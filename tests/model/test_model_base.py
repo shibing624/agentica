@@ -174,6 +174,36 @@ class TestRunFunctionCalls:
         assert len(results) == 1
 
     @pytest.mark.asyncio
+    async def test_tool_display_metadata_reaches_completion_event_not_model_content(self):
+        from agentica.tools.helpers import ToolDisplayOutput
+
+        model = self._make_model_instance()
+
+        def write_tool() -> str:
+            """Return a write result with presentation metadata."""
+            return ToolDisplayOutput(
+                "updated",
+                {"files": [{"path": "a.py", "action": "update", "before": "a", "after": "b"}]},
+            )
+
+        fc = self._make_fc(write_tool, call_id="write-1")
+        results = []
+        events = []
+        async for response in model.run_function_calls([fc], results):
+            events.append(response)
+
+        completed = next(
+            response for response in events
+            if response.event == ModelResponseEvent.tool_call_completed.value
+        )
+        assert completed.tool_call["tool_display_meta"] == {
+            "files": [{"path": "a.py", "action": "update", "before": "a", "after": "b"}]
+        }
+        assert results[0].content == "updated"
+        assert results[0].to_model_dict()["content"] == "updated"
+        assert "tool_display_meta" not in results[0].to_model_dict()
+
+    @pytest.mark.asyncio
     async def test_parallel_execution_faster_than_serial(self):
         """N concurrency_safe tools each sleeping 0.1s should complete in ≈0.1s (parallel), not N*0.1s."""
         model = self._make_model_instance()

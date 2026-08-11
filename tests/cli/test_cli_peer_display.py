@@ -47,11 +47,22 @@ class TestPeerMessageRendering:
         assert "🖥️" in out
         assert "方案A全量+四臂完成" in out
 
-    def test_an_agent_message_does_not_borrow_the_human_prompt_marker(self):
-        """``❯`` means "the user said this"; agent traffic must not wear it."""
+    def test_an_agent_message_uses_history_panel_with_agent_marker(self):
+        """Agent requests share the input-panel shape without borrowing ``❯``."""
         out = _render([_message("I refactored the loader")])
 
         assert "❯" not in out
+        assert "↳ 🖥️ nlp-f1" in out
+
+        console = MagicMock()
+        with patch("agentica.cli.display.messages.get_console", return_value=console):
+            display_peer_messages([_message("I refactored the loader")])
+
+        renderable = console.print.call_args.args[0]
+        assert renderable.style == "on rgb(35,35,35)"
+        marker_column, content_column = renderable.renderable.columns
+        assert marker_column._cells[0].plain == "↳"
+        assert content_column._cells[0].plain == "🖥️ nlp-f1\nI refactored the loader"
 
     def test_a_relayed_user_message_is_shown_as_the_user_speaking(self):
         out = _render([_message("ship it", from_kind="user")])

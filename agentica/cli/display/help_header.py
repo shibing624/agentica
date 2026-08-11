@@ -68,9 +68,15 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
 
 
 def format_session_summary(
-    *, elapsed_seconds: float, usage: Usage, session_id: str | None
+    *, elapsed_seconds: float, usage: Usage, session_id: str | None, brief: bool = False
 ) -> Text:
-    """Build the summary printed before ``/new`` starts a fresh chat."""
+    """Build the session summary block.
+
+    ``brief`` renders only the "Worked for" rule — for mid-session interrupts
+    (Ctrl+C), where the run continues afterwards so token totals and the
+    resume hint are noise. The full block is for actually leaving a session
+    (real exit, ``/new``, one-shot abort).
+    """
     elapsed = max(0, int(elapsed_seconds))
     hours, remainder = divmod(elapsed, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -79,6 +85,8 @@ def format_session_summary(
     text = Text()
     text.append(f"Worked for {duration} ", style="dim")
     text.append("─" * 42, style="dim")
+    if brief:
+        return text
     text.append("\n\nToken usage: ", style="dim")
     text.append(f"total={usage.total_tokens:,} input={usage.input_tokens:,}")
     cached_tokens = usage.input_tokens_details.cache_read_tokens

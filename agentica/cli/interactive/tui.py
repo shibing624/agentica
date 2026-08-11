@@ -158,6 +158,28 @@ class _CleanResizeApplication(Application):
             logger.debug(f"resize restore repaint failed: {e}")
 
 
+# Trailing hint line under an armed ask_user_question prompt. Ctrl+\ (SIGQUIT →
+# hard exit, installed in app.py) is advertised *only* here: prompt_toolkit's
+# raw_mode clears ISIG, so the key is an inert 0x1c byte while the event loop is
+# healthy. It becomes a real signal only inside run_in_terminal's cooked_mode
+# window — which is where a loop starved by background writes gets stuck while
+# an answer is pending. So this prompt is the one place the hint is true.
+_ASK_KEY_HINT = "    Enter to answer · Ctrl+C to cancel · Ctrl+\\ if frozen"
+
+
+def _ask_prompt_lines(req) -> list[str]:
+    """Lines rendered above the input box while an ask_user_question is armed.
+
+    Both the fragment builder and the widget height derive from this, so the
+    reserved height can't drift from what is actually drawn.
+    """
+    lines = [f"  ? {req.prompt}"]
+    if req.options:
+        lines.extend(f"    {i}. {opt}" for i, opt in enumerate(req.options, 1))
+    lines.append(_ASK_KEY_HINT)
+    return lines
+
+
 def _setup_tui(
     state: SessionState,
     skills_registry,
@@ -232,7 +254,7 @@ def _setup_tui(
                 return
             state.last_ctrl_c = now
             _ask_active[0] = False
-            _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit, Ctrl+\\ to kill)")
+            _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit)")
             # If the agent is currently blocked in a ask_user_question tool call, the
             # asyncio task.cancel() route alone won't help: the tool runs on a
             # worker thread waiting on a queue.Queue.get(), and Python threads
@@ -655,20 +677,17 @@ def _setup_tui(
         req = state.input_request
         if req is None:
             return []
-        lines = [f"  ? {req.prompt}"]
-        if req.options:
-            for i, opt in enumerate(req.options, 1):
-                lines.append(f"    {i}. {opt}")
-        return [("class:input-prompt", "\n".join(lines))]
+        *question, hint = _ask_prompt_lines(req)
+        return [
+            ("class:input-prompt", "\n".join(question)),
+            ("class:hint", f"\n{hint}"),
+        ]
 
     def _get_input_prompt_height() -> int:
         req = state.input_request
         if req is None:
             return 0
-        n = 1 + str(req.prompt).count("\n")
-        if req.options:
-            n += len(req.options)
-        return n
+        return sum(1 + line.count("\n") for line in _ask_prompt_lines(req))
 
     input_prompt_widget = ConditionalContainer(
         Window(
@@ -775,4 +794,4 @@ def _setup_tui(
     return app
 
 
-__all__ = ['_CleanResizeApplication', '_setup_tui']
+__all__ = ['_CleanResizeApplication', '_ASK_KEY_HINT', '_ask_prompt_lines', '_setup_tui']

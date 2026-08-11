@@ -451,7 +451,8 @@ class StreamDisplayManager:
     def _display_edit_merged(self, tool_name: str, tool_args: dict,
                              result_content: str, is_error: bool,
                              elapsed_str: str,
-                             tool_call_id: Optional[str] = None) -> None:
+                             tool_call_id: Optional[str] = None,
+                             tool_display_meta: Optional[dict] = None) -> None:
         """One summary line + the FULL unified diff for edit tools.
 
         ``  ✎ edit_file config.py - Edited 1 file (+1 -1) (120ms)`` followed
@@ -465,7 +466,7 @@ class StreamDisplayManager:
         if display_path:
             line += f" [dim]{display_path}[/dim]"
         key = tool_call_id or tool_args.get("file_path", "")
-        old_content = self._write_old.pop(key, None)
+        captured_old_content = self._write_old.pop(key, None)
         if is_error:
             err = self._shorten_workdir_text(str(result_content)).replace("\n", " ").strip()
             if len(err) > 80:
@@ -478,7 +479,12 @@ class StreamDisplayManager:
             self._assistant_console.print(line)
             return
 
-        new_content = self._read_diff_target(tool_args)
+        changes = (tool_display_meta or {}).get("files") or []
+        change = changes[0] if changes else None
+        old_content = change.get("before") if change else captured_old_content
+        new_content = change.get("after") if change else self._read_diff_target(tool_args)
+        if change:
+            display_path = self._display_path(str(change.get("path") or raw_path))
         diff_text = self._build_file_diff(old_content, new_content, display_path)
         added, removed = self._diff_line_counts(diff_text)
         line += f" [dim]- Edited 1 file (+{added} -{removed}){elapsed_str}[/dim]"
@@ -490,7 +496,8 @@ class StreamDisplayManager:
 
     def _display_patch_summary(self, result_content: str, is_error: bool,
                                elapsed_str: str, tool_args: dict,
-                               tool_call_id: Optional[str] = None) -> None:
+                               tool_call_id: Optional[str] = None,
+                               tool_display_meta: Optional[dict] = None) -> None:
         """Render apply_patch as one summary plus its real multi-file diff."""
         icon = TOOL_ICONS.get("apply_patch", TOOL_ICONS["default"])
         line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
@@ -524,13 +531,25 @@ class StreamDisplayManager:
         summary, _, details = content.partition("\n")
         summary = re.sub(r"^Successfully applied patch to ", "Edited ", summary)
         self._assistant_console.print(line + f" [dim]- {summary}{elapsed_str}[/dim]")
+        changes = (tool_display_meta or {}).get("files") or []
+        if changes:
+            files = [
+                (change.get("path", ""), change.get("action", "update"),
+                 change.get("before"), change.get("after"))
+                for change in changes
+            ]
+        else:
+            files = [
+                (raw_path, action, old_content,
+                 "" if action == "delete" else self._read_diff_path(self._resolve_diff_path(raw_path)))
+                for raw_path, action, old_content in old_files
+            ]
         diffs = []
-        for raw_path, action, old_content in old_files:
-            new_content = "" if action == "delete" else self._read_diff_path(
-                self._resolve_diff_path(raw_path)
-            )
-            if action == "add":
+        for raw_path, action, old_content, new_content in files:
+            if action == "add" and old_content is None:
                 old_content = ""
+            if action == "delete" and new_content is None:
+                new_content = ""
             diff_text = self._build_file_diff(
                 old_content,
                 new_content,
@@ -595,7 +614,8 @@ class StreamDisplayManager:
     def _display_write_merged(self, tool_name: str, tool_args: dict,
                               result_content: str, is_error: bool,
                               elapsed_str: str,
-                              tool_call_id: Optional[str] = None) -> None:
+                              tool_call_id: Optional[str] = None,
+                              tool_display_meta: Optional[dict] = None) -> None:
         """One summary line + the FULL old→new diff for write_file.
 
         Keeps the existing created/updated line-count summary and renders the
@@ -623,6 +643,14 @@ class StreamDisplayManager:
             self._assistant_console.print(line)
             return
 
+        changes = (tool_display_meta or {}).get("files") or []
+        if changes:
+            change = changes[0]
+            old_content = change.get("before")
+            new_content = change.get("after")
+            display_path = self._display_path(str(change.get("path") or raw_path))
+        if old_content is None and changes and changes[0].get("action") == "add":
+            old_content = ""
         diff_text = self._build_file_diff(old_content, new_content, display_path)
         n_lines = len(new_content.splitlines())
         verb = "created" if "Created" in result_str else "updated"
@@ -710,7 +738,8 @@ class StreamDisplayManager:
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: Optional[float] = None,
                             tool_args: Optional[dict] = None,
-                            tool_call_id: Optional[str] = None):
+                            tool_call_id: Optional[str] = None,
+                            tool_display_meta: Optional[dict] = None):
         """Display tool execution result.
 
         For ``_DEFERRED_TOOLS`` the call line was suppressed at start time, so
@@ -737,7 +766,8 @@ class StreamDisplayManager:
         if tool_name == "apply_patch":
             self.start_tool_section()
             self._display_patch_summary(
-                result_content, is_error, elapsed_str, tool_args or {}, tool_call_id
+                result_content, is_error, elapsed_str, tool_args or {}, tool_call_id,
+                tool_display_meta,
             )
             return
 
@@ -746,12 +776,12 @@ class StreamDisplayManager:
             if tool_name == "write_file":
                 self._display_write_merged(
                     tool_name, tool_args or {}, result_content, is_error,
-                    elapsed_str, tool_call_id
+                    elapsed_str, tool_call_id, tool_display_meta
                 )
             else:
                 self._display_edit_merged(
                     tool_name, tool_args or {}, result_content, is_error,
-                    elapsed_str, tool_call_id
+                    elapsed_str, tool_call_id, tool_display_meta
                 )
             return
 

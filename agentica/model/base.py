@@ -35,6 +35,7 @@ from agentica.security.redact import (
     redact_tool_outputs_enabled,
 )
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
+from agentica.tools.helpers import ToolDisplayOutput
 from agentica.utils.timer import Timer
 from agentica.cost_tracker import CostTracker, get_model_context_window, get_model_supports_images
 from agentica.hooks import RunHooks, _CompositeRunHooks
@@ -1048,6 +1049,11 @@ class Model(ABC):
                     function_call.error = str(exc)
                     logger.warning(f"Tool {function_call.function.name} failed: {exc}")
 
+            tool_display_meta = (
+                function_call.result.display_meta
+                if isinstance(function_call.result, ToolDisplayOutput)
+                else None
+            )
             function_call_output: Optional[Union[List[Any], str]] = ""
             if isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
                 # Stream redaction is an opt-in safety net (default OFF) because
@@ -1171,19 +1177,22 @@ class Model(ABC):
                 metrics={"time": timers[i].elapsed},
             )
 
+            completed_tool_call = function_call_result.model_dump(
+                include={
+                    "content",
+                    "tool_call_id",
+                    "tool_name",
+                    "tool_args",
+                    "tool_call_error",
+                    "metrics",
+                    "created_at",
+                }
+            )
+            if tool_display_meta is not None:
+                completed_tool_call["tool_display_meta"] = tool_display_meta
             yield ModelResponse(
                 content=f"{function_call.get_call_str()} completed in {timers[i].elapsed:.4f}s.",
-                tool_call=function_call_result.model_dump(
-                    include={
-                        "content",
-                        "tool_call_id",
-                        "tool_name",
-                        "tool_args",
-                        "tool_call_error",
-                        "metrics",
-                        "created_at",
-                    }
-                ),
+                tool_call=completed_tool_call,
                 event=ModelResponseEvent.tool_call_completed.value,
             )
 

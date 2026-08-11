@@ -17,6 +17,7 @@ from typing import Optional, List, Dict, Literal, Tuple
 import aiofiles
 
 from agentica.tools.base import Tool
+from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
 from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
 from agentica.utils.async_utils import terminate_subprocess
 from agentica.utils.log import logger
@@ -593,6 +594,7 @@ class BuiltinFileTool(Tool):
         # Ensure directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
         action = "Created" if not path.exists() else "Updated"
+        old_content = None
 
         # ── Snapshot for rollback ─────────────────────────────────
         await self._diagnostics_snapshot(path)
@@ -625,7 +627,17 @@ class BuiltinFileTool(Tool):
         logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
         diag_text = await self._diagnostics_after(path)
         suffix = f"\n\n{diag_text}" if diag_text else ""
-        return f"{action} file, absolute path: {absolute_path}{suffix}"
+        return ToolDisplayOutput(
+            f"{action} file, absolute path: {absolute_path}{suffix}",
+            file_display_meta([
+                file_change_meta(
+                    absolute_path,
+                    "add" if action == "Created" else "update",
+                    old_content,
+                    content,
+                )
+            ]),
+        )
 
     async def apply_patch(self, patch: str) -> str:
         """Apply one context patch across one or more text files.
@@ -810,7 +822,13 @@ class BuiltinFileTool(Tool):
                     diagnostics.append(f"{result_path}:\n{diag_text}")
         if diagnostics:
             result_lines.extend(("", "\n\n".join(diagnostics)))
-        return "\n".join(result_lines)
+        return ToolDisplayOutput(
+            "\n".join(result_lines),
+            file_display_meta([
+                file_change_meta(result_path, operation.action, old_content, new_content)
+                for operation, _, _, old_content, new_content, result_path, _, _ in prepared
+            ]),
+        )
 
     async def edit_file(
             self,
@@ -914,7 +932,12 @@ class BuiltinFileTool(Tool):
         parts = [f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"]
         if diag_text:
             parts.append(diag_text)
-        return "\n\n".join(parts)
+        return ToolDisplayOutput(
+            "\n\n".join(parts),
+            file_display_meta([
+                file_change_meta(abs_path, "update", content, result["new_content"])
+            ]),
+        )
 
     @staticmethod
     def _edit_read_hint() -> str:

@@ -124,8 +124,13 @@ def display_user_message(
     _echo_panel(rich_text)
 
 
-def _echo_panel(body: Text) -> None:
-    """The ``❯`` panel that means "the human said this" in the transcript.
+def _echo_panel(
+    body: Text,
+    *,
+    marker: str = "❯",
+    marker_style: str = "bold bright_yellow",
+) -> None:
+    """Render one incoming request in the transcript's history panel.
 
     Echoed on a subtle full-width background so it is easy to find while
     scanning a long conversation. No trailing blank line here: the response
@@ -137,7 +142,7 @@ def _echo_panel(body: Text) -> None:
     history = Table.grid(padding=(0, 1), expand=True)
     history.add_column(no_wrap=True)
     history.add_column(ratio=1, overflow="fold")
-    history.add_row(Text("❯", style="bold bright_yellow"), body)
+    history.add_row(Text(marker, style=marker_style), body)
     console = get_console()
     console.print()
     console.print(Padding(history, (0, 1), style="on rgb(35,35,35)"))
@@ -146,16 +151,12 @@ def _echo_panel(body: Text) -> None:
 def display_peer_messages(messages: List[PeerMessage]) -> None:
     """Show messages that just arrived from another session.
 
-    The two senders get deliberately different shapes, because the receiver may
-    act on them differently. A relayed *user* message is the human speaking from
-    another terminal, so it reuses the ``❯`` panel — that panel is this CLI's one
-    signal for "the human said this", and a relayed instruction carries exactly
-    that authority. Another session's agent gets a ``↳ 🖥️ <name>`` header with
-    the message indented beneath — the same visual language as a tool call, so
-    agent traffic reads as an incoming event and can never be mistaken for the
-    user's own words.
+    Both user and agent messages are independent incoming requests, so both use
+    the same history-panel shape. Their markers preserve the authority boundary:
+    ``❯`` means the human spoke, while ``↳ 🖥️ <name>`` identifies another
+    session's agent. The model-facing header separately enforces that an agent
+    message does not carry user authority.
     """
-    console = get_console()
     for message in messages:
         if message.from_user:
             body = Text()
@@ -163,15 +164,10 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
             body.append(message.text, style=f"bold {COLORS['user']}")
             _echo_panel(body)
         else:
-            console.print()
-            # Header line mirrors a tool call: `  ↳ 🖥️ <session>` in bold cyan.
-            console.print(
-                f"  ↳ 🖥️ {message.from_name}", style=f"bold {COLORS['tool']}"
-            )
-            # Message body indented under the header; each line kept on its own
-            # row so multi-line replies stay aligned and fold cleanly.
-            for line in message.text.splitlines() or [""]:
-                console.print(f"    {line}", style=COLORS["tool"])
+            body = Text()
+            body.append(f"🖥️ {message.from_name}\n", style=f"bold {COLORS['tool']}")
+            body.append(message.text, style=f"bold {COLORS['user']}")
+            _echo_panel(body, marker="↳", marker_style=f"bold {COLORS['tool']}")
 
 
 def get_file_completions(document_text: str) -> List[str]:

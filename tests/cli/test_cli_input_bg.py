@@ -329,5 +329,56 @@ class TestSigquitEscape(unittest.TestCase):
             self.assertIsNone(it._install_sigquit_escape(object()))
 
 
+class TestAskPromptKeyHint(unittest.TestCase):
+    """Ctrl+\\ only fires while the tty is in cooked_mode (inside
+    run_in_terminal), which is where a starved event loop parks while an answer
+    is pending. It is an inert byte under prompt_toolkit's raw_mode (ISIG
+    cleared), so it must be advertised on the ask prompt and nowhere else."""
+
+    def test_hint_is_attached_to_the_ask_prompt(self):
+        from agentica.cli.interactive.session_state import _InputRequest
+        from agentica.cli.interactive.tui import _ASK_KEY_HINT, _ask_prompt_lines
+
+        req = _InputRequest(prompt="Pick one", options=["a", "b"])
+        lines = _ask_prompt_lines(req)
+
+        self.assertEqual(lines[0], "  ? Pick one")
+        self.assertEqual(lines[1:3], ["    1. a", "    2. b"])
+        self.assertEqual(lines[-1], _ASK_KEY_HINT)
+        self.assertIn("Ctrl+\\", _ASK_KEY_HINT)
+
+    def test_reserved_height_matches_rendered_lines(self):
+        from agentica.cli.interactive.session_state import _InputRequest
+        from agentica.cli.interactive.tui import _ask_prompt_lines
+
+        # question rows + option rows + the hint row. Both the fragment builder
+        # and the widget height derive from this list, so a hint added without
+        # reserving a row for it is impossible by construction; these numbers
+        # pin the row count the widget asks the layout for.
+        cases = [
+            (_InputRequest(prompt="one line", options=None), 2),
+            (_InputRequest(prompt="two\nlines", options=None), 3),
+            (_InputRequest(prompt="with\nopts", options=["x", "y", "z"]), 6),
+        ]
+        for req, expected_rows in cases:
+            lines = _ask_prompt_lines(req)
+            rows = sum(1 + line.count("\n") for line in lines)
+            self.assertEqual(rows, expected_rows, msg=f"prompt={req.prompt!r}")
+
+    def test_ctrl_c_interrupt_notice_does_not_advertise_the_kill_key(self):
+        import inspect
+
+        from agentica.cli.interactive import tui
+
+        source = inspect.getsource(tui)
+        notice = next(
+            line for line in source.splitlines() if "Interrupting agent" in line
+        )
+        # The file spells the key as an escaped backslash, so a regression would
+        # show up as two literal backslash characters on this line.
+        self.assertNotIn("Ctrl+\\\\", notice)
+        self.assertIn("Ctrl+C again to force exit", notice)
+
+
 if __name__ == "__main__":
     unittest.main()
