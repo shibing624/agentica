@@ -150,7 +150,7 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
     act on them differently. A relayed *user* message is the human speaking from
     another terminal, so it reuses the ``❯`` panel — that panel is this CLI's one
     signal for "the human said this", and a relayed instruction carries exactly
-    that authority. Another session's agent gets a ``↳ 💬 <name>`` header with
+    that authority. Another session's agent gets a ``↳ 🖥️ <name>`` header with
     the message indented beneath — the same visual language as a tool call, so
     agent traffic reads as an incoming event and can never be mistaken for the
     user's own words.
