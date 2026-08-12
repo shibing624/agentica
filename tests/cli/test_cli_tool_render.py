@@ -678,7 +678,8 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("⎿", text)
 
 
-    def test_display_tool_result_merged_line_always_has_elapsed(self):
+    def test_display_tool_result_merged_line_hides_fast_elapsed(self):
+        """Fast tools render no timing; only slow calls (>= 1s) surface it."""
         from agentica.cli.display import StreamDisplayManager
 
         fake = MagicMock()
@@ -694,7 +695,8 @@ class TestCLIToolRender(unittest.TestCase):
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("config.py", text)
         self.assertIn("311 lines", text)
-        self.assertIn("(27ms)", text)
+        self.assertNotIn("ms)", text)
+        self.assertNotIn("0.0", text)
 
 
     def test_display_tool_result_surfaces_errors_even_for_deferred_tools(self):
@@ -786,7 +788,7 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("config.py", text)
         self.assertNotIn(td, text)
         self.assertIn("Edited 1 file (+1 -1)", text)
-        self.assertIn("(120ms)", text)
+        self.assertNotIn("ms)", text)
         syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertEqual(len(syntax_args), 1)
         code = getattr(syntax_args[0], "code", "")
@@ -837,7 +839,7 @@ class TestCLIToolRender(unittest.TestCase):
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("apply_patch", text)
         self.assertIn("Edited 2 files (+3 -1)", text)
-        self.assertIn("(250ms)", text)
+        self.assertNotIn("ms)", text)
         syntax_args = [
             call.args[0] for call in fake.print.call_args_list
             if call.args and "Syntax" in type(call.args[0]).__name__
@@ -966,7 +968,7 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("write_file", text)
         self.assertIn("new_file.py", text)
         self.assertIn("created", text)
-        self.assertIn("(120ms)", text)
+        self.assertNotIn("ms)", text)
         # A diff Syntax block is rendered; for a new file it's all additions.
         syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertTrue(syntax_args, "expected a diff Syntax block")
@@ -1004,11 +1006,11 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("updated", text)
 
 
-    def test_display_execute_head_tail_window(self):
-        """execute shows up to 20 lines inline; beyond that head 10 + tail 10 with the middle hidden."""
+    def test_display_execute_tail_window(self):
+        """execute shows short output inline; long output keeps only the tail."""
         from agentica.cli.display import StreamDisplayManager
 
-        # 10 lines: <= 20, fully shown, no fold hint.
+        # 10 lines: <= inline threshold, fully shown, no fold hint.
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
@@ -1019,10 +1021,10 @@ class TestCLIToolRender(unittest.TestCase):
             elapsed=0.1,
         )
         text = "\n".join(str(c) for c in fake.print.call_args_list)
-        self.assertNotIn("hidden", text)
+        self.assertNotIn("… +", text)
         self.assertNotIn("...", text)
 
-        # 30 lines: > 20, head 10 + tail 10 shown, 10 hidden in the middle.
+        # 30 lines: tail-only window (last 6) — head folded into a hint line.
         fake2 = MagicMock()
         fake2.width = 80
         dm2 = StreamDisplayManager(fake2)
@@ -1033,9 +1035,10 @@ class TestCLIToolRender(unittest.TestCase):
             elapsed=0.1,
         )
         text2 = "\n".join(str(c) for c in fake2.print.call_args_list)
-        # Head and tail present; middle lines hidden.
-        self.assertIn("line 0", text2)
+        # Tail present; head folded into a leading "+N lines" hint.
+        self.assertIn("+24 lines", text2)
         self.assertIn("line 29", text2)
+        self.assertNotIn("line 0", text2)
         self.assertNotIn("line 15", text2)
 
 
@@ -1052,10 +1055,11 @@ class TestCLIToolRender(unittest.TestCase):
 
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("⚠", text)
-        self.assertIn("diag 0", text)
+        self.assertIn("+13 lines", text)
         self.assertIn("diag 17", text)
+        self.assertIn("[Exit code: 1]", text)
+        self.assertNotIn("diag 0", text)
         self.assertNotIn("diag 9", text)
-        self.assertIn("hidden", text)
 
 
     def test_display_execute_filters_internal_repeat_failure_notice(self):

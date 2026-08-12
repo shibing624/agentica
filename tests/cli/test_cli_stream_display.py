@@ -197,24 +197,21 @@ class TestCLIStreamDisplay(unittest.TestCase):
         self.assertNotIn("/apdcephfs/", visible)
 
 
-    def test_fmt_elapsed_uses_ms_under_one_second(self):
-        """Sub-second tools must surface ms-precision rather than being hidden.
-        Every tool call has a real cost — silent <0.1s suppression made fast
-        ops look like they didn't run."""
+    def test_fmt_elapsed_hides_fast_calls(self):
+        """Fast tools render no timing; only slow calls (>= 1s) surface it.
+        A fast grep/read_file reporting "(13ms)" is pure noise — the 1s
+        cutoff keeps quick commands clean while long-running execute tasks
+        still show their cost."""
         from agentica.cli.display import StreamDisplayManager
 
         f = StreamDisplayManager._fmt_elapsed
         # None / negative — no measurement, render nothing
         self.assertEqual(f(None), "")
         self.assertEqual(f(-0.1), "")
-        # Sub-millisecond — still surface a signal
-        self.assertEqual(f(0.0), " (<1ms)")
-        self.assertEqual(f(0.0005), " (<1ms)")
-        # Milliseconds — integer ms
-        self.assertEqual(f(0.001), " (1ms)")
-        self.assertEqual(f(0.005), " (5ms)")
-        self.assertEqual(f(0.123), " (123ms)")
-        self.assertEqual(f(0.999), " (999ms)")
+        # Sub-second — hidden
+        self.assertEqual(f(0.0), "")
+        self.assertEqual(f(0.123), "")
+        self.assertEqual(f(0.999), "")
         # 1s..10s — 2 decimals
         self.assertEqual(f(1.0), " (1.00s)")
         self.assertEqual(f(1.234), " (1.23s)")

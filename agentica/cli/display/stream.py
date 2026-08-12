@@ -262,9 +262,10 @@ class StreamDisplayManager:
         agree.
 
         Read-only tools (``_DEFERRED_TOOLS``) skip the start-time call line and
-        collapse into a single completion line that folds in elapsed time, e.g.
-        ``  🔎 grep 'pat' in path - 5 lines (13ms)``. The live spinner still
-        announces the running tool, so deferring the print costs no feedback.
+        collapse into a single completion line, e.g.
+        ``  🔎 grep 'pat' in path - 5 lines`` (slow calls also fold in the
+        elapsed time). The live spinner still announces the running tool, so
+        deferring the print costs no feedback.
         """
         # Count every tool call up front, before any deferred-print early
         # return, so the turn summary's "N tools" matches what the user saw.
@@ -358,24 +359,20 @@ class StreamDisplayManager:
 
     @staticmethod
     def _fmt_elapsed(elapsed: Optional[float]) -> str:
-        """Format elapsed seconds with ms-precision under 1s.
+        """Format elapsed seconds; fast calls render nothing.
 
-        Every tool call has a non-zero cost (subprocess spawn, file I/O,
-        even pure-python work), so we always surface a number when one is
-        provided — fast tools just report ``<1ms`` instead of being hidden.
+        Only SLOW tool calls surface a duration — a fast ``grep`` /
+        ``read_file`` reporting ``(13ms)`` is pure noise. The 1s cutoff keeps
+        quick commands clean while long-running execute tasks (foreground or
+        background) still show their cost.
 
-        - None or negative   → ''            (no measurement available)
-        - < 1ms              → ' (<1ms)'
-        - < 1s               → ' (Nms)'      e.g. ' (5ms)', ' (120ms)'
-        - < 10s              → ' (N.NNs)'    e.g. ' (1.23s)'
-        - >= 10s             → ' (N.Ns)'     e.g. ' (12.3s)'
+        - None / negative → ''            (no measurement available)
+        - < 1s            → ''            (fast — not worth reporting)
+        - < 10s           → ' (N.NNs)'    e.g. ' (1.23s)'
+        - >= 10s          → ' (N.Ns)'     e.g. ' (12.3s)'
         """
-        if elapsed is None or elapsed < 0:
+        if elapsed is None or elapsed < 1.0:
             return ""
-        if elapsed < 0.001:
-            return " (<1ms)"
-        if elapsed < 1.0:
-            return f" ({int(round(elapsed * 1000))}ms)"
         if elapsed < 10.0:
             return f" ({elapsed:.2f}s)"
         return f" ({elapsed:.1f}s)"
@@ -437,9 +434,10 @@ class StreamDisplayManager:
         if is_error:
             err = str(result_content).replace("\n", " ").strip()
             if len(err) > 80:
-                err = err[:77] + "..."
+                # Keep the TAIL — the final exception line is what matters.
+                err = "..." + err[-77:]
                 remember_truncated(f"Tool error · {tool_name}", str(result_content))
-            line += f" [red]- error: {err}{elapsed_str}[/red]"
+            line += f" [yellow]- error: {err}{elapsed_str}[/yellow]"
         else:
             summary = self._result_count_summary(tool_name, result_content)
             if summary:
@@ -455,8 +453,8 @@ class StreamDisplayManager:
                              tool_display_meta: Optional[dict] = None) -> None:
         """One summary line + the FULL unified diff for edit tools.
 
-        ``  ✎ edit_file config.py - Edited 1 file (+1 -1) (120ms)`` followed
-        by one complete real-file diff. Errors surface a truncated message.
+        ``  ✎ edit_file config.py - Edited 1 file (+1 -1)`` followed by one
+        complete real-file diff. Errors surface a truncated message.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         raw_path = str(tool_args.get("file_path", ""))
@@ -470,12 +468,12 @@ class StreamDisplayManager:
         if is_error:
             err = self._shorten_workdir_text(str(result_content)).replace("\n", " ").strip()
             if len(err) > 80:
-                err = err[:77] + "..."
+                err = "..." + err[-77:]
                 remember_truncated(
                     f"Tool error · {tool_name}",
                     self._shorten_workdir_text(str(result_content)),
                 )
-            line += f" [red]- error: {err}{elapsed_str}[/red]"
+            line += f" [yellow]- error: {err}{elapsed_str}[/yellow]"
             self._assistant_console.print(line)
             return
 
@@ -505,23 +503,24 @@ class StreamDisplayManager:
         key = tool_call_id or tool_args.get("patch", "")
         old_files = self._patch_old.pop(key, [])
         if is_error:
-            self._assistant_console.print(line + f" [red]- error{elapsed_str}[/red]")
+            self._assistant_console.print(line + f" [yellow]- error{elapsed_str}[/yellow]")
             error_lines = content.splitlines() or ["Unknown patch error"]
             max_lines = 8
             truncated = len(error_lines) > max_lines or any(len(item) > 120 for item in error_lines)
-            for index, error_line in enumerate(error_lines[:max_lines]):
+            # Keep the TAIL of the error — the cause lands at the end.
+            hidden = max(0, len(error_lines) - max_lines)
+            for index, error_line in enumerate(error_lines[-max_lines:]):
                 if len(error_line) > 120:
-                    error_line = error_line[:117] + "..."
+                    error_line = "..." + error_line[-117:]
                 prefix = "    ⎿ " if index == 0 else "      "
                 self._assistant_console.print(
                     f"{prefix}{error_line}",
-                    style="dim red",
+                    style="dim yellow",
                     highlight=False,
                     markup=False,
                 )
-            remaining = len(error_lines) - max_lines
             if truncated:
-                detail = f"{remaining} more lines" if remaining > 0 else "full error"
+                detail = f"{hidden} earlier lines hidden" if hidden > 0 else "full error"
                 self._assistant_console.print(
                     f"      ... ({detail} · Ctrl+O to expand)", style="dim italic"
                 )
@@ -637,9 +636,9 @@ class StreamDisplayManager:
             shortened_result = self._shorten_workdir_text(result_str)
             err = shortened_result.replace("\n", " ").strip()
             if len(err) > 80:
-                err = err[:77] + "..."
+                err = "..." + err[-77:]
                 remember_truncated(f"Tool error · {tool_name}", shortened_result)
-            line += f" [red]- error: {err}{elapsed_str}[/red]"
+            line += f" [yellow]- error: {err}{elapsed_str}[/yellow]"
             self._assistant_console.print(line)
             return
 
@@ -665,8 +664,8 @@ class StreamDisplayManager:
                                   line_numbers=False))
 
     # Read-only tools whose call line is deferred to completion so the call
-    # line and elapsed time collapse into ONE line, e.g.
-    # ``  🔎 grep 'pat' in path - 5 lines (13ms)``. No separate result footer.
+    # line and result summary collapse into ONE line, e.g.
+    # ``  🔎 grep 'pat' in path - 5 lines``. No separate result footer.
     _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
 
     # Single-file write tools: call line is deferred to completion and rendered
@@ -692,16 +691,14 @@ class StreamDisplayManager:
 
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
-    # execute: show up to this many lines inline; beyond that, a head+tail
-    # window with the middle collapsed into a single dim hint line so long
-    # command output stays scannable without flooding the transcript.
-    _EXECUTE_MAX_INLINE_LINES = 20
-    # execute head/tail window — the tail carries the command's final status /
-    # output, which is usually what the user needs at a glance.
-    _EXECUTE_HEAD_LINES = 10
-    _EXECUTE_TAIL_LINES = 10
-    _EXECUTE_DIAGNOSTIC_HEAD_LINES = 6
-    _EXECUTE_DIAGNOSTIC_TAIL_LINES = 4
+    # execute: show up to this many lines inline; beyond that, a tail-only
+    # window (codex-style) with the head collapsed into a single dim hint
+    # line — the tail carries the command's final status / exception, which
+    # is what the user needs at a glance.
+    _EXECUTE_MAX_INLINE_LINES = 10
+    _EXECUTE_TAIL_LINES = 6
+    _EXECUTE_ERROR_TAIL_LINES = 12
+    _EXECUTE_DIAGNOSTIC_TAIL_LINES = 8
 
     def _print_result_anchor(self, tool_name: str, tool_args: dict) -> None:
         """Re-state the call a detached ``⎿`` result body belongs to.
@@ -813,19 +810,24 @@ class StreamDisplayManager:
 
         lines = result_str.splitlines()
 
-        # execute: foreground uses a head/tail window; background start text is
+        # execute: foreground uses a tail-only window; background start text is
         # status + Log: path (same class as wait/delegate) and goes FULL.
         if tool_name == "execute":
             if _is_background_execute(tool_args, result_str):
                 self._display_full_result_lines(lines, is_error=is_error, elapsed_str=elapsed_str)
                 return
             is_diagnostics = _is_diagnostic_execute_result(result_str)
-            self._display_head_tail(
-                lines,
-                self._EXECUTE_DIAGNOSTIC_HEAD_LINES if is_diagnostics else self._EXECUTE_HEAD_LINES,
-                self._EXECUTE_DIAGNOSTIC_TAIL_LINES if is_diagnostics else self._EXECUTE_TAIL_LINES,
+            if is_error:
+                tail = self._EXECUTE_ERROR_TAIL_LINES
+            elif is_diagnostics:
+                tail = self._EXECUTE_DIAGNOSTIC_TAIL_LINES
+            else:
+                tail = self._EXECUTE_TAIL_LINES
+            self._display_tail_window(
+                lines, tail,
+                inline=self._EXECUTE_MAX_INLINE_LINES,
                 prefix="    ⎿ ", cont_prefix="      ",
-                style="dim red" if is_error else "dim yellow" if is_diagnostics else "dim",
+                style="dim yellow" if (is_error or is_diagnostics) else "dim",
                 error_prefix="    ⎿ ⚠ " if (is_error or is_diagnostics) else None,
                 truncated_title=f"Tool output · {tool_name}",
                 full_content=result_str,
@@ -843,8 +845,21 @@ class StreamDisplayManager:
                 self._display_ask_user_exchange(*exchange, elapsed_str=elapsed_str)
                 return
 
-        style = "dim red" if is_error else "dim"
-        prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
+        if is_error:
+            # Error details live at the END of the output — fold the head and
+            # keep the tail, same codex-style window execute uses.
+            self._display_tail_window(
+                lines, self._DEFAULT_MAX_RESULT_LINES,
+                prefix="    ⎿ ", cont_prefix="      ",
+                style="dim yellow", error_prefix="    ⎿ ⚠ ",
+                truncated_title=f"Tool output · {tool_name}",
+                full_content=result_str,
+                elapsed_str=elapsed_str,
+            )
+            return
+
+        style = "dim"
+        prefix = "    ⎿ "
         cont_prefix = "      "
 
         max_lines = self._DEFAULT_MAX_RESULT_LINES
@@ -908,7 +923,7 @@ class StreamDisplayManager:
         self, lines: List[str], *, is_error: bool, elapsed_str: str
     ) -> None:
         """Print every result line without width or line-count truncation."""
-        style = "dim red" if is_error else "dim"
+        style = "dim yellow" if is_error else "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
         cont_prefix = "      "
         for i, line in enumerate(lines):
@@ -917,43 +932,40 @@ class StreamDisplayManager:
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 
-    def _display_head_tail(self, lines: List[str], head: int, tail: int,
-                           *, prefix: str, cont_prefix: str, style: str,
-                           error_prefix: Optional[str] = None,
-                           truncated_title: str, full_content: str,
-                           elapsed_str: str = "",
-                           max_line_width: int = 120) -> None:
-        """Render a head/tail window with the middle hidden.
+    def _display_tail_window(self, lines: List[str], tail: int,
+                             *, inline: int = 0,
+                             prefix: str, cont_prefix: str, style: str,
+                             error_prefix: Optional[str] = None,
+                             truncated_title: str, full_content: str,
+                             elapsed_str: str = "",
+                             max_line_width: int = 120) -> None:
+        """Render a tail-only window with the head folded (codex-style).
 
-        Shows the first ``head`` lines and the last ``tail`` lines; anything in
-        between is collapsed into a single dim ``(N hidden lines · Ctrl+O to expand)``
-        hint line. The full content is still remembered for on-demand Ctrl+O
-        expansion. Used for execute output where the tail carries the command's
-        final status.
+        Output up to ``inline`` lines is shown in full. Longer output keeps
+        only the last ``tail`` lines — the tail carries the command's final
+        status / exception, which is what the user needs at a glance — and
+        folds the head into one leading dim ``… +N lines (Ctrl+O to expand)``
+        hint. The full content is still remembered for Ctrl+O expansion.
         """
-        first_prefix = error_prefix or prefix
         n = len(lines)
-        if n <= head + tail:
-            show = lines
-            hidden = 0
+        hidden = 0 if n <= inline else max(0, n - tail)
+        show = lines[hidden:]
+
+        if hidden > 0:
+            self._assistant_console.print(
+                f"{error_prefix or prefix}… +{hidden} lines (Ctrl+O to expand)",
+                style="dim italic",
+            )
+            remember_truncated(truncated_title, full_content)
+            first_prefix = cont_prefix
         else:
-            show = lines[:head] + lines[-tail:]
-            hidden = n - head - tail
+            first_prefix = error_prefix or prefix
 
         for i, line in enumerate(show):
             if len(line) > max_line_width:
                 line = line[:max_line_width - 3] + "..."
             p = first_prefix if i == 0 else cont_prefix
             self._assistant_console.print(f"{p}{line}", style=style)
-
-        if hidden > 0:
-            # Single dim hint line between head and tail (no blank/.../blank
-            # separator). The full content is still stashed for Ctrl+O expansion.
-            self._assistant_console.print(
-                f"{cont_prefix}({hidden} hidden lines · Ctrl+O to expand)",
-                style="dim italic",
-            )
-            remember_truncated(truncated_title, full_content)
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
     
@@ -977,7 +989,7 @@ class StreamDisplayManager:
 
         if not success:
             error_msg = data.get("error", "Unknown error")
-            self._assistant_console.print(f"    ⎿ ⚠ {error_msg[:120]}", style="dim red")
+            self._assistant_console.print(f"    ⎿ ⚠ {error_msg[:120]}", style="dim yellow")
             if self._subagent_live_shown > 0:
                 self._subagent_live_shown -= 1
             return
