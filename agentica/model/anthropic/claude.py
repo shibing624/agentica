@@ -354,6 +354,16 @@ class Claude(Model):
         system_messages: List[str] = []
         pending_tool_use_ids: set[str] = set()
 
+        # This path intentionally does NOT round-trip through
+        # ``Message.to_model_dict()``: Anthropic needs block-typed content
+        # (tool_use/tool_result/thinking) that the flat dict cannot express;
+        # OpenAI's chat path can use the allowlist, this one cannot.
+        # Local-only message fields (metrics/references/provider_data/
+        # compressed_content/created_at/...) never reach the wire through
+        # attribute reads below, because none are read here. The one remaining
+        # surface is dict-typed ``content`` blocks, which pass through as-is —
+        # guarded by tests/model/test_wire_payload_allowlist.py's sentinel test,
+        # so a dump-everything regression (model_dump-style) will not be silent.
         for idx, message in enumerate(messages):
             content = message.content or ""
             if message.role == "system" or (
