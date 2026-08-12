@@ -62,6 +62,7 @@ class TestCLIAwareness(unittest.TestCase):
                 self.tools = list(kwargs.get("tools") or [])
                 self.session_guidance = []
                 self.environment_context = None
+                self._session_log = None
 
             def add_session_guidance(self, text):
                 self.session_guidance.append(text)

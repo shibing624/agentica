@@ -525,6 +525,7 @@ class SessionLog:
             pass
 
         meta_path = path.parent / f"{path.stem}.meta.json"
+        meta = cls._read_meta(meta_path)
         return {
             "session_id": path.stem,
             "path": str(path),
@@ -533,8 +534,10 @@ class SessionLog:
             "size_bytes": stat.st_size,
             "mtime": stat.st_mtime,
             "last_timestamp": last_timestamp,
-            "name": cls._read_meta_name(meta_path),
-            "archived": cls._read_meta_archived(meta_path),
+            "name": cls._meta_name(meta),
+            "archived": cls._meta_archived(meta),
+            "profile_name": cls._meta_profile_name(meta),
+            "profile_source": cls._meta_profile_source(meta),
         }
 
     @classmethod
@@ -720,18 +723,39 @@ class SessionLog:
         file is missing / malformed / empty. Never raises — callers treat
         a missing name as "no name set" and fall back to a preview."""
         try:
-            data = SessionLog._read_meta(meta_path)
-            name = data.get("name")
-            if isinstance(name, str) and name.strip():
-                return name.strip()
-            return None
+            return SessionLog._meta_name(SessionLog._read_meta(meta_path))
         except Exception:
             return None
 
     @staticmethod
     def _read_meta_archived(meta_path: Path) -> bool:
         """Return whether a session has been archived in sidecar metadata."""
-        return bool(SessionLog._read_meta(meta_path).get("archived"))
+        return SessionLog._meta_archived(SessionLog._read_meta(meta_path))
+
+    @staticmethod
+    def _meta_name(data: Dict[str, Any]) -> Optional[str]:
+        name = data.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        return None
+
+    @staticmethod
+    def _meta_archived(data: Dict[str, Any]) -> bool:
+        return bool(data.get("archived"))
+
+    @staticmethod
+    def _meta_profile_name(data: Dict[str, Any]) -> Optional[str]:
+        name = data.get("profile_name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        return None
+
+    @staticmethod
+    def _meta_profile_source(data: Dict[str, Any]) -> Optional[str]:
+        source = data.get("profile_source")
+        if isinstance(source, str) and source.strip():
+            return source.strip()
+        return None
 
     def _write_meta(self, updates: Dict[str, Any]) -> None:
         """Merge sidecar metadata updates and persist atomically."""
@@ -771,6 +795,29 @@ class SessionLog:
             raise ValueError("session name must be a non-empty string")
         name = name.strip()
         self._write_meta({"name": name})
+
+    def get_profile_name(self) -> Optional[str]:
+        """Return the config.yaml profile this session was last run with."""
+        return self._meta_profile_name(self._read_meta(self.meta_path))
+
+    def get_profile_source(self) -> Optional[str]:
+        """Return where this session profile came from, if recorded."""
+        return self._meta_profile_source(self._read_meta(self.meta_path))
+
+    def set_profile(self, name: str, source: str = "") -> None:
+        """Persist the config.yaml profile used by this session.
+
+        The profile body itself stays in config.yaml; the sidecar only records
+        the profile name so resume can pick the same provider/model setup even
+        when another session in the same work_dir has changed project.json's
+        current ``active_profile``.
+        """
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("session profile name must be a non-empty string")
+        updates = {"profile_name": name.strip()}
+        if isinstance(source, str) and source.strip():
+            updates["profile_source"] = source.strip()
+        self._write_meta(updates)
 
     def get_forked_from(self) -> Optional[str]:
         """Return the session this one was branched from, if it was a fork."""
@@ -895,7 +942,14 @@ class SessionLog:
 
         # Recorded here rather than by the caller so provenance cannot drift
         # from the copy: /status reads it back to show what this branch came from.
-        new_log._write_meta({"forked_from": self.session_id, "forked_at_uuid": at_uuid})
+        source_meta = self._read_meta(self.meta_path)
+        fork_meta = {
+            key: source_meta[key]
+            for key in ("profile_name", "profile_source")
+            if isinstance(source_meta.get(key), str) and source_meta[key].strip()
+        }
+        fork_meta.update({"forked_from": self.session_id, "forked_at_uuid": at_uuid})
+        new_log._write_meta(fork_meta)
 
         logger.debug(f"Forked session {self.session_id} → {new_session_id}"
                     f"{f' at {at_uuid}' if at_uuid else ''}")

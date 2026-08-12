@@ -31,6 +31,8 @@ from agentica.cli.session_resume import (
     enter_work_dir,
     find_sessions_by_id,
 )
+from agentica.cli.setup import apply_named_profile_to_agent_config
+from agentica.global_config import set_project_profile
 from agentica.agent.history_filter import strip_tool_artifacts_from_memory
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
@@ -616,6 +618,18 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 return
             agent_config["work_dir"] = choice.work_dir
             con.print(f"[dim]Working directory: {choice.work_dir}[/dim]")
+        if chosen.get("profile_name"):
+            profile_name = chosen["profile_name"]
+            try:
+                apply_named_profile_to_agent_config(agent_config, profile_name, source="session")
+            except ValueError as exc:
+                agent_config["_skip_session_profile_persist"] = True
+                con.print(
+                    f"[yellow]Session profile '{profile_name}' is unavailable: {exc}. "
+                    "Using the current profile instead.[/yellow]"
+                )
+            else:
+                set_project_profile(agent_config.get("work_dir") or os.getcwd(), profile_name)
         current_agent = create_agent(
             agent_config,
             ctx.extra_tools,

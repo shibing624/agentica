@@ -177,6 +177,28 @@ def main():
         "permissions": "allow-all" if args.allow_all else args.permissions,
         "enable_diagnostics": args.enable_diagnostics,
         "diagnostics_servers": args.diagnostics_servers,
+        "_model_config_explicit": any(
+            value is not None
+            for value in (
+                args.profile,
+                args.model_provider,
+                args.model_name,
+                args.base_url,
+                args.api_key,
+                args.max_tokens,
+                args.temperature,
+                args.reasoning_effort,
+                args.top_p,
+                args.context_window,
+                args.enable_cache_control,
+                args.cache_control_messages,
+                args.cache_control_session_header,
+                args.auxiliary_model_provider,
+                args.auxiliary_model_name,
+                args.auxiliary_base_url,
+                args.auxiliary_api_key,
+            )
+        ),
     }
     if getattr(args, "command", None) == "resume":
         agent_config["session_id"] = args.resume_session_id

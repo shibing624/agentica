@@ -23,7 +23,7 @@ own ``api_key``, so it can never silently reuse the real OpenAI key.
 
 import os
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from prompt_toolkit import prompt as pt_prompt
@@ -1125,6 +1125,94 @@ def _auxiliary_resolution(
         "auxiliary_reasoning": auxiliary_block.get("reasoning"),
         "auxiliary_reasoning_effort": auxiliary_block.get("reasoning_effort"),
     }
+
+
+_PROFILE_CONFIG_KEYS = (
+    "profile_name",
+    "profile_source",
+    "model_provider",
+    "model_name",
+    "base_url",
+    "api_key",
+    "wire_api",
+    "max_tokens",
+    "temperature",
+    "reasoning_effort",
+    "reasoning",
+    "top_p",
+    "context_window",
+    "extra_body",
+    "extra_headers",
+    "default_headers",
+    "enable_cache_control",
+    "cache_control_messages",
+    "cache_control_session_header",
+    "cache_keepalive",
+    "auxiliary_model_provider",
+    "auxiliary_model_name",
+    "auxiliary_base_url",
+    "auxiliary_api_key",
+    "auxiliary_wire_api",
+    "auxiliary_extra_body",
+    "auxiliary_extra_headers",
+    "auxiliary_reasoning",
+    "auxiliary_reasoning_effort",
+)
+
+
+def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str, Any]:
+    """Resolve one saved profile into the flat CLI ``agent_config`` shape.
+
+    Only the profile name is persisted per session; the profile body remains in
+    config.yaml so edits to a saved profile are picked up on the next resume.
+    """
+    profile = get_profile(name)
+    if not profile or not profile.get("model_provider"):
+        raise ValueError(f"Profile not found or incomplete: {name}")
+
+    provider = profile["model_provider"]
+    model_name = profile.get("model_name") or default_model_name(provider)
+    base_url = profile.get("base_url") or default_base_url(provider)
+    api_key = profile.get("api_key") or get_profile_api_key(provider, base_url)
+    auxiliary_block = profile.get("auxiliary_model") if isinstance(profile.get("auxiliary_model"), dict) else {}
+    auxiliary = _auxiliary_resolution(auxiliary_block, provider, base_url, api_key)
+
+    return {
+        "profile_name": name,
+        "profile_source": source,
+        "model_provider": provider,
+        "model_name": model_name,
+        "base_url": base_url,
+        "api_key": api_key,
+        "wire_api": profile.get("wire_api"),
+        "max_tokens": profile.get("max_tokens"),
+        "temperature": profile.get("temperature"),
+        "reasoning_effort": profile.get("reasoning_effort"),
+        "reasoning": profile.get("reasoning"),
+        "top_p": profile.get("top_p"),
+        "context_window": profile.get("context_window"),
+        "extra_body": profile.get("extra_body"),
+        "extra_headers": profile.get("extra_headers"),
+        "default_headers": profile.get("default_headers"),
+        "enable_cache_control": profile.get("enable_cache_control"),
+        "cache_control_messages": profile.get("cache_control_messages"),
+        "cache_control_session_header": profile.get("cache_control_session_header"),
+        "cache_keepalive": profile.get("cache_keepalive"),
+        "auxiliary_extra_body": auxiliary_block.get("extra_body"),
+        "auxiliary_extra_headers": auxiliary_block.get("extra_headers"),
+        **auxiliary,
+    }
+
+
+def apply_named_profile_to_agent_config(
+    agent_config: Dict[str, Any],
+    name: str,
+    source: str = "session",
+) -> None:
+    """Replace model/profile fields on ``agent_config`` from a saved profile."""
+    resolved = resolve_named_profile_config(name, source=source)
+    for key in _PROFILE_CONFIG_KEYS:
+        agent_config[key] = resolved.get(key)
 
 
 def session_profile(agent_config: Dict, work_dir: Optional[str] = None) -> Tuple[str, str]:

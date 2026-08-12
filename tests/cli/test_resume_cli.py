@@ -8,15 +8,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentica.cli.commands.context import CommandContext
-from agentica.cli.commands.session import _cmd_history, display_resumed_transcript, hydrate_resumed_session
+from agentica.cli.commands.session import (
+    HistoryRenderStats,
+    _cmd_history,
+    _cmd_resume,
+    display_resumed_transcript,
+    hydrate_resumed_session,
+)
 from agentica.cli.main import main
 from agentica.cli.runtime import parse_args
+from agentica.cli.session_resume import prepare_startup_resume
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.usage import Usage
 from agentica.run_response import RunResponse
+from agentica import global_config as gc
 
 
 def test_parse_shell_resume_command():
@@ -40,6 +48,101 @@ def test_hydrate_resumed_session_builds_prompt_runs(tmp_path):
     history = agent.working_memory.get_messages_from_last_n_runs()
     assert [message.role for message in history] == ["user", "assistant"]
     assert "partial answer" in history[-1].content
+
+
+def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("AGENTICA_HOME", str(home))
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    gc.upsert_profile(
+        "current-prof",
+        {
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-current",
+        },
+    )
+    gc.upsert_profile(
+        "resume-prof",
+        {
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "api_key": "sk-resume",
+        },
+        make_active=False,
+    )
+
+    current_log = SessionLog("current", base_dir=str(tmp_path), work_dir=str(work_dir))
+    current_log.append("user", "current")
+    target_log = SessionLog("session-target", base_dir=str(tmp_path), work_dir=str(work_dir))
+    target_log.append("user", "resume me")
+    target_log.set_profile("resume-prof", "session")
+
+    ctx = CommandContext(
+        agent_config={
+            "profile_name": "current-prof",
+            "profile_source": "project",
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-current",
+            "debug": False,
+            "work_dir": str(work_dir),
+        },
+        current_agent=SimpleNamespace(_session_log=current_log, user_id="default", session_id="current"),
+        extra_tools=[],
+        workspace=None,
+        skills_registry=None,
+        tui_state={},
+    )
+    resumed_agent = SimpleNamespace(
+        _session_log=target_log,
+        working_memory=WorkingMemory(),
+        model=SimpleNamespace(supports_replayed_tool_history=True),
+        auxiliary_model=None,
+        session_id="session-target",
+    )
+    console = MagicMock()
+
+    with (
+        patch("agentica.cli.commands.session.get_console", return_value=console),
+        patch("agentica.cli.commands.session.create_agent", return_value=resumed_agent) as create,
+        patch(
+            "agentica.cli.commands.session.display_resumed_transcript",
+            return_value=HistoryRenderStats(),
+        ),
+    ):
+        result = _cmd_resume(ctx, "session-target")
+
+    assert result["current_agent"] is resumed_agent
+    agent_config = create.call_args.args[0]
+    assert agent_config["profile_name"] == "resume-prof"
+    assert agent_config["profile_source"] == "session"
+    assert agent_config["model_provider"] == "deepseek"
+    assert agent_config["model_name"] == "deepseek-v4-flash"
+    assert gc.get_project_profile(str(work_dir)) == "resume-prof"
+
+
+def test_prepare_startup_resume_carries_session_profile(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("AGENTICA_HOME", str(home))
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    log = SessionLog("startup-session", work_dir=str(work_dir))
+    log.append("user", "hello")
+    log.set_profile("venus", "session")
+
+    agent_config = {"session_id": "startup-session", "work_dir": str(work_dir)}
+
+    assert prepare_startup_resume(agent_config, printer=lambda _msg: None) is True
+    assert agent_config["_resume_session_profile_name"] == "venus"
+    assert agent_config["_resume_session_profile_source"] == "session"
 
 
 def _tool_round_log(tmp_path, session_id):

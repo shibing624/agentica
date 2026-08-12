@@ -152,9 +152,9 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
     """Show messages that just arrived from another session.
 
     Both user and agent messages are independent incoming requests, so both use
-    the same history-panel shape. Their markers preserve the authority boundary:
-    ``❯`` means the human spoke, while ``↳ 🖥️ <name>`` identifies another
-    session's agent. The model-facing header separately enforces that an agent
+    the same history-panel shape. ``❯`` means the human spoke; another
+    session's agent is identified by a source title (``🖥️ <name>:``) without a
+    direction arrow. The model-facing header separately enforces that an agent
     message does not carry user authority.
     """
     for message in messages:
@@ -165,9 +165,9 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
             _echo_panel(body)
         else:
             body = Text()
-            body.append(f"🖥️ {message.from_name}\n", style=f"bold {COLORS['tool']}")
+            body.append(f"🖥️ {message.from_name}:\n", style=f"bold {COLORS['tool']}")
             body.append(message.text, style=f"bold {COLORS['user']}")
-            _echo_panel(body, marker="↳", marker_style=f"bold {COLORS['tool']}")
+            _echo_panel(body, marker="", marker_style=f"bold {COLORS['tool']}")
 
 
 def get_file_completions(document_text: str) -> List[str]:

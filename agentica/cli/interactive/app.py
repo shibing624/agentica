@@ -44,8 +44,8 @@ from agentica.cli.runtime import (
     set_active_console,
 )
 from agentica import config
-from agentica.cli.setup import session_profile
-from agentica.global_config import get_setting
+from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
+from agentica.global_config import get_setting, set_project_profile
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_skills
@@ -302,6 +302,19 @@ def run_interactive(
         printer=get_console().print,
     ):
         return
+    resume_profile = agent_config.pop("_resume_session_profile_name", None)
+    agent_config.pop("_resume_session_profile_source", None)
+    if resume_profile and not agent_config.get("_model_config_explicit"):
+        try:
+            apply_named_profile_to_agent_config(agent_config, resume_profile, source="session")
+        except ValueError as exc:
+            agent_config["_skip_session_profile_persist"] = True
+            get_console().print(
+                f"[yellow]Session profile '{resume_profile}' is unavailable: {exc}. "
+                "Using the current project/global profile instead.[/yellow]"
+            )
+        else:
+            set_project_profile(agent_config.get("work_dir") or os.getcwd(), resume_profile)
 
     peer_cwd = agent_config.get("work_dir") or os.getcwd()
     peer_user_id = agent_config.get("user_id") or (workspace.user_id if workspace else None)

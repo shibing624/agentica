@@ -956,5 +956,13 @@ def create_agent(
     # the live agent + agent_config so _apply_profile can refresh it after a
     # model/profile switch by calling _build_environment_context again.
     new_agent.environment_context = _build_environment_context(new_agent, agent_config)
+    if (
+        agent_config.get("profile_name")
+        and not agent_config.get("_skip_session_profile_persist")
+        and new_agent._session_log is not None
+    ):
+        new_agent._session_log.set_profile(
+            agent_config["profile_name"], agent_config.get("profile_source") or ""
+        )
     new_agent.peer_session = peer_session
     return new_agent

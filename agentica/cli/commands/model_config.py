@@ -18,9 +18,7 @@ from agentica.cli.runtime import (
     _build_sibling_model,
 )
 from agentica.cli.setup import (
-    default_base_url,
-    default_model_name,
-    get_profile_api_key,
+    apply_named_profile_to_agent_config,
     session_profile,
 )
 from agentica.global_config import (
@@ -113,7 +111,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     cost_str = f"${session_cost:.4f}" if isinstance(session_cost, (int, float)) else "n/a"
 
     profile_label = profile or "(none)"
-    if profile and profile_source in ("flag", "project", "global", "default"):
+    if profile and profile_source in ("flag", "session", "project", "global", "default"):
         profile_label = f"{profile} ({profile_source})"
     con.print(f"  [bold]Agentica[/bold] [dim]v{__version__}[/dim]  profile: [cyan]{profile_label}[/cyan]")
     con.print(f"  Model:     [bold]{model_str}[/bold]")
@@ -298,6 +296,10 @@ def _rebuild_live_model(ctx: CommandContext):
         "reasoning": ctx.agent_config.get("reasoning"),
         "top_p": ctx.agent_config.get("top_p"),
         "context_window": ctx.agent_config.get("context_window"),
+        "enable_cache_control": ctx.agent_config.get("enable_cache_control"),
+        "cache_control_messages": ctx.agent_config.get("cache_control_messages"),
+        "cache_control_session_header": ctx.agent_config.get("cache_control_session_header"),
+        "cache_keepalive": ctx.agent_config.get("cache_keepalive"),
         "extra_body": ctx.agent_config.get("extra_body"),
         "extra_headers": ctx.agent_config.get("extra_headers"),
         "default_headers": ctx.agent_config.get("default_headers"),
@@ -423,7 +425,13 @@ def _cmd_upgrade(ctx: CommandContext, cmd_args: str = ""):
 
 
 
-def _apply_profile(ctx: CommandContext, name: str):
+def _apply_profile(
+    ctx: CommandContext,
+    name: str,
+    *,
+    persist_project: bool = True,
+    profile_source: str = "project",
+):
     """Switch the live agent to a named config.yaml profile."""
     con = get_console()
     profile = get_profile(name)
@@ -434,39 +442,21 @@ def _apply_profile(ctx: CommandContext, name: str):
             con.print(f"Available profiles: {', '.join(names)}", style="dim")
         return
 
-    new_provider = profile["model_provider"]
-    new_model = profile.get("model_name") or default_model_name(new_provider)
-    new_base_url = profile.get("base_url") or default_base_url(new_provider)
-    new_key = profile.get("api_key") or get_profile_api_key(new_provider, new_base_url)
-    new_wire_api = profile.get("wire_api")
-
-    # Model tuning params: a profile-switch fully replaces the previous model's
-    # tuning, so unset profile fields reset to None (the model factory default)
-    # rather than leaking the old profile's values.
-    new_max_tokens = profile.get("max_tokens")
-    new_temperature = profile.get("temperature")
-    new_reasoning_effort = profile.get("reasoning_effort")
-    new_reasoning = profile.get("reasoning")
-    new_top_p = profile.get("top_p")
-    new_context_window = profile.get("context_window")
-    new_extra_body = profile.get("extra_body")
-    new_extra_headers = profile.get("extra_headers")
-    new_default_headers = profile.get("default_headers")
-
-    ctx.agent_config["model_provider"] = new_provider
-    ctx.agent_config["model_name"] = new_model
-    ctx.agent_config["base_url"] = new_base_url
-    ctx.agent_config["api_key"] = new_key
-    ctx.agent_config["wire_api"] = new_wire_api
-    ctx.agent_config["max_tokens"] = new_max_tokens
-    ctx.agent_config["temperature"] = new_temperature
-    ctx.agent_config["reasoning_effort"] = new_reasoning_effort
-    ctx.agent_config["reasoning"] = new_reasoning
-    ctx.agent_config["top_p"] = new_top_p
-    ctx.agent_config["context_window"] = new_context_window
-    ctx.agent_config["extra_body"] = new_extra_body
-    ctx.agent_config["extra_headers"] = new_extra_headers
-    ctx.agent_config["default_headers"] = new_default_headers
+    apply_named_profile_to_agent_config(ctx.agent_config, name, source=profile_source)
+    new_provider = ctx.agent_config["model_provider"]
+    new_model = ctx.agent_config["model_name"]
+    new_base_url = ctx.agent_config["base_url"]
+    new_key = ctx.agent_config["api_key"]
+    new_wire_api = ctx.agent_config.get("wire_api")
+    new_max_tokens = ctx.agent_config.get("max_tokens")
+    new_temperature = ctx.agent_config.get("temperature")
+    new_reasoning_effort = ctx.agent_config.get("reasoning_effort")
+    new_reasoning = ctx.agent_config.get("reasoning")
+    new_top_p = ctx.agent_config.get("top_p")
+    new_context_window = ctx.agent_config.get("context_window")
+    new_extra_body = ctx.agent_config.get("extra_body")
+    new_extra_headers = ctx.agent_config.get("extra_headers")
+    new_default_headers = ctx.agent_config.get("default_headers")
 
     # Auxiliary model: a profile switch fully replaces the auxiliary model too. An
     # auxiliary_model block rebuilds the sibling (background calls + task subagent);
@@ -475,17 +465,7 @@ def _apply_profile(ctx: CommandContext, name: str):
     # inheritance; cross-provider reads the block's own key (or env). The auxiliary
     # rebuild is a tolerance boundary — a broken auxiliary config falls back to the
     # main model with a warning instead of blocking the core model switch.
-    auxiliary_block = profile.get("auxiliary_model")
-    if isinstance(auxiliary_block, dict) and auxiliary_block.get("model_name"):
-        ctx.agent_config["auxiliary_model_provider"] = auxiliary_block.get("model_provider") or new_provider
-        ctx.agent_config["auxiliary_model_name"] = auxiliary_block.get("model_name")
-        ctx.agent_config["auxiliary_base_url"] = auxiliary_block.get("base_url")
-        ctx.agent_config["auxiliary_api_key"] = auxiliary_block.get("api_key")
-        ctx.agent_config["auxiliary_wire_api"] = auxiliary_block.get("wire_api")
-        ctx.agent_config["auxiliary_extra_body"] = auxiliary_block.get("extra_body")
-        ctx.agent_config["auxiliary_extra_headers"] = auxiliary_block.get("extra_headers")
-        ctx.agent_config["auxiliary_reasoning"] = auxiliary_block.get("reasoning")
-        ctx.agent_config["auxiliary_reasoning_effort"] = auxiliary_block.get("reasoning_effort")
+    if ctx.agent_config.get("auxiliary_model_name"):
         try:
             new_auxiliary_model = _build_sibling_model(ctx.agent_config, "auxiliary")
         except Exception as exc:
@@ -513,21 +493,24 @@ def _apply_profile(ctx: CommandContext, name: str):
         new_auxiliary_model = None
     ctx.agent_config["auxiliary_model"] = new_auxiliary_model
 
-    # Persist the switch as a project-scoped override in project.json
-    # (``active_profile``). config.yaml's global `active_profile:` pointer is
-    # untouched — that stays the machine-wide default, and other projects keep
-    # whatever they had.
+    # Persist an explicit switch as the project-scoped recent active profile in
+    # project.json (``active_profile``). config.yaml's global `active_profile:`
+    # pointer is untouched — that stays the machine-wide default, and other
+    # projects keep whatever they had.
     #
     # Profile bodies (model_*, auxiliary_*, tuning) are write-only-by-setup
     # — never touched here. That separation is what fixed the original
     # "config.yaml 乱掉" bug, where the old free-form `/model provider/name`
     # path rewrote fields of the active profile in place.
     work_dir = ctx.agent_config.get("work_dir") or os.getcwd()
-    set_project_profile(work_dir, name)
-    # The session is now on this profile whole, which also retires any
-    # --profile choice or model override it started with.
-    ctx.agent_config["profile_name"] = name
-    ctx.agent_config["profile_source"] = "project"
+    if persist_project:
+        set_project_profile(work_dir, name)
+
+    # Record the session profile separately from project.json so resume can
+    # restore this session's provider/model even if another session in the same
+    # work_dir switches the project active profile later.
+    if ctx.current_agent is not None and ctx.current_agent._session_log is not None:
+        ctx.current_agent._session_log.set_profile(name, ctx.agent_config["profile_source"])
 
     model_kwargs = {
         "model_provider": new_provider,
@@ -541,6 +524,10 @@ def _apply_profile(ctx: CommandContext, name: str):
         "reasoning": new_reasoning,
         "top_p": new_top_p,
         "context_window": new_context_window,
+        "enable_cache_control": ctx.agent_config.get("enable_cache_control"),
+        "cache_control_messages": ctx.agent_config.get("cache_control_messages"),
+        "cache_control_session_header": ctx.agent_config.get("cache_control_session_header"),
+        "cache_keepalive": ctx.agent_config.get("cache_keepalive"),
         "extra_body": new_extra_body,
         "extra_headers": new_extra_headers,
         "default_headers": new_default_headers,
@@ -597,7 +584,7 @@ def _clear_project_profile_override(ctx: CommandContext) -> Any:
     con.print(f"[dim]Falling back to {default_name} ({source}).[/dim]")
     # Actually apply the fallback profile to the live session so the state
     # matches the message the user just saw.
-    return _apply_profile(ctx, default_name)
+    return _apply_profile(ctx, default_name, persist_project=False, profile_source=source)
 
 
 
