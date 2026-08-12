@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from agentica.model.message import Message
+from agentica.model.response import ModelResponse
 from agentica.run_response import RunResponse
 
 
@@ -850,6 +851,40 @@ class TestCompressionManagerAutoCompact(unittest.TestCase):
         self.assertIsNotNone(model.captured_prompt)
         self.assertEqual(model.captured_prompt.count('"role": "user"'), 1)
         self.assertEqual(model.captured_prompt.count("Conversation to summarise:"), 0)
+
+
+    def test_anthropic_long_request_falls_back_to_streaming_summary(self):
+        from agentica.compression.manager import CompressionManager
+
+        class FakeAnthropicModel:
+            context_window = 1_000_000
+
+            def __init__(self):
+                self.streamed = False
+                self._agent_ref = None
+
+            async def invoke(self, messages):
+                raise ValueError(
+                    "Streaming is required for operations that may take longer than 10 minutes. "
+                    "See https://github.com/anthropics/anthropic-sdk-python#long-requests "
+                    "for more details"
+                )
+
+            async def response_stream(self, messages):
+                self.streamed = True
+                yield ModelResponse(content="streamed ")
+                yield ModelResponse(content="summary")
+
+        cm = CompressionManager()
+        model = FakeAnthropicModel()
+        msgs = [Message(role="user", content="hi"), Message(role="assistant", content="hello")]
+
+        result = asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+
+        self.assertTrue(result)
+        self.assertTrue(model.streamed)
+        self.assertEqual(cm._consecutive_auto_compact_failures, 0)
+        self.assertIn("streamed summary", msgs[0].content)
 
 
 class TestLayerThresholds(unittest.TestCase):

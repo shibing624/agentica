@@ -19,6 +19,8 @@ from agentica.utils.log import logger
 from agentica.utils.tokens import count_tokens
 
 
+_ANTHROPIC_STREAMING_REQUIRED = "Streaming is required for operations that may take longer than 10 minutes"
+
 # Fraction of the context window at which auto-compact fires. A ratio, not an
 # absolute buffer: the codebase serves windows from 8K (gpt-4) to 1M, and any
 # absolute value is wrong at both ends (negative on small windows — every turn
@@ -229,8 +231,21 @@ class CompressionManager:
                 Message(role="user", content="\n".join(prompt_parts))
             ])
         except Exception as e:
-            logger.warning(f"Summarisation LLM call failed: {e}")
-            return None
+            if _ANTHROPIC_STREAMING_REQUIRED not in str(e):
+                logger.warning(f"Summarisation LLM call failed: {e}")
+                return None
+            try:
+                summary = await self._summarise_conversation_stream(
+                    active_model,
+                    "\n".join(prompt_parts),
+                )
+            except Exception as stream_error:
+                logger.warning(f"Summarisation streaming LLM call failed: {stream_error}")
+                return None
+            if summary:
+                summary = redact_sensitive_text(summary)
+                self._conversation_previous_summary = summary
+            return summary
         # Extract text from common response shapes
         summary: Optional[str] = None
         if hasattr(resp, "choices") and resp.choices:
@@ -250,6 +265,18 @@ class CompressionManager:
             summary = redact_sensitive_text(summary)
             self._conversation_previous_summary = summary
         return summary
+
+    async def _summarise_conversation_stream(self, active_model: Any, prompt: str) -> Optional[str]:
+        """Collect a streaming summary for Anthropic long-output requests."""
+        chunks: List[str] = []
+        async for chunk in active_model.response_stream([
+            Message(role="user", content=prompt)
+        ]):
+            content = chunk.content
+            if isinstance(content, str):
+                chunks.append(content)
+        summary = "".join(chunks).strip()
+        return summary or None
 
     async def auto_compact(
         self,
