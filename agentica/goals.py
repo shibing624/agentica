@@ -43,6 +43,7 @@ from typing import (
     Union,
 )
 
+from agentica.aux_session import AuxSession
 from agentica.prompts.base.goal import (
     GOAL_JUDGE_SYSTEM_PROMPT,
     render_goal_budget_wrapup_prompt,
@@ -528,6 +529,7 @@ async def judge_goal(
     final_response: str,
     subgoals: Optional[List[str]] = None,
     tool_calls: Optional[List[Tuple[str, bool]]] = None,
+    session: Optional["AuxSession"] = None,
 ) -> Tuple[str, str, bool]:
     """Ask the judge model whether ``final_response`` satisfies ``objective``.
 
@@ -550,6 +552,12 @@ async def judge_goal(
     Fail-open on transport errors (caller treats this as ``continue`` and
     does NOT count it as a parse failure — see ``return False`` below).
 
+    ``session``: optional AuxSession for the per-turn judge. When given, prior
+    judgments ride along as a bounded isolated history (system prompt and old
+    exchanges stay a byte-stable prefix — the sub-agent cache pattern), and a
+    successfully parsed exchange is committed for the next turn. Unparseable
+    or failed calls never enter the history.
+
     Args:
         tool_calls: Optional ``(tool_name, is_error)`` pairs from the
             just-finished turn. When provided the judge sees a one-line
@@ -563,17 +571,23 @@ async def judge_goal(
     from agentica.model.message import Message
 
     user_prompt = _build_judge_user_prompt(objective, final_response, subgoals, tool_calls)
-    messages = [
-        Message(role="system", content=GOAL_JUDGE_SYSTEM_PROMPT),
-        Message(role="user", content=user_prompt),
-    ]
+    if session is not None:
+        messages = session.build_request(GOAL_JUDGE_SYSTEM_PROMPT, user_prompt)
+    else:
+        messages = [
+            Message(role="system", content=GOAL_JUDGE_SYSTEM_PROMPT),
+            Message(role="user", content=user_prompt),
+        ]
     try:
         resp = await model.response(messages=messages)
     except Exception as exc:
         logger.debug("judge_goal: model.response() failed, fail-open: %s", exc)
         return "continue", f"judge unavailable: {exc}", False
 
-    return _parse_judge_response(resp.content or "")
+    verdict, reason, parse_failed = _parse_judge_response(resp.content or "")
+    if session is not None and not parse_failed:
+        session.commit(user_prompt, resp.content or "")
+    return verdict, reason, parse_failed
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +642,10 @@ class GoalManager:
         self.verifier = verifier
         self._state: Optional[GoalState] = None
         self._loaded = False
+        # The per-turn judge keeps its own bounded, isolated history so its
+        # system prompt + prior verdicts form a stable cacheable prefix
+        # (Reasonix planner/executor session split). Reset on every new goal.
+        self._judge_session = AuxSession("goal_judge")
 
     def _emit(self, event: RunEventType, **payload: Any) -> None:
         if self.event_callback is None or self._state is None:
@@ -721,6 +739,9 @@ class GoalManager:
         )
         self._persist()
         self._emit(RunEventType.goal_set, reason="user", message=f"◆ Goal set: {self._state.objective}")
+        # A new objective means new judge context: the old exchanges belong to
+        # the previous goal and would anchor the verdicts on stale evidence.
+        self._judge_session.reset()
         return self._state
 
     def pause(self, reason: str = "user") -> Optional[GoalState]:
@@ -1364,6 +1385,7 @@ class GoalManager:
             final_response,
             subgoals=self._state.subgoals or None,
             tool_calls=tool_calls,
+            session=self._judge_session,
         )
         self._state.last_verdict = "parse_failed" if parse_failed else verdict
         self._state.last_reason = reason
