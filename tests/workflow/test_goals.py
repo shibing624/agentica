@@ -716,6 +716,7 @@ def test_agent_get_goal_manager_lazy_creates_session_log_and_manager(tmp_path):
     agent._session_log = None
     agent.goal_manager = None
     agent.tools = None
+    agent.user_id = None
 
     mgr = agent.get_goal_manager()
     assert mgr is not None
@@ -737,6 +738,7 @@ def test_agent_enable_goal_tool_idempotent(tmp_path):
     agent._session_log = None
     agent.goal_manager = None
     agent.tools = None
+    agent.user_id = None
 
     agent.enable_goal_tool()
     agent.enable_goal_tool()  # idempotent
@@ -778,8 +780,11 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     agent.goal_manager = None
     agent.work_dir = None
     agent.tools = None
+    agent.user_id = None
     agent.task_anchor = None
     agent._anchor_session_id = None
+    agent._tool_runtime_configs = {}
+    agent._skill_runtime_configs = {}
 
     # Stub agent.run to return a synthetic RunResponse with no cost data.
     # auto_judge=True: this test specifically exercises the legacy judge-driven
@@ -814,8 +819,11 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     agent.goal_manager = None
     agent.work_dir = None
     agent.tools = None
+    agent.user_id = None
     agent.task_anchor = None
     agent._anchor_session_id = None
+    agent._tool_runtime_configs = {}
+    agent._skill_runtime_configs = {}
 
     ct = CostTracker()
     ct.record(model_id="fake-model", input_tokens=80, output_tokens=80)  # 160 > 50

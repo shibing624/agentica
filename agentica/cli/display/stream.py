@@ -433,11 +433,7 @@ class StreamDisplayManager:
             line += f" [dim]{params}[/dim]"
         if is_error:
             err = str(result_content).replace("\n", " ").strip()
-            if len(err) > 80:
-                # Keep the TAIL — the final exception line is what matters.
-                err = "..." + err[-77:]
-                remember_truncated(f"Tool error · {tool_name}", str(result_content))
-            line += f" [yellow]- error: {err}{elapsed_str}[/yellow]"
+            line += f" [dim]- error: {err}{elapsed_str}[/dim]"
         else:
             summary = self._result_count_summary(tool_name, result_content)
             if summary:

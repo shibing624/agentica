@@ -736,6 +736,33 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn(path, text)
         self.assertIn("memory_extractor.py", text)
 
+    def test_read_file_error_prints_full_plain_error(self):
+        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
+
+        clear_truncated_blocks()
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        error = (
+            "Path does not exist: agentica/cli/status_bar.py. "
+            "Resolve relative paths from the nearest existing parent; "
+            "do not retry speculative absolute paths."
+        )
+
+        dm.display_tool_result(
+            "read_file",
+            error,
+            is_error=True,
+            elapsed=0.01,
+            tool_args={"file_path": "agentica/cli/status_bar.py", "offset": 65, "limit": 30},
+        )
+
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("- error: " + error, text)
+        self.assertNotIn("[yellow]", text)
+        self.assertNotIn("error: ...", text)
+        self.assertEqual(get_truncated_blocks(), [])
+
 
     def test_display_tool_defers_edit_tools_call_line(self):
         """Write-diff tools defer the call line until completion."""
