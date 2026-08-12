@@ -50,7 +50,11 @@ if TYPE_CHECKING:
     from agentica.model.message import Message
 
 # Occupancy at which eviction starts, as a fraction of the context window.
-EVICT_THRESHOLD_RATIO = 0.7
+# 0.8 (not 0.9): from 0.9 the pass would have to free 40% of the window in tool
+# results alone to reach the 0.5 target — text-heavy sessions can't, and Layer
+# 2 then fires within the 5% gap, doubling prefix breaks. 0.8→0.95 leaves 15%.
+# It also must not collide numerically with IRREDUCIBLE_PROMPT_RATIO (0.9).
+EVICT_THRESHOLD_RATIO = 0.8
 
 # Occupancy eviction aims to reach. Strictly below the threshold so one pass
 # buys several turns of headroom instead of re-triggering every turn.

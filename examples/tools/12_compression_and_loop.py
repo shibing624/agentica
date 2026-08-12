@@ -112,8 +112,8 @@ def demo_auto_compact_config():
 
     print(f"\n  Auto-compact circuit-breaker:")
     print(f"    最大连续失败次数: {cm._max_auto_compact_failures}")
-    print(f"    预留 buffer tokens: {cm._auto_compact_buffer_tokens:,}")
-    print(f"    (等同于 CC 的 AUTOCOMPACT_BUFFER_TOKENS = 13,000)\n")
+    from agentica.compression.manager import AUTO_COMPACT_THRESHOLD_RATIO
+    print(f"    触发比例: context_window 的 {AUTO_COMPACT_THRESHOLD_RATIO:.0%}（距窗顶 5% 余量）\n")
 
 
 # ============================================================================

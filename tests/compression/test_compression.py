@@ -25,7 +25,7 @@ class TestEvictToolResults(unittest.TestCase):
     """
 
     WINDOW = 10_000
-    OVER_THRESHOLD = 9_000  # 90% — well past the 70% trigger
+    OVER_THRESHOLD = 9_000  # 90% — well past the 80% trigger
     UNDER_THRESHOLD = 3_000  # 30% — nothing to buy
 
     def _body(self, tag, words=200):
@@ -850,6 +850,100 @@ class TestCompressionManagerAutoCompact(unittest.TestCase):
         self.assertIsNotNone(model.captured_prompt)
         self.assertEqual(model.captured_prompt.count('"role": "user"'), 1)
         self.assertEqual(model.captured_prompt.count("Conversation to summarise:"), 0)
+
+
+class TestLayerThresholds(unittest.TestCase):
+    """Layer 1 (evict) / Layer 2 (auto-compact) trigger points across windows.
+
+    Both layers are pure ratios of the window (0.8 / 0.95), so the ordering
+    layer1 < layer2 must hold for EVERY window size — the inverted-layer and
+    negative-threshold regressions both come from mixing a ratio with an
+    absolute buffer, which is what this class pins down.
+    """
+
+    WINDOWS = (8_192, 32_768, 128_000, 200_000, 1_000_000)
+
+    def _layer2_trigger_point(self, window: int) -> int:
+        """Bisect should_auto_compact for the smallest token count that fires."""
+        from agentica.compression.manager import CompressionManager
+
+        cm = CompressionManager()
+        model = SimpleNamespace(context_window=window, id="test-model")
+        lo, hi = 0, window  # below threshold / at-or-above (window always fires)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if cm.should_auto_compact([], model, context_tokens=mid):
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+
+    def test_both_layers_ordered_and_within_window(self):
+        from agentica.compression.evict import EVICT_THRESHOLD_RATIO
+        from agentica.compression.manager import AUTO_COMPACT_THRESHOLD_RATIO
+
+        for window in self.WINDOWS:
+            layer1 = int(window * EVICT_THRESHOLD_RATIO)
+            layer2 = int(window * AUTO_COMPACT_THRESHOLD_RATIO)
+            with self.subTest(window=window):
+                self.assertGreater(layer1, 0, "negative/zero evict threshold — small-window bug")
+                self.assertLess(layer1, layer2, "layers inverted: summary would burn before free evict")
+                self.assertLess(layer2, window, "threshold must leave headroom below the window")
+
+    def test_layer2_trigger_bisects_to_ratio_and_is_monotonic(self):
+        from agentica.compression.manager import AUTO_COMPACT_THRESHOLD_RATIO
+
+        points = [self._layer2_trigger_point(w) for w in self.WINDOWS]
+        for window, point in zip(self.WINDOWS, points):
+            with self.subTest(window=window):
+                self.assertEqual(point, int(window * AUTO_COMPACT_THRESHOLD_RATIO))
+        self.assertEqual(points, sorted(points))
+        self.assertEqual(len(set(points)), len(points), "trigger points must strictly increase with window")
+
+    def test_small_window_really_full_still_triggers(self):
+        """gpt-4 (8192): the old absolute buffer went negative and fired every
+        turn; the ratio must still fire when the window is genuinely almost full."""
+        from agentica.compression.manager import CompressionManager
+
+        cm = CompressionManager()
+        model = SimpleNamespace(context_window=8_192, id="gpt-4")
+        self.assertTrue(cm.should_auto_compact([], model, context_tokens=8_000))
+        self.assertFalse(cm.should_auto_compact([], model, context_tokens=7_000))
+
+
+class TestNativeCompactionLimits(unittest.TestCase):
+    """native_compaction_token_limit must never collapse to a degenerate value.
+
+    Same bug family as the removed 13_000 auto-compact buffer: absolute
+    headroom terms go negative on small windows, and a max(1, ...) floor then
+    turns the limit into 1 — i.e. "compact every turn". Only models that set
+    supports_native_compaction=True reach this code today.
+    """
+
+    WINDOWS = (8_192, 32_768, 128_000, 200_000, 1_000_000)
+
+    def test_base_default_raises_so_declaring_models_must_implement(self):
+        from agentica.model.base import Model
+
+        with self.assertRaises(NotImplementedError):
+            Model.native_compaction_token_limit(MagicMock())
+
+    def test_responses_limit_bounded_and_monotonic(self):
+        from agentica.model.openai.responses import OpenAIResponses
+
+        prev = 0
+        for window in self.WINDOWS:
+            m = MagicMock()
+            m.context_window = window
+            m.max_output_tokens = None
+            m.max_tokens = None
+            limit = OpenAIResponses.native_compaction_token_limit(m)
+            with self.subTest(window=window):
+                self.assertGreaterEqual(limit, int(window * 0.8),
+                                        "limit must never collapse below the 80% floor")
+                self.assertLess(limit, window)
+                self.assertGreater(limit, prev, "limit must grow with the window")
+            prev = limit
 
 
 class TestCompressionManagerGetStats(unittest.TestCase):

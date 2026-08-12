@@ -19,6 +19,13 @@ from agentica.utils.log import logger
 from agentica.utils.tokens import count_tokens
 
 
+# Fraction of the context window at which auto-compact fires. A ratio, not an
+# absolute buffer: the codebase serves windows from 8K (gpt-4) to 1M, and any
+# absolute value is wrong at both ends (negative on small windows — every turn
+# "over threshold"; far too little headroom on 1M). 0.95 also buys time for
+# tool results to land in prompt cache before the one paid summary resets it.
+AUTO_COMPACT_THRESHOLD_RATIO = 0.95
+
 @dataclass
 class CompressionManager:
     """Summarise the conversation when the context approaches the window.
@@ -51,8 +58,6 @@ class CompressionManager:
     # ------------------------------------------------------------------
     _consecutive_auto_compact_failures: int = field(init=False, default=0)
     _max_auto_compact_failures: int = field(init=False, default=3)
-    # Buffer tokens reserved for the compaction summary output (CC uses 13_000).
-    _auto_compact_buffer_tokens: int = field(init=False, default=13_000)
 
     # Carried across compactions so each one updates the previous summary
     # instead of regenerating from an already-summarised transcript.
@@ -112,7 +117,7 @@ class CompressionManager:
         model: Optional[Any] = None,
         context_tokens: Optional[int] = None,
     ) -> bool:
-        """Return True when token count is within _auto_compact_buffer_tokens of the context window.
+        """Return True once token count reaches AUTO_COMPACT_THRESHOLD_RATIO of the window.
 
         Public because the decision has a side effect outside this class: the
         runner must fire ``on_pre_compact`` (which flushes memory buffers
@@ -124,7 +129,7 @@ class CompressionManager:
         context_window = model.context_window if model is not None else None
         if context_window is None:
             return False
-        threshold = context_window - self._auto_compact_buffer_tokens
+        threshold = int(context_window * AUTO_COMPACT_THRESHOLD_RATIO)
         model_id = model.id if model else 'gpt-4o'
         tokens = context_tokens if context_tokens is not None else count_tokens(messages, None, model_id, None)
         over = tokens >= threshold

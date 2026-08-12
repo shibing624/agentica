@@ -273,10 +273,19 @@ class OpenAIResponses(OpenAIChat):
         return formatted
 
     def native_compaction_token_limit(self) -> int:
+        """Largest input worth sending to native compaction.
+
+        Reserve room for the compaction response (output budget + slack), but
+        never below 80% of the window: on small windows the headroom term goes
+        negative and the previous ``max(1, ...)`` floor collapsed the limit to
+        1, making ``should_native_compact`` fire every single turn. The 80%
+        floor also matches the ``compress_token_limit`` cap ``min()``-ed in
+        downstream, so the collapse point no longer changes behaviour.
+        """
         output_limit = self.max_output_tokens if self.max_output_tokens is not None else self.max_tokens
         if output_limit is None:
             output_limit = 16_384
-        return max(1, self.context_window - output_limit - 8_192)
+        return max(int(self.context_window * 0.8), self.context_window - output_limit - 8_192)
 
     def estimate_native_compaction_tokens(
         self,

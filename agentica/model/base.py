@@ -445,8 +445,19 @@ class Model(ABC):
         return "off"
 
     def native_compaction_token_limit(self) -> int:
-        """Largest estimated input that should be sent to native compaction."""
-        return max(1, self.context_window - 13_000)
+        """Largest estimated input that should be sent to native compaction.
+
+        Subclasses that set ``supports_native_compaction = True`` must override
+        this. There is deliberately no default: any absolute fallback buffer
+        (13_000-style) is wrong somewhere on the 8K-1M window range this
+        codebase serves, and the previous ``max(1, window - 13_000)`` silently
+        collapsed to 1 on small windows, making ``should_native_compact`` fire
+        every single turn. A loud error beats a quietly wrong threshold.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} declares native compaction but does not "
+            "implement native_compaction_token_limit()"
+        )
 
     def estimate_native_compaction_tokens(
         self,
