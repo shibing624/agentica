@@ -145,8 +145,10 @@ TOOL_REGISTRY = {
     "video_download": ("video_download", "VideoDownloadTool", "Integration", "Video download from URLs"),
 }
 
-# Model provider registry - maps provider name to a lazy import target.
-MODEL_REGISTRY = {
+# Private model import registry. CLI startup reads only these strings; the
+# public MODEL_REGISTRY remains a mapping of provider names to callables and is
+# resolved only when a caller explicitly imports it.
+_MODEL_IMPORTS = {
     "openai": ("agentica.model.openai.chat", "OpenAIChat"),
     "azure": ("agentica.model.azure.openai_chat", "AzureOpenAIChat"),
     "moonshot": ("agentica", "MoonshotChat"),
@@ -156,6 +158,8 @@ MODEL_REGISTRY = {
     "ark": ("agentica", "ArkChat"),
     "anthropic": ("agentica.model.anthropic.claude", "Claude"),
 }
+
+_MODEL_REGISTRY_CACHE: Optional[Dict[str, Callable]] = None
 
 # Example models for each provider (for /model command display)
 EXAMPLE_MODELS = {
@@ -176,11 +180,32 @@ def _load_symbol(module_path: str, attr_name: str):
 
 
 def _load_model_factory(model_provider: str):
-    target = MODEL_REGISTRY.get(model_provider)
+    target = _MODEL_IMPORTS.get(model_provider)
     if target is None:
         return None
     module_path, attr_name = target
     return _load_symbol(module_path, attr_name)
+
+
+def _get_public_model_registry() -> Dict[str, Callable]:
+    """Resolve the backward-compatible public provider-to-callable mapping."""
+    global _MODEL_REGISTRY_CACHE
+    if _MODEL_REGISTRY_CACHE is None:
+        _MODEL_REGISTRY_CACHE = {
+            provider: _load_symbol(module_path, attr_name)
+            for provider, (module_path, attr_name) in _MODEL_IMPORTS.items()
+        }
+    return _MODEL_REGISTRY_CACHE
+
+
+def __getattr__(name: str):
+    if name == "MODEL_REGISTRY":
+        return _get_public_model_registry()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | {"MODEL_REGISTRY"})
 
 
 def _get_tool_import_path(tool_name: str) -> str:
@@ -313,7 +338,7 @@ def parse_args():
     # Default is None so saved CLI config (from the first-run wizard) can take
     # effect; main.py resolves args > saved config > hardcoded default.
     parser.add_argument(
-        "--model_provider", type=str, choices=list(MODEL_REGISTRY.keys()), help="LLM model provider", default=None
+        "--model_provider", type=str, choices=list(_MODEL_IMPORTS), help="LLM model provider", default=None
     )
     parser.add_argument(
         "--model_name",
@@ -347,7 +372,7 @@ def parse_args():
     parser.add_argument(
         "--auxiliary_model_provider",
         type=str,
-        choices=list(MODEL_REGISTRY.keys()),
+        choices=list(_MODEL_IMPORTS),
         help="Provider for the auxiliary model (defaults to --model_provider)",
     )
     parser.add_argument(
@@ -509,7 +534,7 @@ def get_model(
 ):
     """Create a model instance based on the provider name.
 
-    Uses MODEL_REGISTRY for provider lookup instead of if/elif chains. Provider
+    Uses the private lazy import registry instead of if/elif chains. Provider
     SDK modules are imported only when a model instance is actually built.
     """
     effective_wire_api = wire_api or "chat_completions"
@@ -579,7 +604,7 @@ def get_model(
     else:
         model_class = _load_model_factory(model_provider)
     if model_class is None:
-        raise ValueError(f"Unsupported model provider: {model_provider}. Supported: {', '.join(MODEL_REGISTRY.keys())}")
+        raise ValueError(f"Unsupported model provider: {model_provider}. Supported: {', '.join(_MODEL_IMPORTS)}")
     if reasoning is not None:
         params["reasoning"] = reasoning
     # Prompt caching. ``enable_cache_control`` applies to any model class that
@@ -588,14 +613,16 @@ def get_model(
     # takes effect everywhere. The OpenAIChat-only message/header knobs are not
     # passed to Claude, which manages its own message caching natively.
     if inspect.isclass(model_class):
-        if enable_cache_control is not None and hasattr(model_class, "enable_cache_control"):
+        model_fields = model_class.__dataclass_fields__
+        if enable_cache_control is not None and "enable_cache_control" in model_fields:
             params["enable_cache_control"] = enable_cache_control
-        OpenAIChat = _load_symbol("agentica.model.openai.chat", "OpenAIChat")
-        if issubclass(model_class, OpenAIChat):
+        if effective_wire_api == "chat_completions" and "cache_control_messages" in model_fields:
             if cache_control_messages is not None:
                 params["cache_control_messages"] = cache_control_messages
+        if effective_wire_api == "chat_completions" and "cache_control_session_header" in model_fields:
             if cache_control_session_header is not None:
                 params["cache_control_session_header"] = cache_control_session_header
+        if effective_wire_api == "chat_completions" and "cache_keepalive" in model_fields:
             if cache_keepalive is not None:
                 params["cache_keepalive"] = cache_keepalive
     return model_class(**params)

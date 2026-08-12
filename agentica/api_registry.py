@@ -34,6 +34,8 @@ LAZY_IMPORTS = {
     "FileType": "agentica.model.response",
     "OpenAIChat": "agentica.model.openai.chat",
     "OpenAIResponses": "agentica.model.openai.responses",
+    "refresh_model_catalog": "agentica.cost_tracker",
+    "refresh_model_catalog_in_background": "agentica.cost_tracker",
     "AzureOpenAIChat": "agentica.model.azure.openai_chat",
     # model providers (heavy dependencies)
     "LiteLLMChat": "agentica.model.litellm.chat",

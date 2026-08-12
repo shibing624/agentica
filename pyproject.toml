@@ -267,7 +267,7 @@ dev = [
 ]
 
 [project.scripts]
-agentica = "agentica.cli:main"
+agentica = "agentica.cli.main:main"
 agentica-gateway = "agentica.gateway.main:main"
 
 [project.urls]

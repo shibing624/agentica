@@ -12,6 +12,7 @@ from datetime import datetime
 from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.display import display_agent_execution_error, format_session_summary, resumable_session_id
 from agentica.cli.setup import resolve_model_config, run_onboarding
+from agentica.cost_tracker import refresh_model_catalog_in_background
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import suppress_console_logging
 from agentica.workspace import Workspace
@@ -114,6 +115,11 @@ def main():
 
         run_cron_daemon(args, get_console())
         return
+
+    # Keep local catalog reads on the startup path and refresh stale pricing /
+    # capability metadata in parallel. The daemon has a hard network timeout
+    # and never delays the first prompt.
+    refresh_model_catalog_in_background()
 
     # Resolve provider/model/base_url: CLI args > saved config > defaults.
     # Triggers the first-run wizard when no key/config is present on a TTY.

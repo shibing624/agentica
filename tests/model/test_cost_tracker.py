@@ -16,6 +16,7 @@ from agentica.cost_tracker import (
     get_model_context_window,
     get_model_supports_images,
     ModelUsageStat,
+    refresh_model_catalog_in_background,
 )
 
 
@@ -239,6 +240,22 @@ class TestPricingCache(unittest.TestCase):
             catalog = _get_catalog()
 
         self.assertEqual(catalog["stale-only-model"]["context_window"], 123456)
+
+    def test_background_refresh_starts_once_as_daemon(self):
+        thread = unittest.mock.Mock()
+        with (
+            unittest.mock.patch("agentica.cost_tracker._CATALOG_REFRESH_STARTED", False),
+            unittest.mock.patch("agentica.cost_tracker.threading.Thread", return_value=thread) as thread_class,
+        ):
+            self.assertTrue(refresh_model_catalog_in_background())
+            self.assertFalse(refresh_model_catalog_in_background())
+
+        thread_class.assert_called_once_with(
+            target=unittest.mock.ANY,
+            daemon=True,
+            name="agentica-model-catalog-refresh",
+        )
+        thread.start.assert_called_once_with()
 
     def test_all_fallback_entries_declare_input_modalities(self):
         self.assertTrue(

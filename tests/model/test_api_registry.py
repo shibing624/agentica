@@ -18,6 +18,8 @@ def test_api_registry_contains_core_lazy_exports():
     # does not pay the provider SDK cost until a model is actually requested.
     assert LAZY_IMPORTS["OpenAIChat"] == "agentica.model.openai.chat"
     assert LAZY_IMPORTS["OpenAIResponses"] == "agentica.model.openai.responses"
+    assert LAZY_IMPORTS["refresh_model_catalog"] == "agentica.cost_tracker"
+    assert LAZY_IMPORTS["refresh_model_catalog_in_background"] == "agentica.cost_tracker"
     assert "BuiltinTodoTool" not in LAZY_IMPORTS
     assert "BuiltinFileTool" not in LAZY_IMPORTS
 

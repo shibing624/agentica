@@ -375,6 +375,7 @@ def test_noninteractive_interrupt_prints_resume_summary():
     with (
         patch("agentica.cli.main.parse_args", return_value=args),
         patch("agentica.cli.main._enable_cli_file_logging"),
+        patch("agentica.cli.main.refresh_model_catalog_in_background"),
         patch("agentica.cli.main.resolve_model_config", return_value=resolved),
         patch("agentica.cli.main.create_agent", return_value=agent),
         patch("agentica.cli.main.get_console", return_value=console),

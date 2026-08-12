@@ -20,6 +20,7 @@ Usage::
 """
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -137,6 +138,8 @@ ModelEntry = Dict[str, Any]
 
 # Singleton — loaded once per process
 _MODEL_CATALOG: Optional[Dict[str, ModelEntry]] = None
+_CATALOG_REFRESH_LOCK = threading.Lock()
+_CATALOG_REFRESH_STARTED = False
 
 
 def _get_cache_path() -> str:
@@ -320,6 +323,27 @@ def refresh_model_catalog() -> Dict[str, ModelEntry]:
         merged.update(remote)
     _MODEL_CATALOG = merged
     return _MODEL_CATALOG
+
+
+def refresh_model_catalog_in_background() -> bool:
+    """Start one daemon refresh without delaying SDK or CLI startup.
+
+    Returns True when this call started the process-wide refresh and False when
+    one was already started. The underlying HTTP request has a 10-second hard
+    timeout in ``_fetch_and_cache``.
+    """
+    global _CATALOG_REFRESH_STARTED
+    with _CATALOG_REFRESH_LOCK:
+        if _CATALOG_REFRESH_STARTED:
+            return False
+        _CATALOG_REFRESH_STARTED = True
+        thread = threading.Thread(
+            target=refresh_model_catalog,
+            daemon=True,
+            name="agentica-model-catalog-refresh",
+        )
+        thread.start()
+    return True
 
 
 def get_model_pricing() -> Dict[str, ModelEntry]:

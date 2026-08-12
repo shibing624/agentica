@@ -50,6 +50,7 @@ def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None):
     with (
         patch("agentica.cli.main.parse_args", return_value=args),
         patch("agentica.cli.main._enable_cli_file_logging"),
+        patch("agentica.cli.main.refresh_model_catalog_in_background"),
         patch("agentica.cli.main.resolve_model_config", return_value=resolved),
         patch("agentica.cli.main.create_agent", return_value=agent),
     ):
