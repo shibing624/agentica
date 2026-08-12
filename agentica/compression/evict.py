@@ -41,9 +41,11 @@ path. Those blocks also carry no tool name, so the placeholder resolves the
 call through an index of the assistant ``tool_calls`` that requested it.
 """
 import json
+import os
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
 
 from agentica.compression.tool_call_args import shrink_tool_call_arguments_json
+from agentica.utils.log import logger
 from agentica.utils.tokens import count_message_tokens, count_tokens
 
 if TYPE_CHECKING:
@@ -55,6 +57,34 @@ if TYPE_CHECKING:
 # 2 then fires within the 5% gap, doubling prefix breaks. 0.8→0.95 leaves 15%.
 # It also must not collide numerically with IRREDUCIBLE_PROMPT_RATIO (0.9).
 EVICT_THRESHOLD_RATIO = 0.8
+
+# The one user-facing knob of the compression policy (Reasonix /config
+# compact_ratio): project-level override via AGENTICA_EVICT_THRESHOLD_RATIO
+# (drop it in the project .env). Deliberately the ONLY exposed ratio — the
+# Layer 2 trigger (0.95) and the 0.5 eviction target stay internal: touching
+# the former reopens the layer-inversion trap, the latter is a separate
+# "how hard to squeeze" question.
+ENV_EVICT_THRESHOLD_RATIO = "AGENTICA_EVICT_THRESHOLD_RATIO"
+_EVICT_THRESHOLD_MAX = 0.95  # strictly below AUTO_COMPACT_THRESHOLD_RATIO
+
+
+def evict_threshold_ratio() -> float:
+    """Effective evict trigger ratio: env override with validation, else 0.8."""
+    raw = os.environ.get(ENV_EVICT_THRESHOLD_RATIO)
+    if not raw:
+        return EVICT_THRESHOLD_RATIO
+    try:
+        ratio = float(raw)
+    except ValueError:
+        logger.warning(f"{ENV_EVICT_THRESHOLD_RATIO}={raw!r} is not a number; using {EVICT_THRESHOLD_RATIO}")
+        return EVICT_THRESHOLD_RATIO
+    if not 0.0 < ratio < _EVICT_THRESHOLD_MAX:
+        clamped = min(max(ratio, 0.05), _EVICT_THRESHOLD_MAX - 0.01)
+        logger.warning(
+            f"{ENV_EVICT_THRESHOLD_RATIO}={ratio} outside (0, {_EVICT_THRESHOLD_MAX}); clamped to {clamped}"
+        )
+        return clamped
+    return ratio
 
 # Occupancy eviction aims to reach. Strictly below the threshold so one pass
 # buys several turns of headroom instead of re-triggering every turn.
@@ -87,7 +117,7 @@ def under_pressure(context_tokens: int, context_window: int) -> bool:
     """True once the request occupies enough of the window to be worth shrinking."""
     if context_window <= 0:
         return False
-    return context_tokens >= context_window * EVICT_THRESHOLD_RATIO
+    return context_tokens >= context_window * evict_threshold_ratio()
 
 
 # Trailing user-turn share of the window at which reactive compact cannot help:

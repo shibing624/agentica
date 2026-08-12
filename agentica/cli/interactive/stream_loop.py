@@ -161,6 +161,15 @@ def _record_main_context_usage(event: dict, tui_state: dict) -> None:
     if event.get("type") != "context.usage" or event.get("is_main_agent") is not True:
         return
     tui_state["context_tokens"] = event["context_tokens"]
+    # Cache observability riding the same event: the previous request's hit
+    # ratio for the bar, and the prefix-break index for debug diagnosis.
+    tui_state["cache_hit_ratio"] = event.get("cache_hit_ratio")
+    break_index = event.get("prefix_break_index")
+    if break_index is not None:
+        logger.debug(
+            "cache prefix broke at message %d this request (cold tail from there on)",
+            break_index,
+        )
     if event["context_window"] > 0:
         tui_state["context_window"] = event["context_window"]
 

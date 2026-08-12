@@ -6,11 +6,13 @@
 
 # This file was mechanically extracted from /tmp/runner_backup.py for compress.py.
 
+import json
 import time
 from typing import (
     Any,
     Dict,
     List,
+    Optional,
     TYPE_CHECKING,
 )
 
@@ -299,12 +301,28 @@ class CompressMixin:
         Context occupancy is runtime state, not cost accounting. Emitting it at
         the request boundary keeps summarisation and other auxiliary LLM calls
         from polluting the main session's status-bar value.
+
+        Also the per-request cache observability point: attaches the previous
+        request's hit ratio (current request has no numbers yet) and the
+        prefix-break index against the previous request's message digests —
+        the two signals needed to spot cache pollution as it happens.
         """
         cb = agent._event_callback
         if cb is None:
             return
         tools = model.tools if isinstance(model.tools, list) else []
         window = model.context_window if isinstance(model.context_window, int) else 0
+
+        prev_digests = getattr(model, "_last_prefix_digests", None)
+        digests = _prefix_digests(messages)
+        break_index = _first_prefix_break(prev_digests, digests) if prev_digests else None
+        model._last_prefix_digests = digests
+
+        hit_ratio = None
+        usage = getattr(model, "usage", None)
+        if usage is not None and usage.request_usage_entries:
+            hit_ratio = usage.request_usage_entries[-1].cache_hit_ratio()
+
         try:
             cb(
                 {
@@ -313,8 +331,46 @@ class CompressMixin:
                     "is_main_agent": agent._parent_run_id is None,
                     "context_tokens": count_tokens(messages, tools, model.id),
                     "context_window": window,
+                    "cache_hit_ratio": hit_ratio,
+                    "prefix_break_index": break_index,
                 }
             )
         except Exception as e:
             logger.warning(f"event callback failed for context.usage: {e}")
+
+
+def _prefix_digests(messages: List[Message]) -> List[str]:
+    """One digest per request-bound message (role + content + tool_calls).
+
+    Local-only fields are intentionally ignored: this is a prefix-stability
+    probe for the provider cache, not a transcript checksum, so fields the
+    model never sees must not count as differences.
+    """
+    import hashlib
+
+    def _norm(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+        except Exception:
+            return str(value)
+
+    digests: List[str] = []
+    for m in messages:
+        raw = f"{m.role}\x00{_norm(m.content)}\x00{_norm(m.tool_calls or '')}"
+        digests.append(hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:10])
+    return digests
+
+
+def _first_prefix_break(prev: List[str], curr: List[str]) -> Optional[int]:
+    """Index of the oldest message whose digest changed; None when curr is
+    prev plus appended tail (the append-only fast path the provider cache is
+    built around). A shrink counts as a break at the cut point."""
+    for i, d in enumerate(prev):
+        if i >= len(curr):
+            return i
+        if curr[i] != d:
+            return i
+    return None if len(curr) >= len(prev) else len(prev)
 

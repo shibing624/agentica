@@ -981,6 +981,44 @@ class TestNativeCompactionLimits(unittest.TestCase):
             prev = limit
 
 
+class TestEvictThresholdOverride(unittest.TestCase):
+    """P3-2: AGENTICA_EVICT_THRESHOLD_RATIO — the one user-facing knob."""
+
+    def _with_env(self, value):
+        if value is None:
+            os.environ.pop("AGENTICA_EVICT_THRESHOLD_RATIO", None)
+        else:
+            os.environ["AGENTICA_EVICT_THRESHOLD_RATIO"] = value
+
+    def tearDown(self):
+        self._with_env(None)
+
+    def test_default_is_point_eight(self):
+        from agentica.compression.evict import evict_threshold_ratio
+        self._with_env(None)
+        self.assertEqual(evict_threshold_ratio(), 0.8)
+
+    def test_env_override_applies(self):
+        from agentica.compression.evict import evict_threshold_ratio, under_pressure
+        self._with_env("0.7")
+        self.assertEqual(evict_threshold_ratio(), 0.7)
+        self.assertTrue(under_pressure(7_000, 10_000))
+        self.assertFalse(under_pressure(6_999, 10_000))
+
+    def test_garbage_env_falls_back_to_default(self):
+        from agentica.compression.evict import evict_threshold_ratio
+        self._with_env("banana")
+        self.assertEqual(evict_threshold_ratio(), 0.8)
+
+    def test_out_of_range_is_clamped_below_layer2(self):
+        from agentica.compression.evict import evict_threshold_ratio
+        self._with_env("0.99")
+        ratio = evict_threshold_ratio()
+        self.assertLess(ratio, 0.95, "must stay strictly below the Layer 2 trigger")
+        self._with_env("0")
+        self.assertGreater(evict_threshold_ratio(), 0.0)
+
+
 class TestCompressionManagerGetStats(unittest.TestCase):
     """get_stats returns a snapshot the caller cannot mutate."""
 

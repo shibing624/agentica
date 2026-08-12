@@ -64,6 +64,17 @@ class TokenDetails(BaseModel):
     cache_creation_tokens: int = 0
 
 
+def _details_dict(details: Optional[TokenDetails]) -> Dict[str, Any]:
+    if details is None:
+        return {}
+    return {
+        "cached_tokens": details.cached_tokens,
+        "cache_read_tokens": details.cache_read_tokens,
+        "cache_creation_tokens": details.cache_creation_tokens,
+        "cache_write_tokens": 0,
+    }
+
+
 class RequestUsage(BaseModel):
     """Token usage for a single LLM request."""
     request_index: int = 0
@@ -73,6 +84,21 @@ class RequestUsage(BaseModel):
     input_tokens_details: Optional[TokenDetails] = None
     output_tokens_details: Optional[TokenDetails] = None
     response_time: Optional[float] = None
+
+    def cache_hit_ratio(self) -> Optional[float]:
+        """cached / (fresh + cached + write) for this request, or None.
+
+        None when the provider reported no cache counters at all — a 0.0 ratio
+        would wrongly imply "cache missed" for providers without a cache.
+        Conventions (inclusive vs exclusive cached counts) are normalised by
+        ``split_prompt_usage``.
+        """
+        details = _details_dict(self.input_tokens_details)
+        if not any(details.values()):
+            return None
+        fresh, hit, write = split_prompt_usage(self.input_tokens, details)
+        total = fresh + hit + write
+        return hit / total if total > 0 else None
 
 
 class Usage(BaseModel):
@@ -105,6 +131,15 @@ class Usage(BaseModel):
 
     # Per-request entries
     request_usage_entries: List[RequestUsage] = Field(default_factory=list)
+
+    def cache_hit_ratio(self) -> Optional[float]:
+        """Aggregate cached share of all prompt tokens; None with no cache data."""
+        details = _details_dict(self.input_tokens_details)
+        if not any(details.values()):
+            return None
+        fresh, hit, write = split_prompt_usage(self.input_tokens, details)
+        total = fresh + hit + write
+        return hit / total if total > 0 else None
 
     def add(self, entry: RequestUsage) -> None:
         """Add a single request's usage to the aggregate."""
