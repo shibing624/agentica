@@ -406,7 +406,19 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
     session_log = agent._session_log
     if session_log is None or not session_log.exists():
         return [], 0
-    resumed = session_log.load(resume_at=resume_at)
+    _model = getattr(agent, "model", None)
+    model_id = getattr(_model, "id", None) if _model is not None else None
+    resumed = session_log.load(
+        resume_at=resume_at,
+        model=model_id,
+    )
+    # Reasonix CacheState: tell the user whether the resumed prefix is likely
+    # still warm in the provider cache before the first request proves it.
+    logger.info(
+        "resume %s: cache state estimate = %s",
+        session_log.session_id,
+        session_log.cache_warmth_hint(model_id),
+    )
     agent.working_memory.clear()
     runs_built = agent.working_memory.hydrate_runs_from_history(resumed) if resumed else 0
     if runs_built and agent.model is not None and not agent.model.supports_replayed_tool_history:

@@ -8,6 +8,7 @@ evicting old tool results. This is what happens when that is not enough: the
 history is replaced by a summary, which costs an LLM call and is irreversible,
 so it is deliberately the last thing tried.
 """
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -27,6 +28,26 @@ _ANTHROPIC_STREAMING_REQUIRED = "Streaming is required for operations that may t
 # "over threshold"; far too little headroom on 1M). 0.95 also buys time for
 # tool results to land in prompt cache before the one paid summary resets it.
 AUTO_COMPACT_THRESHOLD_RATIO = 0.95
+
+
+def _covered_prefix_hash(msgs: List["Message"]) -> str:
+    """Stable hash over the messages a summary replaces (role + content).
+
+    Role and content only: timestamps and tool metadata churn between runs and
+    would make the same conversation hash differently each time. Truncated to
+    16 hex chars — it is a lineage marker, not a checksum adversaries attack.
+    """
+    h = hashlib.sha256()
+    for m in msgs:
+        try:
+            content = m.get_content_string() or ""
+        except Exception:
+            content = str(m.content or "")
+        h.update((m.role or "").encode("utf-8", "replace"))
+        h.update(b"\x00")
+        h.update(content.encode("utf-8", "replace"))
+        h.update(b"\x00")
+    return h.hexdigest()[:16]
 
 @dataclass
 class CompressionManager:
@@ -382,6 +403,13 @@ class CompressionManager:
         tail_start = trailing_user_turn_start(messages)
         preserved_tail = [m for m in messages[tail_start:] if m.role != "system"]
 
+        # Hash the span the summary replaces, before it is gone: boundary
+        # entries carry it so a resume can tell which canonical prefix this
+        # projection covered (observability today, hard validation later).
+        covered_hash = _covered_prefix_hash(
+            [m for m in messages[:tail_start] if m.role != "system"]
+        )
+
         messages.clear()
         messages.extend(preserved_system)
         messages.append(Message(role="user",
@@ -404,7 +432,11 @@ class CompressionManager:
             if _agent is not None:
                 _slog = _agent._session_log
                 if _slog is not None:
-                    _slog.append_compact_boundary(summary)
+                    _slog.append_compact_boundary(
+                        summary,
+                        model=model.id if model is not None else None,
+                        covered_prefix_hash=covered_hash,
+                    )
                     _slog.append_post_compact_messages(preserved_tail)
                     logger.debug("Compact boundary + preserved tail written to session log")
         except Exception as cb_err:

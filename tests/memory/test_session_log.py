@@ -771,5 +771,107 @@ class TestSidecarSessionName:
         assert SessionLog("s-by-cls", base_dir=str(tmp_path)).get_name() == "via-classmethod"
 
 
+class TestProjectionLineage:
+    """Compact boundary lineage: stale summaries must not survive a
+    model/branch switch (Reasonix promptCacheKey port). The boundary IS the
+    projection; everything before it on disk is the canonical transcript and
+    must replay verbatim when lineage disagrees."""
+
+    SUMMARY = "SUMMARY-MARKER: earlier turns condensed"
+
+    def _write_session(self, base_dir, model="model-a", with_lineage=True):
+        log = SessionLog("s-lin", base_dir=base_dir)
+        log.append("user", "CANONICAL-Q1")
+        log.append("assistant", "CANONICAL-A1")
+        if with_lineage:
+            log.append_compact_boundary(
+                self.SUMMARY, model=model, covered_prefix_hash="hash-abc"
+            )
+        else:
+            log.append_compact_boundary(self.SUMMARY)
+            # strip the lineage fields to simulate a pre-feature boundary
+            lines = log.path.read_text(encoding="utf-8").splitlines()
+            out = []
+            for line in lines:
+                entry = json.loads(line)
+                if entry.get("type") == "compact_boundary":
+                    entry.pop("lineage_key", None)
+                    entry.pop("model", None)
+                    entry.pop("covered_prefix_hash", None)
+                out.append(json.dumps(entry, ensure_ascii=False))
+            log.path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        log.append("user", "TAIL-Q2")
+        log.append("assistant", "TAIL-A2")
+        return log
+
+    def _contents(self, messages):
+        return "\n".join(str(m.get("content", "")) for m in messages)
+
+    def _reload(self, base_dir, model=None):
+        log = SessionLog("s-lin", base_dir=base_dir)
+        return log.load(model=model)
+
+    def test_boundary_records_lineage_hash_and_model(self, tmp_path):
+        log = self._write_session(str(tmp_path))
+        boundary = None
+        for line in log.path.read_text(encoding="utf-8").splitlines():
+            entry = json.loads(line)
+            if entry.get("type") == "compact_boundary":
+                boundary = entry
+        assert boundary is not None
+        assert boundary["model"] == "model-a"
+        assert boundary["covered_prefix_hash"] == "hash-abc"
+        key = boundary["lineage_key"]
+        assert key.count("|") == 3  # session|cwd|branch|model
+        assert key.endswith("|model-a")
+
+    def test_lineage_key_excludes_volatile_parts(self, tmp_path):
+        log = SessionLog("s-lin", base_dir=str(tmp_path))
+        assert log.lineage_key("m") == log.lineage_key("m")
+        assert log.lineage_key("m") != log.lineage_key("other-model")
+
+    def test_load_pre_boundary_returns_canonical_span(self, tmp_path):
+        log = self._write_session(str(tmp_path))
+        pre = log.load_pre_boundary()
+        texts = [e.get("content") for e in pre]
+        assert "CANONICAL-Q1" in texts
+        assert "CANONICAL-A1" in texts
+        assert "TAIL-Q2" not in texts
+        assert all(e.get("type") != "compact_boundary" for e in pre)
+
+    def test_same_lineage_resume_keeps_summary(self, tmp_path):
+        base = str(tmp_path)
+        self._write_session(base)
+        messages = self._reload(base, model="model-a")
+        joined = self._contents(messages)
+        assert "Resumed session" in joined
+        assert self.SUMMARY in joined
+        assert "TAIL-Q2" in joined
+        assert "CANONICAL-Q1" not in joined  # canonical stays off the wire
+
+    def test_model_switch_resume_falls_back_to_canonical(self, tmp_path):
+        base = str(tmp_path)
+        self._write_session(base)
+        messages = self._reload(base, model="model-b")
+        joined = self._contents(messages)
+        assert "Resumed session" not in joined, "stale summary survived a model switch"
+        assert self.SUMMARY not in joined
+        assert "CANONICAL-Q1" in joined
+        assert "CANONICAL-A1" in joined
+        assert "TAIL-Q2" in joined
+
+    def test_resume_without_model_keeps_legacy_behavior(self, tmp_path):
+        base = str(tmp_path)
+        self._write_session(base)
+        messages = self._reload(base, model=None)
+        assert "Resumed session" in self._contents(messages)
+
+    def test_legacy_boundary_without_lineage_still_trusted(self, tmp_path):
+        base = str(tmp_path)
+        self._write_session(base, with_lineage=False)
+        messages = self._reload(base, model="model-b")
+        assert "Resumed session" in self._contents(messages)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

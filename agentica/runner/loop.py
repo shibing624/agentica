@@ -564,7 +564,13 @@ class LoopMixin:
                     and len(agent.working_memory.runs) == 0
                     and len(agent.working_memory.messages) == 0
                 ):
-                    resumed_messages = agent._session_log.load()
+                    # model= lets the log distrust a compact boundary written
+                    # under another lineage (model/branch change): it replays
+                    # the canonical transcript instead of the stale summary.
+                    _m = getattr(agent, "model", None)
+                    resumed_messages = agent._session_log.load(
+                        model=getattr(_m, "id", None) if _m is not None else None
+                    )
                     if resumed_messages:
                         runs_built = agent.working_memory.hydrate_runs_from_history(resumed_messages)
                         # The transcript stores tool rounds in the OpenAI wire

@@ -22,6 +22,7 @@ JSONL format (CC-aligned):
 import glob
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -81,6 +82,16 @@ def _iso_now() -> str:
     """Return current time as ISO 8601 string with milliseconds (CC convention)."""
     now = datetime.now(timezone.utc)
     return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+
+
+def _parse_iso_timestamp(value: Any) -> Optional[float]:
+    """ISO-8601 string → epoch seconds; None on anything unparseable."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 class SessionLog:
@@ -183,11 +194,22 @@ class SessionLog:
         self._write_search_index_entry(role, content)
         return entry_uuid
 
-    def append_compact_boundary(self, summary: str) -> str:
+    def append_compact_boundary(
+        self,
+        summary: str,
+        *,
+        model: Optional[str] = None,
+        covered_prefix_hash: Optional[str] = None,
+    ) -> str:
         """Mark a compaction boundary. Breaks the UUID chain (parent_uuid=null).
 
         On resume, all entries before the last boundary are discarded.
         The summary becomes the starting context.
+
+        ``model`` and ``covered_prefix_hash`` attach projection lineage data:
+        the boundary records the identity it was compacted under (see
+        ``lineage_key``) plus a hash of the replaced span, so a later resume
+        can distrust a stale summary instead of replaying it blindly.
         """
         entry_uuid = str(uuid4())
         self._append({
@@ -200,10 +222,31 @@ class SessionLog:
             "version": self._version,
             "git_branch": self._git_branch,
             "summary": summary,
+            "lineage_key": self.lineage_key(model),
+            "model": model,
+            "covered_prefix_hash": covered_prefix_hash,
         })
         self._last_uuid = entry_uuid
         self._write_search_index_entry("compact_boundary", summary)
         return entry_uuid
+
+    def lineage_key(self, model: Optional[str] = None) -> str:
+        """Identity of the cached projection boundary: session + cwd + branch + model.
+
+        Deliberately excludes timestamps, message counts and content hashes —
+        those change every turn and would invalidate the projection constantly
+        (Reasonix promptCacheKey, internal/agent/preflight.go:280-287). When any
+        part changes (model switch, branch hop) an old boundary must not be
+        trusted as the conversation summary.
+        """
+        return "|".join(
+            [
+                str(self.session_id or ""),
+                str(self._cwd or ""),
+                str(self._git_branch or ""),
+                str(model or ""),
+            ]
+        )
 
     def append_post_compact_messages(self, messages: List["Message"]) -> int:
         """Persist the turn compaction preserved, right after a compact_boundary.
@@ -344,13 +387,101 @@ class SessionLog:
     # Load / Resume
     # ------------------------------------------------------------------
 
-    def load(self, resume_at: Optional[str] = None) -> List[Dict[str, Any]]:
+    def load_pre_boundary(self) -> List[Dict[str, Any]]:
+        """Canonical transcript entries BEFORE the last compact boundary.
+
+        The pre-boundary bytes were never deleted — ``load()`` merely starts
+        replaying from the last boundary. This is the read path for checking
+        (and rebuilding) the projection: Reasonix's canonical-vs-projection
+        split on top of the single append-only jsonl. Returns all entries when
+        no boundary exists (the whole log is the canonical prefix).
+        """
+        if not self.path.exists():
+            return []
+        entries: List[Dict[str, Any]] = []
+        last_boundary_idx = -1
+        with open(self.path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                entries.append(entry)
+                if entry.get("type") == "compact_boundary":
+                    last_boundary_idx = len(entries) - 1
+        return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
+
+    def cache_warmth_hint(
+        self,
+        model: Optional[str] = None,
+        *,
+        ttl_seconds: Optional[float] = None,
+    ) -> str:
+        """Best-effort warm/cold/unknown estimate for the prefix about to resume.
+
+        Reasonix CacheState{Warm,Cold,Unknown} (internal/agent/preflight.go).
+        - ``cold``: a lineage-mismatched boundary forces canonical replay (the
+          long rebuilt prefix was never sent before), or the last write is
+          older than ``ttl_seconds`` (provider cache TTL, e.g. Anthropic's
+          ephemeral 5m, when the caller knows it).
+        - ``warm``: a boundary exists whose lineage still matches (or a legacy
+          boundary with nothing recorded to judge by).
+        - ``unknown``: no compact boundary at all — nothing cached to judge.
+        """
+        if not self.path.exists():
+            return "unknown"
+        boundary: Optional[Dict[str, Any]] = None
+        last_ts: Optional[float] = None
+        with open(self.path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("type") == "compact_boundary":
+                    boundary = entry
+                ts = _parse_iso_timestamp(entry.get("timestamp"))
+                if ts is not None:
+                    last_ts = ts
+        if boundary is None:
+            return "unknown"
+        if not self._projection_valid(boundary, model):
+            return "cold"
+        if ttl_seconds is not None and last_ts is not None:
+            if time.time() - last_ts > ttl_seconds:
+                return "cold"
+        return "warm"
+
+    def _projection_valid(self, boundary: Optional[Dict[str, Any]], model: Optional[str]) -> bool:
+        """True when the boundary's recorded lineage still matches this session.
+
+        Legacy boundaries without a key stay trusted (no data to judge with);
+        a caller that cannot name its model also cannot disprove the key, so
+        the summary is kept. Only a recorded key that disagrees with the
+        current session/model identity demotes the summary back to canonical.
+        """
+        if not boundary:
+            return True
+        key = boundary.get("lineage_key")
+        if not key or model is None:
+            return True
+        return key == self.lineage_key(model)
+
+    def load(self, resume_at: Optional[str] = None, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """Replay JSONL log for session resume.
 
         Args:
             resume_at: Optional UUID — truncate the conversation at this message
                        (inclusive). Mirrors CC's --resume-session-at <uuid>.
                        Messages after this UUID are discarded (forms a fork point).
+            model: Optional model id that will consume the transcript. When the
+                       last compact boundary was written under a different
+                       lineage (model/branch/cwd/session), the stale summary is
+                       skipped and the full canonical transcript replays.
 
         Returns:
             List of message dicts with 'role' and 'content' keys.
@@ -360,16 +491,17 @@ class SessionLog:
 
         file_size = self.path.stat().st_size
         if file_size > _LARGE_FILE_THRESHOLD and resume_at is None:
-            return self._load_large_file()
+            return self._load_large_file(model=model)
 
-        return self._load_full(resume_at=resume_at)
+        return self._load_full(resume_at=resume_at, model=model)
 
-    def _load_full(self, resume_at: Optional[str] = None) -> List[Dict[str, Any]]:
+    def _load_full(self, resume_at: Optional[str] = None, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """Load entire file (small files < 5MB), optionally truncated at resume_at."""
         lines = self.path.read_text(encoding="utf-8").splitlines()
         entries: List[Dict] = []
         last_boundary_idx = -1
         last_boundary_summary: Optional[str] = None
+        last_boundary_entry: Optional[Dict] = None
 
         for line in lines:
             if not line.strip():
@@ -380,6 +512,7 @@ class SessionLog:
                 if entry.get("type") == "compact_boundary":
                     last_boundary_idx = len(entries) - 1
                     last_boundary_summary = entry.get("summary", "")
+                    last_boundary_entry = entry
             except json.JSONDecodeError:
                 continue
 
@@ -395,20 +528,31 @@ class SessionLog:
                 # Recalculate boundary after truncation
                 last_boundary_idx = -1
                 last_boundary_summary = None
+                last_boundary_entry = None
                 for i, e in enumerate(entries):
                     if e.get("type") == "compact_boundary":
                         last_boundary_idx = i
                         last_boundary_summary = e.get("summary", "")
+                        last_boundary_entry = e
 
         if entries:
             self._last_uuid = entries[-1].get("uuid")
 
+        if not self._projection_valid(last_boundary_entry, model):
+            logger.warning(
+                "Compact boundary lineage mismatch for session %s — replaying "
+                "canonical transcript instead of the stale summary",
+                self.session_id,
+            )
+            return self._build_messages(entries, -1, None)
+
         return self._build_messages(entries, last_boundary_idx, last_boundary_summary)
 
-    def _load_large_file(self) -> List[Dict[str, Any]]:
+    def _load_large_file(self, model: Optional[str] = None) -> List[Dict[str, Any]]:
         """Large file optimization: only parse lines after the last compact_boundary."""
         last_boundary_offset = -1
         last_boundary_summary: Optional[str] = None
+        last_boundary_entry: Optional[Dict] = None
 
         with open(self.path, "r", encoding="utf-8") as f:
             while True:
@@ -422,8 +566,17 @@ class SessionLog:
                         if entry.get("type") == "compact_boundary":
                             last_boundary_offset = offset
                             last_boundary_summary = entry.get("summary", "")
+                            last_boundary_entry = entry
                     except json.JSONDecodeError:
                         pass
+
+        if not self._projection_valid(last_boundary_entry, model):
+            logger.warning(
+                "Compact boundary lineage mismatch for session %s — replaying "
+                "canonical transcript instead of the stale summary",
+                self.session_id,
+            )
+            return self._load_full(model=model)
 
         entries: List[Dict] = []
         with open(self.path, "r", encoding="utf-8") as f:
