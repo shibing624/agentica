@@ -7,8 +7,10 @@ Tracks token usage and estimates USD cost for every API call within
 a single agent run.  The instance is attached to RunResponse.cost_tracker
 and can be printed via RunResponse.cost_summary.
 
-Pricing is loaded at first use from a local cache of models.dev/api.json,
-refreshed every 24 hours.  Falls back to a hardcoded table when offline.
+Pricing is loaded at first use from a local cache of models.dev/api.json.
+Synchronous lookups never fetch the network; they use fresh cache, stale cache,
+then the hardcoded table.  A caller can explicitly refresh the cache when a
+network round trip is acceptable.
 
 Usage::
 
@@ -275,6 +277,10 @@ def _get_catalog() -> Dict[str, ModelEntry]:
     Remote entries fill in the ~2000 models not in fallback.
     Fallback is authoritative for models we've explicitly listed
     (manually calibrated pricing / context_window).
+
+    This function is used during Model construction, so it must never block on
+    network I/O. A stale cache is good enough for startup; callers that want to
+    update the cache should call refresh_model_catalog() explicitly.
     """
     global _MODEL_CATALOG
     if _MODEL_CATALOG is not None:
@@ -282,11 +288,29 @@ def _get_catalog() -> Dict[str, ModelEntry]:
 
     remote = _load_cached()
     if remote is None:
-        remote = _fetch_and_cache()
+        # A stale-but-valid cache still carries real context windows and
+        # pricing for models absent from _FALLBACK_PRICING, and is far better
+        # than blocking startup on a remote TLS handshake.
+        remote = _load_cached(ignore_ttl=True)
+
+    merged: Dict[str, ModelEntry] = {
+        key: dict(entry) for key, entry in _FALLBACK_PRICING.items()
+    }
+    if remote:
+        merged.update(remote)
+    _MODEL_CATALOG = merged
+    return _MODEL_CATALOG
+
+
+def refresh_model_catalog() -> Dict[str, ModelEntry]:
+    """Fetch models.dev now, update the cache, and return the merged catalog.
+
+    This is intentionally explicit because model construction and CLI startup
+    must not perform network I/O just to estimate context windows or costs.
+    """
+    global _MODEL_CATALOG
+    remote = _fetch_and_cache()
     if remote is None:
-        # Refresh failed (offline / timeout): fall back to the stale cache
-        # file instead of discarding it — it still carries real context
-        # windows and pricing for models absent from _FALLBACK_PRICING.
         remote = _load_cached(ignore_ttl=True)
 
     merged: Dict[str, ModelEntry] = {

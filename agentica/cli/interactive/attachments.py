@@ -15,11 +15,6 @@ from typing import List, NamedTuple, Optional
 from agentica.cli.commands.context import IMAGE_EXTENSIONS
 from agentica.utils.log import logger
 
-try:
-    from imgocr import ImgOcr
-except ImportError:
-    ImgOcr = None
-
 # ==================== Image Attachment Helpers ====================
 
 
@@ -210,8 +205,17 @@ _OCR_TOTAL_CHARS = 200_000
 _OCR_TIMEOUT_SECS = 30
 
 
+def _img_ocr_class():
+    try:
+        from imgocr import ImgOcr
+    except ImportError:
+        return None
+    return ImgOcr
+
+
 def _ocr_single_image(image_path: str) -> str:
     """OCR a single image, returning extracted text (truncated to limit)."""
+    ImgOcr = _img_ocr_class()
     if ImgOcr is None:
         return ""
 

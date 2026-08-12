@@ -40,7 +40,6 @@ from agentica.global_config import (
     global_config_path,
     write_commented_template,
 )
-from agentica.model.anthropic.claude import CLAUDE_OPUS_5_REASONING_EFFORTS, is_claude_opus_5
 
 # Provider presets: provider slug -> metadata used by the wizard.
 # ``env`` is the environment variable each provider factory reads for its key
@@ -260,9 +259,21 @@ _RESPONSES_REASONING_CHOICES = ("none", "minimal", "low", "medium", "high", "xhi
 _WIRE_API_CHOICES = ("chat_completions", "responses")
 
 
+def _is_claude_opus_5_model(model_name: str) -> bool:
+    from agentica.model.anthropic.claude import is_claude_opus_5
+
+    return is_claude_opus_5(model_name)
+
+
+def _claude_opus_5_reasoning_efforts() -> tuple[str, ...]:
+    from agentica.model.anthropic.claude import CLAUDE_OPUS_5_REASONING_EFFORTS
+
+    return CLAUDE_OPUS_5_REASONING_EFFORTS
+
+
 def _reasoning_effort_choices(provider: str, model_name: Optional[str]) -> tuple[str, ...]:
-    if provider == "anthropic" and model_name and is_claude_opus_5(model_name):
-        return CLAUDE_OPUS_5_REASONING_EFFORTS
+    if provider == "anthropic" and model_name and _is_claude_opus_5_model(model_name):
+        return _claude_opus_5_reasoning_efforts()
     return _REASONING_EFFORT_CHOICES
 
 # Profile keys that are optional model-tuning params. Used to carry existing
@@ -500,7 +511,7 @@ def _prompt_advanced_params(
     user blanks out are omitted so the model factory keeps its defaults.
     """
     existing = _pick_keys(current, _TUNING_KEYS)
-    if provider == "anthropic" and model_name and is_claude_opus_5(model_name):
+    if provider == "anthropic" and model_name and _is_claude_opus_5_model(model_name):
         existing.setdefault("reasoning_effort", "high")
     has_existing = bool(existing)
     prompt_label = "Edit advanced model params (thinking depth, limits)?" if has_existing else "Configure advanced model params (thinking depth, limits)?"

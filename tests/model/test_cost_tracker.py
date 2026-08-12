@@ -206,6 +206,40 @@ class TestPricingCache(unittest.TestCase):
         self.assertEqual(catalog["gpt-4o"], remote["gpt-4o"])
         self.assertIn("gpt-5", catalog)
 
+    def test_catalog_lookup_does_not_fetch_network_on_cache_miss(self):
+        with (
+            unittest.mock.patch("agentica.cost_tracker._MODEL_CATALOG", None),
+            unittest.mock.patch("agentica.cost_tracker._load_cached", return_value=None),
+            unittest.mock.patch("agentica.cost_tracker._fetch_and_cache", side_effect=AssertionError("network fetch")),
+        ):
+            catalog = _get_catalog()
+
+        self.assertEqual(catalog["gpt-4o"]["context_window"], 128000)
+
+    def test_catalog_lookup_uses_stale_cache_without_fetching(self):
+        stale = {
+            "stale-only-model": {
+                "input": 0.1,
+                "output": 0.2,
+                "cache_read": 0.0,
+                "cache_write": 0.0,
+                "context_window": 123456,
+                "input_modalities": ("text",),
+            }
+        }
+
+        def _fake_load_cached(ignore_ttl: bool = False):
+            return stale if ignore_ttl else None
+
+        with (
+            unittest.mock.patch("agentica.cost_tracker._MODEL_CATALOG", None),
+            unittest.mock.patch("agentica.cost_tracker._load_cached", side_effect=_fake_load_cached),
+            unittest.mock.patch("agentica.cost_tracker._fetch_and_cache", side_effect=AssertionError("network fetch")),
+        ):
+            catalog = _get_catalog()
+
+        self.assertEqual(catalog["stale-only-model"]["context_window"], 123456)
+
     def test_all_fallback_entries_declare_input_modalities(self):
         self.assertTrue(
             all(entry.get("input_modalities") for entry in _FALLBACK_PRICING.values())

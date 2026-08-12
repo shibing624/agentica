@@ -13,18 +13,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 
-from agentica import (
-    Agent,
-    OpenAIChat,
-    OpenAIResponses,
-    MoonshotChat,
-    AzureOpenAIChat,
-    YiChat,
-    ZhipuAIChat,
-    DeepSeekChat,
-    ArkChat,
-)
-from agentica.model.anthropic.claude import Claude, is_claude_opus_5
 from agentica.agent.config import (
     ExperienceConfig,
     SkillUpgradeConfig,
@@ -157,16 +145,16 @@ TOOL_REGISTRY = {
     "video_download": ("video_download", "VideoDownloadTool", "Integration", "Video download from URLs"),
 }
 
-# Model provider registry - maps provider name to model class
+# Model provider registry - maps provider name to a lazy import target.
 MODEL_REGISTRY = {
-    "openai": OpenAIChat,
-    "azure": AzureOpenAIChat,
-    "moonshot": MoonshotChat,
-    "zhipuai": ZhipuAIChat,
-    "deepseek": DeepSeekChat,
-    "yi": YiChat,
-    "ark": ArkChat,
-    "anthropic": Claude,
+    "openai": ("agentica.model.openai.chat", "OpenAIChat"),
+    "azure": ("agentica.model.azure.openai_chat", "AzureOpenAIChat"),
+    "moonshot": ("agentica", "MoonshotChat"),
+    "zhipuai": ("agentica", "ZhipuAIChat"),
+    "deepseek": ("agentica", "DeepSeekChat"),
+    "yi": ("agentica", "YiChat"),
+    "ark": ("agentica", "ArkChat"),
+    "anthropic": ("agentica.model.anthropic.claude", "Claude"),
 }
 
 # Example models for each provider (for /model command display)
@@ -180,6 +168,19 @@ EXAMPLE_MODELS = {
     "ark": ["doubao-1.5-pro-32k", "doubao-1.5-lite-32k", "doubao-1.5-vision-pro-32k"],
     "anthropic": ["claude-opus-4.8", "claude-sonnet-4.5", "claude-3-5-sonnet-20241022"],
 }
+
+
+def _load_symbol(module_path: str, attr_name: str):
+    module = importlib.import_module(module_path)
+    return getattr(module, attr_name)
+
+
+def _load_model_factory(model_provider: str):
+    target = MODEL_REGISTRY.get(model_provider)
+    if target is None:
+        return None
+    module_path, attr_name = target
+    return _load_symbol(module_path, attr_name)
 
 
 def _get_tool_import_path(tool_name: str) -> str:
@@ -508,7 +509,8 @@ def get_model(
 ):
     """Create a model instance based on the provider name.
 
-    Uses MODEL_REGISTRY for provider lookup instead of if/elif chains.
+    Uses MODEL_REGISTRY for provider lookup instead of if/elif chains. Provider
+    SDK modules are imported only when a model instance is actually built.
     """
     effective_wire_api = wire_api or "chat_completions"
     if effective_wire_api not in ("chat_completions", "responses"):
@@ -548,6 +550,7 @@ def get_model(
     # way to pin sticky routing (e.g. Venus-Sticky-Routing) on the native
     # /v1/messages path, which has no per-request extra_headers mechanism.
     if model_provider == "anthropic":
+        is_claude_opus_5 = _load_symbol("agentica.model.anthropic.claude", "is_claude_opus_5")
         effective_effort = reasoning_effort
         if is_claude_opus_5(model_name):
             if effective_effort is None:
@@ -571,11 +574,10 @@ def get_model(
         if extra_headers is not None:
             params["extra_headers"] = extra_headers
 
-    model_class = (
-        OpenAIResponses
-        if model_provider == "openai" and effective_wire_api == "responses"
-        else MODEL_REGISTRY.get(model_provider)
-    )
+    if model_provider == "openai" and effective_wire_api == "responses":
+        model_class = _load_symbol("agentica.model.openai.responses", "OpenAIResponses")
+    else:
+        model_class = _load_model_factory(model_provider)
     if model_class is None:
         raise ValueError(f"Unsupported model provider: {model_provider}. Supported: {', '.join(MODEL_REGISTRY.keys())}")
     if reasoning is not None:
@@ -588,6 +590,7 @@ def get_model(
     if inspect.isclass(model_class):
         if enable_cache_control is not None and hasattr(model_class, "enable_cache_control"):
             params["enable_cache_control"] = enable_cache_control
+        OpenAIChat = _load_symbol("agentica.model.openai.chat", "OpenAIChat")
         if issubclass(model_class, OpenAIChat):
             if cache_control_messages is not None:
                 params["cache_control_messages"] = cache_control_messages

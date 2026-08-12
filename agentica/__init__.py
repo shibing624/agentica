@@ -3,10 +3,10 @@
 @author: XuMing(xuming624@qq.com)
 @description: Agentica - Build AI Agents with ease.
 
-Core (always default-installed, eager top-level imports)::
+Core (default-installed, fast top-level imports)::
 
     from agentica import Agent, DeepAgent, tool, Workspace    # core SDK
-    from agentica import OpenAIChat                            # default LLM (openai is a hard dep)
+    from agentica import OpenAIChat                            # default LLM (lazy: imports openai on first use)
     from agentica import (                                     # builtin tools (no extra deps)
         BuiltinFileTool, BuiltinExecuteTool,
         BuiltinFetchUrlTool, BuiltinWebSearchTool,
@@ -82,18 +82,23 @@ from agentica.utils.log import set_log_level_to_debug, logger, set_log_level_to_
 from agentica.utils.io import write_audio_to_file
 
 # ── Core Model ──
-# OpenAIChat is eager: openai is a hard runtime dependency (requirements.txt).
-# Other model providers stay lazy to avoid pulling heavy SDKs (anthropic, ollama, litellm) at import time.
+# Provider SDK-backed models stay lazy so `import agentica` is cheap. Importing
+# `OpenAIChat` / `OpenAIResponses` from the top-level package remains supported
+# through __getattr__ and api_registry.LAZY_IMPORTS.
 from agentica.model.message import Message, MessageReferences, UserMessage, AssistantMessage, SystemMessage, ToolMessage
 from agentica.model.content import Media, Video, Audio, Image
 from agentica.model.usage import Usage, RequestUsage, TokenDetails
-from agentica.model.openai.chat import OpenAIChat
-from agentica.model.openai.responses import OpenAIResponses
 
 # ── OpenAI-Compatible provider factories ──
 # Each factory directly constructs OpenAIChat with hardcoded provider metadata.
 # Users override defaults via kwargs: DeepSeekChat(id="deepseek-reasoner", api_key="...").
 from os import getenv as _getenv
+
+
+def _openai_chat_class():
+    from agentica.model.openai.chat import OpenAIChat
+
+    return OpenAIChat
 
 
 def _apply_defaults(kwargs: dict, **defaults) -> dict:
@@ -111,7 +116,7 @@ def _apply_defaults(kwargs: dict, **defaults) -> dict:
 
 
 def DeepSeekChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id=_getenv("DEEPSEEK_MODEL_NAME", "deepseek-v4-flash"),
@@ -128,7 +133,7 @@ DeepSeek = DeepSeekChat
 
 
 def MoonshotChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="kimi-k2.5",
@@ -144,7 +149,7 @@ Moonshot = MoonshotChat
 
 
 def ArkChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id=_getenv("ARK_MODEL_NAME", "doubao-1.5-pro-32k"),
@@ -160,7 +165,7 @@ Ark = ArkChat
 
 
 def TogetherChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
@@ -176,7 +181,7 @@ Together = TogetherChat
 
 
 def GrokChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="grok-beta",
@@ -192,7 +197,7 @@ Grok = GrokChat
 
 
 def YiChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="yi-lightning",
@@ -208,7 +213,7 @@ Yi = YiChat
 
 
 def QwenChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="qwen-max",
@@ -225,7 +230,7 @@ Qwen = QwenChat
 
 def ZhipuAIChat(**kwargs):
     # ZAI_API_KEY is the canonical name; ZHIPUAI_API_KEY kept as legacy fallback.
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="glm-4.7-flash",
@@ -241,7 +246,7 @@ ZhipuAI = ZhipuAIChat
 
 
 def NvidiaChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id=_getenv("NVIDIA_MODEL_NAME", "deepseek-ai/deepseek-v4-flash"),
@@ -254,7 +259,7 @@ def NvidiaChat(**kwargs):
 
 
 def SambanovaChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="Meta-Llama-3.1-8B-Instruct",
@@ -267,7 +272,7 @@ def SambanovaChat(**kwargs):
 
 
 def OpenRouterChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="gpt-4o",
@@ -280,7 +285,7 @@ def OpenRouterChat(**kwargs):
 
 
 def FireworksChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="accounts/fireworks/models/firefunction-v2",
@@ -293,7 +298,7 @@ def FireworksChat(**kwargs):
 
 
 def InternLMChat(**kwargs):
-    return OpenAIChat(
+    return _openai_chat_class()(
         **_apply_defaults(
             kwargs,
             id="internlm2.5-latest",
@@ -479,6 +484,8 @@ def __dir__():
 
 
 if TYPE_CHECKING:
+    from agentica.model.openai.chat import OpenAIChat  # noqa: F401
+    from agentica.model.openai.responses import OpenAIResponses  # noqa: F401
     from agentica.db.sqlite import SqliteDb  # noqa: F401
     from agentica.db.postgres import PostgresDb  # noqa: F401
     from agentica.db.memory import InMemoryDb  # noqa: F401

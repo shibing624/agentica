@@ -28,10 +28,12 @@ LAZY_IMPORTS = {
     "JsonDb": "agentica.db.json",
     "MysqlDb": "agentica.db.mysql",
     "RedisDb": "agentica.db.redis",
-    # model core (pulls in openai SDK; OpenAIChat itself is now eager)
+    # model core / default OpenAI models (lazy so `import agentica` stays fast)
     "Model": "agentica.model.base",
     "ModelResponse": "agentica.model.response",
     "FileType": "agentica.model.response",
+    "OpenAIChat": "agentica.model.openai.chat",
+    "OpenAIResponses": "agentica.model.openai.responses",
     "AzureOpenAIChat": "agentica.model.azure.openai_chat",
     # model providers (heavy dependencies)
     "LiteLLMChat": "agentica.model.litellm.chat",
@@ -184,7 +186,6 @@ EAGER_PUBLIC_EXPORTS = [
     "Message", "MessageReferences", "UserMessage", "AssistantMessage",
     "SystemMessage", "ToolMessage", "Media", "Video", "Audio", "Image",
     "Usage", "RequestUsage", "TokenDetails",
-    "OpenAIChat", "OpenAIResponses",
     "BuiltinFileTool", "BuiltinExecuteTool", "BuiltinFetchUrlTool",
     "BuiltinWebSearchTool", "BuiltinTodoTool", "BuiltinTaskTool", "BuiltinMemoryTool",
     "AgentRun", "SessionSummary", "MemorySummarizer", "WorkingMemory",

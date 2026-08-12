@@ -14,9 +14,10 @@ def test_api_registry_contains_core_lazy_exports():
     assert LAZY_IMPORTS["AskUserQuestionRequired"] == "agentica.tools.ask_user_question_tool"
     assert "UserInputTool" not in LAZY_IMPORTS
     assert "UserInputRequired" not in LAZY_IMPORTS
-    # OpenAI models + builtin tools are eager (openai is a hard dep, builtin tools have no extra deps)
-    assert "OpenAIChat" not in LAZY_IMPORTS
-    assert "OpenAIResponses" not in LAZY_IMPORTS
+    # OpenAI models are public top-level exports, but lazy so `import agentica`
+    # does not pay the provider SDK cost until a model is actually requested.
+    assert LAZY_IMPORTS["OpenAIChat"] == "agentica.model.openai.chat"
+    assert LAZY_IMPORTS["OpenAIResponses"] == "agentica.model.openai.responses"
     assert "BuiltinTodoTool" not in LAZY_IMPORTS
     assert "BuiltinFileTool" not in LAZY_IMPORTS
 

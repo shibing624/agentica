@@ -7,10 +7,13 @@ import sys
 import os
 import threading
 import importlib
+import subprocess
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import pytest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ===========================================================================
@@ -69,6 +72,50 @@ class TestCoreImports:
 
 class TestLazyLoadOptional:
     """Test that optional modules use lazy loading."""
+
+    def test_agentica_import_does_not_load_provider_sdks(self):
+        """Bare SDK import should not eagerly import provider/OCR dependencies."""
+        script = """
+import json
+import sys
+import agentica
+loaded = [name for name in ('openai', 'anthropic', 'imgocr', 'cv2') if name in sys.modules]
+print(json.dumps(loaded))
+raise SystemExit(1 if loaded else 0)
+"""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_cli_main_import_does_not_load_provider_sdks_or_ocr(self):
+        """Importing the CLI entrypoint should stay lightweight before model creation."""
+        script = """
+import json
+import sys
+import agentica.cli.main
+loaded = [name for name in ('openai', 'anthropic', 'imgocr', 'cv2') if name in sys.modules]
+print(json.dumps(loaded))
+raise SystemExit(1 if loaded else 0)
+"""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_guardrails_importable(self):
         """Guardrails should be accessible."""
