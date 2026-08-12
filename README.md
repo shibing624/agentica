@@ -10,8 +10,9 @@
 
 # Agentica
 
-**让 Agent 真正跑起来——跑得久、不跑飞、能干活、会进化。**
-Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web Gateway
+**一个人，一支 agent 团队。**
+
+终端里起多个会话并行干活、互相通信；长任务跑着的时候关掉电脑，也能从微信/企微把它喊回来。
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
@@ -22,64 +23,15 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#社区与支持)
 
-**Agentica** 不是套一层 LLM API 的聊天壳，而是一个 Async-First 的 agent harness——让 Agent 真正跑起来：调工具、跑长任务、多智能体协作、跨会话记忆，并持续自我进化。
+**Agentica** 是给开发者使用的本机 Agent CLI + Python SDK：把一个终端会话变成一个可协作的 agent，把多个会话组成一支可并行推进任务的队伍。
+
+<img src="https://github.com/shibing624/agentica/blob/main/docs/assets/cli_snap.png" width="800" />
 
 |  | |
 |------|------|
-| **跑得久，不跑飞** | 专门 Agentic loop 驱动的 LLM ↔ Tool 长循环，内置上下文压缩、成本预算、死循环防护，长任务不断链 |
-| **能干活，不只聊天** | 文件、执行、搜索、浏览器、MCP、多智能体、Workflow——真实动手，不绑定单一 IDE |
-| **多会话协作** | 跨终端 peer 互发消息；`delegate` 另起完整进程（独立 context / cwd），`task` 便宜进程内 subagent——三种机制分工明确 |
-| **记得住，会遗忘** | 记忆按条目存储、相关性召回、drift 防御；常驻规则写进 `users/{user_id}/AGENTS.md`（CLI default 也可写 `~/.agentica/AGENTS.md` symlink） |
-| **越用越强** | 工具失败 / 用户纠正 / 成功序列沉淀为经验卡片，自动编译成可复用的 `SKILL.md`，跨会话生效 |
-| **全可换，不锁死** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而非封闭 SaaS 黑盒 |
-
-### 和其它框架对比
-
-| | Agentica | LangChain | AutoGen / CrewAI | Pydantic AI |
-|---|---|---|---|---|
-| Async-first agentic loop | ✅ 内置压缩/预算/防死循环 | 片段拼装 | ✅ | ✅ |
-| 自进化 Skill | ✅ 自动编译 `SKILL.md` | ❌ | ❌ | ❌ |
-| `/goal` 长任务循环 | ✅ | ❌ | ❌ | ❌ |
-| CLI 多会话协作 | ✅ peer + `delegate` / `task` | ❌ | 进程内为主 | ❌ |
-| 持久跨会话记忆 | ✅ 开箱即用 | 需自行拼装 | 部分 | 需自行拼装 |
-| 开箱 CLI + Web Gateway | ✅ | ❌ | ❌ | ❌ |
-
-## 🔥 News
-
-
-- [2026/08/11] **v1.4.13**（积累中，未发版）：常驻规则改为直接改 `AGENTS.md`（无 `remember` 工具）；用户级规则统一到 `users/{user_id}/AGENTS.md`（CLI=`default`，`~/.agentica/AGENTS.md` 是兼容 symlink）；删除 `PERSONA.md`/`TOOLS.md`/`USER.md`；企微/微信等可通过 `PEER_BRIDGE` 直连本机 CLI；peer 展示分清人/agent；去掉 shell mode。详见 [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
-- [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
-- [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
-- [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
-
-
-<details>
-<summary>更多版本</summary>
-
-
-- [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
-- [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
-- [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
-- [2026/05/11] **v1.4.4**：MemoryExtractHooks 优化，新增 `auto_extract_memory_background` 后台抽取（不再阻塞 `on_agent_end`），memory 抽取优先走更快更便宜的 `auxiliary_model`。详见 [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
-- [2026/05/10] **v1.4.3**：Skill 生命周期重构 + VaG 解耦，新增 `SkillLifecycleHooks` 统一扩展点。详见 [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
-
-</details>
-
-## 架构
-
-Agentica 提供了从底层模型路由到顶层多智能体协作的完整抽象：
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/architecturev2.jpg" width="800" alt="Agentica Architecture" />
-</div>
-
-### 核心执行引擎 (Agentic Loop)
-
-Agentica 的单体 Agent 运行在一个纯粹的基于控制流的 `while(true)` 引擎中，严格依据工具调用来驱动，并内置了防死循环、成本追踪、[两层上下文压缩](https://github.com/shibing624/agentica/blob/main/docs/advanced/compression.md)（免费淘汰 → LLM 摘要）和四层安全护栏：
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Loop Architecture" />
-</div>
+| **多个会话一起干活** | `list_agents` / `send_message` 让不同终端里的 Agent 互相看见、互发进展，不靠复制粘贴同步上下文 |
+| **大活交给独立进程** | `delegate` 另起完整 `agentica --query --print` 进程（独立 context / cwd），`task` 用进程内 subagent 处理短活 |
+| **人可以离开现场** | `/goal` 让长任务持续推进；Web Gateway 与 `PEER_BRIDGE` 让微信/企微等 IM 直连本机 CLI，把跑着的任务喊回来 |
 
 ## 安装
 
@@ -89,15 +41,7 @@ pip install -U agentica
 
 ## 快速开始
 
-```python
-from agentica import Agent, OpenAIChat
-
-agent = Agent(model=OpenAIChat(id="gpt-4o-mini"))
-result = agent.run_sync("一句话介绍北京")
-print(result.content)
-```
-
-让 Agent 真正干活——搜资料 + 写文件，一行 `run_sync` 搞定：
+让 Agent 直接搜资料 + 写文件，一行 `run_sync` 开始干活：
 
 ```python
 from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFileTool, BuiltinExecuteTool
@@ -129,6 +73,22 @@ agent.run_sync("帮我搜 Python 3.13 新特性，写到 features.md")
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />
 </div>
 
+## 架构
+
+Agentica 提供从底层模型路由到顶层多智能体协作的完整抽象：
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/architecturev2.jpg" width="800" alt="Agentica Architecture" />
+</div>
+
+### 核心执行引擎 (Agentic Loop)
+
+Agentica 的单体 Agent 运行在一个纯粹的基于控制流的 `while(true)` 引擎中，严格依据工具调用来驱动，并内置防死循环、成本追踪、[两层上下文压缩](https://github.com/shibing624/agentica/blob/main/docs/advanced/compression.md)（免费淘汰 → LLM 摘要）和四层安全护栏：
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Loop Architecture" />
+</div>
+
 ## Agent 用例
 
 ### 自定义工具组合
@@ -156,8 +116,6 @@ agent = DeepAgent()  # 40+ 内置工具 + 压缩 + 长期记忆 + skills + MCP�
 ```bash
 agentica 
 ```
-
-<img src="https://github.com/shibing624/agentica/blob/main/docs/assets/cli_snap.png" width="800" />
 
 ### 长任务：`/goal`
 
@@ -222,6 +180,35 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 | **应用** | LLM OS、深度研究、客服系统、**金融研究（6-Agent 流水线）** |
 
 [→ 查看完整示例目录](https://github.com/shibing624/agentica/blob/main/examples/README.md)
+
+## 和其它框架对比
+
+| | Agentica | LangChain | AutoGen / CrewAI | Pydantic AI |
+|---|---|---|---|---|
+| CLI 多会话协作 | ✅ peer + `delegate` / `task` | ❌ | 进程内为主 | ❌ |
+| `/goal` 长任务循环 | ✅ | ❌ | ❌ | ❌ |
+| Async-first agentic loop | ✅ 内置压缩/预算/防死循环 | 片段拼装 | ✅ | ✅ |
+| 自进化 Skill | ✅ 自动编译 `SKILL.md` | ❌ | ❌ | ❌ |
+| 持久跨会话记忆 | ✅ 开箱即用 | 需自行拼装 | 部分 | 需自行拼装 |
+| 开箱 CLI + Web Gateway | ✅ | ❌ | ❌ | ❌ |
+
+## 🔥 News
+
+- [2026/08/11] **v1.4.13**（积累中，未发版）：常驻规则改为直接改 `AGENTS.md`（无 `remember` 工具）；用户级规则统一到 `users/{user_id}/AGENTS.md`（CLI=`default`，`~/.agentica/AGENTS.md` 是兼容 symlink）；删除 `PERSONA.md`/`TOOLS.md`/`USER.md`；企微/微信等可通过 `PEER_BRIDGE` 直连本机 CLI；peer 展示分清人/agent；去掉 shell mode。详见 [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
+- [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
+- [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
+- [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
+
+<details>
+<summary>更多版本</summary>
+
+- [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
+- [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
+- [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
+- [2026/05/11] **v1.4.4**：MemoryExtractHooks 优化，新增 `auto_extract_memory_background` 后台抽取（不再阻塞 `on_agent_end`），memory 抽取优先走更快更便宜的 `auxiliary_model`。详见 [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
+- [2026/05/10] **v1.4.3**：Skill 生命周期重构 + VaG 解耦，新增 `SkillLifecycleHooks` 统一扩展点。详见 [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
+
+</details>
 
 ## 文档
 
