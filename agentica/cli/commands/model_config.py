@@ -39,6 +39,7 @@ from agentica.utils.log import (
 )
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
+from agentica.cli.usage_display import ProviderUsageSummary, cache_counts_inside_input_for_model
 from agentica.project_store import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
@@ -836,11 +837,13 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
 
     model_name = f"{ctx.agent_config.get('model_provider', '')}/{ctx.agent_config.get('model_name', '')}"
 
-    total_cache_read = tracker.total_cache_read_tokens
-    total_cache_write = tracker.total_cache_write_tokens
-
-    prompt_total = tracker.total_prompt_tokens
-    total_all = prompt_total + tracker.total_output_tokens
+    usage_entries = agent.model.usage.request_usage_entries[-tracker.turns:]
+    usage = ProviderUsageSummary.from_request_entries(
+        usage_entries,
+        cache_counts_inside_input=cache_counts_inside_input_for_model(agent.model),
+        cost_usd=tracker.total_cost_usd,
+    )
+    cache_hit_percent = usage.cache_hit_percent
 
     ts = ctx.tui_state or {}
     active_secs = ts.get("active_seconds", 0)
@@ -864,17 +867,19 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
     con.print("  [bold cyan]Latest Turn API Usage[/bold cyan]")
     con.print(f"  {sep}")
     con.print(f"  {'Model:':<30} {model_name}")
-    con.print(f"  {'Input tokens:':<30} {tracker.total_input_tokens:>12,}")
-    if total_cache_read > 0:
-        con.print(f"  {'Cache read tokens:':<30} {total_cache_read:>12,}")
-    if total_cache_write > 0:
-        con.print(f"  {'Cache write tokens:':<30} {total_cache_write:>12,}")
-    con.print(f"  {'Output tokens:':<30} {tracker.total_output_tokens:>12,}")
-    con.print(f"  {'Prompt tokens (total):':<30} {prompt_total:>12,}")
-    con.print(f"  {'Total tokens:':<30} {total_all:>12,}")
-    con.print(f"  {'API calls this turn:':<30} {tracker.turns:>12}")
-    con.print(f"  {'Turn cost:':<30} ~${tracker.total_cost_usd:.4f}")
-    con.print(f"  {'Session API calls:':<30} {ts.get('total_api_calls', tracker.turns):>12}")
+    con.print(f"  {'Input tokens (total):':<30} {usage.prompt_tokens:>12,}")
+    if usage.cache_read_tokens > 0 or usage.cache_write_tokens > 0:
+        con.print(f"  {'Fresh input tokens:':<30} {usage.fresh_input_tokens:>12,}")
+    if usage.cache_read_tokens > 0:
+        cache_suffix = f" / {cache_hit_percent:.1f}% hit" if cache_hit_percent is not None else ""
+        con.print(f"  {'Cached input tokens:':<30} {usage.cache_read_tokens:>12,}{cache_suffix}")
+    if usage.cache_write_tokens > 0:
+        con.print(f"  {'Cache write tokens:':<30} {usage.cache_write_tokens:>12,}")
+    con.print(f"  {'Output tokens:':<30} {usage.output_tokens:>12,}")
+    con.print(f"  {'Total tokens:':<30} {usage.total_tokens:>12,}")
+    con.print(f"  {'API calls this turn:':<30} {usage.api_calls:>12}")
+    con.print(f"  {'Turn cost:':<30} ~${usage.cost_usd:.4f}")
+    con.print(f"  {'Session API calls:':<30} {ts.get('total_api_calls', usage.api_calls):>12}")
     con.print(f"  {'Session active time:':<30} {duration_str:>12}")
     con.print(f"  {'Session cost:':<30} ~${session_cost:.4f}")
     con.print(f"  {sep}")

@@ -24,9 +24,11 @@ def split_prompt_usage(
     - OpenAI reports ``prompt_tokens`` INCLUSIVE of
       ``prompt_tokens_details.cached_tokens`` — the cached count is a subset
       breakdown, so it has to be carved out.
-    - Anthropic, and the OpenAI-compatible proxies that pass Claude's numbers
-      through as ``cache_read_tokens`` / ``cache_creation_tokens``, report input
-      EXCLUSIVE of the cache, so the parts are already disjoint.
+    - Anthropic reports native ``input_tokens`` EXCLUSIVE of
+      ``cache_read_input_tokens`` / ``cache_creation_input_tokens``. Some
+      OpenAI-compatible gateways expose those names in ``prompt_tokens_details``
+      while still keeping ``prompt_tokens`` inclusive, so the numeric relation is
+      the only reliable discriminator at this boundary.
 
     The key names are the discriminator, because they come from whichever API
     contract produced the response. Treating an inclusive figure as exclusive
@@ -40,6 +42,12 @@ def split_prompt_usage(
     cache_creation = details.get("cache_creation_tokens") or 0
     exclusive_read = details.get("cache_read_tokens") or 0
     if exclusive_read or cache_creation:
+        if exclusive_read + cache_creation <= prompt_tokens:
+            return (
+                max(prompt_tokens - exclusive_read - cache_creation, 0),
+                exclusive_read,
+                cache_creation,
+            )
         return prompt_tokens, exclusive_read, cache_creation
 
     inclusive_read = details.get("cached_tokens") or 0

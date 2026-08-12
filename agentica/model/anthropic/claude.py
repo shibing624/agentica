@@ -798,8 +798,12 @@ class Claude(Model):
             # Anthropic cache_creation_input_tokens / cache_read_input_tokens
             cache_read = usage.cache_read_input_tokens or 0
             cache_write = usage.cache_creation_input_tokens or 0
-            if cache_read:
-                entry.input_tokens_details = TokenDetails(cached_tokens=cache_read)
+            if cache_read or cache_write:
+                entry.input_tokens_details = TokenDetails(
+                    cached_tokens=cache_read,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_write,
+                )
             self.usage.add(entry)
 
             # Cost tracking: pass both cache_read and cache_write for accurate

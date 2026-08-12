@@ -216,6 +216,11 @@ class TestCacheWriteTracking(unittest.TestCase):
         assistant_msg = Message(role="assistant", content="response")
         model.update_usage_metrics(assistant_msg, usage, metrics)
 
+        details = model.usage.input_tokens_details
+        self.assertEqual(details.cached_tokens, 800)
+        self.assertEqual(details.cache_read_tokens, 800)
+        self.assertEqual(details.cache_creation_tokens, 500)
+
         # CostTracker.record should be called with both cache_read and cache_write
         mock_tracker.record.assert_called_once()
         call_kwargs = mock_tracker.record.call_args
