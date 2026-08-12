@@ -413,6 +413,32 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         self.assertIn("+3.2K", out, "delta tokens >=1000 shown with K suffix")
         self.assertIn("+$0.08", out, "delta cost shown with 2-decimal $ prefix")
 
+    def test_finalize_rule_shows_provider_usage_breakdown_when_provided(self):
+        from agentica.cli.usage_display import ProviderUsageSummary
+
+        def render(mgr):
+            mgr.stream_response("ok")
+            mgr.finalize(
+                turn_no=9,
+                delta_cost_usd=0.04,
+                usage_summary=ProviderUsageSummary(
+                    input_tokens=38_100,
+                    cache_read_tokens=37_100,
+                    output_tokens=3_000,
+                    total_tokens_override=41_100,
+                ),
+            )
+
+        out = self._capture(render)
+        compact = " ".join(out.split())
+        self.assertIn("#9", out)
+        self.assertIn("+41.1K", out)
+        self.assertNotIn("+41.1K tok", out)
+        self.assertIn("in 38.1K", out)
+        self.assertIn("cache 37.1K / 97.4%", out)
+        self.assertIn("out 3K", compact)
+        self.assertIn("+$0.04", out)
+
     def test_finalize_rule_uses_raw_count_for_small_token_deltas(self):
         """<1000 tokens: no K suffix — show the raw number.
 

@@ -256,6 +256,7 @@ def test_update_usage_metrics_parses_cache_read_and_creation():
     assert details.cache_creation_tokens == 19
 
     stat = model._cost_tracker.model_usage["claude-3-5-sonnet"]
+    assert stat.input_tokens == 0
     assert stat.cache_read_tokens == 7237
     assert stat.cache_write_tokens == 19
 

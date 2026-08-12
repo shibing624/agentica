@@ -17,6 +17,7 @@ from rich.markdown import Markdown
 from rich.syntax import Syntax
 
 from agentica.cli.runtime import TOOL_ICONS
+from agentica.cli.usage_display import ProviderUsageSummary, format_turn_usage_summary
 from agentica.global_config import get_setting
 from agentica.tools.patch_tool import parse_patch_envelope
 
@@ -104,6 +105,7 @@ class StreamDisplayManager:
         self._summary_turn_no: int | None = None
         self._summary_delta_tokens: int | None = None
         self._summary_delta_cost_usd: float | None = None
+        self._summary_usage: ProviderUsageSummary | None = None
         self._thinking_buffer = ""
         self._thinking_console = None
         self.reset()
@@ -132,6 +134,7 @@ class StreamDisplayManager:
         self._summary_turn_no: int | None = None
         self._summary_delta_tokens: int | None = None
         self._summary_delta_cost_usd: float | None = None
+        self._summary_usage: ProviderUsageSummary | None = None
         self._thinking_buffer = ""
         self._thinking_console = None
         # Set of "task" tool_call_ids (or just a counter) for which we have
@@ -1341,7 +1344,11 @@ class StreamDisplayManager:
         if self._turn_started_at is not None:
             elapsed = time.monotonic() - self._turn_started_at
             parts.append(f"{elapsed:.1f}s")
-        if self._summary_delta_tokens is not None and self._summary_delta_tokens > 0:
+        if self._summary_usage is not None:
+            usage_text = format_turn_usage_summary(self._summary_usage)
+            if usage_text:
+                parts.append(usage_text)
+        elif self._summary_delta_tokens is not None and self._summary_delta_tokens > 0:
             dt = self._summary_delta_tokens
             if dt >= 1000:
                 parts.append(f"+{dt / 1000:.1f}K")
@@ -1358,6 +1365,7 @@ class StreamDisplayManager:
         turn_no: int | None = None,
         delta_tokens: int | None = None,
         delta_cost_usd: float | None = None,
+        usage_summary: ProviderUsageSummary | None = None,
     ):
         """Finalize the assistant turn: flush buffers and draw the closing rule.
 
@@ -1385,6 +1393,10 @@ class StreamDisplayManager:
             delta_cost_usd: USD cost incurred by this turn. Rendered as
                 ``+$C``. Omitted when ``None`` or ``<= 0`` so free/local
                 models don't show a noisy ``+$0.00``.
+            usage_summary: Provider-reported per-turn usage parts. When
+                supplied, this replaces the compact ``+Tk`` field with an
+                input/cache/output split while preserving the same real API
+                accounting source.
 
         The caller (interactive loop) is expected to source ``delta_*``
         from the per-run ``cost_tracker`` (which is itself per-``run()``
@@ -1394,6 +1406,7 @@ class StreamDisplayManager:
         self._summary_turn_no = turn_no
         self._summary_delta_tokens = delta_tokens
         self._summary_delta_cost_usd = delta_cost_usd
+        self._summary_usage = usage_summary
 
         if self.in_thinking:
             self.end_thinking()

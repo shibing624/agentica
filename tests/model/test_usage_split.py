@@ -34,6 +34,13 @@ class TestSplitPromptUsage(unittest.TestCase):
         )
         self.assertEqual((fresh, read, write), (120, 50_000, 300))
 
+    def test_openai_compatible_cache_read_keys_can_be_inclusive(self):
+        fresh, read, write = split_prompt_usage(
+            7_256, {"cache_read_tokens": 7_237, "cache_creation_tokens": 19}
+        )
+        self.assertEqual((fresh, read, write), (0, 7_237, 19))
+        self.assertEqual(fresh + read + write, 7_256)
+
     def test_proxy_reporting_both_namings_is_treated_as_exclusive(self):
         """Claude-fronting proxies echo the OpenAI alias alongside their own."""
         fresh, read, _ = split_prompt_usage(

@@ -21,6 +21,7 @@ from agentica.cli.display import (
     resumable_session_id,
 )
 from agentica.cli.runtime import get_console
+from agentica.cli.usage_display import ProviderUsageSummary, cache_counts_inside_input_for_model
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
 from agentica.utils.async_utils import run_sync
@@ -265,6 +266,7 @@ def _process_stream_response(
     _active_baseline = tui_state.get("active_seconds", 0.0)
     _calls_baseline = tui_state.get("total_api_calls", 0)
     _goal_tokens_baseline = tui_state.get("goal_tokens_used", 0)
+    _usage_entry_baseline = len(current_agent.model.usage.request_usage_entries)
     tui_state["_turn_request_start"] = request_start
     tui_state["_turn_cost_baseline"] = _cost_baseline
     tui_state["_turn_active_baseline"] = _active_baseline
@@ -442,11 +444,16 @@ def _process_stream_response(
         cost_tracker = current_agent.run_response.cost_tracker
         delta_tokens: int | None = None
         delta_cost_usd: float | None = None
+        usage_summary: ProviderUsageSummary | None = None
         if cost_tracker and cost_tracker.turns > 0:
-            delta_tokens = (
-                cost_tracker.total_prompt_tokens + cost_tracker.total_output_tokens
+            usage_entries = current_agent.model.usage.request_usage_entries[_usage_entry_baseline:]
+            usage_summary = ProviderUsageSummary.from_request_entries(
+                usage_entries,
+                cache_counts_inside_input=cache_counts_inside_input_for_model(current_agent.model),
+                cost_usd=cost_tracker.total_cost_usd,
             )
-            delta_cost_usd = cost_tracker.total_cost_usd
+            delta_tokens = usage_summary.total_tokens
+            delta_cost_usd = usage_summary.cost_usd
 
         # 1-based session-scoped turn counter. Increment BEFORE finalize so
         # the separator shows the turn that just completed.
@@ -457,6 +464,7 @@ def _process_stream_response(
             turn_no=turn_no,
             delta_tokens=delta_tokens,
             delta_cost_usd=delta_cost_usd,
+            usage_summary=usage_summary,
         )
         _set_phase("idle")
 
