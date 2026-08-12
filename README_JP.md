@@ -29,7 +29,7 @@ Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI
 | **長く走る、暴走しない** | `Runner` 駆動の LLM ↔ ツール長ループ。コンテキスト圧縮・コスト予算・無限ループ防止を内蔵し、長時間タスクが途切れない |
 | **手を動かす、雑談だけではない** | ファイル・実行・検索・ブラウザ・MCP・マルチエージェント・Workflow——単一 IDE に縛られず実際に作業する |
 | **複数セッション協調** | 端末間 peer メッセージ；`delegate` は独立プロセス（独自 context / cwd）；`task` は安価なプロセス内 subagent——役割が分かれている |
-| **覚える、そして忘れる** | 記憶はエントリ単位で保存・関連性想起・drift 防御。常駐ルールは `users/{user_id}/AGENTS.md`（人と agent の両方が編集可能） |
+| **覚える、そして忘れる** | 記憶はエントリ単位で保存・関連性想起・drift 防御。常駐ルールは `users/{user_id}/AGENTS.md`（CLI default は `~/.agentica/AGENTS.md` symlink からも編集可能） |
 | **使うほど強くなる** | ツール失敗 / ユーザー修正 / 成功シーケンスが経験カードになり、再利用可能な `SKILL.md` へ自動コンパイル、セッションをまたいで有効 |
 | **すべて交換可能、ロックインしない** | モデル・ツール・記憶・Skill・Guardrails・MCP はすべて置換可能な部品。閉鎖的な SaaS ブラックボックスではない |
 
@@ -46,7 +46,7 @@ Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI
 
 ## 🔥 News
 
-- [2026/08/11] **v1.4.13**（蓄積中・未公開）：常駐ルールは `AGENTS.md` を直接編集（`remember` ツールなし）；ユーザー級は `users/{user_id}/AGENTS.md`（CLI=`default`）；`PERSONA.md`/`TOOLS.md`/`USER.md` を削除；`PEER_BRIDGE` で IM→本機 CLI；peer 表示で人/agent を区別；shell mode 削除。詳細は [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
+- [2026/08/11] **v1.4.13**（蓄積中・未公開）：常駐ルールは `AGENTS.md` を直接編集（`remember` ツールなし）；ユーザー級は `users/{user_id}/AGENTS.md`（CLI=`default`、`~/.agentica/AGENTS.md` は互換 symlink）；`PERSONA.md`/`TOOLS.md`/`USER.md` を削除；`PEER_BRIDGE` で IM→本機 CLI；peer 表示で人/agent を区別；shell mode 削除。詳細は [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
 - [2026/08/10] **v1.4.12**：コンテキスト圧縮を二層に整理（約 70%→50% で古い tool result を淘汰 → LLM/native 要約）；読み直し無限ループと Anthropic 経路の圧縮未発火を修正。Layer 0 は回収可能かで落盤か切り詰めかを決め、圧縮回数は `RunResponse` に記録；CLI 前提を SDK に押し付けない。端末間 peer メッセージ（`list_agents` / `send_message`）とプロセス級 `delegate`（独立した `agentica --query --print`、`/ps` `/stop` `wait` で管理）を追加し、安価なプロセス内 `task` と役割を分離。詳細は [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**：OpenAI Responses API（ネイティブ compaction 含む）、Markdown 設定可能なサブエージェント、複数ファイル `apply_patch` を追加；CLI の resume/ステータス/圧縮フィードバックを改善；prompt と grep/glob schema のコストを削減；Learned Experiences の汚染と `write_todos` の全リストエコーを修正。詳細は [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：カタログ駆動のモデル能力判定によるネイティブ画像入力を追加；`/rename` と名前指定の `/resume` を追加；Pillow コア依存関係のメタデータを修正。詳細は [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
@@ -120,7 +120,7 @@ agent.run_sync("Python 3.13 の新機能を調べて features.md に書いてく
 - **ガードレール** — 入力 / 出力 / ツールレベルのガードレール、ストリーミングリアルタイム検出
 - **MCP / ACP** — Model Context Protocol と Agent Communication Protocol のサポート
 - **スキルシステム** — Markdown ベースのスキル注入、モデル非依存
-- **永続メモリ** — インデックス / コンテンツ分離、関連性ベースの想起、4タイプ分類、drift 防御；常駐ルールは `users/{user_id}/AGENTS.md`（人と agent が編集）
+- **永続メモリ** — インデックス / コンテンツ分離、関連性ベースの想起、4タイプ分類、drift 防御；常駐ルールは `users/{user_id}/AGENTS.md`（CLI default は `~/.agentica/AGENTS.md` symlink からも編集可能）
 - **マルチモーダル** — テキスト、画像、音声、動画の理解
 - **自己進化** — 経験カードがセッションをまたいで再利用できる `SKILL.md` に自動コンパイル（フローは下図）
 

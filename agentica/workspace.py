@@ -90,12 +90,11 @@ class Workspace:
         >>> await workspace.write_memory_entry("style", "Bob prefers detailed explanations", "user")
     """
 
-    # Sentinel for the "single-user CLI / local install" mode. When
-    # workspace.user_id == DEFAULT_USER_ID, cross-session AGENTS.md and
-    # related artifacts use the home-global path (~/.agentica/AGENTS.md);
-    # any other user_id routes them to workspace_root/users/{user_id}/.
-    # This prevents tenant-A preferences leaking into tenant-B's prompts
-    # when the SDK is embedded in a multi-tenant service.
+    # Sentinel for the "single-user CLI / local install" mode. The default
+    # user's real rules still live under users/default/AGENTS.md, but we expose
+    # ~/.agentica/AGENTS.md as a symlink for mainstream coding-agent
+    # compatibility. Other user_id values never use that home-global alias, so
+    # tenant-A preferences do not leak into tenant-B's prompts.
     DEFAULT_USER_ID = "default"
 
     @staticmethod
@@ -284,10 +283,10 @@ class Workspace:
         user_path = self._get_user_path()
         user_path.mkdir(parents=True, exist_ok=True)
 
-        # Create this user's own AGENTS.md. user_agent_md_path() also moves a
-        # pre-existing ~/.agentica/AGENTS.md here, so it must run before the
-        # scaffold is written — otherwise the scaffold wins and the user's
-        # real rules stay behind in the old location.
+        # Create this user's own AGENTS.md. user_agent_md_path() also reconciles
+        # the default user's ~/.agentica/AGENTS.md compatibility symlink, so it
+        # must run before the scaffold is written — otherwise a legacy file can
+        # be stranded behind the freshly-created target.
         user_agent_md = self.user_agent_md_path()
         if not user_agent_md.exists():
             user_agent_md.write_text(
@@ -583,11 +582,10 @@ class Workspace:
     def user_agent_md_path(self) -> Path:
         """Return this user's own AGENTS.md — ``users/{user_id}/AGENTS.md``.
 
-        There is exactly one layout, and the CLI is not an exception to it: it
-        is simply the ``default`` user. Routing the default user to
-        ``~/.agentica/AGENTS.md`` and everyone else under ``users/`` meant two
-        places for one concept, and every SDK caller had to work out which of
-        them a session was on before it could say where a preference lives.
+        There is exactly one canonical layout, and the CLI is not an exception
+        to it: it is simply the ``default`` user. For compatibility with coding
+        agents that discover user-level instructions at ``~/.agentica/AGENTS.md``,
+        the default user also gets that path as a symlink to the canonical file.
 
         Public because prompt text names this file: the agent is told it may
         append durable instructions to it, and a hardcoded path in a prompt
@@ -596,32 +594,59 @@ class Workspace:
         user_dir = self._get_user_path()
         user_dir.mkdir(parents=True, exist_ok=True)
         path = user_dir / self.config.agent_md
-        self._migrate_home_agent_md(path)
+        self._ensure_home_agent_md_symlink(path)
         return path
 
-    def _migrate_home_agent_md(self, target: Path) -> None:
-        """One-shot move of a pre-1.4.13 ``~/.agentica/AGENTS.md`` into place.
+    def _ensure_home_agent_md_symlink(self, target: Path) -> None:
+        """Expose ``~/.agentica/AGENTS.md`` as the default user's alias.
 
-        Temporary migration helper for the 1.4.13 layout change (user-level
-        rules moved under ``users/{id}/``). Keep it until that version has
-        been stable in the wild long enough that leftover home files are
-        rare; then delete — this is not a permanent second read path, and
-        relocating the file is something the user can do by hand.
-
-        A move, not a compatibility read: leaving the old location readable
-        would restore the two-places problem, and simply dropping it would
-        silently retire rules the user hand-wrote.
+        The canonical file stays under ``users/default/AGENTS.md`` so the
+        multi-user layout remains uniform. The home-level path is created only
+        for the configured default workspace; custom SDK workspaces should not
+        silently repoint the user's real home alias.
         """
-        if self._user_id != self.DEFAULT_USER_ID or target.exists():
+        default_workspace = Path(AGENTICA_WORKSPACE_DIR).expanduser().resolve()
+        if self._user_id != self.DEFAULT_USER_ID or self.path != default_workspace:
             return
-        legacy = Path(AGENTICA_HOME).expanduser() / self.config.agent_md
-        if not legacy.is_file():
+        alias = Path(AGENTICA_HOME).expanduser() / self.config.agent_md
+        if alias == target:
             return
+        alias.parent.mkdir(parents=True, exist_ok=True)
+
         try:
-            legacy.replace(target)
-            logger.info("Moved %s to %s (user-level rules are now per user)", legacy, target)
-        except OSError as exc:
-            logger.warning("Could not move %s to %s: %s", legacy, target, exc)
+            if alias.is_symlink():
+                if alias.resolve(strict=False) == target.resolve(strict=False):
+                    return
+                alias.unlink()
+            elif alias.exists():
+                self._fold_home_agent_md_file(alias, target)
+                if alias.exists():
+                    alias.unlink()
+
+            alias.symlink_to(target)
+        except (OSError, UnicodeError) as exc:
+            logger.warning("Could not link %s to %s: %s", alias, target, exc)
+
+    def _fold_home_agent_md_file(self, alias: Path, target: Path) -> None:
+        """Preserve a pre-existing home AGENTS.md before replacing it with a symlink."""
+        if not target.exists():
+            alias.replace(target)
+            logger.info("Moved %s to %s and kept %s as a compatibility symlink", alias, target, alias)
+            return
+
+        alias_text = alias.read_text(encoding="utf-8")
+        if self._is_empty_template(alias_text):
+            return
+
+        target_text = target.read_text(encoding="utf-8")
+        if alias_text.strip() in target_text:
+            return
+
+        target_body = target_text.rstrip()
+        alias_body = alias_text.rstrip()
+        merged = f"{target_body}\n\n{alias_body}\n" if target_body else f"{alias_body}\n"
+        target.write_text(merged, encoding="utf-8")
+        logger.info("Merged existing %s into %s before creating compatibility symlink", alias, target)
 
     @staticmethod
     def _parse_frontmatter(content: str) -> Dict[str, str]:

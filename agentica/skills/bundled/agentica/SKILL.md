@@ -106,13 +106,14 @@ fact. There is no dedicated tool: append a line with `edit_file` (or
 
 | Scope | File | Who sees it |
 |---|---|---|
-| This user, every project | `~/.agentica/workspace/users/<user_id>/AGENTS.md` (CLI is `default`, so `.../users/default/AGENTS.md`) | every later session of this user |
+| This user, every project | `~/.agentica/workspace/users/<user_id>/AGENTS.md` (CLI is `default`, so `~/.agentica/AGENTS.md` is also a symlink to `.../users/default/AGENTS.md`) | every later session of this user |
 | This repository only | `<repo root>/AGENTS.md` | sessions started anywhere under that repo; the user may commit it |
 
 The path of every file already in the system prompt appears as `<!-- /abs/path -->`
 above it — reuse that path, do not guess. There is no workspace-root
-`~/.agentica/workspace/AGENTS.md` and no `~/.agentica/AGENTS.md` — those
-locations are dead. User rules live only under `users/<id>/AGENTS.md`.
+`~/.agentica/workspace/AGENTS.md`. User rules live under
+`users/<id>/AGENTS.md`; for the default CLI user only, `~/.agentica/AGENTS.md`
+is a compatibility symlink to that same file.
 
 **This session:** the user's request (and your write) are already in the
 conversation history, so follow the rule for the rest of the turn/session

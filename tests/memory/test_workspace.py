@@ -278,53 +278,60 @@ class TestWorkspace:
         assert "# Project" not in tight
         assert len(tight) <= Workspace.MAX_MEMORY_CHARACTER_COUNT + 80
 
-    def test_user_rules_live_under_users_never_in_agentica_home(self, temp_workspace_path):
-        """One layout for everyone: the CLI is just the ``default`` user.
-
-        Routing the default user to ~/.agentica/AGENTS.md and everyone else
-        under users/ meant two places for one concept, and an SDK caller had to
-        know which mode a session was in before it could say where a
-        preference lives.
-        """
+    def test_default_user_gets_home_agents_symlink_to_canonical_file(self, temp_workspace_path):
+        """The default user keeps one real file plus a mainstream-agent alias."""
         home = temp_workspace_path / "home"
         home.mkdir()
-        with patch("agentica.workspace.AGENTICA_HOME", str(home)):
+        with patch("agentica.workspace.AGENTICA_HOME", str(home)), \
+                patch("agentica.workspace.AGENTICA_WORKSPACE_DIR", str(temp_workspace_path)):
             default_user = Workspace(temp_workspace_path).user_agent_md_path()
             tenant = Workspace(temp_workspace_path, user_id="tenant-a").user_agent_md_path()
 
         root = temp_workspace_path.resolve()
         assert default_user == root / "users" / "default" / "AGENTS.md"
         assert tenant == root / "users" / "tenant-a" / "AGENTS.md"
-        assert not (home / "AGENTS.md").exists()
+        assert (home / "AGENTS.md").is_symlink()
+        assert (home / "AGENTS.md").resolve() == default_user
 
-    def test_existing_home_rules_are_moved_to_the_default_user(self, temp_workspace_path):
-        """A move, not a second read path: two readable locations is the bug."""
+        (home / "AGENTS.md").write_text("mainstream path update", encoding="utf-8")
+        assert default_user.read_text(encoding="utf-8") == "mainstream path update"
+
+    def test_existing_home_rules_are_moved_then_replaced_with_symlink(self, temp_workspace_path):
+        """A legacy regular file is preserved before the home path becomes an alias."""
         home = temp_workspace_path / "home"
         home.mkdir()
         legacy = home / "AGENTS.md"
         legacy.write_text("Always write a CHANGELOG entry.", encoding="utf-8")
 
-        with patch("agentica.workspace.AGENTICA_HOME", str(home)):
+        with patch("agentica.workspace.AGENTICA_HOME", str(home)), \
+                patch("agentica.workspace.AGENTICA_WORKSPACE_DIR", str(temp_workspace_path)):
             workspace = Workspace(temp_workspace_path)
             target = workspace.user_agent_md_path()
 
         assert target.read_text(encoding="utf-8") == "Always write a CHANGELOG entry."
-        assert not legacy.exists()
+        assert legacy.is_symlink()
+        assert legacy.resolve() == target
 
-    def test_migration_never_overwrites_and_never_crosses_users(self, temp_workspace_path):
+    def test_home_alias_never_crosses_users_and_existing_target_wins(self, temp_workspace_path):
         home = temp_workspace_path / "home"
         home.mkdir()
         (home / "AGENTS.md").write_text("home rules", encoding="utf-8")
 
-        with patch("agentica.workspace.AGENTICA_HOME", str(home)):
+        with patch("agentica.workspace.AGENTICA_HOME", str(home)), \
+                patch("agentica.workspace.AGENTICA_WORKSPACE_DIR", str(temp_workspace_path)):
             tenant = Workspace(temp_workspace_path, user_id="tenant-a")
             assert not tenant.user_agent_md_path().exists()
             assert (home / "AGENTS.md").is_file(), "another user's session must not move it"
 
             default_user = Workspace(temp_workspace_path)
-            existing = default_user.user_agent_md_path()
-            existing.write_text("already mine", encoding="utf-8")
-            assert default_user.user_agent_md_path().read_text(encoding="utf-8") == "already mine"
+            target = default_user._get_user_path() / "AGENTS.md"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("already mine", encoding="utf-8")
+
+            assert default_user.user_agent_md_path() == target
+            assert target.read_text(encoding="utf-8") == "already mine\n\nhome rules\n"
+            assert (home / "AGENTS.md").is_symlink()
+            assert (home / "AGENTS.md").resolve() == target.resolve()
 
     def test_one_users_rules_never_reach_another(self, temp_workspace_path):
         """The whole point of keeping rules per user rather than in HOME."""

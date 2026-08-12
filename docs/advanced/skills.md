@@ -156,7 +156,7 @@ agentica extensions install /path/to/skill-repo --target-dir ~/.agentica/skills
 如果你希望 Agent 带有持续学习 workflow，推荐做法是：
 - 用 `DeepAgent` 作为默认运行时
 - 把 `learn-from-experience` 安装到 `~/.agentica/skills/`，或通过 `AGENTICA_EXTRA_SKILL_PATH` 指向外部目录
-- 确认过的常驻偏好直接写进该用户的 `~/.agentica/workspace/users/{user_id}/AGENTS.md`（CLI 为 `.../users/default/AGENTS.md`；人手写或 agent `edit_file`；不要再走 memory→AGENTS 编译）
+- 确认过的常驻偏好直接写进该用户的 `~/.agentica/workspace/users/{user_id}/AGENTS.md`（CLI 为 `.../users/default/AGENTS.md`，也可通过 symlink `~/.agentica/AGENTS.md` 改同一份文件；人手写或 agent `edit_file`；不要再走 memory→AGENTS 编译）
 
 ### 方式三：按需激活（RunConfig 白名单）
 

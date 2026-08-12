@@ -29,7 +29,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | **跑得久，不跑飞** | 专门 Agentic loop 驱动的 LLM ↔ Tool 长循环，内置上下文压缩、成本预算、死循环防护，长任务不断链 |
 | **能干活，不只聊天** | 文件、执行、搜索、浏览器、MCP、多智能体、Workflow——真实动手，不绑定单一 IDE |
 | **多会话协作** | 跨终端 peer 互发消息；`delegate` 另起完整进程（独立 context / cwd），`task` 便宜进程内 subagent——三种机制分工明确 |
-| **记得住，会遗忘** | 记忆按条目存储、相关性召回、drift 防御；常驻规则写进 `users/{user_id}/AGENTS.md`（人与 agent 都能改） |
+| **记得住，会遗忘** | 记忆按条目存储、相关性召回、drift 防御；常驻规则写进 `users/{user_id}/AGENTS.md`（CLI default 也可写 `~/.agentica/AGENTS.md` symlink） |
 | **越用越强** | 工具失败 / 用户纠正 / 成功序列沉淀为经验卡片，自动编译成可复用的 `SKILL.md`，跨会话生效 |
 | **全可换，不锁死** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而非封闭 SaaS 黑盒 |
 
@@ -47,7 +47,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 ## 🔥 News
 
 
-- [2026/08/11] **v1.4.13**（积累中，未发版）：常驻规则改为直接改 `AGENTS.md`（无 `remember` 工具）；用户级规则统一到 `users/{user_id}/AGENTS.md`（CLI=`default`）；删除 `PERSONA.md`/`TOOLS.md`/`USER.md`；企微/微信等可通过 `PEER_BRIDGE` 直连本机 CLI；peer 展示分清人/agent；去掉 shell mode。详见 [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
+- [2026/08/11] **v1.4.13**（积累中，未发版）：常驻规则改为直接改 `AGENTS.md`（无 `remember` 工具）；用户级规则统一到 `users/{user_id}/AGENTS.md`（CLI=`default`，`~/.agentica/AGENTS.md` 是兼容 symlink）；删除 `PERSONA.md`/`TOOLS.md`/`USER.md`；企微/微信等可通过 `PEER_BRIDGE` 直连本机 CLI；peer 展示分清人/agent；去掉 shell mode。详见 [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
 - [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
@@ -121,7 +121,7 @@ agent.run_sync("帮我搜 Python 3.13 新特性，写到 features.md")
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
-- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `users/{user_id}/AGENTS.md`（人与 agent 都可 `edit_file`）
+- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `users/{user_id}/AGENTS.md`（CLI default 也可写 `~/.agentica/AGENTS.md` symlink）
 - **多模态** — 文本、图像、音频、视频理解
 - **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`（流程见下图）
 

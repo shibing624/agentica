@@ -219,9 +219,9 @@ class BuiltinMemoryTool(Tool):
     def get_system_prompt(self) -> Optional[str]:
         # The user-level AGENTS.md path is resolved from the workspace, never
         # written into the prompt text: AGENTICA_HOME can be moved, and a
-        # multi-user workspace keeps a per-user copy — a hardcoded
-        # ~/.agentica/AGENTS.md would send one tenant's rule into the file
-        # every other tenant reads.
+        # multi-user workspace keeps a per-user copy. The default CLI user may
+        # expose ~/.agentica/AGENTS.md as a symlink, but the canonical path is
+        # still the per-user workspace file.
         if self._workspace is None:
             return self.MEMORY_SYSTEM_PROMPT
         return self.MEMORY_SYSTEM_PROMPT.replace(

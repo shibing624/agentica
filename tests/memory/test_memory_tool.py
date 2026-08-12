@@ -61,9 +61,9 @@ class TestBuiltinMemoryTool:
     def test_system_prompt_names_this_users_own_rules_file(self):
         """Durable rules have no tool, so the prompt must give the real path.
 
-        Hardcoding ~/.agentica/AGENTS.md would make a multi-tenant agent append
-        one user's standing instruction to the file every other user reads, and
-        would miss the file entirely when AGENTICA_HOME is moved.
+        Hardcoding ~/.agentica/AGENTS.md for every user would make a
+        multi-tenant agent append one user's standing instruction to the wrong
+        file, even though the default CLI user exposes that path as a symlink.
         """
         tenant = Workspace(self.temp_dir, user_id="tenant-a")
         tenant.initialize()
