@@ -6,6 +6,7 @@
 
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -47,6 +48,39 @@ class TestCLIImports(unittest.TestCase):
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import Agent: {e}")
+
+    def test_console_entrypoint_main_is_callable(self):
+        """Installed `agentica` script imports `agentica.cli:main`."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from agentica.cli import main; raise SystemExit(0 if callable(main) else 1)",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_console_entrypoint_main_stays_callable_after_call(self):
+        """Importing agentica.cli.main inside the wrapper must not leave a module export behind."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys, agentica.cli as c; "
+                    "sys.argv=['agentica','--version']; "
+                    "\ntry:\n    c.main()\nexcept SystemExit:\n    pass\n"
+                    "raise SystemExit(0 if callable(c.main) else 1)"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

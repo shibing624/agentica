@@ -35,7 +35,6 @@ _EXPORTS = {
     "resolve_model_config": ("agentica.cli.setup", "resolve_model_config"),
     "run_onboarding": ("agentica.cli.setup", "run_onboarding"),
     "PROVIDER_PRESETS": ("agentica.cli.setup", "PROVIDER_PRESETS"),
-    "main": ("agentica.cli.main", "main"),
 }
 
 _SUBMODULES = {
@@ -54,9 +53,26 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _main_entrypoint(*args, **kwargs):
+    """Console-script entrypoint wrapper.
+
+    Installed scripts import ``agentica.cli:main``. Importing the real
+    ``agentica.cli.main`` submodule temporarily sets ``agentica.cli.main`` to
+    that module object on the package, so expose a real wrapper here instead of
+    relying on lazy ``__getattr__`` for this one name.
+    """
+    from agentica.cli.main import main as _main
+
+    globals()["main"] = _main_entrypoint
+    return _main(*args, **kwargs)
+
+
+main = _main_entrypoint
+
+
 def __dir__():
     eager_names = [name for name in globals() if not name.startswith("_")]
-    return sorted(set(eager_names) | set(_EXPORTS) | set(_SUBMODULES))
+    return sorted(set(eager_names) | set(_EXPORTS) | set(_SUBMODULES) | {"main"})
 
 
 __all__ = [
