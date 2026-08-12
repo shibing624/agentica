@@ -142,6 +142,24 @@ class Usage(BaseModel):
 
     def cache_hit_ratio(self) -> Optional[float]:
         """Aggregate cached share of all prompt tokens; None with no cache data."""
+        if self.request_usage_entries:
+            saw_cache_data = False
+            fresh_total = 0
+            hit_total = 0
+            write_total = 0
+            for entry in self.request_usage_entries:
+                details = _details_dict(entry.input_tokens_details)
+                if any(details.values()):
+                    saw_cache_data = True
+                fresh, hit, write = split_prompt_usage(entry.input_tokens, details)
+                fresh_total += fresh
+                hit_total += hit
+                write_total += write
+            if not saw_cache_data:
+                return None
+            total = fresh_total + hit_total + write_total
+            return hit_total / total if total > 0 else None
+
         details = _details_dict(self.input_tokens_details)
         if not any(details.values()):
             return None

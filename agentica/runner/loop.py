@@ -516,6 +516,10 @@ class LoopMixin:
             )
             agent.run_context = _run_ctx
             agent.run_id = _run_ctx.run_id
+            _restore_guidance_after_run = False
+            _saved_tool_policy_prompts: List[str] = []
+            _saved_session_guidance_prompts: List[str] = []
+            _saved_session_guidance_snapshot: Optional[str] = None
             try:  # R-01 fix: ensure _running is reset on any exception
                 agent.stream = stream and agent.is_streamable
                 agent.stream_intermediate_steps = stream_intermediate_steps and agent.stream
@@ -591,6 +595,21 @@ class LoopMixin:
                 _cost_tracker = CostTracker()
                 agent.run_response.cost_tracker = _cost_tracker
 
+                # Set query-level tool/skill filtering before prompt assembly.
+                # A per-run enabled_skills whitelist is a semantic contract, so
+                # the advertised skill catalogue must match the execution gate.
+                # Re-render only for that explicit override; ordinary skill usage
+                # ranking remains session-frozen for cache stability.
+                agent._enabled_tools = enabled_tools
+                agent._enabled_skills = enabled_skills
+                if enabled_skills is not None:
+                    _restore_guidance_after_run = True
+                    _saved_tool_policy_prompts = list(agent._tool_policy_prompts)
+                    _saved_session_guidance_prompts = list(agent._session_guidance_prompts)
+                    _saved_session_guidance_snapshot = agent._session_guidance_snapshot
+                    agent.refresh_tool_system_prompts()
+                    agent._session_guidance_snapshot = None
+
                 # --- Freeze prompt snapshots on first run (prompt cache stability) ---
                 # Hermes-style: freeze everything the system prompt reads from
                 # live state at session start so its bytes stay identical across
@@ -606,10 +625,6 @@ class LoopMixin:
                     # retrieval is bound to the *original* goal, not whatever
                     # `message` happens to be on subsequent runs.
                     await agent.workspace.freeze_snapshots(query=_anchor.source_query)
-
-                # Set query-level tool/skill filtering (cleared after run)
-                agent._enabled_tools = enabled_tools
-                agent._enabled_skills = enabled_skills
 
                 # Merge default run hooks (e.g. auto-archive) with user-provided hooks
                 effective_hooks = None
@@ -1398,6 +1413,12 @@ class LoopMixin:
                 # and is never dropped. After this, steer() returns False and
                 # the CLI falls back to queuing a fresh turn.
                 agent._end_steer_window()
+                if _restore_guidance_after_run:
+                    agent._tool_policy_prompts = _saved_tool_policy_prompts
+                    agent._session_guidance_prompts = _saved_session_guidance_prompts
+                    agent._session_guidance_snapshot = _saved_session_guidance_snapshot
+                agent._enabled_tools = None
+                agent._enabled_skills = None
                 agent._run_loop = None
                 agent._run_task = None
                 agent._run_max_api_retry = agent.max_api_retry
@@ -1460,4 +1481,3 @@ class LoopMixin:
                         await _m.close_client()
                     except Exception:
                         pass
-

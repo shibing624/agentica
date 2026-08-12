@@ -158,6 +158,8 @@ class TestWorkspace:
             os.chdir(prev_cwd)
 
         assert "AGENTS.md" in context or "Project Agent" in context
+        assert "session-start snapshot" in context
+        assert "read_file" in context
         assert len(context) > 0
 
     def test_write_memory_daily(self, temp_workspace_path):
@@ -276,7 +278,7 @@ class TestWorkspace:
         assert "# User" in tight
         assert "# Nested" not in tight
         assert "# Project" not in tight
-        assert len(tight) <= Workspace.MAX_MEMORY_CHARACTER_COUNT + 80
+        assert len(tight) <= Workspace.MAX_MEMORY_CHARACTER_COUNT + 320
 
     def test_default_user_gets_home_agents_symlink_to_canonical_file(self, temp_workspace_path):
         """The default user keeps one real file plus a mainstream-agent alias."""

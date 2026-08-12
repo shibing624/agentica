@@ -42,6 +42,20 @@ class TestCacheHitRatio:
         # (900+500) / (fresh 600 + hit 1400) = 0.7
         assert u.cache_hit_ratio() == pytest.approx(0.7)
 
+    def test_aggregate_usage_normalises_each_request_before_merging(self):
+        u = Usage()
+        # OpenAI-compatible inclusive: prompt includes cached tokens.
+        u.add(RequestUsage(
+            input_tokens=1000,
+            input_tokens_details=TokenDetails(cached_tokens=900, cache_read_tokens=900),
+        ))
+        # Anthropic exclusive: cache_read is outside input_tokens.
+        u.add(RequestUsage(
+            input_tokens=100,
+            input_tokens_details=TokenDetails(cache_read_tokens=800),
+        ))
+        assert u.cache_hit_ratio() == pytest.approx((900 + 800) / (1000 + 100 + 800))
+
 
 # ---------------------------------------------------------------------------
 # Prefix digests / break attribution

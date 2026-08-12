@@ -671,11 +671,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # the same helper without duplicating the wiring logic.
         self._wire_tools_to_self()
 
-        # Merge tool system prompts into instructions (read-only over tools).
-        self._merge_tool_system_prompts()
-
         # Load runtime config from workspace YAML
         self._load_runtime_config()
+
+        # Merge tool system prompts after runtime config is loaded, so disabled
+        # skills are not advertised in the frozen session guidance.
+        self._merge_tool_system_prompts()
 
         # Layer 2 is always wired: without it a long session has no way back
         # from an oversized context except the provider rejecting the request.

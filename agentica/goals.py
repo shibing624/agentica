@@ -1020,7 +1020,7 @@ class GoalManager:
             # per-run CostTracker => this is the current turn's usage, not a
             # cumulative total. Use it directly as the delta and add it onto
             # the running baseline.
-            token_delta = max(0, ct.total_input_tokens + ct.total_output_tokens)
+            token_delta = max(0, ct.total_prompt_tokens + ct.total_output_tokens)
             new_baseline = tokens_baseline + token_delta
 
         tool_pairs: List[Tuple[str, bool]] = []

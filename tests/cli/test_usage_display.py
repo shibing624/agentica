@@ -104,6 +104,31 @@ def test_provider_usage_summary_adds_native_anthropic_cache_to_input():
     )
 
 
+def test_provider_usage_summary_normalises_mixed_provider_entries_per_request():
+    openai_usage = RequestUsage(
+        input_tokens=1_000,
+        output_tokens=10,
+        input_tokens_details=TokenDetails(cached_tokens=900, cache_read_tokens=900),
+    )
+    anthropic_usage = RequestUsage(
+        input_tokens=100,
+        output_tokens=20,
+        input_tokens_details=TokenDetails(cache_read_tokens=800),
+    )
+
+    summary = ProviderUsageSummary.from_request_entries(
+        [openai_usage, anthropic_usage],
+        cache_counts_inside_input=True,
+    )
+
+    assert summary.prompt_tokens == 1_900
+    assert summary.fresh_input_tokens == 200
+    assert summary.cache_read_tokens == 1_700
+    assert summary.output_tokens == 30
+    assert summary.total_tokens == 1_930
+    assert summary.cache_hit_percent == 89.5
+
+
 def test_turn_usage_summary_omits_cache_write_segment():
     summary = ProviderUsageSummary(
         input_tokens=10_731,

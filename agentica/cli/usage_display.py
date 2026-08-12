@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, TYPE_CHECKING
 
+from agentica.model.usage import split_prompt_usage
+
 if TYPE_CHECKING:
     from agentica.cost_tracker import CostTracker
     from agentica.model.usage import RequestUsage
@@ -59,27 +61,20 @@ class ProviderUsageSummary:
             api_calls += 1
             output_tokens += entry.output_tokens
             details = entry.input_tokens_details
-            cache_read = 0
-            cache_write = 0
+            detail_dict = {}
             if details is not None:
-                cache_read = details.cache_read_tokens or details.cached_tokens
-                cache_write = details.cache_creation_tokens
+                detail_dict = {
+                    "cached_tokens": details.cached_tokens,
+                    "cache_read_tokens": details.cache_read_tokens,
+                    "cache_creation_tokens": details.cache_creation_tokens,
+                }
+            fresh, cache_read, cache_write = split_prompt_usage(entry.input_tokens, detail_dict)
             cache_read_tokens += cache_read
             cache_write_tokens += cache_write
-            prompt_tokens = entry.input_tokens
-            if not cache_counts_inside_input:
-                fresh_input_tokens += entry.input_tokens
-                prompt_tokens += cache_read + cache_write
-            else:
-                fresh_input_tokens += max(entry.input_tokens - cache_read - cache_write, 0)
+            prompt_tokens = fresh + cache_read + cache_write
+            fresh_input_tokens += fresh
             input_tokens += prompt_tokens
-            if entry.total_tokens > 0:
-                if cache_counts_inside_input:
-                    total_tokens += entry.total_tokens
-                else:
-                    total_tokens += entry.total_tokens + cache_read + cache_write
-            else:
-                total_tokens += prompt_tokens + entry.output_tokens
+            total_tokens += prompt_tokens + entry.output_tokens
 
         return cls(
             input_tokens=input_tokens,

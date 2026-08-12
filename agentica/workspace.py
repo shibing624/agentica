@@ -381,7 +381,15 @@ class Workspace:
             Merged context string
         """
         chain_contents = self._load_agent_md_chain()
-        return f"<!-- AGENTS.md chain -->\n{chain_contents}" if chain_contents else ""
+        if not chain_contents:
+            return ""
+        snapshot_note = (
+            "Note: This AGENTS.md context is a session-start snapshot for "
+            "prompt-cache stability. If these rules change during this session, "
+            "use the read_file tool on the file paths shown below when the latest "
+            "content is needed; new sessions load the latest content automatically."
+        )
+        return f"<!-- AGENTS.md chain -->\n{snapshot_note}\n\n{chain_contents}"
 
     async def freeze_snapshots(self, query: str = "") -> None:
         """Freeze context + memory + experience snapshots at session start.

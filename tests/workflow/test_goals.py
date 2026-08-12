@@ -838,6 +838,29 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     agent.auxiliary_model.response.assert_not_called()
 
 
+def test_goal_turn_signals_count_cached_prompt_tokens():
+    """Goal token budgets track real prompt size, not just fresh input."""
+    from agentica.cost_tracker import CostTracker
+    from agentica.run_response import RunResponse
+
+    ct = CostTracker()
+    ct.record(
+        model_id="gpt-4o",
+        input_tokens=100,
+        output_tokens=20,
+        cache_read_tokens=900,
+    )
+    rr = RunResponse(content="done")
+    rr.cost_tracker = ct
+
+    final_text, token_delta, new_baseline, tool_pairs = GoalManager.extract_turn_signals(rr, 10)
+
+    assert final_text == "done"
+    assert token_delta == 1_020
+    assert new_baseline == 1_030
+    assert tool_pairs == []
+
+
 def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
     """When a session has an active goal on disk, Runner._run_impl should
     bind TaskAnchor to the goal objective instead of the latest message.
