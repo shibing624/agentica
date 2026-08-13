@@ -364,21 +364,28 @@ class StreamDisplayManager:
             for operation in operations
         ]
 
-    @staticmethod
-    def _fmt_elapsed(elapsed: Optional[float]) -> str:
+    # Per-tool minimum display time (seconds). ``execute`` gets a higher bar:
+    # compiles/test runs legitimately take seconds, so anything under 10s
+    # isn't worth reporting.
+    _MIN_ELAPSED_DISPLAY = {"execute": 10.0}
+    _MIN_ELAPSED_DEFAULT = 1.0
+
+    @classmethod
+    def _fmt_elapsed(cls, elapsed: Optional[float], tool_name: Optional[str] = None) -> str:
         """Format elapsed seconds; fast calls render nothing.
 
         Only SLOW tool calls surface a duration — a fast ``grep`` /
-        ``read_file`` reporting ``(13ms)`` is pure noise. The 1s cutoff keeps
-        quick commands clean while long-running execute tasks (foreground or
-        background) still show their cost.
+        ``read_file`` reporting ``(13ms)`` is pure noise. Cutoffs are per-tool
+        (``_MIN_ELAPSED_DISPLAY``, default 1s); ``execute`` hides anything
+        under 10s.
 
         - None / negative → ''            (no measurement available)
-        - < 1s            → ''            (fast — not worth reporting)
+        - < cutoff        → ''            (fast — not worth reporting)
         - < 10s           → ' (N.NNs)'    e.g. ' (1.23s)'
         - >= 10s          → ' (N.Ns)'     e.g. ' (12.3s)'
         """
-        if elapsed is None or elapsed < 1.0:
+        cutoff = cls._MIN_ELAPSED_DISPLAY.get(tool_name or "", cls._MIN_ELAPSED_DEFAULT)
+        if elapsed is None or elapsed < cutoff:
             return ""
         if elapsed < 10.0:
             return f" ({elapsed:.2f}s)"
@@ -735,7 +742,7 @@ class StreamDisplayManager:
         would be misread, so it gets an anchor line first. Callers that render
         one tool at a time can omit it.
         """
-        elapsed_str = self._fmt_elapsed(elapsed)
+        elapsed_str = self._fmt_elapsed(elapsed, tool_name=tool_name)
         detached = self._open_block_id != tool_call_id
         # This tool's block is the transcript's last one from here on, whichever
         # branch below renders it.
@@ -1144,7 +1151,7 @@ class StreamDisplayManager:
             if len(info) > 100:
                 info = info[:97] + "..."
             is_error = event.get("is_error", False)
-            elapsed_str = self._fmt_elapsed(event.get("elapsed"))
+            elapsed_str = self._fmt_elapsed(event.get("elapsed"), tool_name=tool_name)
             prefix = self._subagent_prefix(run_id)
             if is_error:
                 self._assistant_console.print(

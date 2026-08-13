@@ -218,6 +218,25 @@ class TestCLIStreamDisplay(unittest.TestCase):
         self.assertEqual(f(9.99), " (9.99s)")
         # >= 10s — 1 decimal
         self.assertEqual(f(10.0), " (10.0s)")
+
+    def test_fmt_elapsed_execute_hides_under_10s(self):
+        """execute commands under 10s render no timing — compiles/tests
+        legitimately take seconds, so the number is noise. Other tools keep
+        the 1s cutoff."""
+        from agentica.cli.display import StreamDisplayManager
+
+        f = StreamDisplayManager._fmt_elapsed
+        # execute: anything under 10s is hidden
+        self.assertEqual(f(0.5, tool_name="execute"), "")
+        self.assertEqual(f(1.0, tool_name="execute"), "")
+        self.assertEqual(f(9.99, tool_name="execute"), "")
+        # execute: 10s and up shows (1-decimal bucket)
+        self.assertEqual(f(10.0, tool_name="execute"), " (10.0s)")
+        self.assertEqual(f(65.43, tool_name="execute"), " (65.4s)")
+        # other tools unchanged; no tool name defaults to the 1s cutoff
+        self.assertEqual(f(1.0, tool_name="grep"), " (1.00s)")
+        self.assertEqual(f(9.99, tool_name="grep"), " (9.99s)")
+        self.assertEqual(f(1.0), " (1.00s)")
         self.assertEqual(f(123.456), " (123.5s)")
 
 
