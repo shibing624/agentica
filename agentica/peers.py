@@ -32,12 +32,15 @@ import os
 import re
 import time
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
+
+if TYPE_CHECKING:
+    from agentica.git_state import GitState
 
 # A peer heartbeats while it lives; a record older than this is treated as a
 # crashed session even when its pid still resolves (pids get reused).
@@ -160,6 +163,17 @@ class PeerInfo:
     cwd: str
     session_id: Optional[str] = None
     git_branch: Optional[str] = None
+    # Where this session sits in the repository (agentica/git_state.py).
+    # Published because the alternative is asking: "did you already touch that
+    # file?" and "are you behind main?" cost a message, a turn on both sides,
+    # and an answer that goes stale the moment a third session commits. Git
+    # knows; presence carries it.
+    head_sha: Optional[str] = None
+    base_ref: Optional[str] = None
+    ahead: Optional[int] = None
+    behind: Optional[int] = None
+    dirty_files: List[str] = field(default_factory=list)
+    dirty_count: Optional[int] = None
     # One line of "what this session is working on", so a sending agent can
     # pick a target on its own instead of guessing from the name.
     task: Optional[str] = None
@@ -195,6 +209,28 @@ class PeerInfo:
     @property
     def alive(self) -> bool:
         return self.age <= STALE_AFTER and _pid_alive(self.pid)
+
+    @property
+    def git_state(self) -> "GitState":
+        """The published git position, rendered by the module that collects it.
+
+        Reassembled rather than stored as one blob: the live record stays flat
+        and readable, and an older record that never published these fields
+        yields an empty state instead of a parse error.
+        """
+        from agentica.git_state import GitState
+
+        return GitState(
+            branch=self.git_branch or "",
+            head_sha=self.head_sha or "",
+            base_ref=self.base_ref or "",
+            ahead=self.ahead or 0,
+            behind=self.behind or 0,
+            dirty_files=tuple(self.dirty_files or ()),
+            # None (never published) must stay None: it is "unknown", not
+            # "clean". See GitState.dirty_count.
+            dirty_count=self.dirty_count,
+        )
 
     @property
     def project_slug(self) -> Optional[str]:
@@ -234,6 +270,12 @@ class PeerInfo:
             cwd=str(data.get("cwd") or ""),
             session_id=data.get("session_id") or None,
             git_branch=data.get("git_branch") or None,
+            head_sha=data.get("head_sha") or None,
+            base_ref=data.get("base_ref") or None,
+            ahead=data.get("ahead") or None,
+            behind=data.get("behind") or None,
+            dirty_files=list(data.get("dirty_files") or []),
+            dirty_count=data.get("dirty_count") or None,
             task=data.get("task") or None,
             project_dir=data.get("project_dir") or None,
             workspace_path=data.get("workspace_path") or None,
@@ -303,8 +345,18 @@ class PeerInfo:
         if memory:
             rows.append(("memory", memory))
         rows.append(("mailbox", str(mailbox_dir(self.peer_id))))
-        if self.git_branch:
+        git = self.git_state
+        if git.known:
+            # One line that answers "where is this session in the repo" —
+            # branch, head, distance from the base branch, dirty count.
+            rows.append(("git", git.summary()))
+        elif self.git_branch:
             rows.append(("branch", self.git_branch))
+        dirty = git.dirty_line()
+        if dirty:
+            # The paths themselves: this is what turns "ask the others whether
+            # they touched this file" into reading a listing.
+            rows.append(("dirty", dirty))
         if self.task:
             rows.append(("working on", self.task))
         return rows

@@ -44,6 +44,7 @@ from agentica.cli.runtime import (
     set_active_console,
 )
 from agentica import config
+from agentica import git_state
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
 from agentica.global_config import get_setting, set_project_profile
 from agentica.peers import PeerSession, format_for_model
@@ -940,6 +941,12 @@ def run_interactive(
                 # day a fourth path forgets to. Empty strings publish as
                 # "unset" rather than being skipped, so clearing works too;
                 # heartbeat itself only writes when one of these differs.
+                #
+                # Git state rides the same tick (agentica/git_state.py caches
+                # for CACHE_TTL, so this is not three subprocesses per second).
+                # It is what lets another session read "who is behind main and
+                # who has that file dirty" instead of asking.
+                git = git_state.collect(tui_state["work_dir"])
                 peers.heartbeat(
                     session_id=agent.session_id if agent is not None else None,
                     profile_name=tui_state["profile_name"],
@@ -948,6 +955,13 @@ def run_interactive(
                     busy=state.agent_running,
                     context_tokens=tui_state["context_tokens"],
                     context_window=tui_state["context_window"],
+                    git_branch=git.branch,
+                    head_sha=git.head_sha,
+                    base_ref=git.base_ref,
+                    ahead=git.ahead,
+                    behind=git.behind,
+                    dirty_files=list(git.dirty_files),
+                    dirty_count=git.dirty_count,
                 )
                 tui_state["peer_name"] = _visible_peer_name_for_status_bar(peers, agent)
             except OSError:
