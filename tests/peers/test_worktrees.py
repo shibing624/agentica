@@ -63,8 +63,9 @@ class TestLayout:
         is in range of `git clean -xdff` in the main checkout."""
         monkeypatch.setattr(worktrees, "_configured_root", lambda: ".agentica/worktrees")
 
+        # No repo name inserted: the repository is implied by where the root is.
         assert worktrees.worktree_path(str(repo), "docs") == str(
-            repo / ".agentica/worktrees" / "proj" / "docs"
+            repo / ".agentica/worktrees" / "docs"
         )
 
     def test_a_configured_root_is_created_and_used(self, repo, tmp_path, monkeypatch):
@@ -74,6 +75,31 @@ class TestLayout:
 
         assert Path(wt.path) == tmp_path / "wt" / "proj" / "docs"
         assert (Path(wt.path) / "a.py").exists()
+
+    def test_an_in_repo_root_ignores_itself_without_touching_the_repo_gitignore(
+        self, repo, monkeypatch
+    ):
+        """Choosing the in-repo layout must not require editing a tracked file in
+        someone else's repository."""
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: ".agentica/worktrees")
+        before = (repo / ".gitignore").read_text()
+
+        wt = ensure(str(repo), "docs")
+
+        assert (repo / ".agentica/worktrees/.gitignore").read_text().endswith("*\n")
+        assert (repo / ".gitignore").read_text() == before
+        assert subprocess.run(
+            ["git", "status", "--porcelain"], cwd=str(repo),
+            capture_output=True, text=True,
+        ).stdout.strip() == ""
+        assert Path(wt.path).is_dir()
+
+    def test_an_outside_root_gets_no_gitignore_marker(self, repo, tmp_path, monkeypatch):
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: str(tmp_path / "wt"))
+
+        ensure(str(repo), "docs")
+
+        assert not (tmp_path / "wt" / "proj" / ".gitignore").exists()
 
     def test_the_branch_is_prefixed(self, repo):
         assert worktrees.branch_for("docs") == "wt/docs"

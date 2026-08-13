@@ -106,16 +106,38 @@ agent 调用：worktree(action="use", name="gateway-peers")
 settings:
   worktree:
     root: ~/worktrees          # 绝对路径 → <root>/<repo>/<任务>
+    # root: .agentica/worktrees  # 相对路径 → 仓库内 <repo>/.agentica/worktrees/<任务>
     link: [".env", ".envrc"]   # 新 worktree 里 symlink 过来的 gitignored 文件
 ```
 
 - **父目录塞了二十个仓库**，不想再散一堆 `xxx-yyy` → 指到一个集中目录
 - **共享挂载的父目录不可写** → 同上（不可写时报错会直接点名这个设置）
 
-`root` 写**相对路径**（如 `.agentica/worktrees`）会落在仓库内部——支持，但先知道代价：
-主 checkout 里一条 `git clean -xdff` 会把被 gitignore 的那棵树连同**别的会话没提交的工作**
-一起删掉（实测 `git clean -xdff --dry-run` 会报 `Would remove .agentica/`）。这些 worktree
-是要长期活着的，所以默认不选这条路。
+### 仓库内布局（`root: .agentica/worktrees`）
+
+这是 Claude Code 的 `.claude/worktrees/` 形态，**一等支持**，选它不需要任何额外准备：
+
+- 目录形如 `<repo>/.agentica/worktrees/<任务>`（不再插一层仓库名——仓库已经由位置隐含了）
+- 首次创建时会在 `.agentica/worktrees/.gitignore` 里写一个 `*`，**自我忽略**：`git status`
+  干净，且**不动仓库里那个被跟踪的 `.gitignore`**（那是共享文件，工具不该替你改）
+- agentica 自己的 `glob` / `grep` 会跳过 `.agentica`，否则 `glob("**/*.py")` 会把每个文件
+  返回 N+1 份（实测过，真会），而真正危险的不是噪音，是**改到副本那一份**上去；
+  绑定在该 worktree 里工作的会话仍然能看到自己的全部文件（排除只作用于搜索根**以下**的路径）
+
+它的优点也是实打实的：不污染父目录、只要仓库可写就能用（共享挂载友好）、删掉仓库时
+worktree 跟着一起走、和 `.cursor/` `.claude/` 同一套心智。
+
+**唯一不可逆的代价**（也是它没被设为默认的原因）：嵌套 checkout 在主 checkout 里
+`git clean` 的射程内。实测——
+
+| 命令 | 结果 |
+|------|------|
+| `git clean -xdf`（单 `-f`，最常打的那条） | `Skipping repository .agentica/worktrees/docs` → **安全** |
+| `git clean -xdff`（双 `-f`） | `Removing .agentica/` → 树没了，**连别的会话未提交的改动一起**，注册项变 `prunable` |
+
+sibling 布局下这条命令完全无害。所以两种布局的错误代价不对称：sibling 选错是"报错 + 加一行
+配置"（可恢复、可见），仓库内选错是"某次双 `-f` 清理顺手删掉三个会话的活"（不可恢复）。
+默认因此留在 sibling；哪条更贴你的机器，改一行配置就切。
 
 `.env` 是 **symlink 而不是拷贝**：轮换一次密钥所有 worktree 同时生效，而且机器上只存在一份。
 

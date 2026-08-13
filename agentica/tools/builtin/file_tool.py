@@ -42,6 +42,34 @@ _GLOB_TIMEOUT = 3
 # default short so the model scopes the path instead of waiting.
 _GREP_TIMEOUT = 3
 
+# Directories every search skips. ``.agentica`` earns its place for a specific
+# reason: with ``settings.worktree.root`` pointing inside the repository
+# (``.agentica/worktrees``), a full second checkout lives under it, and a bare
+# ``glob("**/*.py")`` would then return every file twice — once really, once in
+# each worktree. Verified before fixing: the duplicate was returned, and the
+# dangerous half of that is not the noise but an edit landing in the copy.
+# ``grep`` shells out to ripgrep, which already skips it via .gitignore; the
+# pure-Python fallback and ``glob`` walk the tree themselves and do not.
+_NOISE_DIRS = frozenset({
+    '.git', '.agentica', '__pycache__', 'node_modules', '.venv', 'venv',
+    '.idea', '.pytest_cache',
+})
+
+
+def _in_noise_dir(path: "Path", base: "Path") -> bool:
+    """Whether ``path`` sits inside a skipped directory *below* ``base``.
+
+    Only the part below the search root counts. A session whose work_dir is
+    itself inside one of these names — which is exactly what a worktree under
+    ``.agentica/worktrees`` is — must still see its own files; matching against
+    the whole absolute path made that session's ``glob`` return nothing at all.
+    """
+    try:
+        relative = path.relative_to(base)
+    except ValueError:
+        relative = path
+    return bool(set(relative.parts).intersection(_NOISE_DIRS))
+
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
     "/dev/stdin", "/dev/tty", "/dev/console",
@@ -1159,10 +1187,9 @@ class BuiltinFileTool(Tool):
         # Run glob in executor to avoid blocking on large directory trees
         def _glob_sync():
             matches = list(base_path.glob(pattern))
-            ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
             return sorted(
                 str(m) for m in matches
-                if not set(m.parts).intersection(ignore_dirs)
+                if not _in_noise_dir(m, base_path)
             )
 
         loop = asyncio.get_event_loop()
@@ -1289,7 +1316,7 @@ class BuiltinFileTool(Tool):
             cmd.extend(["--max-count", str(limit)])
 
         # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
-        for d in ["__pycache__", "node_modules", ".venv", "venv", ".idea", ".pytest_cache"]:
+        for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
 
         # Pattern and path
@@ -1404,8 +1431,7 @@ class BuiltinFileTool(Tool):
             files = list(base_path.glob("**/*"))
 
         # Exclude directories and ignored paths
-        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
-        files = [f for f in files if f.is_file() and not set(f.parts).intersection(ignore_dirs)]
+        files = [f for f in files if f.is_file() and not _in_noise_dir(f, base_path)]
 
         results = []
         file_counts = {}
