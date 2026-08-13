@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
         deps.peer_bridge = PeerBridge(deps.channel_manager)
         deps.peer_bridge.start()
     else:
-        logger.info("Peer bridge disabled (set PEER_BRIDGE=true to command local CLI sessions from a chat)")
+        logger.info("Peer bridge disabled (PEER_BRIDGE=false)")
 
     # Distinguish the always-on Web service from any optional IM channels the
     # user enabled via config, so the startup log makes it obvious which

@@ -63,6 +63,18 @@ _MEDIA_IMAGE, _MEDIA_VIDEO, _MEDIA_FILE, _MEDIA_VOICE = 1, 2, 3, 4
 _STATE_FINISH = 2
 _TYPING, _CANCEL = 1, 2
 
+# Poll-failure backoff, mirroring the official openclaw-weixin retry guidance
+# (protocol-spec §4.4): 2s for the first two consecutive failures, 30s once
+# the failure is clearly persistent. An expired session (errcode -14) gets a
+# bounded number of QR re-login attempts instead — an unattended gateway must
+# not mint QR codes forever; after that the loop stops and the log names the
+# manual fix.
+_POLL_RETRY_DELAY = 2
+_POLL_BACKOFF_AFTER = 3
+_POLL_BACKOFF_DELAY = 30
+_RELOGIN_RETRY_DELAY = 60
+_RELOGIN_MAX_ATTEMPTS = 3
+
 # ``qrcode`` is only needed when the token cache is empty; lazy-import to
 # avoid pulling Pillow into core gateway installs. ``Crypto`` is only needed
 # for media (AES-128-ECB); lazy-import so the gateway runs without
@@ -85,6 +97,14 @@ def _ensure_qrcode():
             raise ImportError(
                 "qrcode not installed. Run: pip install 'agentica[wechat]'"
             )
+
+
+class SessionExpiredError(RuntimeError):
+    """The ilink session (bot_token) expired — getUpdates errcode -14.
+
+    The token is dead, so polling further only spams the server; a fresh QR
+    login is required (protocol-spec §4.4).
+    """
 
 
 def _uin() -> str:
@@ -244,7 +264,13 @@ class WxBotClient:
                 raise RuntimeError("WeChat: QR code expired")
 
     def get_updates(self, timeout: int = 30) -> list:
-        """Long-poll for new messages."""
+        """Long-poll for new messages.
+
+        Raises :class:`SessionExpiredError` on errcode -14 (the token is dead;
+        a fresh QR login is required) and ``RuntimeError`` on any other error
+        code, so the poll loop backs off instead of hot-looping against a
+        persistent failure.
+        """
         try:
             resp = self._post(
                 "ilink/bot/getupdates",
@@ -253,12 +279,18 @@ class WxBotClient:
             )
         except requests.exceptions.ReadTimeout:
             return []
-        if resp.get("errcode"):
-            logger.warning(f"WeChat: getUpdates err {resp.get('errcode')} {resp.get('errmsg', '')}")
-            if resp["errcode"] == -14:
+        errcode = resp.get("errcode") or resp.get("ret") or 0
+        if errcode:
+            errmsg = resp.get("errmsg", "")
+            if errcode == -14:
+                # Session expired (protocol-spec §4.4): the token AND the
+                # cursor must both be dropped. Persisting the cleared token
+                # also means a plain restart goes straight to QR login.
                 self._buf = ""
+                self.token = ""
                 self._save()
-            return []
+                raise SessionExpiredError(f"getUpdates err {errcode} {errmsg}")
+            raise RuntimeError(f"getUpdates err {errcode} {errmsg}")
         nb = resp.get("get_updates_buf", "")
         if nb:
             self._buf = nb
@@ -500,28 +532,61 @@ class WxBotClient:
 
         ``on_message(client, msg)`` is invoked once per new user message.
         Errors raised by the callback are logged but do not stop the loop.
+        Poll failures back off (2s, then 30s once persistent); an expired
+        session (errcode -14) triggers a fresh QR login instead of hammering
+        the server with a dead token.
         """
         logger.info(f"WeChat: listening (bot_id={self.bot_id})")
         seen: set = set()
+        failures = 0
+        relogin_attempts = 0
         while True:
             try:
-                for msg in self.get_updates(poll_timeout):
-                    mid = msg.get("message_id", 0)
-                    if not self.is_user_msg(msg) or mid in seen:
-                        continue
-                    seen.add(mid)
-                    if len(seen) > 5000:
-                        seen = set(list(seen)[-2000:])
-                    try:
-                        on_message(self, msg)
-                    except Exception as e:
-                        logger.error(f"WeChat: callback error: {e}")
+                msgs = self.get_updates(poll_timeout)
+                failures = 0
             except KeyboardInterrupt:
                 logger.info("WeChat: loop interrupted")
                 break
+            except SessionExpiredError as e:
+                if relogin_attempts >= _RELOGIN_MAX_ATTEMPTS:
+                    logger.error(
+                        f"WeChat: session expired and {relogin_attempts} QR re-login "
+                        "attempts went unused — polling stopped. To log in afresh: "
+                        f"rm {self._tf} and restart the gateway."
+                    )
+                    break
+                relogin_attempts += 1
+                logger.warning(
+                    f"WeChat: session expired ({e}); stale credentials cleared from "
+                    f"{self._tf}. Starting QR re-login "
+                    f"({relogin_attempts}/{_RELOGIN_MAX_ATTEMPTS}) — scan the QR code "
+                    "with WeChat. Gateway unattended? Fix later with: "
+                    f"rm {self._tf} + restart the gateway."
+                )
+                try:
+                    self.login_qr()
+                    relogin_attempts = 0
+                except Exception as le:
+                    logger.error(f"WeChat: QR re-login failed: {le}; retry in {_RELOGIN_RETRY_DELAY}s")
+                    time.sleep(_RELOGIN_RETRY_DELAY)
+                continue
             except Exception as e:
-                logger.error(f"WeChat: loop error: {e}, retry in 5s")
-                time.sleep(5)
+                failures += 1
+                delay = _POLL_RETRY_DELAY if failures < _POLL_BACKOFF_AFTER else _POLL_BACKOFF_DELAY
+                logger.error(f"WeChat: loop error: {e}, retry in {delay}s")
+                time.sleep(delay)
+                continue
+            for msg in msgs:
+                mid = msg.get("message_id", 0)
+                if not self.is_user_msg(msg) or mid in seen:
+                    continue
+                seen.add(mid)
+                if len(seen) > 5000:
+                    seen = set(list(seen)[-2000:])
+                try:
+                    on_message(self, msg)
+                except Exception as e:
+                    logger.error(f"WeChat: callback error: {e}")
 
 
 class WeChatChannel(Channel):

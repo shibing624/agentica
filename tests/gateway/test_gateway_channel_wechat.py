@@ -1,5 +1,6 @@
 """Unit tests for WeChatChannel (inline WxBotClient is mocked)."""
 import asyncio
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -261,3 +262,124 @@ async def test_on_native_message_attaches_media(tmp_path):
     await asyncio.sleep(0.05)
     assert len(received) == 1
     assert received[0].metadata["media"][0]["encrypt_query_param"] == "e"
+
+
+def test_get_updates_session_expired_clears_credentials_and_raises(tmp_path):
+    """errcode -14: the token is dead, so both it and the cursor must be
+    dropped from the persisted state (a plain restart then goes straight to
+    QR login), and the caller is told via SessionExpiredError."""
+    from agentica.gateway.channels.wechat import WxBotClient, SessionExpiredError
+
+    tf = tmp_path / "tok.json"
+    tf.write_text(json.dumps({"bot_token": "dead", "ilink_bot_id": "b", "updates_buf": "cur"}))
+    bot = WxBotClient(token_file=str(tf))
+    assert bot.token == "dead"
+    bot._post = lambda *a, **k: {"errcode": -14, "errmsg": "session timeout"}
+
+    with pytest.raises(SessionExpiredError):
+        bot.get_updates()
+
+    saved = json.loads(tf.read_text())
+    assert saved["bot_token"] == ""
+    assert saved["updates_buf"] == ""
+    assert bot.token == ""
+
+
+def test_get_updates_ret_minus_14_also_means_session_expired(tmp_path):
+    """The server reports the expiry in either `errcode` or `ret`."""
+    from agentica.gateway.channels.wechat import WxBotClient, SessionExpiredError
+
+    bot = WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+    bot._post = lambda *a, **k: {"ret": -14, "errmsg": "session timeout"}
+    with pytest.raises(SessionExpiredError):
+        bot.get_updates()
+
+
+def test_get_updates_other_errcode_raises_so_the_loop_backs_off(tmp_path):
+    """A persistent non--14 error must not be warn-and-return either — that
+    was the hot loop: the server answers instantly, the loop retries at once."""
+    from agentica.gateway.channels.wechat import WxBotClient
+
+    bot = WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+    bot._post = lambda *a, **k: {"errcode": -2, "errmsg": "bad param"}
+    with pytest.raises(RuntimeError, match="err -2"):
+        bot.get_updates()
+
+
+def test_get_updates_success_persists_new_cursor(tmp_path):
+    from agentica.gateway.channels.wechat import WxBotClient
+
+    bot = WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+    bot._post = lambda *a, **k: {"ret": 0, "get_updates_buf": "nb", "msgs": [{"message_id": 1}]}
+    assert bot.get_updates() == [{"message_id": 1}]
+    assert bot._buf == "nb"
+    assert json.loads((tmp_path / "t.json").read_text())["updates_buf"] == "nb"
+
+
+def test_run_loop_backs_off_2s_then_30s_on_persistent_errors(tmp_path, monkeypatch):
+    from agentica.gateway.channels import wechat
+
+    bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+    polls = []
+
+    def fake_get_updates(timeout=30):
+        polls.append(1)
+        if len(polls) > 3:
+            raise KeyboardInterrupt
+        raise RuntimeError("boom")
+
+    sleeps = []
+    monkeypatch.setattr(bot, "get_updates", fake_get_updates)
+    monkeypatch.setattr(wechat.time, "sleep", lambda s: sleeps.append(s))
+
+    bot.run_loop(lambda c, m: None)
+
+    assert sleeps == [2, 2, 30]
+
+
+def test_run_loop_relogs_in_via_qr_on_session_expired(tmp_path, monkeypatch):
+    from agentica.gateway.channels import wechat
+
+    bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+    polls = []
+
+    def fake_get_updates(timeout=30):
+        polls.append(1)
+        if len(polls) > 1:
+            raise KeyboardInterrupt
+        raise wechat.SessionExpiredError("getUpdates err -14 session timeout")
+
+    logins = []
+    monkeypatch.setattr(bot, "get_updates", fake_get_updates)
+    monkeypatch.setattr(bot, "login_qr", lambda: logins.append(1))
+
+    bot.run_loop(lambda c, m: None)
+
+    assert logins == [1]
+
+
+def test_run_loop_stops_after_bounded_relogin_attempts(tmp_path, monkeypatch):
+    """An unattended gateway must not mint QR codes forever: after the capped
+    attempts the loop stops (the error log names the manual fix)."""
+    from agentica.gateway.channels import wechat
+
+    bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+
+    def always_expired(timeout=30):
+        raise wechat.SessionExpiredError("getUpdates err -14 session timeout")
+
+    logins = []
+    sleeps = []
+
+    def failed_login():
+        logins.append(1)
+        raise RuntimeError("qr expired unscanned")
+
+    monkeypatch.setattr(bot, "get_updates", always_expired)
+    monkeypatch.setattr(bot, "login_qr", failed_login)
+    monkeypatch.setattr(wechat.time, "sleep", lambda s: sleeps.append(s))
+
+    bot.run_loop(lambda c, m: None)
+
+    assert len(logins) == wechat._RELOGIN_MAX_ATTEMPTS
+    assert sleeps == [wechat._RELOGIN_RETRY_DELAY] * wechat._RELOGIN_MAX_ATTEMPTS

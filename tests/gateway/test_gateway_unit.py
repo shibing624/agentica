@@ -350,6 +350,17 @@ class TestSettings:
         assert s.port == 8881
         assert s.debug is False
 
+    def test_peer_bridge_on_by_default_and_env_opts_out(self):
+        """PEER_BRIDGE defaults to on; falsey values disable it."""
+        from agentica.gateway.config import Settings
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("agentica.gateway.config.apply_global_config", return_value={}):
+                assert Settings.from_env().peer_bridge_enabled is True
+        for value in ("false", "0", "no", "off"):
+            with patch.dict(os.environ, {"PEER_BRIDGE": value}, clear=True):
+                with patch("agentica.gateway.config.apply_global_config", return_value={}):
+                    assert Settings.from_env().peer_bridge_enabled is False, value
+
     def test_from_env_custom(self):
         """Settings.from_env() reads custom env vars (profile mocked empty)."""
         from agentica.gateway.config import Settings

@@ -155,8 +155,8 @@ class TestRelaying:
         assert "nlp-f1" in reply
 
     def test_with_nothing_running_the_reply_names_the_directory_searched(self):
-        """An AGENTICA_HOME / OS-user mismatch looks exactly like having no
-        session open, so the only cure is saying where it looked."""
+        """An AGENTICA_HOME mismatch looks exactly like having no session
+        open, so the only cure is saying where it looked."""
         bridge, channel = _bridge()
 
         asyncio.run(bridge.handle(_im("@list")))
@@ -179,28 +179,17 @@ class TestRelaying:
 
 
 class TestGuards:
-    def test_it_refuses_to_relay_for_a_channel_open_to_everyone(self):
-        """An empty allowlist means "everyone" — fine for chatting with the
-        gateway's agent, not for typing into this machine's terminals."""
+    def test_a_channel_with_no_allowlist_still_relays(self):
+        """Personal assistant: the bridge adds no gate of its own — a
+        channel's allowlist (when set) already filters every inbound message
+        upstream of the bridge."""
         cli = _cli("nlp-f1")
-        bridge, channel = _bridge(allowed_users=())
+        bridge, _ = _bridge(allowed_users=())
 
         handled = asyncio.run(bridge.handle(_im("@nlp-f1 rm -rf /")))
 
         assert handled is True
-        assert drain_inbox(cli.peer_id) == []
-        reply = channel.sent[-1][1]
-        assert "WECOM_ALLOWED_USERS" in reply
-        assert "xuming" in reply
-
-    def test_a_sender_outside_the_allowlist_is_refused(self):
-        cli = _cli("nlp-f1")
-        bridge, channel = _bridge(allowed_users=("xuming",))
-
-        asyncio.run(bridge.handle(_im("@nlp-f1 hello", sender_id="stranger")))
-
-        assert drain_inbox(cli.peer_id) == []
-        assert "not in wecom's allowed_users" in channel.sent[-1][1]
+        assert [m.text for m in drain_inbox(cli.peer_id)] == ["rm -rf /"]
 
     def test_the_bridge_never_lists_or_addresses_its_own_endpoints(self):
         """Each IM user is published as a peer so a CLI can answer it; nobody

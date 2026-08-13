@@ -24,16 +24,16 @@ Two consequences of that design decide the rest of this module:
 **A relayed line is the user, so it carries the user's authority.** Sends use
 ``from_kind="user"``: the receiving CLI treats it as if it were typed in that
 terminal (``PEER_MESSAGING_POLICY``). That is the point — the user *is* typing
-it, from a phone — and it is also why the bridge is off by default and refuses
-to relay for a channel with no ``allowed_users``: an open allowlist plus this
-bridge is remote control of the machine by whoever finds the bot.
+it, from a phone. This is a personal-assistant gateway, so the bridge is on by
+default and adds no gate of its own; a channel's ``allowed_users`` (when set)
+already filters every inbound message before it can reach the bridge.
 
 **The bridge lives in the same ``AGENTICA_HOME`` as the CLI or it sees nothing
-at all.** The peers tree is user-level state under ``AGENTICA_CACHE_DIR``, so a
-gateway started as another OS user (or with a different ``AGENTICA_HOME``) finds
-an empty ``live/`` forever and every reply would be an unexplained "no sessions".
-Nothing can assert this away, so the failure is made visible instead: the
-startup log and the empty-list reply both name the directory that was searched.
+at all.** The peers tree is per-install state under ``AGENTICA_CACHE_DIR``, so
+a gateway started with a different ``AGENTICA_HOME`` finds an empty ``live/``
+forever and every reply would be an unexplained "no sessions". Nothing can
+assert this away, so the failure is made visible instead: the startup log and
+the empty-list reply both name the directory that was searched.
 """
 from __future__ import annotations
 
@@ -142,8 +142,8 @@ class PeerBridge:
 
     def start(self) -> None:
         logger.info(
-            f"Peer bridge started — relaying to CLI sessions under {peers_root()} "
-            f"(send `@list` from a chat; only sessions of this OS user are visible)"
+            f"Peer bridge started — relaying to this machine's live CLI sessions "
+            f"(peers dir: {peers_root()}; send `@list` from a chat)"
         )
         self._task = asyncio.create_task(self._poll_loop())
 
@@ -171,11 +171,6 @@ class PeerBridge:
         command = parse_bridge_line(message.content, pinned=endpoint.pinned if endpoint else None)
         if command is None:
             return False
-
-        refusal = self._refuse_unguarded(message)
-        if refusal:
-            await self._reply(message, refusal)
-            return True
 
         if command.kind == "list":
             await self._reply(message, self._render_sessions())
@@ -237,29 +232,6 @@ class PeerBridge:
         own = self._own_peer_ids()
         return [peer for peer in match_peers(target) if peer.peer_id not in own]
 
-    def _refuse_unguarded(self, message: Message) -> Optional[str]:
-        """Refuse to relay for a channel that lets anyone talk to it.
-
-        ``Channel.check_allowlist`` treats an empty allowlist as "everyone",
-        which is a reasonable default for chatting with the gateway's own agent
-        and an unreasonable one for typing into a terminal on this machine with
-        the user's authority. So the bridge fails closed on its own rather than
-        inheriting that default, and says which setting fixes it.
-        """
-        channel: Optional[Channel] = self._channel_manager.get_channel(message.channel)
-        if channel is None:
-            return f"Channel {message.channel.value} is not registered here."
-        if not channel.allowed_users:
-            return (
-                f"Refusing to relay: {message.channel.value} has no allowed_users "
-                f"configured, so anyone who finds this bot could type into your "
-                f"terminals. Set {message.channel.value.upper()}_ALLOWED_USERS "
-                f"(your id is {message.sender_id}) and restart."
-            )
-        if not channel.check_allowlist(message.sender_id):
-            return f"{message.sender_id} is not in {message.channel.value}'s allowed_users."
-        return None
-
     def _own_peer_ids(self) -> set:
         return {endpoint.session.peer_id for endpoint in self._endpoints.values()}
 
@@ -277,13 +249,13 @@ class PeerBridge:
     def _render_sessions(self, *, problem: str = "", matched: int = 0) -> str:
         peers = self._live_sessions()
         if not peers:
-            # Naming the directory is the only way an AGENTICA_HOME / OS-user
-            # mismatch between the gateway and the CLI becomes visible: the
-            # symptom is identical to having no session open.
+            # Naming the directory is the only way an AGENTICA_HOME mismatch
+            # between the gateway and the CLI becomes visible: the symptom is
+            # identical to having no session open.
             return (
-                f"No live agentica CLI session found under {peers_root()}. "
-                "Open one, or check that the gateway runs as the same user with "
-                f"the same AGENTICA_HOME.\n\n{USAGE}"
+                f"No live agentica CLI session found on this machine "
+                f"(searched {peers_root()}). Open one, or check that the "
+                f"gateway and the CLI share the same AGENTICA_HOME.\n\n{USAGE}"
             )
         lines: List[str] = []
         if problem:

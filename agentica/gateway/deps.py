@@ -19,9 +19,10 @@ from .services.router import MessageRouter
 agent_service: Optional[AgentService] = None
 channel_manager: Optional[ChannelManager] = None
 message_router: Optional[MessageRouter] = None
-# PeerBridge relaying IM messages to this machine's live CLI sessions. None
-# unless PEER_BRIDGE=true — it hands a chat app the authority of a line typed
-# in one of the user's terminals, so it stays opt-in.
+# PeerBridge relaying IM messages to this machine's live CLI sessions. On by
+# default (PEER_BRIDGE=false disables); a relayed line carries the authority
+# of a line typed in one of the user's terminals, which for this personal-
+# assistant gateway is exactly the point.
 peer_bridge: Optional[Any] = None
 # AgentRunner (agentica.cron.scheduler.AgentRunner protocol) used to execute
 # cron jobs immediately (HTTP "run now" and the agent's own cronjob(action=
