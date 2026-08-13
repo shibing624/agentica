@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from time import perf_counter
 from typing import Optional
 
 from agentica.cli.context_usage import measure_context
+from agentica.cli.rewind import extract_rewrite_paths, get_turn_checkpointer
 from agentica.cli.display import (
     StreamDisplayManager,
     display_agent_execution_error,
@@ -283,11 +285,26 @@ def _process_stream_response(
     tui_state["_turn_goal_tokens_baseline"] = _goal_tokens_baseline
     tui_state["_turn_usage_entry_baseline"] = _usage_entry_baseline
 
+    turn_checkpointer = None
     try:
         from agentica.run_config import RunConfig
         from agentica.run_context import RunSource
 
         run_config = RunConfig(stream_intermediate_steps=True, source=RunSource.cli)
+
+        # ── Per-turn rewind checkpoint ─────────────────────────────
+        # Open a turn checkpoint BEFORE the run: msg_index = the conversation
+        # length right now, so a later /rewind truncates back to here. The
+        # file-tool snapshot happens below on each TOOL_STARTED event, before
+        # the tool actually writes (Phase 1 yields started events, Phase 2
+        # executes — see Model._run_function_calls_impl).
+        turn_checkpointer = get_turn_checkpointer(
+            tui_state, current_agent.session_id or "default"
+        )
+        turn_no = tui_state.get("turn_no", 0) + 1
+        wm = current_agent.working_memory
+        msg_index = len(wm.messages) if wm is not None else 0
+        turn_checkpointer.begin_turn(turn_no, prompt=final_input, msg_index=msg_index)
 
         # Permission enforcement lives on the Agent itself now (tool_config.
         # permission_mode + sandbox_config, see agentica.agent.permissions) —
@@ -384,6 +401,16 @@ def _process_stream_response(
                                 tool_args = json.loads(tool_args)
                             except ValueError:
                                 tool_args = {"args": tool_args}
+
+                        # Snapshot pre-edit content of any file this tool will
+                        # write, before Phase 2 execution mutates it. first-touch
+                        # dedup in TurnCheckpointer means repeated edits to the
+                        # same file in one turn still yield one turn-start capture.
+                        for path in extract_rewrite_paths(tool_name, tool_args, work_dir or os.getcwd()):
+                            try:
+                                turn_checkpointer.snapshot(path)
+                            except OSError:
+                                pass
 
                         _tool_seq.on_start(
                             tool_info.get("tool_call_id"), tool_name
@@ -546,6 +573,15 @@ def _process_stream_response(
         _set_phase("idle")
         display_agent_execution_error(con, e)
     finally:
+        # Finalize the per-turn rewind checkpoint so /rewind can roll this turn
+        # back. Runs on success, cancel, and error alike — a turn that touched
+        # files still deserves an undo point even if it failed midway.
+        if turn_checkpointer is not None:
+            try:
+                turn_checkpointer.finalize_turn()
+            except Exception as e:
+                logger.warning(f"Could not finalize turn checkpoint: {e}")
+
         # Clear the live-event callback so it doesn't outlive this run.
         current_agent._event_callback = None
         # Strip image payloads from history: the turn already consumed them

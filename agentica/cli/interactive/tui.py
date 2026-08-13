@@ -319,6 +319,13 @@ def _setup_tui(
             )
         event.app.invalidate()
 
+    @kb.add("escape", "escape")
+    def _rewind_shortcut(event):
+        """Esc-Esc -> run ``/rewind list`` (Claude-Code-style rewind entry)."""
+        if dispatch_cmd is not None:
+            dispatch_cmd("/rewind", "list")
+            event.app.invalidate()
+
     @kb.add("enter")
     def _handle_enter(event):
         raw_text = event.app.current_buffer.text

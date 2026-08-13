@@ -934,25 +934,16 @@ def _cmd_retry(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_undo(ctx: CommandContext, cmd_args: str = ""):
+    """Deprecated: /undo only removed conversation messages, never the files the
+    agent edited. Redirect users to /rewind, which rolls back code + conversation."""
     con = get_console()
+    con.print(
+        "  [yellow]/undo is deprecated — it removed the last exchange but never the "
+        "files the agent edited. Use /rewind to roll back code + conversation.[/yellow]"
+    )
+    from agentica.cli.rewind import get_turn_checkpointer, print_turn_list
+
     agent = ctx.current_agent
-    if not agent:
-        con.print("[yellow]No conversation history.[/yellow]")
-        return
-    wm = agent.working_memory
-    if not wm.messages:
-        con.print("[yellow]No messages to undo.[/yellow]")
-        return
-    if wm.runs:
-        wm.runs.pop()
-    removed = 0
-    while wm.messages and wm.messages[-1].role in ("assistant", "tool"):
-        wm.messages.pop()
-        removed += 1
-    if wm.messages and wm.messages[-1].role == "user":
-        wm.messages.pop()
-        removed += 1
-    if removed > 0:
-        con.print(f"  [green]Undone last exchange ({removed} messages removed).[/green]")
-    else:
-        con.print("[yellow]Nothing to undo.[/yellow]")
+    session_id = (agent.session_id if agent is not None else None) or "default"
+    tc = get_turn_checkpointer(ctx.tui_state or {}, session_id)
+    print_turn_list(con, tc.list_turns())

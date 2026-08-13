@@ -20,7 +20,6 @@ from agentica.cli.commands.model_config import (
 from agentica.cli.commands.runtime import (
     _cmd_background,
     _cmd_btw,
-    _cmd_checkpoint,
     _cmd_exit,
     _cmd_fork,
     _cmd_help,
@@ -29,6 +28,7 @@ from agentica.cli.commands.runtime import (
     _cmd_paste,
     _cmd_ps,
     _cmd_queue,
+    _cmd_rewind,
     _cmd_send_message,
     _cmd_steer,
     _cmd_stop,
@@ -64,7 +64,7 @@ COMMAND_REGISTRY = {
     "/export": (_cmd_export, "Save conversation to JSON"),
     "/save": (_cmd_export, "Save conversation to JSON (alias)"),
     "/retry": (_cmd_retry, "Retry the last message (resend to agent)"),
-    "/undo": (_cmd_undo, "Remove the last user/assistant exchange"),
+    "/undo": (_cmd_undo, "Deprecated — use /rewind (code + conversation rollback)"),
     "/compact": (_cmd_compact, "Compact context (summarize history)"),
     "/rename": (_cmd_rename, "Rename the current session for easy resume"),
     "/resume": (_cmd_resume, "Resume by number, name, or id prefix"),
@@ -86,9 +86,9 @@ COMMAND_REGISTRY = {
     "/send-message": (_cmd_send_message, "Send a message yourself: /send-message <session> <text>"),
     "/send": (_cmd_send_message, "Send a message to a session (alias for /send-message)"),
     "/fork": (_cmd_fork, "Branch into a new session: /fork [list|n|uuid]"),
-    "/checkpoint": (
-        _cmd_checkpoint,
-        "Durable file snapshots: list | create <label> <path...> | diff <id> | restore <id>",
+    "/rewind": (
+        _cmd_rewind,
+        "Rewind code + conversation to a previous turn: list | <n> [--yes]",
     ),
     # Model & Config
     "/model": (_cmd_model, "View or switch model"),

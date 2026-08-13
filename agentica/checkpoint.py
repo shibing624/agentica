@@ -31,6 +31,7 @@ import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
@@ -56,10 +57,32 @@ class Checkpoint:
     created_at: str
     files: List[CheckpointFile] = field(default_factory=list)
     dir: Optional[Path] = None
+    # Per-turn aggregation metadata (Reasonix Checkpoint.Turn/Prompt/MsgIndex).
+    # Optional/None for plain ``create()`` checkpoints; populated by TurnCheckpointer.
+    turn: Optional[int] = None
+    msg_index: Optional[int] = None
+    prompt: str = ""
 
     @property
     def paths(self) -> List[str]:
         return [f.path for f in self.files]
+
+
+class RewindScope(str, Enum):
+    """What a rewind restores (Reasonix Rewind scope: Code / Conversation / Both)."""
+    CODE = "code"
+    CONVERSATION = "conversation"
+    BOTH = "both"
+
+
+@dataclass
+class RewindResult:
+    """Outcome of a turn rewind."""
+    turn: int
+    checkpoint_id: str
+    scope: RewindScope
+    restored_paths: List[str] = field(default_factory=list)
+    msg_index: Optional[int] = None
 
 
 class CheckpointManager:
@@ -116,6 +139,52 @@ class CheckpointManager:
         logger.debug(f"Created checkpoint {checkpoint_id} ({label}) with {len(entries)} file(s)")
         return ckpt
 
+    def create_from_captures(
+        self,
+        label: str,
+        captures: dict,
+        *,
+        turn: Optional[int] = None,
+        msg_index: Optional[int] = None,
+        prompt: str = "",
+    ) -> Checkpoint:
+        """Persist a checkpoint from already-captured pre-edit content.
+
+        ``captures`` maps absolute path -> content string (or ``None`` for a
+        path that did not exist when first touched). Unlike :meth:`create`,
+        this does NOT re-read disk: the caller captured first-touch content
+        before edits, so a per-turn aggregator can snapshot on touch and flush
+        at finalize without the capture time moving.
+        """
+        checkpoint_id = self._new_id()
+        ckpt_dir = self._checkpoint_dir(checkpoint_id)
+        files_dir = ckpt_dir / "files"
+        files_dir.mkdir(parents=True, exist_ok=True)
+
+        entries: List[CheckpointFile] = []
+        for idx, (raw_path, content) in enumerate(captures.items()):
+            abs_path = str(Path(raw_path).expanduser().resolve())
+            if content is not None:
+                stored_name = f"{idx}.snap"
+                (files_dir / stored_name).write_text(content, encoding="utf-8")
+                entries.append(CheckpointFile(path=abs_path, existed=True, stored_name=stored_name))
+            else:
+                entries.append(CheckpointFile(path=abs_path, existed=False, stored_name=None))
+
+        ckpt = Checkpoint(
+            id=checkpoint_id,
+            label=label,
+            created_at=datetime.now().isoformat(timespec="seconds"),
+            files=entries,
+            dir=ckpt_dir,
+            turn=turn,
+            msg_index=msg_index,
+            prompt=prompt,
+        )
+        self._write_manifest(ckpt)
+        logger.debug(f"Created checkpoint {checkpoint_id} ({label}) from {len(entries)} capture(s)")
+        return ckpt
+
     def _write_manifest(self, ckpt: Checkpoint) -> None:
         manifest = {
             "id": ckpt.id,
@@ -126,6 +195,12 @@ class CheckpointManager:
                 for f in ckpt.files
             ],
         }
+        if ckpt.turn is not None:
+            manifest["turn"] = ckpt.turn
+        if ckpt.msg_index is not None:
+            manifest["msg_index"] = ckpt.msg_index
+        if ckpt.prompt:
+            manifest["prompt"] = ckpt.prompt
         with open(self._manifest_path(ckpt.id), "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
 
@@ -148,6 +223,9 @@ class CheckpointManager:
                 for f in data.get("files", [])
             ],
             dir=self._checkpoint_dir(checkpoint_id),
+            turn=data.get("turn"),
+            msg_index=data.get("msg_index"),
+            prompt=data.get("prompt", ""),
         )
 
     def list(self) -> List[Checkpoint]:
@@ -239,3 +317,124 @@ class CheckpointManager:
         for ckpt in items:
             self.delete(ckpt.id)
         return len(items)
+
+
+class TurnCheckpointer:
+    """Per-turn aggregating checkpoint layer (Reasonix ``Store.Begin``/``Snapshot`` 移植).
+
+    Wraps :class:`CheckpointManager` with the three designs that de-risk per-edit
+    snapshots: **per-turn aggregation** (one checkpoint per user turn), **path
+    dedup** (first touch wins, subsequent touches in the same turn are ignored),
+    and **first-touch capture** (content is read at the moment of first touch,
+    so rewinding restores the turn-start state, not some mid-turn state).
+
+    This is a turn-boundary API for callers that know when a user turn begins
+    and ends (CLI prompt loop, ``Runner``, a tool wrapper). It is intentionally
+    NOT wired into ``BuiltinFileTool``'s edit path, for the same reason the base
+    primitive isn't: auto-capture belongs to a turn loop, not a per-edit tool.
+
+    Usage::
+
+        tc = TurnCheckpointer(session_id="sess")
+        tc.begin_turn(1, "refactor a.py", msg_index=12)
+        tc.snapshot("/abs/path/a.py")   # first touch -> captured
+        tc.snapshot("/abs/path/a.py")   # same turn -> ignored (dedup)
+        tc.finalize_turn()
+        tc.rewind(1, RewindScope.CODE)  # restore code to turn 1 start
+    """
+
+    def __init__(self, session_id: Optional[str] = None, root_dir: Optional[str] = None):
+        self._cm = CheckpointManager(session_id=session_id, root_dir=root_dir)
+        self.session_id = self._cm.session_id
+        self._turn: Optional[int] = None
+        self._prompt: str = ""
+        self._msg_index: Optional[int] = None
+        self._captures: dict = {}
+        self._seen: set = set()
+
+    def begin_turn(self, turn: int, prompt: str = "", msg_index: Optional[int] = None) -> None:
+        """Open a new turn, finalizing any in-progress turn first."""
+        if self._turn is not None:
+            self.finalize_turn()
+        self._turn = turn
+        self._prompt = prompt
+        self._msg_index = msg_index
+        self._captures = {}
+        self._seen = set()
+
+    def snapshot(self, path: str) -> bool:
+        """Capture first-touch pre-edit content of ``path`` for the current turn.
+
+        Returns True if this was the first touch (captured), False if the path
+        was already captured this turn or no turn is active (no-op).
+        """
+        if self._turn is None:
+            return False
+        abs_path = str(Path(path).expanduser().resolve())
+        if abs_path in self._seen:
+            return False
+        self._seen.add(abs_path)
+        src = Path(abs_path)
+        if src.exists() and src.is_file():
+            try:
+                self._captures[abs_path] = src.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                # Treat unreadable as a creation: capture None -> restore deletes.
+                self._captures[abs_path] = None
+        else:
+            self._captures[abs_path] = None
+        return True
+
+    def finalize_turn(self) -> Optional[Checkpoint]:
+        """Persist the current turn's captures as a checkpoint. No-op if idle."""
+        if self._turn is None:
+            return None
+        label = f"turn {self._turn}"
+        ckpt = self._cm.create_from_captures(
+            label,
+            self._captures,
+            turn=self._turn,
+            msg_index=self._msg_index,
+            prompt=self._prompt,
+        )
+        self._turn = None
+        self._prompt = ""
+        self._msg_index = None
+        self._captures = {}
+        self._seen = set()
+        return ckpt
+
+    def list_turns(self) -> List[Checkpoint]:
+        """All finalized turn checkpoints, newest first."""
+        return [c for c in self._cm.list() if c.turn is not None]
+
+    def rewind(self, turn: int, scope: RewindScope = RewindScope.CODE) -> RewindResult:
+        """Rewind to the start of ``turn``.
+
+        ``RewindScope.CODE`` restores files; ``CONVERSATION`` returns the
+        ``msg_index`` conversation-rewind boundary (no file writes); ``BOTH``
+        does both. Raises ``ValueError`` if no checkpoint exists for ``turn``.
+        """
+        target = None
+        for ckpt in self._cm.list():
+            if ckpt.turn == turn:
+                target = ckpt
+                break
+        if target is None:
+            raise ValueError(f"No checkpoint for turn {turn}")
+
+        restored: List[str] = []
+        if scope in (RewindScope.CODE, RewindScope.BOTH):
+            restored = self._cm.restore(target.id)
+
+        msg_index = None
+        if scope in (RewindScope.CONVERSATION, RewindScope.BOTH):
+            msg_index = target.msg_index
+
+        return RewindResult(
+            turn=turn,
+            checkpoint_id=target.id,
+            scope=scope,
+            restored_paths=restored,
+            msg_index=msg_index,
+        )

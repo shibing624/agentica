@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Runtime slash commands: queue, steer, bg, fork, peers, checkpoint
+@description: Runtime slash commands: queue, steer, bg, fork, peers, rewind
 """
 
 from __future__ import annotations
@@ -450,25 +450,6 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
 
 
 
-def _checkpoint_manager(ctx: CommandContext):
-    """Build a disk-backed CheckpointManager scoped to the current session."""
-    from agentica.checkpoint import CheckpointManager
-
-    session_id = ctx.current_agent.session_id or "default"
-    return CheckpointManager(session_id=session_id)
-
-
-
-def _resolve_ckpt_path(ctx: CommandContext, raw: str) -> str:
-    """Resolve a user-supplied path against the agent's work_dir."""
-    p = os.path.expanduser(raw)
-    if os.path.isabs(p):
-        return p
-    base = ctx.current_agent.work_dir or os.getcwd()
-    return os.path.join(str(base), p)
-
-
-
 def _work_dir_root(ctx: CommandContext) -> Path:
     return Path(ctx.current_agent.work_dir or os.getcwd()).expanduser().resolve()
 
@@ -483,87 +464,80 @@ def _is_inside_work_dir(path: str, root: Path) -> bool:
 
 
 
-def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
-    """Manual, durable, multi-file checkpoints for the current session.
+def _cmd_rewind(ctx: CommandContext, cmd_args: str = ""):
+    """Rewind code and conversation to the start of a previous turn.
 
-    /checkpoint [list]                 -> list checkpoints (newest first)
-    /checkpoint create <label> <path...> -> snapshot files' current content
-    /checkpoint diff <id>              -> unified diff snapshot -> current
-    /checkpoint restore <id>           -> roll files back to the snapshot
+    /rewind [list]                -> list rewindable turns (newest first)
+    /rewind <n>                   -> preview what rewinding turn <n> restores
+    /rewind <n> --yes             -> rewind code + conversation to turn <n> start
     """
     con = get_console()
-    cm = _checkpoint_manager(ctx)
+    from agentica.checkpoint import RewindScope
+    from agentica.cli.rewind import get_turn_checkpointer, print_turn_list, truncate_conversation
+
+    agent = ctx.current_agent
+    session_id = agent.session_id or "default"
+    tc = get_turn_checkpointer(ctx.tui_state or {}, session_id)
     args = cmd_args.strip()
     try:
         parts = shlex.split(args)
     except ValueError as exc:
-        con.print(f"  [red]Invalid checkpoint command: {exc}[/red]")
+        con.print(f"  [red]Invalid rewind command: {exc}[/red]")
         return
     sub = parts[0].lower() if parts else "list"
 
-    def _find(cid_prefix: str):
-        ck = cm.get(cid_prefix)
-        if ck is not None:
-            return ck
-        matches = [c for c in cm.list() if c.id.startswith(cid_prefix)]
-        return matches[0] if len(matches) == 1 else None
+    turns = tc.list_turns()
 
     if sub == "list":
-        items = cm.list()
-        if not items:
-            con.print("  [dim]No checkpoints. Create one: /checkpoint create <label> <path...>[/dim]")
-            return
-        con.print(f"  [cyan]Checkpoints ({len(items)}):[/cyan]")
-        for c in items:
-            con.print(f"    {c.id[:18]}  [dim]{c.created_at}[/dim]  {c.label}  ([dim]{len(c.files)} file(s)[/dim])")
+        print_turn_list(con, turns)
         return
 
-    if sub == "create":
-        if len(parts) < 3:
-            con.print("  [dim]Usage: /checkpoint create <label> <path> [more paths...][/dim]")
-            return
-        label = parts[1]
-        paths = [_resolve_ckpt_path(ctx, p) for p in parts[2:]]
-        ck = cm.create(label, paths)
-        con.print(f"  [green]Created checkpoint {ck.id[:18]} ({label}) with {len(ck.files)} file(s).[/green]")
-        return
-
-    if sub in ("diff", "restore"):
+    if sub == "rewind":
         if len(parts) < 2:
-            con.print(f"  [dim]Usage: /checkpoint {sub} <id>{' --yes' if sub == 'restore' else ''}[/dim]")
+            con.print("  [dim]Usage: /rewind <n> \\[--yes][/dim]")
             return
-        ck = _find(parts[1])
-        if ck is None:
-            con.print(f"  [red]No checkpoint matching '{parts[1]}'.[/red]")
-            return
-        if sub == "diff":
-            con.print(cm.diff(ck.id))
-            return
-
-        root = _work_dir_root(ctx)
-        outside = [f.path for f in ck.files if not _is_inside_work_dir(f.path, root)]
-        if outside:
-            con.print(f"  [red]Refusing to restore checkpoint files outside work_dir: {root}[/red]")
-            for path in outside[:5]:
-                con.print(f"    [dim]{path}[/dim]")
-            return
-
-        diff_text = cm.diff(ck.id)
-        deletions = [f.path for f in ck.files if not f.existed and Path(f.path).exists()]
-        if "--yes" not in parts:
-            con.print(diff_text)
-            if deletions:
-                con.print("  [yellow]Restore will delete file(s) created after the checkpoint:[/yellow]")
-                for path in deletions:
-                    con.print(f"    [dim]{path}[/dim]")
-            con.print("  [yellow]Re-run with --yes to restore this checkpoint.[/yellow]")
-            return
-
-        restored = cm.restore(ck.id)
-        con.print(f"  [green]Restored {len(restored)} file(s) from {ck.id[:18]} ({ck.label}).[/green]")
+        turn_str = parts[1]
+    elif sub.isdigit():
+        turn_str = sub
+    else:
+        con.print("  [dim]Usage: /rewind \\[list] | <n> \\[--yes][/dim]")
+        return
+    try:
+        turn = int(turn_str)
+    except ValueError:
+        con.print(f"  [red]Invalid turn number '{turn_str}'.[/red]")
+        return
+    target = next((c for c in turns if c.turn == turn), None)
+    if target is None:
+        con.print(f"  [red]No checkpoint for turn {turn}.[/red]")
         return
 
-    con.print("  [dim]Usage: /checkpoint list | create <label> <path...> | diff <id> | restore <id> --yes[/dim]")
+    root = _work_dir_root(ctx)
+    outside = [f.path for f in target.files if not _is_inside_work_dir(f.path, root)]
+    if outside:
+        con.print(f"  [red]Refusing to rewind files outside work_dir: {root}[/red]")
+        for path in outside[:5]:
+            con.print(f"    [dim]{path}[/dim]")
+        return
+
+    if "--yes" not in parts:
+        con.print(f"  [yellow]Rewind to turn {turn} start:[/yellow]")
+        if target.prompt:
+            con.print(f"    prompt: {target.prompt.strip()[:80]}")
+        con.print(f"    files:  {len(target.files)}")
+        if target.msg_index is not None:
+            con.print(f"    conversation: truncates to before message {target.msg_index}")
+        con.print("  [yellow]Re-run with --yes to rewind code + conversation.[/yellow]")
+        return
+
+    result = tc.rewind(turn, RewindScope.BOTH)
+    removed = truncate_conversation(agent, result.msg_index)
+    con.print(
+        f"  [green]Rewound to turn {turn} start: "
+        f"{len(result.restored_paths)} file(s) restored, "
+        f"{removed} message(s) removed.[/green]"
+    )
+    return
 
 
 

@@ -52,6 +52,7 @@ class McpTool(Tool):
             sse_timeout: float = 5.0,
             sse_read_timeout: float = 300.0,
             terminate_on_close: bool = True,
+            defer_schema: bool = False,
     ):
         """
         Initialize the MCP toolkit.
@@ -68,6 +69,12 @@ class McpTool(Tool):
             sse_timeout: HTTP request timeout for SSE/StreamableHttp (default: 5 seconds)
             sse_read_timeout: SSE/StreamableHttp connection timeout (default: 300 seconds)
             terminate_on_close: Whether to terminate on close (StreamableHttp only, default: True)
+            defer_schema: If True, MCP functions are registered as deferred — they
+                stay executable in the host registry but do NOT expand into the
+                top-level provider tool schema. Pair with UseCapabilityTool so the
+                model can still discover/call them via the stable use_capability
+                proxy, keeping the prompt cache prefix stable across MCP inventory
+                changes. Default False (current behaviour: expand into schema).
         """
         super().__init__(name="McpTool")
 
@@ -161,6 +168,7 @@ class McpTool(Tool):
 
         self.include_tools = include_tools
         self.exclude_tools = exclude_tools or []
+        self.defer_schema = defer_schema
 
         # Store the server configuration separately for tool functions to use directly
         self._server_config = {
@@ -428,6 +436,7 @@ class McpTool(Tool):
                         parameters=tool_params,
                         entrypoint=entrypoint,
                         skip_entrypoint_processing=True,
+                        deferred=self.defer_schema,
                         origin=ToolOrigin(
                             type="mcp",
                             provider_name=self.name,

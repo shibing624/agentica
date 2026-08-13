@@ -400,7 +400,14 @@ from agentica.tools.builtin import (
 from agentica.compression import CompressionManager
 
 # ── Checkpoint / rollback primitive ──
-from agentica.checkpoint import CheckpointManager, Checkpoint, CheckpointFile
+from agentica.checkpoint import (
+    CheckpointManager,
+    Checkpoint,
+    CheckpointFile,
+    TurnCheckpointer,
+    RewindScope,
+    RewindResult,
+)
 
 # ── Token counting ──
 from agentica.utils.tokens import (
