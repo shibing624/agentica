@@ -51,6 +51,30 @@ class TestLayout:
     def test_a_worktree_is_a_sibling_of_the_main_checkout(self, repo):
         assert worktrees.worktree_path(str(repo), "docs") == str(repo.parent / "proj-docs")
 
+    def test_an_absolute_worktree_root_namespaces_by_repository(self, repo, tmp_path, monkeypatch):
+        """For a parent directory holding twenty repos, or one that is not
+        writable (a shared mount)."""
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: str(tmp_path / "wt"))
+
+        assert worktrees.worktree_path(str(repo), "docs") == str(tmp_path / "wt" / "proj" / "docs")
+
+    def test_a_relative_worktree_root_resolves_inside_the_checkout(self, repo, monkeypatch):
+        """Supported, but not the default: a worktree under an ignored directory
+        is in range of `git clean -xdff` in the main checkout."""
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: ".agentica/worktrees")
+
+        assert worktrees.worktree_path(str(repo), "docs") == str(
+            repo / ".agentica/worktrees" / "proj" / "docs"
+        )
+
+    def test_a_configured_root_is_created_and_used(self, repo, tmp_path, monkeypatch):
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: str(tmp_path / "wt"))
+
+        wt = ensure(str(repo), "docs")
+
+        assert Path(wt.path) == tmp_path / "wt" / "proj" / "docs"
+        assert (Path(wt.path) / "a.py").exists()
+
     def test_the_branch_is_prefixed(self, repo):
         assert worktrees.branch_for("docs") == "wt/docs"
 
@@ -129,6 +153,15 @@ class TestEnsure:
 
 
 class TestLinkedFiles:
+    def test_the_linked_list_is_configurable(self, repo, monkeypatch):
+        (repo / ".envrc").write_text("layout python\n")
+        monkeypatch.setattr(worktrees, "configured_links", lambda: (".env", ".envrc"))
+
+        wt = ensure(str(repo), "docs")
+
+        assert (Path(wt.path) / ".envrc").is_symlink()
+        assert (Path(wt.path) / ".env").is_symlink()
+
     def test_env_is_symlinked_into_a_new_worktree(self, repo):
         """A fresh worktree without .env starts a session that cannot reach a
         model — and the symptom looks nothing like the cause."""

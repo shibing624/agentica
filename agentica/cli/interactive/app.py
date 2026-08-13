@@ -29,7 +29,7 @@ from agentica.cli.commands.session import (
     display_resumed_transcript,
     hydrate_resumed_session,
 )
-from agentica.cli.session_resume import prepare_startup_resume
+from agentica.cli.session_resume import enter_work_dir, prepare_startup_resume
 from agentica.cli.display import (
     display_peer_messages,
     display_user_message,
@@ -317,6 +317,29 @@ def run_interactive(
             )
         else:
             set_project_profile(agent_config.get("work_dir") or os.getcwd(), resume_profile)
+
+    # `--worktree <task>`: start this session in its own checkout. Settled after
+    # resume (which may have moved us) and before anything derives state from the
+    # directory — the peer record, the profile and the session storage all read
+    # it below. A failure ends the session instead of falling back to the shared
+    # checkout: someone who asked for isolation is worse off silently editing the
+    # same files as three other sessions.
+    requested_worktree = agent_config.pop("worktree", None)
+    if requested_worktree:
+        from agentica.worktrees import WorktreeError, ensure as ensure_worktree
+
+        try:
+            bound = ensure_worktree(agent_config.get("work_dir") or os.getcwd(), requested_worktree)
+        except WorktreeError as exc:
+            get_console().print(f"[bold red]--worktree {requested_worktree}: {exc}[/bold red]")
+            return
+        if not enter_work_dir(bound.path):
+            get_console().print(f"[bold red]Cannot enter {bound.path}[/bold red]")
+            return
+        agent_config["work_dir"] = bound.path
+        get_console().print(
+            f"[dim]Worktree {bound.branch_short}: {bound.path}[/dim]"
+        )
 
     peer_cwd = agent_config.get("work_dir") or os.getcwd()
     peer_user_id = agent_config.get("user_id") or (workspace.user_id if workspace else None)

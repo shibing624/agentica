@@ -186,6 +186,9 @@ def main():
         ),
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
+        # Resolved by the interactive app after `resume` has settled the
+        # directory, because both compete to decide where this session works.
+        "worktree": args.worktree,
         "enable_experience_capture": not args.no_experience,
         "enable_skill_upgrade": args.enable_skill_upgrade,
         "skill_upgrade_mode": args.skill_upgrade_mode,

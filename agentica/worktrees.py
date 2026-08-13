@@ -46,8 +46,29 @@ from typing import Dict, List, Optional, Sequence, Tuple
 BRANCH_PREFIX = "wt/"
 
 # Files git ignores but a working session needs. Symlinked (not copied) so a
-# rotated key or a new variable reaches every worktree at once.
+# rotated key or a new variable reaches every worktree at once, and so a secret
+# exists in one place on disk. Override with `worktree.link` in config.yaml.
 LINKED_PATHS: Tuple[str, ...] = (".env",)
+
+# Where worktrees are created. Unset means "next to the main checkout"
+# (``../<repo>-<task>``), which is what a human types by hand and what they can
+# cd into. Two situations need something else, and both are the user's to
+# decide rather than ours to guess:
+#
+#   * a parent directory holding twenty repositories, where five worktrees each
+#     is clutter — point this at one directory and get
+#     ``<root>/<repo>/<task>``;
+#   * a shared mount whose parent is not writable.
+#
+# A *relative* value resolves inside the main checkout (e.g.
+# ``.agentica/worktrees``, which is what Claude Code does). That works, but know
+# what it costs before choosing it: a worktree under an ignored directory is in
+# range of ``git clean -xdff`` run in the main checkout, which deletes it —
+# including whatever another session had not committed yet. Verified, not
+# theorised: git's own dry-run reports the whole tree as removable. These
+# worktrees are meant to outlive tasks, so that trade is off by default.
+ROOT_SETTING = "worktree.root"
+LINK_SETTING = "worktree.link"
 
 DEFAULT_BRANCHES = ("main", "master")
 
@@ -149,9 +170,48 @@ def default_base(cwd: str) -> str:
 
 
 def worktree_path(cwd: str, name: str) -> str:
-    """Where the worktree for ``name`` lives: a sibling of the main checkout."""
+    """Where the worktree for ``name`` lives.
+
+    Default: a sibling of the main checkout, ``../<repo>-<task>``. With
+    ``worktree.root`` set, ``<root>/<repo>/<task>`` — absolute anywhere on the
+    machine, relative inside the main checkout (see ``ROOT_SETTING``).
+    """
     root = Path(main_root(cwd))
-    return str(root.parent / f"{root.name}-{slug(name)}")
+    configured = _configured_root()
+    if not configured:
+        return str(root.parent / f"{root.name}-{slug(name)}")
+    base = Path(os.path.expanduser(configured))
+    if not base.is_absolute():
+        base = root / base
+    return str(base / root.name / slug(name))
+
+
+def _configured_root() -> str:
+    """``worktree.root`` from config.yaml, or "" when unset."""
+    try:
+        from agentica.global_config import get_setting
+
+        return str(get_setting(ROOT_SETTING, "") or "").strip()
+    except Exception:
+        # Worktrees must keep working when config.yaml is missing or broken.
+        return ""
+
+
+def configured_links() -> Tuple[str, ...]:
+    """``worktree.link`` from config.yaml, or the default (``.env``)."""
+    try:
+        from agentica.global_config import get_setting
+
+        configured = get_setting(LINK_SETTING, None)
+    except Exception:
+        configured = None
+    if isinstance(configured, str):
+        configured = [part.strip() for part in configured.split(",")]
+    if isinstance(configured, (list, tuple)):
+        names = tuple(str(item).strip() for item in configured if str(item).strip())
+        if names:
+            return names
+    return LINKED_PATHS
 
 
 def branch_for(name: str) -> str:
@@ -208,14 +268,14 @@ def find(cwd: str, name: str) -> Optional[Worktree]:
     return None
 
 
-def link_ignored(src_root: str, dst_root: str, names: Sequence[str] = LINKED_PATHS) -> List[str]:
+def link_ignored(src_root: str, dst_root: str, names: Optional[Sequence[str]] = None) -> List[str]:
     """Symlink gitignored-but-needed files from the main checkout.
 
     Skips what is absent in the source or already present in the target, so it
     is safe to run again on an existing worktree.
     """
     linked: List[str] = []
-    for name in names:
+    for name in names if names is not None else configured_links():
         src = Path(src_root) / name
         dst = Path(dst_root) / name
         if not src.exists() or dst.exists() or dst.is_symlink():
@@ -236,7 +296,7 @@ def ensure(
     name: str,
     *,
     base: Optional[str] = None,
-    link: Sequence[str] = LINKED_PATHS,
+    link: Optional[Sequence[str]] = None,
 ) -> Worktree:
     """Return the worktree for ``name``, creating it only if it does not exist.
 
@@ -260,6 +320,19 @@ def ensure(
         raise WorktreeError(
             f"{path} already exists but is not a worktree of this repository; "
             "move it aside or pick another name"
+        )
+    parent = Path(path).parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise WorktreeError(
+            f"cannot create {parent} ({e}); set `{ROOT_SETTING}` in "
+            "~/.agentica/config.yaml to a directory you can write to"
+        ) from e
+    if not os.access(parent, os.W_OK):
+        raise WorktreeError(
+            f"{parent} is not writable; set `{ROOT_SETTING}` in "
+            "~/.agentica/config.yaml to a directory you can write to"
         )
 
     base_ref = base or default_base(cwd)

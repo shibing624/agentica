@@ -414,6 +414,16 @@ def parse_args():
     )
     parser.add_argument("--work_dir", type=str, help="Working directory for file operations", default=None)
     parser.add_argument(
+        "--worktree",
+        type=str,
+        default=None,
+        help=(
+            "Work in a per-task git worktree of this repository, created on first "
+            "use and reused after (sibling directory, branch wt/<name>). Lets "
+            "several sessions edit one repo without overwriting each other."
+        ),
+    )
+    parser.add_argument(
         "--tools",
         nargs="*",
         choices=list(TOOL_REGISTRY.keys()),
