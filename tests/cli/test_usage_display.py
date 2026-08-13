@@ -201,6 +201,40 @@ def test_usage_command_prints_real_provider_cache_breakdown(monkeypatch):
     assert "41,100" in out
 
 
+def test_usage_command_omits_net_new_row_when_nothing_re_read(monkeypatch):
+    # With cache_read == 0, net new equals billed total, so the extra row would
+    # just repeat the next line under a second label.
+    tracker = CostTracker()
+    tracker.record("gpt-4o", input_tokens=1_000, output_tokens=500)
+    usage = Usage()
+    usage.add(RequestUsage(input_tokens=1_000, output_tokens=500, total_tokens=1_500))
+    agent = SimpleNamespace(
+        run_response=SimpleNamespace(cost_tracker=tracker),
+        model=SimpleNamespace(usage=usage),
+        working_memory=SimpleNamespace(messages=["user"]),
+    )
+    ctx = CommandContext(
+        agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+        current_agent=agent,
+        tui_state={
+            "active_seconds": 5,
+            "cost_usd": tracker.total_cost_usd,
+            "total_api_calls": tracker.turns,
+        },
+    )
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, color_system=None, width=120)
+    monkeypatch.setattr(model_config, "get_console", lambda: console)
+    monkeypatch.setattr(model_config, "_render_context_breakdown", lambda con, agent: None)
+
+    model_config._cmd_usage(ctx)
+
+    out = buf.getvalue()
+    assert "Net new tokens:" not in out
+    assert "Total tokens (billed):" in out
+    assert "1,500" in out
+
+
 def test_format_cost_usd_adaptive_precision():
     assert format_cost_usd(0.004) == "$0.0040"
     assert format_cost_usd(0.04) == "$0.04"

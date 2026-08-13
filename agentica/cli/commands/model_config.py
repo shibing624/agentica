@@ -796,7 +796,7 @@ def _render_context_breakdown(con, agent) -> None:
         f"({breakdown.percent_full:.0f}% full, estimated)[/dim]"
     )
     con.print(f"  {sep}")
-    con.print(f"  Messages:         {len(agent.working_memory.messages)}")
+    con.print(f"  {'Messages:':<24} {len(agent.working_memory.messages):>7}")
     # Bars are shares of what is loaded, so they add up to the whole row of
     # blocks. Scaling to the largest row instead would peg it at full width and
     # read as "this section filled the window".
@@ -887,10 +887,13 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
     if usage.cache_write_tokens > 0:
         con.print(f"  {'  Cache write tokens:':<30} {usage.cache_write_tokens:>12,}")
     con.print(f"  {'Output tokens:':<30} {usage.output_tokens:>12,}")
-    con.print(
-        f"  {'Net new tokens:':<30} {usage.net_new_tokens:>12,}"
-        f"  [dim](fresh + cache write + output)[/dim]"
-    )
+    # Net new == billed total whenever nothing was re-read (cache_read == 0),
+    # so the extra row only earns its place on cache-hit turns.
+    if usage.cache_read_tokens > 0:
+        con.print(
+            f"  {'Net new tokens:':<30} {usage.net_new_tokens:>12,}"
+            f"  [dim](fresh + cache write + output)[/dim]"
+        )
     con.print(f"  {'Total tokens (billed):':<30} {usage.total_tokens:>12,}")
     con.print(f"  {'Turn cost:':<30} ~{format_cost_usd(usage.cost_usd)}")
     con.print(f"  {sep}")
