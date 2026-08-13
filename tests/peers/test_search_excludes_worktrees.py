@@ -81,23 +81,47 @@ class TestSearchSkipsInRepoWorktrees:
 
         assert "code.py" in out
 
-    def test_a_configured_root_name_is_excluded_too(self, repo_with_custom_root, monkeypatch):
-        from agentica import worktrees
-
-        monkeypatch.setattr(worktrees, "_configured_root", lambda: ".worktrees")
-
+    def test_a_name_nobody_configured_is_excluded_too(self, repo_with_custom_root):
+        """A nested worktree does not have to be one of ours: a person (or
+        another agent) typing `git worktree add .worktrees/x` creates the same
+        duplication, which is why git is asked instead of matching names.
+        Observed live in this repository before the fix."""
         out = asyncio.run(_tool(repo_with_custom_root).glob("**/*.py", path="."))
 
         assert out.count("code.py") == 1
         assert ".worktrees" not in out
 
-    def test_an_unconfigured_name_is_not_excluded(self, repo_with_custom_root, monkeypatch):
-        """The set is derived, not a pile of guesses: with no in-repo root
-        configured, `.worktrees` is just a directory and stays visible."""
-        from agentica import worktrees
+    def test_grep_also_skips_a_nested_worktree(self, repo_with_custom_root):
+        out = asyncio.run(
+            _tool(repo_with_custom_root).grep(
+                "MARKER_TOKEN", path=".", output_mode="files_with_matches"
+            )
+        )
 
-        monkeypatch.setattr(worktrees, "_configured_root", lambda: "")
+        assert out.count("code.py") == 1
 
-        out = asyncio.run(_tool(repo_with_custom_root).glob("**/*.py", path="."))
+    def test_a_session_inside_the_nested_worktree_still_sees_its_own_files(
+        self, repo_with_custom_root
+    ):
+        inner = repo_with_custom_root / ".worktrees/docs"
 
-        assert out.count("code.py") == 2
+        out = asyncio.run(_tool(inner).glob("**/*.py", path="."))
+
+        assert "code.py" in out
+
+    def test_a_sibling_worktree_is_not_excluded(self, tmp_path):
+        """Only *nested* copies are the hazard; a sibling worktree is a separate
+        tree nobody searches by accident."""
+        from agentica.worktrees import ensure, nested_worktrees
+
+        root = tmp_path / "codes" / "proj3"
+        root.mkdir(parents=True)
+        _git(root, "init", "-q", "-b", "main")
+        _git(root, "config", "user.email", "t@example.com")
+        _git(root, "config", "user.name", "T")
+        (root / "code.py").write_text("x\n")
+        _git(root, "add", "code.py")
+        _git(root, "commit", "-q", "-m", "first")
+        ensure(str(root), "docs")
+
+        assert nested_worktrees(str(root), ttl=0) == ()

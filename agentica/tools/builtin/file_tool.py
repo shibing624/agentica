@@ -56,23 +56,32 @@ _NOISE_DIRS = frozenset({
 })
 
 
-def _noise_dirs() -> frozenset:
-    """Skipped directory names, including this project's worktree root.
+def _nested_checkouts(base: "Path") -> tuple:
+    """Worktrees of this repository that live under ``base``, from git itself.
 
-    ``.agentica`` is the default in-repo location, but the name is configurable
-    (``settings.worktree.root``), so the set is derived instead of guessed —
-    another session picked ``.worktrees`` for the same job, and a hardcoded list
-    would have silently let that one double every search result.
+    A worktree inside the checkout is a second copy of every file, so searches
+    skip it — see ``agentica.worktrees.nested_worktrees`` for why this is asked
+    of git instead of matched by name. Never the base itself: a session bound to
+    that worktree searches from inside it and must see its own files.
     """
     try:
-        from agentica.worktrees import local_root_names
+        from agentica.worktrees import nested_worktrees
 
-        return _NOISE_DIRS | frozenset(local_root_names())
+        here = os.path.realpath(str(base))
+        return tuple(
+            path for path in nested_worktrees(str(base))
+            if path != here and not here.startswith(path + os.sep)
+        )
     except Exception:
-        return _NOISE_DIRS
+        return ()
 
 
-def _in_noise_dir(path: "Path", base: "Path", noise: Optional[frozenset] = None) -> bool:
+def _in_noise_dir(
+    path: "Path",
+    base: "Path",
+    noise: Optional[frozenset] = None,
+    nested: tuple = (),
+) -> bool:
     """Whether ``path`` sits inside a skipped directory *below* ``base``.
 
     Only the part below the search root counts. A session whose work_dir is
@@ -84,7 +93,12 @@ def _in_noise_dir(path: "Path", base: "Path", noise: Optional[frozenset] = None)
         relative = path.relative_to(base)
     except ValueError:
         relative = path
-    return bool(set(relative.parts).intersection(noise if noise is not None else _NOISE_DIRS))
+    if set(relative.parts).intersection(noise if noise is not None else _NOISE_DIRS):
+        return True
+    if nested:
+        resolved = os.path.realpath(str(path))
+        return any(resolved.startswith(root + os.sep) for root in nested)
+    return False
 
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
@@ -1203,10 +1217,10 @@ class BuiltinFileTool(Tool):
         # Run glob in executor to avoid blocking on large directory trees
         def _glob_sync():
             matches = list(base_path.glob(pattern))
-            noise = _noise_dirs()
+            nested = _nested_checkouts(base_path)
             return sorted(
                 str(m) for m in matches
-                if not _in_noise_dir(m, base_path, noise)
+                if not _in_noise_dir(m, base_path, _NOISE_DIRS, nested)
             )
 
         loop = asyncio.get_event_loop()
@@ -1333,8 +1347,11 @@ class BuiltinFileTool(Tool):
             cmd.extend(["--max-count", str(limit)])
 
         # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
-        for d in sorted(_noise_dirs() - {'.git'}):
+        for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
+        # rg skips gitignored paths, but a nested worktree need not be ignored.
+        for root in _nested_checkouts(base_path):
+            cmd.extend(["--glob", f"!{os.path.relpath(root, str(base_path))}/"])
 
         # Pattern and path
         cmd.append("--")
@@ -1448,8 +1465,11 @@ class BuiltinFileTool(Tool):
             files = list(base_path.glob("**/*"))
 
         # Exclude directories and ignored paths
-        noise = _noise_dirs()
-        files = [f for f in files if f.is_file() and not _in_noise_dir(f, base_path, noise)]
+        nested = _nested_checkouts(base_path)
+        files = [
+            f for f in files
+            if f.is_file() and not _in_noise_dir(f, base_path, _NOISE_DIRS, nested)
+        ]
 
         results = []
         file_counts = {}

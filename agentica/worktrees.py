@@ -203,24 +203,46 @@ def _configured_root() -> str:
         return ""
 
 
-def local_root_names() -> Tuple[str, ...]:
-    """Directory names that hold worktrees *inside* a checkout.
+# Nested-worktree lookups happen on every glob/grep, so they are cached for a
+# few seconds per repository — creating a worktree is rare, searching is not.
+NESTED_CACHE_TTL = 10.0
+_nested_cache: dict = {}
 
-    Search tools exclude these (``file_tool``): with an in-repo root, a full
-    second checkout lives under the project, and a bare ``glob("**/*.py")``
-    otherwise returns every file once per worktree — with an edit landing in the
-    copy as the real hazard. Derived from ``worktree.root`` rather than a
-    hardcoded name, because the name is the user's to choose (``.worktrees``,
-    ``.agentica/worktrees``, ...) and a list of guesses would silently miss it.
+
+def nested_worktrees(cwd: str, *, ttl: float = NESTED_CACHE_TTL) -> Tuple[str, ...]:
+    """Absolute paths of this repository's worktrees that live *inside* it.
+
+    Search tools exclude these (``tools/builtin/file_tool.py``). A worktree under
+    the checkout is a second full copy of the project, so ``glob("**/*.py")``
+    otherwise returns every file once per worktree — and the hazard is not the
+    noise, it is an edit landing in the copy. Observed live in this repository:
+    ``glob("**/peers.py")`` returned ``.worktrees/wechat-media/agentica/peers.py``
+    next to the real one.
+
+    Asked of git rather than derived from ``worktree.root``, because a nested
+    worktree does not have to be one of ours: a person or another agent typing
+    ``git worktree add .worktrees/x`` creates exactly the same duplication, and a
+    list of names we happen to know would silently miss it.
     """
-    configured = _configured_root()
-    if not configured:
-        return ()
-    first = Path(os.path.expanduser(configured))
-    if first.is_absolute():
-        return ()
-    parts = [part for part in first.parts if part not in (".", "")]
-    return (parts[0],) if parts else ()
+    now = time.time()
+    key = os.path.realpath(cwd)
+    cached = _nested_cache.get(key)
+    if cached is not None and now - cached[0] < ttl:
+        return cached[1]
+
+    try:
+        main = os.path.realpath(main_root(cwd))
+        inside = tuple(
+            os.path.realpath(entry.path)
+            for entry in list_worktrees(cwd)
+            if not entry.is_main
+            and os.path.realpath(entry.path).startswith(main + os.sep)
+        )
+    except (WorktreeError, OSError):
+        # Not a repository, no git, a locked index: nothing to exclude.
+        inside = ()
+    _nested_cache[key] = (now, inside)
+    return inside
 
 
 def configured_links() -> Tuple[str, ...]:

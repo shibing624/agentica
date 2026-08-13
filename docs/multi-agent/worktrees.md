@@ -120,9 +120,13 @@ settings:
 - 目录形如 `<repo>/.agentica/worktrees/<任务>`（不再插一层仓库名——仓库已经由位置隐含了）
 - 首次创建时会在 `.agentica/worktrees/.gitignore` 里写一个 `*`，**自我忽略**：`git status`
   干净，且**不动仓库里那个被跟踪的 `.gitignore`**（那是共享文件，工具不该替你改）
-- agentica 自己的 `glob` / `grep` 会跳过 `.agentica`，否则 `glob("**/*.py")` 会把每个文件
-  返回 N+1 份（实测过，真会），而真正危险的不是噪音，是**改到副本那一份**上去；
-  绑定在该 worktree 里工作的会话仍然能看到自己的全部文件（排除只作用于搜索根**以下**的路径）
+- agentica 自己的 `glob` / `grep` 会跳过**仓库内的任何 worktree**（不只是 `.agentica`）：
+  否则 `glob("**/*.py")` 把每个文件返回 N+1 份，而真正危险的不是噪音，是**改到副本那一份**上去。
+  这个排除是**问 git 要的**（`git worktree list`，按仓库缓存 10s），不是按名字猜的——
+  嵌套 worktree 不一定是 agentica 建的：人或另一个 agent 手打
+  `git worktree add .worktrees/x` 会造成一模一样的重复。实测本仓库当时就有
+  `.worktrees/wechat-media`（另一个会话的临时 worktree），`glob("**/peers.py")` 确实返回了
+  它那一份。绑定在该 worktree 里工作的会话仍然看得见自己的全部文件（排除永不包含搜索根自身）
 
 它的优点也是实打实的：不污染父目录、只要仓库可写就能用（共享挂载友好）、删掉仓库时
 worktree 跟着一起走、和 `.cursor/` `.claude/` 同一套心智。
