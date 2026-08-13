@@ -31,6 +31,7 @@ from __future__ import annotations
 import subprocess
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 # A presence tick may ask far more often than the answer can change in a way
@@ -55,6 +56,10 @@ class GitState:
 
     branch: str = ""
     head_sha: str = ""
+    # The repository's shared .git parent (the main checkout). Two sessions in
+    # different worktrees of one repo publish the same value, which is what makes
+    # "we are both editing that file" answerable without asking.
+    repo_root: str = ""
     # What ahead/behind was measured against ("main", "origin/main", ...).
     base_ref: str = ""
     ahead: int = 0
@@ -203,6 +208,8 @@ def _collect_uncached(work_dir: str) -> GitState:
         return GitState()
     branch, upstream, paths = _parse_status(status)
     head = (_git(["rev-parse", "--short", "HEAD"], work_dir) or "").strip()
+    common = (_git(["rev-parse", "--path-format=absolute", "--git-common-dir"], work_dir) or "").strip()
+    repo_root = str(Path(common).parent) if common else ""
 
     base = _base_ref(work_dir, branch, upstream)
     ahead = behind = 0
@@ -219,6 +226,7 @@ def _collect_uncached(work_dir: str) -> GitState:
     return GitState(
         branch=branch,
         head_sha=head,
+        repo_root=repo_root,
         base_ref=base,
         ahead=ahead,
         behind=behind,

@@ -104,6 +104,7 @@ class BuiltinFileTool(Tool):
             sandbox_config=None,
             diagnostics_checker=None,
             consent_callback=None,
+            peer_conflict_checker=None,
     ):
         """
         Initialize BuiltinFileTool.
@@ -130,6 +131,10 @@ class BuiltinFileTool(Tool):
         self._sandbox_config = sandbox_config
         self.diagnostics_checker = diagnostics_checker
         self._consent_callback = consent_callback
+        # Tells the model when another live session already has the file it just
+        # wrote uncommitted (agentica/peer_conflicts.py). Advisory: the write has
+        # already happened, and two sessions on one file is sometimes correct.
+        self._peer_conflict_checker = peer_conflict_checker
         # Paths the user has explicitly approved via request_path_access,
         # overriding sandbox writable_dirs / blocked_paths / sensitive-path
         # guards for the rest of this session. Not persisted across restarts.
@@ -138,18 +143,6 @@ class BuiltinFileTool(Tool):
         # File snapshots for workspace rollback: {abs_path: [content_before_1, ...]}
         # Stores previous file content before each write/edit, supporting undo.
         self._file_snapshots: Dict[str, List[str]] = {}
-
-    def set_work_dir(self, work_dir: str) -> None:
-        """Point relative paths at another directory, mid-session.
-
-        A long-running session that binds itself to a git worktree
-        (``agentica/worktrees.py``) has to take its tools with it — otherwise
-        ``read_file("agentica/peers.py")`` still reads the directory the session
-        started in, and the isolation the worktree was for is a fiction.
-        ``Agent.rebind_work_dir`` calls this; the sandbox's writable_dirs are
-        updated there, on the shared SandboxConfig every tool holds.
-        """
-        self.work_dir = Path(work_dir)
 
         # Register all file operation functions.
         # Read-only tools are concurrency_safe (can run in parallel with each other).
@@ -170,6 +163,22 @@ class BuiltinFileTool(Tool):
         self.functions["glob"].manages_own_timeout = True
         self.functions["grep"].manages_own_timeout = True
         self.register(self.undo_edit, is_destructive=True)
+
+    def set_work_dir(self, work_dir: str) -> None:
+        """Point relative paths at another directory, mid-session.
+
+        A long-running session that binds itself to a git worktree
+        (``agentica/worktrees.py``) has to take its tools with it — otherwise
+        ``read_file("agentica/peers.py")`` still reads the directory the session
+        started in, and the isolation the worktree was for is a fiction.
+        ``Agent.rebind_work_dir`` calls this; the sandbox's writable_dirs are
+        updated there, on the shared SandboxConfig every tool holds.
+
+        Not a tool function: it is registered nowhere, so the model cannot move
+        its own file tools behind the agent's back — only ``rebind_work_dir``
+        can, which moves everything at once.
+        """
+        self.work_dir = Path(work_dir)
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path, supporting absolute, relative, and ~ paths.
@@ -263,6 +272,16 @@ class BuiltinFileTool(Tool):
             )
         except Exception as e:
             logger.warning(f"Diagnostics check failed for {path}: {e}")
+            return ""
+
+    def _peer_conflict_note(self, path: "Path") -> str:
+        """"Another session has this file dirty too", or "" — never raises."""
+        if self._peer_conflict_checker is None:
+            return ""
+        try:
+            return self._peer_conflict_checker.check(str(path))
+        except Exception as e:
+            logger.debug(f"Peer conflict check failed for {path}: {e}")
             return ""
 
     def _is_escalated(self, resolved: str) -> bool:
@@ -638,7 +657,8 @@ class BuiltinFileTool(Tool):
         absolute_path = str(path.resolve())
         logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
         diag_text = await self._diagnostics_after(path)
-        suffix = f"\n\n{diag_text}" if diag_text else ""
+        notes = [text for text in (diag_text, self._peer_conflict_note(path)) if text]
+        suffix = ("\n\n" + "\n\n".join(notes)) if notes else ""
         return ToolDisplayOutput(
             f"{action} file, absolute path: {absolute_path}{suffix}",
             file_display_meta([
@@ -832,6 +852,9 @@ class BuiltinFileTool(Tool):
                 diag_text = await self._diagnostics_after(path)
                 if diag_text:
                     diagnostics.append(f"{result_path}:\n{diag_text}")
+                conflict = self._peer_conflict_note(path)
+                if conflict:
+                    diagnostics.append(f"{result_path}: {conflict}")
         if diagnostics:
             result_lines.extend(("", "\n\n".join(diagnostics)))
         return ToolDisplayOutput(
@@ -944,6 +967,9 @@ class BuiltinFileTool(Tool):
         parts = [f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"]
         if diag_text:
             parts.append(diag_text)
+        conflict = self._peer_conflict_note(path)
+        if conflict:
+            parts.append(conflict)
         return ToolDisplayOutput(
             "\n\n".join(parts),
             file_display_meta([

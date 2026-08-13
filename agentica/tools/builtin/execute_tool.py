@@ -227,14 +227,6 @@ class BuiltinExecuteTool(Tool):
             self._timeout = sandbox_config.max_execution_time
         self.register(self.execute, is_destructive=True)
 
-    def set_work_dir(self, work_dir: str) -> None:
-        """Run subsequent commands in another directory, mid-session.
-
-        Counterpart of ``BuiltinFileTool.set_work_dir``: a session that moves
-        into a git worktree must run its tests and its git commands there, not
-        in the checkout it happened to start in.
-        """
-        self._work_dir = Path(work_dir)
         # Large bash outputs are persisted to disk (context gets preview only).
         # read_file keeps max_result_size_chars=None (never persist — avoids
         # reading its own persisted output file in a loop).
@@ -262,6 +254,17 @@ class BuiltinExecuteTool(Tool):
         else:
             execute_fn.parameters["properties"].pop("background", None)
         execute_fn.skip_entrypoint_processing = True
+
+    def set_work_dir(self, work_dir: str) -> None:
+        """Run subsequent commands in another directory, mid-session.
+
+        Counterpart of ``BuiltinFileTool.set_work_dir``: a session that moves
+        into a git worktree must run its tests and its git commands there, not
+        in the checkout it happened to start in. Deliberately not a registered
+        tool function — only ``Agent.rebind_work_dir`` moves a session, and it
+        moves everything at once.
+        """
+        self._work_dir = Path(work_dir)
 
     async def execute(
             self,

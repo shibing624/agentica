@@ -993,6 +993,8 @@ def create_agent(
 
         cli_tools.insert(0, WorktreeTool(worktree_binder))
 
+    from agentica.peer_conflicts import build_checker as build_peer_conflict_checker
+
     # Delegating needs the session's process registry (that is how the worker is
     # tracked, waited on and reported), so a one-shot `--query` run and a
     # cron-spawned agent — neither of which has one — simply do not get the tool.
@@ -1044,6 +1046,9 @@ def create_agent(
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
         diagnostics_servers=agent_config.get("diagnostics_servers"),
         permission_mode=permission_mode,
+        # Tell the model when another live session already has the file it just
+        # wrote uncommitted, instead of letting both find out at merge time.
+        peer_conflict_checker=build_peer_conflict_checker(peer_session),
     )
 
     if skills_registry and len(skills_registry) > 0:

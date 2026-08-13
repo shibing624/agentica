@@ -55,6 +55,7 @@ def get_builtin_tools(
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
         web_search_provider: Optional[str] = None,
+        peer_conflict_checker=None,
 ) -> List[Tool]:
     """
     Get the list of built-in tools for Agent.
@@ -113,6 +114,7 @@ def get_builtin_tools(
             sandbox_config=sandbox_config,
             diagnostics_checker=diagnostics_checker,
             consent_callback=ask_user_question_callback,
+            peer_conflict_checker=peer_conflict_checker,
         ))
 
     if include_execute:

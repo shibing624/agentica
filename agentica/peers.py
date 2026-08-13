@@ -170,6 +170,10 @@ class PeerInfo:
     # knows; presence carries it.
     head_sha: Optional[str] = None
     base_ref: Optional[str] = None
+    # The repository this session's directory belongs to (its main checkout).
+    # Equal across worktrees of one repo, which is how "another session has that
+    # same file dirty" is decided without comparing bare filenames.
+    repo_root: Optional[str] = None
     ahead: Optional[int] = None
     behind: Optional[int] = None
     dirty_files: List[str] = field(default_factory=list)
@@ -223,6 +227,7 @@ class PeerInfo:
         return GitState(
             branch=self.git_branch or "",
             head_sha=self.head_sha or "",
+            repo_root=self.repo_root or "",
             base_ref=self.base_ref or "",
             ahead=self.ahead or 0,
             behind=self.behind or 0,
@@ -272,6 +277,7 @@ class PeerInfo:
             git_branch=data.get("git_branch") or None,
             head_sha=data.get("head_sha") or None,
             base_ref=data.get("base_ref") or None,
+            repo_root=data.get("repo_root") or None,
             ahead=data.get("ahead") or None,
             behind=data.get("behind") or None,
             dirty_files=list(data.get("dirty_files") or []),

@@ -996,6 +996,7 @@ def run_interactive(
                     git_branch=git.branch,
                     head_sha=git.head_sha,
                     base_ref=git.base_ref,
+                    repo_root=git.repo_root,
                     ahead=git.ahead,
                     behind=git.behind,
                     dirty_files=list(git.dirty_files),

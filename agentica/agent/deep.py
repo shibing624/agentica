@@ -152,6 +152,10 @@ class DeepAgent(Agent):
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
         background_process_registry: Optional[Any] = None,
+        # Warns (never blocks) when another live session has the same file
+        # uncommitted; see agentica/peer_conflicts.py. Supplied by the CLI,
+        # which is where a session's presence identity lives.
+        peer_conflict_checker: Optional[Any] = None,
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback: Optional[Callable] = None,
@@ -247,6 +251,7 @@ class DeepAgent(Agent):
                 enable_diagnostics=enable_diagnostics,
                 diagnostics_servers=diagnostics_servers,
                 diagnostics_errors_only=diagnostics_errors_only,
+                peer_conflict_checker=peer_conflict_checker,
             )
         )
         if tools:
