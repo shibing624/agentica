@@ -872,6 +872,9 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
         f"  {'API calls this turn:':<30} {usage.api_calls:>12}"
         f"  [dim](tool rounds + final answer)[/dim]"
     )
+    tool_calls = ts.get("last_turn_tool_count", 0)
+    if tool_calls > 0:
+        con.print(f"  {'Tool calls this turn:':<30} {tool_calls:>12}")
     if usage.api_calls > 0:
         avg = round(usage.prompt_tokens / usage.api_calls)
         con.print(

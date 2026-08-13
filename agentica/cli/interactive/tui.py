@@ -586,7 +586,6 @@ def _setup_tui(
             context_tokens=tui_state.get("context_tokens", 0),
             context_window=tui_state.get("context_window", 128000),
             cost_usd=tui_state.get("cost_usd", 0.0),
-            cache_hit_ratio=tui_state.get("cache_hit_ratio"),
             active_seconds=tui_state.get("active_seconds", 0.0),
             last_turn_seconds=tui_state.get("last_turn_seconds", 0.0),
             spinner_text=spinner,

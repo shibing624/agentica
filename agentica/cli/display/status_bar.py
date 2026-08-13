@@ -107,7 +107,7 @@ def _ctx_fg_style(pct: float) -> str:
         return "class:sb-bad"
     if pct >= 50:
         return "class:sb-warn"
-    return "class:sb-good"
+    return "class:sb"
 
 
 def format_duration_compact(seconds: float) -> str:
@@ -154,7 +154,6 @@ def build_status_bar_fragments(
     context_tokens: int = 0,
     context_window: int = 0,
     cost_usd: float = 0.0,
-    cache_hit_ratio: Optional[float] = None,
     active_seconds: float = 0.0,
     last_turn_seconds: float = 0.0,
     spinner_text: str = "",
@@ -266,14 +265,6 @@ def build_status_bar_fragments(
             if context_detail:
                 frags.append(("class:sb", f"{ctx_used}/{ctx_total} "))
             frags.append((fg, pct_label))
-        if cache_hit_ratio is not None:
-            # Last completed request's cached share — the trend line that shows
-            # prefix pollution before the bill does. Hidden when the provider
-            # reports no cache counters (None), never rendered as a fake 0%.
-            frags.extend([
-                ("class:sb-dim", " "),
-                ("class:sb-dim", f"cache {cache_hit_ratio:.0%}"),
-            ])
         if show_goal and goal_text:
             frags.extend([
                 ("class:sb-dim", " │ "),

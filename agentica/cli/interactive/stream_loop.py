@@ -468,6 +468,9 @@ def _process_stream_response(
         # the separator shows the turn that just completed.
         tui_state["turn_no"] = tui_state.get("turn_no", 0) + 1
         turn_no = tui_state["turn_no"]
+        # Expose the per-turn tool-call count so `/usage` can reconcile with the
+        # footer's "N tools" (which counts individual tool calls, incl. parallel).
+        tui_state["last_turn_tool_count"] = display.tool_count
 
         display.finalize(
             turn_no=turn_no,

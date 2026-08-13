@@ -176,6 +176,7 @@ def test_usage_command_prints_real_provider_cache_breakdown(monkeypatch):
             "active_seconds": 5,
             "cost_usd": tracker.total_cost_usd,
             "total_api_calls": tracker.turns,
+            "last_turn_tool_count": 3,
         },
     )
     buf = StringIO()
@@ -197,6 +198,7 @@ def test_usage_command_prints_real_provider_cache_breakdown(monkeypatch):
     assert "3,000" in out
     assert "Net new tokens:" in out
     assert "4,000" in out
+    assert "Tool calls this turn:" in out
     assert "Total tokens (billed):" in out
     assert "41,100" in out
 
