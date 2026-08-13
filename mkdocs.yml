@@ -45,6 +45,7 @@ nav:
       - Workflow: multi-agent/workflow.md
       - Swarm: multi-agent/swarm.md
       - Subagent: multi-agent/subagent.md
+      - Worktrees (共用一个仓库): multi-agent/worktrees.md
   - Advanced:
       - Hooks: advanced/hooks.md
       - RunConfig: advanced/run-config.md

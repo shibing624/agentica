@@ -6,7 +6,6 @@
 The warning has to be right about *which* repository and it has to be quiet
 enough to keep being read, so that is what these check.
 """
-import os
 import subprocess
 from pathlib import Path
 
