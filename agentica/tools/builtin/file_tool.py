@@ -56,7 +56,23 @@ _NOISE_DIRS = frozenset({
 })
 
 
-def _in_noise_dir(path: "Path", base: "Path") -> bool:
+def _noise_dirs() -> frozenset:
+    """Skipped directory names, including this project's worktree root.
+
+    ``.agentica`` is the default in-repo location, but the name is configurable
+    (``settings.worktree.root``), so the set is derived instead of guessed —
+    another session picked ``.worktrees`` for the same job, and a hardcoded list
+    would have silently let that one double every search result.
+    """
+    try:
+        from agentica.worktrees import local_root_names
+
+        return _NOISE_DIRS | frozenset(local_root_names())
+    except Exception:
+        return _NOISE_DIRS
+
+
+def _in_noise_dir(path: "Path", base: "Path", noise: Optional[frozenset] = None) -> bool:
     """Whether ``path`` sits inside a skipped directory *below* ``base``.
 
     Only the part below the search root counts. A session whose work_dir is
@@ -68,7 +84,7 @@ def _in_noise_dir(path: "Path", base: "Path") -> bool:
         relative = path.relative_to(base)
     except ValueError:
         relative = path
-    return bool(set(relative.parts).intersection(_NOISE_DIRS))
+    return bool(set(relative.parts).intersection(noise if noise is not None else _NOISE_DIRS))
 
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
@@ -1187,9 +1203,10 @@ class BuiltinFileTool(Tool):
         # Run glob in executor to avoid blocking on large directory trees
         def _glob_sync():
             matches = list(base_path.glob(pattern))
+            noise = _noise_dirs()
             return sorted(
                 str(m) for m in matches
-                if not _in_noise_dir(m, base_path)
+                if not _in_noise_dir(m, base_path, noise)
             )
 
         loop = asyncio.get_event_loop()
@@ -1316,7 +1333,7 @@ class BuiltinFileTool(Tool):
             cmd.extend(["--max-count", str(limit)])
 
         # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
-        for d in sorted(_NOISE_DIRS - {'.git'}):
+        for d in sorted(_noise_dirs() - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
 
         # Pattern and path
@@ -1431,7 +1448,8 @@ class BuiltinFileTool(Tool):
             files = list(base_path.glob("**/*"))
 
         # Exclude directories and ignored paths
-        files = [f for f in files if f.is_file() and not _in_noise_dir(f, base_path)]
+        noise = _noise_dirs()
+        files = [f for f in files if f.is_file() and not _in_noise_dir(f, base_path, noise)]
 
         results = []
         file_counts = {}

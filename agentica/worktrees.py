@@ -203,6 +203,26 @@ def _configured_root() -> str:
         return ""
 
 
+def local_root_names() -> Tuple[str, ...]:
+    """Directory names that hold worktrees *inside* a checkout.
+
+    Search tools exclude these (``file_tool``): with an in-repo root, a full
+    second checkout lives under the project, and a bare ``glob("**/*.py")``
+    otherwise returns every file once per worktree — with an edit landing in the
+    copy as the real hazard. Derived from ``worktree.root`` rather than a
+    hardcoded name, because the name is the user's to choose (``.worktrees``,
+    ``.agentica/worktrees``, ...) and a list of guesses would silently miss it.
+    """
+    configured = _configured_root()
+    if not configured:
+        return ()
+    first = Path(os.path.expanduser(configured))
+    if first.is_absolute():
+        return ()
+    parts = [part for part in first.parts if part not in (".", "")]
+    return (parts[0],) if parts else ()
+
+
 def configured_links() -> Tuple[str, ...]:
     """``worktree.link`` from config.yaml, or the default (``.env``)."""
     try:
