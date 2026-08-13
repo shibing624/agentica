@@ -14,7 +14,7 @@ Provides:
   - Security scanning (static pattern check) + quarantine install pipeline
   - unified_search(): search all sources and merge results
 
-Used by agentica/cli/commands.py for /skills slash commands.
+Used by agentica/cli/commands/tools_skills.py for /skills slash commands.
 """
 import hashlib
 import json

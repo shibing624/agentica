@@ -45,7 +45,7 @@ from agentica.global_config import (
 # ``env`` is the environment variable each provider factory reads for its key
 # (see agentica/__init__.py). It is consulted as a *fallback* only when no key
 # is stored in a profile. ``base_url`` is the default endpoint shown to the
-# user. Every provider here is backed by MODEL_REGISTRY in cli/config.py.
+# user. Every provider here is backed by MODEL_REGISTRY in cli/runtime.py.
 PROVIDER_PRESETS = {
     "deepseek": {
         "label": "DeepSeek",
@@ -1430,7 +1430,7 @@ def resolve_model_config(args, console=None) -> Dict:
     #   2. profile ``auxiliary_model`` block in config.yaml
     #   3. main model (when same provider) or provider preset / matching profile
     # When no auxiliary_model_name is resolved, all auxiliary fields are None and auxiliary work
-    # reuses the main model (see cli/config.py::_build_sibling_model).
+    # reuses the main model (see cli/runtime.py::_build_sibling_model).
     auxiliary_block = (active_profile.get("auxiliary_model") or {}) if use_profile else {}
     auxiliary_provider = args.auxiliary_model_provider or auxiliary_block.get("model_provider") or provider
     auxiliary_name = args.auxiliary_model_name or auxiliary_block.get("model_name")

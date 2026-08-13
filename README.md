@@ -39,6 +39,7 @@ pip install -U agentica
 三选一，配上任一模型厂商的 API Key 即可（优先级：shell 环境变量 > `.env` > `config.yaml`）：
 
 ```bash
+export OPENAI_BASE_URL="https://api.openai.com/v1"
 export OPENAI_API_KEY="sk-xxx"
 # 或用可免费起步的智谱：export ZAI_API_KEY="your-api-key"
 ```
