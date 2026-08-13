@@ -642,7 +642,10 @@ class TestBuiltinFileToolApplyPatch:
         message = str(exc.value)
         assert "Expected context:" in message
         assert "Actual from line 1:" in message
-        assert "  beta-current" in message
+        # The mismatching line is marked '>' in both the expected and actual block.
+        assert "> beta-current" in message
+        assert "> beta" in message
+        assert "First difference at context line 2 (file line 2)" in message
         assert "Read or re-read" not in message
 
     def test_absolute_patch_path_is_reported_relative_to_work_dir(self, file_tool, tmp_dir):

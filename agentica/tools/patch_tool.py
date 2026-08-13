@@ -16,6 +16,11 @@ from agentica.utils.log import logger
 
 ApplyDiffMode = Literal["default", "create"]
 
+# How many context/file lines one failed hunk may print per block, and how much
+# lead-in is kept before the first mismatching line.
+_RENDER_LIMIT = 6
+_RENDER_LEAD_IN = 2
+
 
 @dataclass
 class Chunk:
@@ -77,21 +82,79 @@ class ContextFailure:
         else:
             header = f"Hunk {self.hunk_number}: {location} not found."
         lines = [header]
+        diff_index = self._first_difference()
+        start = self._window_start(diff_index)
         if self.context:
             lines.append("Expected context:")
-            lines.extend(f"  {line}" for line in self.context[:6])
-            remaining = len(self.context) - 6
-            if remaining > 0:
-                lines.append(f"  ... ({remaining} more context lines)")
+            lines.extend(
+                self._render_window(self.context, start, diff_index, "context lines")
+            )
         if self.actual:
-            lines.append(f"Actual from line {self.actual_start + 1}:")
-            lines.extend(f"  {line}" for line in self.actual[:6])
-            remaining = len(self.actual) - 6
-            if remaining > 0:
-                lines.append(f"  ... ({remaining} more lines)")
+            lines.append(f"Actual from line {self.actual_start + start + 1}:")
+            lines.extend(self._render_window(self.actual, start, diff_index, "lines"))
         elif not self.eof:
             lines.append("None of the expected lines appear in the file.")
+        if diff_index is not None:
+            lines.append(self._difference_note(diff_index))
         return "\n".join(lines)
+
+    def _first_difference(self) -> Optional[int]:
+        """Index of the first context line that the file region does not match.
+
+        Returns ``None`` when there is no comparable file region, which is the
+        case for a hunk whose lines appear nowhere in the file.
+        """
+        if not self.actual:
+            return None
+        for index in range(max(len(self.context), len(self.actual))):
+            expected = self.context[index] if index < len(self.context) else None
+            found = self.actual[index] if index < len(self.actual) else None
+            if expected != found:
+                return index
+        return None
+
+    def _window_start(self, diff_index: Optional[int]) -> int:
+        """Slide the preview so the first mismatching line is always visible.
+
+        A hunk that matches for six lines and diverges on the seventh used to
+        print two identical previews with the only difference folded away.
+        """
+        if diff_index is None or diff_index < _RENDER_LIMIT:
+            return 0
+        longest = max(len(self.context), len(self.actual))
+        return max(0, min(diff_index - _RENDER_LEAD_IN, longest - _RENDER_LIMIT))
+
+    def _render_window(
+        self,
+        source: Tuple[str, ...],
+        start: int,
+        diff_index: Optional[int],
+        noun: str,
+    ) -> List[str]:
+        rendered: List[str] = []
+        if start > 0:
+            noun_earlier = "line" if start == 1 else "lines"
+            verb = "matches" if start == 1 else "match"
+            rendered.append(f"  ... ({start} earlier {noun_earlier} {verb})")
+        window = source[start : start + _RENDER_LIMIT]
+        for offset, line in enumerate(window):
+            marker = "> " if start + offset == diff_index else "  "
+            rendered.append(f"{marker}{line}")
+        remaining = len(source) - (start + len(window))
+        if remaining > 0:
+            rendered.append(f"  ... ({remaining} more {noun})")
+        return rendered
+
+    def _difference_note(self, diff_index: int) -> str:
+        if diff_index >= len(self.actual):
+            return (
+                f"First difference at context line {diff_index + 1}: "
+                "the file region ends before the hunk does."
+            )
+        return (
+            f"First difference at context line {diff_index + 1} "
+            f"(file line {self.actual_start + diff_index + 1}), marked '>'."
+        )
 
 
 class PatchContextError(ValueError):

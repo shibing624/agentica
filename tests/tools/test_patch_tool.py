@@ -208,6 +208,90 @@ def world():
         self.assertNotIn("# -*- coding: utf-8 -*-", message)
         self.assertNotIn("Actual from line", message)
 
+    def test_stale_hunk_shows_mismatch_past_the_preview_limit(self):
+        """A hunk that matches 6 lines and diverges on the 7th must show line 7.
+
+        The preview used to cut both blocks at 6 lines, so this failure printed
+        two byte-identical previews with the only difference folded away.
+        """
+        original = "\n".join([
+            "- v1.4.10 entry",
+            "- v1.4.9 entry",
+            "",
+            "<details>",
+            "<summary>Older releases</summary>",
+            "",
+            "- v1.4.7 entry with a very long tail that the model shortened",
+        ])
+        diff = """@@
+ - v1.4.10 entry
+-- v1.4.9 entry
+ 
+ <details>
+ <summary>Older releases</summary>
+ 
++- v1.4.9 entry
+ - v1.4.7 entry"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("> - v1.4.7 entry", message)
+        self.assertIn(
+            "> - v1.4.7 entry with a very long tail that the model shortened",
+            message,
+        )
+        self.assertIn("First difference at context line 7 (file line 7)", message)
+        self.assertIn("earlier line", message)
+        self.assertNotIn("more context lines", message)
+
+    def test_short_hunk_preview_has_no_window_offset_noise(self):
+        original = "ALPHA = 1\nBETA = 2\n"
+        diff = """@@
+-GAMMA = 3
++GAMMA = 4"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("  GAMMA = 3", message)
+        self.assertNotIn("earlier line", message)
+        self.assertNotIn("First difference", message)
+
+    def test_mismatch_note_reports_absolute_file_line(self):
+        original = "\n".join([f"line{index}" for index in range(1, 21)])
+        diff = """@@ line10
+ line11
+ line12
+-line13changed
++line13new"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("> line13changed", message)
+        self.assertIn("> line13", message)
+        self.assertIn("First difference at context line 3 (file line 13)", message)
+
+    def test_eof_hunk_shorter_file_region_is_reported(self):
+        original = "alpha\nbeta"
+        diff = """@@
+ alpha
+ beta
+ gamma
+-delta
++DELTA
+*** End of File"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("the file region ends before the hunk does", message)
+
 
 class TestParsePatchEnvelope(unittest.TestCase):
     """Tests for strict multi-file patch envelope parsing."""
