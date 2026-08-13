@@ -674,6 +674,36 @@ def _build_sibling_model(agent_config: dict, prefix: str):
     )
 
 
+def _build_fallback_models(agent_config: dict) -> List[Any]:
+    """Build cross-provider fallback model instances from resolved flat dicts.
+
+    ``agent_config["fallback_models"]`` is a list of flat dicts already resolved
+    by ``cli/setup.py`` — each carries ``model_provider``/``model_name``/
+    ``base_url``/``api_key`` plus optional tuning. Returns [] when no fallback
+    is configured. Entries missing a model_name are skipped (defensive; the
+    setup validation already rejects them, but a hand-built agent_config may
+    slip through).
+    """
+    models: List[Any] = []
+    for fb in agent_config.get("fallback_models") or []:
+        if not isinstance(fb, dict) or not fb.get("model_name"):
+            continue
+        models.append(
+            get_model(
+                model_provider=fb["model_provider"],
+                model_name=fb["model_name"],
+                base_url=fb.get("base_url"),
+                api_key=fb.get("api_key"),
+                wire_api=fb.get("wire_api"),
+                reasoning=fb.get("reasoning"),
+                reasoning_effort=fb.get("reasoning_effort"),
+                extra_body=fb.get("extra_body"),
+                extra_headers=fb.get("extra_headers"),
+            )
+        )
+    return models
+
+
 def _build_cli_experience_config(agent_config: dict) -> ExperienceConfig:
     """Build the CLI's opinionated DeepAgent experience configuration."""
     skill_upgrade = None
@@ -755,6 +785,15 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
         lines.append(
             f"- Auxiliary model: {auxiliary_provider}/{auxiliary_model_name}  (background calls + task subagent)"
         )
+
+    fallback_models = agent_config.get("fallback_models") or []
+    if fallback_models:
+        fb_ids = ", ".join(
+            f"{fb.get('model_provider', '?')}/{fb.get('model_name', '?')}"
+            for fb in fallback_models if isinstance(fb, dict)
+        )
+        if fb_ids:
+            lines.append(f"- Fallback models: {fb_ids}")
 
     tool_names = sorted(
         name for t in (agent.tools or []) if isinstance(t, Tool) and t.functions for name in t.functions.keys()
@@ -838,6 +877,14 @@ def create_agent(
     # The task subagent tool shares the auxiliary model (one cheap model for all
     # non-user-facing LLM work), so the CLI exposes only main + auxiliary.
     task_model = auxiliary_model
+    # Cross-provider fallback chain (resilience): built from the resolved flat
+    # dicts in agent_config["fallback_models"]. [] when none configured.
+    fallback_models = _build_fallback_models(agent_config)
+    # Runner-level API attempts per model. CLI default is 2 (main model retries
+    # once before the fallback chain takes over); the SDK default is 1.
+    max_api_retry = agent_config.get("max_api_retry")
+    if max_api_retry is None:
+        max_api_retry = 2
     experience_config = _build_cli_experience_config(agent_config)
     long_term_memory_config = _build_cli_memory_config(agent_config)
 
@@ -950,6 +997,8 @@ def create_agent(
         model=model,
         auxiliary_model=auxiliary_model,
         task_model=task_model,
+        fallback_models=fallback_models,
+        max_api_retry=max_api_retry,
         description=(
             "You are DeepAgent, an interactive CLI coding agent running in the "
             "user's terminal. You help with software engineering tasks: reading "

@@ -479,6 +479,104 @@ class TestResolveAuxModel(_CliSetupTestBase):
         self.assertEqual(resolved["auxiliary_extra_headers"], {"X-Aux": "1"})
 
 
+class TestResolveFallbackModels(_CliSetupTestBase):
+    """Cross-provider fallback chain resolution (profile ``fallback_models`` list).
+
+    No CLI flags exist for fallback — it is hand-edited in config.yaml only.
+    Same inheritance rules as the auxiliary model: same provider inherits the
+    main endpoint/key; a different provider uses its own preset / matching
+    profile key and never the main key.
+    """
+
+    def test_no_fallback_returns_empty_list_and_no_retry(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["fallback_models"], [])
+        self.assertIsNone(resolved["max_api_retry"])
+
+    def test_same_provider_fallback_inherits_main_base_and_key(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "fallback_models": [{"model_name": "deepseek-chat"}],  # only name; same provider
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(len(resolved["fallback_models"]), 1)
+        fb = resolved["fallback_models"][0]
+        self.assertEqual(fb["model_provider"], "deepseek")
+        self.assertEqual(fb["model_name"], "deepseek-chat")
+        self.assertEqual(fb["base_url"], "https://api.deepseek.com")
+        self.assertEqual(fb["api_key"], "sk-main")
+
+    def test_cross_provider_fallback_uses_preset_base_and_block_key(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "fallback_models": [{
+                "model_provider": "zhipuai", "model_name": "glm-4.7-flash",
+                "api_key": "sk-zhipu",
+            }],
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        fb = resolved["fallback_models"][0]
+        self.assertEqual(fb["model_provider"], "zhipuai")
+        self.assertEqual(fb["model_name"], "glm-4.7-flash")
+        # base_url absent in block -> zhipuai preset default, NOT deepseek's.
+        self.assertEqual(fb["base_url"], cli_setup.default_base_url("zhipuai"))
+        # block key used, NOT main key.
+        self.assertEqual(fb["api_key"], "sk-zhipu")
+
+    def test_cross_provider_no_key_anywhere_returns_none_not_main(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "fallback_models": [{"model_provider": "zhipuai", "model_name": "glm-4.7-flash"}],
+        })
+        # Base class already stripped every provider api-key env var.
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertIsNone(resolved["fallback_models"][0]["api_key"])  # NOT sk-main
+
+    def test_multiple_fallbacks_preserve_order_and_carry_tuning(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "fallback_models": [
+                {"model_provider": "zhipuai", "model_name": "glm-4.7-flash", "api_key": "sk-a"},
+                {"model_provider": "openai", "model_name": "gpt-4o-mini", "api_key": "sk-b",
+                 "reasoning_effort": "low", "extra_body": {"x": 1}},
+            ],
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        names = [fb["model_name"] for fb in resolved["fallback_models"]]
+        self.assertEqual(names, ["glm-4.7-flash", "gpt-4o-mini"])
+        second = resolved["fallback_models"][1]
+        self.assertEqual(second["reasoning_effort"], "low")
+        self.assertEqual(second["extra_body"], {"x": 1})
+
+    def test_max_api_retry_resolved_from_profile(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "max_api_retry": 3,
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["max_api_retry"], 3)
+
+    def test_resolve_named_profile_config_includes_fallback_and_retry(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "fallback_models": [{"model_provider": "zhipuai", "model_name": "glm-4.7-flash", "api_key": "sk-z"}],
+            "max_api_retry": 4,
+        }, name="work")
+        resolved = cli_setup.resolve_named_profile_config("work")
+        self.assertEqual(resolved["max_api_retry"], 4)
+        self.assertEqual(resolved["fallback_models"][0]["model_name"], "glm-4.7-flash")
+
+
 class TestShouldOnboard(_CliSetupTestBase):
     def _tty(self):
         return patch.multiple(

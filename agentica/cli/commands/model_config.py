@@ -15,6 +15,7 @@ from agentica.cli.runtime import (
     create_agent,
     get_model,
     _build_environment_context,
+    _build_fallback_models,
     _build_sibling_model,
 )
 from agentica.cli.setup import (
@@ -537,6 +538,16 @@ def _apply_profile(
     if ctx.current_agent is not None:
         ctx.current_agent.model = new_model_obj
         ctx.current_agent.auxiliary_model = new_auxiliary_model
+        # Fallback chain + retry count follow the profile switch too, so the
+        # resilience config never goes stale (a profile without fallback_models
+        # clears the chain back to []).
+        try:
+            ctx.current_agent.fallback_models = _build_fallback_models(ctx.agent_config)
+        except Exception as exc:
+            con.print(f"[yellow]Fallback model build failed, clearing fallback chain: {exc}[/yellow]")
+            ctx.current_agent.fallback_models = []
+        _mar = ctx.agent_config.get("max_api_retry")
+        ctx.current_agent.max_api_retry = _mar if _mar is not None else 2
         # Repoint the cheap tier of the task subagent tool onto the new auxiliary
         # model (None = fall back to the parent's main model, matching
         # create_agent's default).

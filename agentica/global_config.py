@@ -82,6 +82,23 @@ Schema (``~/.agentica/config.yaml``)::
         #   # extra_body / extra_headers work the same as the main model's,
         #   # but are NEVER inherited from it (different endpoint/deployment).
 
+        # --- optional cross-provider fallback chain (resilience) ---
+        # Tried in order after the main model exhausts ``max_api_retry``
+        # attempts on a retryable error, or immediately on a hard outage
+        # (connection / 502 / 503) / provider-side content filter. Use a
+        # DIFFERENT provider than the main model — the same provider often
+        # shares the outage or moderation layer, defeating the fallback.
+        # fallback_models:
+        #   - model_provider: zhipuai
+        #     model_name: glm-4.7-flash
+        #     base_url: https://open.bigmodel.cn/api/paas/v4
+        #     api_key: sk-...
+
+        # max_api_retry: 2           # Runner-level API attempts per model
+        #                            # (main model first, then each fallback).
+        #                            # Default 1 (no same-model retry) in the
+        #                            # SDK; the CLI defaults to 2.
+
     # Free-form env block: arbitrary keys injected into os.environ (tool API
     # keys, tracing, etc.). Shell/env-file values still win over these.
     env:
@@ -519,6 +536,15 @@ active_profile: default
 #     #   model_name: glm-4.7-flash
 #     #   base_url: https://open.bigmodel.cn/api/paas/v4
 #     #   api_key: sk-...
+#     # --- optional cross-provider fallback chain (resilience) ---
+#     # Tried after the main model exhausts max_api_retry (or on a hard
+#     # outage / content filter). Use a DIFFERENT provider than the main.
+#     # fallback_models:
+#     #   - model_provider: zhipuai
+#     #     model_name: glm-4.7-flash
+#     #     base_url: https://open.bigmodel.cn/api/paas/v4
+#     #     api_key: sk-...
+#     # max_api_retry: 2        # API attempts per model (CLI default: 2)
 profiles:
 
 # Free-form env block: arbitrary keys injected into os.environ.

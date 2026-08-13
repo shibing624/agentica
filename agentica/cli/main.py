@@ -174,6 +174,16 @@ def main():
         "auxiliary_extra_headers": resolved.get("auxiliary_extra_headers"),
         "auxiliary_reasoning": resolved.get("auxiliary_reasoning"),
         "auxiliary_reasoning_effort": resolved.get("auxiliary_reasoning_effort"),
+        # Cross-provider fallback chain (resilience) + per-model API attempts.
+        # Both are hand-edited in config.yaml (no CLI flags / wizard prompt).
+        # Default max_api_retry=2 so the main model retries once before the
+        # fallback chain takes over (SDK default is 1 = no same-model retry).
+        "fallback_models": resolved.get("fallback_models") or [],
+        "max_api_retry": (
+            resolved.get("max_api_retry")
+            if resolved.get("max_api_retry") is not None
+            else 2
+        ),
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
         "enable_experience_capture": not args.no_experience,
@@ -282,6 +292,15 @@ def main():
             # caller is a script or a delegating session, and both decide what
             # to do next from the return code.
             sys.exit(1)
+        finally:
+            # Same Langfuse atexit block as the interactive exit: bound it so
+            # a `agentica "query"` subprocess handed to a script/parent agent
+            # doesn't dangle for seconds after its last token.
+            try:
+                from agentica.utils.langfuse_integration import shutdown_langfuse_bounded
+                shutdown_langfuse_bounded(timeout=0.8)
+            except Exception:
+                pass
     else:
         # Interactive mode
         from agentica.cli.interactive import run_interactive

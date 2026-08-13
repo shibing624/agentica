@@ -478,6 +478,45 @@ def _validate_profile(data: dict) -> List[str]:
                 )
             if auxiliary_wire_api == "responses" and auxiliary_effort is not None:
                 errors.append("auxiliary_model.wire_api: responses uses reasoning, not reasoning_effort.")
+
+    # Optional cross-provider fallback chain: a list of model blocks tried in
+    # order after the main model exhausts its retries / hits a hard outage.
+    fallbacks = data.get("fallback_models")
+    if fallbacks is not None:
+        if not isinstance(fallbacks, list):
+            errors.append("fallback_models must be a list of model blocks.")
+        else:
+            for i, fb in enumerate(fallbacks):
+                if not isinstance(fb, dict):
+                    errors.append(f"fallback_models[{i}] must be a mapping.")
+                    continue
+                if not fb.get("model_provider"):
+                    errors.append(f"fallback_models[{i}].model_provider is missing.")
+                elif fb.get("model_provider") not in PROVIDER_PRESETS:
+                    errors.append(f"fallback_models[{i}].model_provider unknown: {fb.get('model_provider')!r}.")
+                if not fb.get("model_name"):
+                    errors.append(f"fallback_models[{i}].model_name is missing.")
+                ferr = _validate_base_url(fb.get("base_url") or "")
+                if ferr:
+                    errors.append(f"fallback_models[{i}].base_url: {ferr}")
+                for raw_key in _RAW_PASSTHROUGH_KEYS:
+                    raw_val = fb.get(raw_key)
+                    if raw_val is not None and not isinstance(raw_val, dict):
+                        errors.append(
+                            f"fallback_models[{i}].{raw_key} must be a mapping (dict), "
+                            f"got {type(raw_val).__name__}."
+                        )
+                fwire = fb.get("wire_api")
+                if fwire is not None and fwire not in _WIRE_API_CHOICES:
+                    errors.append(
+                        f"fallback_models[{i}].wire_api must be one of {list(_WIRE_API_CHOICES)}, got {fwire!r}."
+                    )
+                if fwire is not None and fb.get("model_provider") != "openai":
+                    errors.append("fallback_models[{i}].wire_api requires model_provider: openai.")
+
+    mar = data.get("max_api_retry")
+    if mar is not None and not (isinstance(mar, int) and mar > 0):
+        errors.append("max_api_retry must be a positive integer.")
     return errors
 
 
@@ -1031,6 +1070,13 @@ def _configure_one_profile(
     # _RAW_PASSTHROUGH_KEYS) — carry them through so a re-run of `agentica
     # setup` doesn't silently wipe a hand-edited passthrough dict.
     profile_data.update(_pick_keys(existing if same_provider else None, _RAW_PASSTHROUGH_KEYS))
+    # fallback_models / max_api_retry are hand-edited resilience knobs with no
+    # wizard prompt — carry them through unchanged (same provider only) so a
+    # re-run of `agentica setup` never silently drops them.
+    if same_provider:
+        for _k in ("fallback_models", "max_api_retry"):
+            if existing.get(_k) is not None:
+                profile_data[_k] = existing[_k]
     if auxiliary_block:
         profile_data["auxiliary_model"] = auxiliary_block
 
@@ -1138,6 +1184,46 @@ def _auxiliary_resolution(
     }
 
 
+def _fallback_resolution(
+    fallback_blocks: Optional[List[Dict]], main_provider: str, main_base_url: Optional[str], main_api_key: Optional[str]
+) -> List[Dict]:
+    """Resolve a ``fallback_models`` list into flat per-model dicts (no CLI flags).
+
+    Each entry follows the same base_url/api_key inheritance rules as the
+    auxiliary model: same provider as main inherits main endpoint/key; a
+    different provider uses its own preset / matching-profile key and NEVER the
+    main key. Entries without a model_name are skipped (defensive).
+    """
+    if not fallback_blocks:
+        return []
+    resolved: List[Dict] = []
+    for block in fallback_blocks:
+        if not isinstance(block, dict) or not block.get("model_name"):
+            continue
+        provider = block.get("model_provider") or main_provider
+        base = block.get("base_url")
+        key = block.get("api_key")
+        if not base:
+            base = main_base_url if provider == main_provider else default_base_url(provider)
+        if not key:
+            if provider == main_provider:
+                key = main_api_key
+            else:
+                key = get_profile_api_key(provider, base)
+        resolved.append({
+            "model_provider": provider,
+            "model_name": block.get("model_name"),
+            "base_url": base,
+            "api_key": key,
+            "wire_api": block.get("wire_api"),
+            "reasoning": block.get("reasoning"),
+            "reasoning_effort": block.get("reasoning_effort"),
+            "extra_body": block.get("extra_body"),
+            "extra_headers": block.get("extra_headers"),
+        })
+    return resolved
+
+
 _PROFILE_CONFIG_KEYS = (
     "profile_name",
     "profile_source",
@@ -1168,6 +1254,8 @@ _PROFILE_CONFIG_KEYS = (
     "auxiliary_extra_headers",
     "auxiliary_reasoning",
     "auxiliary_reasoning_effort",
+    "fallback_models",
+    "max_api_retry",
 )
 
 
@@ -1187,6 +1275,12 @@ def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str
     api_key = profile.get("api_key") or get_profile_api_key(provider, base_url)
     auxiliary_block = profile.get("auxiliary_model") if isinstance(profile.get("auxiliary_model"), dict) else {}
     auxiliary = _auxiliary_resolution(auxiliary_block, provider, base_url, api_key)
+    fallback_blocks = profile.get("fallback_models")
+    fallbacks = (
+        _fallback_resolution(fallback_blocks, provider, base_url, api_key)
+        if isinstance(fallback_blocks, list)
+        else []
+    )
 
     return {
         "profile_name": name,
@@ -1211,6 +1305,8 @@ def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str
         "cache_keepalive": profile.get("cache_keepalive"),
         "auxiliary_extra_body": auxiliary_block.get("extra_body"),
         "auxiliary_extra_headers": auxiliary_block.get("extra_headers"),
+        "fallback_models": fallbacks,
+        "max_api_retry": profile.get("max_api_retry"),
         **auxiliary,
     }
 
@@ -1371,6 +1467,18 @@ def resolve_model_config(args, console=None) -> Dict:
         auxiliary_reasoning = None
         auxiliary_reasoning_effort = None
 
+    # Optional cross-provider fallback chain (resilience). Resolution mirrors
+    # the auxiliary model: same provider inherits the main endpoint/key; a
+    # different provider uses its own preset / matching-profile key and never
+    # the main key. Hand-edited in config.yaml only (no wizard prompt).
+    fallback_blocks = active_profile.get("fallback_models") if use_profile else None
+    fallbacks = (
+        _fallback_resolution(fallback_blocks, provider, base_url, resolved_key)
+        if isinstance(fallback_blocks, list)
+        else []
+    )
+    max_api_retry = profile_params.get("max_api_retry")
+
     # What the status bar and /status report as "the profile you are on". A
     # flag that replaced the model means the profile no longer describes what
     # is running, so the session reports no profile rather than a name the
@@ -1407,6 +1515,9 @@ def resolve_model_config(args, console=None) -> Dict:
         "auxiliary_extra_headers": auxiliary_extra_headers,
         "auxiliary_reasoning": auxiliary_reasoning,
         "auxiliary_reasoning_effort": auxiliary_reasoning_effort,
+        # Cross-provider fallback chain + per-model API attempt count.
+        "fallback_models": fallbacks,
+        "max_api_retry": max_api_retry,
         # Prompt caching knobs (profile top-level; CLI flags override in main.py).
         "enable_cache_control": profile_params.get("enable_cache_control"),
         "cache_control_messages": profile_params.get("cache_control_messages"),

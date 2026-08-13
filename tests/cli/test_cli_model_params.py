@@ -330,5 +330,57 @@ class TestBuildSiblingModel(unittest.TestCase):
         self.assertEqual(kw["extra_headers"], {"X-Aux": "1"})
 
 
+class TestBuildFallbackModels(unittest.TestCase):
+    """_build_fallback_models: turn resolved flat fallback dicts into Model instances."""
+
+    def test_empty_when_no_fallback(self):
+        from agentica.cli.runtime import _build_fallback_models
+
+        with patch("agentica.cli.runtime.get_model") as gm:
+            self.assertEqual(_build_fallback_models({}), [])
+            self.assertEqual(_build_fallback_models({"fallback_models": []}), [])
+            gm.assert_not_called()
+
+    def test_builds_each_resolved_fallback(self):
+        from agentica.cli.runtime import _build_fallback_models
+
+        cfg = {
+            "fallback_models": [
+                {"model_provider": "zhipuai", "model_name": "glm-4.7-flash",
+                 "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "sk-z"},
+                {"model_provider": "openai", "model_name": "gpt-4o-mini", "api_key": "sk-o",
+                 "reasoning_effort": "low", "extra_body": {"x": 1}},
+            ],
+        }
+        fake_models = [Mock(), Mock()]
+        with patch("agentica.cli.runtime.get_model", side_effect=fake_models) as gm:
+            result = _build_fallback_models(cfg)
+        self.assertEqual(result, fake_models)
+        self.assertEqual(gm.call_count, 2)
+        first_kw = gm.call_args_list[0].kwargs
+        self.assertEqual(first_kw["model_provider"], "zhipuai")
+        self.assertEqual(first_kw["model_name"], "glm-4.7-flash")
+        self.assertEqual(first_kw["api_key"], "sk-z")
+        second_kw = gm.call_args_list[1].kwargs
+        self.assertEqual(second_kw["reasoning_effort"], "low")
+        self.assertEqual(second_kw["extra_body"], {"x": 1})
+
+    def test_skips_entries_missing_model_name(self):
+        from agentica.cli.runtime import _build_fallback_models
+
+        cfg = {
+            "fallback_models": [
+                {"model_provider": "zhipuai"},  # no model_name -> skipped
+                {"model_provider": "openai", "model_name": "gpt-4o-mini", "api_key": "sk"},
+            ],
+        }
+        with patch("agentica.cli.runtime.get_model") as gm:
+            gm.return_value = Mock()
+            result = _build_fallback_models(cfg)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(gm.call_count, 1)
+        self.assertEqual(gm.call_args.kwargs["model_name"], "gpt-4o-mini")
+
+
 if __name__ == "__main__":
     unittest.main()
