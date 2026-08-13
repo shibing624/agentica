@@ -7,7 +7,8 @@ HTTP API + WebSocket 流式接口 + 多个 IM 平台机器人 + 定时任务调�
 适用场景：
 
 - 把 Agent 封装成内网 / 公网服务，给前端 Web UI、CLI、移动端共享调用
-- 让 Agent 同时接入多个 IM 平台（飞书 / Telegram / Discord / QQ / 企业微信 / 钉钉 / Slack / 个人微信），跨渠道复用同一套对话上下文
+- 让 Agent 同时接入多个 IM 平台（个人微信 / 飞书 / Telegram / Discord / QQ / 企业微信 / 钉钉 / Slack），跨渠道复用同一套对话上下文
+- **出门在外用手机遥控本机跑着的 CLI 会话**（Peer bridge，默认开启，见下文「手机遥控本机 CLI 会话」）
 - 周期性执行 Agent 任务（cron 调度）
 
 ## 安装
@@ -19,12 +20,12 @@ pip install "agentica[gateway]"
 按需追加 IM 平台 SDK（每个 IM 都是可选 extras，不装则该渠道自动跳过）：
 
 ```bash
+pip install "agentica[wechat]"     # 个人微信（微信 ClawBot / iLink 官方协议，含媒体 AES-128-ECB + CDN）
 pip install "agentica[telegram]"   # python-telegram-bot
 pip install "agentica[discord]"    # discord.py
 pip install "agentica[qq]"         # qq-botpy（QQ 开放平台 WebSocket）
 pip install "agentica[wecom]"      # wecom_aibot_sdk（企业微信 AI Bot）
 pip install "agentica[dingtalk]"   # dingtalk-stream（钉钉 Stream）
-pip install "agentica[wechat]"     # 个人微信（微信 ClawBot / iLink 官方协议，含媒体 AES-128-ECB + CDN）
 ```
 
 > 飞书（Lark）SDK `lark-oapi` 已经包含在基础 `[gateway]` 里。
@@ -50,17 +51,31 @@ IM channels started — wechat, wecom                       # 按配置启用的
 
 ## 整体架构
 
-```mermaid
-flowchart TB
-    Client[Web UI / curl / SDK] -->|HTTP| Routes[FastAPI Routes]
-    IMs[Feishu / Telegram / Discord / QQ / WeCom / DingTalk / Slack / WeChat]
-    IMs -->|长轮询 / WebSocket| Channels[Channel 实现]
-    Channels -->|unified Message| CM[ChannelManager]
-    CM -->|_handle_channel_message| Router[MessageRouter]
-    Routes --> AS[AgentService]
-    Router --> AS
-    AS -->|Agent.run| Engine[Agent 引擎]
-    Cron[Cron Scheduler 60s tick] --> AS
+```text
+     HTTP 入口                      IM 入口                       定时入口
+Web UI / curl / SDK       WeChat / Feishu / Telegram /         Cron Scheduler
+                            Discord / QQ / WeCom /               (60s tick)
+                              DingTalk / Slack
+         │                              │                             │
+         │ HTTP                         │ 长轮询 / WebSocket          │
+         ▼                              ▼                             ▼
+   FastAPI Routes                 Channel 实现                        │
+         │                              │ unified Message             │
+                                 ChannelManager                       │
+                                        │ _handle_channel_message     │
+                                  MessageRouter                       │
+         │                              │                             │
+         └──────────────────────────┬───┴─────────────────────────────┘
+         ┌─────────────────────────────────────────────────────┐
+         │                    AgentService                     │
+         │  LRU Agent 缓存; chat(message, session_id, user_id) │
+         └─────────────────────────────────────────────────────┘
+                                    │ Agent.run
+                                    ▼
+                     ┌────────────────────────────┐
+                     │         Agent 引擎         │
+                     │ ReAct 循环（LLM <-> 工具） │
+                     └────────────────────────────┘
 ```
 
 核心抽象：
@@ -76,11 +91,59 @@ flowchart TB
 每个 IM 渠道只做"把平台原生消息翻译成 `Message` + 把回复文本发回平台"两件事，
 其它统一由 Gateway 层完成。
 
+## 手机遥控本机 CLI 会话（PEER_BRIDGE）
+
+主打场景：人在外面，用手机 IM 直接指挥本机终端里**正在跑的 agentica CLI 会话**——
+看看哪些任务还在跑、把指令"敲"进指定终端、让它停下 / 换方向 / 汇报进展，
+如同坐在那台机器的键盘前。
+
+默认开启，无需任何配置；不需要时显式关闭：
+
+```bash
+PEER_BRIDGE=false agentica-gateway
+```
+
+### 用法
+
+在 IM 里（个人微信 / 企微 / 飞书 / Telegram …任一已启用渠道）发消息：
+
+| 你发的 | 效果 |
+|--------|------|
+| `@list` | 列出本机当前 live 的 CLI 会话：名字 / 忙闲 / 工作目录 / 手头任务 |
+| `@nlp-f1 rerun arm 3` | 把 `rerun arm 3` 发给名为 `nlp-f1` 的会话，并置顶（pin）它为默认目标 |
+| `rerun arm 4` | 其后的裸文字继续发给同一会话，不必每行都带 `@` |
+| `@nlp-f1`（不带内容） | 仅置顶，先不发送 |
+| `@off` | 取消置顶，消息恢复交给 Gateway 自己的 agent |
+
+没打 `@` 的消息照旧走 Gateway 自己的 agent，开 bridge 不影响原有对话。
+CLI 侧零改动：`list_agents` 里能直接看到你的手机（如 `wechat-xuming`），
+会话里的 agent 用它本来就有的 `send_message` 就能把进展推到你的微信里。
+
+### 安全前提
+
+转发的每行话按 `from_kind="user"` 投递，接收端 CLI 把它当作**用户本人在终端里敲的字**
+——这正是目的：这是个人助手 Gateway，bot 就是你的另一只手。bridge 自身不加第二道门；
+想限制谁能和你的 bot 说话时，配置渠道的 `<CHANNEL>_ALLOWED_USERS`
+（如 `WECHAT_ALLOWED_USERS=你的sender_id`），它在消息到达 bridge 之前就会过滤，
+对 Gateway agent 与 bridge 同一生效。
+
+bridge 还必须与 CLI 使用同一个 `AGENTICA_HOME`（peers 目录在其缓存下，默认即本机当前用户），
+否则它永远看到空会话列表；启动日志与 `@list` 的空列表回复都会打出实际搜索的目录，便于排查。
+
+### 原理：没有新协议
+
+bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer——每个 IM 用户对应一个
+`PeerSession`（实现见 [`gateway/services/peer_bridge.py`](https://github.com/shibing624/agentica/blob/main/agentica/gateway/services/peer_bridge.py)）。
+邮箱顺序、背压、重复/限频刹车、"在 tool 批次边界投递"等保证全部继承而非重写；
+转发消息也**不进** Gateway 按会话排队的入站队列——`@session 停` 若排在 Gateway agent
+当前那一轮之后，就失去了存在的意义。
+
 ## 支持的渠道一览
 
 | 渠道 | 依赖 extras | 连接方式 | 需要公网 | 启用所需环境变量 |
 |------|------------|----------|----------|------------------|
 | Web 网页 | 内置 `[gateway]` | HTTP（内置 `/chat` UI） | 否（本机 `http://localhost:8881/chat`） | 无需配置，启动即开；可用 `HOST` / `PORT` 调整监听 |
+| 个人微信 | `wechat` | ilinkai HTTP 长轮询 | 否 | `WECHAT_TOKEN_FILE` 或 `WECHAT_ALLOWED_USERS` |
 | 飞书 Lark | 内置 `[gateway]` | WebSocket 长连接 | 否 | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` |
 | Telegram | `telegram` | 长轮询 | 否 | `TELEGRAM_BOT_TOKEN` |
 | Discord | `discord` | Gateway 长连接 | 否 | `DISCORD_BOT_TOKEN` |
@@ -88,7 +151,6 @@ flowchart TB
 | 企业微信 | `wecom` | wecom_aibot_sdk WS | 否 | `WECOM_BOT_ID` + `WECOM_SECRET` |
 | 钉钉 | `dingtalk` | dingtalk-stream | 否 | `DINGTALK_CLIENT_ID` + `DINGTALK_CLIENT_SECRET` |
 | Slack | `slack` | Socket Mode WS | 否 | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` |
-| 个人微信 | `wechat` | ilinkai HTTP 长轮询 | 否 | `WECHAT_TOKEN_FILE` 或 `WECHAT_ALLOWED_USERS` |
 
 > 所有渠道都**不需要公网 IP / 域名 / webhook**：飞书 / QQ / 企业微信 / Slack 走各自厂商的
 > WebSocket 长连，Telegram / Discord / 个人微信走长轮询或 HTTP 轮询，内网部署即可。
@@ -172,6 +234,58 @@ WECHAT_ALLOWED_USERS=
 
 其余渠道只需补对应的 app 凭证，白名单**默认全部留空即可**（见下文各渠道小节），
 先把机器人跑通，再按需加白名单。
+
+### 个人微信（WeChat）
+
+最核心也最省事的接入方式：个人微信扫码即用，不需要申请任何开放平台应用。
+
+> 📌 **协议说明**：该渠道直连微信官方 **ClawBot / iLink** 后端（`https://ilinkai.weixin.qq.com`），
+> 与腾讯开源的 `@tencent-weixin/openclaw-weixin` Node 插件是**同一套 HTTP 协议**的 Python 实现，
+> 无需启动任何 Node 进程。文本与媒体（图片 / 文件 / 语音 / 视频）均支持：媒体先以
+> **AES-128-ECB（PKCS7）** 加密后上传至 CDN，回包头 `x-encrypted-param` 作为 `encrypt_query_param`
+> 回填进 `CDNMedia` 引用，随 `sendmessage` 下发。
+>
+> ⚠️ **风险提示**：iLink 协议可能随微信升级调整。仅推荐用于个人 / 内部小范围实验场景。
+
+```bash
+export WECHAT_TOKEN_FILE=~/.agentica/cache/wxbot_token.json
+agentica-gateway
+```
+
+<div style="display: flex; gap: 16px; align-items: flex-start;">
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="150" />
+</div>
+
+> 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。
+
+说明：
+```bash
+WECHAT_ALLOWED_USERS=   # 留空 = 不限制，任何用户都能访问
+```
+
+#### 启用条件
+
+为了避免 `agentica-gateway` 每次启动都弹出扫码窗口，
+微信渠道**只在以下任一变量被显式设置时**才会注册：
+
+| 你设置了… | 行为 |
+|----------|------|
+| 都没设 | 渠道**不注册**，gateway 启动安静无打扰 ✅ |
+| 仅 `WECHAT_TOKEN_FILE` | 渠道注册；`token.json` 存在 → 直接复用；不存在 → **触发扫码登录** |
+| 仅 `WECHAT_ALLOWED_USERS` | 渠道注册；按默认路径 `~/.agentica/cache/wxbot_token.json` 加载；如果该文件不存在 → **同样触发扫码登录** |
+| 两个都设 | 同上，只是 token 落盘到你指定的路径 |
+
+> ⚠️ 这意味着只用 `WECHAT_ALLOWED_USERS` 做"白名单收紧"是不够安全的——
+> 只要默认 token 路径下没有有效凭据，gateway 在启动时就会拉起一个后台
+> 扫码流程（PNG 写到 `<token_file_dir>/wx_qr.png` 并尝试用默认浏览器打开）。
+>
+> **生产部署建议**：
+>
+> 1. 在受控环境完成一次扫码，把生成的 `token.json` 备份；
+> 2. 用 `WECHAT_TOKEN_FILE` 显式指定该文件的部署路径；
+> 3. 只在这台机器上启用微信渠道，token 失效时手动重扫并替换文件，
+>    不要让无人值守的 gateway 进程意外触发交互式登录。
 
 ### 飞书（Lark）
 
@@ -283,58 +397,6 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 - 自动忽略机器人自己的消息、频道加入通知、消息编辑等噪音事件（`app_mention` 与 `message` 正常接收）
 - `channel_id` 即 Slack 会话 id（`D...` 私聊 / `C...` 频道），可直接用于 `/api/send`
 - 长文本按 3000 字符分片发送；`send(..., thread_ts=...)` 可指定线程回复
-
-### 个人微信（WeChat）
-
-> 📌 **协议说明**：该渠道直连微信官方 **ClawBot / iLink** 后端（`https://ilinkai.weixin.qq.com`），
-> 与腾讯开源的 `@tencent-weixin/openclaw-weixin` Node 插件是**同一套 HTTP 协议**的 Python 实现，
-> 无需启动任何 Node 进程。文本与媒体（图片 / 文件 / 语音 / 视频）均支持：媒体先以
-> **AES-128-ECB（PKCS7）** 加密后上传至 CDN，回包头 `x-encrypted-param` 作为 `encrypt_query_param`
-> 回填进 `CDNMedia` 引用，随 `sendmessage` 下发。
->
-> ⚠️ **风险提示**：iLink 协议可能随微信升级调整。仅推荐用于个人 / 内部小范围实验场景。
-
-```bash
-export WECHAT_TOKEN_FILE=~/.agentica/cache/wxbot_token.json
-agentica-gateway
-```
-
-<div style="display: flex; gap: 16px; align-items: flex-start;">
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="150" />
-</div>
-
-> 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。
-
-说明：
-```bash
-WECHAT_ALLOWED_USERS=   # 留空 = 不限制，任何用户都能访问
-```
-
-#### 启用条件
-
-为了避免 `agentica-gateway` 每次启动都弹出扫码窗口，
-微信渠道**只在以下任一变量被显式设置时**才会注册：
-
-| 你设置了… | 行为 |
-|----------|------|
-| 都没设 | 渠道**不注册**，gateway 启动安静无打扰 ✅ |
-| 仅 `WECHAT_TOKEN_FILE` | 渠道注册；`token.json` 存在 → 直接复用；不存在 → **触发扫码登录** |
-| 仅 `WECHAT_ALLOWED_USERS` | 渠道注册；按默认路径 `~/.agentica/cache/wxbot_token.json` 加载；如果该文件不存在 → **同样触发扫码登录** |
-| 两个都设 | 同上，只是 token 落盘到你指定的路径 |
-
-> ⚠️ 这意味着只用 `WECHAT_ALLOWED_USERS` 做"白名单收紧"是不够安全的——
-> 只要默认 token 路径下没有有效凭据，gateway 在启动时就会拉起一个后台
-> 扫码流程（PNG 写到 `<token_file_dir>/wx_qr.png` 并尝试用默认浏览器打开）。
->
-> **生产部署建议**：
->
-> 1. 在受控环境完成一次扫码，把生成的 `token.json` 备份；
-> 2. 用 `WECHAT_TOKEN_FILE` 显式指定该文件的部署路径；
-> 3. 只在这台机器上启用微信渠道，token 失效时手动重扫并替换文件，
->    不要让无人值守的 gateway 进程意外触发交互式登录。
-
-
 
 ## 提供的 HTTP API
 
