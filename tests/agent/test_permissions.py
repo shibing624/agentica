@@ -68,6 +68,13 @@ class TestAgentPermissionMode(unittest.TestCase):
         agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
         self.assertTrue(agent._is_tool_enabled("read_file"))
         self.assertFalse(agent._is_tool_enabled("write_file"))
+
+    def test_ask_mode_keeps_listing_peers_but_not_messaging_them(self):
+        """Listing the user's other sessions reads a directory; messaging one
+        writes into its mailbox and acts on its behalf."""
+        agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
+        self.assertTrue(agent._is_tool_enabled("list_agents"))
+        self.assertFalse(agent._is_tool_enabled("send_message"))
         self.assertFalse(agent._is_tool_enabled("apply_patch"))
 
     def test_auto_mode_enables_sandbox_and_allows_all_tools(self):

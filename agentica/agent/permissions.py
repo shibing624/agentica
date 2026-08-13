@@ -43,6 +43,13 @@ PERMISSION_MODES = ("ask", "auto", "allow-all")
 READ_ONLY_TOOLS: Set[str] = frozenset({
     "ls", "read_file", "glob", "grep", "web_search", "fetch_url",
     "write_todos", "task",
+    # Listing the user's other live sessions reads a directory and changes
+    # nothing. Leaving it out made the gateway's default mode ("ask", see
+    # ChatRequest.approval_mode) answer "I have no list_agents tool" — the
+    # confusing shape of a stripped tool this mode's instruction warns about.
+    # `send_message` is deliberately NOT here: it writes into another
+    # session's mailbox and acts on its behalf.
+    "list_agents",
 })
 
 

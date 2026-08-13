@@ -119,6 +119,31 @@ PEER_BRIDGE=false agentica-gateway
 CLI 侧零改动：`list_agents` 里能直接看到你的手机（如 `wechat-xuming`），
 会话里的 agent 用它本来就有的 `send_message` 就能把进展推到你的微信里。
 
+### 不打 `@`：让网关 agent 自己去指挥
+
+`@<会话名> <话>` 是**你自己**在寻址某个终端；反过来，你也可以只说一句人话，
+让 Gateway 自己的 agent 去替你寻址、群发、汇总：
+
+```text
+你：  让本机所有 CLI 会话都把自己改的文件提交成 commit
+网关：（list_agents 看到 3 个会话 → 分别 send_message → 回你一句谁收到了）
+```
+
+这条路径和 `@` 走的是同一个 peers 通道：每个 Gateway 会话（网页的、每个 IM 会话的）
+也是一个 peer，发布成 `gw-` 前缀的名字（如 `gw-wechat-<会话>-a1`），
+所以 CLI 那边 `list_agents` 里能同时看到你的手机和网关 agent，
+**CLI 会话也可以主动 `send_message` 给 `gw-…` 把结论推回你的微信**。
+
+几点行为值得知道：
+
+- CLI 的回信在网关 agent**正在跑**时由它自己收进上下文（会体现在它的回复里）；
+  **空闲**时由后台轮询直接推到你当前这个 IM 会话，前缀是发信会话名（`payments-a1 ›`）。
+- 网页 UI 的会话没有 IM 回信路径，回信会留在邮箱里，等你下一次说话时被 agent 读到。
+- 网关 agent 自己**不出现在 `@list` 里**，也不能被 `@` 寻址——不打 `@` 就是在跟它说话，
+  否则等于把话转发给正在回你的那个 agent，只会原样回声。
+- 定时任务（cron）不参与：它每次跑都是一个用完即弃的 agent，发布邮箱没人读。
+- `PEER_BRIDGE=false` 同时关掉这两条路径（同一个信任边界：网关能否往你的终端里敲字）。
+
 ### 安全前提
 
 转发的每行话按 `from_kind="user"` 投递，接收端 CLI 把它当作**用户本人在终端里敲的字**
@@ -137,6 +162,11 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 邮箱顺序、背压、重复/限频刹车、"在 tool 批次边界投递"等保证全部继承而非重写；
 转发消息也**不进** Gateway 按会话排队的入站队列——`@session 停` 若排在 Gateway agent
 当前那一轮之后，就失去了存在的意义。
+
+网关 agent 自己的 peer 身份同理，见
+[`gateway/services/agent_peers.py`](https://github.com/shibing624/agentica/blob/main/agentica/gateway/services/agent_peers.py)：
+它拿到的就是 CLI 会话本来就有的那两个工具（`list_agents` / `send_message`），
+没有为网关新增任何协议或工具。
 
 ## 支持的渠道一览
 

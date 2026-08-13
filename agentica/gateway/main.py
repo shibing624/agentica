@@ -27,6 +27,7 @@ from agentica.version import __version__
 from .config import settings
 from .services.agent_service import AgentService
 from .services.channel_manager import ChannelManager
+from .services.agent_peers import GatewayAgentPeers
 from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
 from .routes import chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes
@@ -102,10 +103,30 @@ async def lifespan(app: FastAPI):
     # agentica CLI sessions running on this machine. Started after the channels
     # because it sends through them.
     if settings.peer_bridge_enabled:
-        deps.peer_bridge = PeerBridge(deps.channel_manager)
+        # The same reach for the gateway's own agent: an `@` command is the
+        # user addressing a session themselves, this is the agent doing it on
+        # their behalf ("让三个会话都把改动提交了"). Same switch, because it is
+        # the same trust boundary, and same ordering — replies are pushed back
+        # through the channels. Built before the bridge, which needs its peer
+        # ids to keep the gateway agent out of `@list`.
+        deps.agent_peers = GatewayAgentPeers(
+            channel_manager=deps.channel_manager,
+            is_live=deps.agent_service.has_cached_session,
+            is_busy=deps.agent_service.is_session_active,
+        )
+        deps.agent_service.agent_peers = deps.agent_peers
+        deps.agent_peers.start()
+
+        deps.peer_bridge = PeerBridge(
+            deps.channel_manager,
+            gateway_peer_ids=deps.agent_peers.peer_ids,
+        )
         deps.peer_bridge.start()
     else:
-        logger.info("Peer bridge disabled (PEER_BRIDGE=false)")
+        logger.info(
+            "Peer bridge disabled (PEER_BRIDGE=false) — the gateway's own agent "
+            "also gets no list_agents / send_message"
+        )
 
     # Distinguish the always-on Web service from any optional IM channels the
     # user enabled via config, so the startup log makes it obvious which
@@ -129,6 +150,8 @@ async def lifespan(app: FastAPI):
             pass
     if deps.peer_bridge:
         await deps.peer_bridge.stop()
+    if deps.agent_peers:
+        await deps.agent_peers.stop()
     if deps.channel_manager:
         await deps.channel_manager.disconnect_all()
     logger.info("Goodbye!")
@@ -347,6 +370,12 @@ async def _handle_channel_message(message) -> None:
 
     agent_id = deps.message_router.route(message)
     session_id = deps.message_router.get_session_id(message, agent_id)
+
+    # Where a CLI session's answer to this chat session should be pushed. Noted
+    # here, on the one path that knows both the session id and the conversation
+    # it belongs to, rather than recovered later by splitting the session id.
+    if deps.agent_peers is not None:
+        deps.agent_peers.note_route(session_id, message.channel, message.channel_id)
 
     async with _channel_queue_lock:
         queue = _channel_queues.get(session_id)

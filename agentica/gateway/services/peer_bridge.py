@@ -40,7 +40,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from agentica.peers import (
     PeerInfo,
@@ -132,9 +132,20 @@ class _Endpoint:
 class PeerBridge:
     """Relays between IM users and this machine's live CLI sessions."""
 
-    def __init__(self, channel_manager, *, poll_interval: float = POLL_INTERVAL) -> None:
+    def __init__(
+        self,
+        channel_manager,
+        *,
+        poll_interval: float = POLL_INTERVAL,
+        gateway_peer_ids: Optional[Callable[[], set]] = None,
+    ) -> None:
         self._channel_manager = channel_manager
         self._poll_interval = poll_interval
+        # The gateway agent's own peers (agent_peers.py). Excluded from every
+        # listing and lookup: relaying a line into the agent that is already
+        # answering this chat would echo it straight back to the phone, and an
+        # unprefixed line reaches that agent anyway.
+        self._gateway_peer_ids = gateway_peer_ids
         self._endpoints: Dict[Tuple[str, str], _Endpoint] = {}
         self._task: Optional[asyncio.Task] = None
 
@@ -233,15 +244,19 @@ class PeerBridge:
         return [peer for peer in match_peers(target) if peer.peer_id not in own]
 
     def _own_peer_ids(self) -> set:
-        return {endpoint.session.peer_id for endpoint in self._endpoints.values()}
+        own = {endpoint.session.peer_id for endpoint in self._endpoints.values()}
+        if self._gateway_peer_ids is not None:
+            own |= self._gateway_peer_ids()
+        return own
 
     def _live_sessions(self) -> List[PeerInfo]:
-        """Live CLI sessions, never the bridge's own endpoints.
+        """Live CLI sessions, never this process's own peers.
 
         Each IM user is published as a peer so a CLI can answer it, which also
         makes it a candidate in every listing and every address lookup. Nobody
         wants to send their own phone a message, and one endpoint's name would
-        shadow a real session's.
+        shadow a real session's. The gateway agent's own peers are excluded for
+        the same reason.
         """
         own = self._own_peer_ids()
         return [peer for peer in list_live_peers() if peer.peer_id not in own]

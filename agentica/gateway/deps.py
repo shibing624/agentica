@@ -24,6 +24,12 @@ message_router: Optional[MessageRouter] = None
 # of a line typed in one of the user's terminals, which for this personal-
 # assistant gateway is exactly the point.
 peer_bridge: Optional[Any] = None
+# GatewayAgentPeers: the gateway's *own* agent as a peer on the same channel,
+# so it can list_agents / send_message this machine's CLI sessions when the
+# user asks for that in words instead of with an `@` command. Governed by the
+# same PEER_BRIDGE switch as the bridge — one trust boundary ("the gateway may
+# talk into my terminals"), not two.
+agent_peers: Optional[Any] = None
 # AgentRunner (agentica.cron.scheduler.AgentRunner protocol) used to execute
 # cron jobs immediately (HTTP "run now" and the agent's own cronjob(action=
 # "run") tool call) — same runner the background ticker uses, so an

@@ -117,6 +117,15 @@ class LRUAgentCache:
     def clear(self) -> None:
         self._cache.clear()
 
+    def contains(self, session_id: str) -> bool:
+        """Membership without the LRU touch ``get`` performs.
+
+        Liveness probes (``AgentService.has_cached_session``) must not reorder
+        the cache: a polling caller would otherwise keep whatever it asks about
+        alive and evict the session the user is actually talking to.
+        """
+        return session_id in self._cache
+
     def keys(self) -> List[str]:
         return list(self._cache.keys())
 
@@ -156,6 +165,12 @@ class AgentService:
         self._workspace: Optional[Workspace] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        # Peer-channel identity for this gateway's own agent sessions
+        # (gateway/services/agent_peers.py), injected at startup by main.py's
+        # lifespan once the channels exist. None means "no peer channel": the
+        # SDK-embedded AgentService and every test build agents without one,
+        # and they simply get no list_agents / send_message.
+        self.agent_peers: Optional[Any] = None
 
     # ============== Model config (single source of truth: `settings`) ==============
     # These proxy directly to the gateway's global `settings` singleton instead
@@ -356,6 +371,19 @@ class AgentService:
         self_manage_tools = get_self_manage_tools()
         extra.extend(self_manage_tools)
 
+        # Peer messaging: the same list_agents / send_message a CLI session has,
+        # so a line typed in IM ("让三个会话都把改动提交了") reaches this
+        # machine's live CLI sessions instead of an agent that cannot see them.
+        # A cron run is excluded: it builds a throwaway agent that is never
+        # cached, so publishing presence for it would advertise a mailbox that
+        # stops being read the moment the job ends.
+        peer_session = None
+        if self.agent_peers is not None and not session_id.startswith(CRON_SESSION_PREFIX):
+            from agentica.tools.peer_tool import PeerMessagingTool
+
+            peer_session = self.agent_peers.session_for(session_id, cwd=work_dir)
+            extra.insert(0, PeerMessagingTool(peer_session))
+
         instructions = list(self.extra_instructions) if self.extra_instructions else None
         if cron_tools:
             if instructions is None:
@@ -393,6 +421,10 @@ class AgentService:
             include_ask_user_question=False,
             permission_mode=self.get_session_approval_mode(session_id),
         )
+
+        # Lets the Runner drain replies from other sessions between tool
+        # batches (agent.peer_session), exactly as it does in the CLI.
+        agent.peer_session = peer_session
 
         tool_count = len(agent.tools) if agent.tools else 0
         logger.info(
@@ -435,6 +467,26 @@ class AgentService:
         if session_id not in self._session_locks:
             self._session_locks[session_id] = asyncio.Lock()
         return self._session_locks[session_id]
+
+    def has_cached_session(self, session_id: str) -> bool:
+        """Whether a built Agent is still cached for this session."""
+        return self._cache.contains(session_id)
+
+    def is_session_active(self, session_id: str) -> bool:
+        """Whether a run is in flight on this session (its lock is held)."""
+        lock = self._session_locks.get(session_id)
+        return lock is not None and lock.locked()
+
+    def _note_peer_turn(self, session_id: str, message: str) -> None:
+        """Publish "what this session is working on" for other sessions to read.
+
+        A CLI peer publishes the line the user typed; this is the same thing for
+        a chat session, and it is what makes a listing on the other side
+        ("working on: 把 gateway 的 peer 工具接上") worth reading. Called after
+        the agent exists, so the session is already registered.
+        """
+        if self.agent_peers is not None:
+            self.agent_peers.note_turn(session_id, message)
 
     # Default approval mode for web sessions: "auto" — file edits and commands
     # are allowed (writes restricted to work_dir). "ask" is opt-in via the
@@ -539,6 +591,7 @@ class AgentService:
 
         async with lock:
             agent = await self._get_agent(session_id)
+            self._note_peer_turn(session_id, message)
 
             try:
                 if self._workspace:
@@ -729,6 +782,7 @@ class AgentService:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
         agent = await self._get_agent(session_id)
+        self._note_peer_turn(session_id, message)
 
         try:
             if self._workspace:
@@ -860,6 +914,11 @@ class AgentService:
         base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
         removed = self._cache.delete(session_id)
         self._session_work_dirs.pop(session_id, None)
+        if self.agent_peers is not None:
+            # A deleted session must stop being addressable at once, not on the
+            # peer loop's next liveness sweep: until it is unpublished its name
+            # is still in every other session's list_agents.
+            self.agent_peers.forget(session_id)
         self._session_locks.pop(session_id, None)
         log_existed = False
         try:

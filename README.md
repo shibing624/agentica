@@ -26,7 +26,7 @@
 |------|------|
 | **多个会话一起干活** | `list_agents` / `send_message` 让不同终端里的 Agent 互相看见、互发进展，不靠复制粘贴同步上下文 |
 | **大活交给独立进程** | `delegate` 另起完整 `agentica --query --print` 进程（独立 context / cwd），`task` 用进程内 subagent 处理短活 |
-| **人可以离开现场** | `/goal` 让长任务持续推进；Web Gateway 与 `PEER_BRIDGE` 让微信/企微等 IM 直连本机 CLI，把跑着的任务喊回来 |
+| **人可以离开现场** | `/goal` 让长任务持续推进；Web Gateway 与 `PEER_BRIDGE` 让微信/企微等 IM 直连本机 CLI：`@会话名` 自己寻址，或者只说一句人话让网关 agent 去群发、把跑着的任务喊回来 |
 
 ## 安装
 
