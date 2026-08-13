@@ -337,6 +337,34 @@ def test_run_loop_backs_off_2s_then_30s_on_persistent_errors(tmp_path, monkeypat
     assert sleeps == [2, 2, 30]
 
 
+def test_run_loop_logs_request_poll_errors_as_warning(tmp_path, monkeypatch):
+    from agentica.gateway.channels import wechat
+
+    bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
+    polls = []
+
+    def fake_get_updates(timeout=30):
+        polls.append(1)
+        if len(polls) > 1:
+            raise KeyboardInterrupt
+        raise wechat.requests.exceptions.ConnectionError("remote closed")
+
+    warnings = []
+    errors = []
+    sleeps = []
+    monkeypatch.setattr(bot, "get_updates", fake_get_updates)
+    monkeypatch.setattr(wechat.logger, "warning", lambda msg: warnings.append(msg))
+    monkeypatch.setattr(wechat.logger, "error", lambda msg: errors.append(msg))
+    monkeypatch.setattr(wechat.time, "sleep", lambda s: sleeps.append(s))
+
+    bot.run_loop(lambda c, m: None)
+
+    assert sleeps == [2]
+    assert len(warnings) == 1
+    assert "WeChat: loop error: remote closed, retry in 2s" in warnings[0]
+    assert errors == []
+
+
 def test_run_loop_relogs_in_via_qr_on_session_expired(tmp_path, monkeypatch):
     from agentica.gateway.channels import wechat
 

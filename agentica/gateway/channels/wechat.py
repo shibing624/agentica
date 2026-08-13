@@ -573,7 +573,12 @@ class WxBotClient:
             except Exception as e:
                 failures += 1
                 delay = _POLL_RETRY_DELAY if failures < _POLL_BACKOFF_AFTER else _POLL_BACKOFF_DELAY
-                logger.error(f"WeChat: loop error: {e}, retry in {delay}s")
+                log_poll_error = (
+                    logger.warning
+                    if isinstance(e, requests.exceptions.RequestException)
+                    else logger.error
+                )
+                log_poll_error(f"WeChat: loop error: {e}, retry in {delay}s")
                 time.sleep(delay)
                 continue
             for msg in msgs:
