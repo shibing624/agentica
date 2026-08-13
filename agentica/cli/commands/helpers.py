@@ -59,6 +59,7 @@ def _refresh_skills_session(ctx: CommandContext):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
+        worktree_binder=ctx.worktree_binder,
     )
     return {
         "skills_registry": new_registry,

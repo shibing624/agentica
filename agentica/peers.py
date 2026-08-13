@@ -486,6 +486,25 @@ class PeerSession:
         _write_private_json(self.path, self.info.to_dict())
         self._last_publish = self.info.updated_at
 
+    def rebind(self, cwd: str) -> None:
+        """Publish a new working directory, keeping the addressable name.
+
+        A session that steps into a git worktree mid-flight is still the same
+        session to everyone else: a peer that was told to report back to
+        ``agentica-d9``, a phone with that name pinned, a message already in
+        flight. ``publish(cwd=...)`` renames from the folder — right at startup,
+        wrong here, because the name is what other people are holding.
+
+        Storage moves with the directory (``project_dir``), so the sessions this
+        terminal starts from now on live with the worktree they belong to.
+        """
+        from agentica.project_store import project_base_dir
+
+        self._storage_cwd = str(cwd)
+        self.info.cwd = os.path.realpath(os.path.expanduser(self._storage_cwd))
+        self.info.project_dir = project_base_dir(self._storage_cwd, user_id=self._user_id)
+        self.publish()
+
     def heartbeat(self, **updates: Any) -> None:
         """Refresh the record when the interval elapsed or something changed.
 

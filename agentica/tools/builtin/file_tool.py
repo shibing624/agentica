@@ -139,6 +139,18 @@ class BuiltinFileTool(Tool):
         # Stores previous file content before each write/edit, supporting undo.
         self._file_snapshots: Dict[str, List[str]] = {}
 
+    def set_work_dir(self, work_dir: str) -> None:
+        """Point relative paths at another directory, mid-session.
+
+        A long-running session that binds itself to a git worktree
+        (``agentica/worktrees.py``) has to take its tools with it — otherwise
+        ``read_file("agentica/peers.py")`` still reads the directory the session
+        started in, and the isolation the worktree was for is a fiction.
+        ``Agent.rebind_work_dir`` calls this; the sandbox's writable_dirs are
+        updated there, on the shared SandboxConfig every tool holds.
+        """
+        self.work_dir = Path(work_dir)
+
         # Register all file operation functions.
         # Read-only tools are concurrency_safe (can run in parallel with each other).
         # Write tools stay serialised.

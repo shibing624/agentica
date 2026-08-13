@@ -365,6 +365,7 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
+        worktree_binder=ctx.worktree_binder,
     )
     print_header(
         ctx.agent_config.get("model_provider", ""),
@@ -650,6 +651,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             ask_user_question_callback=ctx.ask_user_question_callback,
             background_process_registry=ctx.background_processes,
             peer_session=ctx.peer_session,
+            worktree_binder=ctx.worktree_binder,
         )
 
         # Eagerly load history into working_memory so /status, /context etc.
@@ -764,6 +766,7 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
+        worktree_binder=ctx.worktree_binder,
     )
     print_header(
         ctx.agent_config["model_provider"],

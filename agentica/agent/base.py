@@ -1204,6 +1204,50 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self.tool_config.permission_mode = mode
         self.sandbox_config.enabled = sandbox_should_be_enabled(mode)
 
+    def rebind_work_dir(self, work_dir: str) -> str:
+        """Move this agent's *execution* into another directory, mid-run.
+
+        A session that has been running for weeks is exactly the one that needs
+        to step into a git worktree (``agentica/worktrees.py``) without being
+        restarted, and "the agent's directory" is not one thing: the prompt
+        states it, the sandbox allows writes under it, and each file/shell tool
+        captured it when it was built. Changing only ``self.work_dir`` moves the
+        sentence in the prompt and nothing else — the tools would keep writing
+        into the old checkout, which is worse than not moving at all.
+
+        So all three move together, in place, with no rebuild: the conversation,
+        the todo list and the goal survive, and the transcript keeps growing
+        where it was already being written (``session_base_dir``, see
+        ``_init_session_log``) — a session's history should not fragment because
+        its work moved.
+
+        Returns the resolved directory. Does not touch the process cwd: that is
+        the caller's to change (the CLI's ``enter_work_dir``), because a
+        gateway serving many sessions must not chdir for one of them.
+        """
+        resolved = os.path.abspath(os.path.expanduser(work_dir))
+        if not os.path.isdir(resolved):
+            raise ValueError(f"not a directory: {resolved}")
+
+        previous = os.path.abspath(os.path.expanduser(self.work_dir)) if self.work_dir else None
+        self.work_dir = resolved
+
+        # writable_dirs is the shared SandboxConfig every builtin tool holds, so
+        # replacing the old root here is what actually lets writes land.
+        if self.sandbox_config is not None:
+            dirs = [d for d in (self.sandbox_config.writable_dirs or []) if d != previous]
+            if resolved not in dirs:
+                dirs.append(resolved)
+            self.sandbox_config.writable_dirs = dirs
+
+        # Tools that own a work_dir opt in by implementing set_work_dir; a tool
+        # without one (web search, memory, a user's own) has nothing to move.
+        for tool in self.tools or []:
+            setter = getattr(tool, "set_work_dir", None)
+            if callable(setter):
+                setter(resolved)
+        return resolved
+
     def _is_skill_enabled(self, skill_name: str) -> bool:
         """Check if a skill is enabled.
 

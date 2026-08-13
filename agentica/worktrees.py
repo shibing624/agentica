@@ -36,6 +36,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -279,3 +280,124 @@ def ensure(
 def status_lines(cwd: str) -> List[str]:
     """Human-readable listing, main checkout first."""
     return [entry.describe() for entry in list_worktrees(cwd)]
+
+
+# How long to keep retrying an operation in the main checkout that lost a race
+# for git's own index.lock. Two sessions merging at the same time is the case;
+# git's lock is already the mutex, so nothing here invents a second one.
+LOCK_RETRIES = 5
+LOCK_WAIT = 1.0
+
+
+def _git_patient(args: Sequence[str], cwd: str, *, check: bool = True) -> str:
+    """Run a git command, waiting out another process holding the index lock."""
+    last: Optional[WorktreeError] = None
+    for attempt in range(LOCK_RETRIES):
+        try:
+            return _git(args, cwd, check=check)
+        except WorktreeError as e:
+            if "index.lock" not in str(e) and "another git process" not in str(e).lower():
+                raise
+            last = e
+            time.sleep(LOCK_WAIT * (attempt + 1))
+    raise WorktreeError(
+        f"{last} — another session has been holding git's lock for "
+        f"{int(LOCK_RETRIES * LOCK_WAIT)}s; try again in a moment"
+    )
+
+
+@dataclass(frozen=True)
+class MergeResult:
+    """What ``merge_back`` did, in the caller's words."""
+
+    branch: str
+    base: str
+    commits: int
+    merged_sha: str
+    conflicted_files: Tuple[str, ...] = ()
+
+    @property
+    def conflicted(self) -> bool:
+        return bool(self.conflicted_files)
+
+
+def merge_back(cwd: str, *, base: Optional[str] = None) -> MergeResult:
+    """Land this worktree's branch on the base branch, keeping the worktree.
+
+    The order is what makes it safe, and it is not the obvious one:
+
+    1. **Base into the branch, inside the worktree.** A conflict then belongs to
+       the session that wrote the code, in the directory it was written in, with
+       its tests one command away — instead of stranding a half-merged index in
+       the main checkout that every other session shares.
+    2. **Branch into base, in the main checkout.** After step 1 this is a
+       fast-forward, so the shared checkout is touched for as little as possible.
+       Git's own index lock is the mutex against another session doing the same
+       thing; ``_git_patient`` waits it out rather than adding a second lock.
+
+    A worktree left behind at an old base is the thing that makes these go stale,
+    so step 1 is not an optimisation: it is why the worktree is still usable
+    afterwards (it ends level with the base). Nothing is ever deleted.
+
+    Refuses — rather than guessing — when there is uncommitted work on either
+    side, or when the main checkout is not on the base branch.
+    """
+    root = current_root(cwd)
+    main = main_root(cwd)
+    base_ref = base or default_base(cwd)
+
+    branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip()
+    if branch == "HEAD":
+        raise WorktreeError("this worktree is on a detached HEAD; check out a branch first")
+    if branch == base_ref:
+        raise WorktreeError(
+            f"this worktree is already on {base_ref}; there is nothing to merge back"
+        )
+    if os.path.realpath(root) == os.path.realpath(main):
+        raise WorktreeError(
+            "this is the main checkout, not a worktree — switch to a worktree first"
+        )
+    if _git(["status", "--porcelain"], root).strip():
+        raise WorktreeError(
+            "commit (or stash) this worktree's changes first — merging would "
+            "otherwise land a half-finished state on " + base_ref
+        )
+
+    ahead = _git(["rev-list", "--count", f"{base_ref}..{branch}"], root).strip()
+    commits = int(ahead) if ahead.isdigit() else 0
+    if commits == 0:
+        raise WorktreeError(
+            f"{branch} has no commits that {base_ref} does not already have"
+        )
+
+    # 1. Base into the branch, here, where a conflict can be resolved.
+    merge = _git(["merge", "--no-edit", base_ref], root, check=False)
+    conflicted = tuple(
+        line.strip()
+        for line in _git(["diff", "--name-only", "--diff-filter=U"], root).splitlines()
+        if line.strip()
+    )
+    if conflicted:
+        return MergeResult(
+            branch=branch, base=base_ref, commits=commits, merged_sha="",
+            conflicted_files=conflicted,
+        )
+    if "CONFLICT" in merge:
+        raise WorktreeError(f"merging {base_ref} into {branch} failed: {merge.strip()[-200:]}")
+
+    # 2. Branch into base, in the main checkout — a fast-forward after step 1.
+    main_branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], main).strip()
+    if main_branch != base_ref:
+        raise WorktreeError(
+            f"the main checkout is on '{main_branch}', not '{base_ref}'; "
+            f"leave it on {base_ref} so merges land where everyone reads them"
+        )
+    if _git(["status", "--porcelain"], main).strip():
+        raise WorktreeError(
+            f"the main checkout has uncommitted changes; {base_ref} must be clean "
+            "before anything is merged into it"
+        )
+    _git_patient(["merge", "--ff-only", "--no-edit", branch], main)
+    merged_sha = _git(["rev-parse", "--short", "HEAD"], main).strip()
+
+    return MergeResult(branch=branch, base=base_ref, commits=commits, merged_sha=merged_sha)

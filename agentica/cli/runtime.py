@@ -824,6 +824,7 @@ def create_agent(
     enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
     peer_session=None,
+    worktree_binder=None,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
@@ -844,6 +845,10 @@ def create_agent(
     peer_session: optional ``agentica.peers.PeerSession`` for cross-session
         messaging. When given, the agent gets the ``list_agents`` /
         ``send_message`` tools and its inbox is drained between tool batches.
+    worktree_binder: optional ``agentica.cli.worktree_binding.WorktreeBinder``.
+        When given, the agent gets the ``worktree`` tool and can move this
+        session into a per-task checkout on its own — including when the
+        instruction arrived from another session as a peer message.
     """
     if permission_mode is None:
         configured_permission_mode = agent_config.get("permissions")
@@ -969,6 +974,14 @@ def create_agent(
         from agentica.tools.peer_tool import PeerMessagingTool
 
         cli_tools.insert(0, PeerMessagingTool(peer_session))
+
+    # Worktrees are the other half of peer messaging: list_agents shows that
+    # another session is dirty in the same directory, and this is what the agent
+    # does about it without asking a human to restart it somewhere else.
+    if worktree_binder is not None:
+        from agentica.tools.worktree_tool import WorktreeTool
+
+        cli_tools.insert(0, WorktreeTool(worktree_binder))
 
     # Delegating needs the session's process registry (that is how the worker is
     # tracked, waited on and reported), so a one-shot `--query` run and a

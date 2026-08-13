@@ -46,6 +46,7 @@ from agentica.cli.runtime import (
 from agentica import config
 from agentica import git_state
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
+from agentica.cli.worktree_binding import WorktreeBinder
 from agentica.global_config import get_setting, set_project_profile
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
@@ -342,12 +343,25 @@ def run_interactive(
     # or the running agent drained the mailbox. Set after construction so the
     # callback can close over ``state`` / ``app`` once those exist below.
     state.peer_session.publish()
+    # Per-task worktrees: built before the first agent (the tool is created
+    # during create_agent) and shared with every rebuild, so a session can move
+    # itself into its own checkout at any point in its life — including when the
+    # instruction arrives from another session as a peer message. The getters
+    # are deliberate: `state.current_agent` is replaced by /model and /resume,
+    # and `tui_state` does not exist yet at this line.
+    worktree_binder = WorktreeBinder(
+        agent_config=agent_config,
+        get_agent=lambda: state.current_agent,
+        get_peers=lambda: state.peer_session,
+        get_tui_state=lambda: tui_state,
+    )
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
         ask_user_question_callback=_cli_ask_user_question_callback,
         background_process_registry=state.background_processes,
         permission_mode=perm_mode,
         peer_session=state.peer_session,
+        worktree_binder=worktree_binder,
     )
     # create_agent assigns a session_id when the config did not; publish it so
     # other terminals can address / resume this conversation by that id.
@@ -491,6 +505,7 @@ def run_interactive(
             peer_session=state.peer_session,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
+            worktree_binder=worktree_binder,
             ask_user_question_callback=_cli_ask_user_question_callback,
             open_pager_callback=_open_history_pager,
         )
