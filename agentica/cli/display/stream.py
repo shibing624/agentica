@@ -472,7 +472,7 @@ class StreamDisplayManager:
             # Tool errors are single diagnostic messages — the cause lives at
             # the START/MIDDLE, so an 80-char tail window hid exactly what
             # mattered. Print the whole message.
-            line += f" [yellow]- error{elapsed_str}[/yellow]"
+            line += f" [dim]- error{elapsed_str}[/dim]"
             self._assistant_console.print(line)
             err_lines = self._shorten_workdir_text(str(result_content)).strip().splitlines() or [""]
             self._display_full_result_lines(err_lines, is_error=True, elapsed_str="")
@@ -507,7 +507,7 @@ class StreamDisplayManager:
         key = tool_call_id or tool_args.get("patch", "")
         old_files = self._patch_old.pop(key, [])
         if is_error:
-            self._assistant_console.print(line + f" [yellow]- error{elapsed_str}[/yellow]")
+            self._assistant_console.print(line + f" [dim]- error{elapsed_str}[/dim]")
             # Preflight reports name the failing file/hunk at the head — show
             # every line, no tail window.
             self._display_full_result_lines(
@@ -623,7 +623,7 @@ class StreamDisplayManager:
         if display_path:
             line += f" [dim]{display_path}[/dim]"
         if is_error:
-            line += f" [yellow]- error{elapsed_str}[/yellow]"
+            line += f" [dim]- error{elapsed_str}[/dim]"
             self._assistant_console.print(line)
             err_lines = self._shorten_workdir_text(result_str).strip().splitlines() or [""]
             self._display_full_result_lines(err_lines, is_error=True, elapsed_str="")
@@ -815,7 +815,7 @@ class StreamDisplayManager:
                 lines, tail,
                 inline=self._EXECUTE_MAX_INLINE_LINES,
                 prefix="    ⎿ ", cont_prefix="      ",
-                style="dim yellow" if (is_error or is_diagnostics) else "dim",
+                style="dim yellow" if (is_diagnostics and not is_error) else "dim",
                 error_prefix="    ⎿ ⚠ " if (is_error or is_diagnostics) else None,
                 truncated_title=f"Tool output · {tool_name}",
                 full_content=result_str,
@@ -905,7 +905,7 @@ class StreamDisplayManager:
         self, lines: List[str], *, is_error: bool, elapsed_str: str
     ) -> None:
         """Print every result line without width or line-count truncation."""
-        style = "dim yellow" if is_error else "dim"
+        style = "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
         cont_prefix = "      "
         for i, line in enumerate(lines):
@@ -975,7 +975,7 @@ class StreamDisplayManager:
 
         if not success:
             error_msg = data.get("error", "Unknown error")
-            self._assistant_console.print(f"    ⎿ ⚠ {error_msg}", style="dim yellow",
+            self._assistant_console.print(f"    ⎿ ⚠ {error_msg}", style="dim",
                                           highlight=False)
             if self._subagent_live_shown > 0:
                 self._subagent_live_shown -= 1
