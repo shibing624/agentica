@@ -33,9 +33,17 @@ Usage:
 
         response = agent.run("Hello!")
         # All LLM calls within this run are grouped in a single trace
+
+    4. Bounded shutdown at process exit (langfuse's own atexit shutdown
+       blocks for ~2s: span force_flush + consumer-thread poll joins).
+       The CLI does this automatically; SDK apps should call it from their
+       shutdown hook:
+        from agentica.utils.langfuse_integration import shutdown_langfuse_bounded
+        shutdown_langfuse_bounded()  # overlaps nothing, caps the wait
 """
 
 import logging
+import threading
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Any, Generator
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_BASE_URL
@@ -211,17 +219,74 @@ def flush_langfuse():
 
 
 def shutdown_langfuse():
-    """Shutdown Langfuse and flush pending events."""
+    """Shutdown Langfuse and flush pending events (unbounded — see below)."""
     try:
-        from langfuse import Langfuse
         if is_langfuse_configured():
-            client = Langfuse()
-            client.shutdown()
+            from langfuse import get_client
+            get_client().shutdown()
             logger.debug("Langfuse shutdown completed")
     except ImportError:
         pass
     except Exception as e:
         logger.warning(f"Failed to shutdown Langfuse: {e}")
+
+
+def start_shutdown_thread() -> Optional["threading.Thread"]:
+    """Kick Langfuse shutdown on a daemon thread; return it (None when off).
+
+    ``resource_manager.shutdown`` blocks on two serial sleeps — the OTEL
+    span ``force_flush`` plus pausing/joining the score/media consumer
+    threads, whose poll loop costs ~1s each even when idle. Started early, the
+    work overlaps the caller's own teardown; a bounded ``join`` at the very end
+    caps it. The thread is daemon: if the join times out the process exits
+    anyway, dropping at most the tail of telemetry (spans inside one flush
+    interval), which the langfuse atexit handler would otherwise hold the
+    process hostage for — with a slow/unreachable host that is tens of
+    seconds, which we measured as ~2s even on a healthy one.
+    """
+    if not is_langfuse_configured():
+        return None
+    try:
+        # Peek the singleton registry first: get_client() lazily *creates* a
+        # client (spawning its consumer threads), so calling it in a session
+        # that never traced would pay the very shutdown cost we are avoiding.
+        from langfuse._client.resource_manager import LangfuseResourceManager
+        with LangfuseResourceManager._lock:
+            if not LangfuseResourceManager._instances:
+                return None
+        from langfuse import get_client
+        client = get_client()
+    except ImportError:
+        return None
+    except Exception as e:
+        # Private-API drift or a quirky environment must never take down the
+        # caller's exit path — degrade to "no bounded shutdown".
+        logger.warning(f"Langfuse shutdown thread not started: {e}")
+        return None
+
+    def _shutdown():
+        try:
+            # rm.shutdown is ordered right for us: it unregisters its own
+            # atexit FIRST (so a process exit during the flush never blocks
+            # again), then force_flushes the spans (the actual network send),
+            # then pauses/joins the score & media poll threads (~1s poll cycle
+            # each even when idle — the bulk of the wait, and the part a
+            # bounded join may safely cut: those queues sit empty in the CLI).
+            client.shutdown()
+            logger.debug("Langfuse shutdown completed")
+        except Exception as e:
+            logger.warning(f"Failed to shutdown Langfuse: {e}")
+
+    thread = threading.Thread(target=_shutdown, daemon=True, name="langfuse-shutdown")
+    thread.start()
+    return thread
+
+
+def shutdown_langfuse_bounded(timeout: float = 0.8) -> None:
+    """Bounded convenience wrapper: start + join with a timeout."""
+    thread = start_shutdown_thread()
+    if thread is not None:
+        thread.join(timeout=timeout)
 
 
 @contextmanager

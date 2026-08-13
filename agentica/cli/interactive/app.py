@@ -1005,6 +1005,16 @@ def run_interactive(
         pass
     finally:
         state.should_exit = True
+        # Kick Langfuse's ~2s atexit shutdown (span flush + consumer-thread
+        # joins) onto a daemon thread NOW so it overlaps with our own teardown
+        # (_stop_cron, background_processes.stop, summary print) instead of
+        # blocking the interpreter after the farewell line.
+        langfuse_thread = None
+        try:
+            from agentica.utils.langfuse_integration import start_shutdown_thread
+            langfuse_thread = start_shutdown_thread()
+        except Exception:
+            pass
         _stop_cron(state)
         state.background_processes.stop()
         if state.peer_session is not None:
@@ -1016,6 +1026,12 @@ def run_interactive(
 
     _print_interactive_exit_summary(state, tui_state)
     get_console().print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")
+
+    if langfuse_thread is not None:
+        # Cap the flush well below the consumer-poll sleep (~2s): on a
+        # reachable host force_flush ships in ~0.1-0.3s, so 0.8s keeps the
+        # real spans; what we cut is langfuse's idle polling joins.
+        langfuse_thread.join(timeout=0.8)
 
 
 __all__ = ['_maybe_start_cron', '_stop_cron', 'run_interactive']
