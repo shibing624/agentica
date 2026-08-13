@@ -209,7 +209,7 @@ slack    = ["agentica[gateway]", "slack_sdk>=3.40", "websocket-client>=1.6"]
 qq       = ["agentica[gateway]", "qq-botpy>=1.0"]
 wecom    = ["agentica[gateway]", "wecom_aibot_sdk>=0.1"]
 dingtalk = ["agentica[gateway]", "dingtalk-stream>=0.20"]
-wechat   = ["agentica[gateway]", "qrcode>=7.0", "requests>=2.28", "pycryptodome>=3.20", "Pillow>=10.0"]
+wechat   = ["agentica[gateway]", "qrcode>=7.0", "requests>=2.28", "pycryptodome>=3.20", "Pillow>=10.0", "graiax-silkcoder"]
 
 # ═══════════════════════════════════════════════════════════
 # Tracing / Observability

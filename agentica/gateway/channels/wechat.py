@@ -44,7 +44,7 @@ from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
 from agentica.version import __version__
 
-from .base import Channel, ChannelType, Message
+from .base import Channel, ChannelType, InboundMedia, Message
 from ..config import settings
 
 # ── ilinkai protocol constants ──
@@ -515,6 +515,27 @@ class WxBotClient:
         return out
 
     @staticmethod
+    def extract_media_typed(msg: dict) -> list:
+        """Collect ``(kind, CDNMedia)`` pairs from an inbound message.
+
+        ``kind`` is ``"image" | "voice" | "video" | "file"``. A video's
+        ``thumb_media`` is skipped — the understanding pipeline wants the
+        video itself, not its poster frame.
+        """
+        out = []
+        for it in msg.get("item_list", []):
+            for key, kind in (
+                ("image_item", "image"),
+                ("voice_item", "voice"),
+                ("video_item", "video"),
+                ("file_item", "file"),
+            ):
+                sub = it.get(key)
+                if sub and sub.get("media"):
+                    out.append((kind, sub["media"]))
+        return out
+
+    @staticmethod
     def extract_text(msg: dict) -> str:
         """Concatenate all text items from an inbound message."""
         return "\n".join(
@@ -725,6 +746,31 @@ class WeChatChannel(Channel):
             logger.error(f"WeChat: send_media error: {e} channel_id={channel_id}")
             return False
 
+    async def fetch_media(self, message: Message) -> List[InboundMedia]:
+        """Download + decrypt the media referenced by an inbound message.
+
+        Reads the typed ``{"kind", "media"}`` references that
+        ``_on_native_message`` put into ``message.metadata["media"]`` and
+        fetches each payload from the CDN (AES-128-ECB decrypt included).
+        Items that fail to download are skipped with a warning so one bad
+        reference doesn't drop the whole message.
+        """
+        if not self._bot:
+            logger.warning("WeChat: Not connected")
+            return []
+        out: List[InboundMedia] = []
+        for ref in message.metadata.get("media") or []:
+            kind, cdn_media = ref.get("kind", ""), ref.get("media")
+            if not kind or not cdn_media:
+                continue
+            try:
+                data = await asyncio.to_thread(self._bot.download_media, cdn_media)
+            except Exception as e:
+                logger.warning(f"WeChat: media download failed ({kind}): {e}")
+                continue
+            out.append(InboundMedia(kind=kind, data=data))
+        return out
+
     def _on_native_message(self, bot: WxBotClient, msg: dict) -> None:
         """Sync callback (runs in poll thread). Dispatches to main loop."""
         try:
@@ -735,7 +781,7 @@ class WeChatChannel(Channel):
                 self._processed_ids.append(mid)
 
             text = bot.extract_text(msg).strip()
-            media = WxBotClient.extract_media(msg)
+            media = [{"kind": kind, "media": ref} for kind, ref in WxBotClient.extract_media_typed(msg)]
             if not text and not media:
                 return
 

@@ -261,7 +261,92 @@ async def test_on_native_message_attaches_media(tmp_path):
     ch._on_native_message(bot, msg_payload)
     await asyncio.sleep(0.05)
     assert len(received) == 1
-    assert received[0].metadata["media"][0]["encrypt_query_param"] == "e"
+    ref = received[0].metadata["media"][0]
+    assert ref["kind"] == "image"
+    assert ref["media"]["encrypt_query_param"] == "e"
+
+
+def test_extract_media_typed_kinds_and_skips_video_thumb():
+    from agentica.gateway.channels.wechat import WxBotClient
+
+    msg = {
+        "item_list": [
+            {"type": 2, "image_item": {"media": {"encrypt_query_param": "e1"}}},
+            {"type": 3, "voice_item": {"media": {"encrypt_query_param": "e2"}}},
+            {"type": 5, "video_item": {
+                "media": {"encrypt_query_param": "e3"},
+                "thumb_media": {"encrypt_query_param": "t3"},
+            }},
+            {"type": 4, "file_item": {"media": {"encrypt_query_param": "e4"}}},
+            {"type": 1, "text_item": {"text": "hi"}},
+        ]
+    }
+    typed = WxBotClient.extract_media_typed(msg)
+    assert [(kind, m["encrypt_query_param"]) for kind, m in typed] == [
+        ("image", "e1"),
+        ("voice", "e2"),
+        ("video", "e3"),
+        ("file", "e4"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_media_downloads_typed_payloads(tmp_path):
+    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica.gateway.channels.base import ChannelType, Message
+
+    ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
+    ch._bot = MagicMock()
+    payloads = {"e1": b"\xff\xd8\xff\xe0jpeg", "e2": b"#!SILK_V3xx", "e3": b"mp4data"}
+    ch._bot.download_media.side_effect = (
+        lambda ref, cdn_base_url=None: payloads[ref["encrypt_query_param"]]
+    )
+    message = Message(
+        channel=ChannelType.WECHAT,
+        channel_id="u",
+        sender_id="u",
+        sender_name="u",
+        content="",
+        message_id="m",
+        metadata={"media": [
+            {"kind": "image", "media": {"encrypt_query_param": "e1"}},
+            {"kind": "voice", "media": {"encrypt_query_param": "e2"}},
+            {"kind": "video", "media": {"encrypt_query_param": "e3"}},
+        ]},
+    )
+
+    out = await ch.fetch_media(message)
+
+    assert [(m.kind, m.data) for m in out] == [
+        ("image", b"\xff\xd8\xff\xe0jpeg"),
+        ("voice", b"#!SILK_V3xx"),
+        ("video", b"mp4data"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_media_default_channel_returns_empty():
+    from agentica.gateway.channels.base import Channel, ChannelType, Message
+
+    class _TextOnly(Channel):
+        @property
+        def channel_type(self):
+            return ChannelType.WEB
+
+        async def connect(self):
+            return True
+
+        async def disconnect(self):
+            pass
+
+        async def send(self, channel_id, content, **kwargs):
+            return True
+
+    msg = Message(
+        channel=ChannelType.WEB, channel_id="c", sender_id="s", sender_name="s",
+        content="hi", message_id="1", metadata={"media": [{"kind": "image", "media": {}}]},
+    )
+    assert await _TextOnly().fetch_media(msg) == []
 
 
 def test_get_updates_session_expired_clears_credentials_and_raises(tmp_path):

@@ -5,6 +5,7 @@ Requires the [gateway] extras:
 """
 import asyncio
 import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
@@ -87,6 +88,84 @@ class TestAgentServiceRunSource:
 
         config = agent.run.call_args.kwargs["config"]
         assert config.source == RunSource.cron
+
+
+class TestAgentServiceChatMedia:
+    """chat() routes inbound media: base-capable payloads attach to the run,
+    fallback descriptions become text parts, and notes reach the reply."""
+
+    def _svc_with_agent(self, tmp_path, agent):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        svc._get_agent = AsyncMock(return_value=agent)
+        return svc
+
+    def test_base_capable_image_attaches_to_run(self, tmp_path):
+        from agentica.gateway.channels.base import InboundMedia
+
+        agent = MagicMock()
+        agent.model = SimpleNamespace(id="gpt-4o", supports_images=True)
+        agent.run = AsyncMock(return_value=MagicMock(content="看到了", tools=[]))
+        svc = self._svc_with_agent(tmp_path, agent)
+
+        result = asyncio.run(svc.chat(
+            "这是什么", session_id="s1", user_id="u1",
+            media=[InboundMedia(kind="image", data=b"\xff\xd8\xff\xe0xx")],
+        ))
+
+        images = agent.run.call_args.kwargs["images"]
+        assert len(images) == 1
+        assert images[0]["url"].startswith("data:image/jpeg;base64,")
+        assert agent.run.call_args.kwargs["audio"] is None
+        assert agent.run.call_args.args[0] == "这是什么"
+        assert result.media_notes == []
+
+    def test_fallback_voice_transcript_appended_and_noted(self, tmp_path, monkeypatch):
+        from agentica.gateway.channels.base import InboundMedia
+        from agentica.gateway.services import media_understanding as mu
+
+        class _FakeModel:
+            async def response(self, messages):
+                return SimpleNamespace(content="你好，世界")
+
+        monkeypatch.setattr(mu, "get_profiles", lambda: {
+            "g": {"model_provider": "openai", "model_name": "gemini-2.5-flash", "api_key": "k"},
+        })
+        monkeypatch.setattr(
+            "agentica.gateway.services.agent_service.media_understanding",
+            mu.MediaUnderstandingService(create_model_fn=lambda *a, **kw: _FakeModel()),
+        )
+
+        agent = MagicMock()
+        agent.model = SimpleNamespace(id="deepseek-v4-flash", supports_images=False)
+        agent.run = AsyncMock(return_value=MagicMock(content="好的", tools=[]))
+        svc = self._svc_with_agent(tmp_path, agent)
+
+        result = asyncio.run(svc.chat(
+            "", session_id="s1", user_id="u1",
+            media=[InboundMedia(kind="voice", data=b"RIFF" + b"\x00" * 40)],
+        ))
+
+        sent_message = agent.run.call_args.args[0]
+        assert "[语音转写]\n你好，世界" in sent_message
+        assert agent.run.call_args.kwargs["audio"] is None
+        assert result.media_notes
+        assert "gemini-2.5-flash" in result.media_notes[0]
+
+    def test_no_media_keeps_plain_call(self, tmp_path):
+        agent = MagicMock()
+        agent.model = SimpleNamespace(id="deepseek-v4-flash", supports_images=False)
+        agent.run = AsyncMock(return_value=MagicMock(content="ok", tools=[]))
+        svc = self._svc_with_agent(tmp_path, agent)
+
+        result = asyncio.run(svc.chat("hi", session_id="s1", user_id="u1"))
+
+        assert agent.run.call_args.kwargs["images"] is None
+        assert agent.run.call_args.kwargs["audio"] is None
+        assert result.media_notes == []
 
 
 class TestAgentServiceStreamToolDispatch:

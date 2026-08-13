@@ -378,12 +378,17 @@ def get_model_context_window(model_id: str, default: int = 128000) -> int:
     return default
 
 
-def get_model_supports_images(model_id: str) -> bool:
-    """Return whether the catalog declares image as an input modality."""
+def get_model_supports_modality(model_id: str, modality: str) -> bool:
+    """Return whether the catalog declares ``modality`` as an input modality."""
     entry = _get_model_entry(model_id)
     if entry is None:
         return False
-    return "image" in entry.get("input_modalities", ())
+    return modality in entry.get("input_modalities", ())
+
+
+def get_model_supports_images(model_id: str) -> bool:
+    """Return whether the catalog declares image as an input modality."""
+    return get_model_supports_modality(model_id, "image")
 
 
 # Backward-compatible alias used by tests

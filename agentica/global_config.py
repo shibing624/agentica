@@ -58,6 +58,11 @@ Schema (``~/.agentica/config.yaml``)::
         # context_window: 1000000    # context limit; overrides catalog value
         # temperature: 0.7
         # top_p: 0.95
+        # modalities: [image, audio, video]  # optional, hand-edit only: declare
+        # input modalities the model accepts, for models the capability catalog
+        # doesn't know (private deployments, new releases). The gateway's media
+        # understanding reads this to route WeChat image/voice/video messages —
+        # without it, only catalog data + conservative name hints are used.
         # extra_body / extra_headers: raw passthrough dicts, hand-edit only
         # (no setup wizard prompt) for endpoints whose tuning knobs don't map
         # to a standard OpenAI param, e.g. Hunyuan's taiji gateway wants

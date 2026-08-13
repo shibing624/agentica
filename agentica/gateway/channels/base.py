@@ -42,6 +42,20 @@ class Message:
     metadata: dict = field(default_factory=dict)
 
 
+@dataclass
+class InboundMedia:
+    """A downloaded media payload from an inbound channel message.
+
+    Channels that support media override :meth:`Channel.fetch_media` to
+    materialise the opaque media references they put into
+    ``Message.metadata["media"]`` into these byte payloads, which the
+    gateway's media-understanding service then routes to a capable model.
+    """
+    kind: str          # "image" | "voice" | "video" | "file"
+    data: bytes
+    mime: str = ""     # best-effort MIME hint (may be empty)
+
+
 class Channel(ABC):
     """Abstract base class that all channel implementations must extend.
 
@@ -113,6 +127,15 @@ class Channel(ABC):
         """
         if self._message_handler:
             await self._message_handler(message)
+
+    async def fetch_media(self, message: Message) -> List[InboundMedia]:
+        """Download the media referenced by an inbound message.
+
+        Channels that put media references into ``Message.metadata["media"]``
+        override this to fetch the actual bytes. The default returns an empty
+        list (text-only channel).
+        """
+        return []
 
     def check_allowlist(self, user_id: str) -> bool:
         """Check whether a user is permitted by the allowlist.

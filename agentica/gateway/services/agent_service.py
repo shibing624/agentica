@@ -18,7 +18,7 @@ import os
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Callable, List, Any, Dict
+from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
 
 from agentica.utils.log import logger
 from agentica import DeepAgent
@@ -29,6 +29,7 @@ from agentica.run_context import RunSource
 from agentica.workspace import Workspace
 from agentica.global_config import (
     apply_global_config,
+    get_profile,
     set_active_profile,
     provider_api_key_env,
 )
@@ -36,11 +37,15 @@ from agentica.memory.session_log import SessionLog
 from agentica.skills import get_skill_registry
 
 from ..config import settings
+from .media_understanding import media_understanding
 from .model_factory import (
     create_model, get_cron_tools, get_cron_instructions,
     get_self_manage_tools, get_self_manage_instructions,
 )
 from .response_formatter import extract_metrics, format_tool_call_args, format_tool_result
+
+if TYPE_CHECKING:
+    from ..channels.base import InboundMedia
 
 # Timeout in seconds for building a new Agent instance (guards against SDK hangs)
 _AGENT_BUILD_TIMEOUT_S = 30
@@ -83,6 +88,10 @@ class ChatResult:
     tools_used: List[str] = field(default_factory=list)
     reasoning: str = ""
     metrics: Optional[Dict[str, Any]] = None
+    # User-facing one-liners about how inbound media was handled (non-base
+    # model used, media skipped, …); the channel layer prefixes these to the
+    # reply so IM users see them.
+    media_notes: List[str] = field(default_factory=list)
 
 
 class LRUAgentCache:
@@ -557,12 +566,28 @@ class AgentService:
         expanded = get_skill_registry().expand_invocation(message)
         return expanded if expanded is not None else message
 
+    @staticmethod
+    def _base_declared_modalities(agent) -> tuple:
+        """The active profile's explicit ``modalities`` list, when it names
+        the model this agent is actually running (a runtime model switch via
+        /api/model doesn't rewrite config.yaml, so a mismatched profile must
+        not lend its declarations to a different model)."""
+        try:
+            profile = get_profile()
+        except Exception:
+            return ()
+        if profile.get("model_name") != getattr(agent.model, "id", None):
+            return ()
+        declared = profile.get("modalities") or ()
+        return tuple(declared) if isinstance(declared, (list, tuple)) else ()
+
     async def chat(
         self,
         message: str,
         session_id: str,
         user_id: str = "default",
         source: RunSource = RunSource.gateway,
+        media: Optional[List["InboundMedia"]] = None,
     ) -> ChatResult:
         """Send a message and return the full response (non-streaming).
 
@@ -573,6 +598,11 @@ class AgentService:
             message: User message
             session_id: Session identifier
             user_id: User identifier (for workspace memory isolation)
+            media: Downloaded inbound media (image/voice/video payloads) from
+                the channel. Routed by the media-understanding service: items
+                the base model understands attach to the run directly; the
+                rest are described/transcribed by a capable config.yaml model
+                and appended to the text.
 
         Returns:
             ChatResult with content, tool_calls, metrics
@@ -593,6 +623,18 @@ class AgentService:
             agent = await self._get_agent(session_id)
             self._note_peer_turn(session_id, message)
 
+            media_plan = None
+            if media:
+                media_plan = await media_understanding.prepare(
+                    media,
+                    base_model_id=getattr(agent.model, "id", "") or "",
+                    base_supports_images=bool(getattr(agent.model, "supports_images", False)),
+                    base_declared=self._base_declared_modalities(agent),
+                )
+                if media_plan.text_parts:
+                    message = message + "\n\n" + "\n\n".join(media_plan.text_parts)
+            media_notes = media_plan.notes if media_plan else []
+
             try:
                 if self._workspace:
                     await asyncio.to_thread(self._workspace.set_user, user_id)
@@ -600,6 +642,8 @@ class AgentService:
                 response = await agent.run(
                     self._expand_skill_invocation(message),
                     config=self._run_config_for_session(session_id, source),
+                    images=(media_plan.images or None) if media_plan else None,
+                    audio=media_plan.audio if media_plan else None,
                 )
 
                 content = (response.content or "").strip()
@@ -621,6 +665,7 @@ class AgentService:
                     user_id=user_id,
                     tools_used=tools_used,
                     metrics=extract_metrics(agent),
+                    media_notes=media_notes,
                 )
 
             except Exception as e:
@@ -630,6 +675,7 @@ class AgentService:
                     tool_calls=0,
                     session_id=session_id,
                     user_id=user_id,
+                    media_notes=media_notes,
                 )
 
     async def run_cron(self, message: str, job_id: str, user_id: str = "default") -> ChatResult:

@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from agentica.gateway.channels.base import ChannelType, Message
+from agentica.gateway.channels.base import ChannelType, InboundMedia, Message
 from agentica.gateway import main as gw_main
 from agentica.gateway.services.agent_service import ChatResult
 
@@ -61,7 +61,7 @@ async def test_rapid_messages_are_queued_and_processed_in_order(patched_deps):
     release = asyncio.Event()
     first_started = asyncio.Event()
 
-    async def slow_chat(message, session_id, user_id):
+    async def slow_chat(message, session_id, user_id, media=None):
         # Block the first message so the next two arrive while it "runs".
         if not first_started.is_set():
             first_started.set()
@@ -99,7 +99,7 @@ async def test_queue_full_drops_excess(patched_deps):
 
     release = asyncio.Event()
 
-    async def blocking_chat(message, session_id, user_id):
+    async def blocking_chat(message, session_id, user_id, media=None):
         await release.wait()
         return ChatResult(content="ok", session_id=session_id)
 
@@ -128,7 +128,7 @@ async def test_distinct_sessions_run_concurrently(patched_deps):
     both_running = asyncio.Event()
     running = set()
 
-    async def chat(message, session_id, user_id):
+    async def chat(message, session_id, user_id, media=None):
         running.add(session_id)
         if len(running) == 2:
             both_running.set()
@@ -143,3 +143,37 @@ async def test_distinct_sessions_run_concurrently(patched_deps):
     # Different sessions are not serialized against each other.
     await asyncio.wait_for(both_running.wait(), timeout=2.0)
     assert running == {"sess:userA", "sess:userB"}
+
+
+@pytest.mark.asyncio
+async def test_media_message_fetches_payloads_and_replies_with_notes(patched_deps):
+    """A message carrying media refs goes through channel.fetch_media() into
+    agent_service.chat(media=...), and any media notes prefix the reply."""
+    agent_service, channel_manager = patched_deps
+
+    channel = MagicMock()
+    channel.fetch_media = AsyncMock(
+        return_value=[InboundMedia(kind="image", data=b"\xff\xd8\xff\xe0xx")]
+    )
+    channel_manager.get_channel = MagicMock(return_value=channel)
+
+    async def chat(message, session_id, user_id, media=None):
+        assert media and media[0].kind == "image"
+        return ChatResult(
+            content="是只猫",
+            session_id=session_id,
+            media_notes=["🖼 图片由 gpt-4o 识别（底模不支持读图）"],
+        )
+
+    agent_service.chat = AsyncMock(side_effect=chat)
+
+    msg = _make_message("看图")
+    msg.metadata["media"] = [{"kind": "image", "media": {"encrypt_query_param": "e"}}]
+    await gw_main._process_channel_message(msg, "sess:userA")
+
+    channel.fetch_media.assert_awaited_once_with(msg)
+    sent = channel_manager.send.await_args.args
+    assert "🖼 图片由 gpt-4o 识别" in sent[2]
+    assert "是只猫" in sent[2]
+    # note comes before the answer
+    assert sent[2].index("🖼") < sent[2].index("是只猫")

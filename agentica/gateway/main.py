@@ -423,17 +423,33 @@ async def _process_channel_message(message, session_id: str) -> None:
     user_id = message.sender_id or settings.default_user_id
 
     try:
+        # Materialise media references (image/voice/video) the channel put
+        # into metadata — only channels with media support return anything.
+        media = []
+        if message.metadata.get("media"):
+            channel = deps.channel_manager.get_channel(message.channel)
+            if channel is not None:
+                media = await channel.fetch_media(message)
+
         result = await deps.agent_service.chat(
             message=message.content,
             session_id=session_id,
             user_id=user_id,
+            media=media,
         )
 
-        if result.content:
+        # Media notes (non-base model used / media skipped) prefix the reply
+        # so the IM user sees how their image/voice/video was handled.
+        reply = result.content
+        if result.media_notes:
+            notes = "\n".join(result.media_notes)
+            reply = f"{notes}\n\n{reply}" if reply else notes
+
+        if reply:
             await deps.channel_manager.send(
                 message.channel,
                 message.channel_id,
-                result.content,
+                reply,
             )
 
         await ws.ws_manager.broadcast("channel.message", {
