@@ -35,6 +35,7 @@ from agentica.model.base import Model, require_first_choice
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
+from agentica.model.openai.sse_sanitize import TolerantSSETransport
 from agentica.model.stream_retry import stream_with_retry
 from agentica.utils.log import logger
 from agentica.utils.langfuse_integration import (
@@ -388,9 +389,14 @@ class OpenAIChat(Model):
         if self.http_client:
             client_params["http_client"] = self.http_client
         else:
-            client_params["http_client"] = httpx.AsyncClient(
-                limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100)
-            )
+            # Route the default client through the tolerant SSE transport so
+            # double-wrapped `data: data: {...}` frames from OpenAI-compatible
+            # proxies are repaired before the SDK's decoder sees them.
+            # Limits must live on the transport: an explicitly constructed
+            # transport ignores AsyncClient(limits=...).
+            limits = httpx.Limits(max_connections=1000, max_keepalive_connections=100)
+            transport = TolerantSSETransport(httpx.AsyncHTTPTransport(limits=limits))
+            client_params["http_client"] = httpx.AsyncClient(transport=transport)
 
         # Try to use Langfuse-wrapped client if available
         _, LangfuseAsyncOpenAI = get_langfuse_openai_client()
