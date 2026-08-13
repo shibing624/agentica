@@ -153,5 +153,19 @@ class TestRunEvent:
         assert RunEvent.workflow_completed.value == "WorkflowCompleted"
 
 
+class TestToolCallInfo:
+    def test_from_dict_keeps_display_meta(self):
+        meta = {"files": [{"path": "a.py", "before": "old", "after": "new"}]}
+        info = ToolCallInfo.from_dict({
+            "tool_call_id": "c1",
+            "tool_name": "edit_file",
+            "content": "ok",
+            "metrics": {"time": 0.2},
+            "tool_display_meta": meta,
+        })
+        assert info.tool_display_meta == meta
+        assert info.elapsed == 0.2
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

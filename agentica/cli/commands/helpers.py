@@ -24,6 +24,23 @@ from agentica.skills import (
 from agentica.skills.skill_registry import reset_skill_registry
 
 
+def format_cli_log_location() -> Optional[str]:
+    """Return ``~/…/logs/YYYYMMDD-<pid>.log (LEVEL)`` for this CLI process.
+
+    Reads ``agentica.config`` at call time — the path is assigned in
+    ``cli.main`` after modules import, so a frozen import-time constant would
+    always be empty. None when the user opted out (``AGENTICA_LOG_FILE=""``).
+    """
+    from agentica import config
+
+    path = config.AGENTICA_LOG_FILE
+    if not path:
+        return None
+    home = os.path.expanduser("~")
+    display = "~" + path[len(home):] if path.startswith(home) else path
+    return f"{display} ({config.AGENTICA_LOG_LEVEL})"
+
+
 
 
 def _sanitize_history_for_model_switch(agent) -> None:

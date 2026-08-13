@@ -280,11 +280,6 @@ class BuiltinFileTool(Tool):
             lines.append(f"Nearest existing parent: {nearest_parent}")
         else:
             lines.append("Nearest existing parent: <none>")
-
-        lines.append(
-            "Next step: use ls/glob/grep from the nearest existing parent; "
-            "do not retry speculative absolute paths."
-        )
         return "\n".join(lines)
 
     def _result_path(self, raw_path: str) -> str:
@@ -846,7 +841,6 @@ class BuiltinFileTool(Tool):
                 for result_path, error in preflight_errors:
                     error_lines.append(f"- {result_path}:")
                     error_lines.extend(f"  {line}" for line in str(error).splitlines())
-                error_lines.extend(("", self._patch_read_hint()))
                 error_message = "\n".join(error_lines)
                 if len(preflight_errors) == 1:
                     original_error = preflight_errors[0][1]
@@ -1049,14 +1043,6 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Assemble a stateless exact-string edit failure."""
         return error + "\n\n" + cls._edit_read_hint()
-
-    @staticmethod
-    def _patch_read_hint() -> str:
-        """Return the recovery action for patch preflight failures."""
-        return (
-            "Read or re-read each failed region with read_file, rebuild those hunks "
-            "from the exact current text with short unique context, then retry the patch."
-        )
 
     @staticmethod
     def _content_change_counts(

@@ -49,6 +49,7 @@ from agentica.cli.commands.helpers import (
     _run_async_safe,
     _sanitize_history_for_model_switch,
     _update_task_tool_auxiliary_model,
+    format_cli_log_location,
 )
 from agentica.cli.commands.cron_cmd import _confirm_via_tui
 
@@ -139,6 +140,9 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
             f"[dim]peer={peers.peer_id}[/dim]  "
             f"[dim](other sessions address you as this name)[/dim]"
         )
+    log_location = format_cli_log_location()
+    if log_location:
+        con.print(f"  Log file:   [dim]{log_location}[/dim]")
 
 
 

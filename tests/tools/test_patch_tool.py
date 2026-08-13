@@ -160,6 +160,53 @@ def world():
         self.assertIn("STALE_FIRST = 1", message)
         self.assertIn("Hunk 2: context not found", message)
         self.assertIn("STALE_SECOND = 2", message)
+        self.assertIn("None of the expected lines appear in the file.", message)
+
+    def test_stale_hunk_shows_matching_region_not_file_header(self):
+        original = "\n".join([
+            "# -*- coding: utf-8 -*-",
+            '"""module docstring"""',
+            "",
+            "class StreamDisplayManager:",
+            "    @staticmethod",
+            "    def _fmt_elapsed(elapsed):",
+            '        """Format elapsed seconds."""',
+            "        if elapsed < 10:",
+            "            return ''",
+            "        return f'({elapsed:.1f}s)'",
+        ])
+        diff = """@@
+     @staticmethod
+     def _fmt_elapsed(elapsed):
+         \"\"\"Format elapsed seconds; fast calls render nothing.\"\"\"
+-        if elapsed < 1:
++        if elapsed < 10:
+             return ''
+         return f'({elapsed:.1f}s)'"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("def _fmt_elapsed(elapsed):", message)
+        self.assertIn("Actual from line 5:", message)
+        self.assertIn('"""Format elapsed seconds."""', message)
+        self.assertNotIn("# -*- coding: utf-8 -*-", message)
+        self.assertNotIn("from line 1.", message)
+
+    def test_stale_hunk_says_when_expected_lines_are_absent(self):
+        original = "# -*- coding: utf-8 -*-\nprint('hello')\n"
+        diff = """@@
+ def test_chat_accepts_cron_source_override(self, tmp_path):
+     from agentica.gateway.services.agent_service import AgentService"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("None of the expected lines appear in the file.", message)
+        self.assertNotIn("# -*- coding: utf-8 -*-", message)
+        self.assertNotIn("Actual from line", message)
 
 
 class TestParsePatchEnvelope(unittest.TestCase):

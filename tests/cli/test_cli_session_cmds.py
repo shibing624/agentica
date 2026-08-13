@@ -156,6 +156,35 @@ class TestStatusSessionIdentity(unittest.TestCase):
         self.assertIn("agentica-73", printed)
         self.assertIn("735ac7e4", printed)
 
+    def test_status_shows_cli_log_file(self):
+        agent = MagicMock()
+        agent.session_id = "sess-current-1234"
+        agent._session_log = None
+        agent.tools = []
+        agent.tool_config.permission_mode = "allow-all"
+        agent.run_response.cost_tracker = None
+        context = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+            current_agent=agent,
+            tui_state={},
+        )
+        console = MagicMock()
+
+        with (
+            patch("agentica.cli.commands.model_config.get_console", return_value=console),
+            patch("agentica.cli.commands.model_config.resolve_active_profile_name", return_value=("default", "default")),
+            patch("agentica.cli.commands.model_config.get_subagent_configs", return_value={}),
+            patch(
+                "agentica.cli.commands.model_config.format_cli_log_location",
+                return_value="~/.agentica/logs/20260813-99.log (DEBUG)",
+            ),
+        ):
+            cli_model_config._cmd_status(context)
+
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+        self.assertIn("Log file:", printed)
+        self.assertIn("20260813-99.log", printed)
+
 
 class TestPeerRecordAdvertisesTheCliLog(unittest.TestCase):
     """`list_agents` publishes this session's log path, so another agent can
@@ -177,6 +206,18 @@ class TestPeerRecordAdvertisesTheCliLog(unittest.TestCase):
                 interactive_app._cli_log_file(),
                 ("/logs/20260809-31964.log", "INFO"),
             )
+
+    def test_format_cli_log_location_reads_config_at_call_time(self):
+        from agentica.cli.commands.helpers import format_cli_log_location
+
+        with patch.object(agentica_config, "AGENTICA_LOG_FILE", ""):
+            self.assertIsNone(format_cli_log_location())
+
+        with (
+            patch.object(agentica_config, "AGENTICA_LOG_FILE", "/logs/20260813-99.log"),
+            patch.object(agentica_config, "AGENTICA_LOG_LEVEL", "DEBUG"),
+        ):
+            self.assertEqual(format_cli_log_location(), "/logs/20260813-99.log (DEBUG)")
 
 
 class TestResumeArchivedFilter(unittest.TestCase):

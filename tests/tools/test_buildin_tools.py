@@ -197,7 +197,7 @@ class TestBuiltinFileToolReadFile:
         assert f"Nearest existing parent: {existing}" in msg
         assert "Candidate paths:" not in msg
         assert str(candidate) not in msg
-        assert "do not retry speculative absolute paths" in msg
+        assert "Next step:" not in msg
 
     def test_read_long_lines_truncated(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "long.txt")
@@ -231,7 +231,7 @@ class TestMissingPathErrors:
         assert "Nearest existing parent:" in msg
         assert "Did you mean:" not in msg
         assert "src/config.py" not in msg
-        assert "do not retry speculative absolute paths" in msg
+        assert "Next step:" not in msg
 
     def test_glob_missing_path_does_not_suggest_candidates(self, file_tool, tmp_dir):
         Path(tmp_dir, "src").mkdir()
@@ -618,7 +618,8 @@ class TestBuiltinFileToolApplyPatch:
         assert "Hunk 2: context not found" in message
         assert "- second.py:" in message
         assert "- existing.py:" in message
-        assert "short unique context" in message
+        assert "Read or re-read" not in message
+        assert "short unique context" not in message
         assert first.read_text() == "FIRST = 1\n"
         assert second.read_text() == "SECOND = 2\n"
         assert existing.read_text() == "keep\n"
@@ -642,8 +643,7 @@ class TestBuiltinFileToolApplyPatch:
         assert "Expected context:" in message
         assert "Actual from line 1:" in message
         assert "  beta-current" in message
-        assert "Read or re-read" in message
-        assert "read_file" in message
+        assert "Read or re-read" not in message
 
     def test_absolute_patch_path_is_reported_relative_to_work_dir(self, file_tool, tmp_dir):
         target = Path(tmp_dir, "pkg", "app.py")

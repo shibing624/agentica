@@ -87,6 +87,10 @@ class ToolCallInfo(BaseModel):
     content: Optional[Any] = None
     is_error: bool = False
     elapsed: float = 0.0
+    # Display-only before/after snapshots. Carried on the event subject so the
+    # CLI can render the change this call actually made. Not persisted: the
+    # cumulative ``RunResponse.tools`` list strips it (session logs / SSE).
+    tool_display_meta: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -100,6 +104,7 @@ class ToolCallInfo(BaseModel):
             content=d.get("content"),
             is_error=d.get("tool_call_error", False),
             elapsed=metrics.get("time", 0.0),
+            tool_display_meta=d.get("tool_display_meta"),
         )
 
 

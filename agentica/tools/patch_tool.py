@@ -69,9 +69,14 @@ class ContextFailure:
 
     def render(self) -> str:
         location = "EOF context" if self.eof else "context"
-        lines = [
-            f"Hunk {self.hunk_number}: {location} not found from line {self.cursor + 1}."
-        ]
+        if self.eof or self.cursor > 0:
+            header = (
+                f"Hunk {self.hunk_number}: {location} not found "
+                f"from line {self.cursor + 1}."
+            )
+        else:
+            header = f"Hunk {self.hunk_number}: {location} not found."
+        lines = [header]
         if self.context:
             lines.append("Expected context:")
             lines.extend(f"  {line}" for line in self.context[:6])
@@ -84,6 +89,8 @@ class ContextFailure:
             remaining = len(self.actual) - 6
             if remaining > 0:
                 lines.append(f"  ... ({remaining} more lines)")
+        elif not self.eof:
+            lines.append("None of the expected lines appear in the file.")
         return "\n".join(lines)
 
 
@@ -270,20 +277,16 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
         find_result = _find_context(input_lines, section.next_context, cursor, section.eof)
         parser.index = section.end_index
         if find_result.new_index == -1:
-            context_len = len(section.next_context)
-            if section.eof:
-                actual_start = max(0, len(input_lines) - context_len)
-                actual = input_lines[actual_start:]
-            else:
-                actual_start = min(cursor, len(input_lines))
-                actual = input_lines[actual_start : actual_start + max(context_len, 1)]
+            actual_start, actual = _actual_window(
+                input_lines, section.next_context, cursor, section.eof
+            )
             failures.append(
                 ContextFailure(
                     hunk_number=hunk_number,
                     cursor=cursor,
                     context=tuple(section.next_context),
                     eof=section.eof,
-                    actual=tuple(actual),
+                    actual=actual,
                     actual_start=actual_start,
                 )
             )
@@ -331,6 +334,63 @@ def _advance_cursor_to_anchor(
                 break
 
     return cursor
+
+
+def _is_name_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith(("def ", "async def ", "class "))
+
+
+def _ranked_needles(context: List[str]) -> List[Tuple[int, str]]:
+    """Prefer def/class lines, then longer lines, as search needles."""
+    ranked: List[Tuple[int, int, str]] = []
+    for index, line in enumerate(context):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        score = len(stripped) + (1000 if _is_name_line(line) else 0)
+        ranked.append((score, index, line))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [(index, line) for _, index, line in ranked]
+
+
+def _unique_or_name_hit(lines: List[str], needle: str) -> int:
+    """Return a useful line index for `needle`, or -1 if none."""
+    stripped = needle.strip()
+    hits = [
+        index
+        for index, line in enumerate(lines)
+        if line == needle or line.strip() == stripped
+    ]
+    if len(hits) == 1:
+        return hits[0]
+    if hits and _is_name_line(needle):
+        return hits[0]
+    return -1
+
+
+def _actual_window(
+    lines: List[str], context: List[str], cursor: int, eof: bool
+) -> Tuple[int, Tuple[str, ...]]:
+    """Pick the file region to show next to a failed hunk's expected context.
+
+    Search-from-start failures used to dump the file header, which is almost
+    never the region the hunk meant. When the cursor has already advanced,
+    the local window is the right one.
+    """
+    context_len = max(len(context), 1)
+    if eof:
+        start = max(0, len(lines) - context_len)
+        return start, tuple(lines[start:])
+    if cursor > 0:
+        start = min(cursor, len(lines))
+        return start, tuple(lines[start : start + context_len])
+    for index, needle in _ranked_needles(context):
+        hit = _unique_or_name_hit(lines, needle)
+        if hit >= 0:
+            start = max(0, hit - index)
+            return start, tuple(lines[start : start + context_len])
+    return 0, ()
 
 
 def _read_section(lines: List[str], start_index: int) -> ReadSectionResult:

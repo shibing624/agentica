@@ -32,6 +32,31 @@ from agentica.utils.log import logger
 from .attachments import _ocr_images_parallel
 from .session_state import _ToolResultSequencer
 
+
+def _completed_tool_payload(chunk) -> Optional[dict]:
+    """Build the sequencer payload for one TOOL_COMPLETED event.
+
+    Prefer ``chunk.tool_call`` — it is the event subject and the only place
+    ``tool_display_meta`` survives. ``chunk.tools`` is the cumulative run list
+    and deliberately omits those snapshots so session logs don't store full
+    file copies. Falling back to ``chunk.tools`` would make every later write
+    to the same file render as the batch-start-vs-final-disk diff.
+    """
+    subject = chunk.tool_call
+    if subject is None or not subject.tool_call_id:
+        return None
+    info = {
+        "tool_call_id": subject.tool_call_id,
+        "tool_name": subject.tool_name,
+        "tool_args": subject.tool_args or {},
+        "content": "" if subject.content is None else subject.content,
+        "tool_call_error": subject.is_error,
+        "metrics": {"time": subject.elapsed} if subject.elapsed else {},
+    }
+    if subject.tool_display_meta:
+        info["tool_display_meta"] = subject.tool_display_meta
+    return info
+
 # ==================== BTW concurrent handler ====================
 
 
@@ -425,11 +450,15 @@ def _process_stream_response(
 
             if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
                 _set_phase("thinking")
-                if chunk.tools:
+                payload = _completed_tool_payload(chunk)
+                if payload is not None:
+                    _tool_seq.on_complete(payload["tool_call_id"], payload)
+                elif chunk.tools:
                     for tool_info in chunk.tools:
                         _tool_seq.on_complete(
                             tool_info.get("tool_call_id"), tool_info
                         )
+                if payload is not None or chunk.tools:
                     # Flush completed results in call order. The front slot
                     # only prints once it is done, so a slow tool never blocks
                     # later tools from being shown — they just queue until the

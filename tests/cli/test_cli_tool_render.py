@@ -243,6 +243,34 @@ class TestCLIToolRender(unittest.TestCase):
         )
 
 
+    def test_completed_tool_payload_keeps_display_meta_from_event_subject(self):
+        """chunk.tools strips snapshots; the CLI must read chunk.tool_call."""
+        from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+        from agentica.cli.interactive.stream_loop import _completed_tool_payload
+
+        meta = {"files": [{"path": "a.py", "before": "old\n", "after": "new\n"}]}
+        chunk = RunResponse(
+            event=RunEvent.tool_call_completed.value,
+            tools=[{
+                "tool_call_id": "edit-1",
+                "tool_name": "edit_file",
+                "content": "Successfully replaced 1 occurrence",
+            }],
+            tool_call=ToolCallInfo(
+                tool_call_id="edit-1",
+                tool_name="edit_file",
+                content="Successfully replaced 1 occurrence",
+                elapsed=0.1,
+                tool_display_meta=meta,
+            ),
+        )
+
+        payload = _completed_tool_payload(chunk)
+        self.assertEqual(payload["tool_call_id"], "edit-1")
+        self.assertEqual(payload["tool_display_meta"], meta)
+        self.assertEqual(payload["metrics"]["time"], 0.1)
+
+
     def test_display_tool_result_suppresses_write_todos_footer(self):
         """write_todos drops the result footer on success (call line lists tasks)."""
         from agentica.cli.display import StreamDisplayManager
@@ -744,9 +772,9 @@ class TestCLIToolRender(unittest.TestCase):
         fake.width = 80
         dm = StreamDisplayManager(fake)
         error = (
-            "Path does not exist: agentica/cli/status_bar.py. "
-            "Resolve relative paths from the nearest existing parent; "
-            "do not retry speculative absolute paths."
+            "Path not found: agentica/cli/status_bar.py. "
+            "Resolved path: /tmp/agentica/cli/status_bar.py. "
+            "Nearest existing parent: /tmp/agentica/cli"
         )
 
         dm.display_tool_result(
@@ -898,7 +926,6 @@ class TestCLIToolRender(unittest.TestCase):
                 "  Hunk 2: context not found from line 1.",
                 "  Expected context:",
                 "    STALE_SECOND = 2",
-                "Read or re-read each failed region with read_file.",
             ])
             fake = MagicMock()
             fake.width = 100
@@ -922,7 +949,6 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("STALE_FIRST = 1", rendered)
         self.assertIn("Hunk 2: context not found", rendered)
         # Full error renders inline — nothing is folded behind Ctrl+O anymore.
-        self.assertIn("Read or re-read each failed region with read_file.", rendered)
         self.assertNotIn("Ctrl+O to expand", rendered)
 
 
