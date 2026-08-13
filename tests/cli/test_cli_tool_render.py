@@ -921,7 +921,9 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("Hunk 1: context not found", rendered)
         self.assertIn("STALE_FIRST = 1", rendered)
         self.assertIn("Hunk 2: context not found", rendered)
-        self.assertIn("Ctrl+O to expand", rendered)
+        # Full error renders inline — nothing is folded behind Ctrl+O anymore.
+        self.assertIn("Read or re-read each failed region with read_file.", rendered)
+        self.assertNotIn("Ctrl+O to expand", rendered)
 
 
     def test_display_apply_patch_error_renders_rich_markup_as_literal_text(self):
@@ -1199,6 +1201,186 @@ class TestCLIToolRender(unittest.TestCase):
             {"title": "Command · execute", "content": command},
             {"title": "Tool output · execute", "content": long_output},
         ])
+
+    # --- Diff rendering must wrap long lines, not crop them ---------------
+    #
+    # CHANGELOG-style files keep one whole entry on a single 1KB+ line, so a
+    # edit's -/+ difference routinely sits beyond the console edge. All four
+    # diff render sites must soft-wrap (Rich Syntax word_wrap) so nothing is
+    # horizontally cropped away.
+
+    _LONG_OLD = "intro " + "m" * 300 + " OLD_TAIL_MARK\n"
+    _LONG_NEW = "intro " + "m" * 300 + " NEW_TAIL_MARK\n"
+
+    def _stream_console(self):
+        from io import StringIO
+        from rich.console import Console
+
+        output = StringIO()
+        console = Console(file=output, width=60, force_terminal=False, no_color=True)
+        from agentica.cli.display import StreamDisplayManager
+
+        return StreamDisplayManager(console), output
+
+    def test_edit_file_diff_word_wraps_long_lines(self):
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "edit_file",
+            "Successfully replaced 1 occurrence(s) in 'CHANGELOG.md'.",
+            is_error=False,
+            elapsed=0.1,
+            tool_args={"file_path": "CHANGELOG.md"},
+            tool_display_meta={"files": [
+                {"path": "CHANGELOG.md", "before": self._LONG_OLD, "after": self._LONG_NEW},
+            ]},
+        )
+        rendered = output.getvalue()
+        self.assertIn("OLD_TAIL_MARK", rendered)
+        self.assertIn("NEW_TAIL_MARK", rendered)
+
+    def test_write_file_diff_word_wraps_long_lines(self):
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "write_file",
+            "Updated file, absolute path: x.md",
+            is_error=False,
+            elapsed=0.1,
+            tool_args={"file_path": "x.md", "content": self._LONG_NEW},
+            tool_display_meta={"files": [
+                {"path": "x.md", "before": self._LONG_OLD, "after": self._LONG_NEW},
+            ]},
+        )
+        rendered = output.getvalue()
+        self.assertIn("OLD_TAIL_MARK", rendered)
+        self.assertIn("NEW_TAIL_MARK", rendered)
+
+    def test_apply_patch_diff_word_wraps_long_lines(self):
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "apply_patch",
+            "Successfully applied patch to 1 file(s)",
+            is_error=False,
+            elapsed=0.1,
+            tool_args={"patch": "*** Begin Patch\n*** End Patch\n"},
+            tool_display_meta={"files": [
+                {"path": "x.md", "action": "update",
+                 "before": self._LONG_OLD, "after": self._LONG_NEW},
+            ]},
+        )
+        rendered = output.getvalue()
+        self.assertIn("OLD_TAIL_MARK", rendered)
+        self.assertIn("NEW_TAIL_MARK", rendered)
+
+    def test_display_diff_word_wraps_long_lines(self):
+        from io import StringIO
+        from rich.console import Console
+        from agentica.cli.display.messages import display_diff
+
+        output = StringIO()
+        console = Console(file=output, width=60, force_terminal=False, no_color=True)
+        display_diff(console, "x.md", self._LONG_OLD, self._LONG_NEW)
+        rendered = output.getvalue()
+        self.assertIn("OLD_TAIL_MARK", rendered)
+        self.assertIn("NEW_TAIL_MARK", rendered)
+
+    # --- Tool errors must render in full ----------------------------------
+    #
+    # edit_file/write_file errors are single diagnostic messages whose key
+    # facts ("found 2 occurrences", the suggested fix) sit at the START and
+    # MIDDLE of the text; an 80-char tail window kept only the boilerplate
+    # ending and hid the actual cause.
+
+    _LONG_EDIT_ERROR = (
+        "Edit failed: found 2 occurrences of the string in "
+        "'docs/learn_cc/reasonix_v1.md'. Either provide a larger string with "
+        "more surrounding context to make it unique, or use replace_all=True "
+        "to change every instance. Read or re-read the relevant region with "
+        "read_file, copy the exact current text into old_string, then retry "
+        "the edit."
+    )
+
+    def test_edit_file_error_shows_full_message(self):
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "edit_file",
+            self._LONG_EDIT_ERROR,
+            is_error=True,
+            elapsed=0.05,
+            tool_args={"file_path": "docs/learn_cc/reasonix_v1.md"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("- error", rendered)
+        self.assertIn("found 2 occurrences", rendered)
+        self.assertIn("replace_all=True", rendered)
+        self.assertNotIn("error: ...", rendered)
+
+    def test_write_file_error_shows_full_message(self):
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "write_file",
+            self._LONG_EDIT_ERROR,
+            is_error=True,
+            elapsed=0.05,
+            tool_args={"file_path": "docs/learn_cc/reasonix_v1.md", "content": "x"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("- error", rendered)
+        self.assertIn("found 2 occurrences", rendered)
+        self.assertIn("replace_all=True", rendered)
+        self.assertNotIn("error: ...", rendered)
+
+    def test_apply_patch_error_shows_full_message(self):
+        # apply_patch preflight reports can run a dozen lines of expected/actual
+        # context; the old 8-line tail window dropped the head, which is where
+        # the failing file and hunk are named.
+        error_lines = [f"preflight detail line {i}: context mismatch" for i in range(14)]
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "apply_patch",
+            "\n".join(error_lines),
+            is_error=True,
+            elapsed=0.2,
+            tool_args={"patch": "*** Begin Patch\n*** End Patch\n"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("- error", rendered)
+        self.assertIn("preflight detail line 0", rendered)
+        self.assertIn("preflight detail line 13", rendered)
+
+    def test_generic_tool_error_shows_full_message(self):
+        # Non-execute tools (cronjob, self_manage, undo_edit, ...) previously
+        # got a 4-line tail window on errors; the failure reason sits at the
+        # START of the message for these, exactly what was folded away.
+        error = "\n".join(
+            ["unknown config key 'bogus' for profile 'main'"]
+            + [f"detail {i}" for i in range(6)]
+            + ["LAST_LINE_MARK"]
+        )
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "self_manage",
+            error,
+            is_error=True,
+            elapsed=0.05,
+            tool_args={"action": "set_config", "key": "bogus"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("unknown config key", rendered)
+        self.assertIn("LAST_LINE_MARK", rendered)
+
+    def test_task_error_shows_full_message(self):
+        import json
+        error = "subagent failed: " + "detail " * 30 + "TAIL_MARK"
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "task",
+            json.dumps({"success": False, "error": error}),
+            is_error=True,
+            elapsed=1.0,
+            tool_args={"description": "explore x"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("TAIL_MARK", rendered)
 
 
 

@@ -246,4 +246,6 @@ def display_diff(console_instance, file_path: str, old_content: str, new_content
     ))
     if diff_lines:
         diff_text = "\n".join(diff_lines)
-        console_instance.print(Syntax(diff_text, "diff", theme="monokai", line_numbers=False))
+        # word_wrap so long single-line entries are not cropped at the edge.
+        console_instance.print(Syntax(diff_text, "diff", theme="monokai",
+                                      line_numbers=False, word_wrap=True))

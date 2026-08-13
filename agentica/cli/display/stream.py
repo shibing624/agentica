@@ -469,15 +469,13 @@ class StreamDisplayManager:
         key = tool_call_id or tool_args.get("file_path", "")
         captured_old_content = self._write_old.pop(key, None)
         if is_error:
-            err = self._shorten_workdir_text(str(result_content)).replace("\n", " ").strip()
-            if len(err) > 80:
-                err = "..." + err[-77:]
-                remember_truncated(
-                    f"Tool error · {tool_name}",
-                    self._shorten_workdir_text(str(result_content)),
-                )
-            line += f" [yellow]- error: {err}{elapsed_str}[/yellow]"
+            # Tool errors are single diagnostic messages — the cause lives at
+            # the START/MIDDLE, so an 80-char tail window hid exactly what
+            # mattered. Print the whole message.
+            line += f" [yellow]- error{elapsed_str}[/yellow]"
             self._assistant_console.print(line)
+            err_lines = self._shorten_workdir_text(str(result_content)).strip().splitlines() or [""]
+            self._display_full_result_lines(err_lines, is_error=True, elapsed_str="")
             return
 
         changes = (tool_display_meta or {}).get("files") or []
@@ -492,8 +490,11 @@ class StreamDisplayManager:
         self._assistant_console.print(line)
         if not diff_text:
             return
+        # word_wrap: single-line entries (e.g. CHANGELOG items) run to 1KB+;
+        # without folding, Rich crops everything past the console edge and the
+        # actual -/+ change is invisible.
         self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
-                                  line_numbers=False))
+                                  line_numbers=False, word_wrap=True))
 
     def _display_patch_summary(self, result_content: str, is_error: bool,
                                elapsed_str: str, tool_args: dict,
@@ -507,27 +508,12 @@ class StreamDisplayManager:
         old_files = self._patch_old.pop(key, [])
         if is_error:
             self._assistant_console.print(line + f" [yellow]- error{elapsed_str}[/yellow]")
-            error_lines = content.splitlines() or ["Unknown patch error"]
-            max_lines = 8
-            truncated = len(error_lines) > max_lines or any(len(item) > 120 for item in error_lines)
-            # Keep the TAIL of the error — the cause lands at the end.
-            hidden = max(0, len(error_lines) - max_lines)
-            for index, error_line in enumerate(error_lines[-max_lines:]):
-                if len(error_line) > 120:
-                    error_line = "..." + error_line[-117:]
-                prefix = "    ⎿ " if index == 0 else "      "
-                self._assistant_console.print(
-                    f"{prefix}{error_line}",
-                    style="dim yellow",
-                    highlight=False,
-                    markup=False,
-                )
-            if truncated:
-                detail = f"{hidden} earlier lines hidden" if hidden > 0 else "full error"
-                self._assistant_console.print(
-                    f"      ... ({detail} · Ctrl+O to expand)", style="dim italic"
-                )
-                remember_truncated("Tool error · apply_patch", content)
+            # Preflight reports name the failing file/hunk at the head — show
+            # every line, no tail window.
+            self._display_full_result_lines(
+                content.splitlines() or ["Unknown patch error"],
+                is_error=True, elapsed_str="",
+            )
             return
 
         summary, _, details = content.partition("\n")
@@ -561,7 +547,8 @@ class StreamDisplayManager:
                 diffs.append(diff_text)
         if diffs:
             self._assistant_console.print(
-                Syntax("\n".join(diffs) + "\n", "diff", theme="monokai", line_numbers=False)
+                Syntax("\n".join(diffs) + "\n", "diff", theme="monokai",
+                       line_numbers=False, word_wrap=True)
             )
             return
 
@@ -636,13 +623,10 @@ class StreamDisplayManager:
         if display_path:
             line += f" [dim]{display_path}[/dim]"
         if is_error:
-            shortened_result = self._shorten_workdir_text(result_str)
-            err = shortened_result.replace("\n", " ").strip()
-            if len(err) > 80:
-                err = "..." + err[-77:]
-                remember_truncated(f"Tool error · {tool_name}", shortened_result)
-            line += f" [yellow]- error: {err}{elapsed_str}[/yellow]"
+            line += f" [yellow]- error{elapsed_str}[/yellow]"
             self._assistant_console.print(line)
+            err_lines = self._shorten_workdir_text(result_str).strip().splitlines() or [""]
+            self._display_full_result_lines(err_lines, is_error=True, elapsed_str="")
             return
 
         changes = (tool_display_meta or {}).get("files") or []
@@ -662,9 +646,10 @@ class StreamDisplayManager:
         if not diff_text:
             return
         # Render the FULL diff so the user always sees the complete file change,
-        # never folded behind Ctrl+O.
+        # never folded behind Ctrl+O. word_wrap keeps long single lines (e.g.
+        # CHANGELOG entries) from being cropped at the console edge.
         self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
-                                  line_numbers=False))
+                                  line_numbers=False, word_wrap=True))
 
     # Read-only tools whose call line is deferred to completion so the call
     # line and result summary collapse into ONE line, e.g.
@@ -849,16 +834,10 @@ class StreamDisplayManager:
                 return
 
         if is_error:
-            # Error details live at the END of the output — fold the head and
-            # keep the tail, same codex-style window execute uses.
-            self._display_tail_window(
-                lines, self._DEFAULT_MAX_RESULT_LINES,
-                prefix="    ⎿ ", cont_prefix="      ",
-                style="dim yellow", error_prefix="    ⎿ ⚠ ",
-                truncated_title=f"Tool output · {tool_name}",
-                full_content=result_str,
-                elapsed_str=elapsed_str,
-            )
+            # Every tool except execute emits single-message errors whose cause
+            # sits at the START — show the whole thing. execute keeps its tail
+            # window because command output can be arbitrarily long.
+            self._display_full_result_lines(lines, is_error=True, elapsed_str=elapsed_str)
             return
 
         style = "dim"
@@ -931,7 +910,10 @@ class StreamDisplayManager:
         cont_prefix = "      "
         for i, line in enumerate(lines):
             p = prefix if i == 0 else cont_prefix
-            self._assistant_console.print(f"{p}{line}", style=style)
+            # Literal text: error messages and status output contain [brackets]
+            # that must not be parsed as Rich markup or fuzzy-highlighted.
+            self._assistant_console.print(f"{p}{line}", style=style,
+                                          markup=False, highlight=False)
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 
@@ -982,7 +964,8 @@ class StreamDisplayManager:
         try:
             data = json.loads(result_content)
         except (ValueError, TypeError):
-            self._assistant_console.print(f"    ⎿ {str(result_content)[:120]}", style="dim")
+            self._assistant_console.print(f"    ⎿ {result_content}", style="dim",
+                                          highlight=False)
             return
 
         success = data.get("success", False)
@@ -992,7 +975,8 @@ class StreamDisplayManager:
 
         if not success:
             error_msg = data.get("error", "Unknown error")
-            self._assistant_console.print(f"    ⎿ ⚠ {error_msg[:120]}", style="dim yellow")
+            self._assistant_console.print(f"    ⎿ ⚠ {error_msg}", style="dim yellow",
+                                          highlight=False)
             if self._subagent_live_shown > 0:
                 self._subagent_live_shown -= 1
             return
