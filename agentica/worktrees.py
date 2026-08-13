@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
+from agentica.utils.log import logger
+
 # Branch names for worktrees this module creates. Prefixed so `git branch`
 # separates "a task someone is working in" from long-lived branches.
 BRANCH_PREFIX = "wt/"
@@ -182,7 +184,11 @@ def worktree_path(cwd: str, name: str) -> str:
         return str(root.parent / f"{root.name}-{slug(name)}")
     base = Path(os.path.expanduser(configured))
     if not base.is_absolute():
-        base = root / base
+        # In-repo (``.agentica/worktrees``): the repository is already implied by
+        # where the root lives, so ``<root>/<task>`` — inserting the repo name
+        # again would read ``proj/.agentica/worktrees/proj/docs``.
+        return str(root / base / slug(name))
+    # One directory serving several repositories has to say which one.
     return str(base / root.name / slug(name))
 
 
@@ -195,6 +201,48 @@ def _configured_root() -> str:
     except Exception:
         # Worktrees must keep working when config.yaml is missing or broken.
         return ""
+
+
+# Nested-worktree lookups happen on every glob/grep, so they are cached for a
+# few seconds per repository — creating a worktree is rare, searching is not.
+NESTED_CACHE_TTL = 10.0
+_nested_cache: dict = {}
+
+
+def nested_worktrees(cwd: str, *, ttl: float = NESTED_CACHE_TTL) -> Tuple[str, ...]:
+    """Absolute paths of this repository's worktrees that live *inside* it.
+
+    Search tools exclude these (``tools/builtin/file_tool.py``). A worktree under
+    the checkout is a second full copy of the project, so ``glob("**/*.py")``
+    otherwise returns every file once per worktree — and the hazard is not the
+    noise, it is an edit landing in the copy. Observed live in this repository:
+    ``glob("**/peers.py")`` returned ``.worktrees/wechat-media/agentica/peers.py``
+    next to the real one.
+
+    Asked of git rather than derived from ``worktree.root``, because a nested
+    worktree does not have to be one of ours: a person or another agent typing
+    ``git worktree add .worktrees/x`` creates exactly the same duplication, and a
+    list of names we happen to know would silently miss it.
+    """
+    now = time.time()
+    key = os.path.realpath(cwd)
+    cached = _nested_cache.get(key)
+    if cached is not None and now - cached[0] < ttl:
+        return cached[1]
+
+    try:
+        main = os.path.realpath(main_root(cwd))
+        inside = tuple(
+            os.path.realpath(entry.path)
+            for entry in list_worktrees(cwd)
+            if not entry.is_main
+            and os.path.realpath(entry.path).startswith(main + os.sep)
+        )
+    except (WorktreeError, OSError):
+        # Not a repository, no git, a locked index: nothing to exclude.
+        inside = ()
+    _nested_cache[key] = (now, inside)
+    return inside
 
 
 def configured_links() -> Tuple[str, ...]:
@@ -290,6 +338,41 @@ def link_ignored(src_root: str, dst_root: str, names: Optional[Sequence[str]] = 
         linked.append(str(dst))
     return linked
 
+def _self_ignore(parent: Path, repo_root: str) -> None:
+    """Make a worktree root inside the repository ignore itself.
+
+    Only when it *is* inside: a root under the checkout (``.agentica/worktrees``,
+    the shape Claude Code uses) would otherwise show up as untracked in every
+    ``git status`` until someone edits the repository's ``.gitignore`` — and that
+    edit is a change to a tracked, shared file, made by a tool, in someone
+    else's repository. A ``.gitignore`` containing ``*`` *inside* the root ignores
+    the tree and itself, touches nothing tracked, and needs no per-repo setup
+    (the same trick pip uses for its caches).
+
+    Note what this does not fix: an ignored tree is in range of
+    ``git clean -xdff`` run in the main checkout. Single ``-f`` skips nested
+    checkouts ("Skipping repository"), double ``-ff`` removes them along with
+    whatever another session had not committed. That is the price of the
+    in-repo layout, and it is why it is not the default.
+    """
+    try:
+        # realpath both sides: /tmp is a symlink to /private/tmp on macOS, and a
+        # string comparison would then decide the root is outside the repo.
+        resolved_parent = Path(os.path.realpath(parent))
+        resolved_repo = os.path.realpath(repo_root)
+        inside = resolved_repo in (
+            str(resolved_parent), *(str(p) for p in resolved_parent.parents)
+        )
+        if not inside:
+            return
+        marker = parent / ".gitignore"
+        if not marker.exists():
+            marker.write_text("# Created by agentica: worktrees live here, git ignores them.\n*\n")
+    except OSError:
+        # Not worth failing a worktree over; the user can add the ignore line.
+        logger.debug("could not write %s/.gitignore", parent, exc_info=True)
+
+
 
 def ensure(
     cwd: str,
@@ -334,6 +417,7 @@ def ensure(
             f"{parent} is not writable; set `{ROOT_SETTING}` in "
             "~/.agentica/config.yaml to a directory you can write to"
         )
+    _self_ignore(parent, main_root(cwd))
 
     base_ref = base or default_base(cwd)
     if _git(["rev-parse", "--verify", "--quiet", branch], cwd, check=False).strip():

@@ -42,6 +42,64 @@ _GLOB_TIMEOUT = 3
 # default short so the model scopes the path instead of waiting.
 _GREP_TIMEOUT = 3
 
+# Directories every search skips. ``.agentica`` earns its place for a specific
+# reason: with ``settings.worktree.root`` pointing inside the repository
+# (``.agentica/worktrees``), a full second checkout lives under it, and a bare
+# ``glob("**/*.py")`` would then return every file twice — once really, once in
+# each worktree. Verified before fixing: the duplicate was returned, and the
+# dangerous half of that is not the noise but an edit landing in the copy.
+# ``grep`` shells out to ripgrep, which already skips it via .gitignore; the
+# pure-Python fallback and ``glob`` walk the tree themselves and do not.
+_NOISE_DIRS = frozenset({
+    '.git', '.agentica', '__pycache__', 'node_modules', '.venv', 'venv',
+    '.idea', '.pytest_cache',
+})
+
+
+def _nested_checkouts(base: "Path") -> tuple:
+    """Worktrees of this repository that live under ``base``, from git itself.
+
+    A worktree inside the checkout is a second copy of every file, so searches
+    skip it — see ``agentica.worktrees.nested_worktrees`` for why this is asked
+    of git instead of matched by name. Never the base itself: a session bound to
+    that worktree searches from inside it and must see its own files.
+    """
+    try:
+        from agentica.worktrees import nested_worktrees
+
+        here = os.path.realpath(str(base))
+        return tuple(
+            path for path in nested_worktrees(str(base))
+            if path != here and not here.startswith(path + os.sep)
+        )
+    except Exception:
+        return ()
+
+
+def _in_noise_dir(
+    path: "Path",
+    base: "Path",
+    noise: Optional[frozenset] = None,
+    nested: tuple = (),
+) -> bool:
+    """Whether ``path`` sits inside a skipped directory *below* ``base``.
+
+    Only the part below the search root counts. A session whose work_dir is
+    itself inside one of these names — which is exactly what a worktree under
+    ``.agentica/worktrees`` is — must still see its own files; matching against
+    the whole absolute path made that session's ``glob`` return nothing at all.
+    """
+    try:
+        relative = path.relative_to(base)
+    except ValueError:
+        relative = path
+    if set(relative.parts).intersection(noise if noise is not None else _NOISE_DIRS):
+        return True
+    if nested:
+        resolved = os.path.realpath(str(path))
+        return any(resolved.startswith(root + os.sep) for root in nested)
+    return False
+
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
     "/dev/stdin", "/dev/tty", "/dev/console",
@@ -1159,10 +1217,10 @@ class BuiltinFileTool(Tool):
         # Run glob in executor to avoid blocking on large directory trees
         def _glob_sync():
             matches = list(base_path.glob(pattern))
-            ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
+            nested = _nested_checkouts(base_path)
             return sorted(
                 str(m) for m in matches
-                if not set(m.parts).intersection(ignore_dirs)
+                if not _in_noise_dir(m, base_path, _NOISE_DIRS, nested)
             )
 
         loop = asyncio.get_event_loop()
@@ -1289,8 +1347,11 @@ class BuiltinFileTool(Tool):
             cmd.extend(["--max-count", str(limit)])
 
         # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
-        for d in ["__pycache__", "node_modules", ".venv", "venv", ".idea", ".pytest_cache"]:
+        for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
+        # rg skips gitignored paths, but a nested worktree need not be ignored.
+        for root in _nested_checkouts(base_path):
+            cmd.extend(["--glob", f"!{os.path.relpath(root, str(base_path))}/"])
 
         # Pattern and path
         cmd.append("--")
@@ -1404,8 +1465,11 @@ class BuiltinFileTool(Tool):
             files = list(base_path.glob("**/*"))
 
         # Exclude directories and ignored paths
-        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
-        files = [f for f in files if f.is_file() and not set(f.parts).intersection(ignore_dirs)]
+        nested = _nested_checkouts(base_path)
+        files = [
+            f for f in files
+            if f.is_file() and not _in_noise_dir(f, base_path, _NOISE_DIRS, nested)
+        ]
 
         results = []
         file_counts = {}
