@@ -46,7 +46,6 @@ class ProviderUsageSummary:
         cls,
         entries: Iterable["RequestUsage"],
         *,
-        cache_counts_inside_input: bool,
         cost_usd: float = 0.0,
     ) -> "ProviderUsageSummary":
         input_tokens = 0
@@ -98,6 +97,17 @@ class ProviderUsageSummary:
         return self.prompt_tokens + self.output_tokens
 
     @property
+    def net_new_tokens(self) -> int:
+        """Fresh input + cache writes + output — what this turn actually added.
+
+        Cache *writes* count: they are content sent for the first time (and
+        billed at a premium), so a turn that rebuilds the cached prefix is an
+        expensive turn and must not read as a cheap one. Only re-read cache is
+        excluded, being the one part that was already paid for.
+        """
+        return self.fresh_input_tokens + self.cache_write_tokens + self.output_tokens
+
+    @property
     def cache_hit_percent(self) -> float | None:
         if self.prompt_tokens <= 0 or self.cache_read_tokens <= 0:
             return None
@@ -119,10 +129,20 @@ def format_tokens_short(n: int) -> str:
     return str(n)
 
 
-def cache_counts_inside_input_for_model(model: object) -> bool:
-    """Whether provider input_tokens already includes cache read/write tokens."""
-    module = model.__class__.__module__
-    return not module.startswith("agentica.model.anthropic.")
+def format_cost_usd(cost: float, *, signed: bool = False) -> str:
+    """Format USD cost with adaptive precision: 4 decimals under 1 cent.
+
+    Sub-cent turns otherwise render as a meaningless ``$0.00``. A non-zero cost
+    too small to survive 4 decimals becomes ``<$0.0001`` rather than the same
+    "looks free" lie one order further down.
+
+    ``signed`` prefixes ``+`` for per-turn deltas. The ``<$0.0001`` floor never
+    takes one — ``+<$`` reads as line noise.
+    """
+    if 0 < cost < 0.00005:
+        return "<$0.0001"
+    body = f"${cost:.4f}" if cost < 0.00995 else f"${cost:.2f}"
+    return f"+{body}" if signed else body
 
 
 def format_cache_hit(summary: ProviderUsageSummary) -> str | None:
@@ -134,14 +154,19 @@ def format_cache_hit(summary: ProviderUsageSummary) -> str | None:
 
 
 def format_turn_usage_summary(summary: ProviderUsageSummary) -> str:
-    """Compact footer text for provider-reported per-turn usage."""
+    """Compact footer text for provider-reported per-turn usage.
+
+    Leads with net-new tokens (fresh input + cache writes + output) — the
+    increment this turn actually added — rather than the gross total, which is
+    dominated by re-read cache and easily misread as context growth.
+    """
     if summary.total_tokens <= 0:
         return ""
 
-    parts = [
-        f"+{format_tokens_short(summary.total_tokens)}",
-        f"in {format_tokens_short(summary.prompt_tokens)}",
-    ]
+    parts: list[str] = []
+    if summary.net_new_tokens > 0:
+        parts.append(f"+{format_tokens_short(summary.net_new_tokens)}")
+    parts.append(f"in {format_tokens_short(summary.prompt_tokens)}")
 
     cache_hit = format_cache_hit(summary)
     if cache_hit is not None:

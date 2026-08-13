@@ -17,7 +17,11 @@ from rich.markdown import Markdown
 from rich.syntax import Syntax
 
 from agentica.cli.runtime import TOOL_ICONS
-from agentica.cli.usage_display import ProviderUsageSummary, format_turn_usage_summary
+from agentica.cli.usage_display import (
+    ProviderUsageSummary,
+    format_cost_usd,
+    format_turn_usage_summary,
+)
 from agentica.global_config import get_setting
 from agentica.tools.patch_tool import parse_patch_envelope
 
@@ -1324,12 +1328,14 @@ class StreamDisplayManager:
                          seen in the status bar's ``⏱``. The two differ by CLI
                          overhead (render / disk / callbacks) — that gap is
                          real and intentional; see docs.
-        * ``+Tk``      — Delta tokens produced by this turn (input+output).
-                         ``K`` suffix when ≥ 1_000, else raw. Omitted when
-                         caller didn't pass ``delta_tokens``.
-        * ``+$C``      — Delta USD cost for this turn. Omitted when caller
-                         didn't pass ``delta_cost_usd`` or the cost is 0
-                         (avoid noise for free/local models).
+        * ``+Tk``      — Net new tokens this turn (fresh input + cache writes +
+                         output), excluding only re-read cache. ``K`` suffix
+                         when ≥ 1_000, else raw. Omitted when caller didn't
+                         pass ``delta_tokens``.
+        * ``+$C``      — Delta USD cost for this turn, at 4 decimals below one
+                         cent (``<$0.0001`` when smaller still, unsigned).
+                         Omitted when caller didn't pass ``delta_cost_usd`` or
+                         the cost is 0 (avoid noise for free/local models).
         * ``N tools``  — Tool calls executed this turn. Omitted when 0.
 
         The design principle: the closing separator carries **per-turn API
@@ -1355,7 +1361,7 @@ class StreamDisplayManager:
             else:
                 parts.append(f"+{dt}")
         if self._summary_delta_cost_usd is not None and self._summary_delta_cost_usd > 0:
-            parts.append(f"+${self._summary_delta_cost_usd:.2f}")
+            parts.append(format_cost_usd(self._summary_delta_cost_usd, signed=True))
         if self.tool_count > 0:
             parts.append(f"{self.tool_count} tool{'s' if self.tool_count != 1 else ''}")
         return " " + " · ".join(parts) + " "
@@ -1383,20 +1389,19 @@ class StreamDisplayManager:
                 ``#N`` at the head of the summary. When ``None`` the field
                 is omitted — useful for tests or synthetic turns that have
                 no meaningful ordinal.
-            delta_tokens: Tokens consumed by this turn — every prompt token
-                (cached ones included) plus output, summed over the turn's API
-                calls. A tool loop sends the prompt once per call, so this can
-                run well above the context size shown in the status bar; that
-                one is the context the next main request will carry.
-                Rendered as ``+Tk`` (``+3.2K`` when ≥ 1000, ``+42`` else).
-                Omitted when ``None`` or ``<= 0``.
-            delta_cost_usd: USD cost incurred by this turn. Rendered as
-                ``+$C``. Omitted when ``None`` or ``<= 0`` so free/local
-                models don't show a noisy ``+$0.00``.
+            delta_tokens: Net new tokens added by this turn — fresh input plus
+                cache writes plus output, excluding re-read cache. Rendered as
+                ``+Tk`` (``+3.2K`` when ≥ 1000, ``+42`` else). Omitted when
+                ``None`` or ``<= 0``. Ignored when ``usage_summary`` is
+                supplied.
+            delta_cost_usd: USD cost incurred by this turn. Rendered as ``+$C``
+                via ``format_cost_usd``, so a sub-cent turn keeps 4 decimals
+                instead of collapsing to ``+$0.00``. Omitted when ``None`` or
+                ``<= 0`` so free/local models show nothing at all.
             usage_summary: Provider-reported per-turn usage parts. When
-                supplied, this replaces the compact ``+Tk`` field with an
-                input/cache/output split while preserving the same real API
-                accounting source.
+                supplied, the leading ``+Tk`` field is derived from it as the
+                same net-new figure (fresh input + cache writes + output),
+                followed by an input/cache/output split.
 
         The caller (interactive loop) is expected to source ``delta_*``
         from the per-run ``cost_tracker`` (which is itself per-``run()``

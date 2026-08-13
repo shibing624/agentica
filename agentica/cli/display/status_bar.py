@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from agentica.cli.usage_display import format_cost_usd
+
 def _format_tokens_short(n: int) -> str:
     """Format token count with K/M suffix for compact display."""
     if n >= 1_000_000:
@@ -87,7 +89,7 @@ def display_token_stats(
         parts.append(f"[dim]{' · '.join(seg)}[/dim]")
 
     cost = cost_tracker.total_cost_usd
-    cost_str = f"${cost:.4f}" if cost < 0.01 else f"${cost:.2f}"
+    cost_str = format_cost_usd(cost)
     parts.append(f"[dim]{cost_str}[/dim]")
 
     console_instance.print(f"{'  ·  '.join(parts)}")
@@ -201,7 +203,7 @@ def build_status_bar_fragments(
     pct = (context_tokens / context_window * 100) if context_window > 0 else 0.0
     pct_label = f"{pct:.0f}%"
     fg = _ctx_fg_style(pct)
-    cost_str = f"${cost_usd:.4f}" if cost_usd < 0.01 else f"${cost_usd:.2f}"
+    cost_str = format_cost_usd(cost_usd)
 
     turn_str = f"⏱ {last_turn_seconds:.1f}s" if last_turn_seconds > 0 else ""
     total_str = f"Σ {format_duration_compact(active_seconds)}" if active_seconds > 0 else ""

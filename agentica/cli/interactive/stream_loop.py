@@ -21,7 +21,7 @@ from agentica.cli.display import (
     resumable_session_id,
 )
 from agentica.cli.runtime import get_console
-from agentica.cli.usage_display import ProviderUsageSummary, cache_counts_inside_input_for_model
+from agentica.cli.usage_display import ProviderUsageSummary
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
 from agentica.utils.async_utils import run_sync
@@ -281,6 +281,7 @@ def _process_stream_response(
     tui_state["_turn_active_baseline"] = _active_baseline
     tui_state["_turn_calls_baseline"] = _calls_baseline
     tui_state["_turn_goal_tokens_baseline"] = _goal_tokens_baseline
+    tui_state["_turn_usage_entry_baseline"] = _usage_entry_baseline
 
     try:
         from agentica.run_config import RunConfig
@@ -458,10 +459,9 @@ def _process_stream_response(
             usage_entries = current_agent.model.usage.request_usage_entries[_usage_entry_baseline:]
             usage_summary = ProviderUsageSummary.from_request_entries(
                 usage_entries,
-                cache_counts_inside_input=cache_counts_inside_input_for_model(current_agent.model),
                 cost_usd=cost_tracker.total_cost_usd,
             )
-            delta_tokens = usage_summary.total_tokens
+            delta_tokens = usage_summary.net_new_tokens
             delta_cost_usd = usage_summary.cost_usd
 
         # 1-based session-scoped turn counter. Increment BEFORE finalize so

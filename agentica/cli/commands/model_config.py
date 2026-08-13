@@ -39,7 +39,7 @@ from agentica.utils.log import (
 )
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
-from agentica.cli.usage_display import ProviderUsageSummary, cache_counts_inside_input_for_model
+from agentica.cli.usage_display import ProviderUsageSummary, format_cost_usd
 from agentica.project_store import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
@@ -796,6 +796,7 @@ def _render_context_breakdown(con, agent) -> None:
         f"({breakdown.percent_full:.0f}% full, estimated)[/dim]"
     )
     con.print(f"  {sep}")
+    con.print(f"  Messages:         {len(agent.working_memory.messages)}")
     # Bars are shares of what is loaded, so they add up to the whole row of
     # blocks. Scaling to the largest row instead would peg it at full width and
     # read as "this section filled the window".
@@ -837,18 +838,18 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
 
     model_name = f"{ctx.agent_config.get('model_provider', '')}/{ctx.agent_config.get('model_name', '')}"
 
-    usage_entries = agent.model.usage.request_usage_entries[-tracker.turns:]
+    ts = ctx.tui_state or {}
+    entries = agent.model.usage.request_usage_entries
+    baseline = ts.get("_turn_usage_entry_baseline")
+    if baseline is None:
+        baseline = max(len(entries) - tracker.turns, 0)
     usage = ProviderUsageSummary.from_request_entries(
-        usage_entries,
-        cache_counts_inside_input=cache_counts_inside_input_for_model(agent.model),
+        entries[baseline:],
         cost_usd=tracker.total_cost_usd,
     )
     cache_hit_percent = usage.cache_hit_percent
 
-    ts = ctx.tui_state or {}
     active_secs = ts.get("active_seconds", 0)
-
-    msg_count = len(agent.working_memory.messages)
 
     if active_secs < 60:
         duration_str = f"{active_secs:.0f}s"
@@ -867,23 +868,38 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
     con.print("  [bold cyan]Latest Turn API Usage[/bold cyan]")
     con.print(f"  {sep}")
     con.print(f"  {'Model:':<30} {model_name}")
-    con.print(f"  {'Input tokens (total):':<30} {usage.prompt_tokens:>12,}")
+    con.print(
+        f"  {'API calls this turn:':<30} {usage.api_calls:>12}"
+        f"  [dim](tool rounds + final answer)[/dim]"
+    )
+    if usage.api_calls > 0:
+        avg = round(usage.prompt_tokens / usage.api_calls)
+        con.print(
+            f"  {'Input tokens:':<30} {usage.prompt_tokens:>12,}  [dim](avg {_fmt_tokens(avg)}/call)[/dim]"
+        )
+    else:
+        con.print(f"  {'Input tokens:':<30} {usage.prompt_tokens:>12,}")
     if usage.cache_read_tokens > 0 or usage.cache_write_tokens > 0:
-        con.print(f"  {'Fresh input tokens:':<30} {usage.fresh_input_tokens:>12,}")
+        con.print(f"  {'  Fresh input tokens:':<30} {usage.fresh_input_tokens:>12,}")
     if usage.cache_read_tokens > 0:
         cache_suffix = f" / {cache_hit_percent:.1f}% hit" if cache_hit_percent is not None else ""
-        con.print(f"  {'Cached input tokens:':<30} {usage.cache_read_tokens:>12,}{cache_suffix}")
+        con.print(f"  {'  Cached input tokens:':<30} {usage.cache_read_tokens:>12,}{cache_suffix}")
     if usage.cache_write_tokens > 0:
-        con.print(f"  {'Cache write tokens:':<30} {usage.cache_write_tokens:>12,}")
+        con.print(f"  {'  Cache write tokens:':<30} {usage.cache_write_tokens:>12,}")
     con.print(f"  {'Output tokens:':<30} {usage.output_tokens:>12,}")
-    con.print(f"  {'Total tokens:':<30} {usage.total_tokens:>12,}")
-    con.print(f"  {'API calls this turn:':<30} {usage.api_calls:>12}")
-    con.print(f"  {'Turn cost:':<30} ~${usage.cost_usd:.4f}")
-    con.print(f"  {'Session API calls:':<30} {ts.get('total_api_calls', usage.api_calls):>12}")
-    con.print(f"  {'Session active time:':<30} {duration_str:>12}")
-    con.print(f"  {'Session cost:':<30} ~${session_cost:.4f}")
+    con.print(
+        f"  {'Net new tokens:':<30} {usage.net_new_tokens:>12,}"
+        f"  [dim](fresh + cache write + output)[/dim]"
+    )
+    con.print(f"  {'Total tokens (billed):':<30} {usage.total_tokens:>12,}")
+    con.print(f"  {'Turn cost:':<30} ~{format_cost_usd(usage.cost_usd)}")
     con.print(f"  {sep}")
-    con.print(f"  Messages:         {msg_count}")
+    con.print("  [bold cyan]Session[/bold cyan]")
+    con.print(f"  {sep}")
+    con.print(f"  {'API calls:':<30} {ts.get('total_api_calls', usage.api_calls):>12}")
+    con.print(f"  {'Active time:':<30} {duration_str:>12}")
+    con.print(f"  {'Cost:':<30} ~{format_cost_usd(session_cost)}")
+    con.print(f"  {sep}")
     _render_context_breakdown(con, agent)
 
 

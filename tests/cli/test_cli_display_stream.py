@@ -411,8 +411,33 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         out = self._capture(render)
         self.assertIn("#7", out, "turn number must appear as #N")
         self.assertIn("+3.2K", out, "delta tokens >=1000 shown with K suffix")
-        self.assertIn("+$0.08", out, "delta cost shown with 2-decimal $ prefix")
+        self.assertIn("+$0.08", out, "at or above one cent, cost shows 2 decimals")
 
+    def test_finalize_rule_keeps_four_decimals_for_sub_cent_cost(self):
+        """A sub-cent turn must not render as a free one.
+
+        Guards the footer's wiring to ``format_cost_usd``, not just the
+        formatter: a fixed ``:.2f`` here turns $0.004 into ``+$0.00``.
+        """
+
+        def render(mgr):
+            mgr.stream_response("cheap")
+            mgr.finalize(turn_no=3, delta_tokens=120, delta_cost_usd=0.004)
+
+        out = self._capture(render)
+        self.assertIn("+$0.0040", out)
+
+    def test_finalize_rule_floors_unrenderable_cost_without_a_plus(self):
+        """Below 4-decimal resolution the footer shows the floor, unsigned."""
+
+        def render(mgr):
+            mgr.stream_response("tiny")
+            mgr.finalize(turn_no=4, delta_tokens=30, delta_cost_usd=0.000014)
+
+        out = self._capture(render)
+        self.assertIn("<$0.0001", out)
+        self.assertNotIn("+<", out)
+        self.assertNotIn("$0.0000", out)
     def test_finalize_rule_shows_provider_usage_breakdown_when_provided(self):
         from agentica.cli.usage_display import ProviderUsageSummary
 
@@ -423,6 +448,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
                 delta_cost_usd=0.04,
                 usage_summary=ProviderUsageSummary(
                     input_tokens=38_100,
+                    fresh_input_tokens=1_000,
                     cache_read_tokens=37_100,
                     output_tokens=3_000,
                     total_tokens_override=41_100,
@@ -432,8 +458,8 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         out = self._capture(render)
         compact = " ".join(out.split())
         self.assertIn("#9", out)
-        self.assertIn("+41.1K", out)
-        self.assertNotIn("+41.1K tok", out)
+        self.assertIn("+4K", out)
+        self.assertNotIn("+4K tok", out)
         self.assertIn("in 38.1K", out)
         self.assertIn("cache 37.1K / 97.4%", out)
         self.assertIn("out 3K", compact)

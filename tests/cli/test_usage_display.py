@@ -9,6 +9,7 @@ from agentica.cli.commands import model_config
 from agentica.cli.usage_display import (
     ProviderUsageSummary,
     format_cache_hit,
+    format_cost_usd,
     format_turn_usage_summary,
 )
 from agentica.cost_tracker import CostTracker
@@ -16,8 +17,10 @@ from agentica.model.usage import RequestUsage, TokenDetails, Usage
 
 
 def test_turn_usage_summary_surfaces_provider_cache_hit_rate():
+    # 38.1K prompt = 37.1K cache read + 1K fresh; net new = 1K fresh + 3K out.
     summary = ProviderUsageSummary(
         input_tokens=38_100,
+        fresh_input_tokens=1_000,
         cache_read_tokens=37_100,
         output_tokens=3_000,
         total_tokens_override=41_100,
@@ -26,7 +29,7 @@ def test_turn_usage_summary_surfaces_provider_cache_hit_rate():
     assert format_cache_hit(summary) == "cache 37.1K / 97.4%"
     assert (
         format_turn_usage_summary(summary)
-        == "+41.1K · in 38.1K · cache 37.1K / 97.4% · out 3K"
+        == "+4K · in 38.1K · cache 37.1K / 97.4% · out 3K"
     )
 
 
@@ -70,14 +73,13 @@ def test_provider_usage_summary_uses_provider_total_for_inclusive_cache_details(
 
     summary = ProviderUsageSummary.from_request_entries(
         [usage],
-        cache_counts_inside_input=True,
         cost_usd=0.04,
     )
 
     assert summary.prompt_tokens == 38_100
     assert summary.total_tokens == 41_100
     assert format_turn_usage_summary(summary) == (
-        "+41.1K · in 38.1K · cache 37.1K / 97.4% · out 3K"
+        "+4K · in 38.1K · cache 37.1K / 97.4% · out 3K"
     )
 
 
@@ -94,13 +96,12 @@ def test_provider_usage_summary_adds_native_anthropic_cache_to_input():
 
     summary = ProviderUsageSummary.from_request_entries(
         [usage],
-        cache_counts_inside_input=False,
     )
 
     assert summary.prompt_tokens == 38_100
     assert summary.total_tokens == 41_100
     assert format_turn_usage_summary(summary) == (
-        "+41.1K · in 38.1K · cache 37.1K / 97.4% · out 3K"
+        "+4K · in 38.1K · cache 37.1K / 97.4% · out 3K"
     )
 
 
@@ -118,7 +119,6 @@ def test_provider_usage_summary_normalises_mixed_provider_entries_per_request():
 
     summary = ProviderUsageSummary.from_request_entries(
         [openai_usage, anthropic_usage],
-        cache_counts_inside_input=True,
     )
 
     assert summary.prompt_tokens == 1_900
@@ -130,8 +130,11 @@ def test_provider_usage_summary_normalises_mixed_provider_entries_per_request():
 
 
 def test_turn_usage_summary_omits_cache_write_segment():
+    # 10,731 prompt = 10,718 cache read + 11 cache write + 2 fresh.
+    # Net new = 2 fresh + 11 write + 15 out = 28; only the re-read 10,718 is excluded.
     summary = ProviderUsageSummary(
         input_tokens=10_731,
+        fresh_input_tokens=2,
         cache_read_tokens=10_718,
         cache_write_tokens=11,
         output_tokens=15,
@@ -140,7 +143,7 @@ def test_turn_usage_summary_omits_cache_write_segment():
 
     rendered = format_turn_usage_summary(summary)
 
-    assert rendered == "+10.7K · in 10.7K · cache 10.7K / 99.9% · out 15"
+    assert rendered == "+28 · in 10.7K · cache 10.7K / 99.9% · out 15"
     assert "cache write" not in rendered
 
 
@@ -184,7 +187,7 @@ def test_usage_command_prints_real_provider_cache_breakdown(monkeypatch):
 
     out = buf.getvalue()
     assert "Latest Turn API Usage" in out
-    assert "Input tokens (total):" in out
+    assert "Input tokens:" in out
     assert "38,100" in out
     assert "Fresh input tokens:" in out
     assert "1,000" in out
@@ -192,5 +195,60 @@ def test_usage_command_prints_real_provider_cache_breakdown(monkeypatch):
     assert "37,100 / 97.4% hit" in out
     assert "Output tokens:" in out
     assert "3,000" in out
-    assert "Total tokens:" in out
+    assert "Net new tokens:" in out
+    assert "4,000" in out
+    assert "Total tokens (billed):" in out
     assert "41,100" in out
+
+
+def test_format_cost_usd_adaptive_precision():
+    assert format_cost_usd(0.004) == "$0.0040"
+    assert format_cost_usd(0.04) == "$0.04"
+    assert format_cost_usd(0.009999) == "$0.01"
+
+
+def test_format_cost_usd_floors_sub_precision_cost_instead_of_showing_zero():
+    # A cost too small for 4 decimals must not render as "$0.0000" — that is the
+    # same "looks free" lie the adaptive precision exists to kill.
+    assert format_cost_usd(0.000014) == "<$0.0001"
+    assert format_cost_usd(0.0001) == "$0.0001"
+    assert format_cost_usd(0.0) == "$0.0000"
+
+
+def test_format_cost_usd_signed_prefixes_delta_but_not_the_floor():
+    assert format_cost_usd(0.004, signed=True) == "+$0.0040"
+    assert format_cost_usd(1.5, signed=True) == "+$1.50"
+    assert format_cost_usd(0.000014, signed=True) == "<$0.0001"
+
+
+def test_net_new_tokens_counts_cache_writes_as_new():
+    # Cache writes are content sent for the first time (and billed at a
+    # premium), so a prefix-rebuilding turn must not read as a cheap one.
+    summary = ProviderUsageSummary(
+        input_tokens=38_100,
+        fresh_input_tokens=1_000,
+        cache_read_tokens=36_600,
+        cache_write_tokens=500,
+        output_tokens=3_000,
+    )
+    assert summary.net_new_tokens == 4_500
+
+
+def test_net_new_tokens_excludes_re_read_cache():
+    summary = ProviderUsageSummary(
+        input_tokens=38_100,
+        fresh_input_tokens=1_000,
+        cache_read_tokens=37_100,
+        output_tokens=3_000,
+    )
+    assert summary.net_new_tokens == 4_000
+
+
+def test_turn_usage_summary_omits_leading_zero_for_full_cache_turn():
+    summary = ProviderUsageSummary(
+        input_tokens=76_200,
+        fresh_input_tokens=0,
+        cache_read_tokens=76_200,
+        output_tokens=0,
+    )
+    assert format_turn_usage_summary(summary) == "in 76.2K · cache 76.2K / 100.0%"
