@@ -137,9 +137,9 @@ CLI 侧零改动：`list_agents` 里能直接看到你的手机（如 `wechat-xu
 ```
 
 这条路径和 `@` 走的是同一个 peers 通道：每个 Gateway 会话（网页的、每个 IM 会话的）
-也是一个 peer，发布成 `gw-` 前缀的名字（如 `gw-wechat-<会话>-a1`），
-所以 CLI 那边 `list_agents` 里能同时看到你的手机和网关 agent，
-**CLI 会话也可以主动 `send_message` 给 `gw-…` 把结论推回你的微信**。
+也是一个 peer，发布成和 CLI 一样短的名字（如 `wechat-agentica-41`：渠道 + cwd
+末级目录 + 两位 id），所以 CLI 那边 `list_agents` 里能同时看到你的手机和网关 agent，
+**CLI 会话也可以主动 `send_message` 给 `wechat-agentica-41` 把完整结论推回你的微信**。
 
 几点行为值得知道：
 

@@ -94,21 +94,28 @@ class TestPresence:
         assert published[0].session_id == "web-1"
         assert published[0].cwd == os.path.realpath("/tmp/proj")
 
-    def test_the_name_is_gw_prefixed_so_it_shadows_nothing(self):
-        """A CLI publishes `<folder>-<xx>` and a bridge endpoint
-        `<channel>-<sender>`; match_peers() treats a name prefix as an address,
-        so a third shape must not collide with either."""
+    def test_the_name_is_channel_folder_id_like_a_cli_session(self):
+        """CLI is ``<folder>-<xx>``; gateway is ``<channel>-<folder>-<xx>``.
+
+        match_peers() treats a name prefix as an address, so this must not
+        collide with a CLI's ``agentica-41`` or a bridge endpoint's
+        ``wechat-<openid>``. The WeChat sender id must not appear — that is
+        what made ``send_message`` targets unusable.
+        """
+        service, _ = _gateway_peers(live={"s1"})
+        service.note_route("s1", ChannelType.WECHAT, "o9cq8035jyckmmlzta33-mkm")
+
+        session = service.session_for("s1", cwd="/tmp/agentica")
+
+        assert session.name == f"wechat-agentica-{session.peer_id[:2]}"
+        assert "o9cq" not in session.name
+
+    def test_a_web_session_uses_the_web_channel_and_the_cwd_folder(self):
         service, _ = _gateway_peers(live={"web-1"})
 
-        name = service.session_for("web-1").name
+        session = service.session_for("web-1", cwd="/tmp/proj")
 
-        assert name.startswith("gw-")
-
-    def test_the_name_follows_the_im_conversation_it_serves(self):
-        service, _ = _gateway_peers(live={"s1"})
-        service.note_route("s1", ChannelType.WECOM, "chat-1")
-
-        assert service.session_for("s1").name.startswith("gw-wecom-chat-1")
+        assert session.name == f"web-proj-{session.peer_id[:2]}"
 
     def test_note_turn_publishes_what_the_session_is_working_on(self):
         service, _ = _gateway_peers(live={"s1"})

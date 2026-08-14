@@ -13,11 +13,12 @@ from a terminal and from an ``@`` command, and unreachable from the one surface
 a user has when they are not at the machine: a sentence typed into IM.
 
 **Still no new protocol.** Each gateway chat session gets a ``PeerSession`` on
-the same file-based channel (``agentica/peers.py``), published under a ``gw-``
-name, so a CLI sees it in ``list_agents`` and answers it with the
+the same file-based channel (``agentica/peers.py``), published under a short
+name like the CLI (``wechat-agentica-41``: channel + cwd folder + two id
+chars), so a CLI sees it in ``list_agents`` and answers it with the
 ``send_message`` tool it already has. That symmetry buys the reverse direction
-for free: a CLI session can message ``gw-wechat-…`` to reach the user's phone
-without knowing anything about the gateway.
+for free: a CLI session can message ``wechat-agentica-41`` to reach the user's
+phone without knowing anything about the gateway.
 
 Two things this module owns beyond publishing:
 
@@ -41,10 +42,9 @@ fresh peer id costs nothing, because peers are addressed by name.
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Callable, Dict, List, Optional, Tuple
 
-from agentica.peers import PeerMessage, PeerSession
+from agentica.peers import PeerMessage, PeerSession, default_peer_name, new_peer_id
 from agentica.utils.log import logger
 
 from ..channels.base import Channel, ChannelType
@@ -62,11 +62,16 @@ CHUNK_CHARS = 1800
 # whole prompt into every listing.
 MAX_TASK_CHARS = 200
 
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
+def _gateway_peer_name(channel: str, cwd: Optional[str], peer_id: str) -> str:
+    """Short addressable name: channel + cwd folder + two id chars.
 
-
-def _slug(text: str, limit: int = 24) -> str:
-    return _SLUG_RE.sub("-", (text or "").casefold()).strip("-")[:limit]
+    A CLI publishes ``<folder>-<xx>`` (``agentica-41``). Putting the channel
+    in front (``wechat-agentica-41``) keeps this out of that prefix space and
+    out of a bridge endpoint's ``<channel>-<sender>`` space, without stuffing
+    a WeChat openid into a name the model has to type as a ``send_message``
+    target.
+    """
+    return f"{channel}-{default_peer_name(cwd, peer_id)}"
 
 
 def _task_line(text: str) -> str:
@@ -135,22 +140,18 @@ class GatewayAgentPeers:
             return existing
 
         route = self._routes.get(session_id)
-        who = f"{route[0].value}-{_slug(route[1])}" if route else "web"
+        channel = route[0].value if route else "web"
+        cwd_str = str(cwd or settings.base_dir)
+        peer_id = new_peer_id()
         session = PeerSession(
-            cwd=str(cwd or settings.base_dir),
-            # Placeholder: the addressable name needs the peer id, which the
-            # constructor is what mints. Set below, before anything publishes.
-            name="gw",
+            peer_id=peer_id,
+            name=_gateway_peer_name(channel, cwd_str, peer_id),
+            cwd=cwd_str,
             session_id=session_id,
             workspace_path=str(settings.workspace_path),
             model_provider=settings.model_provider or None,
             model_name=settings.model_name or None,
         )
-        # `gw-` prefix keeps these out of the way of the two other name shapes
-        # on the channel: a CLI's `<folder>-<xx>` and a bridge endpoint's
-        # `<channel>-<sender>`. Nothing addressable may shadow anything else —
-        # match_peers() treats a name prefix as an address.
-        session.info.name = f"gw-{who}-{session.peer_id[:2]}"
         session.publish(task="gateway agent (web UI / chat channels)")
         self._sessions[session_id] = session
         logger.info(f"Gateway agent peer {session.name} [peer={session.peer_id}] published")
@@ -160,8 +161,9 @@ class GatewayAgentPeers:
         """Remember where this session's replies go, before its agent exists.
 
         Recorded on the inbound path so ``session_for`` can name the peer after
-        the conversation it serves, and so the loop can push a CLI's answer to
-        the right chat.
+        the channel it serves (``wechat-agentica-41``), and so the loop can
+        push a CLI's answer to the right chat. The conversation id is the
+        reply address, not part of the published name.
         """
         self._routes[session_id] = (channel, channel_id)
 
