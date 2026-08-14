@@ -177,6 +177,111 @@ def test_aes_ecb_roundtrip():
     assert bot._aes_ecb_decrypt(cipher, key) == plain
 
 
+def test_parse_aes_key_accepts_raw16_b64_hex_b64_and_bare_hex():
+    """Inbound CDNMedia.aes_key is not one encoding.
+
+    Images typically send base64(raw 16 bytes). Voice/file/video send
+    base64(32 hex chars). ImageItem.aeskey is a bare 32-char hex string.
+    Treating the hex form as a 32-byte AES-256 key decrypts garbage and
+    surfaces as pycryptodome 'Padding is incorrect.'
+    """
+    import base64
+
+    from agentica.gateway.channels.wechat import WxBotClient
+
+    key = os.urandom(16)
+    assert WxBotClient._parse_aes_key(base64.b64encode(key).decode()) == key
+    hex_b64 = base64.b64encode(key.hex().encode("ascii")).decode()
+    assert WxBotClient._parse_aes_key(hex_b64) == key
+    assert WxBotClient._parse_aes_key(key.hex()) == key
+
+
+def test_hex_encoded_aes_key_decrypts_voice_payload():
+    """The encoding that inbound voice/file actually uses must round-trip.
+
+    Naive ``AES.new(b64decode(aes_key), ECB)`` on a hex-wrapped key is
+    AES-256 and fails unpad with 'Padding is incorrect.'
+    """
+    import base64
+
+    pytest.importorskip("Crypto.Cipher", reason="pycryptodome required for AES tests")
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import unpad
+
+    from agentica.gateway.channels.wechat import WxBotClient
+
+    bot = WxBotClient(token="t")
+    key = os.urandom(16)
+    plain = b"#!SILK_V3" + b"\x00" * 80
+    cipher = bot._aes_ecb_encrypt(plain, key)
+    hex_b64 = base64.b64encode(key.hex().encode("ascii")).decode()
+
+    naive = base64.b64decode(hex_b64)
+    assert len(naive) == 32
+    with pytest.raises(ValueError, match="Padding is incorrect"):
+        unpad(AES.new(naive, AES.MODE_ECB).decrypt(cipher), 16)
+
+    assert bot._aes_ecb_decrypt(cipher, bot._parse_aes_key(hex_b64)) == plain
+
+
+def test_download_media_uses_parsed_key_and_default_cdn_base(monkeypatch):
+    import base64
+
+    from agentica.gateway.channels.wechat import WxBotClient, _CDN_BASE_URL
+
+    bot = WxBotClient(token="t")
+    key = os.urandom(16)
+    plain = b"\xff\xd8\xff\xe0" + b"jpeg-body" * 8
+    cipher = bot._aes_ecb_encrypt(plain, key)
+    hex_b64 = base64.b64encode(key.hex().encode("ascii")).decode()
+    captured = {}
+
+    class _Resp:
+        content = cipher
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, headers=None, timeout=30):
+        captured["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(
+        "agentica.gateway.channels.wechat.requests.get", fake_get
+    )
+    out = bot.download_media({
+        "encrypt_query_param": "enc-q",
+        "aes_key": hex_b64,
+    })
+    assert out == plain
+    assert captured["url"].startswith(_CDN_BASE_URL)
+    assert "encrypted_query_param=enc-q" in captured["url"]
+
+
+def test_download_media_skips_decrypt_when_encrypt_type_zero(monkeypatch):
+    from agentica.gateway.channels.wechat import WxBotClient
+
+    bot = WxBotClient(token="t")
+    raw = b"\xff\xd8\xff\xe0plaintext-jpeg"
+
+    class _Resp:
+        content = raw
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(
+        "agentica.gateway.channels.wechat.requests.get",
+        lambda *a, **k: _Resp(),
+    )
+    out = bot.download_media({
+        "encrypt_query_param": "enc-q",
+        "full_url": "https://cdn.example/file",
+        "encrypt_type": 0,
+    })
+    assert out == raw
+
+
 def test_send_typing_uses_status_field(monkeypatch):
     from agentica.gateway.channels.wechat import WxBotClient, _TYPING, _CANCEL
 
@@ -271,7 +376,10 @@ def test_extract_media_typed_kinds_and_skips_video_thumb():
 
     msg = {
         "item_list": [
-            {"type": 2, "image_item": {"media": {"encrypt_query_param": "e1"}}},
+            {"type": 2, "image_item": {
+                "aeskey": "ab" * 16,
+                "media": {"encrypt_query_param": "e1"},
+            }},
             {"type": 3, "voice_item": {"media": {"encrypt_query_param": "e2"}}},
             {"type": 5, "video_item": {
                 "media": {"encrypt_query_param": "e3"},
@@ -288,6 +396,9 @@ def test_extract_media_typed_kinds_and_skips_video_thumb():
         ("video", "e3"),
         ("file", "e4"),
     ]
+    # ImageItem.aeskey (bare hex) must ride on the CDNMedia dict — dropping
+    # it is the other half of the inbound decrypt failure.
+    assert typed[0][1]["aes_key"] == "ab" * 16
 
 
 @pytest.mark.asyncio

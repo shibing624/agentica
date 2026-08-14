@@ -177,3 +177,53 @@ async def test_media_message_fetches_payloads_and_replies_with_notes(patched_dep
     assert "是只猫" in sent[2]
     # note comes before the answer
     assert sent[2].index("🖼") < sent[2].index("是只猫")
+
+
+@pytest.mark.asyncio
+async def test_media_download_failure_does_not_chat_empty_user_message(patched_deps):
+    """Image/voice-only inbound whose CDN decrypt fails must not call
+    agent.chat(''). That empty user turn is what Venus/Claude reject as
+    ``messages.N: user messages must have non-empty content``.
+    """
+    agent_service, channel_manager = patched_deps
+
+    channel = MagicMock()
+    channel.fetch_media = AsyncMock(return_value=[])
+    channel_manager.get_channel = MagicMock(return_value=channel)
+    agent_service.chat = AsyncMock()
+
+    msg = _make_message("")
+    msg.metadata["media"] = [{"kind": "image", "media": {"encrypt_query_param": "e"}}]
+    await gw_main._process_channel_message(msg, "sess:userA")
+
+    agent_service.chat.assert_not_awaited()
+    channel_manager.send.assert_awaited_once()
+    assert "没能下载" in channel_manager.send.await_args.args[2]
+
+
+@pytest.mark.asyncio
+async def test_image_only_success_sends_nonempty_placeholder(patched_deps):
+    """A successful image with no caption still needs a non-empty user prompt."""
+    agent_service, channel_manager = patched_deps
+
+    channel = MagicMock()
+    channel.fetch_media = AsyncMock(
+        return_value=[InboundMedia(kind="image", data=b"\xff\xd8\xff\xe0xx")]
+    )
+    channel_manager.get_channel = MagicMock(return_value=channel)
+
+    seen = {}
+
+    async def chat(message, session_id, user_id, media=None):
+        seen["message"] = message
+        seen["media"] = media
+        return ChatResult(content="ok", session_id=session_id)
+
+    agent_service.chat = AsyncMock(side_effect=chat)
+
+    msg = _make_message("")
+    msg.metadata["media"] = [{"kind": "image", "media": {"encrypt_query_param": "e"}}]
+    await gw_main._process_channel_message(msg, "sess:userA")
+
+    assert seen["message"].strip()
+    assert seen["media"] and seen["media"][0].kind == "image"

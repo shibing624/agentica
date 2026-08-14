@@ -55,6 +55,9 @@ _API = "https://ilinkai.weixin.qq.com"
 _DEFAULT_TOKEN_FILE = Path(AGENTICA_CACHE_DIR) / "wxbot_token.json"
 _VERSION = __version__
 _BOT_AGENT = f"Agentica/{__version__}"
+# Official iLink C2C CDN. Inbound CDNMedia often has encrypt_query_param
+# without full_url; the download path is then this base + the query param.
+_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
 
 # Message / item / media type enums (mirror openclaw-weixin types.ts)
 _MSG_USER, _MSG_BOT = 1, 2
@@ -200,6 +203,40 @@ class WxBotClient:
     def _aes_ecb_decrypt(self, cipher: bytes, key: bytes) -> bytes:
         self._ensure_crypto()
         return _unpad(_AES.new(key, _AES.MODE_ECB).decrypt(cipher), 16)
+
+    @staticmethod
+    def _parse_aes_key(value: str) -> bytes:
+        """Turn a CDNMedia.aes_key / ImageItem.aeskey string into 16 raw bytes.
+
+        Three encodings show up on inbound messages (openclaw-weixin /
+        OpenAEON ``parseAesKey``):
+
+        * ``base64(raw 16 bytes)`` — typical ``media.aes_key`` on images
+        * ``base64(32 hex chars)`` — ``media.aes_key`` on voice / file / video
+        * bare 32-char hex — ``image_item.aeskey``
+
+        Feeding the hex form straight to ``AES.new`` is a 32-byte key
+        (AES-256). Decrypting AES-128 ciphertext with it yields garbage
+        whose PKCS7 check is ``Padding is incorrect.``
+        """
+        raw = (value or "").strip()
+        if not raw:
+            raise ValueError("empty aes_key")
+        if len(raw) == 32 and all(c in "0123456789abcdefABCDEF" for c in raw):
+            return bytes.fromhex(raw)
+        decoded = base64.b64decode(raw)
+        if len(decoded) == 16:
+            return decoded
+        if len(decoded) == 32:
+            try:
+                hex_text = decoded.decode("ascii")
+            except UnicodeDecodeError:
+                hex_text = ""
+            if len(hex_text) == 32 and all(c in "0123456789abcdefABCDEF" for c in hex_text):
+                return bytes.fromhex(hex_text)
+        raise ValueError(
+            f"aes_key must decode to 16 bytes (got {len(decoded)} after base64)"
+        )
 
     def login_qr(self, poll_interval: int = 2) -> dict:
         """Interactive QR-code login flow.
@@ -483,9 +520,11 @@ class WxBotClient:
     def download_media(self, cdn_media: dict, cdn_base_url: Optional[str] = None) -> bytes:
         """Download and AES-128-ECB decrypt a ``CDNMedia`` reference."""
         encrypt_query_param = cdn_media.get("encrypt_query_param", "")
-        aes_key_b64 = cdn_media.get("aes_key", "")
+        aes_key = cdn_media.get("aes_key") or cdn_media.get("aeskey") or ""
         url = self._cdn_download_url(
-            encrypt_query_param, cdn_media.get("full_url", ""), cdn_base_url
+            encrypt_query_param,
+            cdn_media.get("full_url", ""),
+            cdn_base_url or _CDN_BASE_URL,
         )
         h = {
             "AuthorizationType": "ilink_bot_token",
@@ -495,7 +534,10 @@ class WxBotClient:
             h["Authorization"] = f"Bearer {self.token}"
         r = requests.get(url, headers=h, timeout=30)
         r.raise_for_status()
-        key = base64.b64decode(aes_key_b64)
+        # encrypt_type 0 = CDN already returned plaintext (no AES).
+        if cdn_media.get("encrypt_type") == 0 or not aes_key:
+            return r.content
+        key = self._parse_aes_key(aes_key)
         return self._aes_ecb_decrypt(r.content, key)
 
     @staticmethod
@@ -531,8 +573,14 @@ class WxBotClient:
                 ("file_item", "file"),
             ):
                 sub = it.get(key)
-                if sub and sub.get("media"):
-                    out.append((kind, sub["media"]))
+                if not (sub and sub.get("media")):
+                    continue
+                media = dict(sub["media"])
+                # ImageItem.aeskey is a bare hex key and is preferred over
+                # media.aes_key when present (same rule as openclaw-weixin).
+                if sub.get("aeskey"):
+                    media["aes_key"] = sub["aeskey"]
+                out.append((kind, media))
         return out
 
     @staticmethod

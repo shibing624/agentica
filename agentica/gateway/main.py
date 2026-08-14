@@ -426,13 +426,35 @@ async def _process_channel_message(message, session_id: str) -> None:
         # Materialise media references (image/voice/video) the channel put
         # into metadata — only channels with media support return anything.
         media = []
-        if message.metadata.get("media"):
+        wanted = message.metadata.get("media") or []
+        if wanted:
             channel = deps.channel_manager.get_channel(message.channel)
             if channel is not None:
                 media = await channel.fetch_media(message)
 
+        text = (message.content or "").strip()
+        if not text and not media:
+            # A media-only inbound whose download/decrypt failed must not
+            # become agent.chat(""): Venus/Claude reject empty user content
+            # (``messages.N: user messages must have non-empty content``)
+            # and the empty turn poisons the session history.
+            if wanted:
+                await deps.channel_manager.send(
+                    message.channel,
+                    message.channel_id,
+                    "没能下载这条图片/语音，请再发一次，或配一句文字。",
+                )
+            return
+        if not text:
+            kind = media[0].kind
+            text = {
+                "image": "请看这条图片。",
+                "voice": "请听这条语音。",
+                "video": "请看这条视频。",
+            }.get(kind, "请查看这条媒体。")
+
         result = await deps.agent_service.chat(
-            message=message.content,
+            message=text,
             session_id=session_id,
             user_id=user_id,
             media=media,
