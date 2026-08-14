@@ -3,39 +3,37 @@
 @author:XuMing(xuming624@qq.com)
 @description: Inbound media understanding for gateway channels.
 
-Decides, per media item (image / voice / video), how it reaches the agent:
+Two rules, no profile scan:
 
-* **Base model handles the modality** → attach the payload to the agent run
-  (``images=`` / ``audio=``). Videos ride the ``images`` channel as a
-  ``data:video/mp4;base64,<...>`` URL dict — the convention Gemini's
-  OpenAI-compatible endpoint understands for inline video. (No Agentica model
-  class consumes the native ``videos=`` run kwarg today.) Gemini models are
-  natively multi-modal, so a Gemini base model always takes this path.
-* **Base model lacks the modality** → scan config.yaml profiles (main fields,
-  ``auxiliary_model`` and ``fallback_models`` blocks) for a model that
-  supports it, make a one-shot describe/transcribe call, and inject the
-  result into the user message as a text part. A note is added to the reply
-  so the user knows a non-base model was used.
-* **Nobody supports it** → log a warning and add a user-facing note telling
-  the user how to configure a capable model (e.g. a ``modalities: [image]``
-  declaration on a profile with a private/unknown model name).
+* **Images** — if the base model can see (``supports_images``, or the base
+  id is Gemini), attach the payload to ``agent.run(images=)``. Otherwise a
+  one-shot describe via ``settings.media_model``.
+* **Audio / video** — if the base id is Gemini (natively multimodal), attach
+  (video rides ``images`` as a ``data:video/mp4;base64`` URL dict, the
+  convention Gemini's OpenAI-compatible endpoint understands). Otherwise the
+  same ``settings.media_model`` transcribes / describes into the user text.
 
-Voice payloads from WeChat arrive silk-encoded; they are decoded to wav first
-(``pilk`` or ``graiax-silkcoder`` — pure-Python, in the ``wechat`` extra).
+``settings.media_model`` is a model block (``model_provider`` / ``model_name``
+/ ``base_url`` / ``api_key``). ``model_name`` defaults to
+``gemini-3.6-flash`` when omitted; provider or ``base_url`` must be set so
+this does not guess an endpoint. Missing config yields a user-facing note,
+not a hunt through every profile.
+
+Voice payloads from WeChat arrive silk-encoded; they are decoded to wav
+first via ``pilk`` (installed with the ``wechat`` extra).
 Videos larger than ``MAX_INLINE_VIDEO_BYTES`` are skipped (Gemini inline
 payloads cap at ~20MB).
 """
-import asyncio
 import base64
-import inspect
 import io
+import os
+import tempfile
 import wave
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agentica.cost_tracker import get_model_supports_modality
-from agentica.global_config import get_profiles
+from agentica.global_config import get_setting
 from agentica.model.message import Message
 from agentica.utils.log import logger
 
@@ -44,16 +42,11 @@ from ..channels.base import InboundMedia
 # Gemini inline payloads cap at ~20MB; stay well under it.
 MAX_INLINE_VIDEO_BYTES = 15 * 1024 * 1024
 
+# Default name inside settings.media_model when the block omits model_name.
+DEFAULT_MEDIA_MODEL_NAME = "gemini-3.6-flash"
+
 _MODALITY_LABELS = {"image": "图片", "audio": "语音", "video": "视频"}
 _KIND_TO_MODALITY = {"image": "image", "voice": "audio", "video": "video"}
-
-# Name hints, consulted only when the model catalog has no entry for the id
-# (private deployments, brand-new releases). Catalog data wins when present.
-_NAME_HINTS = {
-    "image": ("gemini", "vl", "vision", "-4v", "4o", "omni", "seed", "qvq"),
-    "audio": ("gemini", "omni", "audio"),
-    "video": ("gemini", "omni", "seed"),
-}
 
 # Silk (WeChat voice) decodes to 24kHz mono s16 PCM.
 _SILK_PCM_RATE = 24000
@@ -70,7 +63,7 @@ class MediaPlan:
     ``images`` holds everything that goes to the base model via
     ``agent.run(images=...)``: real images *and* videos (as
     ``data:video/mp4;base64`` URL dicts — see module docstring).
-    ``text_parts`` are fallback-model descriptions/transcriptions to append
+    ``text_parts`` are media-model descriptions/transcriptions to append
     to the user text; ``notes`` are user-facing one-liners about non-base
     models used or media that had to be skipped.
     """
@@ -80,24 +73,45 @@ class MediaPlan:
     notes: List[str] = field(default_factory=list)
 
 
-def supports_modality(
-    model_id: str,
-    modality: str,
-    declared: Optional[Iterable[str]] = None,
-) -> bool:
-    """Whether ``model_id`` can take ``modality`` (image/audio/video) input.
+def is_gemini(model_id: str) -> bool:
+    """Uncatalogued Gemini deploys (e.g. gemini-3.6-flash) are natively multimodal."""
+    return "gemini" in (model_id or "").lower()
 
-    Resolution order: an explicit ``declared`` list (per-profile
-    ``modalities`` in config.yaml) > the model catalog > conservative name
-    hints (only reachable for models the catalog doesn't know).
+
+def base_supports_modality(model_id: str, modality: str) -> bool:
+    """Whether the base model can take ``modality`` as native input.
+
+    Catalog first; Gemini by name is the only extra (no vl/4o/seed heuristics).
     """
-    declared_set = {str(m).strip().lower() for m in (declared or ())}
-    if modality in declared_set:
-        return True
     if get_model_supports_modality(model_id, modality):
         return True
-    name = (model_id or "").lower()
-    return any(hint in name for hint in _NAME_HINTS.get(modality, ()))
+    return is_gemini(model_id)
+
+
+def resolve_media_model() -> Optional[Dict[str, Any]]:
+    """The Gemini used for describe/transcribe, or None if unconfigured.
+
+    Reads ``settings.media_model``. ``model_name`` defaults to
+    ``DEFAULT_MEDIA_MODEL_NAME``; ``model_provider`` or ``base_url`` must be
+    present so we do not invent an endpoint.
+    """
+    raw = get_setting("media_model")
+    if not isinstance(raw, dict):
+        return None
+    name = (raw.get("model_name") or "").strip() or DEFAULT_MEDIA_MODEL_NAME
+    provider = (raw.get("model_provider") or "").strip()
+    base_url = (raw.get("base_url") or "").strip()
+    api_key = (raw.get("api_key") or "").strip()
+    wire_api = (raw.get("wire_api") or "").strip()
+    if not provider and not base_url:
+        return None
+    return {
+        "model_provider": provider or "openai",
+        "model_name": name,
+        "base_url": base_url,
+        "api_key": api_key,
+        "wire_api": wire_api,
+    }
 
 
 def sniff_image_mime(data: bytes) -> str:
@@ -133,35 +147,39 @@ def _pcm_to_wav(pcm: bytes, rate: int = _SILK_PCM_RATE) -> bytes:
 
 
 def _silk_to_pcm(data: bytes) -> Optional[bytes]:
-    """Decode silk to PCM with whichever optional decoder is installed."""
+    """Decode silk bytes to raw PCM using ``pilk``.
+
+    ``pilk`` (0.2.x) exposes a file-path based API (``decode(silk_path,
+    pcm_path, pcm_rate=...)``), not a bytes-in/bytes-out one, so the payload is
+    staged through temp files. Returns None when ``pilk`` is not installed or
+    decoding fails.
+    """
     try:
         import pilk
-        try:
-            return pilk.decode(data)
-        except Exception as e:
-            logger.warning(f"pilk silk decode failed: {e}")
-    except ImportError:
-        pass
-    try:
-        from graiax import silkcoder
     except ImportError:
         return None
+
+    silk_path = tempfile.mktemp(suffix=".silk")
+    pcm_path = tempfile.mktemp(suffix=".pcm")
     try:
-        result = silkcoder.decode(data)
-        if inspect.isawaitable(result):
-            # graiax-silkcoder's API is a coroutine; decode_voice is sync and
-            # is typically called on a running event loop, so run it on a
-            # private loop in a helper thread.
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(asyncio.run, result).result()
-        return result
+        with open(silk_path, "wb") as f:
+            f.write(data)
+        pilk.decode(silk_path, pcm_path, pcm_rate=_SILK_PCM_RATE)
+        with open(pcm_path, "rb") as f:
+            return f.read()
     except Exception as e:
-        logger.warning(f"graiax-silkcoder silk decode failed: {e}")
+        logger.warning(f"pilk silk decode failed: {e}")
         return None
+    finally:
+        for p in (silk_path, pcm_path):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def decode_voice(data: bytes) -> Optional[Tuple[bytes, str]]:
-    """Normalise a voice payload to (bytes, format) for ``input_audio``.
+    """Normalise a voice payload to (bytes, format) for audio input.
 
     wav/mp3 pass through untouched; silk is decoded and wrapped as wav.
     Returns None when the payload needs decoding but no decoder is installed.
@@ -179,7 +197,7 @@ def decode_voice(data: bytes) -> Optional[Tuple[bytes, str]]:
 
 
 class MediaUnderstandingService:
-    """Routes inbound media to the base model or a config.yaml fallback model."""
+    """Routes inbound media to the base model or ``settings.media_model``."""
 
     def __init__(self, create_model_fn: Optional[Callable] = None):
         if create_model_fn is None:
@@ -188,49 +206,6 @@ class MediaUnderstandingService:
         self._create_model = create_model_fn
         self._model_cache: Dict[tuple, Any] = {}
 
-    # ------------------------------------------------------ model discovery
-    @staticmethod
-    def _iter_model_blocks(profiles: Dict[str, Any]):
-        """Yield (profile, role, block) for every model defined in config.yaml.
-
-        ``auxiliary_model`` / ``fallback_models`` entries inherit
-        provider/base_url/api_key from their profile's main block when
-        omitted (same-inheritance rule as global_config).
-        """
-        for profile, prof in profiles.items():
-            if not isinstance(prof, dict):
-                continue
-            yield profile, "main", prof
-            for role, blocks in (
-                ("auxiliary", [prof.get("auxiliary_model")]),
-                ("fallback", prof.get("fallback_models") or []),
-            ):
-                for block in blocks:
-                    if not isinstance(block, dict) or not block.get("model_name"):
-                        continue
-                    merged = dict(block)
-                    for key in ("model_provider", "base_url", "api_key"):
-                        if not merged.get(key) and prof.get(key):
-                            merged[key] = prof[key]
-                    yield profile, role, merged
-
-    def find_model_for(self, modality: str) -> Optional[Dict[str, Any]]:
-        """First config.yaml model that supports ``modality``, or None."""
-        for profile, role, block in self._iter_model_blocks(get_profiles()):
-            model_name = block.get("model_name") or ""
-            if supports_modality(model_name, modality, declared=block.get("modalities")):
-                return {
-                    "profile": profile,
-                    "role": role,
-                    "model_provider": block.get("model_provider") or "",
-                    "model_name": model_name,
-                    "base_url": block.get("base_url") or "",
-                    "api_key": block.get("api_key") or "",
-                    "wire_api": block.get("wire_api") or "",
-                }
-        return None
-
-    # ------------------------------------------------------ one-shot calls
     def _get_model(self, spec: Dict[str, Any]):
         key = (spec["model_provider"], spec["model_name"], spec["base_url"])
         model = self._model_cache.get(key)
@@ -245,20 +220,18 @@ class MediaUnderstandingService:
             self._model_cache[key] = model
         return model
 
-    # ------------------------------------------------------ routing
     async def prepare(
         self,
         media: List[InboundMedia],
         *,
         base_model_id: str,
         base_supports_images: bool,
-        base_declared: Optional[Iterable[str]] = None,
     ) -> MediaPlan:
         """Decide how each media item reaches the agent (see module docstring)."""
         plan = MediaPlan()
         for item in media:
             try:
-                await self._route(item, plan, base_model_id, base_supports_images, base_declared)
+                await self._route(item, plan, base_model_id, base_supports_images)
             except Exception as e:  # external I/O boundary: CDN/LLM calls
                 label = _MODALITY_LABELS.get(_KIND_TO_MODALITY.get(item.kind, ""), item.kind)
                 logger.warning(f"Media understanding failed for {item.kind}: {e}")
@@ -271,45 +244,48 @@ class MediaUnderstandingService:
         plan: MediaPlan,
         base_model_id: str,
         base_supports_images: bool,
-        base_declared: Optional[Iterable[str]],
     ) -> None:
         if item.kind == "image":
-            await self._route_image(item, plan, base_supports_images)
+            await self._route_image(item, plan, base_model_id, base_supports_images)
         elif item.kind == "voice":
-            await self._route_voice(item, plan, base_model_id, base_declared)
+            await self._route_voice(item, plan, base_model_id)
         elif item.kind == "video":
-            await self._route_video(item, plan, base_model_id, base_declared)
+            await self._route_video(item, plan, base_model_id)
         else:
             logger.debug(f"Media understanding: skipping unsupported kind {item.kind!r}")
 
-    def _base_supports(self, base_model_id: str, modality: str, base_declared) -> bool:
-        return supports_modality(base_model_id, modality, declared=base_declared)
-
-    def _note_unsupported(self, plan: MediaPlan, modality: str) -> None:
+    def _note_unconfigured(self, plan: MediaPlan, modality: str) -> None:
         label = _MODALITY_LABELS[modality]
         logger.warning(
-            f"Media understanding: no model for {modality} — base model lacks it and "
-            "no config.yaml profile supports it. Declare one with `modalities:`."
+            f"Media understanding: no settings.media_model for {modality} "
+            f"(base model cannot take it natively)"
         )
         plan.notes.append(
-            f"⚠️ 暂不支持{label}理解：底模不支持，且 config.yaml 中没有可用的{label}模型"
-            f"（可给某个 profile 加 modalities: [{modality}] 声明后重试）"
+            f"⚠️ 暂不支持{label}理解：底模不能处理，且未配置 settings.media_model"
+            f"（在 config.yaml 的 settings 里加上指向 Gemini 的 media_model，"
+            f"例如 model_name: {DEFAULT_MEDIA_MODEL_NAME}）"
         )
 
     async def _describe(self, spec: Dict[str, Any], blocks: List[dict]) -> str:
         model = self._get_model(spec)
         resp = await model.response([Message(role="user", content=blocks)])
-        return (getattr(resp, "content", "") or "").strip()
+        return (resp.content or "").strip()
 
-    async def _route_image(self, item: InboundMedia, plan: MediaPlan, base_supports_images: bool) -> None:
+    async def _route_image(
+        self,
+        item: InboundMedia,
+        plan: MediaPlan,
+        base_model_id: str,
+        base_supports_images: bool,
+    ) -> None:
         mime = item.mime or sniff_image_mime(item.data)
         url = f"data:{mime};base64,{base64.b64encode(item.data).decode()}"
-        if base_supports_images:
+        if base_supports_images or is_gemini(base_model_id):
             plan.images.append({"url": url})
             return
-        spec = self.find_model_for("image")
+        spec = resolve_media_model()
         if spec is None:
-            self._note_unsupported(plan, "image")
+            self._note_unconfigured(plan, "image")
             return
         text = await self._describe(spec, [
             {"type": "text", "text": _IMAGE_PROMPT},
@@ -318,42 +294,48 @@ class MediaUnderstandingService:
         plan.text_parts.append(f"[图片内容]\n{text}")
         plan.notes.append(f"🖼 图片由 {spec['model_name']} 识别（底模不支持读图）")
 
-    async def _route_voice(self, item: InboundMedia, plan: MediaPlan, base_model_id: str, base_declared) -> None:
+    async def _route_voice(self, item: InboundMedia, plan: MediaPlan, base_model_id: str) -> None:
         decoded = decode_voice(item.data)
         if decoded is None:
-            logger.warning("Media understanding: voice decode failed (no silk decoder installed?)")
+            logger.warning("Media understanding: voice decode failed (pilk installed?)")
             plan.notes.append(
-                "⚠️ 语音解码失败：缺少 silk 解码库，请安装 graiax-silkcoder 或 pilk"
-                "（pip install 'agentica[wechat]'）"
+                "⚠️ 语音解码失败：请安装 silk 解码库 pilk"
+                "（pip install pilk 或 pip install 'agentica[wechat]'）"
             )
             return
         payload, fmt = decoded
-        if plan.audio is None and self._base_supports(base_model_id, "audio", base_declared):
+        if plan.audio is None and base_supports_modality(base_model_id, "audio"):
             plan.audio = {"data": base64.b64encode(payload).decode(), "format": fmt}
             return
-        spec = self.find_model_for("audio")
+        spec = resolve_media_model()
         if spec is None:
-            self._note_unsupported(plan, "audio")
+            self._note_unconfigured(plan, "audio")
             return
+        audio_b64 = base64.b64encode(payload).decode()
+        # Gemini's OpenAI-compatible endpoint takes audio_url data URLs and
+        # rejects OpenAI's native input_audio block.
         text = await self._describe(spec, [
             {"type": "text", "text": _VOICE_PROMPT},
-            {"type": "input_audio", "input_audio": {"data": base64.b64encode(payload).decode(), "format": fmt}},
+            {
+                "type": "audio_url",
+                "audio_url": {"url": f"data:audio/{fmt};base64,{audio_b64}"},
+            },
         ])
         plan.text_parts.append(f"[语音转写]\n{text}")
         plan.notes.append(f"🎤 语音由 {spec['model_name']} 转写（底模不支持语音）")
 
-    async def _route_video(self, item: InboundMedia, plan: MediaPlan, base_model_id: str, base_declared) -> None:
+    async def _route_video(self, item: InboundMedia, plan: MediaPlan, base_model_id: str) -> None:
         if len(item.data) > MAX_INLINE_VIDEO_BYTES:
             logger.warning(f"Media understanding: video too large ({len(item.data)} bytes), skipped")
             plan.notes.append(f"⚠️ 视频过大（>{MAX_INLINE_VIDEO_BYTES // 1024 // 1024}MB），已跳过")
             return
         url = f"data:video/mp4;base64,{base64.b64encode(item.data).decode()}"
-        if self._base_supports(base_model_id, "video", base_declared):
+        if base_supports_modality(base_model_id, "video"):
             plan.images.append({"url": url})
             return
-        spec = self.find_model_for("video")
+        spec = resolve_media_model()
         if spec is None:
-            self._note_unsupported(plan, "video")
+            self._note_unconfigured(plan, "video")
             return
         text = await self._describe(spec, [
             {"type": "text", "text": _VIDEO_PROMPT},
@@ -363,15 +345,18 @@ class MediaUnderstandingService:
         plan.notes.append(f"🎬 视频由 {spec['model_name']} 解读（底模不支持视频）")
 
 
-# Process-wide singleton — the fallback model cache lives here.
+# Process-wide singleton — the media-model cache lives here.
 media_understanding = MediaUnderstandingService()
 
 __all__ = [
+    "DEFAULT_MEDIA_MODEL_NAME",
     "MAX_INLINE_VIDEO_BYTES",
     "MediaPlan",
     "MediaUnderstandingService",
+    "base_supports_modality",
     "decode_voice",
+    "is_gemini",
     "media_understanding",
+    "resolve_media_model",
     "sniff_image_mime",
-    "supports_modality",
 ]

@@ -5,6 +5,7 @@ Requires the [gateway] extras:
 """
 import asyncio
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -131,9 +132,12 @@ class TestAgentServiceChatMedia:
             async def response(self, messages):
                 return SimpleNamespace(content="你好，世界")
 
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "g": {"model_provider": "openai", "model_name": "gemini-2.5-flash", "api_key": "k"},
-        })
+        monkeypatch.setattr(mu, "get_setting", lambda key, default=None: {
+            "model_provider": "openai",
+            "model_name": "gemini-3.6-flash",
+            "api_key": "k",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        } if key == "media_model" else default)
         monkeypatch.setattr(
             "agentica.gateway.services.agent_service.media_understanding",
             mu.MediaUnderstandingService(create_model_fn=lambda *a, **kw: _FakeModel()),
@@ -153,7 +157,7 @@ class TestAgentServiceChatMedia:
         assert "[语音转写]\n你好，世界" in sent_message
         assert agent.run.call_args.kwargs["audio"] is None
         assert result.media_notes
-        assert "gemini-2.5-flash" in result.media_notes[0]
+        assert "gemini-3.6-flash" in result.media_notes[0]
 
     def test_no_media_keeps_plain_call(self, tmp_path):
         agent = MagicMock()
@@ -1015,3 +1019,15 @@ class TestChannelBase:
         ch = _TestChannel(allowed_users=["user1", "user2"])
         assert ch.check_allowlist("user1") is True
         assert ch.check_allowlist("user3") is False
+
+
+class TestGatewayStartupLogPath:
+    def test_home_path_uses_tilde(self, tmp_path):
+        from agentica.gateway.main import _display_home_path
+
+        home = Path.home()
+        assert _display_home_path(str(home / ".agentica/logs/20260814-65634.log")) == (
+            "~/.agentica/logs/20260814-65634.log"
+        )
+        assert _display_home_path(str(tmp_path / "x.log")) == str(tmp_path / "x.log")
+

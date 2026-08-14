@@ -1,9 +1,9 @@
 """Tests for gateway media understanding (image/voice/video routing).
 
 Covers:
-- capability detection (catalog -> name hints -> explicit declaration)
-- fallback model discovery across config.yaml profiles
-- prepare(): base-model attach vs fallback description vs pass-through
+- base Gemini / catalog vision vs text-only
+- settings.media_model resolve (no profile scan)
+- prepare(): base-model attach vs media-model describe vs unconfigured note
 - voice silk decoding plumbing
 """
 import base64
@@ -14,6 +14,8 @@ import pytest
 
 from agentica.gateway.channels.base import InboundMedia
 from agentica.gateway.services import media_understanding as mu
+from agentica.model.message import Message
+from agentica.utils.tokens import count_message_tokens
 
 
 # ---------------------------------------------------------------- helpers
@@ -41,93 +43,73 @@ def _wav_bytes() -> bytes:
     return b"RIFF" + b"\x00" * 40 + b"WAVE"
 
 
+def _media_model(**overrides):
+    spec = {
+        "model_provider": "openai",
+        "model_name": "gemini-3.6-flash",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key": "k",
+    }
+    spec.update(overrides)
+    return spec
+
+
+def _patch_media_model(monkeypatch, spec):
+    monkeypatch.setattr(mu, "get_setting", lambda key, default=None: spec if key == "media_model" else default)
+
+
 # ------------------------------------------------------------ detection
-class TestSupportsModality:
+class TestBaseSupportsModality:
     def test_catalog_gemini_all_modalities(self):
-        assert mu.supports_modality("gemini-2.5-flash", "image")
-        assert mu.supports_modality("gemini-2.5-flash", "audio")
-        assert mu.supports_modality("gemini-2.5-flash", "video")
+        assert mu.base_supports_modality("gemini-2.5-flash", "image")
+        assert mu.base_supports_modality("gemini-2.5-flash", "audio")
+        assert mu.base_supports_modality("gemini-2.5-flash", "video")
 
     def test_catalog_text_only_model(self):
-        assert not mu.supports_modality("deepseek-v4-flash", "image")
-        assert not mu.supports_modality("deepseek-v4-flash", "audio")
-        assert not mu.supports_modality("deepseek-v4-flash", "video")
+        assert not mu.base_supports_modality("deepseek-v4-flash", "image")
+        assert not mu.base_supports_modality("deepseek-v4-flash", "audio")
+        assert not mu.base_supports_modality("deepseek-v4-flash", "video")
 
     def test_catalog_vision_model(self):
-        assert mu.supports_modality("gpt-4o", "image")
-        assert not mu.supports_modality("gpt-4o", "audio")
+        assert mu.base_supports_modality("gpt-4o", "image")
+        assert not mu.base_supports_modality("gpt-4o", "audio")
 
-    def test_declared_overrides_catalog(self):
-        assert mu.supports_modality("deepseek-v4-flash", "image", declared=["image"])
-        assert not mu.supports_modality("deepseek-v4-flash", "audio", declared=["image"])
+    def test_uncatalogued_gemini_by_name(self):
+        assert mu.is_gemini("gemini-3.6-flash")
+        assert mu.base_supports_modality("gemini-3.6-flash", "video")
+        assert mu.base_supports_modality("gemini-3.6-flash", "audio")
 
-    def test_name_hints_when_catalog_misses(self):
-        assert mu.supports_modality("acme-gemini-pro", "video")
-        assert mu.supports_modality("acme-gemini-pro", "audio")
-        assert mu.supports_modality("acme-vision-x1", "image")
-        assert mu.supports_modality("acme-qwen2-vl", "image")
-        assert not mu.supports_modality("acme-plain-1", "image")
-
-    def test_gemini_hint_only_as_fallback(self):
-        # a catalog-known text model whose name happens to contain no hint stays incapable
-        assert not mu.supports_modality("glm-4-flash", "video")
+    def test_no_vl_or_4o_name_heuristics(self):
+        assert not mu.base_supports_modality("acme-vision-x1", "image")
+        assert not mu.base_supports_modality("acme-qwen2-vl", "image")
+        assert not mu.base_supports_modality("acme-plain-1", "image")
 
 
-# ------------------------------------------------------------ profile scan
-class TestFindMediaModel:
-    def test_finds_first_supporting_profile(self, monkeypatch):
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "a": {"model_provider": "deepseek", "model_name": "deepseek-v4-flash"},
-            "b": {"model_provider": "openai", "model_name": "gpt-4o", "api_key": "k"},
-        })
-        svc = _svc()
-        spec = svc.find_model_for("image")
-        assert spec["profile"] == "b"
-        assert spec["model_name"] == "gpt-4o"
+# ------------------------------------------------------------ media_model resolve
+class TestResolveMediaModel:
+    def test_full_block(self, monkeypatch):
+        _patch_media_model(monkeypatch, _media_model())
+        spec = mu.resolve_media_model()
+        assert spec["model_name"] == "gemini-3.6-flash"
         assert spec["api_key"] == "k"
+        assert spec["model_provider"] == "openai"
 
-    def test_returns_none_when_nobody_supports(self, monkeypatch):
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "a": {"model_provider": "deepseek", "model_name": "deepseek-v4-flash"},
+    def test_model_name_defaults_when_omitted(self, monkeypatch):
+        _patch_media_model(monkeypatch, {
+            "model_provider": "openai",
+            "base_url": "https://example.com/v1",
+            "api_key": "k",
         })
-        assert _svc().find_model_for("video") is None
+        spec = mu.resolve_media_model()
+        assert spec["model_name"] == mu.DEFAULT_MEDIA_MODEL_NAME
 
-    def test_scans_auxiliary_model_block(self, monkeypatch):
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "a": {
-                "model_provider": "deepseek",
-                "model_name": "deepseek-v4-flash",
-                "auxiliary_model": {
-                    "model_provider": "openai",
-                    "model_name": "gemini-2.5-flash",
-                    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-                    "api_key": "gk",
-                },
-            },
-        })
-        spec = _svc().find_model_for("audio")
-        assert spec is not None
-        assert spec["model_name"] == "gemini-2.5-flash"
-        assert spec["role"] == "auxiliary"
+    def test_missing_setting_returns_none(self, monkeypatch):
+        _patch_media_model(monkeypatch, None)
+        assert mu.resolve_media_model() is None
 
-    def test_scans_fallback_models_with_declared_modalities(self, monkeypatch):
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "a": {
-                "model_provider": "deepseek",
-                "model_name": "deepseek-v4-flash",
-                "fallback_models": [{
-                    "model_provider": "openai",
-                    "model_name": "my-private-vl",
-                    "base_url": "http://internal/v1",
-                    "api_key": "x",
-                    "modalities": ["image"],
-                }],
-            },
-        })
-        spec = _svc().find_model_for("image")
-        assert spec is not None
-        assert spec["model_name"] == "my-private-vl"
-        assert spec["role"] == "fallback"
+    def test_name_alone_is_not_an_endpoint(self, monkeypatch):
+        _patch_media_model(monkeypatch, {"model_name": "gemini-3.6-flash"})
+        assert mu.resolve_media_model() is None
 
 
 # ------------------------------------------------------------ prepare: image
@@ -144,13 +126,25 @@ class TestPrepareImage:
         assert plan.images[0]["url"].startswith("data:image/jpeg;base64,")
         assert plan.text_parts == []
         assert plan.notes == []
+        assert count_message_tokens(
+            Message(role="user", content="请看这条图片。", images=plan.images)
+        ) > 0
 
     @pytest.mark.asyncio
-    async def test_fallback_model_describes_and_notifies(self, monkeypatch):
+    async def test_uncatalogued_gemini_base_attaches_image(self):
+        svc = _svc()
+        plan = await svc.prepare(
+            [InboundMedia(kind="image", data=_jpeg_bytes())],
+            base_model_id="gemini-3.6-flash",
+            base_supports_images=False,
+        )
+        assert len(plan.images) == 1
+        assert plan.text_parts == []
+
+    @pytest.mark.asyncio
+    async def test_media_model_describes_and_notifies(self, monkeypatch):
         fake = _FakeModel("一只猫")
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "v": {"model_provider": "openai", "model_name": "gpt-4o", "api_key": "k"},
-        })
+        _patch_media_model(monkeypatch, _media_model())
         svc = _svc(create_model_fn=lambda *a, **kw: fake)
         plan = await svc.prepare(
             [InboundMedia(kind="image", data=_jpeg_bytes())],
@@ -160,21 +154,18 @@ class TestPrepareImage:
         assert plan.images == []
         assert plan.text_parts == ["[图片内容]\n一只猫"]
         assert len(plan.notes) == 1
-        assert "gpt-4o" in plan.notes[0]
-        # the fallback model really received an image block
+        assert "gemini-3.6-flash" in plan.notes[0]
         sent = fake.calls[0][0]
         blocks = sent.content
         assert any(b.get("type") == "image_url" for b in blocks)
 
     @pytest.mark.asyncio
-    async def test_no_capable_model_warns_and_notifies(self, monkeypatch):
+    async def test_unconfigured_warns_and_notifies(self, monkeypatch):
         import logging
 
         from agentica.utils.log import logger
 
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "a": {"model_provider": "deepseek", "model_name": "deepseek-v4-flash"},
-        })
+        _patch_media_model(monkeypatch, None)
         warnings: list = []
 
         class _ListHandler(logging.Handler):
@@ -194,8 +185,8 @@ class TestPrepareImage:
             logger.removeHandler(handler)
         assert plan.images == []
         assert plan.text_parts == []
-        assert any("暂不支持" in n and "图片" in n for n in plan.notes)
-        assert any("image" in w for w in warnings)
+        assert any("暂不支持" in n and "图片" in n and "media_model" in n for n in plan.notes)
+        assert any("media_model" in w for w in warnings)
 
 
 # ------------------------------------------------------------ prepare: voice
@@ -214,11 +205,9 @@ class TestPrepareVoice:
         assert plan.notes == []
 
     @pytest.mark.asyncio
-    async def test_fallback_transcribes_and_notifies(self, monkeypatch):
+    async def test_media_model_transcribes_and_notifies(self, monkeypatch):
         fake = _FakeModel("你好，世界")
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "g": {"model_provider": "openai", "model_name": "gemini-2.5-flash", "api_key": "k"},
-        })
+        _patch_media_model(monkeypatch, _media_model())
         svc = _svc(create_model_fn=lambda *a, **kw: fake)
         plan = await svc.prepare(
             [InboundMedia(kind="voice", data=_wav_bytes())],
@@ -227,13 +216,13 @@ class TestPrepareVoice:
         )
         assert plan.audio is None
         assert plan.text_parts == ["[语音转写]\n你好，世界"]
-        assert any("转写" in n and "gemini-2.5-flash" in n for n in plan.notes)
+        assert any("转写" in n and "gemini-3.6-flash" in n for n in plan.notes)
+        blocks = fake.calls[0][0].content
+        assert any(b.get("type") == "audio_url" for b in blocks)
 
     @pytest.mark.asyncio
     async def test_silk_without_decoder_notifies(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "pilk", None)
-        monkeypatch.setitem(sys.modules, "graiax", None)
-        monkeypatch.setitem(sys.modules, "graiax.silkcoder", None)
         silk = b"#!SILK_V3" + b"\x01" * 20
         svc = _svc()
         plan = await svc.prepare(
@@ -246,8 +235,12 @@ class TestPrepareVoice:
 
     def test_silk_decoded_to_wav_with_pilk(self, monkeypatch):
         pcm = b"\x00\x01" * 100
-        fake_pilk = SimpleNamespace(decode=lambda data: pcm)
-        monkeypatch.setitem(sys.modules, "pilk", fake_pilk)
+
+        def fake_decode(silk_path, pcm_path, pcm_rate=24000):
+            with open(pcm_path, "wb") as f:
+                f.write(pcm)
+
+        monkeypatch.setitem(sys.modules, "pilk", SimpleNamespace(decode=fake_decode))
         out, fmt = mu.decode_voice(b"\x02#!SILK_V3" + b"\x01" * 20)
         assert fmt == "wav"
         assert out.startswith(b"RIFF")
@@ -273,13 +266,14 @@ class TestPrepareVideo:
         assert len(plan.images) == 1
         assert plan.images[0]["url"] == "data:video/mp4;base64," + base64.b64encode(mp4).decode()
         assert plan.notes == []
+        assert count_message_tokens(
+            Message(role="user", content="请看这条视频。", images=plan.images)
+        ) > 0
 
     @pytest.mark.asyncio
-    async def test_fallback_video_model_describes(self, monkeypatch):
+    async def test_media_model_describes_video(self, monkeypatch):
         fake = _FakeModel("一段日落视频")
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "g": {"model_provider": "openai", "model_name": "gemini-2.5-flash", "api_key": "k"},
-        })
+        _patch_media_model(monkeypatch, _media_model())
         svc = _svc(create_model_fn=lambda *a, **kw: fake)
         mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
         plan = await svc.prepare(
@@ -288,13 +282,11 @@ class TestPrepareVideo:
             base_supports_images=False,
         )
         assert plan.text_parts == ["[视频内容]\n一段日落视频"]
-        assert any("视频" in n and "gemini-2.5-flash" in n for n in plan.notes)
+        assert any("视频" in n and "gemini-3.6-flash" in n for n in plan.notes)
 
     @pytest.mark.asyncio
-    async def test_no_video_model_passes_with_note(self, monkeypatch):
-        monkeypatch.setattr(mu, "get_profiles", lambda: {
-            "a": {"model_provider": "deepseek", "model_name": "deepseek-v4-flash"},
-        })
+    async def test_unconfigured_video_passes_with_note(self, monkeypatch):
+        _patch_media_model(monkeypatch, None)
         svc = _svc()
         mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
         plan = await svc.prepare(
@@ -304,7 +296,7 @@ class TestPrepareVideo:
         )
         assert plan.images == []
         assert plan.text_parts == []
-        assert any("暂不支持" in n and "视频" in n for n in plan.notes)
+        assert any("暂不支持" in n and "视频" in n and "media_model" in n for n in plan.notes)
 
     @pytest.mark.asyncio
     async def test_oversize_video_skipped(self):

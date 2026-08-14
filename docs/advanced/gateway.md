@@ -39,9 +39,16 @@ agentica-gateway
 
 默认监听 `0.0.0.0:8881`，浏览器打开 `http://localhost:8881/chat` 进入内置 Web UI。
 
-启动日志会明确区分两类服务，避免与 IM 渠道混淆：
+启动日志会明确区分两类服务，避免与 IM 渠道混淆；并给出本进程的文件日志路径（与 CLI 同一套 `$AGENTICA_HOME/logs/YYYYMMDD-<pid>.log`，`AGENTICA_LOG_FILE=""` 可关掉）：
 
 ```
+==================================================
+  Agentica Gateway v1.4.13
+  Workspace: /Users/me/.agentica/workspace
+  Work dir:  /Users/me/project
+  Model:     openai/gpt-4o
+  Log File (INFO): ~/.agentica/logs/20260814-65634.log
+==================================================
 Web service started — http://0.0.0.0:8881/chat            # 始终运行的 Web / HTTP 服务
 IM channels started — wechat, wecom                       # 按配置启用的 IM 渠道
 # 或：IM channels — none enabled (configure a channel to enable)
@@ -292,6 +299,18 @@ agentica-gateway
 说明：
 ```bash
 WECHAT_ALLOWED_USERS=   # 留空 = 不限制，任何用户都能访问
+```
+
+图片：底模能看（`supports_images`，或底模是 Gemini）就直接给底模看像素。语音/视频：只有底模是 Gemini 时直挂，否则走 `settings.media_model`（指向 Gemini，`model_name` 省略则为 `gemini-3.6-flash`）转写/描述。未配置 media_model 时回复会说明怎么配，不会去扫其它 profile。
+
+```yaml
+# ~/.agentica/config.yaml
+settings:
+  media_model:
+    model_provider: openai
+    model_name: gemini-3.6-flash
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key: ...
 ```
 
 #### 启用条件

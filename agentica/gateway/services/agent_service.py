@@ -29,7 +29,6 @@ from agentica.run_context import RunSource
 from agentica.workspace import Workspace
 from agentica.global_config import (
     apply_global_config,
-    get_profile,
     set_active_profile,
     provider_api_key_env,
 )
@@ -566,21 +565,6 @@ class AgentService:
         expanded = get_skill_registry().expand_invocation(message)
         return expanded if expanded is not None else message
 
-    @staticmethod
-    def _base_declared_modalities(agent) -> tuple:
-        """The active profile's explicit ``modalities`` list, when it names
-        the model this agent is actually running (a runtime model switch via
-        /api/model doesn't rewrite config.yaml, so a mismatched profile must
-        not lend its declarations to a different model)."""
-        try:
-            profile = get_profile()
-        except Exception:
-            return ()
-        if profile.get("model_name") != getattr(agent.model, "id", None):
-            return ()
-        declared = profile.get("modalities") or ()
-        return tuple(declared) if isinstance(declared, (list, tuple)) else ()
-
     async def chat(
         self,
         message: str,
@@ -599,10 +583,9 @@ class AgentService:
             session_id: Session identifier
             user_id: User identifier (for workspace memory isolation)
             media: Downloaded inbound media (image/voice/video payloads) from
-                the channel. Routed by the media-understanding service: items
-                the base model understands attach to the run directly; the
-                rest are described/transcribed by a capable config.yaml model
-                and appended to the text.
+                the channel. Images attach to the run when the base model can
+                see them; audio/video attach when the base is Gemini. Anything
+                else is described/transcribed by ``settings.media_model``.
 
         Returns:
             ChatResult with content, tool_calls, metrics
@@ -627,9 +610,8 @@ class AgentService:
             if media:
                 media_plan = await media_understanding.prepare(
                     media,
-                    base_model_id=getattr(agent.model, "id", "") or "",
-                    base_supports_images=bool(getattr(agent.model, "supports_images", False)),
-                    base_declared=self._base_declared_modalities(agent),
+                    base_model_id=agent.model.id or "",
+                    base_supports_images=bool(agent.model.supports_images),
                 )
                 if media_plan.text_parts:
                     message = message + "\n\n" + "\n\n".join(media_plan.text_parts)

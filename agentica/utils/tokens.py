@@ -385,7 +385,7 @@ def count_text_tokens(text: str, model_id: str = "gpt-4o") -> int:
     return len(encoding.encode(text, disallowed_special=()))
 
 
-def count_image_tokens(image: Union[Image, str, bytes]) -> int:
+def count_image_tokens(image: Union[Image, str, bytes, Dict[str, Any]]) -> int:
     """
     Count tokens for an image based on OpenAI's vision model formula.
 
@@ -398,6 +398,14 @@ def count_image_tokens(image: Union[Image, str, bytes]) -> int:
     # String URLs / base64 strings don't carry dimension info — use low-detail default
     if isinstance(image, (str, bytes)):
         return 85
+
+    # Gateway / OpenAI process_image already pass {"url": "...", "detail"?: ...}
+    # dicts. Counting used to assume agentica.media.Image and crash on .detail.
+    if isinstance(image, dict):
+        url = image.get("url")
+        if not isinstance(url, str) or not url:
+            return 85
+        return count_image_tokens(Image(url=url, detail=image.get("detail") or "auto"))
 
     width, height = _get_image_dimensions(image)
     detail = image.detail or "auto"

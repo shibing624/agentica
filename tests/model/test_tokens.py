@@ -1,3 +1,4 @@
+import base64
 import struct
 from types import SimpleNamespace
 
@@ -35,6 +36,28 @@ def test_count_image_tokens_remote_url_does_not_fetch_network(monkeypatch):
 
     assert calls == []
     assert tokens > 0
+
+
+def test_count_image_tokens_accepts_url_dict():
+    """Gateway attaches {"url": data_url} dicts; OpenAI process_image already accepts them."""
+    tokens = count_image_tokens({"url": "https://example.com/image.png"})
+    assert tokens > 0
+
+
+def test_count_image_tokens_accepts_data_url_dict():
+    url = "data:image/png;base64," + base64.b64encode(_png_header(64, 64)).decode()
+    tokens = count_image_tokens({"url": url})
+    assert tokens > 0
+
+
+def test_count_message_tokens_accepts_gateway_image_dicts():
+    url = "data:image/png;base64," + base64.b64encode(_png_header(64, 64)).decode()
+    message = Message(
+        role="user",
+        content="请看这条图片。",
+        images=[{"url": url}],
+    )
+    assert count_message_tokens(message) > 0
 
 
 def test_count_message_tokens_remote_image_url_content_does_not_fetch_network(monkeypatch):

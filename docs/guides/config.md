@@ -74,9 +74,15 @@ profiles:
       base_url: https://open.bigmodel.cn/api/paas/v4
       api_key: sk-...
 
-# CLI 行为开关（与 model 无关）
+# CLI / gateway 行为开关（与 model profile 无关）
 settings:
   num_history_turns: 20
+  # gateway 入站图片/语音/视频：底模看不了时用这个 Gemini 描述/转写
+  # media_model:
+  #   model_provider: openai
+  #   model_name: gemini-3.6-flash
+  #   base_url: https://generativelanguage.googleapis.com/v1beta/openai
+  #   api_key: sk-...
 
 # 自由 env 块（shell/.env 值仍优先于此）
 env:

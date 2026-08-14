@@ -21,7 +21,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from agentica.utils.log import logger
+from agentica.config import AGENTICA_LOG_LEVEL
+from agentica.utils.log import enable_process_file_logging, logger
 from . import deps
 from agentica.version import __version__
 from .config import settings
@@ -43,14 +44,25 @@ def get_request_id() -> str:
 
 # ============== Lifespan ==============
 
+def _display_home_path(path: str) -> str:
+    """Render ``/Users/me/foo`` as ``~/foo`` for startup banners."""
+    home = str(Path.home())
+    if path.startswith(home):
+        return "~" + path[len(home):]
+    return path
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize all services on startup; clean up on shutdown."""
+    log_file = enable_process_file_logging()
     logger.info("=" * 50)
     logger.info(f"  Agentica Gateway v{__version__}")
     logger.info(f"  Workspace: {settings.workspace_path}")
     logger.info(f"  Work dir:  {settings.base_dir}")
     logger.info(f"  Model:     {settings.model_provider}/{settings.model_name}")
+    if log_file:
+        logger.info(f"  Log File ({AGENTICA_LOG_LEVEL}): {_display_home_path(log_file)}")
     logger.info("=" * 50)
 
     # Agent service

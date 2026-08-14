@@ -4,65 +4,22 @@
 @description: CLI main entry point
 """
 
-import os
 import sys
 import time
-from datetime import datetime
 
 from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.display import display_agent_execution_error, format_session_summary, resumable_session_id
 from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.cost_tracker import refresh_model_catalog_in_background
 from agentica.run_response import AgentCancelledError
-from agentica.utils.log import suppress_console_logging
+from agentica.utils.log import suppress_console_logging, enable_process_file_logging
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
 
 
 def _enable_cli_file_logging() -> str:
-    """Attach a file handler to the agentica logger for this CLI session.
-
-    The SDK keeps file logging off by default. The CLI opts in so users have a
-    persistent log to grep when debugging an interactive session. Behaviour:
-
-    - ``AGENTICA_LOG_FILE`` unset  -> default ``$AGENTICA_HOME/logs/YYYYMMDD.log``
-    - ``AGENTICA_LOG_FILE=""``     -> respect the user's opt-out, return ""
-    - ``AGENTICA_LOG_FILE=<path>`` -> already honoured by ``agentica.config``;
-      reuse whatever path the logger was built with.
-
-    Returns the resolved log file path (or "" when disabled) so the caller can
-    surface it in the banner.
-    """
-    from agentica import config as agentica_config
-    from agentica.utils.log import cleanup_old_logs, get_agentica_logger
-
-    # User explicitly opted out via empty string.
-    if os.getenv("AGENTICA_LOG_FILE") == "":
-        return ""
-
-    log_file = agentica_config.AGENTICA_LOG_FILE
-    if not log_file:
-        # SDK default leaves it empty; the CLI opts in with a daily path.
-        # The ``-<pid>`` suffix isolates concurrent CLI processes (e.g. the
-        # user running two `agentica` shells at once) so their file handlers
-        # don't fight over the same fd on macOS/Linux and their records don't
-        # get interleaved at the byte level. Per-run separation *inside* a
-        # single process is handled by the ``run=<id>`` log prefix (see
-        # agentica.utils.log.bind_run_context) — the pid suffix only guards
-        # cross-process collisions.
-        formatted_date = datetime.now().strftime("%Y%m%d")
-        log_dir = f"{agentica_config.AGENTICA_HOME}/logs"
-        log_file = f"{log_dir}/{formatted_date}-{os.getpid()}.log"
-        os.makedirs(log_dir, exist_ok=True)
-        agentica_config.AGENTICA_LOG_FILE = log_file
-        # Best-effort retention: drop CLI log files older than 14 days. Runs
-        # once per CLI startup, silently no-ops on any error.
-        cleanup_old_logs(log_dir, keep_days=14)
-
-    # get_agentica_logger is idempotent: it reuses the existing console handler
-    # and only adds a file handler if one for this exact path isn't attached.
-    get_agentica_logger(log_level=agentica_config.AGENTICA_LOG_LEVEL, log_file=log_file)
-    return log_file
+    """Attach a file handler for this CLI session. See ``enable_process_file_logging``."""
+    return enable_process_file_logging()
 
 
 def main():

@@ -346,7 +346,7 @@ def cleanup_old_logs(log_dir: str, keep_days: int = 14) -> int:
     files are left alone so this is safe to call even if the log directory
     contains other content.
 
-    Called lazily from the CLI startup path (not at module import) so pure
+    Called lazily from CLI / gateway startup (not at module import) so pure
     SDK usage never touches the filesystem. Errors are swallowed with a
     debug log — a stale file failing to delete must never break user code.
 
@@ -379,6 +379,43 @@ def cleanup_old_logs(log_dir: str, keep_days: int = 14) -> int:
         except OSError as exc:  # pragma: no cover — best-effort cleanup
             logger.debug("cleanup_old_logs: failed to remove %s: %s", path, exc)
     return removed
+
+
+def enable_process_file_logging() -> str:
+    """Attach a dated pid log file for a long-running process (CLI / gateway).
+
+    The SDK keeps file logging off by default so ``import agentica`` does not
+    create files. CLI and gateway opt in so a user can grep a persistent log
+    when debugging. Behaviour:
+
+    - ``AGENTICA_LOG_FILE`` unset  -> ``$AGENTICA_HOME/logs/YYYYMMDD-<pid>.log``
+    - ``AGENTICA_LOG_FILE=""``     -> respect the opt-out, return ""
+    - ``AGENTICA_LOG_FILE=<path>`` -> already honoured by ``agentica.config``;
+      reuse whatever path the logger was built with.
+
+    The ``-<pid>`` suffix isolates concurrent processes so their file handlers
+    don't share an fd. Per-run separation inside one process is the
+    ``run=<id>`` prefix from ``bind_run_context``.
+
+    Returns the resolved log file path (or "" when disabled).
+    """
+    # Delayed: this module is imported from agentica/__init__.py.
+    import agentica.config
+
+    if os.getenv("AGENTICA_LOG_FILE") == "":
+        return ""
+
+    log_file = agentica.config.AGENTICA_LOG_FILE
+    if not log_file:
+        formatted_date = datetime.now().strftime("%Y%m%d")
+        log_dir = f"{agentica.config.AGENTICA_HOME}/logs"
+        log_file = f"{log_dir}/{formatted_date}-{os.getpid()}.log"
+        os.makedirs(log_dir, exist_ok=True)
+        agentica.config.AGENTICA_LOG_FILE = log_file
+        cleanup_old_logs(log_dir, keep_days=14)
+
+    get_agentica_logger(log_level=agentica.config.AGENTICA_LOG_LEVEL, log_file=log_file)
+    return log_file
 
 
 def print_llm_stream(msg):
