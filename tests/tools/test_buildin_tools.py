@@ -61,6 +61,8 @@ class BlockingSubprocess:
 
     def __init__(self):
         self.started = asyncio.Event()
+        self.returncode = None
+        self._transport = None
 
     async def communicate(self):
         self.started.set()
@@ -1543,6 +1545,34 @@ class TestBuiltinExecuteTool:
         tool = BuiltinExecuteTool(timeout=1)
         with pytest.raises(TimeoutError, match="timed out"):
             asyncio.run(tool.execute("sleep 30"))
+
+    def test_execute_cancellation_reaps_from_finally(self, tmp_dir):
+        """Ctrl+C must reap in finally (shielded), not in except CancelledError.
+
+        except CancelledError + await cleanup is aborted by the same cancel.
+        """
+        async def cancel_running_command():
+            process = BlockingSubprocess()
+            cleanup = AsyncMock()
+            with patch(
+                "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
+                new=AsyncMock(return_value=process),
+            ), patch(
+                "agentica.tools.builtin.execute_tool.terminate_subprocess",
+                cleanup,
+            ):
+                tool = BuiltinExecuteTool(work_dir=tmp_dir)
+                task = asyncio.create_task(tool.execute("sleep 60"))
+                await process.started.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+            cleanup.assert_awaited_once()
+            assert cleanup.await_args.args == (process,)
+            assert cleanup.await_args.kwargs["process_group"] is True
+
+        asyncio.run(cancel_running_command())
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group cleanup")
     def test_execute_cancellation_reaps_subprocess_group(self, tmp_dir):

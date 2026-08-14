@@ -19,7 +19,7 @@ import aiofiles
 from agentica.tools.base import Tool
 from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
 from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
-from agentica.utils.async_utils import terminate_subprocess
+from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
 
@@ -1355,20 +1355,18 @@ class BuiltinFileTool(Tool):
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=effective_timeout)
         except asyncio.TimeoutError:
-            if proc is not None:
-                await terminate_subprocess(proc)
             raise TimeoutError(
                 f"grep timed out after {effective_timeout} seconds"
             ) from None
-        except asyncio.CancelledError:
-            if proc is not None:
-                await terminate_subprocess(proc)
-            raise
         except FileNotFoundError:
             return await self._run_grep_fallback(
                 pattern, path, include, output_mode, limit, fixed_strings,
                 case_insensitive, effective_timeout,
             )
+        finally:
+            if proc is not None and proc.returncode is None:
+                await asyncio.shield(terminate_subprocess(proc))
+            close_subprocess_transport(proc)
 
         # rg exit codes: 0=matches found, 1=no matches, 2=error
         if proc.returncode == 2:

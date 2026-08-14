@@ -12,9 +12,28 @@ import os
 import signal
 import threading
 from collections.abc import Coroutine
-from typing import TypeVar
+from typing import Optional, TypeVar
 
 T = TypeVar("T")
+
+
+def close_subprocess_transport(process: Optional[asyncio.subprocess.Process]) -> None:
+    """Mark an asyncio subprocess transport closed while its loop is still alive.
+
+    ``Process.communicate()`` drains the pipes and waits for the exit code; it
+    does not set ``BaseSubprocessTransport._closed``. The destructor then calls
+    ``close()``, which does ``loop.call_soon`` on a loop ``asyncio.run()`` has
+    already shut — CPython prints ``Exception ignored in:
+    BaseSubprocessTransport.__del__`` / ``RuntimeError: Event loop is closed``
+    to stderr. The CLI TUI only patches stdout, so that traceback lands in the
+    transcript. Closing here makes ``__del__`` a no-op.
+    """
+    if process is None:
+        return
+    transport = process._transport
+    if transport is None or transport.is_closing():
+        return
+    transport.close()
 
 
 async def terminate_subprocess(
@@ -26,9 +45,8 @@ async def terminate_subprocess(
     """Terminate and fully reap an asyncio subprocess on its live event loop.
 
     ``Process.wait()`` only observes the exit code. ``communicate()`` also
-    drains and closes stdout/stderr pipe transports, which prevents their
-    destructors from calling back into an event loop after ``asyncio.run()``
-    has closed it.
+    drains stdout/stderr. ``close_subprocess_transport`` then marks the
+    transport closed so ``__del__`` cannot call back into a shut loop.
     """
 
     def stop(*, force: bool) -> None:
@@ -45,17 +63,26 @@ async def terminate_subprocess(
         except ProcessLookupError:
             pass
 
-    if grace_period > 0:
-        stop(force=False)
-        try:
-            await asyncio.wait_for(process.communicate(), timeout=grace_period)
-            return
-        except asyncio.TimeoutError:
+    try:
+        if grace_period > 0:
+            stop(force=False)
+            try:
+                await asyncio.shield(
+                    asyncio.wait_for(process.communicate(), timeout=grace_period)
+                )
+                return
+            except asyncio.TimeoutError:
+                stop(force=True)
+        else:
             stop(force=True)
-    else:
-        stop(force=True)
 
-    await process.communicate()
+        # Ctrl+C cancels the agent task. Without shield, that cancel also
+        # aborts this communicate() — the process is killed but its PIPE
+        # transports stay open, and their __del__ later dumps
+        # "Event loop is closed" into the next turn's TUI.
+        await asyncio.shield(process.communicate())
+    finally:
+        close_subprocess_transport(process)
 
 
 def run_sync(coro: Coroutine[None, None, T]) -> T:

@@ -76,6 +76,8 @@ def test_verify_test_cancellation_cleans_up_subprocess(tmp_path):
         class BlockingSubprocess:
             def __init__(self):
                 self.started = asyncio.Event()
+                self.returncode = None
+                self._transport = None
 
             async def communicate(self):
                 self.started.set()

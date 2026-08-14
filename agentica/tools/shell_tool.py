@@ -10,7 +10,7 @@ from typing import Optional, Union
 import sys,os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from agentica.tools.base import Tool
-from agentica.utils.async_utils import terminate_subprocess
+from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 
 
@@ -107,14 +107,16 @@ class ShellTool(Tool):
                 timeout=self.timeout
             )
         except asyncio.TimeoutError:
-            await terminate_subprocess(process, process_group=True)
             logger.warning(f"Command timed out after {self.timeout}s: {command}")
             raise TimeoutError(
                 f"Command timed out after {self.timeout} seconds"
             ) from None
-        except asyncio.CancelledError:
-            await terminate_subprocess(process, process_group=True)
-            raise
+        finally:
+            if process.returncode is None:
+                await asyncio.shield(
+                    terminate_subprocess(process, process_group=True)
+                )
+            close_subprocess_transport(process)
 
         # Decode output
         stdout_str = stdout.decode(errors='replace') if stdout else ""

@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Optional
 
 from agentica.goals import GoalState, judge_goal
 from agentica.tools.base import Tool
-from agentica.utils.async_utils import terminate_subprocess
+from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
@@ -181,6 +181,7 @@ class GoalTool(Tool):
                 "mode='test' requires verify_command — a shell command that exits 0 "
                 "only when the goal is met (e.g. 'pytest tests/ -q'). Write the tests first."
             )
+        proc = None
         try:
             proc = await asyncio.create_subprocess_shell(
                 verify_command,
@@ -189,26 +190,27 @@ class GoalTool(Tool):
                 cwd=self._work_dir,
                 start_new_session=os.name != "nt",
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=_DEFAULT_VERIFY_TIMEOUT_SEC
-                )
-            except asyncio.TimeoutError:
-                await terminate_subprocess(proc, process_group=True)
-                return (
-                    f"Verification command timed out after {_DEFAULT_VERIFY_TIMEOUT_SEC:.0f}s: "
-                    f"`{verify_command}`. Goal stays active — make the check terminate faster "
-                    f"or narrow it, then verify again."
-                )
-            except asyncio.CancelledError:
-                await terminate_subprocess(proc, process_group=True)
-                raise
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=_DEFAULT_VERIFY_TIMEOUT_SEC
+            )
+        except asyncio.TimeoutError:
+            return (
+                f"Verification command timed out after {_DEFAULT_VERIFY_TIMEOUT_SEC:.0f}s: "
+                f"`{verify_command}`. Goal stays active — make the check terminate faster "
+                f"or narrow it, then verify again."
+            )
         except Exception as exc:
             logger.warning("verify_completion(test) failed to run command: %s", exc)
             return (
                 f"Could not run verify_command `{verify_command}`: {exc}. "
                 f"Goal stays active. Fix the command and verify again."
             )
+        finally:
+            if proc is not None and proc.returncode is None:
+                await asyncio.shield(
+                    terminate_subprocess(proc, process_group=True)
+                )
+            close_subprocess_transport(proc)
 
         exit_code = proc.returncode
         stdout = _tail(stdout_b.decode("utf-8", errors="replace"))

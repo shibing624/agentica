@@ -15,7 +15,7 @@ from agentica.tools.base import Tool
 from agentica.tools.background_processes import BackgroundProcessRegistry, read_log_tail
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
 from agentica.security.redact import redact_tool_outputs_enabled
-from agentica.utils.async_utils import terminate_subprocess
+from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 
 def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
@@ -444,7 +444,7 @@ class BuiltinExecuteTool(Tool):
             )
 
         proc = None
-
+        timed_out = False
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -457,20 +457,25 @@ class BuiltinExecuteTool(Tool):
                 proc.communicate(), timeout=effective_timeout,
             )
         except asyncio.TimeoutError:
-            if proc is not None:
-                await terminate_subprocess(
-                    proc,
-                    process_group=True,
-                    grace_period=5,
-                )
+            timed_out = True
             logger.warning(f"Command timed out after {effective_timeout}s: {command}")
             raise TimeoutError(
                 f"Command timed out after {effective_timeout} seconds"
             ) from None
-        except asyncio.CancelledError:
-            if proc is not None:
-                await terminate_subprocess(proc, process_group=True)
-            raise
+        finally:
+            # Ctrl+C cancels this task. An unshielded await in except
+            # CancelledError is aborted by that same cancel, so the process
+            # and its PIPE transports outlive this asyncio.run() and dump
+            # "Event loop is closed" into the next turn. Reap here, shielded.
+            if proc is not None and proc.returncode is None:
+                await asyncio.shield(
+                    terminate_subprocess(
+                        proc,
+                        process_group=True,
+                        grace_period=5 if timed_out else 0,
+                    )
+                )
+            close_subprocess_transport(proc)
 
         # Combine stdout and stderr
         output_parts = []
