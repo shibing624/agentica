@@ -110,6 +110,35 @@ class TestPresence:
         assert session.name == f"wechat-agentica-{session.peer_id[:2]}"
         assert "o9cq" not in session.name
 
+    def test_the_name_survives_eviction_so_a_reply_still_lands(self):
+        """A worker answers the name it was given, possibly an hour later.
+
+        ``session_for`` runs again after every LRU eviction, delete or gateway
+        restart. Minting a fresh uuid moved the short name with it (it embeds
+        the first two characters), so the address a CLI was told to report to
+        quietly became nobody — and the user carried the result back by hand.
+        """
+        service, _ = _gateway_peers(live={"s1"})
+        service.note_route("s1", ChannelType.WECOM, "chat-1")
+        first = service.session_for("s1", cwd="/tmp/agentica")
+
+        service._is_live = lambda sid: False
+        asyncio.run(service._tick())
+        service._is_live = lambda sid: True
+        again = service.session_for("s1", cwd="/tmp/agentica")
+
+        assert again.peer_id == first.peer_id
+        assert again.name == first.name
+
+        cli = _cli("payments-a1")
+        cli.send(first.name, "committed 4f2a1c9")
+        assert [m.text for m in again.drain()] == ["committed 4f2a1c9"]
+
+    def test_two_chat_sessions_are_still_two_peers(self):
+        service, _ = _gateway_peers(live={"s1", "s2"})
+
+        assert service.session_for("s1").peer_id != service.session_for("s2").peer_id
+
     def test_a_web_session_uses_the_web_channel_and_the_cwd_folder(self):
         service, _ = _gateway_peers(live={"web-1"})
 

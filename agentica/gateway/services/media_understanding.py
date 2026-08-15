@@ -15,7 +15,7 @@ Two rules, no profile scan:
 
 ``settings.media_model`` is a model block (``model_provider`` / ``model_name``
 / ``base_url`` / ``api_key``). ``model_name`` defaults to
-``gemini-3.6-flash`` when omitted; provider or ``base_url`` must be set so
+``gemini`` when omitted; provider or ``base_url`` must be set so
 this does not guess an endpoint. Missing config yields a user-facing note,
 not a hunt through every profile.
 

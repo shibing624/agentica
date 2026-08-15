@@ -36,15 +36,21 @@ in the mailbox for the next turn rather than dropped.
 LRU, so eviction, session deletion and shutdown all end sessions without
 telling anyone, and a stale ``live/`` record is worse than no record: it is an
 addressable name whose mailbox nobody reads. The loop asks ``is_live`` and
-unpublishes whatever the agent cache has forgotten. Re-publishing later under a
-fresh peer id costs nothing, because peers are addressed by name.
+unpublishes whatever the agent cache has forgotten.
+
+**And the name it comes back under must be the one it left with**, which is why
+the peer id is derived from the chat session id rather than minted fresh
+(``_stable_peer_id``). See that function: "re-publish under a new id, peers are
+addressed by name" was the original reasoning and it was wrong, because the
+name embeds the id.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Callable, Dict, List, Optional, Tuple
 
-from agentica.peers import PeerMessage, PeerSession, default_peer_name, new_peer_id
+from agentica.peers import PeerMessage, PeerSession, default_peer_name
 from agentica.utils.log import logger
 
 from ..channels.base import Channel, ChannelType
@@ -72,6 +78,22 @@ def _gateway_peer_name(channel: str, cwd: Optional[str], peer_id: str) -> str:
     target.
     """
     return f"{channel}-{default_peer_name(cwd, peer_id)}"
+
+
+def _stable_peer_id(session_id: str) -> str:
+    """A peer id that survives agent-cache eviction, deletion and restart.
+
+    A CLI mints its peer id once per process, so the address a worker was told
+    to answer (``agentica-41``) stays valid for as long as that terminal is
+    open. The gateway had no such anchor: ``session_for`` runs again after
+    every LRU eviction or restart, and a fresh uuid moved the *name* too
+    (``default_peer_name`` embeds the first two characters), so a worker
+    reporting back an hour later addressed a session that no longer exists —
+    with the user then relaying the result by hand. The chat session id is what
+    identifies this conversation, so the identity is derived from it and the
+    name becomes a property of the conversation rather than of the cache.
+    """
+    return hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:8]
 
 
 def _task_line(text: str) -> str:
@@ -134,6 +156,10 @@ class GatewayAgentPeers:
         Called while building the session's agent (in a worker thread), so it
         does its own small presence write instead of waiting for the loop —
         a session that is about to send must be addressable for the reply.
+
+        Rebuilt after an eviction it publishes the same id and name as before
+        (``_stable_peer_id``), so an answer addressed to the name handed out
+        earlier still lands here.
         """
         existing = self._sessions.get(session_id)
         if existing is not None:
@@ -142,7 +168,7 @@ class GatewayAgentPeers:
         route = self._routes.get(session_id)
         channel = route[0].value if route else "web"
         cwd_str = str(cwd or settings.base_dir)
-        peer_id = new_peer_id()
+        peer_id = _stable_peer_id(session_id)
         session = PeerSession(
             peer_id=peer_id,
             name=_gateway_peer_name(channel, cwd_str, peer_id),
@@ -185,13 +211,24 @@ class GatewayAgentPeers:
         the very agent that is answering it."""
         return {session.peer_id for session in self._sessions.values()}
 
-    def forget(self, session_id: str) -> None:
-        """Drop a session's peer identity (deleted session, evicted agent)."""
+    def _unpublish(self, session_id: str) -> None:
+        """Take a session off the peer directory, keeping its reply route.
+
+        An eviction is not the end of the conversation — the next message
+        rebuilds the agent — and the route is what names the peer
+        (``wecom-agentica-64``). Dropping it here republished the same session
+        as ``web-agentica-64``, so the stable peer id above bought nothing: the
+        address a worker holds moved anyway.
+        """
         session = self._sessions.pop(session_id, None)
-        self._routes.pop(session_id, None)
         if session is not None:
             session.unpublish()
             logger.debug(f"Gateway agent peer {session.name} unpublished")
+
+    def forget(self, session_id: str) -> None:
+        """Drop a session's peer identity and its reply route (deleted session)."""
+        self._unpublish(session_id)
+        self._routes.pop(session_id, None)
 
     # -- outbound ----------------------------------------------------------
 
@@ -212,7 +249,7 @@ class GatewayAgentPeers:
             busy = self._is_busy(session_id) if self._is_busy else False
             live = self._is_live(session_id) if self._is_live else True
             if not live and not busy:
-                self.forget(session_id)
+                self._unpublish(session_id)
                 continue
             route = self._routes.get(session_id)
             messages = await asyncio.to_thread(self._refresh_and_drain, session, busy, route)

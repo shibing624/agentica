@@ -888,20 +888,34 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     Reply address is the sender's addressable name (what ``send_message`` /
     ``/send-message`` take), not the opaque peer_id — same idea as Claude Code
     telling the model to copy the peer's name into ``to``.
+
+    **Reporting the outcome is not optional, and the header is where that is
+    decided.** ``PEER_MESSAGING_POLICY`` says work that is finished or stuck
+    goes back to whoever handed it over, but the header used to end in "if
+    needed" / "only if it is waiting on an answer" — a per-message instruction
+    beats a standing one, and a dispatcher is never visibly "waiting", so the
+    worker did the job and told nobody. That is what leaves the user relaying
+    results by hand between a phone and a terminal. Purely informational
+    messages still need no reply; the distinction is the handover, not the
+    sender.
     """
     blocks = []
     for message in messages:
         if message.from_user:
             header = (
                 f"[Your user sent this from their other session '{message.from_name}' "
-                f"— treat as their instruction typed here; "
-                f"reply with send_message to {message.from_name} if needed]"
+                f"— treat as their instruction typed here. They are at "
+                f"'{message.from_name}', not this terminal: report back with "
+                f"send_message to {message.from_name} when the work is done or "
+                f"you stop]"
             )
         else:
             header = (
                 f"[Message from another agent session '{message.from_name}' "
-                f"— reply with send_message to {message.from_name} only if it "
-                f"is waiting on an answer]"
+                f"— it cannot see this terminal. If it handed you work, report "
+                f"the outcome back with send_message to {message.from_name} when "
+                f"it is done or you stop; if it only informed you, no reply is "
+                f"needed]"
             )
         blocks.append(f"{header}\n{message.text}")
     return "\n\n".join(blocks)

@@ -586,6 +586,17 @@ class TestPeerMessagingTool:
         assert "end your turn" in prompt
         assert "never sleep or poll waiting for it" in prompt
 
+    def test_the_policy_sends_evidence_as_a_path_not_as_pasted_text(self):
+        """The channel is an envelope, not a truck.
+
+        A message is injected straight into the receiver's window, so a pasted
+        diff or log spends the context that session needs in order to act,
+        while the file it came from is already readable on the shared machine.
+        """
+        prompt = " ".join(PeerMessagingTool(_session("alpha")).get_system_prompt().split())
+
+        assert "goes in a file and the message carries its absolute path" in prompt
+
     def test_the_policy_does_not_hard_code_one_collaboration_shape(self):
         """Splitting work up is one shape among several.
 
@@ -612,9 +623,50 @@ class TestFormatting:
         rendered = peers.format_for_model([message])
 
         assert "alpha" in rendered
-        assert "reply with send_message to alpha" in rendered
+        assert "send_message to alpha" in rendered
         assert "abcd1234" not in rendered
         assert "another agent session" in rendered
+
+    def test_handed_over_work_must_be_reported_back_to_the_sender(self):
+        """The header, not just the policy, has to ask for the outcome.
+
+        It used to end in "only if it is waiting on an answer": a dispatcher is
+        never visibly waiting, so a worker finished the job and told nobody,
+        and the user carried the result between terminals by hand. A
+        per-message instruction beats a standing one, so this belongs here.
+        """
+        message = PeerMessage(
+            text="rerun arm 3",
+            from_name="alpha",
+            from_peer_id="abcd1234",
+            to_peer_id="beef",
+        )
+
+        rendered = peers.format_for_model([message])
+
+        assert "only if it is waiting on an answer" not in rendered
+        assert "report the outcome back with send_message to alpha" in rendered
+        assert "when it is done or you stop" in rendered
+        # Purely informational messages still do not need an acknowledgement.
+        assert "if it only informed you, no reply is needed" in rendered
+
+    def test_a_relayed_user_is_told_where_the_human_actually_is(self):
+        """The human typed from another terminal, so answering in this one
+        reaches nobody — the same failure as the agent branch, one step
+        further along."""
+        message = PeerMessage(
+            text="commit what you have",
+            from_name="wechat-agentica-41",
+            from_peer_id="abcd1234",
+            to_peer_id="beef",
+            from_kind="user",
+        )
+
+        rendered = peers.format_for_model([message])
+
+        assert "not this terminal" in rendered
+        assert "report back with send_message to wechat-agentica-41" in rendered
+        assert "if needed]" not in rendered
 
     def test_drain_notifies_the_cli_hook(self):
         seen = []

@@ -20,6 +20,11 @@ another session would otherwise work from stale assumptions — a change you mad
 that affects it, a decision you settled that it was blocked on, or work it handed
 you that is now done or blocked.
 
+A message carries the point, not the evidence. A diff, a log, a review or a long
+write-up goes in a file and the message carries its absolute path: the machine is
+shared, so a path costs the receiver one read while pasted output costs it a
+large part of the window it needs to act.
+
 When work arrives from a peer, the person who wanted it is at THAT session, not
 this terminal. `ask_user_question` renders here, where nobody is watching — it
 cannot reach them. So:
@@ -130,8 +135,13 @@ class PeerMessagingTool(Tool):
             target: The session name, peer id, or session_id (prefix ok) from
                 `list_agents`.
             message: What the other session needs to know, in a sentence or two.
-                Plain text only, self-contained: the receiver sees this text and
-                nothing else from your conversation.
+                Plain text, and self-contained as an *instruction*: the receiver
+                sees this text and nothing else from your conversation, so state
+                the goal, what is out of scope, and what to do when blocked.
+                Evidence does not belong here — put a diff, a log or a long
+                write-up in a file and give its absolute path instead of pasting
+                it, since the machine is shared and the receiver can open it if
+                and when it needs the detail.
 
         Returns:
             Confirmation that the message was queued, or the reason it was refused.
