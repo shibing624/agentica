@@ -1347,6 +1347,7 @@ class BuiltinFileTool(Tool):
         # rg is normally millisecond-fast; a hard effective_timeout catches hangs
         # (pathological regex, huge binary files, or a stuck network mount).
         proc = None
+        drained = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -1354,6 +1355,7 @@ class BuiltinFileTool(Tool):
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=effective_timeout)
+            drained = True
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {effective_timeout} seconds"
@@ -1364,8 +1366,8 @@ class BuiltinFileTool(Tool):
                 case_insensitive, effective_timeout,
             )
         finally:
-            if proc is not None and proc.returncode is None:
-                await asyncio.shield(terminate_subprocess(proc))
+            if proc is not None and not drained:
+                await terminate_subprocess(proc)
             close_subprocess_transport(proc)
 
         # rg exit codes: 0=matches found, 1=no matches, 2=error

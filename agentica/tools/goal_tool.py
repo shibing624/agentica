@@ -182,6 +182,7 @@ class GoalTool(Tool):
                 "only when the goal is met (e.g. 'pytest tests/ -q'). Write the tests first."
             )
         proc = None
+        drained = False
         try:
             proc = await asyncio.create_subprocess_shell(
                 verify_command,
@@ -193,6 +194,7 @@ class GoalTool(Tool):
             stdout_b, stderr_b = await asyncio.wait_for(
                 proc.communicate(), timeout=_DEFAULT_VERIFY_TIMEOUT_SEC
             )
+            drained = True
         except asyncio.TimeoutError:
             return (
                 f"Verification command timed out after {_DEFAULT_VERIFY_TIMEOUT_SEC:.0f}s: "
@@ -206,10 +208,8 @@ class GoalTool(Tool):
                 f"Goal stays active. Fix the command and verify again."
             )
         finally:
-            if proc is not None and proc.returncode is None:
-                await asyncio.shield(
-                    terminate_subprocess(proc, process_group=True)
-                )
+            if proc is not None and not drained:
+                await terminate_subprocess(proc, process_group=True)
             close_subprocess_transport(proc)
 
         exit_code = proc.returncode

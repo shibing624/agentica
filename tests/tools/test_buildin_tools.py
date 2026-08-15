@@ -1547,9 +1547,10 @@ class TestBuiltinExecuteTool:
             asyncio.run(tool.execute("sleep 30"))
 
     def test_execute_cancellation_reaps_from_finally(self, tmp_dir):
-        """Ctrl+C must reap in finally (shielded), not in except CancelledError.
+        """Ctrl+C must reap from `finally`, which also covers the timeout path.
 
-        except CancelledError + await cleanup is aborted by the same cancel.
+        `except CancelledError` reached only one of the two ways a command is
+        abandoned, and left the other holding a subprocess and its pipes.
         """
         async def cancel_running_command():
             process = BlockingSubprocess()

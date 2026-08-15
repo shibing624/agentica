@@ -445,6 +445,7 @@ class BuiltinExecuteTool(Tool):
 
         proc = None
         timed_out = False
+        drained = False
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -456,6 +457,7 @@ class BuiltinExecuteTool(Tool):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=effective_timeout,
             )
+            drained = True
         except asyncio.TimeoutError:
             timed_out = True
             logger.warning(f"Command timed out after {effective_timeout}s: {command}")
@@ -463,17 +465,17 @@ class BuiltinExecuteTool(Tool):
                 f"Command timed out after {effective_timeout} seconds"
             ) from None
         finally:
-            # Ctrl+C cancels this task. An unshielded await in except
-            # CancelledError is aborted by that same cancel, so the process
-            # and its PIPE transports outlive this asyncio.run() and dump
-            # "Event loop is closed" into the next turn. Reap here, shielded.
-            if proc is not None and proc.returncode is None:
-                await asyncio.shield(
-                    terminate_subprocess(
-                        proc,
-                        process_group=True,
-                        grace_period=5 if timed_out else 0,
-                    )
+            # A timeout or a cancelled turn leaves the group running with our
+            # pipes open. `not drained` rather than `returncode is None`: the
+            # shell in `cmd & ...` exits immediately while the grandchild it
+            # backgrounded keeps the write end, which is the state where the
+            # unclosed transport later dumps "Event loop is closed" into the
+            # next turn's TUI.
+            if proc is not None and not drained:
+                await terminate_subprocess(
+                    proc,
+                    process_group=True,
+                    grace_period=5 if timed_out else 0,
                 )
             close_subprocess_transport(proc)
 

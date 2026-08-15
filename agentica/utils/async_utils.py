@@ -17,16 +17,24 @@ from typing import Optional, TypeVar
 T = TypeVar("T")
 
 
-def close_subprocess_transport(process: Optional[asyncio.subprocess.Process]) -> None:
-    """Mark an asyncio subprocess transport closed while its loop is still alive.
+# How long a teardown drain may wait for EOF on the pipes. Bounded because EOF
+# is not guaranteed to arrive at all: see terminate_subprocess.
+DRAIN_TIMEOUT_SECONDS = 2.0
 
-    ``Process.communicate()`` drains the pipes and waits for the exit code; it
-    does not set ``BaseSubprocessTransport._closed``. The destructor then calls
-    ``close()``, which does ``loop.call_soon`` on a loop ``asyncio.run()`` has
-    already shut — CPython prints ``Exception ignored in:
-    BaseSubprocessTransport.__del__`` / ``RuntimeError: Event loop is closed``
-    to stderr. The CLI TUI only patches stdout, so that traceback lands in the
-    transcript. Closing here makes ``__del__`` a no-op.
+
+def close_subprocess_transport(process: Optional[asyncio.subprocess.Process]) -> None:
+    """Close an asyncio subprocess transport while its event loop is still alive.
+
+    A pipe transport that reached EOF has already closed itself, so its
+    destructor is a no-op. One that did not — a killed process, a cancelled
+    turn, a write end still held by something we left behind — still has a
+    reader registered on the loop, and ``BaseSubprocessTransport.__del__``
+    closes it from whatever GC pass happens to collect it. The CLI runs each
+    turn in its own ``asyncio.run()``, so that pass falls after the loop was
+    shut: ``call_soon`` raises ``RuntimeError: Event loop is closed`` and
+    CPython prints ``Exception ignored in: ...__del__`` to ``sys.stderr``,
+    which ``prompt_toolkit.patch_stdout`` has redirected into the TUI
+    transcript. Closing on the live loop is what makes ``__del__`` a no-op.
     """
     if process is None:
         return
@@ -42,47 +50,59 @@ async def terminate_subprocess(
     process_group: bool = False,
     grace_period: float = 0.0,
 ) -> None:
-    """Terminate and fully reap an asyncio subprocess on its live event loop.
+    """Signal, drain and close a subprocess that did not finish on its own.
 
-    ``Process.wait()`` only observes the exit code. ``communicate()`` also
-    drains stdout/stderr. ``close_subprocess_transport`` then marks the
-    transport closed so ``__del__`` cannot call back into a shut loop.
+    Two properties this must hold, both learned from a command that hung for
+    the rest of the session:
+
+    * **The signal cannot be gated on our own child's exit code.** ``cmd &``
+      inside the shell leaves a grandchild holding the write end of our PIPEs,
+      and the shell exits at once — so the process we spawned is already reaped
+      while the group it led is still running. Skipping ``killpg`` in that state
+      left the grandchild alive *and* the drain below waiting for an EOF that
+      could never come.
+    * **Every drain is bounded.** Even after ``killpg`` the write end may be
+      held by a process outside the group, so waiting for EOF is best effort.
+      The transport is closed either way.
     """
 
     def stop(*, force: bool) -> None:
-        if process.returncode is not None:
-            return
+        sig = signal.SIGKILL if force else signal.SIGTERM
         try:
             if process_group and os.name != "nt":
-                sig = signal.SIGKILL if force else signal.SIGTERM
+                # pid == pgid: every caller spawns with start_new_session=True.
+                # Deliberately not guarded by process.returncode — that guard
+                # was the bug. The group outlives its leader here, and once no
+                # member is left this just raises ProcessLookupError.
                 os.killpg(process.pid, sig)
-            elif force:
-                process.kill()
-            else:
-                process.terminate()
-        except ProcessLookupError:
+            elif process.returncode is None:
+                if force:
+                    process.kill()
+                else:
+                    process.terminate()
+        except (ProcessLookupError, PermissionError):
             pass
 
     try:
         if grace_period > 0:
             stop(force=False)
-            try:
-                await asyncio.shield(
-                    asyncio.wait_for(process.communicate(), timeout=grace_period)
-                )
+            if await _drain(process, grace_period):
                 return
-            except asyncio.TimeoutError:
-                stop(force=True)
+            stop(force=True)
         else:
             stop(force=True)
-
-        # Ctrl+C cancels the agent task. Without shield, that cancel also
-        # aborts this communicate() — the process is killed but its PIPE
-        # transports stay open, and their __del__ later dumps
-        # "Event loop is closed" into the next turn's TUI.
-        await asyncio.shield(process.communicate())
+        await _drain(process, DRAIN_TIMEOUT_SECONDS)
     finally:
         close_subprocess_transport(process)
+
+
+async def _drain(process: asyncio.subprocess.Process, timeout: float) -> bool:
+    """Read the pipes to EOF and collect the exit code. False if the wait ran out."""
+    try:
+        await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        return False
 
 
 def run_sync(coro: Coroutine[None, None, T]) -> T:

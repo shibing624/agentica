@@ -101,21 +101,21 @@ class ShellTool(Tool):
             start_new_session=os.name != "nt",
         )
 
+        drained = False
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=self.timeout
             )
+            drained = True
         except asyncio.TimeoutError:
             logger.warning(f"Command timed out after {self.timeout}s: {command}")
             raise TimeoutError(
                 f"Command timed out after {self.timeout} seconds"
             ) from None
         finally:
-            if process.returncode is None:
-                await asyncio.shield(
-                    terminate_subprocess(process, process_group=True)
-                )
+            if not drained:
+                await terminate_subprocess(process, process_group=True)
             close_subprocess_transport(process)
 
         # Decode output
