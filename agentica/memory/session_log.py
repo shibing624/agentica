@@ -94,6 +94,153 @@ def _parse_iso_timestamp(value: Any) -> Optional[float]:
         return None
 
 
+# ----------------------------------------------------------------------
+# Trajectory equivalence (canonical log vs what was really sent)
+# ----------------------------------------------------------------------
+# The session log is written at the end of a turn by walking
+# ``run_response.messages`` (agentica/runner/persist.py). Nothing used to
+# guarantee that the rebuilt log projects back to the message sequence the
+# provider actually saw: a regression there is invisible until a later
+# ``/resume`` gets a provider 400 ("messages with role 'tool' must be a
+# response to a preceding message with 'tool_calls'"), which has happened
+# once already. These helpers make that an assertable invariant.
+
+_TRAJECTORY_ROLES = ("user", "assistant", "tool")
+
+
+def _msg_field(message: Any, name: str) -> Any:
+    """Read ``name`` off a message dict OR a ``Message`` object."""
+    if isinstance(message, dict):
+        return message.get(name)
+    return getattr(message, name, None)
+
+
+def _tool_call_ids(tool_calls: Any) -> tuple:
+    """Ids of an assistant message's tool_calls, in call order."""
+    if not isinstance(tool_calls, (list, tuple)):
+        return ()
+    ids = []
+    for tc in tool_calls:
+        if isinstance(tc, dict):
+            ids.append(str(tc.get("id") or ""))
+        else:
+            ids.append(str(getattr(tc, "id", "") or ""))
+    return tuple(ids)
+
+
+def _has_text(message: Any) -> bool:
+    content = _msg_field(message, "content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    return content is not None and content != []
+
+
+def trajectory_skeleton(messages: List[Any]) -> List[tuple]:
+    """Structure of a message sequence, stripped of everything cosmetic.
+
+    Keeps only what a provider validates and what the historical resume-400
+    bug corrupted: the role order, which assistant carried which tool_call
+    ids, and which tool result answered which id. Content, metrics and
+    timestamps are deliberately ignored — compaction, markers and
+    synthesized messages rewrite content legally.
+
+    Two normalisations encode legal log-vs-live differences:
+    - messages with neither text nor tool_calls are dropped (the log does not
+      write an empty assistant, the live list may hold one)
+    - consecutive plain user (or plain assistant) messages collapse into one
+      (the log writes a single ``user`` entry per turn and a single final
+      ``assistant`` entry, the live list may hold several)
+    """
+    items: List[tuple] = []
+    for message in messages or []:
+        role = _msg_field(message, "role")
+        if role not in _TRAJECTORY_ROLES:
+            continue
+        if role == "tool":
+            items.append(("tool", str(_msg_field(message, "tool_call_id") or "")))
+            continue
+        tool_calls = _msg_field(message, "tool_calls")
+        if role == "assistant" and tool_calls:
+            items.append(("assistant_tool_calls", _tool_call_ids(tool_calls)))
+            continue
+        if not _has_text(message):
+            continue
+        items.append((role, ()))
+
+    collapsed: List[tuple] = []
+    for item in items:
+        if collapsed and item == collapsed[-1] and item[0] in ("user", "assistant"):
+            continue
+        collapsed.append(item)
+    return collapsed
+
+
+def _tool_pairing_error(skeleton: List[tuple]) -> Optional[str]:
+    """Describe the first orphaned/mis-ordered tool result, or None."""
+    pending: List[str] = []
+    for idx, item in enumerate(skeleton):
+        kind = item[0]
+        if kind == "assistant_tool_calls":
+            pending = list(item[1])
+        elif kind == "tool":
+            if not pending:
+                return (
+                    f"tool result at index {idx} (tool_call_id={item[1]!r}) is not "
+                    f"preceded by an assistant carrying tool_calls"
+                )
+            if item[1] not in pending:
+                return (
+                    f"tool result at index {idx} (tool_call_id={item[1]!r}) does not "
+                    f"answer the preceding assistant's tool_calls {tuple(pending)!r}"
+                )
+            pending.remove(item[1])
+        else:
+            pending = []
+    return None
+
+
+def _format_skeleton(skeleton: List[tuple]) -> str:
+    parts = []
+    for kind, payload in skeleton:
+        parts.append(f"{kind}{list(payload) if payload else ''}" if payload else kind)
+    return " -> ".join(parts) if parts else "<empty>"
+
+
+def assert_trajectory_equivalent(derived: List[Any], actual: List[Any]) -> Optional[str]:
+    """Compare a log projection against the trajectory really sent to a provider.
+
+    ``derived`` comes from :meth:`SessionLog.derive_messages`, ``actual`` is
+    the live turn (``Message`` objects or dicts). Returns ``None`` when the two
+    are structurally equivalent, otherwise a human-readable description of the
+    first divergence — suitable for a log warning and for a test assertion.
+
+    Equivalence is structural only: same role order, same tool_call ids in the
+    same order, every tool result answering the assistant that requested it.
+    Content is never compared.
+    """
+    derived_skeleton = trajectory_skeleton(derived)
+    actual_skeleton = trajectory_skeleton(actual)
+
+    pairing = _tool_pairing_error(derived_skeleton)
+    if pairing is not None:
+        return (
+            f"log projection is not replayable: {pairing} "
+            f"(log={_format_skeleton(derived_skeleton)})"
+        )
+
+    if derived_skeleton != actual_skeleton:
+        for idx in range(max(len(derived_skeleton), len(actual_skeleton))):
+            left = derived_skeleton[idx] if idx < len(derived_skeleton) else None
+            right = actual_skeleton[idx] if idx < len(actual_skeleton) else None
+            if left != right:
+                return (
+                    f"trajectory diverges at index {idx}: log={left!r} live={right!r} "
+                    f"(log={_format_skeleton(derived_skeleton)} | "
+                    f"live={_format_skeleton(actual_skeleton)})"
+                )
+    return None
+
+
 class SessionLog:
     """Append-only JSONL session log with UUID chain. Enables session resume.
 
@@ -143,6 +290,31 @@ class SessionLog:
         # If set, each append() also writes to the search index.
         self._search_index = search_index
         self._search_index_healthy: bool = True
+        # Turn-scoped bookkeeping for in-turn (incremental) persistence: what
+        # the CURRENT turn has already put on disk. The end-of-turn write then
+        # backfills only what is missing instead of writing a second copy.
+        # See ``begin_turn`` and agentica/runner/persist.py.
+        self._turn_start_uuid: Optional[str] = None
+        self._turn_user_uuid: Optional[str] = None
+        self._turn_written_tool_call_ids: set = set()
+        self._turn_written_tool_call_rounds: set = set()
+
+    def begin_turn(self) -> None:
+        """Open a turn for incremental writes (resets the per-turn bookkeeping).
+
+        Must be called once per turn, before anything of that turn is appended.
+        Everything written mid-turn is recorded here so the end-of-turn write —
+        which rebuilds the whole turn from ``run_response.messages`` — skips the
+        entries that already reached disk. Without this the two paths would
+        duplicate every tool round and resume would replay each of them twice.
+
+        Also pins where this turn's entries begin (``_turn_start_uuid``), which
+        is what ``derive_messages(since_uuid=...)`` slices on.
+        """
+        self._turn_start_uuid = self._last_uuid
+        self._turn_user_uuid = None
+        self._turn_written_tool_call_ids = set()
+        self._turn_written_tool_call_rounds = set()
 
     @staticmethod
     def _get_version() -> str:
@@ -657,6 +829,218 @@ class SessionLog:
             f"resumed with {len(messages)} messages"
         )
         return messages
+
+    # ------------------------------------------------------------------
+    # Derive (projection used for the trajectory invariant)
+    # ------------------------------------------------------------------
+
+    def _iter_entries(self):
+        """Yield parsed entries in file order, skipping unparseable lines."""
+        if not self.path.exists():
+            return
+        with open(self.path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+    def _derived_count_after(self, since_uuid: str) -> Optional[int]:
+        """How many projected messages come from entries after ``since_uuid``.
+
+        ``None`` when the uuid is not in the log (caller keeps the whole
+        projection). A compact boundary resets the count: ``load()`` replays
+        only what follows the last boundary, so the tail can never start
+        earlier than that. The two synthesized summary messages are never part
+        of the tail — they stand for the *replaced* span, not for anything
+        appended after ``since_uuid``.
+        """
+        count = 0
+        seen = False
+        found = False
+        for entry in self._iter_entries():
+            entry_type = entry.get("type", "")
+            if entry_type == "compact_boundary":
+                count = 0
+                continue
+            if seen and entry_type in ("user", "assistant", "system", "tool"):
+                count += 1
+            if entry.get("uuid") == since_uuid:
+                seen = True
+                found = True
+        return count if found else None
+
+    def derive_messages(
+        self,
+        *,
+        model: Optional[str] = None,
+        since_uuid: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Project the log into the message sequence a resume would replay.
+
+        Thin wrapper over :meth:`load` — same boundary and lineage rules, no
+        second parser — plus an optional tail slice. ``since_uuid`` keeps only
+        the messages derived from entries appended *after* that uuid, which is
+        how a caller isolates the turn it has just written (see
+        ``assert_trajectory_equivalent``). ``load()``'s ``_last_uuid`` side
+        effect is undone, so deriving never perturbs the append chain.
+        """
+        saved_last_uuid = self._last_uuid
+        try:
+            messages = self.load(model=model)
+        finally:
+            self._last_uuid = saved_last_uuid
+        if since_uuid is None:
+            return messages
+        count = self._derived_count_after(since_uuid)
+        if count is None:
+            return messages
+        return messages[-count:] if count > 0 else []
+
+    def seal_incomplete_turn(self) -> Optional[str]:
+        """Close a turn whose process died mid-write, so resume stays replayable.
+
+        In-process endings persist their own interrupted turn (cancel, error —
+        ``agentica/runner/persist.py`` ``_persist_incomplete_turn``). A SIGKILL /
+        OOM kill / power loss cannot: with in-turn writes the log then ends on a
+        user question or a tool result, i.e. a turn with no assistant reply.
+        Replaying that shape puts two consecutive user-role turns on the wire
+        once tool artifacts are stripped, which strict providers reject.
+
+        Appends one assistant entry so every turn in the log ends with an
+        assistant message again. Append-only (history is never rewritten) and
+        idempotent: a log already ending in assistant text is left untouched.
+
+        Returns the uuid of the sealing entry, or ``None`` if nothing needed it.
+        """
+        if not self.path.exists():
+            return None
+        last_replayable: Optional[Dict[str, Any]] = None
+        tail_uuid: Optional[str] = None
+        for entry in self._iter_entries():
+            entry_type = entry.get("type", "")
+            if entry_type == "goal":
+                # Out-of-band: deliberately outside the conversation chain.
+                continue
+            tail_uuid = entry.get("uuid") or tail_uuid
+            if entry_type == "compact_boundary":
+                last_replayable = None
+                continue
+            if entry_type in ("user", "assistant", "tool", "tool_audit"):
+                last_replayable = entry
+        if last_replayable is None:
+            return None
+        if last_replayable.get("type") == "assistant" and not last_replayable.get("tool_calls"):
+            return None
+        if self._last_uuid is None:
+            # Keep the uuid chain intact: a fresh SessionLog opened for resume
+            # has not read the file yet, and parent_uuid=None is the boundary
+            # convention, not "first entry of a turn".
+            self._last_uuid = tail_uuid
+        sealed_uuid = self.append(
+            "assistant",
+            "[Session ended before the assistant replied]",
+            finish_reason="interrupted",
+        )
+        logger.warning(
+            "SessionLog %s ended mid-turn (last entry type=%s); sealed it so the "
+            "replay stays valid",
+            self.session_id,
+            last_replayable.get("type"),
+        )
+        return sealed_uuid
+
+    # ------------------------------------------------------------------
+    # Trajectory metrics (read what the writer already records)
+    # ------------------------------------------------------------------
+
+    def trajectory_stats(self) -> Dict[str, Any]:
+        """Aggregate the trajectory this log recorded, over the whole file.
+
+        Every number comes from a field the writer really puts on disk, checked
+        against live transcripts before this was written:
+
+        - turn / step counts from the entry types
+        - ``tool_name`` for the per-tool distribution (persist.py)
+        - ``is_error`` on tool entries — the on-disk name; ``_build_messages``
+          reads it back as ``tool_call_error``, and both spellings are accepted
+          here because ``append_post_compact_messages`` replays the latter
+        - ``metrics.input_tokens`` / ``output_tokens`` / ``total_tokens``
+        - ``metrics.prompt_tokens_details.cached_tokens`` and
+          ``cache_read_tokens`` (provider-dependent: OpenAI-compatible writes
+          the first, Anthropic-style the second) plus
+          ``metrics.completion_tokens_details.reasoning_tokens``
+        - ``compact_boundary`` entries for the compaction count
+
+        Nothing is estimated or inferred. A metric a log carries no data for
+        stays 0, which is a truthful "not recorded", not a guess.
+        """
+        stats: Dict[str, Any] = {
+            "entries": 0,
+            "turns": 0,
+            "assistant_messages": 0,
+            "tool_call_rounds": 0,
+            "tool_calls": 0,
+            "tool_audit_entries": 0,
+            "tool_errors": 0,
+            "tool_error_rate": 0.0,
+            "tools_by_name": {},
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+            "cache_read_tokens": 0,
+            "reasoning_tokens": 0,
+            "compactions": 0,
+        }
+        tools_by_name: Dict[str, int] = {}
+        for entry in self._iter_entries():
+            entry_type = entry.get("type", "")
+            stats["entries"] += 1
+            if entry_type == "compact_boundary":
+                stats["compactions"] += 1
+            elif entry_type == "user":
+                stats["turns"] += 1
+            elif entry_type == "assistant":
+                stats["assistant_messages"] += 1
+                if entry.get("tool_calls"):
+                    stats["tool_call_rounds"] += 1
+            elif entry_type in ("tool", "tool_audit"):
+                if entry_type == "tool":
+                    stats["tool_calls"] += 1
+                else:
+                    stats["tool_audit_entries"] += 1
+                if entry.get("is_error", entry.get("tool_call_error", False)):
+                    stats["tool_errors"] += 1
+                name = entry.get("tool_name") or "unknown"
+                tools_by_name[name] = tools_by_name.get(name, 0) + 1
+
+            metrics = entry.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            for key in ("input_tokens", "output_tokens", "total_tokens"):
+                value = metrics.get(key)
+                if isinstance(value, (int, float)):
+                    stats[key] += int(value)
+            prompt_details = metrics.get("prompt_tokens_details")
+            if isinstance(prompt_details, dict):
+                for key in ("cached_tokens", "cache_read_tokens"):
+                    value = prompt_details.get(key)
+                    if isinstance(value, (int, float)):
+                        stats[key] += int(value)
+            completion_details = metrics.get("completion_tokens_details")
+            if isinstance(completion_details, dict):
+                value = completion_details.get("reasoning_tokens")
+                if isinstance(value, (int, float)):
+                    stats["reasoning_tokens"] += int(value)
+
+        executed_tools = stats["tool_calls"] + stats["tool_audit_entries"]
+        if executed_tools:
+            stats["tool_error_rate"] = round(stats["tool_errors"] / executed_tools, 4)
+        stats["tools_by_name"] = dict(sorted(tools_by_name.items()))
+        return stats
 
     # ------------------------------------------------------------------
     # Session listing (for /resume command)

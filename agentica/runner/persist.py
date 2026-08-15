@@ -79,7 +79,107 @@ class PersistMixin:
         return meta
 
     @staticmethod
-    def _persist_assistant_tool_calls(agent: "Agent") -> None:
+    def _persist_turn_user_message(
+        agent: "Agent",
+        message: Any,
+        user_messages: List[Message],
+    ) -> None:
+        """Append this turn's ``user`` entry, exactly once.
+
+        Requested from three places — the first in-turn flush, the end-of-turn
+        write and the interrupted-turn path — because whichever runs first must
+        put the question on disk BEFORE that turn's assistant/tool entries, or
+        the replay would show the answer before the question. The log's
+        turn bookkeeping (``SessionLog.begin_turn``) makes the later calls
+        no-ops.
+        """
+        session_log = agent._session_log
+        if session_log is None or session_log._turn_user_uuid is not None:
+            return
+        text: Optional[str] = None
+        if isinstance(message, str):
+            text = message
+        elif isinstance(message, Message):
+            text = message.content if isinstance(message.content, str) else str(message.content)
+        if not text:
+            return
+        meta = PersistMixin._provider_replay_meta(user_messages[-1]) if user_messages else {}
+        session_log._turn_user_uuid = session_log.append("user", text, **meta)
+
+    @staticmethod
+    def _should_flush_turn_tool_rounds(
+        agent: "Agent",
+        messages: Any,
+        loop_state: "LoopState",
+        fallback_transaction_model: Any,
+    ) -> bool:
+        """Whether in-turn persistence applies to the turn being run.
+
+        Skipped when:
+        - there is no session log, or ``messages`` was pre-built (those runs
+          manage their own history — the end-of-turn write skips them too)
+        - a compression stage collapsed the context: the ``num_input_messages``
+          prefix boundary is gone, so "this turn's messages" can no longer be
+          sliced out reliably
+        - the turn is inside a fallback transaction: its tool results become
+          non-replayable ``tool_audit`` entries, and that is only decided at
+          turn end — writing them early as replayable ``tool`` entries would
+          corrupt the replay
+        """
+        return (
+            agent._session_log is not None
+            and messages is None
+            and not loop_state.context_collapsed
+            and fallback_transaction_model is None
+        )
+
+    @staticmethod
+    def _flush_turn_tool_rounds(
+        agent: "Agent",
+        message: Any,
+        user_messages: List[Message],
+        turn_messages: List[Message],
+    ) -> None:
+        """Persist the tool rounds finished so far, without waiting for turn end.
+
+        The whole turn used to be written only at the end, so a SIGKILL / OOM
+        kill / power loss lost every round of an agentic turn that had been
+        running for minutes. Writing each finished round costs one append per
+        round and leaves the end-of-turn write as a backfill.
+
+        Only *answered* rounds are written (``_drop_unanswered_tool_calls``): an
+        ``assistant(tool_calls)`` entry with no tool result on disk is exactly
+        the shape a provider rejects on replay.
+
+        Best-effort: the end-of-turn write still persists everything, so a
+        failure here must never take the running turn down with it.
+        """
+        if agent._session_log is None:
+            return
+        try:
+            answered = PersistMixin._drop_unanswered_tool_calls(
+                [m for m in turn_messages if isinstance(m, Message)]
+            )
+            if not any(
+                (m.role == "assistant" and m.tool_calls) or m.role == "tool"
+                for m in answered
+            ):
+                return
+            PersistMixin._persist_turn_user_message(agent, message, user_messages)
+            PersistMixin._persist_assistant_tool_calls(
+                agent,
+                messages=answered,
+                tool_records=PersistMixin._tool_records_from_messages(answered),
+            )
+        except Exception:
+            logger.warning("in-turn session-log flush failed", exc_info=True)
+
+    @staticmethod
+    def _persist_assistant_tool_calls(
+        agent: "Agent",
+        messages: Optional[List[Message]] = None,
+        tool_records: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         """Persist the turn's assistant tool-call messages to the session log.
 
         The session log otherwise records only ``user`` -> ``tool`` results ->
@@ -110,26 +210,47 @@ class PersistMixin:
         Called once per turn (before the final assistant text is logged) so the
         JSONL order is
         ``user -> assistant(tool_calls) -> tool -> assistant(tool_calls) -> tool -> ... -> assistant(text)``.
+
+        Idempotent within a turn: rounds already written by an in-turn flush
+        (``_flush_turn_tool_rounds``) are recorded on the session log by
+        ``begin_turn`` bookkeeping and skipped here, so this stays a backfill
+        instead of a second copy. ``messages`` / ``tool_records`` let the
+        mid-turn caller pass the in-flight turn slice; both default to
+        ``run_response``, which only exists once the turn is over.
         """
         if agent._session_log is None:
             return
+        session_log = agent._session_log
+        _msgs = messages if messages is not None else (agent.run_response.messages or [])
+        _records = tool_records if tool_records is not None else (agent.run_response.tools or [])
         tool_by_id = {
             tc.get("tool_call_id"): tc
-            for tc in (agent.run_response.tools or [])
+            for tc in _records
         }
         _functions = (agent.model.functions or {}) if agent.model else {}
-        for msg in agent.run_response.messages or []:
+        for msg in _msgs:
             if not isinstance(msg, Message):
                 continue
             if msg.role == "assistant" and msg.tool_calls:
+                _ids = tuple(
+                    str(tc.get("id") or "") for tc in msg.tool_calls if isinstance(tc, dict)
+                )
+                _round_key: Any = _ids if _ids and all(_ids) else ("obj", id(msg))
+                if _round_key in session_log._turn_written_tool_call_rounds:
+                    continue
+                session_log._turn_written_tool_call_rounds.add(_round_key)
                 _text = msg.content if isinstance(msg.content, str) else ""
-                agent._session_log.append(
+                session_log.append(
                     "assistant",
                     _text,
                     tool_calls=msg.tool_calls,
                     **PersistMixin._provider_replay_meta(msg),
                 )
             elif msg.role == "tool":
+                if msg.tool_call_id and msg.tool_call_id in session_log._turn_written_tool_call_ids:
+                    continue
+                if msg.tool_call_id:
+                    session_log._turn_written_tool_call_ids.add(msg.tool_call_id)
                 _tc = tool_by_id.get(msg.tool_call_id)
                 if _tc is not None:
                     _tool_content = _tc.get("content", "") or ""
@@ -145,7 +266,7 @@ class PersistMixin:
                             _origin_meta["origin_agent_name"] = _fn.origin.agent_name
                         if _fn.origin.source_tool_name:
                             _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
-                    agent._session_log.append(
+                    session_log.append(
                         "tool_audit" if _tc.get("replay") is False else "tool",
                         _tool_content,
                         tool_name=_tc.get("tool_name", ""),
@@ -160,7 +281,7 @@ class PersistMixin:
                 else:
                     # Tool message without matching FunctionCall metadata: log a
                     # minimal entry so resume still has a valid assistant->tool pair.
-                    agent._session_log.append(
+                    session_log.append(
                         "tool",
                         msg.content if isinstance(msg.content, str) else "",
                         tool_call_id=msg.tool_call_id or "",
@@ -181,6 +302,56 @@ class PersistMixin:
         from agentica.agent.history_filter import strip_all_tool_artifacts
 
         return strip_all_tool_artifacts(msgs, drop_system=drop_system)
+
+    @staticmethod
+    def _check_session_log_trajectory(agent: "Agent", turn_start_uuid: Optional[str]) -> None:
+        """Verify the log just written projects back to this turn's live trajectory.
+
+        The log is rebuilt at the end of a turn from ``run_response.messages``
+        (see ``_persist_assistant_tool_calls``); a regression in that rebuild is
+        invisible until a later ``/resume`` is rejected by the provider. This
+        checks the invariant while both sides are still in hand.
+
+        Deliberately weak in production: DEBUG-only, warning-only, and wrapped
+        so it can never become a new crash source — log fidelity is an
+        observability concern and must not kill a live conversation. Its real
+        job is to be assertable in tests (``assert_trajectory_equivalent``).
+        """
+        if not logger.isEnabledFor(10):  # logging.DEBUG == 10
+            return
+        try:
+            from agentica.memory.session_log import assert_trajectory_equivalent
+
+            session_log = agent._session_log
+            if session_log is None:
+                return
+            # A fallback-compacted turn writes its tool results as ``tool_audit``
+            # entries, which ``_build_messages`` deliberately does not replay —
+            # log and live trajectory legally differ, so there is nothing to check.
+            if any(
+                isinstance(tc, dict) and tc.get("replay") is False
+                for tc in (agent.run_response.tools or [])
+            ):
+                logger.debug("session-log trajectory check skipped: fallback-compacted tool audit turn")
+                return
+            derived = session_log.derive_messages(
+                model=agent.model.id if agent.model is not None else None,
+                since_uuid=turn_start_uuid,
+            )
+            live = [m for m in (agent.run_response.messages or []) if isinstance(m, Message)]
+            divergence = assert_trajectory_equivalent(derived, live)
+            if divergence is not None:
+                logger.warning(
+                    "session log does not match the turn sent to the provider "
+                    "(resume would replay a different trajectory): %s",
+                    divergence,
+                )
+            else:
+                logger.debug(
+                    "session-log trajectory check ok (%d derived messages)", len(derived)
+                )
+        except Exception:
+            logger.debug("session-log trajectory check failed", exc_info=True)
 
     @staticmethod
     def _sanitize_tool_history_after_error(agent: "Agent", messages: List[Message]) -> None:
@@ -436,17 +607,12 @@ class PersistMixin:
 
         # session log so /resume restores this turn.
         if agent._session_log is not None:
-            _user_text = None
-            if isinstance(message, str):
-                _user_text = message
-            elif isinstance(message, Message):
-                _user_text = message.content if isinstance(message.content, str) else str(message.content)
-            if _user_text:
-                _user_meta = PersistMixin._provider_replay_meta(user_messages[-1]) if user_messages else {}
-                agent._session_log.append("user", _user_text, **_user_meta)
+            # No-op when an in-turn flush already wrote the question.
+            PersistMixin._persist_turn_user_message(agent, message, user_messages)
             # Log assistant tool-call messages AND their tool results in the
             # exact interleaved order so /resume rebuilds a valid
-            # assistant(tool_calls)->tool sequence instead of orphaned tools.
+            # assistant(tool_calls)->tool sequence instead of orphaned tools
+            # (skipping the rounds an in-turn flush already persisted).
             self._persist_assistant_tool_calls(agent)
             _assistant_meta = PersistMixin._provider_replay_meta(last_asst) if last_asst is not None else {}
             _assistant_meta["finish_reason"] = finish_reason

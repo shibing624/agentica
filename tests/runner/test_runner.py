@@ -848,5 +848,121 @@ class TestRunnerToolEventsCarryTheirToolCall(unittest.TestCase):
         )
 
 
+class TestSessionLogInTurnPersistence(unittest.TestCase):
+    """A tool turn must reach the session log exactly once.
+
+    Rounds are now flushed to the log as they finish (so a SIGKILL does not
+    lose a long turn) and the end-of-turn write backfills what is missing. If
+    the two paths ever double up, every resume replays each tool round twice.
+    """
+
+    def _entries(self, agent):
+        text = agent._session_log.path.read_text(encoding="utf-8")
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def _assert_single_tool_turn(self, agent):
+        entries = self._entries(agent)
+        self.assertEqual(
+            [e["type"] for e in entries],
+            ["user", "assistant", "tool", "assistant"],
+            f"unexpected transcript: {[e['type'] for e in entries]}",
+        )
+        self.assertEqual(entries[0]["content"], "please echo hi")
+        self.assertTrue(entries[1]["tool_calls"], "assistant round lost its tool_calls")
+        self.assertEqual(entries[2]["tool_call_id"], "call_1")
+        self.assertIn("echo:hi", entries[2]["content"])
+
+        from agentica.memory.session_log import assert_trajectory_equivalent
+
+        derived = agent._session_log.derive_messages()
+        self.assertEqual(
+            [m["role"] for m in derived], ["user", "assistant", "tool", "assistant"]
+        )
+        self.assertIsNone(assert_trajectory_equivalent(derived, derived))
+
+    def test_non_streaming_turn_is_written_once(self):
+        import tempfile
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        rounds = {"n": 0}
+
+        async def fake_response(messages=None, **_kw):
+            rounds["n"] += 1
+            if rounds["n"] == 1:
+                messages.append(Message(role="assistant", tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": '{"text": "hi"}'},
+                }]))
+                return ModelResponse(content="")
+            messages.append(Message(role="assistant", content="done"))
+            return ModelResponse(content="done")
+
+        model.response = fake_response
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                session_id="s-inturn", session_base_dir=tmp,
+            )
+            agent.run_sync("please echo hi")
+            self._assert_single_tool_turn(agent)
+
+    def test_streaming_turn_is_written_once(self):
+        import tempfile
+        from types import SimpleNamespace
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        def _chunk(content=None, tool_calls=None, finish_reason=None):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    finish_reason=finish_reason,
+                    delta=SimpleNamespace(content=content, reasoning_content=None,
+                                          audio=None, tool_calls=tool_calls),
+                )],
+                usage=None,
+            )
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        turns = iter([
+            [_chunk(
+                tool_calls=[SimpleNamespace(
+                    index=0, id="call_1", type="function",
+                    function=SimpleNamespace(name="echo", arguments='{"text": "hi"}'),
+                )],
+                finish_reason="tool_calls",
+            )],
+            [_chunk(content="done", finish_reason="stop")],
+        ])
+
+        async def fake_invoke_stream(messages):
+            for chunk in next(turns):
+                yield chunk
+
+        model.invoke_stream = fake_invoke_stream
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                session_id="s-inturn-stream", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("please echo hi"):
+                    pass
+
+            asyncio.run(_drive())
+            self._assert_single_tool_turn(agent)
+
+
 if __name__ == "__main__":
     unittest.main()

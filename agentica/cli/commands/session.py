@@ -409,6 +409,11 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
         return [], 0
     _model = getattr(agent, "model", None)
     model_id = getattr(_model, "id", None) if _model is not None else None
+    # A session killed mid-turn (SIGKILL/OOM) has in-turn writes on disk but no
+    # assistant reply for that turn; close it before replaying. Forking at an
+    # explicit uuid replays a chosen prefix, so leave that alone.
+    if resume_at is None:
+        session_log.seal_incomplete_turn()
     resumed = session_log.load(
         resume_at=resume_at,
         model=model_id,

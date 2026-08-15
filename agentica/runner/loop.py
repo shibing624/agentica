@@ -572,6 +572,11 @@ class LoopMixin:
                     # under another lineage (model/branch change): it replays
                     # the canonical transcript instead of the stale summary.
                     _m = getattr(agent, "model", None)
+                    # A previous process may have been killed mid-turn (in-turn
+                    # writes land as they happen). Close that turn before
+                    # replaying it, or the resumed history ends on a question
+                    # with no answer.
+                    agent._session_log.seal_incomplete_turn()
                     resumed_messages = agent._session_log.load(
                         model=getattr(_m, "id", None) if _m is not None else None
                     )
@@ -719,6 +724,11 @@ class LoopMixin:
                 )
                 num_input_messages = len(messages_for_model)
                 input_message_ids = {id(m) for m in messages_for_model}
+                # Open the turn for incremental writes: everything this turn puts
+                # on disk mid-flight is recorded so the end-of-turn write becomes
+                # a backfill instead of a duplicate.
+                if agent._session_log is not None:
+                    agent._session_log.begin_turn()
 
                 if agent.stream_intermediate_steps:
                     yield self.generic_run_response("Run started", RunEvent.run_started)
@@ -952,6 +962,18 @@ class LoopMixin:
                                             agent_id=agent.agent_id,
                                         )
 
+                        # Persist the rounds finished so far (streaming path), so a
+                        # hard kill does not take the whole turn down with it.
+                        if self._should_flush_turn_tool_rounds(
+                            agent, messages, loop_state, fallback_transaction_model
+                        ):
+                            self._flush_turn_tool_rounds(
+                                agent,
+                                message,
+                                user_messages,
+                                messages_for_model[num_input_messages:],
+                            )
+
                         # Post-tool hook (todo reminder injection)
                         if _post_tool_hook is not None:
                             await _post_tool_hook(messages_for_model, [])
@@ -1079,6 +1101,17 @@ class LoopMixin:
                                 record["replay"] = False
                                 record["fallback_model"] = fallback_transaction_model.id
                             fallback_compacted_tools.extend(tool_result.tool_results)
+
+                        # Persist the rounds finished so far (non-streaming path).
+                        if self._should_flush_turn_tool_rounds(
+                            agent, messages, loop_state, fallback_transaction_model
+                        ):
+                            self._flush_turn_tool_rounds(
+                                agent,
+                                message,
+                                user_messages,
+                                messages_for_model[num_input_messages:],
+                            )
 
                         # Post-tool hook (todo reminder injection)
                         if _post_tool_hook is not None:
@@ -1290,20 +1323,20 @@ class LoopMixin:
                 # --- Session persist (CC-style JSONL append) ---
                 # Log the complete turn: user input + tool results + assistant output
                 if agent._session_log is not None and messages is None:
-                    # 1. Log user input
-                    _user_text = None
-                    if isinstance(message, str):
-                        _user_text = message
-                    elif isinstance(message, Message):
-                        _user_text = message.content if isinstance(message.content, str) else str(message.content)
-                    if _user_text:
-                        _user_meta = self._provider_replay_meta(user_messages[-1]) if user_messages else {}
-                        agent._session_log.append("user", _user_text, **_user_meta)
+                    # Where this turn's entries start — the trajectory check below
+                    # compares only the tail we are about to append.
+                    # An in-turn flush may already have written the question and
+                    # the finished rounds, so the tail starts at whatever entry
+                    # preceded THIS turn's first write.
+                    _turn_start_uuid = agent._session_log._turn_start_uuid
+                    # 1. Log user input (no-op if an in-turn flush wrote it)
+                    self._persist_turn_user_message(agent, message, user_messages)
 
                     # 2. Log assistant tool-call messages AND their tool results in
                     #    the exact interleaved order, so /resume rebuilds a valid
                     #    assistant(tool_calls)->tool sequence instead of orphaned
-                    #    (or mis-ordered) tool messages.
+                    #    (or mis-ordered) tool messages. Rounds already flushed
+                    #    mid-turn are skipped.
                     self._persist_assistant_tool_calls(agent)
 
                     # 3. Log assistant output (with model info + usage, mirrors CC)
@@ -1336,6 +1369,15 @@ class LoopMixin:
                         if _final_assistant is not None:
                             _model_meta.update(self._provider_replay_meta(_final_assistant))
                         agent._session_log.append("assistant", _assistant_text, **_model_meta)
+
+                    # 4. Invariant: the entries just written must project back to
+                    #    the trajectory this turn actually sent to the provider.
+                    #    DEBUG-only and warning-only (see the method docstring).
+                    #    Skipped after a context collapse: run_response.messages
+                    #    then holds the whole surviving conversation, not this
+                    #    turn, so there is no comparable tail.
+                    if not loop_state.context_collapsed:
+                        self._check_session_log_trajectory(agent, _turn_start_uuid)
 
                 # Run reached natural completion -- mark + emit terminal event.
                 _run_ctx.mark_completed()

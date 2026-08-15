@@ -9,7 +9,7 @@ import tempfile
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from agentica.memory.session_log import SessionLog
+from agentica.memory.session_log import SessionLog, assert_trajectory_equivalent
 from agentica.model.message import Message
 from agentica.runner import Runner
 
@@ -871,6 +871,448 @@ class TestProjectionLineage:
         self._write_session(base, with_lineage=False)
         messages = self._reload(base, model="model-b")
         assert "Resumed session" in self._contents(messages)
+
+
+class TestDeriveMessages:
+    """``derive_messages`` — the log projection used to assert the trajectory."""
+
+    def test_derive_matches_load_without_since_uuid(self, tmp_dir):
+        log = SessionLog("derive-all", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a")
+        assert log.derive_messages() == log.load()
+
+    def test_since_uuid_slices_the_last_turn_only(self, tmp_dir):
+        log = SessionLog("derive-tail", base_dir=tmp_dir)
+        log.append("user", "turn-1 q")
+        turn1_end = log.append("assistant", "turn-1 a")
+        log.append("user", "turn-2 q")
+        log.append("assistant", "", tool_calls=[{"id": "T", "type": "function",
+                                                 "function": {"name": "grep", "arguments": "{}"}}])
+        log.append("tool", "hit", tool_name="grep", tool_call_id="T")
+        log.append("assistant", "turn-2 a")
+
+        tail = log.derive_messages(since_uuid=turn1_end)
+        assert [m["role"] for m in tail] == ["user", "assistant", "tool", "assistant"]
+        assert tail[0]["content"] == "turn-2 q"
+
+    def test_derive_does_not_disturb_the_append_chain(self, tmp_dir):
+        log = SessionLog("derive-chain", base_dir=tmp_dir)
+        log.append("user", "q")
+        last = log.append("assistant", "a")
+        log.derive_messages()
+        assert log._last_uuid == last
+        log.append("user", "q2")
+        entries = [json.loads(line) for line in log.path.read_text(encoding="utf-8").splitlines()]
+        assert entries[-1]["parent_uuid"] == last
+
+    def test_unknown_since_uuid_returns_whole_projection(self, tmp_dir):
+        log = SessionLog("derive-unknown", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a")
+        assert log.derive_messages(since_uuid="no-such-uuid") == log.load()
+
+    def test_since_uuid_before_boundary_excludes_summary_pair(self, tmp_dir):
+        log = SessionLog("derive-boundary", base_dir=tmp_dir)
+        log.append("user", "old q")
+        old = log.append("assistant", "old a")
+        log.append_compact_boundary("SUMMARY")
+        log.append("user", "new q")
+        log.append("assistant", "new a")
+
+        tail = log.derive_messages(since_uuid=old)
+        assert [m["content"] for m in tail] == ["new q", "new a"]
+
+
+class TestTrajectoryEquivalence:
+    """The invariant that turns the resume-400 bug class into a test failure.
+
+    ``persist.py`` rebuilds the log at the end of a turn from
+    ``run_response.messages``. Nothing used to check that the rebuild projects
+    back to what was really sent, so a reordering regression only surfaced as a
+    provider 400 on a later ``/resume``.
+    """
+
+    @staticmethod
+    def _live_multi_round_turn():
+        """The live trajectory of a two-round tool turn (read_file then grep)."""
+        return [
+            Message(role="system", content="you are a helpful agent"),
+            Message(role="user", content="read the file then grep it"),
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "A", "type": "function",
+                             "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", tool_call_id="A", content="file content", tool_name="read_file"),
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "B", "type": "function",
+                             "function": {"name": "grep", "arguments": "{}"}}],
+            ),
+            Message(role="tool", tool_call_id="B", content="matches", tool_name="grep"),
+            Message(role="assistant", content="done"),
+        ]
+
+    def test_persisted_turn_is_equivalent_to_what_was_sent(self, tmp_dir):
+        """Regression: the real persist path must round-trip to the live turn."""
+        log = SessionLog("traj-ok", base_dir=tmp_dir)
+        live = self._live_multi_round_turn()
+        turn_start = log.append("user", "read the file then grep it")
+        agent = _FakeAgent(
+            log,
+            messages=live,
+            tools=[
+                {"tool_call_id": "A", "tool_name": "read_file", "content": "file content", "replay": True},
+                {"tool_call_id": "B", "tool_name": "grep", "content": "matches", "replay": True},
+            ],
+        )
+        Runner._persist_assistant_tool_calls(agent)
+        log.append("assistant", "done", model="m1")
+
+        derived = log.derive_messages(since_uuid=turn_start)
+        assert [m["role"] for m in derived] == ["assistant", "tool", "assistant", "tool", "assistant"]
+        # The interleaving the provider requires, end to end.
+        full = log.derive_messages()
+        assert [m["role"] for m in full] == [
+            "user", "assistant", "tool", "assistant", "tool", "assistant",
+        ]
+        assert assert_trajectory_equivalent(full, live) is None
+
+    def test_grouped_assistants_then_tools_is_detected(self, tmp_dir):
+        """Negative test — the core deliverable.
+
+        Hand-build the log shape the previous implementation produced (all
+        assistant tool-call rounds first, then all tool results). It is a valid
+        JSONL log and loads fine, but replaying it 400s on OpenAI-compatible
+        providers. The invariant must catch it.
+        """
+        log = SessionLog("traj-bad", base_dir=tmp_dir)
+        log.append("user", "read the file then grep it")
+        log.append("assistant", "", tool_calls=[{"id": "A", "type": "function",
+                                                 "function": {"name": "read_file", "arguments": "{}"}}])
+        log.append("assistant", "", tool_calls=[{"id": "B", "type": "function",
+                                                 "function": {"name": "grep", "arguments": "{}"}}])
+        log.append("tool", "file content", tool_name="read_file", tool_call_id="A")
+        log.append("tool", "matches", tool_name="grep", tool_call_id="B")
+        log.append("assistant", "done", model="m1")
+
+        derived = log.derive_messages()
+        divergence = assert_trajectory_equivalent(derived, self._live_multi_round_turn())
+        assert divergence is not None, "mis-ordered log passed the equivalence check"
+        assert "not replayable" in divergence
+        assert "'A'" in divergence  # names the offending tool_call_id
+
+    def test_orphaned_tool_result_is_detected(self, tmp_dir):
+        """A tool result with no requesting assistant is the other 400 shape."""
+        log = SessionLog("traj-orphan", base_dir=tmp_dir)
+        log.append("user", "read the file")
+        log.append("tool", "file content", tool_name="read_file", tool_call_id="A")
+        log.append("assistant", "done")
+
+        divergence = assert_trajectory_equivalent(log.derive_messages(), [])
+        assert divergence is not None
+        assert "not preceded by an assistant carrying tool_calls" in divergence
+
+    def test_missing_tool_round_in_log_is_detected(self, tmp_dir):
+        """A dropped tool round is a divergence even though the log stays valid."""
+        log = SessionLog("traj-missing", base_dir=tmp_dir)
+        log.append("user", "read the file then grep it")
+        log.append("assistant", "", tool_calls=[{"id": "A", "type": "function",
+                                                 "function": {"name": "read_file", "arguments": "{}"}}])
+        log.append("tool", "file content", tool_name="read_file", tool_call_id="A")
+        log.append("assistant", "done", model="m1")
+
+        divergence = assert_trajectory_equivalent(
+            log.derive_messages(), self._live_multi_round_turn()
+        )
+        assert divergence is not None
+        assert "diverges at index" in divergence
+
+    def test_content_rewrites_are_not_divergences(self, tmp_dir):
+        """Compaction/markers rewrite content legally; structure is what counts."""
+        log = SessionLog("traj-content", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "answer\n\n[User interrupted the response]")
+        live = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="q"),
+            Message(role="assistant", content="answer"),
+        ]
+        assert assert_trajectory_equivalent(log.derive_messages(), live) is None
+
+    def test_extra_live_user_messages_and_empty_assistant_are_tolerated(self, tmp_dir):
+        """The log writes one user entry per turn; the live list may hold more."""
+        log = SessionLog("traj-normalize", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a")
+        live = [
+            Message(role="user", content="q"),
+            Message(role="user", content="[injected reminder]"),
+            Message(role="assistant", content=""),
+            Message(role="assistant", content="a"),
+        ]
+        assert assert_trajectory_equivalent(log.derive_messages(), live) is None
+
+    def test_tool_call_id_reordering_is_detected(self, tmp_dir):
+        """Same roles, wrong pairing: tool B answered under assistant A's round."""
+        log = SessionLog("traj-swap", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "", tool_calls=[{"id": "A", "type": "function",
+                                                 "function": {"name": "read_file", "arguments": "{}"}}])
+        log.append("tool", "matches", tool_name="grep", tool_call_id="B")
+        log.append("assistant", "done")
+
+        divergence = assert_trajectory_equivalent(log.derive_messages(), [])
+        assert divergence is not None
+        assert "does not answer the preceding assistant's tool_calls" in divergence
+
+
+def _tool_round(call_id, tool_name):
+    """One finished tool round as the model layer leaves it in the message list."""
+    return [
+        Message(
+            role="assistant",
+            tool_calls=[{"id": call_id, "type": "function",
+                         "function": {"name": tool_name, "arguments": "{}"}}],
+        ),
+        Message(role="tool", tool_call_id=call_id, content=f"{tool_name} output", tool_name=tool_name),
+    ]
+
+
+class TestInTurnPersistence:
+    """P2: rounds are written as they finish, end-of-turn write is a backfill.
+
+    Before this, the whole turn was written at the end of the turn, so a
+    SIGKILL / OOM kill / power loss lost every round of a long agentic turn.
+    """
+
+    QUESTION = "read the file then grep it"
+
+    def _agent(self, log):
+        return _FakeAgent(log, messages=[], tools=[])
+
+    def _user_messages(self):
+        return [Message(role="user", content=self.QUESTION)]
+
+    def test_flush_then_end_of_turn_write_produces_no_duplicates(self, tmp_dir):
+        log = SessionLog("inturn-idempotent", base_dir=tmp_dir)
+        log.begin_turn()
+        agent = self._agent(log)
+        round_a = _tool_round("A", "read_file")
+        round_b = _tool_round("B", "grep")
+
+        # Round 1 finishes -> flushed mid-turn (question goes first).
+        Runner._flush_turn_tool_rounds(agent, self.QUESTION, self._user_messages(), list(round_a))
+        # Round 2 finishes -> flushed; round 1 must not be written twice.
+        Runner._flush_turn_tool_rounds(
+            agent, self.QUESTION, self._user_messages(), round_a + round_b
+        )
+
+        # End of turn: the runner rebuilds the whole turn and backfills.
+        final = Message(role="assistant", content="done")
+        live = self._user_messages() + round_a + round_b + [final]
+        agent.run_response.messages = live
+        agent.run_response.tools = [
+            {"tool_call_id": "A", "tool_name": "read_file", "content": "read_file output", "replay": True},
+            {"tool_call_id": "B", "tool_name": "grep", "content": "grep output", "replay": True},
+        ]
+        Runner._persist_turn_user_message(agent, self.QUESTION, self._user_messages())
+        Runner._persist_assistant_tool_calls(agent)
+        log.append("assistant", "done", model="m1")
+
+        derived = log.derive_messages()
+        assert [m["role"] for m in derived] == [
+            "user", "assistant", "tool", "assistant", "tool", "assistant",
+        ]
+        assert [m.get("tool_call_id") for m in derived if m["role"] == "tool"] == ["A", "B"]
+        assert assert_trajectory_equivalent(derived, live) is None
+
+    def test_hard_kill_keeps_the_finished_rounds(self, tmp_dir):
+        """Simulated SIGKILL: no end-of-turn write ever happens."""
+        log = SessionLog("inturn-crash", base_dir=tmp_dir)
+        log.begin_turn()
+        agent = self._agent(log)
+        round_a = _tool_round("A", "read_file")
+        Runner._flush_turn_tool_rounds(agent, self.QUESTION, self._user_messages(), list(round_a))
+        # ... process dies here: no _persist_assistant_tool_calls, no assistant text.
+
+        derived = log.derive_messages()
+        assert [m["role"] for m in derived] == ["user", "assistant", "tool"]
+        assert derived[0]["content"] == self.QUESTION
+        assert derived[2]["content"] == "read_file output"
+        # The surviving projection is one a provider accepts: every tool result
+        # answers the assistant that requested it.
+        assert assert_trajectory_equivalent(derived, derived) is None
+
+    def test_resume_seals_the_turn_the_kill_left_open(self, tmp_dir):
+        log = SessionLog("inturn-seal", base_dir=tmp_dir)
+        log.begin_turn()
+        agent = self._agent(log)
+        Runner._flush_turn_tool_rounds(
+            agent, self.QUESTION, self._user_messages(), _tool_round("A", "read_file")
+        )
+
+        sealed = SessionLog("inturn-seal", base_dir=tmp_dir)
+        assert sealed.seal_incomplete_turn() is not None
+        derived = sealed.derive_messages()
+        assert [m["role"] for m in derived] == ["user", "assistant", "tool", "assistant"]
+        assert "[Session ended before the assistant replied]" in derived[-1]["content"]
+        # Idempotent: a sealed log needs no second seal.
+        assert sealed.seal_incomplete_turn() is None
+        # The uuid chain stays intact across the sealing append.
+        entries = [json.loads(line) for line in sealed.path.read_text(encoding="utf-8").splitlines()]
+        assert entries[-1]["parent_uuid"] == entries[-2]["uuid"]
+
+    def test_seal_leaves_a_complete_log_alone(self, tmp_dir):
+        log = SessionLog("inturn-complete", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a")
+        before = log.path.read_text(encoding="utf-8")
+        assert log.seal_incomplete_turn() is None
+        assert log.path.read_text(encoding="utf-8") == before
+
+    def test_seal_closes_a_dangling_user_question(self, tmp_dir):
+        """Killed before the first round finished — the question still survives."""
+        log = SessionLog("inturn-dangling", base_dir=tmp_dir)
+        log.append("user", "q")
+        assert log.seal_incomplete_turn() is not None
+        assert [m["role"] for m in log.derive_messages()] == ["user", "assistant"]
+
+    def test_unanswered_tool_call_is_never_flushed(self, tmp_dir):
+        """An assistant(tool_calls) with no result on disk is the 400 shape."""
+        log = SessionLog("inturn-unanswered", base_dir=tmp_dir)
+        log.begin_turn()
+        agent = self._agent(log)
+        pending = [
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "A", "type": "function",
+                             "function": {"name": "read_file", "arguments": "{}"}}],
+            )
+        ]
+        Runner._flush_turn_tool_rounds(agent, self.QUESTION, self._user_messages(), pending)
+        assert log.entry_count() == 0
+
+    def test_begin_turn_resets_the_per_turn_bookkeeping(self, tmp_dir):
+        log = SessionLog("inturn-two-turns", base_dir=tmp_dir)
+        agent = self._agent(log)
+        log.begin_turn()
+        Runner._flush_turn_tool_rounds(
+            agent, "turn one", [Message(role="user", content="turn one")], _tool_round("A", "read_file")
+        )
+        log.append("assistant", "done one")
+        log.begin_turn()
+        Runner._flush_turn_tool_rounds(
+            agent, "turn two", [Message(role="user", content="turn two")], _tool_round("B", "grep")
+        )
+        log.append("assistant", "done two")
+
+        derived = log.derive_messages()
+        assert [m["role"] for m in derived] == [
+            "user", "assistant", "tool", "assistant",
+            "user", "assistant", "tool", "assistant",
+        ]
+        assert derived[4]["content"] == "turn two"
+        assert assert_trajectory_equivalent(derived, derived) is None
+
+    def test_turn_start_uuid_scopes_the_derived_tail(self, tmp_dir):
+        log = SessionLog("inturn-tail", base_dir=tmp_dir)
+        log.append("user", "old q")
+        log.append("assistant", "old a")
+        log.begin_turn()
+        agent = self._agent(log)
+        Runner._flush_turn_tool_rounds(
+            agent, self.QUESTION, self._user_messages(), _tool_round("A", "read_file")
+        )
+        log.append("assistant", "done")
+
+        tail = log.derive_messages(since_uuid=log._turn_start_uuid)
+        assert [m["role"] for m in tail] == ["user", "assistant", "tool", "assistant"]
+        assert tail[0]["content"] == self.QUESTION
+
+
+class TestTrajectoryStats:
+    """P3: read the metrics the writer already records — no estimates."""
+
+    def _write_session(self, tmp_dir):
+        log = SessionLog("stats", base_dir=tmp_dir)
+        log.append("user", "q1")
+        log.append(
+            "assistant", "",
+            tool_calls=[{"id": "A", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}],
+            metrics={
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "total_tokens": 110,
+                "prompt_tokens_details": {"cached_tokens": 64},
+                "completion_tokens_details": {"reasoning_tokens": 4},
+            },
+        )
+        log.append("tool", "content", tool_name="read_file", tool_call_id="A", is_error=False)
+        log.append(
+            "assistant", "",
+            tool_calls=[{"id": "B", "type": "function",
+                         "function": {"name": "grep", "arguments": "{}"}}],
+            metrics={"input_tokens": 200, "output_tokens": 20, "total_tokens": 220,
+                     "prompt_tokens_details": {"cache_read_tokens": 128}},
+        )
+        log.append("tool", "boom", tool_name="grep", tool_call_id="B", is_error=True)
+        log.append("assistant", "done", metrics={"input_tokens": 300, "output_tokens": 30,
+                                                 "total_tokens": 330})
+        return log
+
+    def test_counts_and_rates(self, tmp_dir):
+        stats = self._write_session(tmp_dir).trajectory_stats()
+        assert stats["entries"] == 6
+        assert stats["turns"] == 1
+        assert stats["assistant_messages"] == 3
+        assert stats["tool_call_rounds"] == 2
+        assert stats["tool_calls"] == 2
+        assert stats["tool_errors"] == 1
+        assert stats["tool_error_rate"] == 0.5
+        assert stats["tools_by_name"] == {"grep": 1, "read_file": 1}
+
+    def test_token_and_cache_sums(self, tmp_dir):
+        stats = self._write_session(tmp_dir).trajectory_stats()
+        assert stats["input_tokens"] == 600
+        assert stats["output_tokens"] == 60
+        assert stats["total_tokens"] == 660
+        assert stats["cached_tokens"] == 64
+        assert stats["cache_read_tokens"] == 128
+        assert stats["reasoning_tokens"] == 4
+
+    def test_compactions_and_audit_entries(self, tmp_dir):
+        log = self._write_session(tmp_dir)
+        log.append_compact_boundary("summary", model="m1")
+        log.append("tool_audit", "audited", tool_name="execute", tool_call_id="C",
+                   is_error=True, replay=False)
+        stats = log.trajectory_stats()
+        assert stats["compactions"] == 1
+        assert stats["tool_audit_entries"] == 1
+        # tool_audit results are not replayable but they DID run: they count
+        # towards the error rate, not towards replayable tool calls.
+        assert stats["tool_calls"] == 2
+        assert stats["tool_errors"] == 2
+        assert stats["tool_error_rate"] == round(2 / 3, 4)
+
+    def test_empty_log_reports_zeros_not_guesses(self, tmp_dir):
+        stats = SessionLog("stats-empty", base_dir=tmp_dir).trajectory_stats()
+        assert stats["entries"] == 0
+        assert stats["tool_error_rate"] == 0.0
+        assert stats["input_tokens"] == 0
+        assert stats["tools_by_name"] == {}
+
+    def test_metricless_log_reports_zero_tokens(self, tmp_dir):
+        """A log written without metrics must not fabricate token counts."""
+        log = SessionLog("stats-nometrics", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a")
+        stats = log.trajectory_stats()
+        assert stats["turns"] == 1
+        assert (stats["input_tokens"], stats["output_tokens"], stats["total_tokens"]) == (0, 0, 0)
+        assert stats["cached_tokens"] == 0
 
 
 if __name__ == "__main__":

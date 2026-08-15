@@ -185,10 +185,63 @@ def calculate_statistics(results: List[Dict]) -> Dict[str, Any]:
     }
 
 
+def aggregate_trajectory_stats(results: List[Dict]) -> Dict[str, Any]:
+    """Aggregate the per-instance session-log trajectories.
+
+    Read straight from ``SessionLog.trajectory_stats()``, i.e. from what the
+    runner actually wrote to the transcript: token usage, cache reads, tool
+    error rate, per-tool distribution. Purely additive — accuracy and the
+    existing ``statistics`` block are untouched, so old summaries stay
+    comparable.
+
+    Instances whose run produced no trajectory (crash before the first write)
+    contribute nothing instead of a zero, so the averages describe the runs
+    that happened.
+    """
+    trajectories = [
+        item["trajectory"] for item in results
+        if isinstance(item.get("trajectory"), dict) and item["trajectory"].get("entries")
+    ]
+    if not trajectories:
+        return {"instances_with_trajectory": 0}
+
+    summed_keys = (
+        "tool_calls", "tool_errors", "tool_call_rounds", "assistant_messages",
+        "input_tokens", "output_tokens", "total_tokens",
+        "cached_tokens", "cache_read_tokens", "reasoning_tokens", "compactions",
+    )
+    totals = {key: sum(int(t.get(key, 0)) for t in trajectories) for key in summed_keys}
+    tools_by_name: Dict[str, int] = {}
+    for trajectory in trajectories:
+        for name, count in (trajectory.get("tools_by_name") or {}).items():
+            tools_by_name[name] = tools_by_name.get(name, 0) + int(count)
+
+    n = len(trajectories)
+    executed = totals["tool_calls"]
+    return {
+        "instances_with_trajectory": n,
+        "avg_tool_calls_logged": round(totals["tool_calls"] / n, 2),
+        "avg_tool_call_rounds": round(totals["tool_call_rounds"] / n, 2),
+        "avg_assistant_steps": round(totals["assistant_messages"] / n, 2),
+        "tool_error_rate": round(totals["tool_errors"] / executed, 4) if executed else 0.0,
+        "avg_input_tokens": round(totals["input_tokens"] / n, 2),
+        "avg_output_tokens": round(totals["output_tokens"] / n, 2),
+        "avg_total_tokens": round(totals["total_tokens"] / n, 2),
+        "avg_cached_tokens": round(totals["cached_tokens"] / n, 2),
+        "avg_cache_read_tokens": round(totals["cache_read_tokens"] / n, 2),
+        "avg_reasoning_tokens": round(totals["reasoning_tokens"] / n, 2),
+        "compactions": totals["compactions"],
+        "tools_by_name": dict(sorted(tools_by_name.items(), key=lambda kv: -kv[1])),
+        "totals": totals,
+    }
+
+
 async def evaluate_instance(
     model_name: str,
     instance: Dict,
     debug: bool = False,
+    session_log_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Evaluate a single instance using multi-round Agent.
@@ -197,6 +250,10 @@ async def evaluate_instance(
         model_name: Model ID to use
         instance: Test instance with 'question' and 'answer'
         debug: Enable debug mode
+        session_log_dir: Where to write this instance's session transcript. The
+            transcript is what trajectory metrics are read back from, so without
+            it the result carries no ``trajectory`` block.
+        session_id: Session id for that transcript (one per instance).
     
     Returns:
         Evaluation result dict
@@ -219,6 +276,10 @@ async def evaluate_instance(
             prompt_config=PromptConfig(markdown=True, enable_agentic_prompt=True),
             work_dir="./tmp/",
             instructions=SYSTEM_PROMPT_MULTI,
+            # A transcript per instance: the source of the trajectory metrics.
+            session_id=session_id,
+            session_base_dir=session_log_dir,
+            enable_session_log=session_log_dir is not None,
         )
         
         # Run the agent
@@ -235,13 +296,15 @@ async def evaluate_instance(
         # Get tool call history
         tool_calls = agent.working_memory.get_tool_calls(num_calls=100)
         logger.info(f"tool_calls: {tool_calls}")
+        trajectory = agent._session_log.trajectory_stats() if agent._session_log is not None else {}
         return {
             'question': question,
             'answer': ground_truth,
             'prediction': extract_answer(response_content),
             'messages': messages,
             'tool_calls': tool_calls,
-            'full_response': response_content
+            'full_response': response_content,
+            'trajectory': trajectory,
         }
         
     except Exception as e:
@@ -253,6 +316,7 @@ async def evaluate_instance(
             'messages': [],
             'tool_calls': [],
             'full_response': '',
+            'trajectory': {},
             'error': str(e)
         }
 
@@ -316,11 +380,17 @@ async def main():
     results = []
     debug = args.debug == 1
     
-    for instance in tqdm(test_data, desc="Running Agent"):
+    # One transcript per instance: trajectory metrics are read back from these.
+    session_log_dir = os.path.join(args.output_dir, f"session_logs-{args.dataset}")
+    os.makedirs(session_log_dir, exist_ok=True)
+
+    for index, instance in enumerate(tqdm(test_data, desc="Running Agent")):
         result = await evaluate_instance(
             model_name=args.model,
             instance=instance,
             debug=debug,
+            session_log_dir=session_log_dir,
+            session_id=f"{args.dataset}-{index:04d}",
         )
         results.append(result)
 
@@ -333,6 +403,9 @@ async def main():
 
     # Calculate statistics
     statistics = calculate_statistics(results)
+    # Trajectory metrics from the session transcripts (additive; accuracy and
+    # the statistics block above are unchanged).
+    trajectory_statistics = aggregate_trajectory_stats(results)
     
     # Judge results (unless skipped)
     if args.skip_judge:
@@ -372,6 +445,14 @@ async def main():
     print(f"📝 Avg Rounds: {statistics['avg_rounds']} (max: {statistics['max_rounds']})")
     print(f"📄 Avg Answer Length: {statistics['avg_answer_length']}")
     print(f"🧠 Avg Reasoning Length: {statistics['avg_reasoning_length']}")
+    if trajectory_statistics.get("instances_with_trajectory"):
+        print("-" * 40)
+        print(f"🧾 Trajectory (from session logs, n={trajectory_statistics['instances_with_trajectory']})")
+        print(f"   - Avg assistant steps: {trajectory_statistics['avg_assistant_steps']}")
+        print(f"   - Avg tool calls: {trajectory_statistics['avg_tool_calls_logged']}")
+        print(f"   - Tool error rate: {trajectory_statistics['tool_error_rate']}")
+        print(f"   - Avg tokens in/out: {trajectory_statistics['avg_input_tokens']}/{trajectory_statistics['avg_output_tokens']}")
+        print(f"   - Avg cached tokens: {trajectory_statistics['avg_cached_tokens']}")
     print("=" * 60)
 
     # Save final results
@@ -385,6 +466,7 @@ async def main():
         "correct": correct_count if not args.skip_judge else None,
         "total": len(results),
         "statistics": statistics,
+        "trajectory_statistics": trajectory_statistics,
         "judged_results": judged_results if not args.skip_judge else []
     }
 
