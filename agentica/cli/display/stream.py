@@ -42,12 +42,22 @@ def _is_background_execute(tool_args: Optional[dict], result_str: str = "") -> b
     return str(result_str).startswith("Started background command")
 
 
-def _parse_ask_user_exchange(result_str: str) -> Optional[Tuple[str, str]]:
-    """Pull ``(prompt, response)`` out of an ask_user_question result.
+def _coerce_ask_options(value) -> Optional[List[str]]:
+    if not isinstance(value, list) or not value:
+        return None
+    return [str(item) for item in value]
+
+
+def _parse_ask_user_exchange(
+    result_str: str, tool_args: Optional[dict] = None,
+) -> Optional[Tuple[str, str, Optional[str], Optional[List[str]]]]:
+    """Pull ``(prompt, response, raw_input, options)`` out of an ask result.
 
     Returns None for anything that isn't that payload — a select-mode error
     dict, or a tool of the same name from elsewhere — so the caller can fall
     back to the generic result renderer instead of showing a blank exchange.
+    ``options`` prefer the result JSON (the lasting record); older payloads
+    that omitted them fall back to the call's ``tool_args``.
     """
     try:
         payload = json.loads(result_str)
@@ -55,10 +65,14 @@ def _parse_ask_user_exchange(result_str: str) -> Optional[Tuple[str, str]]:
         return None
     if not isinstance(payload, dict) or "response" not in payload:
         return None
+    options = _coerce_ask_options(payload.get("options"))
+    if options is None and tool_args:
+        options = _coerce_ask_options(tool_args.get("options"))
     return (
         str(payload.get("prompt", "")),
         str(payload.get("response", "")),
         payload.get("raw_input"),
+        options,
     )
 
 
@@ -835,7 +849,7 @@ class StreamDisplayManager:
             return
 
         if tool_name in self._ASK_USER_TOOLS and not is_error:
-            exchange = _parse_ask_user_exchange(result_str)
+            exchange = _parse_ask_user_exchange(result_str, tool_args)
             if exchange is not None:
                 self._display_ask_user_exchange(*exchange, elapsed_str=elapsed_str)
                 return
@@ -872,29 +886,42 @@ class StreamDisplayManager:
 
     def _display_ask_user_exchange(
         self, prompt: str, response: str, raw_input: Optional[str] = None,
-        *, elapsed_str: str
+        options: Optional[List[str]] = None, *, elapsed_str: str
     ) -> None:
         """Replay a human-in-the-loop question and the user's answer, unclipped.
 
         Both sides go into the transcript so scrolling back weeks later still
         shows what the agent asked and what the user chose to do about it.
-        ``raw_input`` is the user's full typed reply when it was resolved to an
-        option (e.g. "3, because workers=10 is ok" → option 3); showing it
-        preserves the rationale that would otherwise vanish.
+        Offered choices belong under Q — without them the answer is an orphan
+        label. ``raw_input`` is the user's full typed reply when it was
+        resolved to an option (e.g. "3, because workers=10 is ok" → option 3);
+        showing it preserves the rationale that would otherwise vanish.
         """
         cont_prefix = "      "
         # Both sides are free text — a model-written question or a typed answer
         # containing "[bold]" is content, not styling, and rich would eat it.
-        for label, body in (("Q", prompt), ("A", response)):
-            body_lines = body.splitlines() or [""]
-            head = "    ⎿ " if label == "Q" else cont_prefix
+        body_lines = prompt.splitlines() or [""]
+        self._assistant_console.print(
+            f"    ⎿ Q: {body_lines[0]}", style="dim", highlight=False, markup=False
+        )
+        for line in body_lines[1:]:
             self._assistant_console.print(
-                f"{head}{label}: {body_lines[0]}", style="dim", highlight=False, markup=False
+                f"{cont_prefix}   {line}", style="dim", highlight=False, markup=False
             )
-            for line in body_lines[1:]:
+        if options:
+            for i, opt in enumerate(options, 1):
                 self._assistant_console.print(
-                    f"{cont_prefix}   {line}", style="dim", highlight=False, markup=False
+                    f"{cont_prefix}   {i}. {opt}",
+                    style="dim", highlight=False, markup=False,
                 )
+        answer_lines = response.splitlines() or [""]
+        self._assistant_console.print(
+            f"{cont_prefix}A: {answer_lines[0]}", style="dim", highlight=False, markup=False
+        )
+        for line in answer_lines[1:]:
+            self._assistant_console.print(
+                f"{cont_prefix}   {line}", style="dim", highlight=False, markup=False
+            )
         if raw_input and raw_input != response:
             raw_lines = raw_input.splitlines() or [""]
             self._assistant_console.print(

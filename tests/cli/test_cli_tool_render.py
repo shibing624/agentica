@@ -363,7 +363,7 @@ class TestCLIToolRender(unittest.TestCase):
         clear_truncated_blocks()
         answer = self.ASK_OPTIONS[0]
         result = json.dumps(
-            {"prompt": self.ASK_PROMPT, "response": answer},
+            {"prompt": self.ASK_PROMPT, "response": answer, "options": self.ASK_OPTIONS},
             ensure_ascii=False,
         )
         fake = MagicMock()
@@ -371,14 +371,39 @@ class TestCLIToolRender(unittest.TestCase):
         dm = StreamDisplayManager(fake)
         dm.display_tool_result(
             "ask_user_question", result, is_error=False, elapsed=12.5,
-            tool_args={"prompt": self.ASK_PROMPT}, tool_call_id="ask-1",
+            tool_args={"prompt": self.ASK_PROMPT, "options": self.ASK_OPTIONS},
+            tool_call_id="ask-1",
         )
 
         rendered = self._render(dm, fake)
         self.assertIn(self.ASK_PROMPT, rendered.replace("\n", "").replace("   ", ""))
+        self.assertIn(f"1. {self.ASK_OPTIONS[0]}", rendered)
+        self.assertIn(f"2. {self.ASK_OPTIONS[1]}", rendered)
         self.assertIn(answer, rendered)
         self.assertNotIn("more lines", rendered)
         self.assertEqual(get_truncated_blocks(), [])
+
+    def test_ask_result_falls_back_to_tool_args_for_options(self):
+        """Older result JSON omitted options; the call args still have them."""
+        import json
+
+        from agentica.cli.display import StreamDisplayManager
+
+        result = json.dumps(
+            {"prompt": "选哪个？", "response": "方案 A"},
+            ensure_ascii=False,
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "ask_user_question", result, is_error=False, elapsed=1.0,
+            tool_args={"prompt": "选哪个？", "options": ["方案 A", "方案 B"]},
+        )
+
+        rendered = self._render(dm, fake)
+        self.assertIn("1. 方案 A", rendered)
+        self.assertIn("2. 方案 B", rendered)
 
     def test_multiline_answer_keeps_every_line(self):
         import json
@@ -481,6 +506,22 @@ class TestCLIToolRender(unittest.TestCase):
 
         self.assertEqual(payload["prompt"], long_prompt)
         self.assertEqual(payload["response"], "ok")
+        self.assertNotIn("options", payload)
+
+    def test_tool_echoes_options_in_the_result(self):
+        import asyncio
+        import json
+
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        options = ["keep flemingxu", "set user.name=shibing624"]
+        tool = AskUserQuestionTool(input_callback=lambda prompt, opts: opts[1])
+        payload = json.loads(asyncio.run(
+            tool.ask_user_question(prompt="Which git name?", options=options)
+        ))
+
+        self.assertEqual(payload["options"], options)
+        self.assertEqual(payload["response"], options[1])
 
     def test_wait_result_shows_full_command(self):
         """wait's Command: line is the whole reason you looked — never ellipsis it."""

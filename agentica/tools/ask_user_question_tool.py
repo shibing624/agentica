@@ -293,8 +293,8 @@ turn instead. Keep using this tool for the user who is actually here.
                 picks one (in any wording); when omitted, the reply is free-form.
 
         Returns:
-            str: JSON with ``prompt``, the resolved ``response``, and the user's
-            ``raw_input``.
+            str: JSON with ``prompt``, the resolved ``response``, the offered
+            ``options`` when any were given, and the user's ``raw_input``.
 
         Examples:
             # Confirmation
@@ -334,6 +334,8 @@ turn instead. Keep using this tool for the user who is actually here.
             "prompt": prompt,
             "response": response,
         }
+        if options:
+            result["options"] = list(options)
         if raw_input != response:
             result["raw_input"] = raw_input
         return json.dumps(result, ensure_ascii=False)

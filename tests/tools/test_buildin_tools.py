@@ -2665,6 +2665,7 @@ class TestAskUserQuestionTool:
             tool.ask_user_question(prompt="pick", options=options)
         ))
         assert result["response"] == "第二个吧"
+        assert result["options"] == options
         assert "raw_input" not in result
 
     def test_llm_failure_keeps_raw_input(self):
