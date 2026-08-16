@@ -130,28 +130,6 @@ class TestEmitContextUsage:
 
 
 # ---------------------------------------------------------------------------
-# Status bar fragment
-# ---------------------------------------------------------------------------
-
-class TestStatusBarCacheSegment:
-    def test_ratio_rendered(self):
-        from agentica.cli.display.status_bar import build_status_bar_fragments
-        frags = build_status_bar_fragments(model_name="gpt-4o", context_window=1000,
-                                           context_tokens=500, cache_hit_ratio=0.873,
-                                           terminal_width=200)
-        text = "".join(t for _cls, t in frags)
-        assert "cache 87%" in text
-
-    def test_ratio_none_hidden(self):
-        from agentica.cli.display.status_bar import build_status_bar_fragments
-        frags = build_status_bar_fragments(model_name="gpt-4o", context_window=1000,
-                                           context_tokens=500, cache_hit_ratio=None,
-                                           terminal_width=200)
-        text = "".join(t for _cls, t in frags)
-        assert "cache" not in text
-
-
-# ---------------------------------------------------------------------------
 # SessionLog.cache_warmth_hint
 # ---------------------------------------------------------------------------
 

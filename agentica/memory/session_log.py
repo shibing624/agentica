@@ -972,6 +972,15 @@ class SessionLog:
           ``cache_read_tokens`` (provider-dependent: OpenAI-compatible writes
           the first, Anthropic-style the second) plus
           ``metrics.completion_tokens_details.reasoning_tokens``
+        - ``cache_write_tokens``: the one-time cost of PUTTING a prefix in the
+          cache, which Anthropic bills as a third rate separate from both a
+          miss and a hit (write > uncached input > hit). Kept apart from the
+          two hit counters above on purpose — folding a write into a hit rate
+          would report cache spend as cache savings. Read from
+          ``prompt_tokens_details.cache_creation_tokens``, falling back to
+          ``cache_write_tokens``: the same two spellings, and the same
+          preference order, that ``split_prompt_usage`` and
+          ``agentica/model/base.py`` already treat as aliases.
         - ``compact_boundary`` entries for the compaction count
 
         Nothing is estimated or inferred. A metric a log carries no data for
@@ -992,6 +1001,7 @@ class SessionLog:
             "total_tokens": 0,
             "cached_tokens": 0,
             "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
             "reasoning_tokens": 0,
             "compactions": 0,
         }
@@ -1030,6 +1040,13 @@ class SessionLog:
                     value = prompt_details.get(key)
                     if isinstance(value, (int, float)):
                         stats[key] += int(value)
+                # Aliases for one quantity, so take the first present rather
+                # than summing: a provider emitting both would double-bill.
+                write = prompt_details.get("cache_creation_tokens")
+                if not isinstance(write, (int, float)):
+                    write = prompt_details.get("cache_write_tokens")
+                if isinstance(write, (int, float)):
+                    stats["cache_write_tokens"] += int(write)
             completion_details = metrics.get("completion_tokens_details")
             if isinstance(completion_details, dict):
                 value = completion_details.get("reasoning_tokens")

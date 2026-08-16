@@ -38,12 +38,20 @@ class TestStartShutdownThread(unittest.TestCase):
     def test_peek_failure_degrades_to_none(self):
         """Private-API drift must never break the caller's exit path."""
 
-        class _BoomRM:
-            _lock = threading.Lock()
-
+        # The registry peek reads ``_instances`` off the CLASS, so the raising
+        # descriptor has to live on the metaclass: a plain ``@property`` here
+        # would just hand back the property object (truthy, no raise), letting
+        # the call fall through to get_client() and — whenever langfuse happens
+        # to be importable/initialised in this process — spawn a real
+        # ``langfuse-shutdown`` thread that outlives the test and breaks its
+        # siblings.
+        class _BoomMeta(type):
             @property
-            def _instances(self):
+            def _instances(cls):
                 raise RuntimeError("api drift")
+
+        class _BoomRM(metaclass=_BoomMeta):
+            _lock = threading.Lock()
 
         with (
             patch.object(li, "is_langfuse_configured", return_value=True),
@@ -52,6 +60,10 @@ class TestStartShutdownThread(unittest.TestCase):
             ),
         ):
             self.assertIsNone(li.start_shutdown_thread())
+        self.assertFalse(
+            any(t.name == "langfuse-shutdown" for t in threading.enumerate()),
+            "degrading to None must not leave a shutdown thread behind",
+        )
 
     def test_shutdown_runs_on_daemon_thread(self):
         client = MagicMock()

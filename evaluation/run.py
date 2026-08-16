@@ -208,7 +208,8 @@ def aggregate_trajectory_stats(results: List[Dict]) -> Dict[str, Any]:
     summed_keys = (
         "tool_calls", "tool_errors", "tool_call_rounds", "assistant_messages",
         "input_tokens", "output_tokens", "total_tokens",
-        "cached_tokens", "cache_read_tokens", "reasoning_tokens", "compactions",
+        "cached_tokens", "cache_read_tokens", "cache_write_tokens",
+        "reasoning_tokens", "compactions",
     )
     totals = {key: sum(int(t.get(key, 0)) for t in trajectories) for key in summed_keys}
     tools_by_name: Dict[str, int] = {}
@@ -229,6 +230,10 @@ def aggregate_trajectory_stats(results: List[Dict]) -> Dict[str, Any]:
         "avg_total_tokens": round(totals["total_tokens"] / n, 2),
         "avg_cached_tokens": round(totals["cached_tokens"] / n, 2),
         "avg_cache_read_tokens": round(totals["cache_read_tokens"] / n, 2),
+        # Cache WRITE is billed separately from a hit (Anthropic prices it above
+        # an uncached input token), so it is reported next to the hit counters
+        # rather than merged into them.
+        "avg_cache_write_tokens": round(totals["cache_write_tokens"] / n, 2),
         "avg_reasoning_tokens": round(totals["reasoning_tokens"] / n, 2),
         "compactions": totals["compactions"],
         "tools_by_name": dict(sorted(tools_by_name.items(), key=lambda kv: -kv[1])),
@@ -453,6 +458,7 @@ async def main():
         print(f"   - Tool error rate: {trajectory_statistics['tool_error_rate']}")
         print(f"   - Avg tokens in/out: {trajectory_statistics['avg_input_tokens']}/{trajectory_statistics['avg_output_tokens']}")
         print(f"   - Avg cached tokens: {trajectory_statistics['avg_cached_tokens']}")
+        print(f"   - Avg cache write tokens: {trajectory_statistics['avg_cache_write_tokens']}")
     print("=" * 60)
 
     # Save final results

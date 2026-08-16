@@ -1282,6 +1282,55 @@ class TestTrajectoryStats:
         assert stats["cached_tokens"] == 64
         assert stats["cache_read_tokens"] == 128
         assert stats["reasoning_tokens"] == 4
+        # This transcript records no cache writes, so the metric is a truthful
+        # zero rather than an estimate derived from the hit counters.
+        assert stats["cache_write_tokens"] == 0
+
+    def test_cache_write_read_from_the_anthropic_spelling(self, tmp_dir):
+        log = SessionLog("stats-write", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a", metrics={
+            "input_tokens": 10,
+            "prompt_tokens_details": {"cache_creation_tokens": 512},
+        })
+        assert log.trajectory_stats()["cache_write_tokens"] == 512
+
+    def test_cache_write_read_from_the_inclusive_spelling(self, tmp_dir):
+        log = SessionLog("stats-write2", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a", metrics={
+            "input_tokens": 10,
+            "prompt_tokens_details": {"cache_write_tokens": 256},
+        })
+        assert log.trajectory_stats()["cache_write_tokens"] == 256
+
+    def test_cache_write_aliases_are_not_double_counted(self, tmp_dir):
+        """The two spellings name ONE quantity; summing both would over-bill."""
+        log = SessionLog("stats-write3", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a", metrics={
+            "prompt_tokens_details": {
+                "cache_creation_tokens": 300,
+                "cache_write_tokens": 300,
+            },
+        })
+        assert log.trajectory_stats()["cache_write_tokens"] == 300
+
+    def test_cache_write_is_never_folded_into_the_hit_counters(self, tmp_dir):
+        """A cache WRITE is billed above an uncached input token, a HIT below it.
+
+        Counting a write as a hit would report cache spend as cache savings, so
+        a write-only entry must leave both hit counters at zero.
+        """
+        log = SessionLog("stats-write4", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "a", metrics={
+            "prompt_tokens_details": {"cache_creation_tokens": 1024},
+        })
+        stats = log.trajectory_stats()
+        assert stats["cache_write_tokens"] == 1024
+        assert stats["cached_tokens"] == 0
+        assert stats["cache_read_tokens"] == 0
 
     def test_compactions_and_audit_entries(self, tmp_dir):
         log = self._write_session(tmp_dir)
