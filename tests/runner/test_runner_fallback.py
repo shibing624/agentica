@@ -217,11 +217,12 @@ class TestFallbackRetryableExhausted(unittest.TestCase):
         agent = _make_agent()
         agent._run_fallback_models = [fallback]
 
-        # Tighten retry to keep test fast
+        # Tighten retry to keep test fast; skip the exponential backoff sleep.
         state = LoopState(max_api_retry=2)
-        result = asyncio.run(
-            Runner._call_with_retry(primary, [], state, agent, stream=False)
-        )
+        with unittest.mock.patch("agentica.runner.retry_fallback.asyncio.sleep", new_callable=AsyncMock):
+            result = asyncio.run(
+                Runner._call_with_retry(primary, [], state, agent, stream=False)
+            )
 
         # primary should have been called max_api_retry times before fallback
         self.assertEqual(call_count["n"], 2)

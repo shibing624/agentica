@@ -193,7 +193,7 @@ class TestAgentTimeout(unittest.TestCase):
         agent = Agent()
 
         async def slow_consume(*args, **kwargs):
-            await asyncio.sleep(1)  # Sleep longer than timeout
+            await asyncio.sleep(0.05)  # Sleep longer than timeout
             return RunResponse(content="Should not reach here")
 
         with patch.object(agent._runner, "_consume_run", slow_consume):
@@ -213,7 +213,7 @@ class TestAgentTimeout(unittest.TestCase):
         agent = Agent()
 
         async def slow_async_iterator():
-            await asyncio.sleep(1)  # Sleep longer than first_token_timeout
+            await asyncio.sleep(0.05)  # Sleep longer than first_token_timeout
             yield RunResponse(content="Should not reach here")
 
         async def get_first():

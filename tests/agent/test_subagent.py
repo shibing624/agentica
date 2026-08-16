@@ -354,7 +354,7 @@ class _PartialThenHangAgent(RecordingAgent):
         )
         yield SimpleNamespace(event="RunResponse", content="second-half.", tools=None)
         # Hang so wait_for cancels us mid-flight.
-        await asyncio.sleep(10)
+        await asyncio.sleep(1)
 
 
 def test_spawn_timeout_preserves_partial_content_and_tool_calls():
@@ -365,7 +365,7 @@ def test_spawn_timeout_preserves_partial_content_and_tool_calls():
         name="slowish",
         description="slow",
         system_prompt="s",
-        timeout=1,  # cut short after 1s
+        timeout=0.05,  # cut short before the hang
     )
     parent = _make_parent_agent()
 
@@ -697,7 +697,7 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
     class _HangAgent(RecordingAgent):
         async def run_stream(self, task, config=None):
             yield SimpleNamespace(event="RunResponse", content="progress made", tools=None)
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
 
     registry = SubagentRegistry()
     parent = _make_parent_agent()
@@ -708,7 +708,7 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
         result = asyncio.run(
             registry.spawn(
                 parent_agent=parent, task="t", agent_type="hinter",
-                timeout_override=1,
+                timeout_override=0.05,
             )
         )
 

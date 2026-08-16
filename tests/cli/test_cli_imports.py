@@ -49,47 +49,17 @@ class TestCLIImports(unittest.TestCase):
         except ImportError as e:
             self.fail(f"Failed to import Agent: {e}")
 
-    def test_console_entrypoint_main_is_callable(self):
-        """The backward-compatible package-root main export remains callable."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from agentica.cli import main; raise SystemExit(0 if callable(main) else 1)",
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_package_main_stays_callable_after_submodule_import(self):
-        """Import order must not turn the public package function into a module."""
+    def test_public_cli_exports_in_a_fresh_process(self):
+        """Import order and lazy registry must hold in a process that just started."""
         result = subprocess.run(
             [
                 sys.executable,
                 "-c",
                 (
                     "import agentica.cli.main; "
-                    "from agentica.cli import main; "
-                    "raise SystemExit(0 if callable(main) else 1)"
-                ),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_public_model_registry_keeps_callable_values(self):
-        """Lazy startup must not change the exported registry value contract."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "from agentica.cli import MODEL_REGISTRY; "
-                    "raise SystemExit(0 if all(callable(v) for v in MODEL_REGISTRY.values()) else 1)"
+                    "from agentica.cli import main, MODEL_REGISTRY; "
+                    "assert callable(main); "
+                    "assert all(callable(v) for v in MODEL_REGISTRY.values())"
                 ),
             ],
             text=True,

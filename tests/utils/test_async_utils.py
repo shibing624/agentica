@@ -209,9 +209,9 @@ def test_double_ctrl_c_during_a_hung_command_leaves_nothing_on_stderr(tmp_path):
 
     async def turn():
         task = asyncio.create_task(tool.execute(command=f"{holder} & sleep 0.05"))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.08)
         task.cancel()
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.05)
         task.cancel()
         try:
             await task
@@ -227,12 +227,12 @@ def test_double_ctrl_c_during_a_hung_command_leaves_nothing_on_stderr(tmp_path):
 def test_timeout_with_an_orphan_pipe_holder_returns_and_kills_the_group(tmp_path):
     """The timeout must be the timeout, not the start of an unbounded wait."""
     holder = _holder_script(tmp_path)
-    tool = BuiltinExecuteTool(work_dir=str(tmp_path), timeout=1)
+    tool = BuiltinExecuteTool(work_dir=str(tmp_path), timeout=0.05)
 
     started = time.monotonic()
     try:
         with pytest.raises(TimeoutError):
-            asyncio.run(tool.execute(command=f"{holder} & sleep 0.05", timeout=1))
+            asyncio.run(tool.execute(command=f"{holder} & sleep 0.05"))
         assert time.monotonic() - started < 10, "cleanup hung past the timeout"
         assert _wait_gone(holder), "the timed-out command was left running"
     finally:

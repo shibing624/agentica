@@ -1041,12 +1041,12 @@ class TestBuiltinFileToolGrep:
         # Slow sync fallback worker; the real _run_grep_fallback wraps it with
         # asyncio.wait_for, so the timeout fires well before this returns.
         def slow_worker(*args, **kwargs):
-            _time.sleep(0.5)
+            _time.sleep(0.2)
             return "should not reach"
         tool._grep_fallback = slow_worker
 
         with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None), \
-             patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 0.1):
+             patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 0.05):
             with pytest.raises(TimeoutError, match=r"grep timed out"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
 
@@ -1057,17 +1057,17 @@ class TestBuiltinFileToolGrep:
         tool = BuiltinFileTool(work_dir=tmp_dir)
 
         def slow_worker(*args, **kwargs):
-            _time.sleep(2)
+            _time.sleep(0.2)
             return "should not reach"
         tool._grep_fallback = slow_worker
 
-        # Patch the default _GREP_TIMEOUT up to 100s; passing timeout=1 must
-        # still fire at 1s, proving the caller's value wins and is not clamped
+        # Patch the default _GREP_TIMEOUT up to 100s; passing timeout=0.05 must
+        # still fire at 0.05s, proving the caller's value wins and is not clamped
         # back toward the default.
         with patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 100), \
              patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
-                asyncio.run(tool.grep("x", str(tmp_dir), timeout=1))
+            with pytest.raises(TimeoutError, match=r"grep timed out after 0.05 seconds"):
+                asyncio.run(tool.grep("x", str(tmp_dir), timeout=0.05))
 
     def test_grep_default_timeout_still_bounds(self, tmp_dir):
         """When no timeout arg is passed, the module default still bounds the
@@ -1076,13 +1076,13 @@ class TestBuiltinFileToolGrep:
         tool = BuiltinFileTool(work_dir=tmp_dir)
 
         def slow_worker(*args, **kwargs):
-            _time.sleep(2)
+            _time.sleep(0.2)
             return "should not reach"
         tool._grep_fallback = slow_worker
 
-        with patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 1), \
+        with patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 0.05), \
              patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
+            with pytest.raises(TimeoutError, match=r"grep timed out after 0.05 seconds"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
 
     def test_grep_cancellation_cleans_up_subprocess(self, tmp_dir):
@@ -1257,7 +1257,7 @@ class TestBuiltinExecuteTool:
         assert "ready" in result
 
     def test_execute_allows_short_sleep_for_service_startup(self, execute_tool):
-        result = asyncio.run(execute_tool.execute("sleep 1 && echo up"))
+        result = asyncio.run(execute_tool.execute("sleep 0.05 && echo up"))
         assert "up" in result
 
     def test_wait_returns_as_soon_as_the_command_exits(self, tmp_dir):
@@ -1265,7 +1265,7 @@ class TestBuiltinExecuteTool:
         much wall time as the command itself."""
         registry = BackgroundProcessRegistry()
         tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
-        script = 'import time; time.sleep(1); print("summary ready")'
+        script = 'import time; time.sleep(0.05); print("summary ready")'
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
 
         async def scenario():
@@ -1294,7 +1294,19 @@ class TestBuiltinExecuteTool:
         async def scenario():
             await tool.execute(command, background=True)
             item_id = registry.list()[0].id
-            return await tool.wait(item_id, timeout=1)
+            clock = {"t": 0.0}
+
+            def fake_monotonic():
+                return clock["t"]
+
+            async def fake_sleep(seconds):
+                clock["t"] += seconds
+
+            with (
+                patch("agentica.tools.builtin.execute_tool.time.monotonic", fake_monotonic),
+                patch("agentica.tools.builtin.execute_tool.asyncio.sleep", fake_sleep),
+            ):
+                return await tool.wait(item_id, timeout=1)
 
         try:
             result = asyncio.run(scenario())
@@ -1542,7 +1554,7 @@ class TestBuiltinExecuteTool:
         assert "error_msg" in result
 
     def test_execute_timeout(self):
-        tool = BuiltinExecuteTool(timeout=1)
+        tool = BuiltinExecuteTool(timeout=0.05)
         with pytest.raises(TimeoutError, match="timed out"):
             asyncio.run(tool.execute("sleep 30"))
 

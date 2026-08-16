@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,10 +58,13 @@ class TestSchedulerLoop(unittest.TestCase):
                 async def run(self, prompt, context=None):
                     return "ok"
 
-            t, ev = m.start_cron_thread(StubRunner(), interval=1)
-            time.sleep(2.2)
-            ev.set()
-            t.join(timeout=3)
+            with patch.object(m.time, "sleep", lambda _s: None):
+                t, ev = m.start_cron_thread(StubRunner(), interval=1)
+                deadline = time.monotonic() + 1
+                while calls["n"] < 1 and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                ev.set()
+                t.join(timeout=1)
             self.assertGreaterEqual(calls["n"], 1)
             self.assertFalse(t.is_alive())
         finally:

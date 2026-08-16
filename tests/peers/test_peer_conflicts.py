@@ -6,18 +6,10 @@
 The warning has to be right about *which* repository and it has to be quiet
 enough to keep being read, so that is what these check.
 """
-import subprocess
-from pathlib import Path
-
 import pytest
 
 from agentica import git_state, peers
 from agentica.peer_conflicts import PeerConflictChecker, build_checker
-from agentica.worktrees import ensure
-
-
-def _git(cwd, *args):
-    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
 
 
 @pytest.fixture(autouse=True)
@@ -28,20 +20,9 @@ def isolated(tmp_path, monkeypatch):
     git_state.invalidate()
 
 
-def _repo(root):
-    root.mkdir(parents=True)
-    _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "T")
-    (root / "a.py").write_text("print(1)\n")
-    _git(root, "add", "a.py")
-    _git(root, "commit", "-q", "-m", "first")
-    return root
-
-
 @pytest.fixture
-def repo(tmp_path):
-    return _repo(tmp_path / "codes" / "proj")
+def repo(clone_git_repo, tmp_path):
+    return clone_git_repo(tmp_path / "codes" / "proj")
 
 
 def _publish(cwd, *, name):
@@ -75,12 +56,16 @@ class TestWarning:
         assert "other-a1" in note
         assert "send_message" in note
 
-    def test_a_worktree_of_the_same_repo_counts(self, repo):
-        """The case worth warning about: two sessions, two directories, one repo."""
-        wt = ensure(str(repo), "docs")
-        other = _publish(wt.path, name="other-a1")
-        (Path(wt.path) / "a.py").write_text("their edit\n")
-        other.publish(dirty_files=["a.py"], dirty_count=1)
+    def test_a_second_cwd_of_the_same_repo_counts(self, repo, tmp_path):
+        """Two sessions, two directories, one repo_root — no real worktree needed."""
+        other_cwd = tmp_path / "other-checkout"
+        other_cwd.mkdir()
+        other = peers.PeerSession(cwd=str(other_cwd), name="other-a1")
+        other.publish(
+            repo_root=str(repo.resolve()),
+            dirty_files=["a.py"],
+            dirty_count=1,
+        )
         me = peers.PeerSession(cwd=str(repo), name="me-b2")
         me.publish()
 
@@ -88,10 +73,12 @@ class TestWarning:
 
         assert "other-a1" in note
 
-    def test_an_unrelated_repository_with_the_same_filename_is_not_reported(self, tmp_path):
+    def test_an_unrelated_repository_with_the_same_filename_is_not_reported(
+        self, clone_git_repo, tmp_path
+    ):
         """Otherwise every README.md on the machine warns forever."""
-        mine = _repo(tmp_path / "codes" / "mine")
-        theirs = _repo(tmp_path / "codes" / "theirs")
+        mine = clone_git_repo(tmp_path / "codes" / "mine")
+        theirs = clone_git_repo(tmp_path / "codes" / "theirs")
         other = _publish(theirs, name="other-a1")
         (theirs / "a.py").write_text("their edit\n")
         other.publish(dirty_files=["a.py"], dirty_count=1)

@@ -27,17 +27,9 @@ def no_cache_between_tests():
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(clone_git_repo, tmp_path):
     """A repo on `main` with one commit."""
-    root = tmp_path / "repo"
-    root.mkdir()
-    _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@example.com")
-    _git(root, "config", "user.name", "T")
-    (root / "a.py").write_text("print(1)\n")
-    _git(root, "add", "a.py")
-    _git(root, "commit", "-q", "-m", "first")
-    return root
+    return clone_git_repo(tmp_path / "repo")
 
 
 class TestOutsideGit:
@@ -114,15 +106,9 @@ class TestDistanceFromTheBaseBranch:
         assert state.base_ref == ""
         assert "vs" not in state.summary()
 
-    def test_master_is_used_when_there_is_no_main(self, tmp_path):
-        root = tmp_path / "old"
-        root.mkdir()
-        _git(root, "init", "-q", "-b", "master")
-        _git(root, "config", "user.email", "t@example.com")
-        _git(root, "config", "user.name", "T")
-        (root / "a").write_text("a\n")
-        _git(root, "add", "a")
-        _git(root, "commit", "-q", "-m", "first")
+    def test_master_is_used_when_there_is_no_main(self, clone_git_repo, tmp_path):
+        root = clone_git_repo(tmp_path / "old")
+        _git(root, "branch", "-m", "main", "master")
         _git(root, "checkout", "-q", "-b", "wt/x")
 
         assert collect(str(root)).base_ref == "master"
