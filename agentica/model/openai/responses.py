@@ -467,6 +467,28 @@ class OpenAIResponses(OpenAIChat):
             completion_tokens_details=response_usage.output_tokens_details,
         )
 
+    @staticmethod
+    def _replay_provider_data(response: Any) -> Dict[str, Any]:
+        """Keep only the parts of the Response that replay actually reads back.
+
+        A full ``response.model_dump()`` is mostly an echo of the REQUEST, and
+        the tool schema dominates it: measured over one 54MB transcript corpus,
+        ``tools`` was 89% of these blobs (11.7MB across 395 assistant entries)
+        for 3 distinct schemas repeated verbatim on every entry. None of the
+        echo is ever consumed:
+
+        - ``_assistant_items`` reads ``object`` and ``output``, nothing else
+        - ``provider_data`` is local-only and never reaches the wire
+          (``Message.to_dict``'s allowlist, pinned by
+          ``tests/model/test_wire_payload_allowlist.py``)
+        - Responses stateful chaining rides on ``provider_checkpoint``, a
+          separate field persisted separately
+
+        So this is an allowlist, not a ``tools`` blacklist: a future fat
+        request-echo key cannot silently reintroduce the bloat.
+        """
+        return response.model_dump(exclude_none=True, include={"object", "output"})
+
     def _assistant_message(self, response: Any, metrics: Metrics) -> Message:
         output = response.output
         content = self._output_text(output).lstrip("\n")
@@ -488,7 +510,7 @@ class OpenAIResponses(OpenAIChat):
             content=content or None,
             reasoning_content=reasoning_content or None,
             tool_calls=tool_calls or None,
-            provider_data=response.model_dump(exclude_none=True),
+            provider_data=self._replay_provider_data(response),
         )
         assistant.finish_reason = self._finish_reason(response)
         self.update_usage_metrics(assistant, metrics, self._completion_usage(response.usage))

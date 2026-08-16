@@ -31,10 +31,20 @@ class FakeDeepAgent:
 def session(tmp_path):
     """Two full exchanges: the branch point is between them."""
     log = SessionLog("live-session", work_dir=str(tmp_path), user_id=Workspace.DEFAULT_USER_ID)
-    log.append("user", "first question")
-    log.append("assistant", "first answer")
-    log.append("user", "second question")
-    log.append("assistant", "second answer")
+    # Deterministic, LETTER-leading uuids. A fork point is looked up as an index
+    # first and as a uuid prefix second, so a real uuid4 that happens to start
+    # with the digit under test makes "an out-of-range index" resolve to a valid
+    # prefix instead — a ~1-in-8 flake (measured 7/40) that has nothing to do
+    # with what these tests are pinning.
+    counter = iter(range(1, 100))
+    with patch(
+        "agentica.memory.session_log.uuid4",
+        side_effect=lambda: f"aaaaaaa{next(counter):01x}-0000-4000-8000-000000000000",
+    ):
+        log.append("user", "first question")
+        log.append("assistant", "first answer")
+        log.append("user", "second question")
+        log.append("assistant", "second answer")
     return log
 
 

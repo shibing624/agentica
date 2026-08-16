@@ -218,7 +218,12 @@ def test_hex_encoded_aes_key_decrypts_voice_payload():
 
     naive = base64.b64decode(hex_b64)
     assert len(naive) == 32
-    with pytest.raises(ValueError, match="Padding is incorrect"):
+    # pycryptodome reports the same "this key is wrong" outcome two ways
+    # depending on the garbage it decrypts to — "Padding is incorrect." when the
+    # length byte is out of range, "PKCS#7 padding is incorrect." when the
+    # padding bytes disagree. With a random key either can come out, so matching
+    # the capitalised spelling alone was a ~1-in-15 flake (measured 2/30).
+    with pytest.raises(ValueError, match="(?i)padding is incorrect"):
         unpad(AES.new(naive, AES.MODE_ECB).decrypt(cipher), 16)
 
     assert bot._aes_ecb_decrypt(cipher, bot._parse_aes_key(hex_b64)) == plain

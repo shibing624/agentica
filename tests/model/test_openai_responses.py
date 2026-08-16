@@ -17,7 +17,7 @@ from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat, OpenAIResponses
 
 
-def _response(output, *, status="completed", usage=True, incomplete_reason=None):
+def _response(output, *, status="completed", usage=True, incomplete_reason=None, tools=None):
     return Response.model_validate(
         {
             "id": "resp_test",
@@ -32,7 +32,7 @@ def _response(output, *, status="completed", usage=True, incomplete_reason=None)
             "parallel_tool_calls": True,
             "temperature": None,
             "tool_choice": "auto",
-            "tools": [],
+            "tools": tools if tools is not None else [],
             "top_p": None,
             "background": False,
             "completed_at": 2,
@@ -233,6 +233,68 @@ def test_request_preserves_custom_include_with_encrypted_reasoning():
         "web_search_call.action.sources",
         "reasoning.encrypted_content",
     ]
+
+
+def test_provider_data_keeps_only_replayable_parts_of_the_response():
+    """The Response echoes the whole request; only ``object``/``output`` is read.
+
+    Persisting that echo put a full tool schema on every assistant entry — 89%
+    of the provider_data bytes in a real transcript corpus — for something
+    nothing reads: replay uses ``object``/``output``, the wire allowlist never
+    sends provider_data at all, and Responses stateful chaining rides on
+    ``provider_checkpoint``, a separate field.
+    """
+    fat_schema = [
+        {
+            "type": "function",
+            "name": f"tool_{i}",
+            "description": "x" * 500,
+            "parameters": {"type": "object", "properties": {"a": {"type": "string"}}},
+        }
+        for i in range(8)
+    ]
+    response = _response(
+        [
+            {
+                "id": "rs_1",
+                "type": "reasoning",
+                "encrypted_content": "encrypted-reasoning-state",
+                "summary": [{"type": "summary_text", "text": "Need the probe tool."}],
+                "status": "completed",
+            },
+            {
+                "id": "fc_1",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "venus_probe",
+                "arguments": "{\"value\":\"ping\"}",
+                "status": "completed",
+            },
+        ],
+        tools=fat_schema,
+    )
+    assert response.tools, "fixture must carry a request echo for this to mean anything"
+
+    model = OpenAIResponses(id="gpt-5.6-sol", api_key="test",
+                            client=_FakeClient(response), run_tools=False)
+    messages = [Message(role="user", content="Call the probe tool.")]
+
+    asyncio.run(model.response(messages))
+    assistant = messages[-1]
+
+    # Allowlist, not a `tools` blacklist: a future fat echo key cannot creep in.
+    assert set(assistant.provider_data) == {"object", "output"}
+    assert assistant.provider_data["object"] == "response"
+
+    # ... and what survives is still enough to rebuild the turn for the provider.
+    messages.append(Message(role="tool", tool_call_id="call_1", content="probe-ok"))
+    replay = model.format_messages(messages)
+    assert [item["type"] for item in replay[1:]] == [
+        "reasoning",
+        "function_call",
+        "function_call_output",
+    ]
+    assert replay[1]["encrypted_content"] == "encrypted-reasoning-state"
 
 
 def test_stream_maps_text_reasoning_and_usage():
