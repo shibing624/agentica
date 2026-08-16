@@ -221,6 +221,37 @@ class TestSessionLogBasic:
             assert prev["role"] == "assistant"
             assert m["tool_call_id"] in [t["id"] for t in prev.get("tool_calls", [])]
 
+    def test_tool_calling_assistant_keeps_reasoning_content_across_replay(self, tmp_dir):
+        """A resumed tool-calling assistant must still carry its reasoning trace.
+
+        DeepSeek's thinking-mode contract: once a request carries ``tools``, every
+        later request must return ``reasoning_content`` in full or the API answers
+        400. Resume rebuilds those requests from this log, so an assistant that
+        comes back with its ``tool_calls`` but without its reasoning is exactly the
+        shape that gets rejected — and it would only surface on someone's resume.
+        """
+        log = SessionLog("reasoning-replay", base_dir=tmp_dir)
+        log.begin_turn()
+        log.append("user", "q")
+        log.append(
+            "assistant", "looking",
+            tool_calls=[{"id": "A", "type": "function",
+                         "function": {"name": "read_file", "arguments": "{}"}}],
+            reasoning_content="REASONING-TRACE",
+        )
+        log.append("tool", "file body", tool_name="read_file", tool_call_id="A")
+        log.append("assistant", "done")
+
+        for message in log.derive_messages():
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                assert message.get("reasoning_content") == "REASONING-TRACE", (
+                    "replay dropped reasoning_content from a tool-calling assistant; "
+                    "a thinking model with tools would reject this on resume"
+                )
+                break
+        else:
+            raise AssertionError("no tool-calling assistant survived the projection")
+
     def test_provider_checkpoint_round_trip_and_out_of_band_attachment(self, tmp_dir):
         checkpoint = {
             "type": "openai_responses_compaction",
