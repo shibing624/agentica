@@ -58,20 +58,47 @@ def _holder_script(tmp_path: Path, *, escape_group: bool = False) -> str:
 
 
 def _pids_running(script: str) -> list[int]:
-    """PIDs whose argv is exactly this script (`/bin/sh <script>`).
+    """PIDs whose last argv token is this script (`/bin/sh <script>`).
 
-    Matched on argv rather than a substring: the pytest process's own command
-    line can contain the path, which would read as a survivor that never was.
+    Last-token match, not a substring: the pytest process's own command line
+    can contain the path. ``ps`` without ``ww`` truncates COMMAND on Linux CI
+    (no TTY, ~80 cols), so the path never equals ``script`` and the holder
+    looks dead — then ``_kill_holders`` also misses it and the open transport
+    dumps ``Event loop is closed`` into a later test.
     """
+    pids = _pids_from_proc(script)
+    if pids:
+        return pids
     out = subprocess.run(
-        ["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True
+        ["ps", "-axww", "-o", "pid=,args="], capture_output=True, text=True
     ).stdout
-    pids = []
     for line in out.splitlines():
-        parts = line.split()
-        if len(parts) in (2, 3) and parts[-1] == script:
-            pids.append(int(parts[0]))
+        raw = line.strip()
+        if not raw:
+            continue
+        pid_str, _, cmd = raw.partition(" ")
+        if pid_str.isdigit() and cmd.split()[-1:] == [script]:
+            pids.append(int(pid_str))
     return pids
+
+
+def _pids_from_proc(script: str) -> list[int]:
+    """Linux: read /proc/*/cmdline so we are not at the mercy of ``ps`` width."""
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return []
+    found: list[int] = []
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        argv = [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+        if argv and argv[-1] == script:
+            found.append(int(entry.name))
+    return found
 
 
 def _kill_holders(*scripts: str) -> None:
@@ -122,6 +149,7 @@ async def test_group_is_signalled_even_after_our_own_child_was_reaped(tmp_path):
     and the drain below waiting for an EOF that could not come.
     """
     holder = _holder_script(tmp_path)
+    proc = None
     try:
         proc = await _spawn_then_lose_the_shell(holder)
         assert _pids_running(holder), "the backgrounded child should still be alive"
@@ -132,6 +160,8 @@ async def test_group_is_signalled_even_after_our_own_child_was_reaped(tmp_path):
 
         assert _wait_gone(holder), "terminate_subprocess left the group running"
     finally:
+        if proc is not None:
+            await terminate_subprocess(proc, process_group=True)
         _kill_holders(holder)
 
 
@@ -143,6 +173,7 @@ async def test_teardown_gives_up_on_a_drain_that_can_never_finish(tmp_path):
     stray process lived.
     """
     holder = _holder_script(tmp_path, escape_group=True)
+    proc = None
     try:
         proc = await _spawn_then_lose_the_shell(holder)
 
@@ -151,12 +182,15 @@ async def test_teardown_gives_up_on_a_drain_that_can_never_finish(tmp_path):
         )
         assert proc._transport.is_closing(), "the transport must be closed regardless"
     finally:
+        if proc is not None:
+            await terminate_subprocess(proc, process_group=True)
         _kill_holders(holder)
 
 
 @pytest.mark.asyncio
 async def test_grace_period_escalates_to_sigkill_and_closes(tmp_path):
     holder = _holder_script(tmp_path)
+    proc = None
     try:
         proc = await _spawn_then_lose_the_shell(holder)
         await asyncio.wait_for(
@@ -166,6 +200,8 @@ async def test_grace_period_escalates_to_sigkill_and_closes(tmp_path):
         assert _wait_gone(holder)
         assert proc._transport.is_closing()
     finally:
+        if proc is not None:
+            await terminate_subprocess(proc, process_group=True)
         _kill_holders(holder)
 
 

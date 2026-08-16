@@ -10,7 +10,13 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import agentica.utils.langfuse_integration as li
+
+
+def _require_langfuse():
+    pytest.importorskip("langfuse", reason="Langfuse tests require the langfuse extra")
 
 
 class TestStartShutdownThread(unittest.TestCase):
@@ -25,6 +31,7 @@ class TestStartShutdownThread(unittest.TestCase):
         """get_client() lazily CREATES a client; the peek at the singleton
         registry must short-circuit first so a never-traced session doesn't
         pay shutdown cost it never incurred."""
+        _require_langfuse()
         from langfuse._client.resource_manager import LangfuseResourceManager
 
         with (
@@ -37,6 +44,7 @@ class TestStartShutdownThread(unittest.TestCase):
 
     def test_peek_failure_degrades_to_none(self):
         """Private-API drift must never break the caller's exit path."""
+        _require_langfuse()
 
         # The registry peek reads ``_instances`` off the CLASS, so the raising
         # descriptor has to live on the metaclass: a plain ``@property`` here
@@ -70,6 +78,7 @@ class TestStartShutdownThread(unittest.TestCase):
         done = threading.Event()
         client.shutdown.side_effect = lambda: done.set()
 
+        _require_langfuse()
         from langfuse._client.resource_manager import LangfuseResourceManager
 
         with (
@@ -91,6 +100,7 @@ class TestStartShutdownThread(unittest.TestCase):
         client = MagicMock()
         client.shutdown.side_effect = RuntimeError("boom")
 
+        _require_langfuse()
         from langfuse._client.resource_manager import LangfuseResourceManager
 
         with (
@@ -116,6 +126,7 @@ class TestShutdownLangfuseBounded(unittest.TestCase):
         client = MagicMock()
         client.shutdown.side_effect = _slow_shutdown
 
+        _require_langfuse()
         from langfuse._client.resource_manager import LangfuseResourceManager
 
         with (

@@ -4,6 +4,10 @@ cold-starts the prompt cache (Reasonix use_capability 移植的 MCP 侧)。
 """
 import unittest
 
+import pytest
+
+pytest.importorskip("mcp", reason="MCP tests require the mcp extra")
+
 
 class _FakeTool:
     def __init__(self, name):
