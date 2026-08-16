@@ -48,23 +48,48 @@ _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 _truncated_blocks: List[Dict[str, str]] = []
 
 
-def remember_truncated(title: str, content: str) -> None:
-    """Stash a truncated block for on-demand expansion (Ctrl+O opens all)."""
+def _public_truncated(block: Dict[str, str]) -> Dict[str, str]:
+    return {"title": block.get("title", ""), "content": block.get("content", "")}
+
+
+def remember_truncated(
+    title: str,
+    content: str,
+    *,
+    key: Optional[str] = None,
+    only_replace: bool = False,
+) -> None:
+    """Stash a truncated block for on-demand expansion (Ctrl+O opens all).
+
+    ``key`` replaces an earlier block from the same call (a folded execute
+    command is upgraded to command + full output when the result arrives).
+    ``only_replace`` updates that block and otherwise does nothing — used
+    when the result itself was short enough to show inline.
+    """
     if not content:
         return
-    _truncated_blocks.append({"title": title, "content": content})
+    block: Dict[str, str] = {"title": title, "content": content}
+    if key:
+        block["key"] = key
+        for i, existing in enumerate(_truncated_blocks):
+            if existing.get("key") == key:
+                _truncated_blocks[i] = block
+                return
+        if only_replace:
+            return
+    _truncated_blocks.append(block)
 
 
 def get_last_truncated() -> Dict[str, str]:
     """Return a copy of the most recent truncated block (or empty)."""
     if not _truncated_blocks:
         return {"title": "", "content": ""}
-    return dict(_truncated_blocks[-1])
+    return _public_truncated(_truncated_blocks[-1])
 
 
 def get_truncated_blocks() -> List[Dict[str, str]]:
     """Return all truncated blocks accumulated this run (newest last)."""
-    return [dict(b) for b in _truncated_blocks]
+    return [_public_truncated(b) for b in _truncated_blocks]
 
 
 def clear_truncated_blocks() -> None:

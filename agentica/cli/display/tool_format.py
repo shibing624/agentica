@@ -7,7 +7,7 @@
 import re
 import textwrap
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from rich.text import Text
 
@@ -70,7 +70,30 @@ def _wrap_command_lines(command: str, width: int) -> List[str]:
     return wrapped
 
 
-def _display_execute_command(console_instance, command: str, *, full: bool = False) -> None:
+def format_execute_expand(command: str, output: str = "") -> str:
+    """Plain-text pager view: the launch command, then the full result.
+
+    Matches the transcript's shape closely enough to copy from — ``$`` for
+    the command, ``⎿`` for the output — without Rich markup (the pager is
+    ``less``).
+    """
+    parts = ["execute"]
+    cmd_lines = str(command or "").splitlines() or ([""] if command else [])
+    if cmd_lines:
+        parts.append(f"$ {cmd_lines[0]}")
+        parts.extend(f"  {line}" for line in cmd_lines[1:])
+    if output:
+        out_lines = str(output).splitlines() or [""]
+        parts.append("")
+        parts.append(f"    ⎿ {out_lines[0]}")
+        parts.extend(f"      {line}" for line in out_lines[1:])
+    return "\n".join(parts)
+
+
+def _display_execute_command(
+    console_instance, command: str, *, full: bool = False,
+    tool_call_id: Optional[str] = None,
+) -> None:
     """Render an execute command.
 
     Foreground calls keep a three-line preview (full text via Ctrl+O).
@@ -107,7 +130,11 @@ def _display_execute_command(console_instance, command: str, *, full: bool = Fal
         hint.append(continuation, style="dim")
         hint.append(f"… +{omitted} lines (Ctrl+O to expand)", style="dim italic")
         console_instance.print(hint)
-        remember_truncated("Command · execute", raw_command)
+        remember_truncated(
+            "execute",
+            format_execute_expand(raw_command),
+            key=f"execute:{tool_call_id}" if tool_call_id else None,
+        )
 
 
 def _format_handoff_display(
@@ -272,7 +299,7 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
 
 
 def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
-                       tool_count: int = 0) -> None:
+                       tool_count: int = 0, tool_call_id: Optional[str] = None) -> None:
     """Shared implementation for displaying a tool call."""
     icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
     display_str = format_tool_display(tool_name, tool_args)
@@ -285,7 +312,8 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
         bg = tool_args.get("background")
         full = bg is True or bg == "true" or bg == 1 or bg == "1"
         _display_execute_command(
-            console_instance, tool_args.get("command", ""), full=full
+            console_instance, tool_args.get("command", ""), full=full,
+            tool_call_id=tool_call_id,
         )
     # Special handling for write_todos - multi-line display.
     # Note: in this repo "task" is the dedicated subagent-spawn tool, so we

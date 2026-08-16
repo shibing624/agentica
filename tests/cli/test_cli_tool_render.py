@@ -1200,9 +1200,11 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertEqual(rendered.count("│"), 3)
         self.assertRegex(rendered, r"… \+\d+ lines \(Ctrl\+O to expand\)")
         self.assertNotIn("value-11", rendered)
+        from agentica.cli.display.tool_format import format_execute_expand
+
         self.assertEqual(disp.get_truncated_blocks(), [{
-            "title": "Command · execute",
-            "content": command,
+            "title": "execute",
+            "content": format_execute_expand(command),
         }])
 
 
@@ -1235,16 +1237,19 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("│ base = pathlib.Path", rendered)
         self.assertIn("… +3 lines (Ctrl+O to expand)", rendered)
         self.assertNotIn("print(json.dumps", rendered)
-        self.assertEqual(disp.get_last_truncated()["content"], command)
+        from agentica.cli.display.tool_format import format_execute_expand
+
+        self.assertEqual(disp.get_last_truncated()["content"], format_execute_expand(command))
 
 
-    def test_execute_command_and_output_are_separate_expandable_blocks(self):
-        """Ctrl+O retains both a folded command and its folded output."""
+    def test_execute_command_and_output_are_one_expandable_block(self):
+        """Ctrl+O is one exchange: the launch command plus the full result."""
         from io import StringIO
         from rich.console import Console
 
         from agentica.cli import display as disp
         from agentica.cli.display import StreamDisplayManager
+        from agentica.cli.display.tool_format import format_execute_expand
 
         command = "python3 -m benchmark " + " ".join(
             f"--case case-{index}" for index in range(16)
@@ -1264,10 +1269,48 @@ class TestCLIToolRender(unittest.TestCase):
             tool_call_id="exec-both",
         )
 
-        self.assertEqual(disp.get_truncated_blocks(), [
-            {"title": "Command · execute", "content": command},
-            {"title": "Tool output · execute", "content": long_output},
-        ])
+        blocks = disp.get_truncated_blocks()
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["title"], "execute")
+        self.assertEqual(blocks[0]["content"], format_execute_expand(command, long_output))
+        self.assertIn("$ " + command.splitlines()[0], blocks[0]["content"])
+        self.assertIn("output 0", blocks[0]["content"])
+        self.assertIn("output 29", blocks[0]["content"])
+
+    def test_short_execute_command_still_lands_in_ctrl_o_with_full_output(self):
+        """A one-line command is shown inline, but Ctrl+O must still name it.
+
+        Otherwise the pager is a pile of output with no launch command — the
+        usual case, and the one that made the expand view unusable.
+        """
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        command = "pytest tests/cli -q"
+        long_output = "\n".join(f"line {index}" for index in range(30))
+        output = StringIO()
+        console = Console(file=output, width=80, force_terminal=False, no_color=True)
+        manager = StreamDisplayManager(console)
+        disp.clear_truncated_blocks()
+
+        manager.display_tool("execute", {"command": command}, tool_call_id="exec-short")
+        manager.display_tool_result(
+            "execute",
+            long_output,
+            elapsed=1.2,
+            tool_args={"command": command},
+            tool_call_id="exec-short",
+        )
+
+        blocks = disp.get_truncated_blocks()
+        self.assertEqual(len(blocks), 1)
+        self.assertIn(f"$ {command}", blocks[0]["content"])
+        self.assertIn("line 0", blocks[0]["content"])
+        self.assertIn("line 29", blocks[0]["content"])
+        self.assertIn("    ⎿ line 0", blocks[0]["content"])
 
     # --- Diff rendering must wrap long lines, not crop them ---------------
     #

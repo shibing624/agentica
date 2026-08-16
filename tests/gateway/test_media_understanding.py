@@ -12,6 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
+# Collection must not import agentica.gateway until extras are present —
+# gateway/__init__.py raises ImportError without fastapi, which aborts CI.
+pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+
 from agentica.gateway.channels.base import InboundMedia
 from agentica.gateway.services import media_understanding as mu
 from agentica.model.message import Message

@@ -317,20 +317,25 @@ class TestCLIStreamDisplay(unittest.TestCase):
         block = disp.get_last_truncated()
         self.assertEqual(block["content"], "")
 
-        # Long execute output (>20 lines) IS remembered.
+        # Long execute output IS remembered, with the launch command.
         long_output = "\n".join(f"out {i}" for i in range(50))
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
-        dm.display_tool_result("execute", long_output, is_error=False, elapsed=0.5)
+        dm.display_tool_result(
+            "execute", long_output, is_error=False, elapsed=0.5,
+            tool_args={"command": "pytest -q"}, tool_call_id="exec-1",
+        )
         block = disp.get_last_truncated()
-        self.assertIn("execute", block["title"])
-        self.assertEqual(block["content"], long_output)
+        self.assertEqual(block["title"], "execute")
+        self.assertIn("$ pytest -q", block["content"])
+        self.assertIn("out 0", block["content"])
+        self.assertIn("out 49", block["content"])
 
         # Only the execute block is remembered (the query was shown in full).
         blocks = disp.get_truncated_blocks()
         self.assertEqual(len(blocks), 1)
-        self.assertIn("execute", blocks[0]["title"])
+        self.assertEqual(blocks[0]["title"], "execute")
 
         # Short output is NOT remembered (no truncation → nothing to expand).
         disp.clear_truncated_blocks()

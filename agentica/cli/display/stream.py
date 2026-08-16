@@ -31,7 +31,7 @@ from .console import (
     remember_truncated,
 )
 from .messages import _has_markdown
-from .tool_format import _display_tool_impl, format_tool_display
+from .tool_format import _display_tool_impl, format_execute_expand, format_tool_display
 
 
 def _is_background_execute(tool_args: Optional[dict], result_str: str = "") -> bool:
@@ -300,7 +300,10 @@ class StreamDisplayManager:
             self._capture_file_before_call(tool_name, tool_args, tool_call_id)
             return
         self.start_tool_section()
-        _display_tool_impl(self._assistant_console, tool_name, tool_args, self.tool_count)
+        _display_tool_impl(
+            self._assistant_console, tool_name, tool_args, self.tool_count,
+            tool_call_id=tool_call_id,
+        )
         self._open_block_id = tool_call_id
 
     def _resolve_diff_path(self, raw_path: str) -> Path:
@@ -832,16 +835,28 @@ class StreamDisplayManager:
                 tail = self._EXECUTE_DIAGNOSTIC_TAIL_LINES
             else:
                 tail = self._EXECUTE_TAIL_LINES
+            command = str((tool_args or {}).get("command") or "")
+            stash_key = f"execute:{tool_call_id}" if tool_call_id else None
             self._display_tail_window(
                 lines, tail,
                 inline=self._EXECUTE_MAX_INLINE_LINES,
                 prefix="    ⎿ ", cont_prefix="      ",
                 style="dim yellow" if (is_diagnostics and not is_error) else "dim",
                 error_prefix="    ⎿ ⚠ " if (is_error or is_diagnostics) else None,
-                truncated_title=f"Tool output · {tool_name}",
-                full_content=result_str,
+                truncated_title="execute",
+                full_content=format_execute_expand(command, result_str),
                 elapsed_str=elapsed_str,
+                stash_key=stash_key,
             )
+            if stash_key:
+                # Command was folded earlier but this result fit inline —
+                # attach the output to that block so Ctrl+O is one exchange.
+                remember_truncated(
+                    "execute",
+                    format_execute_expand(command, result_str),
+                    key=stash_key,
+                    only_replace=True,
+                )
             return
 
         if tool_name in self._FULL_RESULT_TOOLS:
@@ -880,7 +895,12 @@ class StreamDisplayManager:
             self._assistant_console.print(
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+O to expand)", style="dim italic"
             )
-            remember_truncated(f"Tool output · {tool_name}", result_str)
+            brief = format_tool_display(tool_name, tool_args or {})
+            header = f"{tool_name} {brief}".rstrip()
+            remember_truncated(
+                f"Tool output · {tool_name}",
+                f"{header}\n\n{result_str}" if header else result_str,
+            )
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 
@@ -957,7 +977,8 @@ class StreamDisplayManager:
                              error_prefix: Optional[str] = None,
                              truncated_title: str, full_content: str,
                              elapsed_str: str = "",
-                             max_line_width: int = 120) -> None:
+                             max_line_width: int = 120,
+                             stash_key: Optional[str] = None) -> None:
         """Render a tail-only window with the head folded (codex-style).
 
         Output up to ``inline`` lines is shown in full. Longer output keeps
@@ -975,7 +996,7 @@ class StreamDisplayManager:
                 f"{error_prefix or prefix}… +{hidden} lines (Ctrl+O to expand)",
                 style="dim italic",
             )
-            remember_truncated(truncated_title, full_content)
+            remember_truncated(truncated_title, full_content, key=stash_key)
             first_prefix = cont_prefix
         else:
             first_prefix = error_prefix or prefix
