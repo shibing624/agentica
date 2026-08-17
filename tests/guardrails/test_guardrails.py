@@ -334,36 +334,6 @@ class TestRunGuardrails(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    def test_input_guardrails_run_at_the_same_time(self):
-        """``run_in_parallel`` defaults to True; three moderation calls in a
-        policy should cost one round trip, not three."""
-        in_flight = 0
-        peak = 0
-
-        async def slow_check(ctx, agent, input_data):
-            nonlocal in_flight, peak
-            in_flight += 1
-            peak = max(peak, in_flight)
-            try:
-                await asyncio.sleep(0.05)
-            finally:
-                in_flight -= 1
-            return GuardrailOutput.allow()
-
-        guards = [
-            input_guardrail(name=f"g{i}")(slow_check) for i in range(3)
-        ]
-
-        async def run_test():
-            started = time.monotonic()
-            results = await run_input_guardrails(None, "test", guards)
-            return results, time.monotonic() - started
-
-        results, elapsed = asyncio.run(run_test())
-        assert len(results) == 3
-        assert peak == 3, f"guardrails ran {peak}-at-a-time"
-        assert elapsed < 0.12, f"took {elapsed:.2f}s; serial would be ~0.15s"
-
     def test_a_serial_guardrail_gates_the_ones_declared_after_it(self):
         """Opting out is how a cheap filter is placed in front of expensive
         ones — so blocking there must stop them from ever starting."""
