@@ -114,13 +114,18 @@ class CompressMixin:
         is_main_agent = agent._parent_run_id is None
 
         cm = agent.tool_config.compression_manager
+        enable_evict = agent.tool_config.enable_evict
+        enable_auto_compact = agent.tool_config.enable_auto_compact
 
         # Layer 2, provider-native variant. Tried before the local layers
         # because a successful checkpoint leaves the portable transcript
         # untouched, so cross-provider fallback remains possible while
-        # subsequent Responses calls use the smaller context.
-        if cm is not None and cm.should_native_compact(
-            messages, model, tools=model.tools
+        # subsequent Responses calls use the smaller context. Same gate as
+        # local auto-compact: native *is* Layer 2, done server-side.
+        if (
+            enable_auto_compact
+            and cm is not None
+            and cm.should_native_compact(messages, model, tools=model.tools)
         ):
             before_tokens = model.estimate_native_compaction_tokens(messages, model.tools)
             t0 = time.monotonic()
@@ -176,33 +181,34 @@ class CompressMixin:
         # room for, and the model pays for it by re-running the tool.
         _window = model.context_window if isinstance(model.context_window, int) else 0
         context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
-        reclaimed = evict_context(
-            messages,
-            context_tokens=context_tokens,
-            context_window=_window,
-            model_id=model.id,
-        )
-        if reclaimed.total:
-            logger.debug(
-                f"Layer 1 (evict): {reclaimed.tool_results} tool result(s), "
-                f"{reclaimed.tool_call_args} tool-call argument(s)"
+        if enable_evict:
+            reclaimed = evict_context(
+                messages,
+                context_tokens=context_tokens,
+                context_window=_window,
+                model_id=model.id,
             )
-            if cb is not None:
-                cb(
-                    {
-                        "type": "compact.evict",
-                        "agent_name": agent_name,
-                        "is_main_agent": is_main_agent,
-                        "evicted": reclaimed.tool_results,
-                        "shrunk": reclaimed.tool_call_args,
-                    }
+            if reclaimed.total:
+                logger.debug(
+                    f"Layer 1 (evict): {reclaimed.tool_results} tool result(s), "
+                    f"{reclaimed.tool_call_args} tool-call argument(s)"
                 )
-            # Eviction rewrote content, so the count taken above is stale — and
-            # too high. Re-measure before deciding on Layer 2: an LLM summary
-            # bought for a request eviction already made fit is pure waste.
-            context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
+                if cb is not None:
+                    cb(
+                        {
+                            "type": "compact.evict",
+                            "agent_name": agent_name,
+                            "is_main_agent": is_main_agent,
+                            "evicted": reclaimed.tool_results,
+                            "shrunk": reclaimed.tool_call_args,
+                        }
+                    )
+                # Eviction rewrote content, so the count taken above is stale — and
+                # too high. Re-measure before deciding on Layer 2: an LLM summary
+                # bought for a request eviction already made fit is pure waste.
+                context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
 
-        if cm is None:
+        if not enable_auto_compact or cm is None:
             return
 
         # Layer 2: LLM summarisation. The threshold is checked *here* rather
@@ -269,7 +275,7 @@ class CompressMixin:
     ) -> bool:
         """Force Layer 2 after a prompt_too_long rejection. True if compacted."""
         cm = agent.tool_config.compression_manager if agent is not None else None
-        if cm is None:
+        if cm is None or not agent.tool_config.enable_auto_compact:
             return False
         await CompressMixin._fire_pre_compact(agent, messages)
         before = len(messages)

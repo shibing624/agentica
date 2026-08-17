@@ -19,7 +19,7 @@ from agentica.cli.runtime import (
 from agentica.subagent import get_subagent_configs
 from agentica.skills import (
     get_skill_registry,
-    load_skills,
+    load_system_skills,
 )
 from agentica.skills.skill_registry import reset_skill_registry
 
@@ -66,7 +66,7 @@ def _sanitize_history_for_model_switch(agent) -> None:
 def _refresh_skills_session(ctx: CommandContext):
     """Reload skill registry from disk and rebuild the current agent."""
     reset_skill_registry()
-    load_skills()
+    load_system_skills()
     new_registry = get_skill_registry()
     new_agent = create_agent(
         ctx.agent_config,

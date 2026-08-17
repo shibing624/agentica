@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Package version is already ``1.4.13``; keep accumulating here until the release cut.
 
+#### features
+- **系统 skill 只在 CLI/gateway 物化到 `$AGENTICA_HOME/skills/.system/`**：包内 `agentica/skills/bundled/`（`agentica`、`multi-agent`）仍是源；产品入口 `load_system_skills()` 按内容哈希同步到隐藏的 `.system`（升级覆盖）。SDK 的 `load_skills()` / `Agent()` / `DeepAgent()` / `SkillTool(auto_load=True)` 默认不扫 bundled、也不扫 `.system`，同机跑过 CLI 留下的文件不会漏进库调用。要覆盖内置：在 `skills/<name>/` 写同名 user skill。
+- **Layer 1 / Layer 2 压缩可关，默认仍开**：`ToolConfig.enable_evict`（淘汰旧工具结果）和 `ToolConfig.enable_auto_compact`（窗口满时自动摘要，含原生 compact 与 `prompt_too_long` 后的 reactive）。SDK 传 `ToolConfig(...)`；CLI `--no-evict` / `--no-auto-compact`（也认 `--evict` / `--auto-compact`），以及 `config.yaml` 的 `settings.enable_evict` / `settings.enable_auto_compact`（gateway 同样读）。关掉自动摘要后 `/compact` 仍可用，跨 provider fallback 仍会压 portable transcript。两层都关则超窗时把 provider 错误原样抛出。
+- **无 Docker 的 coding-agent 评测入口 `evaluation/code_benchmark/`**：本机跑 Aider Polyglot（Python 子集，agent 改文件 + pytest 判分）、LiveCodeBench（单轮生成基线）、BigCodeBench、EvalPlus（HumanEval+ 管道 smoke）。官方 Aider runner 绑 Docker，这里只用 polyglot-benchmark 题目和本机 pytest，分数可对表但不能直接贴官方榜。`run.py --dry-run` 不调 LLM，用 stub/canonical 自检判分；正式跑把 `AGENTICA_HOME` 指到输出目录，不写 `~/.agentica`。
+- **coding-agent 评测补齐 TB2.1/Pro 风格指标**：`summary.json` 除 accuracy 外必报 wall-clock/task、tool calls 与 API calls（分列，且 `tasks[]` 按题罗列）、crash/timeout rate、completion honesty（声称 tests pass 但判分未过）；另报 false-edit collateral（`git diff` 任务无关文件/行）、error recovery、human intervention、cache hit rate，以及 model / input·fresh·cached·output tokens / cost。Polyglot 在题目目录 `git init` 快照 stub，agent 跑完再 diff。`--agent claude|codex` 用同一套 pytest 包 Claude Code / Codex CLI 的 headless JSON，墙钟和对错在外面量，API/token 从它们自己的 JSON 解析。`--extra-body` 把 Venus 等网关的 `thinking_enabled` / `reasoning_effort` 原样传给模型。`--agent codex` 配 `--base-url` 时写一份隔离的 `CODEX_HOME`（`wire_api = "responses"`），走 Venus 的 Responses 接口，不碰 `~/.codex`。
+
 #### changes
 - **Ctrl+O 展开 execute 时带上启动命令，且结果是完整的**：前端只给命令/输出各留几行预览，展开页却经常只有输出（短命令根本不会单独入栈），用户对不上「哪条命令产出了这段」。现在同一次 `execute` 在 Ctrl+O 里是一块：`$` 后面是完整启动命令，`⎿` 后面是完整 stdout/stderr（含前端已经露出的那几行尾部），长命令先入栈、结果到达后原地升级，不会拆成两块。其它被折行的工具结果同样先写工具名和参数再写正文。
 - **`ask_user_question` 结果块的 Q 带上候选项**：翻回 transcript 时原先只看得到问题和最终答案，选项在提问组件消失后就没了，答案成了没上下文的标签。工具返回现在带上 `options`，结果块按 `1. / 2.` 列在 Q 下面（和提问组件同一套编号）；旧 payload 没有 `options` 时回退读这次调用的 `tool_args`。

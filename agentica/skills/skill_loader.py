@@ -10,7 +10,9 @@ Skill directories can contain:
 The SkillLoader provides file operations (list_files, read_file) to allow
 agents to explore and use skill resources.
 """
+import hashlib
 import os
+import shutil
 from pathlib import Path
 from typing import List, Optional
 
@@ -19,6 +21,85 @@ from agentica.skills.skill_registry import SkillRegistry, get_skill_registry
 from agentica.utils.string import truncate_if_too_long
 from agentica.config import AGENTICA_SKILL_DIR, AGENTICA_EXTRA_SKILL_PATHS
 from agentica.utils.log import logger
+
+# Product-only materialization of package bundled skills. Hidden so a listing
+# of $AGENTICA_HOME/skills shows user skills, not the ones we overwrite on
+# upgrade. SDK load_skills() never scans this directory.
+SYSTEM_SKILL_DIRNAME = ".system"
+_SYSTEM_SYNC_HASH = ".sync-hash"
+
+
+def system_skills_dir() -> Path:
+    """``$AGENTICA_HOME/skills/.system`` (honours ``AGENTICA_SKILL_DIR``)."""
+    return Path(AGENTICA_SKILL_DIR) / SYSTEM_SKILL_DIRNAME
+
+
+def _iter_bundled_skill_dirs() -> List[Path]:
+    root = SkillLoader.BUNDLED_SKILL_DIR
+    if not root.is_dir():
+        return []
+    return sorted(
+        p for p in root.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and (p / "SKILL.md").exists()
+    )
+
+
+def _fingerprint_tree(root: Path) -> str:
+    digest = hashlib.sha256()
+    if not root.is_dir():
+        return digest.hexdigest()
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts or path.suffix == ".pyc":
+            continue
+        if path.name == _SYSTEM_SYNC_HASH:
+            continue
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def ensure_system_skills() -> Path:
+    """Copy package bundled skills into ``skills/.system``. Product entry points only.
+
+    ``.system`` is a cache: content-hash mismatch overwrites. User overrides
+    belong in ``skills/<name>/``, not here. Returns the destination directory
+    even when the copy fails (loader then falls back to the package path).
+    """
+    dest_root = system_skills_dir()
+    src_dirs = _iter_bundled_skill_dirs()
+    fingerprint = _fingerprint_tree(SkillLoader.BUNDLED_SKILL_DIR)
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+        stamp = dest_root / _SYSTEM_SYNC_HASH
+        src_names = {p.name for p in src_dirs}
+        dest_names = {
+            p.name for p in dest_root.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        }
+        if (
+            stamp.is_file()
+            and stamp.read_text(encoding="utf-8").strip() == fingerprint
+            and dest_names == src_names
+        ):
+            return dest_root
+        for child in list(dest_root.iterdir()):
+            if child.name.startswith("."):
+                continue
+            if child.is_dir() and child.name not in src_names:
+                shutil.rmtree(child)
+        for src in src_dirs:
+            dest = dest_root / src.name
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        stamp.write_text(fingerprint + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning(f"Could not materialize system skills to {dest_root}: {exc}")
+    return dest_root
 
 
 class SkillLoader:
@@ -31,7 +112,11 @@ class SkillLoader:
     3. AGENTICA_EXTRA_SKILL_PATH (external extra skill dirs)
     4. ~/.claude/skills (user-level)
     5. ~/.agentica/skills (user-level)
-    6. agentica/skills/bundled (ships with the package)
+    6. $AGENTICA_HOME/skills/.system (CLI/gateway only, include_system=True)
+
+    SDK loaders omit (6). CLI/gateway call load_system_skills() which copies
+    agentica/skills/bundled into .system and then loads it as location
+    ``bundled`` (lowest priority: a user skill of the same name wins).
 
     Project-level skills override user-level skills with the same name.
 
@@ -51,8 +136,8 @@ class SkillLoader:
 
     SKILL_FILE = "SKILL.md"
 
-    # Skills shipped inside the package, so an agentica install always knows
-    # how to drive agentica itself.
+    # Canonical source of product skills. Copied to .system by
+    # ensure_system_skills(); SDK search paths do not include this directory.
     BUNDLED_SKILL_DIR = Path(__file__).parent / "bundled"
 
     def __init__(self, project_root: Optional[Path] = None):
@@ -65,9 +150,13 @@ class SkillLoader:
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.home_dir = Path.home()
 
-    def get_search_paths(self) -> List[tuple]:
+    def get_search_paths(self, include_system: bool = False) -> List[tuple]:
         """
         Get all skill search paths with their location type.
+
+        Args:
+            include_system: When True (CLI/gateway), append ``skills/.system``
+                as location ``bundled``. SDK callers leave this False.
 
         Returns:
             List of (path, location_type) tuples
@@ -102,8 +191,12 @@ class SkillLoader:
             user_path = self.home_dir / skill_dir
             add_path(user_path, "user")
 
-        # Bundled last: anything the user writes with the same name wins.
-        add_path(self.BUNDLED_SKILL_DIR, "bundled")
+        if include_system:
+            system_dir = system_skills_dir()
+            if self.discover_skills(system_dir):
+                add_path(system_dir, "bundled")
+            else:
+                add_path(self.BUNDLED_SKILL_DIR, "bundled")
 
         return paths
 
@@ -129,10 +222,11 @@ class SkillLoader:
         skill_files = []
 
         for item in skills_dir.iterdir():
-            if item.is_dir():
-                skill_md = item / self.SKILL_FILE
-                if skill_md.exists():
-                    skill_files.append(skill_md)
+            if not item.is_dir() or item.name.startswith("."):
+                continue
+            skill_md = item / self.SKILL_FILE
+            if skill_md.exists():
+                skill_files.append(skill_md)
 
         return skill_files
 
@@ -178,12 +272,17 @@ class SkillLoader:
 
         return self.load_skill(skill_md_path, location)
 
-    def load_all(self, registry: Optional[SkillRegistry] = None) -> SkillRegistry:
+    def load_all(
+        self,
+        registry: Optional[SkillRegistry] = None,
+        include_system: bool = False,
+    ) -> SkillRegistry:
         """
         Load all skills from all search paths into the registry.
 
         Args:
             registry: Optional registry to load into. Creates new if not provided.
+            include_system: Load system skills from ``skills/.system``.
 
         Returns:
             SkillRegistry containing all loaded skills
@@ -191,7 +290,7 @@ class SkillLoader:
         if registry is None:
             registry = get_skill_registry()
 
-        for search_path, location in self.get_search_paths():
+        for search_path, location in self.get_search_paths(include_system=include_system):
             skill_files = self.discover_skills(search_path)
 
             for skill_md_path in skill_files:
@@ -207,12 +306,17 @@ class SkillLoader:
 
         return registry
 
-    def reload(self, registry: Optional[SkillRegistry] = None) -> SkillRegistry:
+    def reload(
+        self,
+        registry: Optional[SkillRegistry] = None,
+        include_system: bool = False,
+    ) -> SkillRegistry:
         """
         Reload all skills, clearing the existing registry first.
 
         Args:
             registry: Optional registry to reload. Uses global if not provided.
+            include_system: Load system skills from ``skills/.system``.
 
         Returns:
             SkillRegistry containing all reloaded skills
@@ -221,7 +325,7 @@ class SkillLoader:
             registry = get_skill_registry()
 
         registry.clear()
-        return self.load_all(registry)
+        return self.load_all(registry, include_system=include_system)
 
     def match_trigger(self, text: str) -> Optional[Skill]:
         """
@@ -334,18 +438,32 @@ class SkillLoader:
             return f"Error reading file: {e}"
 
 
-def load_skills(project_root: Optional[Path] = None) -> SkillRegistry:
+def load_skills(
+    project_root: Optional[Path] = None,
+    include_system: bool = False,
+) -> SkillRegistry:
     """
-    Convenience function to load all skills from standard directories.
+    Load skills from standard directories.
+
+    ``include_system`` defaults False: SDK callers must not pick up the
+    CLI/gateway manuals (``agentica``, ``multi-agent``). Product entry
+    points use :func:`load_system_skills` instead.
 
     Args:
         project_root: Root directory of the project
+        include_system: Load ``$AGENTICA_HOME/skills/.system``
 
     Returns:
         SkillRegistry containing all loaded skills
     """
     loader = SkillLoader(project_root)
-    return loader.load_all()
+    return loader.load_all(include_system=include_system)
+
+
+def load_system_skills(project_root: Optional[Path] = None) -> SkillRegistry:
+    """CLI/gateway: materialize ``.system`` then load all paths including it."""
+    ensure_system_skills()
+    return load_skills(project_root, include_system=True)
 
 
 def get_available_skills() -> List[Skill]:

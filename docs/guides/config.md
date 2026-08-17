@@ -77,6 +77,8 @@ profiles:
 # CLI / gateway 行为开关（与 model profile 无关）
 settings:
   num_history_turns: 20
+  # enable_evict: true         # Layer 1 淘汰旧工具结果（默认开）
+  # enable_auto_compact: true  # Layer 2 窗口满时自动摘要（默认开；/compact 仍可用）
   # gateway 入站图片/语音/视频：底模看不了时用这个 Gemini 描述/转写
   # media_model:
   #   model_provider: openai

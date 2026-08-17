@@ -10,6 +10,7 @@ Agent Skills format).
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agentica.skills.skill import Skill
 from agentica.skills.skill_loader import SkillLoader
@@ -96,13 +97,129 @@ class TestBundledSkillsArePreemptable(unittest.TestCase):
         self.assertFalse(registry.register(bundled))
         self.assertEqual(registry.get("multi-agent").location, "user")
 
-    def test_bundled_is_the_last_search_path(self):
+    def test_sdk_search_paths_omit_bundled(self):
         loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
-        paths = loader.get_search_paths()
-        self.assertEqual(paths[-1][1], "bundled")
-        self.assertEqual(
-            Path(paths[-1][0]).resolve(), SkillLoader.BUNDLED_SKILL_DIR.resolve(),
-        )
+        locations = [loc for _, loc in loader.get_search_paths()]
+        self.assertNotIn("bundled", locations)
+
+    def test_product_search_paths_put_system_last(self):
+        from agentica.skills.skill_loader import ensure_system_skills, system_skills_dir
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                ensure_system_skills()
+                loader = SkillLoader(project_root=Path(tmp))
+                paths = loader.get_search_paths(include_system=True)
+                self.assertEqual(paths[-1][1], "bundled")
+                self.assertEqual(Path(paths[-1][0]).resolve(), system_skills_dir().resolve())
+
+
+class TestSystemSkillsAreProductOnly(unittest.TestCase):
+    """SDK load_skills must not register or materialize agentica/multi-agent."""
+
+    def test_sdk_load_does_not_register_bundled_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                loader = SkillLoader(project_root=Path(tmp))
+                loader.home_dir = Path(tmp)
+                registry = loader.load_all(SkillRegistry())
+        self.assertIsNone(registry.get("agentica"))
+        self.assertIsNone(registry.get("multi-agent"))
+
+    def test_sdk_load_skips_leftover_system_dir(self):
+        """A previous CLI run left files in .system; SDK must not pick them up."""
+        with tempfile.TemporaryDirectory() as tmp:
+            leftover = Path(tmp) / ".system" / "agentica"
+            leftover.mkdir(parents=True)
+            (leftover / "SKILL.md").write_text(
+                "---\nname: agentica\ndescription: leftover\n---\nfrom CLI\n",
+                encoding="utf-8",
+            )
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                loader = SkillLoader(project_root=Path(tmp))
+                loader.home_dir = Path(tmp)
+                registry = loader.load_all(SkillRegistry())
+        self.assertIsNone(registry.get("agentica"))
+
+    def test_load_system_skills_materializes_and_registers(self):
+        from agentica.skills.skill_loader import load_system_skills, system_skills_dir
+        from agentica.skills.skill_registry import reset_skill_registry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                reset_skill_registry()
+                registry = load_system_skills(project_root=Path(tmp))
+                dest = system_skills_dir()
+                self.assertTrue((dest / "agentica" / "SKILL.md").is_file())
+                self.assertTrue((dest / "multi-agent" / "SKILL.md").is_file())
+                skill = registry.get("agentica")
+                self.assertIsNotNone(skill)
+                self.assertEqual(skill.location, "bundled")
+                self.assertEqual(Path(skill.path).resolve(), (dest / "agentica").resolve())
+
+    def test_user_skill_of_the_same_name_still_wins_after_materialize(self):
+        from agentica.skills.skill_loader import load_system_skills
+        from agentica.skills.skill_registry import reset_skill_registry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            user = Path(tmp) / "multi-agent"
+            user.mkdir()
+            (user / "SKILL.md").write_text(
+                "---\nname: multi-agent\ndescription: mine\n---\nmy own version\n",
+                encoding="utf-8",
+            )
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                reset_skill_registry()
+                registry = load_system_skills(project_root=Path(tmp))
+            self.assertEqual(registry.get("multi-agent").location, "user")
+            self.assertIn("my own version", registry.get("multi-agent").content)
+
+    def test_skill_tool_sdk_auto_load_omits_system_skills(self):
+        from agentica.skills.skill_registry import reset_skill_registry
+        from agentica.tools.skill_tool import SkillTool
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                reset_skill_registry()
+                leftover = Path(tmp) / ".system" / "agentica"
+                leftover.mkdir(parents=True)
+                (leftover / "SKILL.md").write_text(
+                    "---\nname: agentica\ndescription: leftover\n---\nfrom CLI\n",
+                    encoding="utf-8",
+                )
+                tool = SkillTool(auto_load=True)
+                tool.initialize()
+        self.assertIsNone(tool.registry.get("agentica"))
+        self.assertIsNone(tool.registry.get("multi-agent"))
+
+    def test_skill_tool_after_product_load_keeps_system_skills(self):
+        """CLI create_agent preloads via load_system_skills, then SkillTool
+        auto_load calls load_skills() without include_system. That must not
+        drop the already-registered system skills."""
+        from agentica.skills.skill_loader import load_system_skills
+        from agentica.skills.skill_registry import reset_skill_registry
+        from agentica.tools.skill_tool import SkillTool
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                reset_skill_registry()
+                load_system_skills(project_root=Path(tmp))
+                tool = SkillTool(auto_load=True)
+                tool.initialize()
+                self.assertIsNotNone(tool.registry.get("agentica"))
+                self.assertEqual(tool.registry.get("agentica").location, "bundled")
+
+    def test_ensure_system_skills_is_idempotent_until_source_changes(self):
+        from agentica.skills.skill_loader import ensure_system_skills, system_skills_dir
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
+                first = ensure_system_skills()
+                stamp = first / ".sync-hash"
+                text = stamp.read_text(encoding="utf-8")
+                ensure_system_skills()
+                self.assertEqual(stamp.read_text(encoding="utf-8"), text)
+                self.assertEqual(system_skills_dir(), first)
 
 
 class TestBundledSkillContent(unittest.TestCase):

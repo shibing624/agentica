@@ -14,7 +14,7 @@ from agentica.cost_tracker import refresh_model_catalog_in_background
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import suppress_console_logging, enable_process_file_logging
 from agentica.workspace import Workspace
-from agentica.skills import load_skills, get_skill_registry
+from agentica.skills import load_system_skills, get_skill_registry
 
 
 def _enable_cli_file_logging() -> str:
@@ -147,6 +147,8 @@ def main():
         # directory, because both compete to decide where this session works.
         "worktree": args.worktree,
         "enable_experience_capture": not args.no_experience,
+        "enable_evict": args.evict,
+        "enable_auto_compact": args.auto_compact,
         "enable_skill_upgrade": args.enable_skill_upgrade,
         "skill_upgrade_mode": args.skill_upgrade_mode,
         "permissions": "allow-all" if args.allow_all else args.permissions,
@@ -198,7 +200,7 @@ def main():
         # Suppress logging during skill loading for cleaner output
         if args.debug == 0:
             suppress_console_logging()
-        load_skills()
+        load_system_skills()
         skills_registry = get_skill_registry()
 
     if args.query:

@@ -580,6 +580,17 @@ class TestRunnerEvictionGate(unittest.TestCase):
         self.assertGreater(evicted, 0)
         self.assertLess(evicted, 7, "must stop at target and spare the trailing batch")
 
+    def test_disabled_evict_keeps_every_result_even_when_tight(self):
+        from agentica.runner import Runner
+
+        agent, model, messages = self._agent_and_messages()
+        model.context_window = 8_000
+        agent.tool_config.enable_evict = False
+
+        asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+
+        self.assertEqual(self._evicted(messages), 0)
+
 
 class TestRunnerNativeCompaction(unittest.TestCase):
     def _agent(self):
@@ -620,6 +631,24 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         self.assertEqual(messages[-1].provider_checkpoint, result.checkpoint)
         evict.assert_not_called()
         local_auto.assert_not_called()
+
+    def test_auto_compact_off_skips_native(self):
+        from agentica.runner import Runner
+
+        agent, model, cm = self._agent()
+        agent.tool_config.enable_auto_compact = False
+        messages = [Message(role="user", content="long context")]
+        model.compact_context = AsyncMock(
+            side_effect=AssertionError("native compact must not run when auto-compact is off")
+        )
+
+        with patch.object(cm, "should_native_compact", return_value=True) as native_gate, \
+             patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+
+        native_gate.assert_not_called()
+        model.compact_context.assert_not_called()
+        local_auto.assert_not_awaited()
 
     def test_native_failure_falls_back_to_local_pipeline(self):
         from agentica.compression import EvictionResult

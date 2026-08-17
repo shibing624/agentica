@@ -11,7 +11,7 @@ import asyncio
 import os
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -103,6 +103,63 @@ class TestCompactionIsReportedOnTheRun(unittest.TestCase):
 
         self.assertEqual(agent.run_response.context_compactions, 1)
         self.assertTrue(state.context_collapsed)
+
+
+class TestCompressionSwitches(unittest.TestCase):
+    """Automatic Layer 1 / Layer 2 can be turned off; /compact stays available."""
+
+    def test_defaults_are_on(self):
+        from agentica.agent.config import ToolConfig
+
+        tc = ToolConfig()
+        self.assertTrue(tc.enable_evict)
+        self.assertTrue(tc.enable_auto_compact)
+        agent = _agent()
+        self.assertTrue(agent.tool_config.enable_evict)
+        self.assertTrue(agent.tool_config.enable_auto_compact)
+        self.assertIsNotNone(agent.tool_config.compression_manager)
+
+    def test_layer1_off_skips_evict(self):
+        from agentica.agent.config import ToolConfig
+        from agentica.compression import EvictionResult
+
+        agent = _agent(tool_config=ToolConfig(enable_evict=False))
+        agent.model.context_window = 8_000
+        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict:
+            asyncio.run(
+                CompressMixin._maybe_compress_messages(
+                    [Message(role="user", content="hi")], agent, agent.model, LoopState(),
+                )
+            )
+        evict.assert_not_called()
+
+    def test_layer2_off_skips_auto_and_reactive_but_keeps_the_manager(self):
+        from agentica.agent.config import ToolConfig
+
+        agent = _agent(tool_config=ToolConfig(enable_auto_compact=False))
+        agent.model.context_window = 1_000
+        cm = MagicMock()
+        cm.should_native_compact = MagicMock(return_value=False)
+        cm.should_auto_compact = MagicMock(return_value=True)
+        cm.auto_compact = AsyncMock(return_value=True)
+        agent.tool_config.compression_manager = cm
+
+        asyncio.run(
+            CompressMixin._maybe_compress_messages(
+                [Message(role="user", content="hi")], agent, agent.model, LoopState(),
+            )
+        )
+        cm.auto_compact.assert_not_awaited()
+        cm.should_auto_compact.assert_not_called()
+
+        compacted = asyncio.run(
+            CompressMixin._try_reactive_compact(
+                [Message(role="user", content="hi")], agent, agent.model,
+            )
+        )
+        self.assertFalse(compacted)
+        cm.auto_compact.assert_not_awaited()
+        self.assertIsNotNone(agent.tool_config.compression_manager)
 
 
 if __name__ == "__main__":

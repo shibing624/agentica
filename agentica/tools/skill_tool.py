@@ -257,13 +257,9 @@ class SkillTool(Tool):
     specialized knowledge, workflows, and tools. When a skill is invoked,
     its instructions are loaded into the conversation context.
 
-    Auto-loads skills from standard directories:
-    - .claude/skills (project-level)
-    - .agentica/skills (project-level)
-    - ~/.claude/skills (user-level)
-    - ~/.agentica/skills (user-level)
-
-    Also supports custom skill directories via constructor.
+    Auto-loads skills from standard directories (user/project/managed).
+    Product (CLI/gateway) system skills are loaded separately via
+    ``load_system_skills``; this tool does not register them.
     """
 
     _VISIBLE_GENERATED_STATUSES = {"shadow", "auto"}

@@ -50,7 +50,7 @@ from agentica.cli.worktree_binding import WorktreeBinder
 from agentica.global_config import get_setting, set_project_profile
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
-from agentica.skills import get_skill_registry, load_skills
+from agentica.skills import get_skill_registry, load_system_skills
 from agentica.subagent_loader import load_all_agents
 from agentica.tools.ask_user_question_tool import (
     set_default_ask_user_question_callback,
@@ -428,7 +428,7 @@ def run_interactive(
 
     # Always scan installed skills for auto-commands
     if skills_registry is None or len(skills_registry) == 0:
-        load_skills()
+        load_system_skills()
         scanned = get_skill_registry()
         if len(scanned) > 0:
             skills_registry = scanned

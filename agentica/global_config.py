@@ -580,6 +580,9 @@ env: {}
 settings:
 #  cli_markdown: auto        # off|auto|on — render only the final assistant reply
 #  num_history_turns: 20     # conversation turns kept in the prompt window
+#  enable_evict: true        # Layer 1: drop old tool results under pressure
+#  enable_auto_compact: true # Layer 2: LLM-summarise when the window fills
+#                            # (/compact still works when this is false)
 #  resume_cwd: ask           # ask|session|current — directory to use when /resume
 #                            # picks a session started in another directory
 #  media_model:              # gateway: Gemini used to describe/transcribe

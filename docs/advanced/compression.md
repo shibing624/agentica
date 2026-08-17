@@ -33,6 +33,8 @@ Context Messages
 
 ### Layer 1：淘汰（`agentica.compression.evict`）
 
+由 `ToolConfig.enable_evict` 控制（默认开）。关掉后这一层完全不跑，窗口会更快涨到 Layer 2。
+
 只有两个参数，没有「保留最近 N 条」这类计数：
 
 - **`EVICT_THRESHOLD_RATIO = 0.7`** — 占用低于窗口 70% 时一条都不动。清掉一条窗口本来放得下的结果是净亏：省下的上下文没人要，模型却要重跑工具才能拿回来。
@@ -59,7 +61,7 @@ Context Messages
 
 ### Layer 2：摘要（`CompressionManager`）
 
-淘汰兜不住时才走这层。它总是可用的（`ToolConfig.compression_manager` 留空时自动创建），否则长会话除了被 provider 拒绝没有别的出路。
+淘汰兜不住时才走这层。`ToolConfig.compression_manager` 留空时自动创建（给 `/compact` 和跨 provider fallback 用）。自动触发由 `ToolConfig.enable_auto_compact` 控制（默认开）；关掉后 runner / 原生 compact / `prompt_too_long` 后的 reactive 都不跑，超窗就把 provider 错误抛出。`/compact` 不受此开关影响。
 
 ## Responses 原生 Compact
 
@@ -111,6 +113,36 @@ agent = Agent(
 两个阈值都可以省略：留空时运行时按 `model.context_window` 推导（80% 触发 / 50% 目标）。`model` 省略时使用调用方传入的活跃模型。
 
 摘要会保留两样东西：**system prompt**（否则本轮剩下的调用没有任何指令）和**从最后一条 user 消息开始的整个尾部**（否则对话以 assistant 结尾，provider 会直接拒绝）。
+
+## 开关（默认都开）
+
+两层都可以关。比例旋钮仍然只有 `AGENTICA_EVICT_THRESHOLD_RATIO`；这两个布尔管的是「要不要自动做」，不是「做多狠」。
+
+| 开关 | 默认 | 关掉之后 |
+|------|------|----------|
+| `ToolConfig.enable_evict` | `True` | Layer 1 不淘汰。窗口更容易涨到 Layer 2 |
+| `ToolConfig.enable_auto_compact` | `True` | runner 自动摘要、原生 compact、`prompt_too_long` 后的 reactive 都不跑。`/compact` 仍可用 |
+
+```python
+from agentica import Agent, OpenAIChat
+from agentica.agent.config import ToolConfig
+
+# SDK：评测 / 成本敏感服务可以关自动摘要
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o"),
+    tool_config=ToolConfig(enable_evict=False, enable_auto_compact=False),
+)
+```
+
+CLI：`--no-evict` / `--no-auto-compact`（也认 `--evict` / `--auto-compact` 强制打开）。未传 flag 时读 `~/.agentica/config.yaml`：
+
+```yaml
+settings:
+  enable_evict: true
+  enable_auto_compact: true
+```
+
+Gateway 读同一对 settings。SDK 的 `Agent()` **不**读 config.yaml——只认构造时传入的 `ToolConfig`。
 
 ## Layer 0：工具输出预算
 

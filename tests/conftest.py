@@ -43,6 +43,17 @@ def _isolate_default_project_dir(monkeypatch):
         yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_skill_dir(monkeypatch):
+    """create_agent / load_system_skills write ``skills/.system``. Keep that
+    off the user's real ``~/.agentica/skills``."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setenv("AGENTICA_SKILL_DIR", tmpdir)
+        monkeypatch.setattr("agentica.config.AGENTICA_SKILL_DIR", tmpdir, raising=False)
+        monkeypatch.setattr("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmpdir, raising=False)
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Simple tool helpers (usable as Agent tools)
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
 
 from agentica.utils.log import logger
 from agentica import DeepAgent
+from agentica.agent.config import ToolConfig
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
 from agentica.run_config import RunConfig
@@ -29,11 +30,12 @@ from agentica.run_context import RunSource
 from agentica.workspace import Workspace
 from agentica.global_config import (
     apply_global_config,
+    get_setting,
     set_active_profile,
     provider_api_key_env,
 )
 from agentica.memory.session_log import SessionLog
-from agentica.skills import get_skill_registry
+from agentica.skills import get_skill_registry, load_system_skills
 
 from ..config import settings
 from .media_understanding import media_understanding
@@ -405,6 +407,10 @@ class AgentService:
             instructions = []
         instructions.append(_APPROVAL_MODE_INSTRUCTION)
 
+        permission_mode = self.get_session_approval_mode(session_id)
+        enable_evict = get_setting("enable_evict", True)
+        enable_auto_compact = get_setting("enable_auto_compact", True)
+        load_system_skills()
         agent = DeepAgent(
             session_id=session_id,
             model=model,
@@ -427,7 +433,13 @@ class AgentService:
             # is intentionally OFF: the gateway is headless (web/chat channels)
             # with no stdin, so the tool would block on a bare input() call.
             include_ask_user_question=False,
-            permission_mode=self.get_session_approval_mode(session_id),
+            permission_mode=permission_mode,
+            tool_config=ToolConfig(
+                auto_load_mcp=True,
+                permission_mode=permission_mode,
+                enable_evict=bool(enable_evict),
+                enable_auto_compact=bool(enable_auto_compact),
+            ),
         )
 
         # Lets the Runner drain replies from other sessions between tool

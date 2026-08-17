@@ -88,8 +88,12 @@ class ToolConfig:
     update_knowledge: bool = False
     # References
     add_references: bool = False
-    # Compression. Layer 1 (eviction) is unconditional; this holds Layer 2,
-    # which is built automatically when left as None.
+    # Compression. The manager is always constructed (for /compact and
+    # cross-provider fallback); these two flags gate the *automatic* path.
+    # Both default on. Layer 0 (tool-result budget) is an output policy,
+    # not a switch — per-function max_result_size_chars already exists.
+    enable_evict: bool = True
+    enable_auto_compact: bool = True
     compression_manager: Optional[Any] = None
 
     # Unified 3-tier tool permission mode shared by the SDK, CLI, and Gateway.

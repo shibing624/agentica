@@ -551,6 +551,24 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertTrue(args.enable_skill_upgrade)
         self.assertEqual(args.skill_upgrade_mode, "draft")
 
+    def test_parse_compression_flags(self):
+        from agentica.cli.runtime import parse_args
+
+        with patch.object(sys, "argv", ["agentica"]):
+            args = parse_args()
+        self.assertIsNone(args.evict)
+        self.assertIsNone(args.auto_compact)
+
+        with patch.object(sys, "argv", ["agentica", "--no-evict", "--no-auto-compact"]):
+            args = parse_args()
+        self.assertFalse(args.evict)
+        self.assertFalse(args.auto_compact)
+
+        with patch.object(sys, "argv", ["agentica", "--evict", "--auto-compact"]):
+            args = parse_args()
+        self.assertTrue(args.evict)
+        self.assertTrue(args.auto_compact)
+
     def test_interactive_extensions_install_reports_replaced_symlinked_skill(self):
         """Interactive install prints when it replaces a symlinked skill."""
         from agentica.skills.skill import Skill
@@ -595,7 +613,7 @@ class TestCLIConfiguration(unittest.TestCase):
         with (
             patch.object(cli_tools_skills, "install_skills", side_effect=fake_install_skills),
             patch.object(cli_helpers, "reset_skill_registry"),
-            patch.object(cli_helpers, "load_skills"),
+            patch.object(cli_helpers, "load_system_skills"),
             patch.object(cli_helpers, "get_skill_registry", return_value=refreshed_registry),
             patch.object(cli_helpers, "create_agent", return_value=MagicMock()),
             patch("agentica.cli.commands.tools_skills.Path") as MockPath,
@@ -703,6 +721,56 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertFalse(captured["experience_config"].capture_success_patterns)
         self.assertIsNotNone(captured["experience_config"].skill_upgrade)
         self.assertEqual(captured["experience_config"].skill_upgrade.mode, "draft")
+
+    def test_create_agent_applies_compression_switches(self):
+        from agentica.cli.runtime import create_agent
+
+        captured = {}
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.tools = []
+
+        with (
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
+            patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
+        ):
+            create_agent(
+                {
+                    "model_provider": "zhipuai",
+                    "model_name": "glm-5",
+                    "debug": False,
+                    "work_dir": None,
+                    "enable_evict": False,
+                    "enable_auto_compact": False,
+                },
+                extra_tools=[],
+                workspace=None,
+                skills_registry=None,
+            )
+
+        tc = captured["tool_config"]
+        self.assertFalse(tc.enable_evict)
+        self.assertFalse(tc.enable_auto_compact)
+        self.assertTrue(tc.auto_load_mcp)
+
+    def test_resolve_compression_flags_reads_settings_when_unset(self):
+        from agentica.cli.runtime import _resolve_compression_flags
+
+        with patch("agentica.cli.runtime.get_setting", side_effect=lambda key, default=None: {
+            "enable_evict": False,
+            "enable_auto_compact": False,
+        }.get(key, default)):
+            evict, auto = _resolve_compression_flags({})
+        self.assertFalse(evict)
+        self.assertFalse(auto)
+
+        evict, auto = _resolve_compression_flags(
+            {"enable_evict": True, "enable_auto_compact": False}
+        )
+        self.assertTrue(evict)
+        self.assertFalse(auto)
 
     def test_create_agent_sets_background_registry_user_id(self):
         """Background command logs should use the current workspace user segment."""

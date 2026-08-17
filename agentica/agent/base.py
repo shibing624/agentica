@@ -678,8 +678,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # skills are not advertised in the frozen session guidance.
         self._merge_tool_system_prompts()
 
-        # Layer 2 is always wired: without it a long session has no way back
-        # from an oversized context except the provider rejecting the request.
+        # Layer 2 is always constructed so /compact and cross-provider
+        # fallback have a manager. The automatic path (runner / native /
+        # reactive) is gated by ToolConfig.enable_auto_compact, default on.
         if self.tool_config.compression_manager is None:
             self.tool_config.compression_manager = CompressionManager(
                 model=self.resolve_auxiliary_model("compression"),

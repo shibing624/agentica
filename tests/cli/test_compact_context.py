@@ -147,6 +147,16 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         rendered = "\n".join(str(call) for call in console.print.call_args_list)
         self.assertIn("Compaction failed", rendered)
 
+    def test_compact_still_runs_when_auto_compact_is_off(self):
+        agent = _build_agent(num_runs=5)
+        agent.tool_config.enable_auto_compact = False
+        before = asyncio.run(measure_context(agent)).total
+
+        with self._summary(agent):
+            self._run_compact(agent)
+
+        self.assertLess(asyncio.run(measure_context(agent)).total, before)
+
     def test_compact_is_noop_on_empty_history(self):
         from agentica import Agent
 

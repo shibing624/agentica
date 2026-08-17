@@ -164,6 +164,8 @@ examples/outputs
 .DS_Store
 examples/tmp/
 evaluation/outputs/
+evaluation/code_benchmark/.cache/
+evaluation/code_benchmark/outputs/
 .vscode/
 outputs/
 

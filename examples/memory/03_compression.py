@@ -128,6 +128,8 @@ def demo_agent_with_compression():
     agent1 = Agent(model=OpenAIChat(id="gpt-4o"), name="DefaultAgent")
     print("\n1. Default agent — Layer 2 is wired automatically:")
     print(f"   Manager: {type(agent1.tool_config.compression_manager).__name__}")
+    print(f"   enable_evict={agent1.tool_config.enable_evict} "
+          f"enable_auto_compact={agent1.tool_config.enable_auto_compact}")
 
     custom_compression = CompressionManager(
         model=OpenAIChat(id="gpt-4o-mini"),

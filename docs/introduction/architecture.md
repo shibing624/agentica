@@ -95,8 +95,8 @@ Runner._run_impl()
     │       └── Dynamic Zone:   workspace memory + datetime
     │
     ├─► 上下文压缩检查       (Runner._maybe_compress_messages)
-    │       ├── Layer 1: evict_context() — 淘汰旧结果 + 收缩参数（免费）
-    │       └── Layer 2: CompressionManager.auto_compact() — LLM 摘要
+    │       ├── Layer 1: evict_context() — 淘汰旧结果 + 收缩参数（免费；`enable_evict`）
+    │       └── Layer 2: CompressionManager.auto_compact() — LLM 摘要（`enable_auto_compact`）
     │
     ├─► LLM API 调用         (Model.response / response_stream)
     │

@@ -16,9 +16,12 @@ from rich.console import Console
 from agentica.agent.config import (
     ExperienceConfig,
     SkillUpgradeConfig,
+    ToolConfig,
     WorkspaceMemoryConfig,
 )
 from agentica.config import AGENTICA_CACHE_DIR
+from agentica.global_config import get_setting
+from agentica.skills import load_system_skills
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.version import __version__
@@ -433,6 +436,22 @@ def parse_args():
         "--no-experience", action="store_true", help="Disable DeepAgent experience capture and self-evolution hooks"
     )
     parser.add_argument(
+        "--evict",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Layer 1: evict old tool results under context pressure "
+        "(default: on; --no-evict disables). config.yaml settings.enable_evict also applies.",
+    )
+    parser.add_argument(
+        "--auto-compact",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        dest="auto_compact",
+        help="Layer 2: auto-summarise when the context window fills "
+        "(default: on; --no-auto-compact disables). /compact still works. "
+        "config.yaml settings.enable_auto_compact also applies.",
+    )
+    parser.add_argument(
         "--enable-skill-upgrade", action="store_true", help="Enable automatic experience-to-skill upgrade"
     )
     parser.add_argument(
@@ -824,6 +843,17 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _resolve_compression_flags(agent_config: dict) -> tuple[bool, bool]:
+    """CLI flag (via agent_config) wins; else config.yaml settings; else on."""
+    evict = agent_config.get("enable_evict")
+    if evict is None:
+        evict = get_setting("enable_evict", True)
+    auto = agent_config.get("enable_auto_compact")
+    if auto is None:
+        auto = get_setting("enable_auto_compact", True)
+    return bool(evict), bool(auto)
+
+
 def create_agent(
     agent_config: dict,
     extra_tools: Optional[List] = None,
@@ -863,6 +893,8 @@ def create_agent(
     if permission_mode is None:
         configured_permission_mode = agent_config.get("permissions")
         permission_mode = configured_permission_mode if isinstance(configured_permission_mode, str) else "allow-all"
+    enable_evict, enable_auto_compact = _resolve_compression_flags(agent_config)
+    load_system_skills()
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -1046,6 +1078,12 @@ def create_agent(
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
         diagnostics_servers=agent_config.get("diagnostics_servers"),
         permission_mode=permission_mode,
+        tool_config=ToolConfig(
+            auto_load_mcp=True,
+            permission_mode=permission_mode,
+            enable_evict=enable_evict,
+            enable_auto_compact=enable_auto_compact,
+        ),
         # Tell the model when another live session already has the file it just
         # wrote uncommitted, instead of letting both find out at merge time.
         peer_conflict_checker=build_peer_conflict_checker(peer_session),
