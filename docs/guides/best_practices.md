@@ -96,7 +96,7 @@ def create_agent(user_id: str) -> Agent:
 ```python
 from agentica import DeepAgent
 
-agent = DeepAgent()  # 40+ 内置工具 + 5 阶段压缩 + 长期记忆 + skills + MCP
+agent = DeepAgent()  # 内置工具 + 压缩 + 长期记忆 + skills + MCP
 print(agent.run_sync("Research RAG 最新进展并写到 report.md").content)
 ```
 

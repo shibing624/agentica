@@ -1,7 +1,7 @@
 # Agentica
 
-**让 Agent 真正跑起来——跑得久、不跑飞、能干活、会进化。**
-Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web Gateway
+**一个人，一支 agent 团队。**
+本机 Agent CLI + Python SDK · 多会话协作 · `/goal` 长任务 · 微信/企微/飞书 Gateway
 
 <div align="center">
   <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/logo.png" height="30" alt="Logo">
@@ -21,7 +21,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 - **Async-First 架构** -- 所有核心方法原生 async，同步适配器无缝兼容。
 - **开发者友好** -- 简洁直观的面向对象 API，极低学习曲线。
 - **模块化可扩展** -- 模型、记忆后端、向量存储均可自由替换。
-- **功能完备** -- 内置 40+ 工具、RAG、多智能体团队、工作流编排、安全守卫。
+- **功能完备** -- 内置工具、RAG、多智能体团队、工作流编排、安全守卫。
 - **生产就绪** -- CLI / Web UI / API 服务多种部署方式，支持 MCP 与 ACP 协议。
 
 ## 系统架构
@@ -42,7 +42,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | [CLI 终端](getting-started/terminal.md) | 命令行交互：`task` / `delegate` / peer、斜杠命令 |
 | **核心概念** | |
 | [Agent](concepts/agent.md) | Agent 核心概念、Model、Memory、Tools |
-| [Model](concepts/model.md) | 20+ 模型提供商 |
+| [Model](concepts/model.md) | 多模型提供商 |
 | [Tools](concepts/tools.md) | 内置工具与自定义工具（含 `task`/`delegate`/peer） |
 | [Memory & Workspace](concepts/memory.md) | 记忆系统与工作空间 |
 | [Knowledge (RAG)](concepts/rag.md) | 知识库、向量检索 |

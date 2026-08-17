@@ -7,7 +7,7 @@ A pre-configured Agent preset for CLI, Gateway, and daily dogfood workflows.
 Use plain Agent for SDK integrations that need the smallest stable surface.
 
 DeepAgent enables the product defaults users expect from an unattended assistant:
-- 40+ built-in tools (file ops, web search, execute, subagent task, todos)
+- built-in tools (file ops, web search, execute, subagent task, todos)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
 - Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
   native/LLM summarise; reactive compact on prompt_too_long)

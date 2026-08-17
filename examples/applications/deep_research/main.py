@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Deep Research Agent — DeepAgent with 40+ built-in tools demo.
+@description: Deep Research Agent — DeepAgent with built-in tools demo.
 
 Demonstrates DeepAgent capabilities powered by the Runner agentic loop:
-- 40+ built-in tools (file ops, web search, execute code, subagent task, todos)
+- built-in tools (file ops, web search, execute code, subagent task, todos)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
 - Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
   native/LLM summarise; reactive compact on prompt_too_long)

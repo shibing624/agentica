@@ -1,6 +1,6 @@
 # Model
 
-Model 是 Agent 的"大脑"，提供推理和生成能力。Agentica 支持 20+ 模型提供商。
+Model 是 Agent 的"大脑"，提供推理和生成能力。Agentica 支持多家模型提供商。
 
 ## 支持的模型
 

@@ -10,8 +10,9 @@
 
 # Agentica
 
-**Agent を「何時間でも走らせる」——暴走せず、実際に手を動かし、使うほど強くなる。**
-Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI + Web Gateway
+**一人で、エージェントのチームを持つ。**
+
+ターミナルで複数セッションを並行起動し、互いに通信する。長時間タスクの最中に席を外しても、WeChat / WeCom から呼び戻せる。
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
@@ -19,16 +20,13 @@ Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://github.com/shibing624/agentica/blob/main/requirements.txt)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#コミュニティとサポート)
 
-**Agentica** は単なる LLM API のチャットラッパーではなく、Async-First の agent harness です——エージェントを本当に「動かす」：ツール呼び出し、長時間タスク、マルチエージェント協調、セッションをまたぐ記憶、そして継続的な自己進化。
+**Agentica** は開発者向けのローカル Agent CLI + Python SDK です。一つのターミナルセッションを協働できる agent にし、複数セッションを並行して仕事を進めるチームにします。
 
 |  | |
 |------|------|
-| **長く走る、暴走しない** | `Runner` 駆動の LLM ↔ ツール長ループ。コンテキスト圧縮・コスト予算・無限ループ防止を内蔵し、長時間タスクが途切れない |
-| **手を動かす、雑談だけではない** | ファイル・実行・検索・ブラウザ・MCP・マルチエージェント・Workflow——単一 IDE に縛られず実際に作業する |
-| **複数セッション協調** | 端末間 peer メッセージ；`delegate` は独立プロセス（独自 context / cwd）；`task` は安価なプロセス内 subagent——役割が分かれている |
-| **覚える、そして忘れる** | 記憶はエントリ単位で保存・関連性想起・drift 防御。常駐ルールは `users/{user_id}/AGENTS.md`（CLI default は `~/.agentica/AGENTS.md` symlink からも編集可能） |
-| **使うほど強くなる** | ツール失敗 / ユーザー修正 / 成功シーケンスが経験カードになり、再利用可能な `SKILL.md` へ自動コンパイル、セッションをまたいで有効 |
-| **すべて交換可能、ロックインしない** | モデル・ツール・記憶・Skill・Guardrails・MCP はすべて置換可能な部品。閉鎖的な SaaS ブラックボックスではない |
+| **複数セッションで一緒に働く** | `list_agents` / `send_message` で別ターミナルの Agent が互いを見つけ、進捗を送り合う。コピー＆ペーストで文脈を同期しなくてよい |
+| **大きな仕事は独立プロセスへ** | `delegate` は完全な `agentica --query --print` プロセスを別起動（独自 context / cwd）。`task` は短い作業を安価なプロセス内 subagent で処理 |
+| **席を外せる** | `/goal` が長時間タスクを継続推進。Web Gateway と `PEER_BRIDGE` で WeChat / WeCom / Feishu が本機 CLI に直結：`@セッション名` で宛先指定、あるいは普通の一文をゲートウェイ agent に任せて群発し、走っている仕事を呼び戻す |
 
 ## インストール
 
@@ -41,6 +39,7 @@ pip install -U agentica
 API キーは 3 つの方法のいずれかで設定します（優先順位：シェル環境変数 > `.env` > `config.yaml`）：
 
 ```bash
+export OPENAI_BASE_URL="https://api.openai.com/v1"
 export OPENAI_API_KEY="sk-xxx"
 # 無料で始められる ZhipuAI の場合：export ZAI_API_KEY="your-api-key"
 ```
@@ -61,23 +60,7 @@ agentica
 
 ### Python SDK
 
-`asyncio` を学ぶ必要はありません。`run_sync` は内部で完全な agentic loop
-（並列ツール呼び出し、ストリーミング、圧縮、リトライ）を実行しますが、
-外から見れば普通の同期関数です：
-
-```python
-from agentica import Agent, OpenAIChat
-
-agent = Agent(model=OpenAIChat(id="gpt-4o-mini"))
-result = agent.run_sync("北京を一文で紹介してください")
-print(result.content)
-```
-
-```
-北京は中国の首都であり、三千年以上の歴史を持つ文化都市で、政治・文化・国際交流の中心地です。
-```
-
-Agent に実際に「作業」させる——Web 検索してファイルに書き出す、`run_sync` 一発：
+Agent に検索とファイルを渡して、`run_sync` 一発で作業を始める：
 
 ```python
 from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFileTool, BuiltinExecuteTool
@@ -89,7 +72,7 @@ agent = Agent(
 agent.run_sync("Python 3.13 の新機能を調べて features.md に書いてください")
 ```
 
-全部入りのフルパワー版（40+ 組み込みツール + 圧縮 + 長期記憶 + skills + MCP）はこちら：
+全部入りのプリセット（組み込みツール + 圧縮 + 長期記憶 + skills + MCP）はこちら：
 
 ```python
 from agentica import DeepAgent
@@ -101,8 +84,8 @@ agent = DeepAgent()
 **コアエンジン**
 
 - **Async-First** — ネイティブ async API、`asyncio.gather()` による並列ツール実行、同期アダプター対応
-- **40以上の組み込みツール** — 検索、コード実行、ファイル操作、ブラウザ、OCR、画像生成
-- **20以上のモデル** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM など
+- **組み込みツール** — 検索、コード実行、ファイル操作、ブラウザ、OCR、画像生成
+- **多様なモデル** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM など
 - **ガードレール** — 入力 / 出力 / ツールレベルのガードレール、ストリーミングリアルタイム検出
 - **マルチモーダル** — テキスト、画像、音声、動画の理解
 
@@ -217,7 +200,7 @@ IM 連携の詳細（スキャンコードバインディング、チャネル�
 
 | | Agentica | Claude Code | Codex CLI | Gemini CLI |
 |---|---|---|---|---|
-| モデル選択 | ✅ 20+ プロバイダーを自由に切替 | Claude モデルのみ | OpenAI モデルのみ | Gemini モデルのみ |
+| モデル選択 | ✅ 複数プロバイダーを自由に切替 | Claude モデルのみ | OpenAI モデルのみ | Gemini モデルのみ |
 | 端末間の複数セッション協調 | ✅ peer + `delegate` / `task` | ❌ | ❌ | ❌ |
 | `/goal` 長時間タスクループ | ✅ 予算管理 + 完了自動判定 + 再開 | ❌ | ❌ | ❌ |
 | Web UI + IM Gateway | ✅ WeChat / WeCom / Feishu / Telegram など本機に直結 | ❌ | ❌ | ❌ |

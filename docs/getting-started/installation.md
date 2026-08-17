@@ -200,4 +200,4 @@ print(result.content)
 
 - [快速入门](quickstart.md) -- 5 分钟上手第一个 Agent
 - [CLI 终端](terminal.md) -- 命令行交互模式全功能介绍
-- [模型提供商](../guides/models.md) -- 20+ 模型配置指南
+- [模型提供商](../guides/models.md) -- 模型配置指南

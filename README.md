@@ -72,7 +72,7 @@ agent = Agent(
 agent.run_sync("帮我搜 Python 3.13 新特性，写到 features.md")
 ```
 
-开箱即用的完全体（40+ 内置工具 + 压缩 + 长期记忆 + skills + MCP）：
+开箱即用的完全体（内置工具 + 压缩 + 长期记忆 + skills + MCP）：
 
 ```python
 from agentica import DeepAgent
@@ -84,8 +84,8 @@ agent = DeepAgent()
 **核心引擎**
 
 - **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
-- **40+ 内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
-- **20+ 模型** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM 等
+- **内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
+- **多模型** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM 等
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **多模态** — 文本、图像、音频、视频理解
 
@@ -200,7 +200,7 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 
 | | Agentica | Claude Code | Codex CLI | Gemini CLI |
 |---|---|---|---|---|
-| 模型选择 | ✅ 20+ 厂商自由切换 | 仅 Claude 模型 | 仅 OpenAI 模型 | 仅 Gemini 模型 |
+| 模型选择 | ✅ 多厂商自由切换 | 仅 Claude 模型 | 仅 OpenAI 模型 | 仅 Gemini 模型 |
 | 跨终端多会话协作 | ✅ peer + `delegate` / `task` | ❌ | ❌ | ❌ |
 | `/goal` 长任务循环 | ✅ 预算控制 + 自动判完成 + 断点续跑 | ❌ | ❌ | ❌ |
 | Web UI + IM Gateway | ✅ 微信 / 企微 / 飞书 / Telegram 等直连本机 | ❌ | ❌ | ❌ |

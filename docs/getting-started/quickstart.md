@@ -119,7 +119,7 @@ asyncio.run(main())
 
 ## 选择模型
 
-Agentica 支持 20+ 模型提供商，详见 [模型提供商指南](../guides/models.md)：
+Agentica 支持多家模型提供商，详见 [模型提供商指南](../guides/models.md)：
 
 ```python
 from agentica import (

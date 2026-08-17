@@ -147,7 +147,7 @@ Model Context Protocol 集成。
 
 ### 9. 模型提供商 (`model_providers/`)
 
-支持 20+ LLM 提供商，统一 async 接口。
+支持多家 LLM 提供商，统一 async 接口。
 
 | # | 示例 | 描述 | 关键概念 |
 |---|------|------|----------|

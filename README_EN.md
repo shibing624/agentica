@@ -10,8 +10,9 @@
 
 # Agentica
 
-**Make agents that run for hours — not seconds. Stay on track, do real work, get better with use.**
-Async-first Python agent harness · 40+ tools · 20+ models · MCP · CLI + Web Gateway
+**One person, a team of agents.**
+
+Spin up several CLI sessions that work in parallel and talk to each other. Walk away from a long job — you can still call it back from WeChat or WeCom.
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
@@ -19,17 +20,13 @@ Async-first Python agent harness · 40+ tools · 20+ models · MCP · CLI + Web 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://github.com/shibing624/agentica/blob/main/requirements.txt)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#community--support)
 
-**Agentica** is not a chat wrapper around an LLM API. It is an Async-First agent harness that makes agents actually *run*:
-tool calling, long-running tasks, multi-agent orchestration, cross-session memory, and continuous self-evolution.
+**Agentica** is a local Agent CLI + Python SDK for developers: one terminal session becomes a collaborator; several sessions become a team that can push work in parallel.
 
 |  | |
 |------------|---------------|
-| **Runs long, doesn't run away** | `Runner`-driven LLM ↔ tool loop with context compaction, cost budgets, and loop safety — long tasks stay on track |
-| **Does work, not just chat** | Files, execution, search, browser, MCP, multi-agent, Workflow — real actions, not tied to a single IDE |
-| **Multi-session collaboration** | Cross-terminal peer messaging; `delegate` spawns a full process (own context/cwd); `task` stays the cheap in-process subagent |
-| **Remembers and forgets** | Memory stored as indexed entries with relevance recall and drift defense; standing rules live in `users/{user_id}/AGENTS.md` (`~/.agentica/AGENTS.md` is a default-CLI symlink) |
-| **Gets better with use** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` across sessions |
-| **Fully swappable, not locked in** | Models, tools, memory, skills, guardrails, and MCP are replaceable parts — not a closed hosted platform |
+| **Several sessions, one job** | `list_agents` / `send_message` let Agents in different terminals see each other and share progress — no copy-paste to sync context |
+| **Big work gets its own process** | `delegate` starts a full `agentica --query --print` process (own context / cwd); `task` keeps short lookups as cheap in-process subagents |
+| **You can leave the desk** | `/goal` keeps a long task moving; the Web Gateway and `PEER_BRIDGE` wire WeChat / WeCom / Feishu to this machine's CLI — `@session-name` to address one, or a plain sentence and the gateway agent fans it out and calls running jobs back |
 
 ## Installation
 
@@ -42,6 +39,7 @@ pip install -U agentica
 Three ways to provide a model API key (precedence: shell env > `.env` > `config.yaml`):
 
 ```bash
+export OPENAI_BASE_URL="https://api.openai.com/v1"
 export OPENAI_API_KEY="sk-xxx"
 # or start free with ZhipuAI: export ZAI_API_KEY="your-api-key"
 ```
@@ -62,23 +60,7 @@ Once the interactive terminal is up, just talk — e.g. "find out why the tests 
 
 ### Python SDK
 
-No need to learn `asyncio`. `run_sync` runs the full agentic loop internally
-(parallel tools, streaming, compression, retries) — from the outside it's just
-a normal sync function:
-
-```python
-from agentica import Agent, OpenAIChat
-
-agent = Agent(model=OpenAIChat(id="gpt-4o-mini"))
-result = agent.run_sync("Describe Beijing in one sentence")
-print(result.content)
-```
-
-```
-Beijing is the capital of China, a historic city with over 3,000 years of history, and the nation's political, cultural, and international exchange center.
-```
-
-Make an agent that actually *works* — search the web and write a file, one `run_sync`:
+Give the Agent search + files and start working with one `run_sync`:
 
 ```python
 from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFileTool, BuiltinExecuteTool
@@ -90,7 +72,7 @@ agent = Agent(
 agent.run_sync("Search Python 3.13 new features and write them to features.md")
 ```
 
-Or grab the batteries-included full power (40+ built-in tools + compression + long-term memory + skills + MCP):
+Or grab the batteries-included preset (built-in tools + compression + long-term memory + skills + MCP):
 
 ```python
 from agentica import DeepAgent
@@ -102,8 +84,8 @@ agent = DeepAgent()
 **Core engine**
 
 - **Async-First** — Native async API, `asyncio.gather()` parallel tool execution, sync adapter included
-- **40+ Built-in Tools** — Search, code execution, file operations, browser, OCR, image generation
-- **20+ Models** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses), DeepSeek, Claude, ZhipuAI, Qwen, Moonshot, Ollama, LiteLLM and more
+- **Built-in tools** — Search, code execution, file operations, browser, OCR, image generation
+- **Many models** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses), DeepSeek, Claude, ZhipuAI, Qwen, Moonshot, Ollama, LiteLLM and more
 - **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
 - **Multi-Modal** — Text, image, audio, video understanding
 
@@ -218,7 +200,7 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 
 | | Agentica | Claude Code | Codex CLI | Gemini CLI |
 |---|---|---|---|---|
-| Model choice | ✅ 20+ providers, freely swappable | Claude models only | OpenAI models only | Gemini models only |
+| Model choice | ✅ Many providers, freely swappable | Claude models only | OpenAI models only | Gemini models only |
 | Cross-terminal multi-session collab | ✅ peer + `delegate` / `task` | ❌ | ❌ | ❌ |
 | `/goal` long-task loop | ✅ budgets + auto-judged completion + resume | ❌ | ❌ | ❌ |
 | Web UI + IM Gateway | ✅ WeChat / WeCom / Feishu / Telegram etc. straight to your machine | ❌ | ❌ | ❌ |
