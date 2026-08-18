@@ -176,6 +176,20 @@ def isolated_home(root: Path) -> Iterator[Path]:
             os.environ["AGENTICA_HOME"] = previous
 
 
+def resolve_responses_reasoning(extra_body: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Responses thinking: extra_body.reasoning.effort or reasoning_effort."""
+    if not extra_body:
+        return "high"
+    reasoning = extra_body.get("reasoning")
+    if isinstance(reasoning, dict) and reasoning.get("effort") not in (None, ""):
+        return str(reasoning["effort"])
+    if extra_body.get("reasoning_effort") not in (None, ""):
+        return str(extra_body["reasoning_effort"])
+    if extra_body.get("thinking_enabled") is False:
+        return "none"
+    return "high"
+
+
 def build_model(
     model_id: str,
     *,
@@ -183,9 +197,8 @@ def build_model(
     api_key: Optional[str] = None,
     extra_body: Optional[Dict[str, Any]] = None,
     timeout: Optional[float] = None,
+    wire_api: str = "chat_completions",
 ):
-    from agentica import OpenAIChat
-
     kwargs: Dict[str, Any] = {"id": model_id}
     if base_url:
         kwargs["base_url"] = base_url
@@ -195,6 +208,14 @@ def build_model(
         kwargs["extra_body"] = extra_body
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if wire_api == "responses":
+        from agentica import OpenAIResponses
+
+        kwargs.pop("extra_body", None)
+        kwargs["reasoning"] = resolve_responses_reasoning(extra_body)
+        return OpenAIResponses(**kwargs)
+    from agentica import OpenAIChat
+
     return OpenAIChat(**kwargs)
 
 

@@ -176,15 +176,59 @@ def write_isolated_codex_home(
     return home
 
 
-def claude_command(prompt: str) -> List[str]:
-    return [
+def anthropic_base_url(openai_compatible_base: str) -> str:
+    """Map an OpenAI-compatible ``.../v1`` root to an Anthropic SDK base.
+
+    Claude Code appends ``/v1/messages``. Leaving the client on ``.../v1``
+    would request ``.../v1/v1/messages``. Some proxies mount Anthropic under
+    ``.../anthropic`` when the OpenAI root is ``.../v1``.
+    """
+    base = openai_compatible_base.rstrip("/")
+    if base.endswith("/anthropic"):
+        return base
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]
+    if base.endswith("/llmproxy"):
+        return base + "/anthropic"
+    return base
+
+
+def claude_env(
+    *,
+    config_dir: Path,
+    base_url: str,
+    api_key: str,
+    model_id: str,
+) -> Dict[str, str]:
+    """Isolated Claude Code env pointed at an Anthropic /v1/messages proxy."""
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "CLAUDE_CONFIG_DIR": str(config_dir),
+        "ANTHROPIC_BASE_URL": anthropic_base_url(base_url),
+        "ANTHROPIC_API_KEY": api_key,
+        # Some proxies reject x-api-key and accept Authorization: Bearer.
+        # Claude --bare still requires ANTHROPIC_API_KEY to exist; AUTH_TOKEN
+        # is what actually goes on the wire as Bearer.
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_MODEL": model_id,
+    }
+
+
+def claude_command(prompt: str, *, model: str = "", effort: str = "") -> List[str]:
+    command = [
         "claude",
         "--print",
         "--output-format",
         "json",
         "--dangerously-skip-permissions",
-        prompt,
+        "--bare",
     ]
+    if model:
+        command.extend(["--model", model])
+    if effort:
+        command.extend(["--effort", effort])
+    command.append(prompt)
+    return command
 
 
 def codex_command(prompt: str, *, model: str = "") -> List[str]:
@@ -216,7 +260,11 @@ def run_cli_agent(
 ) -> Tuple[str, Dict[str, Any], bool, str]:
     """Run one headless CLI turn in ``work``. Returns prediction, metrics, crashed, abort_reason."""
     if kind == "claude":
-        binary, command = "claude", claude_command(prompt)
+        binary, command = "claude", claude_command(
+            prompt,
+            model=model,
+            effort=str((env or {}).get("CODE_BENCH_CLAUDE_EFFORT") or ""),
+        )
     elif kind == "codex":
         binary, command = "codex", codex_command(prompt, model=model)
     else:

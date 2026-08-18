@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Package version is already ``1.4.13``; keep accumulating here until the release cut.
 
 #### features
+- **评测 `--wire-api responses` 与 Claude `/v1/messages`**：`--agent agentica --wire-api responses` 走 `OpenAIResponses`。`--agent claude` 配 `--base-url` 时写隔离 `CLAUDE_CONFIG_DIR` + `ANTHROPIC_BASE_URL`（去掉 OpenAI 兼容地址尾部的 `/v1`，Claude Code 再拼 `/v1/messages`），并设 `ANTHROPIC_AUTH_TOKEN`（`--bare` 仍要 API key，Bearer 给走 Anthropic 协议的网关），不读 `~/.claude`。
 - **`--agent codex` 认 Responses 关思考写法**：`--extra-body '{"reasoning": {"effort": "none"}}'` 写入隔离 `CODEX_HOME` 的 `model_reasoning_effort`。以前只读 `reasoning_effort`，缺这个键就默认 `high`，关思考传不进去。也认 `thinking_enabled: false`。
 - **README 增加 Polyglot 评测对照，对比表去掉 Gemini CLI**：数字与 `docs/guides/benchmark.md` 同一跑次（Agentica / Codex 各 34/34）。原始 `summary.json` / `predictions.jsonl` 在 `evaluation/code_benchmark/results/`。
 - **系统 skill 只在 CLI/gateway 物化到 `$AGENTICA_HOME/skills/.system/`**：包内 `agentica/skills/bundled/`（`agentica`、`multi-agent`）仍是源；产品入口 `load_system_skills()` 按内容哈希同步到隐藏的 `.system`（升级覆盖）。SDK 的 `load_skills()` / `Agent()` / `DeepAgent()` / `SkillTool(auto_load=True)` 默认不扫 bundled、也不扫 `.system`，同机跑过 CLI 留下的文件不会漏进库调用。要覆盖内置：在 `skills/<name>/` 写同名 user skill。

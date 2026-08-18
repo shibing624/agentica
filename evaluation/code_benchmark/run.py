@@ -91,6 +91,12 @@ def parse_args() -> argparse.Namespace:
         default=float(os.environ.get("CODE_BENCH_HTTP_TIMEOUT", "600")),
         help="Per-request HTTP timeout in seconds (thinking models need this high)",
     )
+    parser.add_argument(
+        "--wire-api",
+        default="chat_completions",
+        choices=("chat_completions", "responses"),
+        help="Agentica only: OpenAIChat vs OpenAIResponses",
+    )
     return parser.parse_args()
 
 
@@ -146,6 +152,7 @@ async def run_live(args: argparse.Namespace) -> int:
             api_key=args.api_key,
             extra_body=extra_body,
             timeout=args.http_timeout,
+            wire_api=args.wire_api,
         )
     selected = BENCHES if args.bench == "all" else (args.bench,)
     exit_code = 0
@@ -154,6 +161,7 @@ async def run_live(args: argparse.Namespace) -> int:
         out.mkdir(parents=True, exist_ok=True)
         if name == "polyglot":
             from evaluation.code_benchmark.cli_agents import (
+                claude_env,
                 resolve_codex_reasoning_effort,
                 write_isolated_codex_home,
             )
@@ -171,6 +179,15 @@ async def run_live(args: argparse.Namespace) -> int:
                 cli_env = {"CODEX_HOME": str(codex_home)}
                 if args.api_key:
                     cli_env["OPENAI_API_KEY"] = args.api_key
+            elif args.agent == "claude" and args.base_url and args.api_key:
+                effort = resolve_codex_reasoning_effort(extra_body)
+                cli_env = claude_env(
+                    config_dir=out / "claude-home",
+                    base_url=args.base_url,
+                    api_key=args.api_key,
+                    model_id=args.model,
+                )
+                cli_env["CODE_BENCH_CLAUDE_EFFORT"] = effort
             results = await run_polyglot(
                 model=model,
                 max_samples=args.max_samples,
@@ -184,7 +201,7 @@ async def run_live(args: argparse.Namespace) -> int:
                 agent_kind=args.agent,
                 agent_timeout=args.agent_timeout,
                 cli_env=cli_env,
-                cli_model=args.model if args.agent == "codex" else "",
+                cli_model=args.model if args.agent in ("codex", "claude") else "",
             )
         elif name == "livecodebench":
             from evaluation.code_benchmark.livecodebench import run_livecodebench
@@ -219,7 +236,11 @@ async def run_live(args: argparse.Namespace) -> int:
             name,
             args.model,
             results,
-            extra={"agent": args.agent, "extra_body": extra_body},
+            extra={
+                "agent": args.agent,
+                "extra_body": extra_body,
+                "wire_api": args.wire_api if args.agent == "agentica" else None,
+            },
         )
         write_jsonl(out / "predictions.jsonl", [r.to_dict() for r in results])
         write_json(out / "summary.json", payload)
