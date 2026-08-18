@@ -198,15 +198,29 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 
 ## 和其它 Agent CLI 对比
 
-| | Agentica | Claude Code | Codex CLI | Gemini CLI |
-|---|---|---|---|---|
-| 模型选择 | ✅ 多厂商自由切换 | 仅 Claude 模型 | 仅 OpenAI 模型 | 仅 Gemini 模型 |
-| 跨终端多会话协作 | ✅ peer + `delegate` / `task` | ❌ | ❌ | ❌ |
-| `/goal` 长任务循环 | ✅ 预算控制 + 自动判完成 + 断点续跑 | ❌ | ❌ | ❌ |
-| Web UI + IM Gateway | ✅ 微信 / 企微 / 飞书 / Telegram 等直连本机 | ❌ | ❌ | ❌ |
-| 自进化 Skill | ✅ 经验自动编译 `SKILL.md` | ❌ | ❌ | ❌ |
-| Python SDK | ✅ 完整 SDK，可嵌入任意代码 | 部分（绑定 Claude） | ❌ | ❌ |
-| 开源 | ✅ Apache 2.0 | ❌ | ✅ | ✅ |
+| | Agentica | Claude Code | Codex CLI |
+|---|---|---|---|
+| 模型选择 | ✅ 多厂商自由切换 | 仅 Claude 模型 | 仅 OpenAI 模型 |
+| 跨终端多会话协作 | ✅ peer + `delegate` / `task` | ❌ | ❌ |
+| `/goal` 长任务循环 | ✅ 预算控制 + 自动判完成 + 断点续跑 | ❌ | ❌ |
+| Web UI + IM Gateway | ✅ 微信 / 企微 / 飞书 / Telegram 等直连本机 | ❌ | ❌ |
+| 自进化 Skill | ✅ 经验自动编译 `SKILL.md` | ❌ | ❌ |
+| Python SDK | ✅ 完整 SDK，可嵌入任意代码 | 部分（绑定 Claude） | ❌ |
+| 开源 | ✅ Apache 2.0 | ❌ | ✅ |
+
+## 评测
+
+[Aider Polyglot](https://github.com/Aider-AI/polyglot-benchmark) Python 全量 34 题，同一 `deepseek-v4-flash-official`、同一 pytest。完整说明见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
+
+| 指标 | Agentica | Codex CLI |
+|---|---|---|
+| 准确率 | **34/34（100%）** | **34/34（100%）** |
+| 平均墙钟 / 题 | **60.0s** | 68.6s |
+| crash / 误报完成 / 误改 | **0** | **0** |
+| 输入 token | **2.60M** | 2.85M |
+| cache hit | 85.6% | 86.8% |
+
+原始结果：Agentica [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-223855-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-223855-polyglot/predictions.jsonl)；Codex [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/predictions.jsonl)。
 
 ## 🔥 News
 
