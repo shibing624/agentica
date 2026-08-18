@@ -64,7 +64,7 @@ nav:
   - Best Practices: guides/best_practices.md
   - API Reference:
       - Agent: api/agent.md
-  - Benchmark: guides/benchmark.md
+  - 评测: guides/benchmark.md
 
 markdown_extensions:
   - pymdownx.highlight:

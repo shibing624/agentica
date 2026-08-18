@@ -166,6 +166,7 @@ examples/tmp/
 evaluation/outputs/
 evaluation/code_benchmark/.cache/
 evaluation/code_benchmark/outputs/
+# published PK copies (summary.json + predictions.jsonl only) live in results/
 .vscode/
 outputs/
 

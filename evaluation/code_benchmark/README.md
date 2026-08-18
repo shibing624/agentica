@@ -37,6 +37,8 @@ OpenAI 兼容端点用 `--base-url` / `--api-key`，或环境变量 `OPENAI_BASE
 
 Python 子集大约 34 题（全量 Polyglot 是 225，含 JS/Go/Rust/Java/C++）。先跑 `--max-samples 5` 估成本，再拉满。
 
+已发布的 Agentica CLI vs Codex CLI 对照见 [`docs/guides/benchmark.md`](../../docs/guides/benchmark.md)，原始 `summary.json` / `predictions.jsonl` 在 [`results/`](results/)。
+
 ## 输出
 
 `evaluation/code_benchmark/outputs/<time>-<bench>/`
