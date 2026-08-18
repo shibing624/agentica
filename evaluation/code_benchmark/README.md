@@ -77,9 +77,9 @@ Polyglot 评测关掉了 `ask_user_question`，所以 `human_intervention_rate` 
 ```bash
 # 同一题、同一 Venus 模型：agentica 走 Chat Completions；Codex CLI 只走 Responses
 python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent agentica \
-  --model deepseek-v4-pro-official --extra-body '{"thinking_enabled": true, "reasoning_effort": "high"}'
+  --model deepseek-v4-flash-official --extra-body '{"thinking_enabled": false}'
 python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent codex \
-  --model deepseek-v4-pro-official --extra-body '{"reasoning_effort": "high"}'
+  --model deepseek-v4-flash-official --extra-body '{"reasoning": {"effort": "none"}}'
 ```
 
 `--agent codex` 且给了 `--base-url` 时，会在输出目录写一份隔离的 `CODEX_HOME`（`wire_api = "responses"`，`requires_openai_auth = false`），不读也不写 `~/.codex`。Codex CLI 从 2026-02 起不再支持 Chat Completions，所以 Venus 必须有 `/v1/responses`。

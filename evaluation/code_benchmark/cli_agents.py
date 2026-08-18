@@ -128,6 +128,26 @@ def metrics_from_codex_jsonl(text: str) -> Tuple[str, Dict[str, Any]]:
     return last_text, metrics
 
 
+def resolve_codex_reasoning_effort(extra_body: Optional[Dict[str, Any]]) -> str:
+    """Map --extra-body onto Codex ``model_reasoning_effort``.
+
+    Venus Responses uses ``{"reasoning": {"effort": "none"}}`` to turn thinking
+    off. Chat Completions leftover keys (``reasoning_effort``,
+    ``thinking_enabled: false``) are accepted so the same flag works both ways.
+    Missing extra_body still defaults to ``high`` (Codex CLI's own default).
+    """
+    if not extra_body:
+        return "high"
+    reasoning = extra_body.get("reasoning")
+    if isinstance(reasoning, dict) and reasoning.get("effort") not in (None, ""):
+        return str(reasoning["effort"])
+    if extra_body.get("reasoning_effort") not in (None, ""):
+        return str(extra_body["reasoning_effort"])
+    if extra_body.get("thinking_enabled") is False:
+        return "none"
+    return "high"
+
+
 def write_isolated_codex_home(
     root: Path,
     *,

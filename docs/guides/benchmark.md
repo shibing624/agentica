@@ -30,12 +30,12 @@ Agentica CLI 与 Codex CLI 在同一套题目、同一套 pytest 上的对照。
 
 ## 设定
 
-- 模型：`deepseek-v4-flash-official`，`extra_body` 为空（Codex 隔离配置 `model_reasoning_effort = high`）
+- 模型：`deepseek-v4-flash-official`，（均配置 `model_reasoning_effort = high` / `thinking_enabled = true`）
 - 题集：`--bench polyglot --language python --max-samples 0`（34 题）
 - 裁判：题目目录里的 pytest（`--rootdir=. --noconftest`），两边同一条命令
 - Agentica：本仓库 `run.py --agent agentica`（`DeepAgent` + 文件工具 + `execute`）
 - Codex：`--agent codex --agent-timeout 600`（`codex exec --json`，隔离 `CODEX_HOME`）
-- 串行、同一 Venus 兼容端点；评测把 `AGENTICA_HOME` 指到输出目录，不写 `~/.agentica`
+- 串行、同一 provider 兼容端点；评测把 `AGENTICA_HOME` 指到输出目录，不写 `~/.agentica`
 
 复现（key / base-url 自己导出，不要写进命令行）：
 

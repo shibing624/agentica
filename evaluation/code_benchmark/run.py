@@ -82,7 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--extra-body",
         default=os.environ.get("CODE_BENCH_EXTRA_BODY"),
-        help='JSON object forwarded as OpenAI extra_body, e.g. {"thinking_enabled": true, "reasoning_effort": "high"}',
+        help='JSON extra_body. Agentica Chat Completions: {"thinking_enabled": false}. '
+        'Codex Responses: {"reasoning": {"effort": "none"}} to turn thinking off.',
     )
     parser.add_argument(
         "--http-timeout",
@@ -152,12 +153,15 @@ async def run_live(args: argparse.Namespace) -> int:
         out = _output_dir(args, name) if args.bench != "all" else (args.output_dir or OUTPUT_DIR) / f"{now_tag()}-{name}"
         out.mkdir(parents=True, exist_ok=True)
         if name == "polyglot":
-            from evaluation.code_benchmark.cli_agents import write_isolated_codex_home
+            from evaluation.code_benchmark.cli_agents import (
+                resolve_codex_reasoning_effort,
+                write_isolated_codex_home,
+            )
             from evaluation.code_benchmark.polyglot import run_polyglot
 
             cli_env = None
             if args.agent == "codex" and args.base_url:
-                effort = (extra_body or {}).get("reasoning_effort") or "high"
+                effort = resolve_codex_reasoning_effort(extra_body)
                 codex_home = write_isolated_codex_home(
                     out / "codex-home",
                     model_id=args.model,
