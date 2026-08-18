@@ -182,7 +182,7 @@ async def test_media_message_fetches_payloads_and_replies_with_notes(patched_dep
 @pytest.mark.asyncio
 async def test_media_download_failure_does_not_chat_empty_user_message(patched_deps):
     """Image/voice-only inbound whose CDN decrypt fails must not call
-    agent.chat(''). That empty user turn is what Venus/Claude reject as
+    agent.chat(''). That empty user turn is what Claude/compatible proxies reject as
     ``messages.N: user messages must have non-empty content``.
     """
     agent_service, channel_manager = patched_deps

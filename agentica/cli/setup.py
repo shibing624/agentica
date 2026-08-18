@@ -649,7 +649,7 @@ def _prompt_cache_control(console, provider: str, current: Optional[dict] = None
     console.print()
     console.print("  Prompt caching reuses the system prompt + recent messages", style="dim")
     console.print("  so repeat turns cost less. Useful for OpenAI-compatible proxies", style="dim")
-    console.print("  that front Anthropic Claude (e.g. Venus).", style="dim")
+    console.print("  that front Anthropic Claude.", style="dim")
     gate = "Edit prompt caching?" if has_existing else "Enable prompt caching?"
     answer = pt_prompt(f"  {gate} [y/N]: ").strip().lower()
     if answer not in ("y", "yes"):
@@ -663,7 +663,7 @@ def _prompt_cache_control(console, provider: str, current: Optional[dict] = None
     elif cur_msgs is not None:
         params["cache_control_messages"] = cur_msgs
     cur_header = existing.get("cache_control_session_header")
-    header = pt_prompt(_label("Sticky routing header (e.g. Venus-Session-Id)", cur_header)).strip()
+    header = pt_prompt(_label("Sticky routing header (e.g. X-Session-Id)", cur_header)).strip()
     if header:
         params["cache_control_session_header"] = header
     elif cur_header:
@@ -1027,8 +1027,8 @@ def _configure_one_profile(
         model_name=model_name,
     )
 
-    # Optional prompt caching (OpenAI-compatible proxies fronting Claude, e.g.
-    # Venus). Skipped for anthropic. Pre-filled; declining keeps existing.
+    # Optional prompt caching (OpenAI-compatible proxies fronting Claude).
+    # Skipped for anthropic. Pre-filled; declining keeps existing.
     cache_block = _prompt_cache_control(console, provider, current=existing if same_provider else None)
 
     # Optional auxiliary model — pre-filled; declining keeps the existing auxiliary block.
@@ -1504,7 +1504,7 @@ def resolve_model_config(args, console=None) -> Dict:
         "extra_body": profile_params.get("extra_body"),
         "extra_headers": profile_params.get("extra_headers"),
         # Client-level static headers (anthropic provider only, e.g.
-        # Venus-Sticky-Routing on the native /v1/messages path).
+        # X-Sticky-Routing on the native /v1/messages path).
         "default_headers": profile_params.get("default_headers"),
         "auxiliary_model_provider": auxiliary_provider,
         "auxiliary_model_name": auxiliary_name,

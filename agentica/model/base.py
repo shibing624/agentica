@@ -219,7 +219,7 @@ class Model(ABC):
     #
     # Use this for deployment-specific API-gateway / proxy markers that the
     # SDK cannot know about — e.g. a private corp gateway returning
-    # ``venus_error 4001`` or ``aiproxy_busy`` as a 400-bodied transient.
+    # ``gateway_error 4001`` or ``aiproxy_busy`` as a 400-bodied transient.
     #
     # Resolution order: this field > env var ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS``
     # (comma-separated) > none. Matched case-insensitively via substring.
@@ -382,15 +382,15 @@ class Model(ABC):
           3. Env var ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS`` — comma-separated
              global override, useful for ops without touching code.
 
-        Example: a private corp gateway named ``venus`` that returns
-        ``Error code: 400 - {'type': 'venus_error', ...}`` for transient
+        Example: a private corp gateway that returns
+        ``Error code: 400 - {'type': 'gateway_error', ...}`` for transient
         upstream hiccups::
 
-            model = OpenAIChat(id="gpt-5", extra_retryable_substrings=["venus_error"])
+            model = OpenAIChat(id="gpt-5", extra_retryable_substrings=["gateway_error"])
 
         or, deployment-side without code changes::
 
-            export AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS="venus_error,aiproxy_busy"
+            export AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS="gateway_error,aiproxy_busy"
         """
         merged = {s.lower() for s in defaults}
         if self.extra_retryable_substrings:

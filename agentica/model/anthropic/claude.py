@@ -258,7 +258,7 @@ class Claude(Model):
         if self.api_key:
             _client_params["api_key"] = self.api_key
         # Custom endpoint (corporate proxy). Also seed the bearer header —
-        # proxies like Venus authenticate via Authorization: Bearer <token>
+        # some corporate proxies authenticate via Authorization: Bearer <token>
         # rather than the SDK's default x-api-key, so send both to be safe.
         if self.base_url:
             _client_params["base_url"] = self.base_url

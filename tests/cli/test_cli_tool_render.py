@@ -320,11 +320,11 @@ class TestCLIToolRender(unittest.TestCase):
     ASK_PROMPT = (
         "实测发现 storage 不可复用（v2 用完即删，316 题记忆只剩 3 个残留）。"
         "方案 A 必须改为重跑 ingest。修正成本：方案 A' = 重跑 qwen ingest"
-        "（~2880 次，本地免费）+ venus QA（~84 次，~0.5M tok，~1-2h 并行）；"
+        "（~2880 次，本地免费）+ proxy QA（~84 次，~0.5M tok，~1-2h 并行）；"
         "方案 B = 全链路 ds-v4（~5880 次付费，~25M tok）。选哪个？"
     )
     ASK_OPTIONS = [
-        "方案 A'（qwen 重跑 ingest + venus QA，~2880 免费 + ~84 付费，推荐）",
+        "方案 A'（qwen 重跑 ingest + proxy QA，~2880 免费 + ~84 付费，推荐）",
         "方案 B（全链路 ds-v4，~5880 次付费）",
     ]
 

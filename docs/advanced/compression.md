@@ -73,7 +73,7 @@ from agentica import Agent, OpenAIResponses
 agent = Agent(
     model=OpenAIResponses(
         id="gpt-5.6-sol",
-        base_url="https://v2.open.venus.woa.com/llmproxy/v1",
+        base_url="https://api.example.com/v1",
         reasoning="high",
         max_output_tokens=8192,
     ),

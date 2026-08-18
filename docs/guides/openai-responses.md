@@ -57,7 +57,7 @@ model = OpenAIResponses(
 POST <base_url>/responses/compact
 ```
 
-例如 Venus 配置 `base_url: https://v2.open.venus.woa.com/llmproxy/v1` 时，请求地址自动为 `https://v2.open.venus.woa.com/llmproxy/v1/responses/compact`，不需要单独配置 compact URL。
+例如配置 `base_url: https://api.example.com/v1` 时，请求地址自动为 `https://api.example.com/v1/responses/compact`，不需要单独配置 compact URL。
 
 服务端返回的完整 `response.compaction.output` 会作为下一轮 canonical input 原样回放。Agentica 不解析或裁剪 opaque `compaction` item，并在 SessionLog 中保存 checkpoint，使 `/resume` 后仍可继续。普通 role/content transcript 会同时保留，CLI 历史和跨 provider fallback 不依赖 opaque 数据。
 

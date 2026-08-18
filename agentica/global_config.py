@@ -525,8 +525,8 @@ active_profile: default
 #     #   extra_body / extra_headers: raw passthrough dicts, hand-edit only,
 #     #     for endpoints whose tuning knobs don't map to a standard OpenAI
 #     #     param (e.g. extra_body: {chat_template_kwargs: {reasoning_effort: high}})
-#     # optional prompt caching for OpenAI-compatible proxies fronting Claude
-#     # (e.g. Venus): enable_cache_control, cache_control_messages,
+#     # optional prompt caching for OpenAI-compatible proxies fronting Claude:
+#     #   enable_cache_control, cache_control_messages,
 #     #   cache_control_session_header (sticky-routing header for cache hits).
 #     # --- optional auxiliary model (background calls + `task` subagent tool) ---
 #     # A cheaper/faster model here saves cost on memory extraction, context

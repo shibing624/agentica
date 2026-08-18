@@ -162,16 +162,16 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertFalse(hasattr(model, "extra_body") and model.extra_body)
 
     def test_get_model_passes_default_headers_for_anthropic(self):
-        """default_headers reaches the Claude client (sticky routing on Venus)."""
+        """default_headers reaches the Claude client (sticky routing on a proxy)."""
         from agentica.cli.runtime import get_model
 
         model = get_model(
             "anthropic",
             "claude-opus-4-8",
             api_key="k",
-            default_headers={"Venus-Sticky-Routing": "token"},
+            default_headers={"X-Sticky-Routing": "token"},
         )
-        self.assertEqual(model.default_headers, {"Venus-Sticky-Routing": "token"})
+        self.assertEqual(model.default_headers, {"X-Sticky-Routing": "token"})
 
     def test_get_model_skips_default_headers_for_openai(self):
         """default_headers is an anthropic-path knob; openai ignores it."""
@@ -181,7 +181,7 @@ class TestCLIModelParams(unittest.TestCase):
             "openai",
             "gpt-5.2",
             api_key="k",
-            default_headers={"Venus-Sticky-Routing": "token"},
+            default_headers={"X-Sticky-Routing": "token"},
         )
         self.assertIsNone(model.default_headers)
 
@@ -207,7 +207,7 @@ class TestCLIModelParams(unittest.TestCase):
             "context_window": 500000,
             "temperature": 0.3,
             "top_p": 0.9,
-            "default_headers": {"Venus-Sticky-Routing": "token"},
+            "default_headers": {"X-Sticky-Routing": "token"},
         }
         args = argparse.Namespace(
             model_provider=None,
@@ -227,7 +227,7 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(resolved["context_window"], 500000)
         self.assertEqual(resolved["temperature"], 0.3)
         self.assertEqual(resolved["top_p"], 0.9)
-        self.assertEqual(resolved["default_headers"], {"Venus-Sticky-Routing": "token"})
+        self.assertEqual(resolved["default_headers"], {"X-Sticky-Routing": "token"})
 
 
 class TestBuildSiblingModel(unittest.TestCase):

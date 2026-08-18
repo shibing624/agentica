@@ -1,4 +1,4 @@
-"""Tests for Anthropic-style prompt caching on OpenAI-compatible proxies (Venus)."""
+"""Tests for Anthropic-style prompt caching on OpenAI-compatible proxies."""
 
 from typing import Any, Dict, List
 from unittest.mock import patch
@@ -117,8 +117,8 @@ def test_enabled_with_tools_reduces_message_budget():
     assert len(cached_user) == 2
 
 
-def test_tool_result_tagged_per_venus_example():
-    # Venus cache example: tool results carry cache_control in block-list form.
+def test_tool_result_tagged_per_proxy_example():
+    # Proxy cache example: tool results carry cache_control in block-list form.
     model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True, cache_control_messages=2)
     formatted = [
         {"role": "system", "content": "sys"},
@@ -130,7 +130,7 @@ def test_tool_result_tagged_per_venus_example():
     out, _ = model._apply_cache_control(formatted, _rk())
     # system tagged
     assert out[0]["content"][-1].get("cache_control") == {"type": "ephemeral"}
-    # tool result wrapped into a cached block list (Venus format), string preserved
+    # tool result wrapped into a cached block list (proxy format), string preserved
     assert out[3]["content"] == [{"type": "text", "text": "tool result", "cache_control": {"type": "ephemeral"}}]
     # last user tagged
     assert out[4]["content"][-1].get("cache_control") == {"type": "ephemeral"}
@@ -190,7 +190,7 @@ def test_breakpoint_budget_never_exceeds_four():
 def test_default_off_even_for_known_proxy_base_url():
     # No whitelist: caching is off by default regardless of base_url. The user
     # must opt in explicitly (enable_cache_control=True / CLI flag / profile).
-    model = OpenAIChat(id="m", api_key="fake_openai_key", base_url="https://venus.example/v1")
+    model = OpenAIChat(id="m", api_key="fake_openai_key", base_url="https://proxy.example/v1")
     out, kw = model._apply_cache_control(_msgs(1), _rk())
     assert out == _msgs(1)
     assert "cache_control" not in (kw.get("tools") or [])
@@ -198,7 +198,7 @@ def test_default_off_even_for_known_proxy_base_url():
 
 
 def test_explicit_false_stays_off():
-    model = OpenAIChat(id="m", api_key="fake_openai_key", base_url="https://venus.example/v1", enable_cache_control=False)
+    model = OpenAIChat(id="m", api_key="fake_openai_key", base_url="https://proxy.example/v1", enable_cache_control=False)
     out, _ = model._apply_cache_control(_msgs(1), _rk())
     assert out == _msgs(1)
 
@@ -206,23 +206,23 @@ def test_explicit_false_stays_off():
 def test_session_header_stable_across_calls():
     model = OpenAIChat(
         id="m", api_key="fake_openai_key", enable_cache_control=True,
-        cache_control_session_header="Venus-Session-Id",
+        cache_control_session_header="X-Session-Id",
     )
     _, kw1 = model._apply_cache_control(_msgs(1), _rk())
     _, kw2 = model._apply_cache_control(_msgs(1), _rk())
-    h1 = kw1["extra_headers"]["Venus-Session-Id"]
-    h2 = kw2["extra_headers"]["Venus-Session-Id"]
+    h1 = kw1["extra_headers"]["X-Session-Id"]
+    h2 = kw2["extra_headers"]["X-Session-Id"]
     assert h1 == h2 and h1.startswith("agentica-cache-")
 
 
 def test_session_header_merges_into_existing_headers():
     model = OpenAIChat(
         id="m", api_key="fake_openai_key", enable_cache_control=True,
-        cache_control_session_header="Venus-Session-Id",
+        cache_control_session_header="X-Session-Id",
     )
     _, kw = model._apply_cache_control(_msgs(1), _rk(extra_headers={"X-Foo": "bar"}))
     assert kw["extra_headers"]["X-Foo"] == "bar"
-    assert "Venus-Session-Id" in kw["extra_headers"]
+    assert "X-Session-Id" in kw["extra_headers"]
 
 
 def test_no_session_header_when_unset():
@@ -234,7 +234,7 @@ def test_no_session_header_when_unset():
 # ── usage parsing + cost tracker ──────────────────────────────────────────────
 
 
-def _venus_usage() -> CompletionUsage:
+def _proxy_usage() -> CompletionUsage:
     return CompletionUsage.model_validate({
         "prompt_tokens": 7256,
         "completion_tokens": 6,
@@ -247,9 +247,9 @@ def test_update_usage_metrics_parses_cache_read_and_creation():
     model = OpenAIChat(id="claude-3-5-sonnet", api_key="fake_openai_key")
     model._cost_tracker = CostTracker()
     metrics = Metrics()
-    model.add_response_usage_to_metrics(metrics=metrics, response_usage=_venus_usage())
+    model.add_response_usage_to_metrics(metrics=metrics, response_usage=_proxy_usage())
     assistant = Message(role="assistant", content="ok")
-    model.update_usage_metrics(assistant, metrics, _venus_usage())
+    model.update_usage_metrics(assistant, metrics, _proxy_usage())
 
     details: TokenDetails = model.usage.input_tokens_details
     assert details.cache_read_tokens == 7237
@@ -368,12 +368,12 @@ def test_session_header_shared_across_instances(tmp_path, monkeypatch):
 
     monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
     kwargs = dict(id="m", api_key="fake_openai_key", enable_cache_control=True,
-                  cache_control_session_header="Venus-Session-Id", base_url="https://x.example/v1")
+                  cache_control_session_header="X-Session-Id", base_url="https://x.example/v1")
     m1 = OpenAIChat(**kwargs)
     m2 = OpenAIChat(**kwargs)
     _, kw1 = m1._apply_cache_control(_msgs(1), _rk())
     _, kw2 = m2._apply_cache_control(_msgs(1), _rk())
-    assert kw1["extra_headers"]["Venus-Session-Id"] == kw2["extra_headers"]["Venus-Session-Id"]
+    assert kw1["extra_headers"]["X-Session-Id"] == kw2["extra_headers"]["X-Session-Id"]
 
 
 # ── cache keep-alive ──────────────────────────────────────────────────────────
@@ -441,7 +441,7 @@ def test_keepalive_not_armed_without_sticky_header():
 
 def test_keepalive_armed_with_sticky_header():
     model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True,
-                       cache_control_session_header="Venus-Session-Id", cache_keepalive_interval=3600)
+                       cache_control_session_header="X-Session-Id", cache_keepalive_interval=3600)
     model._apply_cache_control(_msgs(1), _rk())
     model._arm_cache_keepalive()
     assert model._cache_keepalive_generation == 1
@@ -477,11 +477,11 @@ def test_keepalive_ping_request_shape(monkeypatch):
 
     monkeypatch.setattr(chat_mod, "AsyncOpenAIClient", _FakeClient)
     model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True,
-                       cache_control_session_header="Venus-Session-Id", base_url="https://x.example/v1")
+                       cache_control_session_header="X-Session-Id", base_url="https://x.example/v1")
     sys_blocks = [{"type": "text", "text": "S", "cache_control": {"type": "ephemeral"}}]
     model._last_cache_payload = (
         [{"role": "system", "content": sys_blocks}, {"role": "user", "content": "u"}],
-        {"tools": [{"type": "function"}], "extra_headers": {"Venus-Session-Id": "sid"}},
+        {"tools": [{"type": "function"}], "extra_headers": {"X-Session-Id": "sid"}},
     )
     import asyncio
 
@@ -489,7 +489,7 @@ def test_keepalive_ping_request_shape(monkeypatch):
     assert sent["max_tokens"] == 1
     assert [m["role"] for m in sent["messages"]] == ["system", "user"]  # no conversation replay
     assert sent["tools"] == [{"type": "function"}]
-    assert sent["extra_headers"] == {"Venus-Session-Id": "sid"}
+    assert sent["extra_headers"] == {"X-Session-Id": "sid"}
     assert "http_client" in sent["client_params"]  # throwaway client, not the shared one
 
 

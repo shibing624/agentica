@@ -204,7 +204,7 @@ class TestHelperFunctions(unittest.TestCase):
         """Empty-content user message must be excluded.
 
         Regression: an empty-content message persisted into history was
-        re-sent every turn, triggering Venus 400 'message has no content'
+        re-sent every turn, triggering provider 400 'message has no content'
         and poisoning the whole session.
         """
         self.assertFalse(_is_history_message(Message(role="user", content="")))
@@ -229,7 +229,7 @@ class TestHelperFunctions(unittest.TestCase):
 
     def test_clean_history_empty_tool_gets_placeholder(self):
         """An empty tool result (e.g. after base64 stripping) must not be sent
-        with empty content (Venus 400 "message has no content"). It can't be
+        with empty content (provider 400 "message has no content"). It can't be
         dropped either (tool_call_id pairing), so substitute a placeholder."""
         m = _clean_message_for_history(Message(role="tool", content="", tool_call_id="x"))
         self.assertEqual(m.content, "(tool returned no output)")

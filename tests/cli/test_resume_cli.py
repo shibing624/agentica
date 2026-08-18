@@ -136,12 +136,12 @@ def test_prepare_startup_resume_carries_session_profile(tmp_path, monkeypatch):
     work_dir.mkdir()
     log = SessionLog("startup-session", work_dir=str(work_dir))
     log.append("user", "hello")
-    log.set_profile("venus", "session")
+    log.set_profile("proxy", "session")
 
     agent_config = {"session_id": "startup-session", "work_dir": str(work_dir)}
 
     assert prepare_startup_resume(agent_config, printer=lambda _msg: None) is True
-    assert agent_config["_resume_session_profile_name"] == "venus"
+    assert agent_config["_resume_session_profile_name"] == "proxy"
     assert agent_config["_resume_session_profile_source"] == "session"
 
 

@@ -119,7 +119,7 @@ def _tool_response():
                 "id": "fc_1",
                 "type": "function_call",
                 "call_id": "call_1",
-                "name": "venus_probe",
+                "name": "probe_tool",
                 "arguments": "{\"value\":\"ping\"}",
                 "status": "completed",
             },
@@ -163,7 +163,7 @@ def test_request_maps_reasoning_tools_and_replays_response_items():
             {
                 "type": "function",
                 "function": {
-                    "name": "venus_probe",
+                    "name": "probe_tool",
                     "description": "Return a probe value.",
                     "parameters": {
                         "type": "object",
@@ -186,7 +186,7 @@ def test_request_maps_reasoning_tools_and_replays_response_items():
     assert request["tools"] == [
         {
             "type": "function",
-            "name": "venus_probe",
+            "name": "probe_tool",
             "description": "Return a probe value.",
             "parameters": {
                 "type": "object",
@@ -266,7 +266,7 @@ def test_provider_data_keeps_only_replayable_parts_of_the_response():
                 "id": "fc_1",
                 "type": "function_call",
                 "call_id": "call_1",
-                "name": "venus_probe",
+                "name": "probe_tool",
                 "arguments": "{\"value\":\"ping\"}",
                 "status": "completed",
             },
@@ -347,7 +347,7 @@ def test_native_compact_request_and_canonical_checkpoint_replay():
     model = OpenAIResponses(
         id="gpt-5.6-sol",
         api_key="test",
-        base_url="https://v2.open.venus.woa.com/llmproxy/v1",
+        base_url="https://api.example.com/v1",
         client=fake_client,
     )
     messages = [
@@ -369,7 +369,7 @@ def test_native_compact_request_and_canonical_checkpoint_replay():
         "instructions": "Keep file paths.",
     }
     assert result.checkpoint["type"] == "openai_responses_compaction"
-    assert result.checkpoint["base_url"] == "https://v2.open.venus.woa.com/llmproxy/v1"
+    assert result.checkpoint["base_url"] == "https://api.example.com/v1"
     assert result.checkpoint["output"][0]["encrypted_content"] == "opaque-compacted-state"
     assert result.usage["total_tokens"] == 120
     assert model.usage.requests == 1
@@ -401,7 +401,7 @@ def test_native_checkpoint_is_ignored_by_other_endpoint_identity():
     model = OpenAIResponses(
         id="gpt-5.6-sol",
         api_key="test",
-        base_url="https://v2.open.venus.woa.com/llmproxy/v1",
+        base_url="https://api.example.com/v1",
     )
     messages = [
         Message(role="user", content="portable question"),
@@ -465,7 +465,7 @@ def test_profile_validation_accepts_responses_reasoning():
     profile = {
         "model_provider": "openai",
         "model_name": "gpt-5.6-sol",
-        "base_url": "https://v2.open.venus.woa.com/llmproxy/v1",
+        "base_url": "https://api.example.com/v1",
         "wire_api": "responses",
         "reasoning": "high",
     }

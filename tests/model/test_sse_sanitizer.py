@@ -3,7 +3,7 @@
 @author: XuMing(xuming624@qq.com)
 @description: Tests for the tolerant SSE byte-stream sanitizer.
 
-Reproduces the Venus/OpenAI-compatible proxy bug where SSE frames arrive
+Reproduces the OpenAI-compatible proxy bug where SSE frames arrive
 double-wrapped (``data: data: {...}``). The OpenAI SDK strips exactly one
 ``data:`` prefix and hands the remaining ``data: {...}`` to the JSON parser,
 which dies with ``json.JSONDecodeError: Expecting value: line 1 column 1
@@ -51,12 +51,12 @@ async def _collect(it):
     return out
 
 
-# A frame shaped like the real Venus error: reasoning_content delta plus the
-# proxy's private venusMarker field, delivered with a doubled data: prefix.
+# A frame shaped like a real proxy error: reasoning_content delta plus the
+# proxy's private proxyMarker field, delivered with a doubled data: prefix.
 DOUBLE_WRAPPED_FRAME = (
     b'data: data: {"id":"c1","object":"chat.completion.chunk","created":1786592626,'
     b'"model":"ep-test","choices":[{"index":0,"delta":{"reasoning_content":"0"},'
-    b'"finish_reason":null}],"venusMarker":{"spanId":"abc"}}\n\n'
+    b'"finish_reason":null}],"proxyMarker":{"spanId":"abc"}}\n\n'
 )
 NORMAL_FRAME = (
     b'data: {"id":"c1","object":"chat.completion.chunk","created":1786592626,'
@@ -185,7 +185,7 @@ class TestOpenAIChatStreamEndToEnd:
         assert len(chunks) == 2
         # Extra vendor fields must survive parsing (extra="allow" on SDK models).
         assert getattr(chunks[0].choices[0].delta, "reasoning_content", None) == "0"
-        assert chunks[0].model_extra.get("venusMarker") == {"spanId": "abc"}
+        assert chunks[0].model_extra.get("proxyMarker") == {"spanId": "abc"}
         assert chunks[1].choices[0].delta.content == "Hello"
 
     def test_double_wrapped_frame_split_across_byte_chunks(self):

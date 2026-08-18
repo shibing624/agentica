@@ -77,7 +77,7 @@ def display_token_stats(
     if elapsed_seconds > 0:
         parts.append(f"[dim]{elapsed_seconds:.2f}s[/dim]")
 
-    # Prompt-cache hits / writes (Anthropic-style, e.g. Venus proxying Claude).
+    # Prompt-cache hits / writes (Anthropic-style, via an OpenAI-compatible proxy).
     cache_read = cost_tracker.total_cache_read_tokens
     cache_write = cost_tracker.total_cache_write_tokens
     if cache_read or cache_write:

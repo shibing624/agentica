@@ -112,7 +112,7 @@ def main():
         # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
         "extra_body": resolved.get("extra_body"),
         "extra_headers": resolved.get("extra_headers"),
-        # Prompt caching (OpenAI-compatible proxies fronting Claude, e.g. Venus).
+        # Prompt caching (OpenAI-compatible proxies fronting Claude).
         # CLI flag wins; otherwise the active profile's value; else None (auto:
         # on for known proxy base_urls, off otherwise).
         "enable_cache_control": args.enable_cache_control if args.enable_cache_control is not None else resolved.get("enable_cache_control"),

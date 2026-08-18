@@ -3,7 +3,7 @@
 
 Standard OpenAI streams number tool_call deltas with a stable ``index`` so
 fragments can be reassembled positionally. OpenAI-compatible proxies that
-translate Anthropic Claude tool_use into the OpenAI wire format (e.g. Venus)
+translate Anthropic Claude tool_use into the OpenAI wire format
 may omit ``index`` (send ``None``) and rely on ``id`` to delimit calls. The
 original positional-only logic raised ``TypeError`` on a ``None`` index,
 dropping every tool call and silently degrading the turn to plain text — the

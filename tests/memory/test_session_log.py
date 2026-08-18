@@ -777,12 +777,12 @@ class TestSidecarSessionName:
     def test_profile_round_trips_through_sidecar_and_listing(self, tmp_path):
         log = SessionLog("s-profile", base_dir=str(tmp_path))
         log.append("user", "hi")
-        log.set_profile("venus-ds-v4-flash", "project")
+        log.set_profile("proxy-ds-v4-flash", "project")
 
-        assert log.get_profile_name() == "venus-ds-v4-flash"
+        assert log.get_profile_name() == "proxy-ds-v4-flash"
         assert log.get_profile_source() == "project"
         sessions = SessionLog.list_sessions(base_dir=str(tmp_path))
-        assert sessions[0]["profile_name"] == "venus-ds-v4-flash"
+        assert sessions[0]["profile_name"] == "proxy-ds-v4-flash"
         assert sessions[0]["profile_source"] == "project"
 
     def test_fork_inherits_profile_metadata(self, tmp_path):

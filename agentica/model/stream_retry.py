@@ -45,7 +45,7 @@ T = TypeVar("T")
 
 # SDK-level default retryable substrings for the stream wrapper.
 # Kept to protocol/transport-level transients only — vendor-specific proxy
-# markers (e.g. a private "venus_error" corp gateway) must be added by the
+# markers (e.g. a private "gateway_error" corp proxy) must be added by the
 # caller via ``extra_substrings=`` or env ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS``.
 # Listed inline (not imported) to avoid a cycle with model.loop_state.
 _DEFAULT_RETRYABLE_SUBSTRINGS = (

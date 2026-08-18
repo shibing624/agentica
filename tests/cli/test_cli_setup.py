@@ -717,14 +717,14 @@ class TestRunOnboarding(_CliSetupTestBase):
         console = MagicMock()
         console.width = 80
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("n"),
-        # cache: yes("y"), messages("2"), header("Venus-Session-Id"), auxiliary("n")
-        inputs = iter(["2", "", "sk", "", "n", "y", "2", "Venus-Session-Id", "n"])
+        # cache: yes("y"), messages("2"), header("X-Session-Id"), auxiliary("n")
+        inputs = iter(["2", "", "sk", "", "n", "y", "2", "X-Session-Id", "n"])
         with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
             cli_setup.run_onboarding(console)
         profile = gc.get_profile()
         self.assertTrue(profile.get("enable_cache_control"))
         self.assertEqual(profile.get("cache_control_messages"), 2)
-        self.assertEqual(profile.get("cache_control_session_header"), "Venus-Session-Id")
+        self.assertEqual(profile.get("cache_control_session_header"), "X-Session-Id")
 
     def test_cache_control_skipped_when_answered_no(self):
         from agentica import global_config as gc

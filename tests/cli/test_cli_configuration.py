@@ -349,7 +349,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 patch.object(cli_model_config, "create_agent", return_value=MagicMock()),
             ):
                 gc.upsert_profile(
-                    "venus",
+                    "proxy",
                     {
                         "model_provider": "openai",
                         "model_name": "gpt-4o",
@@ -380,7 +380,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 stale_name, stale_source = gc.resolve_active_profile_name(work_dir=ctx.agent_config.get("work_dir"))
 
         self.assertEqual((fixed_name, fixed_source), ("ark", "project"))
-        self.assertEqual((stale_name, stale_source), ("venus", "global"))
+        self.assertEqual((stale_name, stale_source), ("proxy", "global"))
 
     def test_parse_goal_budget_flags(self):
         from agentica.cli.commands.goal import _parse_goal_set_args

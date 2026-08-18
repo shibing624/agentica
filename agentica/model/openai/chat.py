@@ -280,8 +280,8 @@ class OpenAIChat(Model):
     extra_body: Optional[Dict[str, Any]] = None
     request_params: Optional[Dict[str, Any]] = None
 
-    # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude
-    # (e.g. Venus). The proxy accepts Anthropic-style ``cache_control`` blocks
+    # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude.
+    # The proxy accepts Anthropic-style ``cache_control`` blocks
     # inside OpenAI-format system / messages / tools and reports
     # ``prompt_tokens_details.cache_read_tokens`` / ``cache_creation_tokens``.
     # Default OFF: pure OpenAI / DeepSeek / Zhipu may reject the non-standard
@@ -294,7 +294,7 @@ class OpenAIChat(Model):
     # (rolling cache window). Anthropic caps a request at 4 breakpoints total,
     # so the effective count is min(cache_control_messages, 4 - tools - system).
     cache_control_messages: int = 3
-    # Optional sticky-routing header name (e.g. "Venus-Session-Id"): when set,
+    # Optional sticky-routing header name (e.g. "X-Session-Id"): when set,
     # a session id is loaded-or-created once per base_url (persisted in
     # ~/.agentica/cache/cache_routing.json) and injected into ``extra_headers`` so
     # consecutive invokes — even across CLI restarts — land on the same
@@ -314,7 +314,7 @@ class OpenAIChat(Model):
     # Cache keep-alive: while the session sits idle, re-read the cached
     # tools+system prefix every `cache_keepalive_interval` seconds (a cache read
     # costs ~0.1x input price vs ~1.25x for a re-write after the 5-min TTL
-    # lapses; verified against Venus that reads refresh the TTL). The ping chain
+    # lapses; verified on a proxy that refreshes TTL on cache reads). The ping chain
     # stops after `cache_keepalive_max_pings` pings without new traffic, so idle
     # cost is bounded.
     cache_keepalive: bool = True
@@ -490,7 +490,7 @@ class OpenAIChat(Model):
         - ``reasoning_effort`` (OpenAI o-series, gpt-5.x)
         - ``extra_body.thinking`` (DeepSeek, Ark/Doubao: ``{"type": "enabled"|"disabled", ...}``)
         - ``extra_body.enable_thinking`` (Qwen / DashScope-compatible)
-        - ``extra_body.thinking_enabled`` (Anthropic-via-OpenAI proxy, e.g. Venus;
+        - ``extra_body.thinking_enabled`` (Anthropic-via-OpenAI proxy;
           the flat thinking params ``thinking_enabled`` / ``reasoning_effort`` /
           ``thinking_display`` are forwarded as top-level request fields)
         """
@@ -513,7 +513,7 @@ class OpenAIChat(Model):
             enable_thinking = self.extra_body.get("enable_thinking")
             if isinstance(enable_thinking, bool):
                 is_on = enable_thinking
-            # Anthropic-via-OpenAI proxy (Venus) flat thinking params.
+            # Anthropic-via-OpenAI proxy flat thinking params.
             thinking_enabled = self.extra_body.get("thinking_enabled")
             if isinstance(thinking_enabled, bool):
                 is_on = thinking_enabled
@@ -589,7 +589,7 @@ class OpenAIChat(Model):
 
         return message.to_model_dict()
 
-    # ── Prompt caching (Anthropic-via-OpenAI proxies, e.g. Venus) ──
+    # ── Prompt caching (Anthropic-via-OpenAI proxies) ──
 
     def _prompt_cache_key(self) -> Optional[str]:
         """Routing-affinity key for OpenAI's implicit prompt cache.
@@ -614,7 +614,7 @@ class OpenAIChat(Model):
         """Merge a stable per-run session id into extra_headers for sticky routing.
 
         Cache hits require consecutive requests to land on the same backend.
-        Proxies like Venus route by a request header (e.g. ``Venus-Session-Id``);
+        Some proxies route by a request header (e.g. ``X-Session-Id``);
         the id is loaded-or-created once per base_url and persisted in
         ``~/.agentica/cache/cache_routing.json`` so cache affinity survives CLI
         restarts. Only merges into a dict-typed extra_headers; other types are
@@ -674,7 +674,7 @@ class OpenAIChat(Model):
     async def _cache_keepalive_ping(self) -> Optional[int]:
         """Re-read the cached tools+system prefix with a minimal request.
 
-        A cache read refreshes the entry TTL (verified against Venus), so pinging
+        A cache read refreshes the entry TTL (verified on a proxy that does so), so pinging
         during idle think-time keeps the expensive prefix alive instead of paying
         a full re-write on the next real request. Runs in a worker thread with
         its own event loop and a throwaway client so it never touches the main
@@ -752,8 +752,8 @@ class OpenAIChat(Model):
                 budget -= 1
                 break
 
-        # 3) Trailing USER/TOOL messages: rolling cache window. Per the Venus
-        #    cache example, both user turns and tool results carry cache_control
+        # 3) Trailing USER/TOOL messages: rolling cache window. Per typical
+        #    proxy cache examples, both user turns and tool results carry cache_control
         #    breakpoints (block-list form). Assistant turns are skipped: in
         #    OpenAI format their tool_calls live in a separate field, not in
         #    content blocks, so there is no block to attach cache_control to.
@@ -813,7 +813,7 @@ class OpenAIChat(Model):
         langfuse_params = self._get_langfuse_extra_params()
         formatted = [self.format_message(m) for m in messages]
         # Inject Anthropic-style cache_control breakpoints for OpenAI-compatible
-        # proxies that front Claude (e.g. Venus). No-op when caching is off.
+        # proxies that front Claude. No-op when caching is off.
         formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
 
         if self.response_format is not None and self.use_structured_outputs:
@@ -1124,7 +1124,7 @@ class OpenAIChat(Model):
         ``index`` so fragments (name in one chunk, arguments split across the
         next) can be reassembled positionally. Some OpenAI-compatible proxies —
         notably ones that translate Anthropic Claude tool_use into the OpenAI
-        wire format (e.g. Venus) — omit ``index`` (send ``None``) or hold it at
+        wire format — omit ``index`` (send ``None``) or hold it at
         0 while relying on ``id`` to delimit calls. The original positional-only
         logic raised ``TypeError`` on ``None`` index, dropping every tool call
         and silently degrading the turn to plain text.

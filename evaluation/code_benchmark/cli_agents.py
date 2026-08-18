@@ -131,7 +131,8 @@ def metrics_from_codex_jsonl(text: str) -> Tuple[str, Dict[str, Any]]:
 def resolve_codex_reasoning_effort(extra_body: Optional[Dict[str, Any]]) -> str:
     """Map --extra-body onto Codex ``model_reasoning_effort``.
 
-    Venus Responses uses ``{"reasoning": {"effort": "none"}}`` to turn thinking
+    Some OpenAI-compatible Responses endpoints use
+    ``{"reasoning": {"effort": "none"}}`` to turn thinking
     off. Chat Completions leftover keys (``reasoning_effort``,
     ``thinking_enabled: false``) are accepted so the same flag works both ways.
     Missing extra_body still defaults to ``high`` (Codex CLI's own default).
@@ -155,16 +156,16 @@ def write_isolated_codex_home(
     base_url: str,
     reasoning_effort: str = "high",
 ) -> Path:
-    """CODEX_HOME for one eval run. Codex only speaks Responses; Venus has that wire."""
+    """CODEX_HOME for one eval run. Codex only speaks Responses; the proxy must too."""
     home = Path(root)
     home.mkdir(parents=True, exist_ok=True)
     config = (
         f'model = "{model_id}"\n'
-        'model_provider = "venus"\n'
+        'model_provider = "gateway"\n'
         f'model_reasoning_effort = "{reasoning_effort}"\n'
         "\n"
-        "[model_providers.venus]\n"
-        'name = "Venus"\n'
+        "[model_providers.gateway]\n"
+        'name = "Gateway"\n'
         f'base_url = "{base_url.rstrip("/")}"\n'
         'env_key = "OPENAI_API_KEY"\n'
         'wire_api = "responses"\n'

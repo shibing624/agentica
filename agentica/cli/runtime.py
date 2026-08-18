@@ -386,15 +386,15 @@ def parse_args():
     parser.add_argument("--auxiliary_base_url", type=str, help="Base URL for the auxiliary model")
     parser.add_argument("--auxiliary_api_key", type=str, help="API key for the auxiliary model")
 
-    # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude
-    # (e.g. Venus). Default None = use the active profile's value (or off if the
+    # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude.
+    # Default None = use the active profile's value (or off if the
     # profile doesn't set it); --enable_cache_control / --no-enable_cache_control
     # force on/off for this run.
     parser.add_argument(
         "--enable_cache_control",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Enable Anthropic-style cache_control blocks (for Venus-style proxies).",
+        help="Enable Anthropic-style cache_control blocks (for OpenAI-compatible proxies).",
     )
     parser.add_argument(
         "--cache_control_messages",
@@ -406,7 +406,7 @@ def parse_args():
         "--cache_control_session_header",
         type=str,
         default=None,
-        help="Sticky-routing header name for cache hits (e.g. Venus-Session-Id).",
+        help="Sticky-routing header name for cache hits (e.g. X-Session-Id).",
     )
 
     parser.add_argument("--debug", type=int, help="enable verbose mode", default=0)
@@ -592,16 +592,15 @@ def get_model(
     if context_window is not None:
         params["context_window"] = context_window
     # base_url applies to every provider, including anthropic: a corporate
-    # proxy that forwards the native /v1/messages endpoint (e.g. Venus
-    # http://.../llmproxy/anthropic) can be targeted, and the Claude client
-    # seeds the bearer header for such proxies.
+    # proxy that forwards the native /v1/messages endpoint can be targeted,
+    # and the Claude client seeds the bearer header for such proxies.
     if base_url is not None:
         params["base_url"] = base_url
     # OpenAI-only tuning: reasoning_effort + raw passthrough dicts. Anthropic
     # takes reasoning_effort too (mapped to adaptive thinking inside the Claude
     # model class), but NOT the OpenAI extra_body/extra_headers passthrough.
     # default_headers goes to the Anthropic client's static headers — the only
-    # way to pin sticky routing (e.g. Venus-Sticky-Routing) on the native
+    # way to pin sticky routing (e.g. X-Sticky-Routing) on the native
     # /v1/messages path, which has no per-request extra_headers mechanism.
     if model_provider == "anthropic":
         is_claude_opus_5 = _load_symbol("agentica.model.anthropic.claude", "is_claude_opus_5")

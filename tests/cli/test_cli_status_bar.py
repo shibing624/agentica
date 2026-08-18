@@ -303,7 +303,7 @@ class TestCLIStatusBar(unittest.TestCase):
             thinking_mode="high",
             work_dir="/very/long/path/to/dual-mem",
             git_branch="main",
-            profile_name="venus-gpt-5.6-sol",
+            profile_name="proxy-gpt-5.6-sol",
             context_tokens=24_200,
             context_window=1_100_000,
             cost_usd=0.64,

@@ -399,7 +399,7 @@ class RetryMixin:
                     # Retryable transient errors: backoff within current model.
                     # Merge SDK defaults with model-level + env-level user
                     # extensions, so deployment-specific proxy markers
-                    # (e.g. a private "venus_error") become retryable
+                    # (e.g. a private "gateway_error") become retryable
                     # without touching SDK source.
                     _retryable = current.get_retryable_substrings(state.RETRYABLE_SUBSTRINGS)
                     is_retryable = any(r in err for r in _retryable)

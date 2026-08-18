@@ -75,14 +75,14 @@ Polyglot 评测关掉了 `ask_user_question`，所以 `human_intervention_rate` 
 不要从它们的交互式 TUI 里抠内部指标。正确做法是：**同一套题目 + 同一套 pytest 判分**，把对方当成 headless 子进程包进来。墙钟、对错、crash/timeout、honesty、collateral 是我们在外面量的，不依赖它们开没开 telemetry。
 
 ```bash
-# 同一题、同一 Venus 模型：agentica 走 Chat Completions；Codex CLI 只走 Responses
+# 同一题、同一模型：agentica 走 Chat Completions；Codex CLI 只走 Responses
 python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent agentica \
   --model deepseek-v4-flash-official --extra-body '{"thinking_enabled": false}'
 python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent codex \
   --model deepseek-v4-flash-official --extra-body '{"reasoning": {"effort": "none"}}'
 ```
 
-`--agent codex` 且给了 `--base-url` 时，会在输出目录写一份隔离的 `CODEX_HOME`（`wire_api = "responses"`，`requires_openai_auth = false`），不读也不写 `~/.codex`。Codex CLI 从 2026-02 起不再支持 Chat Completions，所以 Venus 必须有 `/v1/responses`。
+`--agent codex` 且给了 `--base-url` 时，会在输出目录写一份隔离的 `CODEX_HOME`（`wire_api = "responses"`，`requires_openai_auth = false`），不读也不写 `~/.codex`。Codex CLI 从 2026-02 起不再支持 Chat Completions，所以该代理必须有 `/v1/responses`。
 
 | 指标 | 怎么拿到 | 能否 PK |
 |---|---|---|
@@ -94,7 +94,7 @@ python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent
 | tool calls | Codex jsonl 的 `command_execution` / `file_change` 等；Claude `--output-format json` **没有**工具次数 | Claude 这一格是 `-`，不要拿 0 去比 |
 | honesty / collateral / recovery | 看它们的最终文本 + 工作区 `git diff` + 我们的 pytest 回灌 | 可 PK（不是它们内部的数） |
 
-Claude：`claude --print --output-format json --dangerously-skip-permissions`。Codex：`codex exec --json --sandbox workspace-write -c approval_policy=never`（`exec` 没有 `--ask-for-approval`）。Venus 路径不读 `~/.codex`、也不走 ChatGPT 登录。这是产品对产品的 harness 对比，不是同一套 SDK 的 ablation。
+Claude：`claude --print --output-format json --dangerously-skip-permissions`。Codex：`codex exec --json --sandbox workspace-write -c approval_policy=never`（`exec` 没有 `--ask-for-approval`）。带 `--base-url` 的路径不读 `~/.codex`、也不走 ChatGPT 登录。这是产品对产品的 harness 对比，不是同一套 SDK 的 ablation。
 
 评测过程把 `AGENTICA_HOME` 指到输出目录，不会写 `~/.agentica`。
 

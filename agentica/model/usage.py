@@ -64,7 +64,7 @@ class TokenDetails(BaseModel):
     cached_tokens: int = 0
     reasoning_tokens: int = 0
     # Anthropic-style prompt-cache accounting (also returned by OpenAI-compatible
-    # proxies that front Claude, e.g. Venus). ``cached_tokens`` is kept as the
+    # proxies that front Claude). ``cached_tokens`` is kept as the
     # OpenAI-native alias for cache reads; ``cache_read_tokens`` is the
     # Anthropic name for the same concept. ``cache_creation_tokens`` is the
     # one-time write cost (priced higher than a normal input token).

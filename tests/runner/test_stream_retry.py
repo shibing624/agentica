@@ -97,7 +97,7 @@ class TestStreamRetryHelper:
     def test_retry_on_extra_substring_open(self):
         """User-supplied substring (e.g. private proxy marker) must trigger retry.
 
-        ``venus_error`` is intentionally NOT in SDK defaults — it's a private
+        ``gateway_error`` is intentionally NOT in SDK defaults — it's a private
         corp gateway marker. Pass it through ``extra_substrings`` to retry.
         """
         calls = {"n": 0}
@@ -107,7 +107,7 @@ class TestStreamRetryHelper:
             if calls["n"] == 1:
                 raise RuntimeError(
                     "Error code: 400 - {'error': {'message': '状态错误', "
-                    "'type': 'venus_error', 'code': '4001'}}"
+                    "'type': 'gateway_error', 'code': '4001'}}"
                 )
 
             async def _gen():
@@ -119,7 +119,7 @@ class TestStreamRetryHelper:
             return await _collect(
                 stream_with_retry(
                     _open,
-                    extra_substrings=["venus_error"],
+                    extra_substrings=["gateway_error"],
                     max_retries=2,
                     base_delay=0.01,
                 )
@@ -135,7 +135,7 @@ class TestStreamRetryHelper:
         async def _open():
             calls["n"] += 1
             raise RuntimeError(
-                "Error code: 400 - {'type': 'venus_error', 'code': '4001'}"
+                "Error code: 400 - {'type': 'gateway_error', 'code': '4001'}"
             )
 
         async def _do():
@@ -240,17 +240,17 @@ class TestDefaultIsParserError:
         assert not default_is_parser_error(ValueError("the model 'gpt-9' does not exist"))
 
     def test_does_not_classify_vendor_proxy_by_default(self):
-        # venus_error is private to a specific corp gateway — SDK has no
+        # gateway_error is private to a specific corp gateway — SDK has no
         # business hardcoding it. Without opt-in it must NOT match.
-        assert not default_is_parser_error(RuntimeError("venus_error 4001"))
+        assert not default_is_parser_error(RuntimeError("gateway_error 4001"))
 
     def test_extra_substrings_enable_vendor_match(self):
         assert default_is_parser_error(
-            RuntimeError("venus_error 4001 状态错误"),
-            extra_substrings=["venus_error"],
+            RuntimeError("gateway_error 4001 状态错误"),
+            extra_substrings=["gateway_error"],
         )
 
     def test_env_var_enables_vendor_match(self, monkeypatch):
-        monkeypatch.setenv("AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS", "venus_error,aiproxy_busy")
+        monkeypatch.setenv("AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS", "gateway_error,aiproxy_busy")
         assert default_is_parser_error(RuntimeError("aiproxy_busy: try later"))
-        assert default_is_parser_error(RuntimeError("VENUS_ERROR 4001"))
+        assert default_is_parser_error(RuntimeError("GATEWAY_ERROR 4001"))

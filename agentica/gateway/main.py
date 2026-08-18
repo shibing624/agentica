@@ -447,7 +447,7 @@ async def _process_channel_message(message, session_id: str) -> None:
         text = (message.content or "").strip()
         if not text and not media:
             # A media-only inbound whose download/decrypt failed must not
-            # become agent.chat(""): Venus/Claude reject empty user content
+            # become agent.chat(""): Claude and compatible proxies reject empty user content
             # (``messages.N: user messages must have non-empty content``)
             # and the empty turn poisons the session history.
             if wanted:
