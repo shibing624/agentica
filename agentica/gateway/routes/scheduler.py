@@ -18,6 +18,7 @@ from agentica.cron.jobs import (
     pause_job,
     resume_job,
     list_task_runs,
+    schedule_to_expr,
     schedule_to_human,
 )
 from agentica.cron.scheduler import _execute_job
@@ -38,6 +39,8 @@ def _job_dict(j) -> dict:
         "prompt": j.prompt,
         "user_id": j.user_id,
         "schedule": schedule_to_human(j.schedule),
+        # What the edit form must send back: the human form does not parse.
+        "schedule_expr": schedule_to_expr(j.schedule),
         "status": j.status.value,
         "enabled": j.enabled,
         "deliver": j.deliver,

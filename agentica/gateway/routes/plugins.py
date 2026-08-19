@@ -155,7 +155,15 @@ def _skill_dir() -> Path:
 
 
 def _load_registry():
-    return SkillLoader().load_all()
+    """Re-read the skill files from disk.
+
+    ``load_all()`` fills the *global* registry and its ``register()`` keeps the
+    first entry per name, so after this process has loaded skills once it is a
+    no-op: an edit made through this router returned 200 while the listing kept
+    serving the old body, and a deleted skill kept appearing. ``reload()``
+    clears first, which is the only way a CRUD route sees its own write.
+    """
+    return SkillLoader().reload()
 
 
 def _write_skill_md(path: Path, name: str, description: str, content: str, trigger: str = "") -> None:
@@ -190,7 +198,10 @@ async def get_skill(name: str):
 
 
 @router.post("/skills")
-async def create_skill(body: SkillCreateRequest):
+async def create_skill(
+    body: SkillCreateRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Skill name must not be empty")
@@ -200,11 +211,18 @@ async def create_skill(body: SkillCreateRequest):
         raise HTTPException(status_code=400, detail=f"Skill '{slug}' already exists")
     skill_path.mkdir(parents=True)
     _write_skill_md(skill_path, name, body.description, body.content, body.trigger or "")
+    # The catalogue is frozen per agent, so an already-cached agent would never
+    # see this skill — same reason the MCP routes invalidate.
+    await svc._invalidate_cache()
     return {"status": "created", "name": name, "slug": slug}
 
 
 @router.put("/skills/{name}")
-async def update_skill(name: str, body: SkillUpdateRequest):
+async def update_skill(
+    name: str,
+    body: SkillUpdateRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
     registry = _load_registry()
     skill = registry.get(name)
     if not skill or skill.location != "user":
@@ -213,14 +231,19 @@ async def update_skill(name: str, body: SkillUpdateRequest):
     trigger = body.trigger if body.trigger is not None else (skill.trigger or "")
     content = body.content if body.content is not None else skill.content
     _write_skill_md(skill.path, skill.name, description, content, trigger)
+    await svc._invalidate_cache()
     return {"status": "updated", "name": name}
 
 
 @router.delete("/skills/{name}")
-async def delete_skill(name: str):
+async def delete_skill(
+    name: str,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
     registry = _load_registry()
     skill = registry.get(name)
     if not skill or skill.location != "user":
         raise HTTPException(status_code=404, detail="Editable skill not found")
     shutil.rmtree(skill.path, ignore_errors=True)
+    await svc._invalidate_cache()
     return {"status": "deleted", "name": name}

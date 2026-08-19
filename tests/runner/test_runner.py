@@ -890,12 +890,18 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
         return [json.loads(line) for line in text.splitlines() if line.strip()]
 
     def _assert_single_tool_turn(self, agent):
-        entries = self._entries(agent)
+        raw = self._entries(agent)
+        # Observability rows share the file but are not the transcript: they
+        # are out-of-band, never replayed, and the Trace page owns them.
+        entries = [e for e in raw if e["type"] != "event"]
         self.assertEqual(
             [e["type"] for e in entries],
             ["user", "assistant", "tool", "assistant"],
-            f"unexpected transcript: {[e['type'] for e in entries]}",
+            f"unexpected transcript: {[e['type'] for e in raw]}",
         )
+        # The question must precede the lifecycle events of the request it
+        # caused, or the Trace page attributes every round to the turn before.
+        self.assertEqual(raw[0]["type"], "user", "the question is not the first row")
         self.assertEqual(entries[0]["content"], "please echo hi")
         self.assertTrue(entries[1]["tool_calls"], "assistant round lost its tool_calls")
         self.assertEqual(entries[2]["tool_call_id"], "call_1")

@@ -260,6 +260,24 @@ def validate_cron_expression(expression: str) -> bool:
     return True
 
 
+def schedule_to_expr(schedule: Schedule) -> str:
+    """Render a schedule back into the string form ``parse_schedule`` accepts.
+
+    ``schedule_to_human`` is one-way ("Daily at 09:00" parses back as nothing),
+    so an editor pre-filled from it would either fail or silently reschedule the
+    job. This is the round-trip form.
+    """
+    if isinstance(schedule, CronSchedule):
+        return schedule.expression
+    if isinstance(schedule, EverySchedule):
+        return f"every {schedule.interval_ms // 1000}s"
+    if isinstance(schedule, AtSchedule):
+        if schedule.at_ms > 0:
+            return datetime.fromtimestamp(schedule.at_ms / 1000).isoformat(timespec="seconds")
+        return ""
+    return ""
+
+
 def schedule_to_human(schedule: Schedule) -> str:
     """Convert schedule to human-readable description."""
     if isinstance(schedule, AtSchedule):

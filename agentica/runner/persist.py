@@ -22,6 +22,7 @@ from typing import (
 from agentica.utils.log import logger
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
+from agentica.model.usage import split_prompt_usage
 from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
 from agentica.memory import AgentRun
 
@@ -617,3 +618,106 @@ class PersistMixin:
             _assistant_meta = PersistMixin._provider_replay_meta(last_asst) if last_asst is not None else {}
             _assistant_meta["finish_reason"] = finish_reason
             agent._session_log.append("assistant", persisted, **_assistant_meta)
+
+    @staticmethod
+    def _trace_event(agent: "Agent", name: str, **payload: Any) -> None:
+        """Append a SessionLog lifecycle event. No-op without a session log."""
+        slog = agent._session_log
+        if slog is None:
+            return
+        slog.append_event(name, **payload)
+
+    @staticmethod
+    def _trace_session_prelude(agent: "Agent", messages: List[Message]) -> None:
+        """Record model / tool table / system prompt for the Trace page.
+
+        Called before every request; the SessionLog drops the repeat unless the
+        content actually changed, so a mid-session profile switch is visible
+        and a steady session pays one row set.
+        """
+        slog = agent._session_log
+        if slog is None:
+            return
+        system_prompt = ""
+        for msg in messages:
+            if msg.role == "system":
+                system_prompt = msg.content if isinstance(msg.content, str) else ""
+                break
+        model = agent.model
+        slog.append_trace_prelude(
+            model=model.id if model is not None else None,
+            provider=model.provider if model is not None else None,
+            context_window=model.context_window if model is not None else None,
+            tools=sorted((model.functions or {}).keys()) if model is not None else [],
+            system_prompt=system_prompt,
+        )
+
+    @staticmethod
+    def _tool_call_id_and_name(tc: Dict[str, Any]) -> tuple[str, str]:
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        call_id = str(tc.get("id") or tc.get("tool_call_id") or "")
+        name = str(tc.get("tool_name") or fn.get("name") or "")
+        return call_id, name
+
+    @staticmethod
+    def _trace_request_segments(agent: "Agent", messages: List[Message]) -> None:
+        """Write thinking / text / tool_call completion events for this request."""
+        assistant = None
+        for msg in reversed(messages):
+            if msg.role == "assistant":
+                assistant = msg
+                break
+        if assistant is None:
+            return
+        reasoning = assistant.reasoning_content or assistant.thinking
+        if isinstance(reasoning, str) and reasoning.strip():
+            PersistMixin._trace_event(agent, "thinking")
+        content = assistant.content if isinstance(assistant.content, str) else ""
+        if content.strip():
+            PersistMixin._trace_event(agent, "text")
+        for tc in assistant.tool_calls or []:
+            if not isinstance(tc, dict):
+                continue
+            call_id, name = PersistMixin._tool_call_id_and_name(tc)
+            if not call_id:
+                continue
+            PersistMixin._trace_event(agent, "tool_call", tool_call_id=call_id, tool_name=name)
+
+    @staticmethod
+    def _trace_token_usage(agent: "Agent", messages: List[Message]) -> None:
+        assistant = None
+        for msg in reversed(messages):
+            if msg.role == "assistant":
+                assistant = msg
+                break
+        metrics = (assistant.metrics if assistant is not None else None) or {}
+
+        def _num(value: Any) -> int:
+            if isinstance(value, list):
+                return int(sum(x for x in value if isinstance(x, (int, float))))
+            if isinstance(value, (int, float)):
+                return int(value)
+            return 0
+
+        details = metrics.get("prompt_tokens_details") if isinstance(metrics.get("prompt_tokens_details"), dict) else {}
+        # Same split the cost path uses: the three prompt buckets must be
+        # disjoint or the cached prefix is counted (and priced) twice.
+        prompt_tokens = _num(metrics.get("prompt_tokens")) or _num(metrics.get("input_tokens"))
+        fresh_input, cache_read, cache_write = split_prompt_usage(prompt_tokens, details)
+        if not (cache_read or cache_write):
+            cache_read = _num(metrics.get("cache_read_tokens") or metrics.get("cached_tokens"))
+            cache_write = _num(metrics.get("cache_write_tokens"))
+            fresh_input = max(prompt_tokens - cache_read - cache_write, 0)
+        output = _num(metrics.get("output_tokens"))
+        total = _num(metrics.get("total_tokens")) or (prompt_tokens + output)
+        PersistMixin._trace_event(
+            agent,
+            "token_usage",
+            request={
+                "input": fresh_input,
+                "cache_read": cache_read,
+                "cache_write": cache_write,
+                "output": output,
+                "total": total,
+            },
+        )
