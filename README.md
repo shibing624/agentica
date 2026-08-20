@@ -8,7 +8,7 @@
 
 <p align="center"><b>一个人，一支 agent 团队。</b><br />CLI 终端、本机 Web、Desktop App 是同一套产品，跑在你自己的机器上。</p>
 
-<h3 align="center"><a href="#桌面版">⬇️ 下载桌面版</a></h3>
+<h3 align="center"><a href="#桌面版">⬇️ Download Desktop App</a></h3>
 
 <p align="center">macOS · Windows · Linux</p>
 
@@ -24,7 +24,7 @@
 
 ## 为什么选 Agentica
 
-### 1. 🏆 同一个模型，更少的时间和 token
+### 1. 🏆 同一个模型，更准、更快、更省钱
 
 工具面刻意收窄、接口保持底层，对 DeepSeek 等开放模型深度适配。和 OpenAI Codex 各跑同一个模型、同一批公开题目，正面对比：
 
@@ -57,16 +57,8 @@ pip install -U agentica
 窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
 
 > [!IMPORTANT]
-> 桌面版是个壳，服务端仍是 Python 的 gateway。装应用之前先装它：
-> `pip install -U "agentica[gateway]"`（同一台机器、能在终端里跑起来即可）。
-
-| 系统 | 安装包 |
-|---|---|
-| **macOS** 11+ | [Apple 芯片（arm64）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg) · [Intel（x64）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg) |
-| **Windows** 10+ | [x64 安装程序（NSIS）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe) |
-| **Linux** x64 | [AppImage（免安装）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
-
-也都附在每个 [GitHub Release](https://github.com/shibing624/agentica/releases) 里。当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可：
+> 装桌面版应用之前先装服务端：
+> `pip install -U "agentica[gateway]"`。当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可：
 
 <details>
 <summary><b>🍎 macOS 提示「Agentica 已损坏，无法打开」</b></summary>
@@ -174,7 +166,7 @@ agent = DeepAgent()
 
 - **CLI** — `agentica` 交互终端；进程内 `task`、进程级 `delegate`、跨终端 peer 消息
 - **Web** — `agentica-gateway` 本机 SPA（聊天 / 轨迹 / 设置）+ IM 渠道
-- **Desktop App** — Electron 薄壳，同一套 Web，先 attach 再 spawn
+- **Desktop App** — App 跟 Web、CLI 共用同一套历史记录、工作目录、模型、配置等状态
 
 **协作**
 
