@@ -215,3 +215,4 @@ examples/self_evolution/03_self_evolution_e2e_glm.py
 .worktrees/
 node_modules/
 web/dist/
+desktop/node_modules/
