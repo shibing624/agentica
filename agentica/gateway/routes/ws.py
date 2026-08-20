@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from agentica.utils.log import logger
 from .. import deps
+from ..auth import websocket_token_ok
 from ..config import settings
 
 router = APIRouter()
@@ -71,6 +72,15 @@ async def websocket_endpoint(websocket: WebSocket):
             return
 
         params = data.get("params", {})
+        # `method: "agent"` runs the agent and `"send"` posts to IM, so this
+        # socket is the same authority as /api. The HTTP middleware never sees
+        # a websocket scope, so the check has to happen here — and it happens
+        # after the connect frame because `params.auth.token` is one of the
+        # documented ways to present it.
+        if not websocket_token_ok(websocket, params):
+            await websocket.close(code=4401, reason="Local token required")
+            return
+
         client_id = params.get("client", {}).get("id", "unknown")
         ws_manager.active_connections[client_id] = websocket
         logger.debug(f"WebSocket connected: {client_id}")

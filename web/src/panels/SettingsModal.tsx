@@ -1,5 +1,5 @@
 import * as api from "../api";
-import { browseDir, loadCronJobs, loadDirHistory, loadProfiles, loadProviders, loadStatus } from "../data";
+import { browseDir, loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders, loadStatus } from "../data";
 import { IconClose, IconFolder } from "../icons";
 import { agoStr, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession } from "../sessions";
@@ -142,6 +142,63 @@ async function applyBaseDir(dir: string) {
   showToast("工作目录已更新");
 }
 
+/** Set or change the web password.
+ *
+ *  Worth having here as well as in `agentica-gateway --set-password`: that one
+ *  is the only way to set the *first* password on a headless box, this one is
+ *  the only way for somebody who is not at that terminal. Setting one also
+ *  switches the entry point from the printed token URL to the login page, so
+ *  the copy says so. */
+function AccessBlock() {
+  const s = useAppState();
+  const f = s.passwordForm;
+  const set = (p: Partial<typeof f>) => setState({ passwordForm: { ...f, ...p } });
+
+  async function save() {
+    if (f.next.length < 8) { showToast("密码至少 8 位", 2500); return; }
+    if (f.next !== f.repeat) { showToast("两次输入不一致", 2500); return; }
+    set({ busy: true });
+    const { ok, data } = await api.setPasswordApi(f.next, f.old || undefined);
+    set({ busy: false });
+    if (!ok) { showToast((data as any)?.detail || "设置失败", 3500); return; }
+    setState({ passwordForm: { old: "", next: "", repeat: "", busy: false }, passwordSet: true });
+    showToast("密码已更新，其他浏览器已退出登录");
+  }
+
+  return (
+    <div className="settings-block">
+      <div className="settings-block-title">访问控制</div>
+      <div className="settings-item-meta">
+        {s.passwordSet
+          ? "已设密码：打开 /chat 会先要求登录，令牌 URL 不再打印。"
+          : "还没设密码：入口是启动时打印的 /chat?token=… 。设一个之后就走登录页，"
+            + "重启 gateway 也不用回终端重新取地址。"}
+      </div>
+      {s.passwordSet && (
+        <input className="pf-input" type="password" autoComplete="current-password"
+               placeholder="当前密码" value={f.old} onChange={(e) => set({ old: e.target.value })} />
+      )}
+      <input className="pf-input" type="password" autoComplete="new-password"
+             placeholder="新密码（至少 8 位）" value={f.next} onChange={(e) => set({ next: e.target.value })} />
+      <input className="pf-input" type="password" autoComplete="new-password"
+             placeholder="再输一次" value={f.repeat} onChange={(e) => set({ repeat: e.target.value })} />
+      <div className="pf-row">
+        <button className="dp-btn primary" disabled={f.busy} onClick={() => void save()}>
+          {s.passwordSet ? "修改密码" : "设置密码"}
+        </button>
+        {s.passwordSet && (
+          <button className="dp-btn" onClick={() => void logout()}>退出登录</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+async function logout() {
+  await api.logoutApi();
+  window.location.href = "/login";
+}
+
 export function SettingsModal() {
   const s = useAppState();
   const archived = Object.entries(s.sessions).filter(([, sess]) => sess.archived);
@@ -233,6 +290,8 @@ function GeneralTab() {
           </div>
         )}
       </div>
+
+      <AccessBlock />
 
       <div className="settings-block">
         <div className="settings-block-title">当前配置</div>
@@ -348,5 +407,8 @@ function ProfileForm() {
  *  rather than whatever the chat page fetched at boot. */
 export async function primeSettings(tab: string) {
   setState({ settingsModal: { open: true }, settingsTab: tab });
-  await Promise.all([loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs()]);
+  await Promise.all([
+    loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(),
+    loadAuthStatus(),
+  ]);
 }

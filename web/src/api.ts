@@ -1,8 +1,22 @@
 export type ApiResult<T = any> = { ok: boolean; status: number; data: T | null; error?: unknown };
 
+/** The header that lets a multipart write through the CSRF check (see
+ *  `gateway/auth.py::_csrf_ok`). A cross-site form can forge the body type but
+ *  not a custom header. */
+export const CLIENT_HEADER = "X-Agentica-Client";
+
+/** Where to send a browser whose session has gone. Set by the app so `api.ts`
+ *  does not have to know about the router. */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
+
 async function request<T = any>(url: string, options: RequestInit = {}): Promise<ApiResult<T>> {
   try {
     const r = await fetch(url, options);
+    // One place, because a 401 can come back from any of ~40 calls: the
+    // session expired or the gateway restarted without one, and every caller's
+    // correct reaction is the same.
+    if (r.status === 401 && !url.startsWith("/api/auth/")) onUnauthorized?.();
     let data: T | null = null;
     try { data = await r.json(); } catch { /* no body */ }
     return { ok: r.ok, status: r.status, data };
@@ -39,8 +53,19 @@ export async function uploadFileApi(file: File, targetDir?: string) {
   const fd = new FormData();
   fd.append("file", file);
   if (targetDir) fd.append("target_dir", targetDir);
-  return request("/api/upload", { method: "POST", body: fd });
+  return request("/api/upload", {
+    method: "POST",
+    body: fd,
+    headers: { [CLIENT_HEADER]: "web" },
+  });
 }
+
+export const fetchAuthStatus = () => request("/api/auth/status");
+export const loginApi = (password: string, user_id?: string) =>
+  postJson("/api/auth/login", user_id ? { password, user_id } : { password });
+export const logoutApi = () => postJson("/api/auth/logout", {});
+export const setPasswordApi = (password: string, old_password?: string) =>
+  postJson("/api/auth/password", old_password ? { password, old_password } : { password });
 
 export const fetchCronJobs = () => request("/api/scheduler/jobs");
 export const createCronJobApi = (body: unknown) => postJson("/api/scheduler/jobs", body);

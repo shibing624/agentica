@@ -429,9 +429,12 @@ class TestSettings:
         with patch.dict(os.environ, {}, clear=True):
             with patch("agentica.gateway.config.apply_global_config", return_value={}):
                 s = Settings.from_env()
-        assert s.host == "0.0.0.0"
+        # Loopback, not 0.0.0.0: reaching this API is enough to run tools as
+        # the user, so exposing it to the LAN has to be asked for.
+        assert s.host == "127.0.0.1"
         assert s.port == 8881
         assert s.debug is False
+        assert s.parent_pid == 0
 
     def test_peer_bridge_on_by_default_and_env_opts_out(self):
         """PEER_BRIDGE defaults to on; falsey values disable it."""

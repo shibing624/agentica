@@ -10,20 +10,27 @@ Responsibilities:
 - Channel setup and channel message handler
 - Serve static files and SPA HTML
 """
+import argparse
 import asyncio
+import os
+import socket
+import sys
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    import uvicorn
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from agentica.config import AGENTICA_LOG_LEVEL
 from agentica.utils.log import enable_process_file_logging, logger
-from . import deps
+from . import accounts, auth, deps, runtime
 from agentica.version import __version__
 from .config import settings
 from .services.agent_service import AgentService
@@ -31,7 +38,7 @@ from .services.channel_manager import ChannelManager
 from .services.agent_peers import GatewayAgentPeers
 from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
-from .routes import chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes
+from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes
 
 # ContextVar holding the current request ID — async-safe, no threading issues
 _request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -50,6 +57,38 @@ def _display_home_path(path: str) -> str:
     if path.startswith(home):
         return "~" + path[len(home):]
     return path
+
+
+def _entry_url(record: "runtime.GatewayRuntime") -> str:
+    """The address to hand a human.
+
+    Carries the token on the first hop, unless a password is set — then the
+    login page is the way in and printing a credential in the log is a leak
+    with no upside.
+    """
+    if record.token and not accounts.store().has_password():
+        return f"{record.url}/chat?token={record.token}"
+    return f"{record.url}/chat"
+
+
+# How often the parent-pid watchdog looks. Short enough that a killed shell
+# does not leave a gateway holding the port for long, long enough to be free.
+PARENT_POLL_SECONDS = 2.0
+
+
+async def _exit_with_parent(parent_pid: int) -> None:
+    """Stop this process once ``parent_pid`` is gone.
+
+    ``os._exit`` on purpose: a graceful shutdown would try to reach the peers
+    tree and the IM channels of a session whose owner has already vanished, and
+    the shell that would have waited for it is what just died.
+    """
+    while True:
+        await asyncio.sleep(PARENT_POLL_SECONDS)
+        if not runtime.is_pid_alive(parent_pid):
+            logger.info(f"Parent process {parent_pid} is gone — exiting")
+            runtime.unpublish(os.getpid())
+            os._exit(0)
 
 
 @asynccontextmanager
@@ -140,10 +179,41 @@ async def lifespan(app: FastAPI):
             "also gets no list_agents / send_message"
         )
 
-    # Distinguish the always-on Web service from any optional IM channels the
-    # user enabled via config, so the startup log makes it obvious which
-    # surfaces are live.
-    logger.info(f"Web service started — http://{settings.host}:{settings.port}/chat")
+    # Publish how to reach this process (port + token) so a desktop shell or a
+    # second terminal can find it, and print the one URL that works on a cold
+    # browser — with the token, since without it /chat is a 401.
+    record = runtime.GatewayRuntime(
+        pid=os.getpid(),
+        host=settings.host,
+        port=settings.port,
+        token=auth.get_token() if auth.auth_enabled() else "",
+        version=__version__,
+    )
+    runtime_path = runtime.publish(record)
+    logger.info(f"Web service started — {_entry_url(record)}")
+    if not auth.auth_enabled():
+        logger.warning(
+            "  API auth is OFF (GATEWAY_AUTH=false) — anything that can reach "
+            f"{record.url} can run tools as you"
+        )
+    elif accounts.store().has_password():
+        logger.info("  Sign in with your web password")
+        logger.info(f"  Runtime (port + token): {_display_home_path(str(runtime_path))}")
+    else:
+        logger.info(f"  Runtime (port + token): {_display_home_path(str(runtime_path))}")
+        logger.info(
+            "  No web password set — the URL above is the way in. "
+            "`agentica-gateway --set-password` switches to a login page."
+        )
+
+    # A desktop shell owns this process; if the shell is killed outright there
+    # is nobody left to stop us, and an orphan gateway keeps holding the port
+    # and the session locks. Polling is the only check that survives SIGKILL of
+    # the parent (an atexit handler over there would never run).
+    parent_task = None
+    if settings.parent_pid:
+        parent_task = asyncio.create_task(_exit_with_parent(settings.parent_pid))
+
     if deps.channel_manager.channels:
         enabled = ", ".join(c.value for c in deps.channel_manager.channels)
         logger.info(f"IM channels started — {enabled}")
@@ -154,6 +224,9 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
+    runtime.unpublish(os.getpid())
+    if parent_task is not None:
+        parent_task.cancel()
     if cron_task is not None:
         cron_task.cancel()
         try:
@@ -178,14 +251,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow all origins by default (personal local daemon)
+# CORS — loopback only, and that is not a tightening for its own sake.
+# Starlette answers `allow_origins=["*"]` + `allow_credentials=True` by echoing
+# the *request's* origin, so with the token in a cookie any page you happened to
+# be visiting could read this API and run tools. The SPA is same-origin (Vite's
+# dev server proxies, so it is same-origin too), so nothing legitimate needs a
+# wider list; the regex covers whatever port either of them is on.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"http://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.middleware("http")(auth.token_middleware)
 
 
 # ============== Request ID middleware ==============
@@ -239,13 +319,50 @@ if _UI_ASSETS.is_dir():
 @app.get("/chat/{full_path:path}", response_class=HTMLResponse)
 @app.get("/traces", response_class=HTMLResponse)
 @app.get("/traces/{full_path:path}", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse)
 async def web_spa(full_path: str = ""):
-    """Serve the SPA shell. Client router owns /chat and /traces."""
+    """Serve the SPA shell. Client router owns /chat, /traces and /login.
+
+    ``/login`` is outside the token gate (see ``auth._OPEN_PATHS``) — it is the
+    one page a signed-out browser must be able to load.
+    """
     return _spa_index()
+
+
+# ============== Desktop shell control ==============
+# Set by main() so the shutdown route can ask uvicorn to wind down. None under
+# a TestClient (no server object), which is exactly when the route should
+# decline rather than kill the test runner.
+_server: Optional["uvicorn.Server"] = None
+
+
+@app.post("/api/desktop/shutdown")
+async def desktop_shutdown(request: Request):
+    """Wind down gracefully at the supervising shell's request.
+
+    POSIX has SIGTERM, so this exists for Windows, where killing a child is a
+    hard ``TerminateProcess``: the channels would never disconnect and the
+    peers record would never be unpublished. The shell asks here first and
+    kills only if the process is still up afterwards.
+
+    Restricted to the machine token, not any session: a browser tab must not be
+    able to stop the process behind it, and the shell holds the token already.
+    """
+    presented, _ = auth.machine_token(request)
+    if auth.auth_enabled() and not auth.token_is_valid(presented):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if _server is None:
+        return JSONResponse(
+            {"error": "unavailable", "detail": "Not running under uvicorn."},
+            status_code=503,
+        )
+    _server.should_exit = True
+    return {"status": "stopping"}
 
 
 # ============== Route registration ==============
 
+app.include_router(auth_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(chat.router)
 app.include_router(traces_routes.router)
@@ -553,15 +670,116 @@ class _GatewayAgentRunner:
 
 # ============== Entry point ==============
 
-def main() -> None:
+def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="agentica-gateway",
+        description="Serve the agentica Web UI and HTTP/WebSocket API.",
+    )
+    parser.add_argument(
+        "--host", default=settings.host,
+        help="Bind address (default %(default)s; use 0.0.0.0 to accept from the LAN)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=settings.port,
+        help="Port to bind; 0 picks a free one and reports it (default %(default)s)",
+    )
+    parser.add_argument(
+        "--parent-pid", type=int, default=settings.parent_pid,
+        help="Exit when this pid is gone. A desktop shell passes its own pid so "
+             "killing the shell cannot leave the gateway running.",
+    )
+    parser.add_argument(
+        "--set-password", action="store_true",
+        help="Prompt for a web password and exit. Required before binding "
+             "anything other than loopback.",
+    )
+    return parser.parse_args(argv)
+
+
+def _bind(host: str, port: int) -> socket.socket:
+    """Bind the listening socket here, before uvicorn.
+
+    ``--port 0`` has to be resolved by whoever holds the socket: asking the OS
+    for a free port and then handing the *number* to uvicorn re-opens the race
+    the zero was there to avoid — something else can take it in between. So we
+    bind, read the port back, and give uvicorn the socket.
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.set_inheritable(True)
+    return sock
+
+
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def _refuse_open_bind(host: str) -> Optional[str]:
+    """Why this host must not be served, or None.
+
+    Binding past loopback puts ``execute`` on the network. The token alone is
+    not enough there: it is printed in a terminal and mailed around in a
+    ``runtime.json`` path, and there is no way to change it without a restart.
+    A password is the credential a person can rotate, so it is the price of
+    admission — and refusing at startup is the only moment anybody is watching.
+
+    ``GATEWAY_AUTH=false`` is not caught here on purpose: turning the gate off
+    is an explicit instruction, and an explicit argument is intent. It gets a
+    loud warning instead (see ``lifespan``).
+    """
+    if host in LOOPBACK_HOSTS or not auth.auth_enabled():
+        return None
+    if accounts.store().has_password():
+        return None
+    return (
+        f"refusing to serve {host}: that is reachable from the network and no "
+        "web password is set. Run `agentica-gateway --set-password` first, or "
+        "bind 127.0.0.1."
+    )
+
+
+def main(argv: Optional[list[str]] = None) -> None:
     """Start the gateway server."""
     import uvicorn
-    uvicorn.run(
-        "agentica.gateway.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=False,
-    )
+
+    args = _parse_args(argv)
+    if args.set_password:
+        raise SystemExit(accounts.set_password_interactive(settings.default_user_id))
+
+    settings.host = args.host
+    settings.parent_pid = args.parent_pid
+
+    refusal = _refuse_open_bind(args.host)
+    if refusal:
+        print(f"agentica-gateway: {refusal}", file=sys.stderr)
+        raise SystemExit(2)
+
+    try:
+        sock = _bind(args.host, args.port)
+    except OSError as e:
+        # The common one is "port already in use", and the useful next line is
+        # not a traceback — it is which gateway already has it.
+        existing = runtime.read()
+        hint = ""
+        if existing is not None and existing.port == args.port and runtime.is_pid_alive(existing.pid):
+            hint = f" — pid {existing.pid} is already serving {existing.url}"
+        print(f"agentica-gateway: cannot bind {args.host}:{args.port}: {e}{hint}", file=sys.stderr)
+        raise SystemExit(1)
+
+    # The real port, which with --port 0 is only knowable now. lifespan reads
+    # settings.port to publish the runtime record, so it must be set first.
+    settings.port = sock.getsockname()[1]
+
+    # The app *object*, not "agentica.gateway.main:app". Under `python -m` the
+    # import string makes uvicorn load this file a second time, under its real
+    # name — so `main()` would set `_server` on the `__main__` copy while the
+    # shutdown route ran in the other one and answered "not under uvicorn".
+    # Passing the object also means the module is only executed once.
+    global _server
+    config = uvicorn.Config(app, reload=False)
+    _server = uvicorn.Server(config)
+    _server.run(sockets=[sock])
 
 
 if __name__ == "__main__":

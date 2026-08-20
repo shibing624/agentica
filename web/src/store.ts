@@ -123,6 +123,10 @@ export type AppState = {
   cronRunsOpen: string[];
   cronBusy: string;
   sidebarSearch: string;
+  /** Whether a web password exists. Decides what the access-control block
+   *  offers ("set" vs "change") and whether logging out is a thing. */
+  passwordSet: boolean;
+  passwordForm: { old: string; next: string; repeat: string; busy: boolean };
 };
 
 export function emptyProfileForm(): ProfileForm {
@@ -200,6 +204,8 @@ const state: AppState = {
   cronRunsOpen: [],
   cronBusy: "",
   sidebarSearch: "",
+  passwordSet: false,
+  passwordForm: { old: "", next: "", repeat: "", busy: false },
 };
 
 export function getState() { return state; }

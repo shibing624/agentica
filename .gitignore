@@ -213,5 +213,5 @@ START_HERE.md
 examples/self_evolution/03_self_evolution_e2e_glm.py
 .workbuddy/
 .worktrees/
-web/node_modules/
+node_modules/
 web/dist/

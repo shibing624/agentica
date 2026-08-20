@@ -35,9 +35,13 @@ pip install "agentica[dingtalk]"   # dingtalk-stream（钉钉 Stream）
 ```bash
 agentica-gateway
 # 等价：python -m agentica.gateway.main
+
+agentica-gateway --set-password        # 设一个网页密码（见下文「鉴权」）
+agentica-gateway --host 0.0.0.0        # 也让局域网设备访问（必须先设密码）
+agentica-gateway --port 0              # 让系统挑一个空闲端口，启动时打印实际端口
 ```
 
-默认监听 `0.0.0.0:8881`，浏览器打开 `http://localhost:8881/chat` 进入内置 Web UI。
+默认监听 `127.0.0.1:8881`。**`/api` 与 `/ws` 需要凭据**：没设密码时用启动日志里那条带 `?token=` 的完整地址打开一次，之后浏览器记住会话，直接开 `http://localhost:8881/chat` 即可；设了密码就走 `/login` 登录页。
 
 启动日志会明确区分两类服务，避免与 IM 渠道混淆；并给出本进程的文件日志路径（与 CLI 同一套 `$AGENTICA_HOME/logs/YYYYMMDD-<pid>.log`，`AGENTICA_LOG_FILE=""` 可关掉）：
 
@@ -49,12 +53,71 @@ agentica-gateway
   Model:     openai/gpt-4o
   Log File (INFO): ~/.agentica/logs/20260814-65634.log
 ==================================================
-Web service started — http://0.0.0.0:8881/chat            # 始终运行的 Web / HTTP 服务
+Web service started — http://127.0.0.1:8881/chat?token=…  # 第一次用这条完整地址打开
+  Runtime (port + token): ~/.agentica/cache/gateway/runtime.json
 IM channels started — wechat, wecom                       # 按配置启用的 IM 渠道
 # 或：IM channels — none enabled (configure a channel to enable)
 ```
 
 其中 `Work dir` 行显示当前传给 Agent 的 project 工作目录（默认即启动 `agentica-gateway` 时所在的目录，见下文"工作目录"）。
+
+## 鉴权
+
+`/api` 能切 profile、读任意路径、跑 `execute`，所以它默认要凭据。**有两种凭据，分工不同**：
+
+**机器令牌** —— 证明"我在这台机器上，能读一个 `0600` 文件"。每次启动随机生成，连同实际端口写进 `$AGENTICA_CACHE_DIR/gateway/runtime.json`（`0600`，进程退出时删除）。给脚本和桌面壳用：
+
+```bash
+TOKEN=$(python -c "import json,os;print(json.load(open(os.path.expanduser('~/.agentica/cache/gateway/runtime.json')))['token'])")
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8881/api/status
+# 或 X-Agentica-Token: <token>
+```
+
+**会话** —— 证明"这个浏览器登录过一次"。落盘在 `$AGENTICA_HOME/gateway/auth.json`（`0600`，只存 sha256），装在 `agentica_session` cookie 里（HttpOnly、SameSite=Lax），有效期 7 天、最后一天内的任何请求自动续期。
+
+两者分开是有原因的：cookie 里放的**不是**令牌本身。令牌是进程级的，一重启就变——cookie 若存令牌，每次重启 gateway 都得回终端重新捞地址；而且 cookie 泄露就等于主凭据泄露，没法只吊销一个浏览器。
+
+进门方式取决于有没有设密码：
+
+| 有密码？ | 浏览器进门方式 |
+|---|---|
+| 没有（默认） | 启动日志打印 `…/chat?token=…`，打开一次即换成会话；之后 `/chat` 书签照常工作 |
+| 有 | 打开 `/chat` 会 302 到 `/login`，输密码换会话；启动日志不再打印令牌 |
+
+设密码：`agentica-gateway --set-password`（在那台机器的终端上），或网页里 设置 › 常规 › 访问控制。密码用 `hashlib.scrypt` 存储，格式 `scrypt$n$r$p$salt$hash`（参数随 hash 一起存，以后调高成本不会作废旧密码）。改密码会让**其他所有浏览器退出登录**——改密码的场景就是"我的 cookie 可能被人拿到了"。连续失败 5 次后按 1s、2s、4s…（上限 60s）退避，返回 429 并带 `Retry-After`。
+
+**`--host` 不是 loopback 时必须先设密码，否则拒绝启动**（退出码 2）。令牌是打印在终端里、不重启改不了的东西，不适合暴露到网络；密码是人能自己轮换的凭据。`GATEWAY_AUTH=false` 不受这条约束——显式关门是明确意图，只会得到一条醒目的告警。
+
+不需要凭据的路径，每条都有不得不豁免的理由：`/webhook/*`（飞书等第三方回调自带签名，无法携带我们的凭据）、`/health` 与 `/api/health`（就绪探针在拿到令牌之前就要跑）、`/`、`/assets/*`（编译产物，无用户数据）、`/login` 与 `/api/auth/{status,login,logout}`（门自己不能锁在门后）。CORS 只放行 loopback 来源。
+
+CSRF 的主防线是 `SameSite=Lax`；第二道是**带 cookie 的写请求必须是 `application/json`，或者带 `X-Agentica-Client` 头**——HTML 表单只能发那三种 Content-Type，也伪造不出自定义头。`/api/upload` 确实要 multipart，所以它带这个头。用 header 递交令牌的脚本不受此约束（`curl -d` 默认就是表单类型，而表单发不出 `Authorization`）。
+
+| 变量 | 作用 |
+|---|---|
+| `AGENTICA_GATEWAY_TOKEN` | 固定令牌，不再每次随机（脚本、桌面壳重启子进程时用） |
+| `GATEWAY_AUTH=false` | 整道门关掉。**只在你确认这个端口只有自己能连时**才用 |
+
+相关端点：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/auth/status` | 免凭据。门开着吗 / 有密码吗 / 我登录了吗 |
+| POST | `/api/auth/login` | `{"password": "…"}` → 下发会话 cookie |
+| POST | `/api/auth/logout` | 服务端销毁会话（不只是清 cookie） |
+| POST | `/api/auth/password` | 设置或修改密码；令牌持有者可以不填旧密码 |
+| POST | `/api/desktop/shutdown` | 仅限令牌持有者，优雅停机（Windows 上唯一的优雅路径） |
+
+## 桌面应用（Electron 薄壳）
+
+`desktop/` 是一层 Electron 壳：单实例，同一 `~/.agentica` 上已经有 gateway 就直接连过去，否则拉起 `agentica-gateway --port <上次那个> --parent-pid <自己>`，就绪后开窗口加载 `/chat`。窗口里就是浏览器看到的同一份 SPA，没有第二套 UI，也没有 preload / IPC；令牌先换成会话再注入 cookie，渲染进程读不到。
+
+几处不显然的设计：
+
+- **端口是粘的。** SPA 的会话树、当前会话、主题都存在 `localStorage`，而它按 origin 隔离，origin 就是 `http://127.0.0.1:<port>`。所以纯 `--port 0` 会让每次启动的侧边栏都是空的；壳记住上次真正绑定的端口，下次优先要它，被占了才退回 0。
+- **子进程死了会重启**，退避 1s / 2s / 4s，三次放弃并弹窗；连续跑满一分钟就重置这个额度。
+- **退出先请求 `POST /api/desktop/shutdown`**，再 SIGTERM，再 SIGKILL，且退出流程会等到子进程真的没了才继续——Windows 上 `kill()` 是硬 TerminateProcess，渠道不会断开、peers 记录不会清理。`--parent-pid` 是壳被强杀时的兜底：gateway 发现父进程消失会自己退出。
+
+详见 `desktop/README.md`。
 
 ## 整体架构
 
@@ -198,7 +261,7 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 
 <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
 
-> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用；其余 IM 渠道都是可选的叠加层。
+> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用（首次用启动日志里带 `?token=` 的地址，或设了密码后走 `/login`）；其余 IM 渠道都是可选的叠加层。
 
 ## 配置（环境变量）
 
@@ -210,8 +273,11 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `HOST` | `0.0.0.0` | 监听地址 |
-| `PORT` | `8881` | 监听端口 |
+| `HOST` | `127.0.0.1` | 监听地址。`0.0.0.0` 才对局域网开放，此时**必须先设密码**，否则拒绝启动 |
+| `PORT` | `8881` | 监听端口。`0` = 由系统挑一个空闲端口并在启动日志里报出来 |
+| `GATEWAY_AUTH` | `true` | `/api` + `/ws` 的凭据门，见「鉴权」 |
+| `AGENTICA_GATEWAY_TOKEN` | 随机 | 固定令牌 |
+| `AGENTICA_GATEWAY_PARENT_PID` | — | 该 pid 消失后自行退出（等价 `--parent-pid`） |
 | `OPENAI_API_KEY` / 各家 provider key | — | 走标准 provider 配置；config.yaml profile 也自带 `api_key`，二者等价 |
 
 ### 模型（优先 config.yaml）
@@ -254,7 +320,7 @@ agentica-gateway
 
 ### 最简启动（先跑起来）
 
-零配置就能先跑：`agentica-gateway` 启动后自带 Web UI（`http://localhost:8881/chat`），
+零配置就能先跑：`agentica-gateway` 启动后自带 Web UI（用启动日志里那条 `http://127.0.0.1:8881/chat?token=…`），
 无需任何 IM 配置即可对话，记忆落地在 `~/.agentica/workspace`。
 
 想接一个 IM 渠道，**微信 ClawBot 最省事**：不用去开放平台申请应用，
@@ -453,9 +519,11 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 
 | Method | Path | 说明 |
 |--------|------|------|
-| GET | `/health` / `/api/health` | 健康检查（免 token） |
-| GET | `/chat` | 内置 Web UI（免 token） |
+| GET | `/health` / `/api/health` | 健康检查（免凭据） |
+| GET | `/chat` | 内置 Web UI（首次需 `?token=` 或登录，之后走 cookie） |
 | GET | `/traces` | Session Trace 页（与 `/chat` 同一份 SPA） |
+| GET | `/login` | 登录页（设了密码时；与 `/chat` 同一份 SPA） |
+| POST | `/api/auth/login` / `/logout` / `/password` | 登录、退出、改密码，见「鉴权」 |
 | GET | `/api/sessions/{id}/trace/analysis` | 读时分析：Task / 模型条 / 工具条 |
 | GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
 | POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`, `user_id`） |
@@ -468,6 +536,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 
 ```bash
 curl -X POST http://localhost:8881/api/send \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "qq",

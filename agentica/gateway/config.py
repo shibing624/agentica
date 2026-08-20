@@ -26,10 +26,16 @@ class Settings:
     /api/config/base_dir) can update them without property-override hacks.
     """
 
-    # Server
-    host: str = "0.0.0.0"
+    # Server. Loopback by default: this API can run tools as you, so listening
+    # on every interface is something to ask for (HOST=0.0.0.0), not something
+    # to get by not thinking about it.
+    host: str = "127.0.0.1"
     port: int = 8881
     debug: bool = False
+
+    # When set, the gateway exits once this pid is gone — the desktop shell
+    # passes its own so killing the shell cannot orphan the server.
+    parent_pid: int = 0
 
     # Default user ID (single-user scenario)
     default_user_id: str = "default"
@@ -185,9 +191,10 @@ class Settings:
 
         return cls(
             # Server
-            host=os.getenv("HOST", "0.0.0.0"),
+            host=os.getenv("HOST", "127.0.0.1"),
             port=int(os.getenv("PORT", "8881")),
             debug=os.getenv("DEBUG", "").lower() in ("1", "true"),
+            parent_pid=int(os.getenv("AGENTICA_GATEWAY_PARENT_PID", "0") or 0),
 
             # Default user
             default_user_id=os.getenv("DEFAULT_USER_ID", "default"),

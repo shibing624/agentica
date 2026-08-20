@@ -4,7 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as api from "../api";
 import { DirModal } from "../components/DirModal";
-import { loadCronJobs, loadPlugins, loadProfiles, loadStatus } from "../data";
+import { loadAuthStatus, loadCronJobs, loadPlugins, loadProfiles, loadStatus } from "../data";
 import { agoStr, fmtN, fmtTime, shortenPath, uid } from "../lib/format";
 import { PluginsPanel } from "../panels/PluginsPanel";
 import { primeSettings, SettingsModal, switchProfile } from "../panels/SettingsModal";
@@ -32,7 +32,7 @@ export function ChatPage() {
     void (async () => {
       await loadStatus();
       await loadSessions();
-      await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs()]);
+      await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs(), loadAuthStatus()]);
     })();
   }, []);
 

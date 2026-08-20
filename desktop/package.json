@@ -1,0 +1,13 @@
+{
+  "name": "agentica-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell around the agentica gateway. Mechanism only: process lifecycle and one window.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
+  }
+}

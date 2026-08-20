@@ -23,6 +23,11 @@ export async function loadStatus() {
   });
 }
 
+export async function loadAuthStatus() {
+  const { ok, data } = await api.fetchAuthStatus();
+  if (ok && data) setState({ passwordSet: !!data.password_set });
+}
+
 export async function loadProfiles() {
   const { ok, data } = await api.fetchProfiles();
   if (ok && data) setState({ profilesData: data });

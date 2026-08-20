@@ -21,7 +21,27 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Empty string is the documented "disable file sink" sentinel in config.py.
 os.environ.setdefault("AGENTICA_LOG_FILE", "")
 
+# The gateway's local token gate is ON in production, and every existing
+# gateway test is about what a route *does*, not about how it is guarded — so
+# they run with the gate open rather than each one carrying a header. The gate
+# itself is covered by tests/gateway/test_gateway_auth.py, which turns it back
+# on explicitly (auth.auth_enabled() reads the env per request, so a test can).
+os.environ["GATEWAY_AUTH"] = "false"
+
+import atexit
+import shutil
 import tempfile
+
+# Runtime state under $AGENTICA_CACHE_DIR (the peers tree, and the gateway's
+# runtime.json holding a live port + token) must not be the user's real one:
+# a TestClient runs the gateway lifespan for real, and publishing from a test
+# would overwrite the record of the gateway they actually have running — a
+# desktop shell would then attach to a port nobody is listening on. Set before
+# any `import agentica.*`, which reads this env at import time.
+_CACHE_TMPDIR = tempfile.mkdtemp(prefix="agentica-test-cache-")
+os.environ["AGENTICA_CACHE_DIR"] = _CACHE_TMPDIR
+atexit.register(shutil.rmtree, _CACHE_TMPDIR, ignore_errors=True)
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from agentica.agent import Agent
@@ -41,6 +61,27 @@ def _isolate_default_project_dir(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("AGENTICA_PROJECTS_DIR", tmpdir)
         yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gateway_accounts():
+    """Keep the gateway's password hash and web sessions out of the real home.
+
+    ``auth.json`` lives under ``$AGENTICA_HOME`` (a cache wipe must not lose a
+    password), and ``AGENTICA_HOME`` is read at import — so the env var is not
+    the seam here; the store is. Skipped entirely without ``[gateway]``.
+    """
+    try:
+        from agentica.gateway import accounts
+    except ImportError:
+        yield
+        return
+    with tempfile.TemporaryDirectory() as tmpdir:
+        accounts.use_store_for_tests(os.path.join(tmpdir, "auth.json"))
+        try:
+            yield
+        finally:
+            accounts.use_store_for_tests(accounts.AUTH_FILE)
 
 
 @pytest.fixture(autouse=True)
