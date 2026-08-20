@@ -6,12 +6,11 @@ need Node.
 
 ## Develop (two processes)
 
-`agentica-gateway` on PATH is the **editable install of the main checkout**,
-not this worktree. Starting it from here still serves the old petite-vue
-`/static` page. Run the Gateway as a module from this tree:
+`agentica-gateway` on PATH is whichever checkout is `pip install -e`'d. To be
+sure you are running *this* tree, start it as a module from the repo root:
 
 ```bash
-cd /path/to/agentica/.worktrees/web-v2
+cd /path/to/agentica
 PYTHONPATH=. python -m agentica.gateway.main
 ```
 
@@ -24,8 +23,9 @@ npm run dev          # http://localhost:5173  (proxies /api to :8881)
 ```
 
 Open `http://localhost:5173/chat`, not `:8881/chat`, while Vite is running.
-`:8881/chat` is the built dist (run `npm run build` to refresh it).
+`:8881/chat` serves the built output in `agentica/gateway/ui/`, which only
+changes when you build:
 
 ```bash
-npm run build        # writes ../agentica/gateway/ui
+npm run build        # tsc --noEmit, then writes ../agentica/gateway/ui
 ```
