@@ -424,9 +424,9 @@ class TestCLIToolRender(unittest.TestCase):
         for line in answer.splitlines():
             self.assertIn(line, rendered)
 
-    def test_raw_input_rationale_is_shown_in_transcript(self):
-        """When the user typed "3, because workers=10 is ok" and it resolved to
-        option 3, scrolling back must still show the rationale the user gave."""
+    def test_the_answer_is_shown_as_the_user_typed_it(self):
+        """The transcript is the only lasting record of the exchange, so the
+        rationale the user typed alongside their choice has to survive in it."""
         import json
         from io import StringIO
 
@@ -440,16 +440,14 @@ class TestCLIToolRender(unittest.TestCase):
             "ask_user_question",
             json.dumps({
                 "prompt": "选哪个？",
-                "response": "100 题（~3.5 小时）",
-                "raw_input": "3 , 100题, workers=10 is ok",
+                "response": "3 , 100题, workers=10 is ok",
             }, ensure_ascii=False),
             is_error=False,
             elapsed=5.0,
         )
 
         rendered = output.getvalue()
-        self.assertIn("100 题（~3.5 小时）", rendered)
-        self.assertIn("workers=10 is ok", rendered)
+        self.assertIn("3 , 100题, workers=10 is ok", rendered)
 
     def test_unparseable_ask_result_falls_back_to_generic_rendering(self):
         """A payload with no 'response' isn't an exchange — it must still print."""

@@ -212,7 +212,9 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 
 [Aider Polyglot](https://github.com/Aider-AI/polyglot-benchmark) Python 全量 34 题，同一 `deepseek-v4-flash-official`、同一 pytest。完整说明见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
 
-![总时长、tool calls、输入/输出 token：Agentica 均低于 Codex](docs/guides/img/polyglot-agentica-vs-codex.png)
+同一模型下 Agentica 更快、更少工具、更少 token，更省钱。
+
+![Agentica_pk_Codex](https://github.com/shibing624/agentica/blob/main/docs/assets/polyglot-agentica-vs-codex.png)
 
 | 指标 | Agentica | Codex CLI |
 |---|---|---|

@@ -1,12 +1,13 @@
 # Code Benchmarks（无 Docker）
 
-本目录跑四套**本机直接执行**的 coding benchmark，用来给 agentica 出第一批数字。
+本目录跑五套**本机直接执行**的 coding / data-analysis benchmark，用来给 agentica 出第一批数字。
 
-公榜上最有公信力的 TB2.1 / SWE-bench 都绑 Docker。这里刻意避开它们：判分在本机跑，PK 公信力会打折，但一天内能出分，且 **Aider Polyglot 是这批里唯一测 agent 循环的**。
+公榜上最有公信力的 TB2.1 / SWE-bench 都绑 Docker。这里刻意避开它们：判分在本机跑，PK 公信力会打折，但一天内能出分。**Aider Polyglot** 测改代码直到 pytest 绿；**InfiAgent-DABench** 测读 CSV 做数据分析直到打出 `@name[value]`。
 
 | Benchmark | 测什么 | 默认用法 | 本机依赖 |
 |---|---|---|---|
-| **polyglot**（主） | agent 改文件直到 pytest 绿 | `--bench polyglot` | git + pytest |
+| **polyglot**（主，coding） | agent 改文件直到 pytest 绿 | `--bench polyglot` | git + pytest |
+| **dabench**（data analysis） | agent 读 CSV，封闭题 `@tag[value]` | `--bench dabench` | pandas / numpy / scipy / sklearn |
 | **livecodebench**（副） | 单轮算法生成 + 执行 | `--bench livecodebench` | 仅 python |
 | **bigcodebench** | 函数级 + 真实库 | `--bench bigcodebench` | `pip install datasets` + 题面里的第三方库 |
 | **evalplus** | HumanEval+，只当管道 smoke | `--bench evalplus` | 仅 python |
@@ -24,20 +25,35 @@ python evaluation/code_benchmark/run.py --bench polyglot --max-samples 1 --model
 
 # LiveCodeBench 裸模基线
 python evaluation/code_benchmark/run.py --bench livecodebench --max-samples 5 --lcb-start-date 2024-08-01
+
+# DABench（data analysis）。agentica 默认 Responses；评测 agent 与 Polyglot 同一套（无 todo / ls / glob / grep）
+python evaluation/code_benchmark/run.py --bench dabench --max-samples 0 --agent agentica --wire-api responses --model deepseek-v4-flash-official --extra-body '{"reasoning": {"effort": "high"}}'
+python evaluation/code_benchmark/run.py --bench dabench --max-samples 0 --agent codex --agent-timeout 600 --model deepseek-v4-flash-official --extra-body '{"reasoning": {"effort": "high"}}'
 ```
 
 OpenAI 兼容端点用 `--base-url` / `--api-key`，或环境变量 `OPENAI_BASE_URL` / `OPENAI_API_KEY`。
 
 ## 推荐组合
 
-1. **Polyglot 主分数**：`--language python --tries 2`。agent 自己决定读哪、改哪、跑不跑测试。
-2. **LiveCodeBench 裸分**：同一底模、单轮生成。`Polyglot − LCB ≈ harness 增益`。
-3. **EvalPlus**：只确认管道没坏。头部模型已经 90%+，别拿出去 PK。
-4. **BigCodeBench**：要 `datasets`，且题面会 `import` 真实第三方库；缺库的题会判失败。
+1. **Polyglot 主分数（coding）**：`--language python --tries 2`。
+2. **DABench（data analysis）**：`--bench dabench`。公开的是 DAEval validation（本仓库缓存 **257** 题 / 55 个 CSV）；判分是 `@name[value]` 精确匹配（浮点 1e-6），与 [InfiAgent](https://github.com/InfiAgent/InfiAgent) 的 `eval_closed_form.py` 同口径。agentica 与 Polyglot 共用评测 agent（无 todo，schema 去掉 `ls` / `glob` / `grep`），prompt 点名 CSV、禁止多余清洗、打出 `@tag` 立刻停。全量 `--max-samples 0`，默认 `--wire-api responses`。
+3. **LiveCodeBench 裸分**：同一底模、单轮生成。`Polyglot − LCB ≈ harness 增益`。
+4. **EvalPlus**：只确认管道没坏。头部模型已经 90%+，别拿出去 PK。
+5. **BigCodeBench**：要 `datasets`，且题面会 `import` 真实第三方库；缺库的题会判失败。
 
 Python 子集大约 34 题（全量 Polyglot 是 225，含 JS/Go/Rust/Java/C++）。先跑 `--max-samples 5` 估成本，再拉满。
 
 已发布的 Agentica vs Codex CLI 对照见 [`docs/guides/benchmark.md`](../../docs/guides/benchmark.md)，原始 `summary.json` / `predictions.jsonl` 在 [`results/`](results/)。
+
+## 单测
+
+harness 自己的不调 LLM 的断言：
+
+```bash
+python -m pytest evaluation/code_benchmark/tests/ -q
+```
+
+覆盖评测 agent 的工具白名单、DABench `@tag[value]` 判分、prompt 约束、以及 `--dry-run` 的 gold/broken/empty 三条路径。
 
 ## 输出
 
@@ -101,4 +117,5 @@ Claude：`claude --print --output-format json --dangerously-skip-permissions`。
 ## 和官方 runner 的差异
 
 - **Polyglot**：题目与 pytest 判分对齐 aider；agent 是 agentica，不是 aider 的 edit-format。分数可对表，但不能直接贴官方 leaderboard。
+- **DABench**：题目、CSV、`@tag[value]` 金标对齐 InfiAgent DAEval validation；agent 是 agentica / Codex CLI，不是官方 Docker sandbox。分数可对表，但不能直接贴官方 leaderboard。
 - **LCB / EvalPlus / BCB**：本机 subprocess 执行，不是官方 Docker / remote evaluator。`--dry-run` 用 canonical / 坏答案自检管道。LiveCodeBench 官方 jsonl 约 1.2GB，runner **按行流式读取**，`--max-samples N` 不会整包下载。

@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-import os
-
-os.environ.setdefault("OPENAI_API_KEY", "test-key")
-
+"""Unit tests for the coding-eval agent factory (no LLM)."""
 from evaluation.code_benchmark.common import (
     EVAL_DROP_TOOLS,
     INSTRUCTIONS_ADDENDUM,

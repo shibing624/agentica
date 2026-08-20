@@ -3,11 +3,12 @@
 @author:XuMing(xuming624@qq.com)
 @description: Ask User Question Tool - Human-in-the-loop tool for agent interactions
 
-The agent asks the user a question and waits for the reply. The reply is text:
-free-form prose, a picked option, a yes/no — the user's wording is never
-enumerable, so the tool resolves it against any offered options with the
-auxiliary LLM and hands the model a plain answer. No mode parameter, no rule
-matching.
+The agent asks the user a question and waits for the reply. The reply is handed
+back as text, exactly as typed — nothing between the keystrokes and the model,
+not an auxiliary LLM "resolving" the wording and not a rule mapping "3" to an
+option. The question and the options travel with the answer, so the model reads
+"3", "C", "the last one" and "the cheap one" off the same list the user saw,
+with all the context that made it ask.
 
 Example:
     ```python
@@ -94,9 +95,14 @@ You have access to the `ask_user_question` tool to request input or confirmation
 ### How it behaves:
 Ask a plain question in `prompt`. Optionally pass `options` to present numbered
 choices. The user replies in their own words — a number, a paraphrase, a yes/no,
-a rationale, or none of the above — and the tool resolves it against the options
-by meaning and returns the answer as text. You always get back the question, the
-resolved answer, and the user's raw reply.
+a rationale, or none of the above — and you get that reply back verbatim next to
+the question. Read it in context: a bare number means that numbered option,
+anything else means what it says.
+
+### Recommending an option:
+When one choice is your recommendation, put it first in `options` and say so in
+its label — e.g. "全量重跑（推荐）" or "Rerun everything (recommended)". The
+user then picks it with one keystroke.
 
 ### Who this reaches:
 This renders in YOUR terminal. If the work you are doing was handed to you by
@@ -106,8 +112,6 @@ out. Send the question back to that session with `send_message` and end your
 turn instead. Keep using this tool for the user who is actually here.
 
 ### Best Practices:
-- If you recommend a specific option, make that the FIRST option in the list
-  and add "(Recommended)" at the end of the label
 - Provide clear, concise prompts that explain what you need and why
 - For confirmations, clearly state what action will be taken if confirmed
 - Don't overuse — only ask when truly necessary to avoid breaking flow
@@ -132,37 +136,12 @@ turn instead. Keep using this tool for the user who is actually here.
         self.input_callback = input_callback
         self.timeout = timeout
         self.default_on_timeout = default_on_timeout
-        # Bound to the owning agent at wire time so ``ask_user_question`` can
-        # resolve an auxiliary model for parsing free-form replies. None for
-        # SDK callers that never bind the tool to an agent.
-        self._parent_agent = None
 
         self.register(self.ask_user_question)
         # Human-in-the-loop: wait indefinitely for the user (like CC/Cursor),
         # don't let the outer ~120s tool-executor timeout auto-pass the prompt
         # and silently continue without an answer.
         self.functions["ask_user_question"].manages_own_timeout = True
-
-    def set_parent_agent(self, agent) -> None:
-        """Bind to the owning agent so the tool can resolve an auxiliary model
-        for LLM-based reply parsing."""
-        self._parent_agent = agent
-
-    def clone(self) -> "AskUserQuestionTool":
-        """Fresh instance so each agent owns its ``_parent_agent`` slot."""
-        new = AskUserQuestionTool(
-            input_callback=self.input_callback,
-            timeout=self.timeout,
-            default_on_timeout=self.default_on_timeout,
-        )
-        from collections import OrderedDict
-        if set(new.functions) != set(self.functions):
-            new.functions = OrderedDict(
-                (name, new.functions[name])
-                for name in self.functions
-                if name in new.functions
-            )
-        return new
 
     def get_system_prompt(self) -> Optional[str]:
         """Get the system prompt for user input tool usage guidance."""
@@ -204,77 +183,6 @@ turn instead. Keep using this tool for the user who is actually here.
                 return self.default_on_timeout
             return ""
 
-    def _resolve_parse_model(self):
-        """Get a cheap model for parsing free-form replies, or None.
-
-        Uses the parent agent's auxiliary model (the same cheap tier that
-        memory extraction / compression run on). Returns None when the tool
-        was never bound to an agent (SDK callers, cron jobs) — callers then
-        fall back to returning the raw reply rather than guessing.
-        """
-        agent = self._parent_agent
-        if agent is None:
-            return None
-        try:
-            return agent.resolve_auxiliary_model("ask_user_question")
-        except Exception:
-            return None
-
-    async def _parse_reply(
-        self, prompt: str, raw_input: str, options: Optional[List[str]]
-    ) -> Optional[str]:
-        """Resolve a free-form reply into a plain answer via the auxiliary LLM.
-
-        The user's wording is never enumerable — "3, because workers=10 is ok",
-        "第二个吧", "嗯行吧可以" — so a hard rule (isdigit / regex / matching) is
-        exactly what fabricated a choice the user never made. The LLM reads the
-        reply in context and returns the answer: the chosen option's text, a
-        yes/no, or a concise restatement. Returns None when the parse can't run
-        (no model / call failed), so the caller falls back to the raw reply.
-        """
-        model = self._resolve_parse_model()
-        if model is None:
-            return None
-
-        lines = [
-            "The user was asked a question and replied in their own words.",
-            f"Question: {prompt}",
-        ]
-        if options:
-            lines.append("Options offered:")
-            for i, opt in enumerate(options, 1):
-                lines.append(f"{i}. {opt}")
-        lines.append(f"User's reply: {raw_input}")
-        lines.append("")
-        lines.append(
-            "State the answer to the question as the user intended it, by "
-            "meaning rather than wording. If options were offered and the reply "
-            "clearly picks one, reply with that option's text verbatim. If it is "
-            "a yes/no question, reply 'yes' or 'no'. Otherwise reply with the "
-            "user's answer, concisely. Output only the answer, nothing else."
-        )
-        try:
-            resp = await asyncio.wait_for(
-                model.invoke([Message(role="user", content="\n".join(lines))]),
-                timeout=30.0,
-            )
-        except Exception as e:
-            logger.warning(f"ask_user_question LLM parse failed: {e}")
-            return None
-        text = None
-        if hasattr(resp, "choices") and resp.choices:
-            try:
-                text = resp.choices[0].message.content
-            except (AttributeError, IndexError):
-                pass
-        if text is None and hasattr(resp, "content") and isinstance(resp.content, str):
-            text = resp.content
-        if text is None and isinstance(resp, str):
-            text = resp
-        if text is None:
-            return None
-        return text.strip() or None
-
     async def ask_user_question(
         self,
         prompt: str,
@@ -290,21 +198,23 @@ turn instead. Keep using this tool for the user who is actually here.
             prompt: Clear description of what input is needed and why. For a
                 confirmation, describe the action that will be taken.
             options: Optional list of choices to present. When given, the user
-                picks one (in any wording); when omitted, the reply is free-form.
+                picks one (in any wording); when omitted, the reply is
+                free-form. Put the choice you recommend first and say so in its
+                label, e.g. "Rerun everything (recommended)".
 
         Returns:
-            str: JSON with ``prompt``, the resolved ``response``, the offered
-            ``options`` when any were given, and the user's ``raw_input``.
+            str: JSON with ``prompt``, the user's ``response`` verbatim, and the
+            ``options`` that were offered, if any.
 
         Examples:
             # Confirmation
             ask_user_question(prompt="Delete all temp files? This cannot be undone.")
             # Free-form input
             ask_user_question(prompt="Please provide the API endpoint URL.")
-            # Pick from choices
+            # Pick from choices, recommendation first
             ask_user_question(
                 prompt="Choose the output format:",
-                options=["JSON", "CSV", "XML"],
+                options=["JSON (recommended)", "CSV", "XML"],
             )
         """
         logger.info(f"User input requested: prompt={prompt[:100]}...")
@@ -313,31 +223,22 @@ turn instead. Keep using this tool for the user who is actually here.
         # prompt_toolkit callback parks on a queue until the user types). Run
         # it in a thread so the event loop stays live to service the UI.
         loop = asyncio.get_running_loop()
-        raw_input = await loop.run_in_executor(
+        response = await loop.run_in_executor(
             None, lambda: self._get_input(prompt, options)
         )
-
-        # Resolve the reply against any offered options. Falls back to the raw
-        # reply (never a fabricated option) when the parse can't run.
-        response = await self._parse_reply(prompt, raw_input, options)
-        if response is None:
-            response = raw_input
 
         logger.info(f"User input received: {response[:100]}...")
 
         # The prompt is echoed back in full: the CLI renders this result as the
         # transcript's only lasting record of the exchange (the question widget
         # is transient), and a clipped copy would hide what was actually asked.
-        # ``raw_input`` preserves the user's full typed reply when it differs
-        # from the resolved answer, so the model still sees the rationale.
+        # The options go with it — without them the answer is an orphan label.
         result = {
             "prompt": prompt,
             "response": response,
         }
         if options:
             result["options"] = list(options)
-        if raw_input != response:
-            result["raw_input"] = raw_input
         return json.dumps(result, ensure_ascii=False)
 
 

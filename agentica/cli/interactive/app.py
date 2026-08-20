@@ -278,14 +278,12 @@ def run_interactive(
         answer_text = str(answer)
         logger.info(f"[ask] resolved: answer={answer_text[:80]!r}")
 
-        # If the user typed an option number, map it back to the option text.
-        if options and answer_text:
-            try:
-                idx = int(answer_text)
-                if 1 <= idx <= len(options):
-                    return options[idx - 1]
-            except ValueError:
-                pass
+        # Handed over exactly as typed. Mapping "3" to that option's text was
+        # the last thing standing between the user's keystrokes and the model,
+        # and the model is better placed to read them: the question and the
+        # numbered options travel with the answer in the tool result, so it
+        # resolves "3", "C", "the last one" and "the cheap one" from the same
+        # list the user was looking at.
         return answer_text
 
     # The process registry belongs to the CLI session and must exist before

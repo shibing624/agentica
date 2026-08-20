@@ -764,7 +764,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         from agentica.tools.builtin import BuiltinTodoTool, BuiltinMemoryTool
         from agentica.tools.builtin_task_tool import BuiltinTaskTool
         from agentica.tools.skill_tool import SkillTool
-        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         for tool in self.tools:
             if isinstance(tool, Tool):
@@ -777,8 +776,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 tool.set_workspace(self.workspace)
             elif isinstance(tool, SkillTool):
                 tool._agent = self
-            elif isinstance(tool, AskUserQuestionTool):
-                tool.set_parent_agent(self)
 
     def _inject_generated_skill_dirs(self) -> None:
         """Attach workspace generated skill dirs to any SkillTool before prompt merge."""

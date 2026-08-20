@@ -3,13 +3,15 @@
 """
 No-Docker coding-agent benchmarks for agentica.
 
-  Aider Polyglot  — agent loop (file edit + pytest). Primary harness score.
+  Aider Polyglot  — agent loop (file edit + pytest). Primary coding score.
+  DABench         — data-analysis agent loop (CSV + closed-form tags).
   LiveCodeBench   — single-shot generation. Bare-model baseline.
   BigCodeBench    — function-level + real libraries.
   EvalPlus        — HumanEval+ smoke / pipeline check.
 
 Usage:
   python evaluation/code_benchmark/run.py --bench polyglot --max-samples 1
+  python evaluation/code_benchmark/run.py --bench dabench --max-samples 10
   python evaluation/code_benchmark/run.py --dry-run
   python evaluation/code_benchmark/run.py --bench all --max-samples 2 --model hy3
 """
@@ -27,18 +29,23 @@ REPO_ROOT = HERE.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from evaluation.code_benchmark.cli_agents import (  # noqa: E402
+    resolve_codex_reasoning_effort,
+)
 from evaluation.code_benchmark.common import (  # noqa: E402
     OUTPUT_DIR,
     build_model,
     now_tag,
     print_summary,
+    resolve_responses_reasoning,
     summarize,
     write_json,
     write_jsonl,
 )
 
 
-BENCHES = ("polyglot", "livecodebench", "bigcodebench", "evalplus")
+BENCHES = ("polyglot", "dabench", "livecodebench", "bigcodebench", "evalplus")
+CLI_AGENT_BENCHES = ("polyglot", "dabench")
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,7 +78,7 @@ def parse_args() -> argparse.Namespace:
         "--agent",
         default="agentica",
         choices=("agentica", "claude", "codex"),
-        help="Polyglot only: which coding agent edits the files",
+        help="Polyglot / DABench: which coding agent edits the files",
     )
     parser.add_argument(
         "--agent-timeout",
@@ -116,6 +123,10 @@ def run_dry(args: argparse.Namespace) -> int:
                 from evaluation.code_benchmark.polyglot import dry_run_polyglot
                 payload = dry_run_polyglot(max_samples=1, repo=args.polyglot_repo)
                 ok = payload["stub_failed"] and payload["example_passed"]
+            elif name == "dabench":
+                from evaluation.code_benchmark.dabench import dry_run_dabench
+                payload = dry_run_dabench()
+                ok = payload["gold_passed"] and payload["broken_failed"] and payload["empty_failed"]
             elif name == "livecodebench":
                 from evaluation.code_benchmark.livecodebench import dry_run_lcb
                 payload = dry_run_lcb()
@@ -139,12 +150,51 @@ def run_dry(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _cli_env(args: argparse.Namespace, extra_body, out: Path):
+    from evaluation.code_benchmark.cli_agents import (
+        claude_env,
+        resolve_codex_reasoning_effort,
+        write_isolated_codex_home,
+    )
+
+    if args.agent == "codex" and args.base_url:
+        effort = resolve_codex_reasoning_effort(extra_body)
+        codex_home = write_isolated_codex_home(
+            out / "codex-home",
+            model_id=args.model,
+            base_url=args.base_url,
+            reasoning_effort=str(effort),
+        )
+        env = {"CODEX_HOME": str(codex_home)}
+        if args.api_key:
+            env["OPENAI_API_KEY"] = args.api_key
+        return env
+    if args.agent == "claude" and args.base_url and args.api_key:
+        effort = resolve_codex_reasoning_effort(extra_body)
+        env = claude_env(
+            config_dir=out / "claude-home",
+            base_url=args.base_url,
+            api_key=args.api_key,
+            model_id=args.model,
+        )
+        env["CODE_BENCH_CLAUDE_EFFORT"] = effort
+        return env
+    return None
+
+
 async def run_live(args: argparse.Namespace) -> int:
-    if args.agent != "agentica" and args.bench != "polyglot":
-        print("--agent claude|codex only works with --bench polyglot")
-        return 1
-    model = None
     extra_body = json.loads(args.extra_body) if args.extra_body else None
+    if args.agent != "agentica":
+        if args.bench == "all":
+            selected = CLI_AGENT_BENCHES
+        elif args.bench not in CLI_AGENT_BENCHES:
+            print("--agent claude|codex only works with --bench polyglot|dabench")
+            return 1
+        else:
+            selected = (args.bench,)
+    else:
+        selected = BENCHES if args.bench == "all" else (args.bench,)
+    model = None
     if args.agent == "agentica":
         model = build_model(
             args.model,
@@ -154,40 +204,14 @@ async def run_live(args: argparse.Namespace) -> int:
             timeout=args.http_timeout,
             wire_api=args.wire_api,
         )
-    selected = BENCHES if args.bench == "all" else (args.bench,)
     exit_code = 0
     for name in selected:
         out = _output_dir(args, name) if args.bench != "all" else (args.output_dir or OUTPUT_DIR) / f"{now_tag()}-{name}"
         out.mkdir(parents=True, exist_ok=True)
+        cli_env = _cli_env(args, extra_body, out) if name in CLI_AGENT_BENCHES else None
         if name == "polyglot":
-            from evaluation.code_benchmark.cli_agents import (
-                claude_env,
-                resolve_codex_reasoning_effort,
-                write_isolated_codex_home,
-            )
             from evaluation.code_benchmark.polyglot import run_polyglot
 
-            cli_env = None
-            if args.agent == "codex" and args.base_url:
-                effort = resolve_codex_reasoning_effort(extra_body)
-                codex_home = write_isolated_codex_home(
-                    out / "codex-home",
-                    model_id=args.model,
-                    base_url=args.base_url,
-                    reasoning_effort=str(effort),
-                )
-                cli_env = {"CODEX_HOME": str(codex_home)}
-                if args.api_key:
-                    cli_env["OPENAI_API_KEY"] = args.api_key
-            elif args.agent == "claude" and args.base_url and args.api_key:
-                effort = resolve_codex_reasoning_effort(extra_body)
-                cli_env = claude_env(
-                    config_dir=out / "claude-home",
-                    base_url=args.base_url,
-                    api_key=args.api_key,
-                    model_id=args.model,
-                )
-                cli_env["CODE_BENCH_CLAUDE_EFFORT"] = effort
             results = await run_polyglot(
                 model=model,
                 max_samples=args.max_samples,
@@ -197,6 +221,20 @@ async def run_live(args: argparse.Namespace) -> int:
                 language=args.language,
                 keywords=args.keywords,
                 repo=args.polyglot_repo,
+                output_dir=out,
+                agent_kind=args.agent,
+                agent_timeout=args.agent_timeout,
+                cli_env=cli_env,
+                cli_model=args.model if args.agent in ("codex", "claude") else "",
+            )
+        elif name == "dabench":
+            from evaluation.code_benchmark.dabench import run_dabench
+
+            results = await run_dabench(
+                model=model,
+                max_samples=args.max_samples,
+                offset=args.offset,
+                tool_call_limit=args.tool_call_limit,
                 output_dir=out,
                 agent_kind=args.agent,
                 agent_timeout=args.agent_timeout,
@@ -232,6 +270,15 @@ async def run_live(args: argparse.Namespace) -> int:
                 plus=not args.no_plus,
                 timeout=args.timeout,
             )
+        if args.agent == "codex":
+            wire_api = "responses"
+            reasoning_effort = resolve_codex_reasoning_effort(extra_body)
+        elif args.agent == "agentica":
+            wire_api = args.wire_api
+            reasoning_effort = resolve_responses_reasoning(extra_body)
+        else:
+            wire_api = None
+            reasoning_effort = None
         payload = summarize(
             name,
             args.model,
@@ -239,7 +286,8 @@ async def run_live(args: argparse.Namespace) -> int:
             extra={
                 "agent": args.agent,
                 "extra_body": extra_body,
-                "wire_api": args.wire_api if args.agent == "agentica" else None,
+                "wire_api": wire_api,
+                "reasoning_effort": reasoning_effort,
             },
         )
         write_jsonl(out / "predictions.jsonl", [r.to_dict() for r in results])

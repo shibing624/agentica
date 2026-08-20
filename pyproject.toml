@@ -292,7 +292,7 @@ agentica = ["py.typed", "**/*.md", "**/*.js", "**/*.html", "**/*.css", "**/*.yam
 log_cli = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
+testpaths = ["tests", "evaluation/code_benchmark/tests"]
 
 [tool.ruff]
 line-length = 120
