@@ -936,6 +936,11 @@ class AgentService:
             })
         return out
 
+    def session_log_for(self, session_id: str) -> SessionLog:
+        """Open the on-disk SessionLog for a session (may not exist yet)."""
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        return SessionLog(session_id=session_id, base_dir=base_dir)
+
     def has_active_runs(self) -> bool:
         """Return True if any session currently has an in-flight run.
 

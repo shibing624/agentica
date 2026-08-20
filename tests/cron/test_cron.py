@@ -238,6 +238,22 @@ class TestScheduleParser:
         assert "30 minutes" in schedule_to_human(EverySchedule(interval_ms=1800000))
         assert "Daily" in schedule_to_human(CronSchedule(expression="30 7 * * *"))
 
+    def test_schedule_to_expr_parses_back(self):
+        """The human form is one-way, so an edit form filled from it would
+        reschedule the job to something else (or fail). This form round-trips."""
+        from datetime import datetime
+
+        from agentica.cron.jobs import parse_schedule, schedule_to_expr
+        from agentica.cron.types import AtSchedule, CronSchedule, EverySchedule
+
+        for schedule in (
+            CronSchedule(expression="30 7 * * *"),
+            EverySchedule(interval_ms=7200000),
+            AtSchedule.from_datetime(datetime(2026, 1, 15, 9, 30, 0)),
+        ):
+            expr = schedule_to_expr(schedule)
+            assert parse_schedule(expr) == schedule, expr
+
 
 # ============== TestCronJobs ==============
 

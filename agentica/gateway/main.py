@@ -31,7 +31,7 @@ from .services.channel_manager import ChannelManager
 from .services.agent_peers import GatewayAgentPeers
 from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
-from .routes import chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes
+from .routes import chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes
 
 # ContextVar holding the current request ID — async-safe, no threading issues
 _request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -209,24 +209,46 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 
 
 # ============== Static files + SPA ==============
+# Production: Vite writes into gateway/ui/. pip users get that dist; Node is
+# not required at runtime. Dev: `cd web && npm run dev` proxies /api to here.
 
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+_UI_DIR = Path(__file__).parent / "ui"
+_UI_ASSETS = _UI_DIR / "assets"
+
+
+def _spa_index() -> HTMLResponse:
+    index = _UI_DIR / "index.html"
+    if not index.is_file():
+        return HTMLResponse(
+            "<!doctype html><title>Agentica</title><p>Web UI is not built. "
+            "From the repo: <code>cd web && npm install && npm run build</code>.</p>",
+            status_code=503,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    return HTMLResponse(
+        content=index.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+if _UI_ASSETS.is_dir():
+    app.mount("/assets", StaticFiles(directory=_UI_ASSETS), name="ui-assets")
 
 
 @app.get("/chat", response_class=HTMLResponse)
-async def web_chat():
-    """Serve the single-page web UI."""
-    html_path = Path(__file__).parent / "static" / "index.html"
-    return HTMLResponse(
-        content=html_path.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
-    )
+@app.get("/chat/{full_path:path}", response_class=HTMLResponse)
+@app.get("/traces", response_class=HTMLResponse)
+@app.get("/traces/{full_path:path}", response_class=HTMLResponse)
+async def web_spa(full_path: str = ""):
+    """Serve the SPA shell. Client router owns /chat and /traces."""
+    return _spa_index()
 
 
 # ============== Route registration ==============
 
 app.include_router(settings_routes.router)
 app.include_router(chat.router)
+app.include_router(traces_routes.router)
 app.include_router(scheduler_routes.router)
 app.include_router(plugins_routes.router)
 app.include_router(channels.router)

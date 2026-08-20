@@ -825,80 +825,96 @@ class LoopMixin:
                         )
 
                         call_start = len(messages_for_model)
-                        model_call = await self._call_with_retry(
-                            active_model, messages_for_model, loop_state, agent, stream=True
-                        )
-                        model_response_stream = model_call.response
-                        active_model = model_call.used_model
-                        if model_call.used_fallback:
-                            agent.run_response.fallback_used = True
-                        if model_call.used_fallback or fallback_transaction_model is not None:
-                            fallback_transaction_model = active_model
-                        # Stamp truthful model id onto RunResponse: reflects the
-                        # model that actually answered, including any per-call
-                        # fallback. Optimistic for streaming (final answer may
-                        # still hit content_filter at end-of-stream, but this
-                        # call did at least connect to `last_used_model_id`).
-                        if loop_state.last_used_model_id is not None:
-                            agent.run_response.model = loop_state.last_used_model_id
+                        # The question goes on disk before the request it caused.
+                        # Idempotent per turn; the end-of-turn write backfills a
+                        # turn that never reached an LLM call. Writing it later
+                        # left every lifecycle event of the turn sitting ahead of
+                        # its own prompt, which reads back as the previous turn's.
+                        if messages is None:
+                            self._persist_turn_user_message(agent, message, user_messages)
+                        self._trace_session_prelude(agent, messages_for_model)
+                        self._trace_event(agent, "request_begin")
+                        _trace_status = "failed"
                         try:
-                            async for model_response_chunk in model_response_stream:
-                                agent._check_cancelled()
-                                if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
-                                    if model_response_chunk.reasoning_content is not None:
-                                        if model_response.reasoning_content is None:
-                                            model_response.reasoning_content = ""
-                                        model_response.reasoning_content += model_response_chunk.reasoning_content
-                                        yield RunResponse(
-                                            event=RunEvent.run_response,
-                                            reasoning_content=model_response_chunk.reasoning_content,
-                                            run_id=agent.run_id,
-                                            agent_id=agent.agent_id,
-                                        )
-                                    if model_response_chunk.content is not None and model_response.content is not None:
-                                        model_response.content += model_response_chunk.content
-                                        yield RunResponse(
-                                            event=RunEvent.run_response,
-                                            content=model_response_chunk.content,
-                                            run_id=agent.run_id,
-                                            agent_id=agent.agent_id,
-                                        )
-                        except Exception as exc:
-                            # _call_with_retry's tool-history sanitize-retry never
-                            # fires for streaming: it only wraps generator
-                            # *creation* (lazy, no HTTP call yet), not consumption
-                            # — the actual request/error happens here, on the
-                            # first chunk. Mirror that one-shot recovery at the
-                            # point the error actually surfaces.
-                            err = str(exc).lower()
-                            is_tool_history_error = any(h in err for h in loop_state.TOOL_HISTORY_HINTS)
-                            if is_tool_history_error and not loop_state.tool_history_sanitized_done:
-                                loop_state.tool_history_sanitized_done = True
-                                del messages_for_model[call_start:]
-                                logger.warning(
-                                    f"[tool_history] {active_model.id} rejected tool-call "
-                                    f"history mid-stream (likely cross-model resume); "
-                                    f"stripping tool messages and retrying once: {exc}"
-                                )
-                                self._sanitize_tool_history_after_error(agent, messages_for_model)
-                                continue
-                            raise
+                            model_call = await self._call_with_retry(
+                                active_model, messages_for_model, loop_state, agent, stream=True
+                            )
+                            model_response_stream = model_call.response
+                            active_model = model_call.used_model
+                            if model_call.used_fallback:
+                                agent.run_response.fallback_used = True
+                            if model_call.used_fallback or fallback_transaction_model is not None:
+                                fallback_transaction_model = active_model
+                            # Stamp truthful model id onto RunResponse: reflects the
+                            # model that actually answered, including any per-call
+                            # fallback. Optimistic for streaming (final answer may
+                            # still hit content_filter at end-of-stream, but this
+                            # call did at least connect to `last_used_model_id`).
+                            if loop_state.last_used_model_id is not None:
+                                agent.run_response.model = loop_state.last_used_model_id
+                            try:
+                                async for model_response_chunk in model_response_stream:
+                                    agent._check_cancelled()
+                                    if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
+                                        if model_response_chunk.reasoning_content is not None:
+                                            if model_response.reasoning_content is None:
+                                                model_response.reasoning_content = ""
+                                            model_response.reasoning_content += model_response_chunk.reasoning_content
+                                            yield RunResponse(
+                                                event=RunEvent.run_response,
+                                                reasoning_content=model_response_chunk.reasoning_content,
+                                                run_id=agent.run_id,
+                                                agent_id=agent.agent_id,
+                                            )
+                                        if model_response_chunk.content is not None and model_response.content is not None:
+                                            model_response.content += model_response_chunk.content
+                                            yield RunResponse(
+                                                event=RunEvent.run_response,
+                                                content=model_response_chunk.content,
+                                                run_id=agent.run_id,
+                                                agent_id=agent.agent_id,
+                                            )
+                            except Exception as exc:
+                                # _call_with_retry's tool-history sanitize-retry never
+                                # fires for streaming: it only wraps generator
+                                # *creation* (lazy, no HTTP call yet), not consumption
+                                # — the actual request/error happens here, on the
+                                # first chunk. Mirror that one-shot recovery at the
+                                # point the error actually surfaces.
+                                err = str(exc).lower()
+                                is_tool_history_error = any(h in err for h in loop_state.TOOL_HISTORY_HINTS)
+                                if is_tool_history_error and not loop_state.tool_history_sanitized_done:
+                                    loop_state.tool_history_sanitized_done = True
+                                    del messages_for_model[call_start:]
+                                    logger.warning(
+                                        f"[tool_history] {active_model.id} rejected tool-call "
+                                        f"history mid-stream (likely cross-model resume); "
+                                        f"stripping tool messages and retrying once: {exc}"
+                                    )
+                                    self._sanitize_tool_history_after_error(agent, messages_for_model)
+                                    continue
+                                raise
 
-                        # Streaming appends the turn's assistant message during
-                        # consumption, so capture the transaction-start marker now
-                        # (once) — the first message produced at ``call_start``.
-                        if (
-                            fallback_transaction_model is not None
-                            and fallback_transaction_marker is None
-                            and call_start < len(messages_for_model)
-                        ):
-                            fallback_transaction_marker = messages_for_model[call_start]
+                            # Streaming appends the turn's assistant message during
+                            # consumption, so capture the transaction-start marker now
+                            # (once) — the first message produced at ``call_start``.
+                            if (
+                                fallback_transaction_model is not None
+                                and fallback_transaction_marker is None
+                                and call_start < len(messages_for_model)
+                            ):
+                                fallback_transaction_marker = messages_for_model[call_start]
 
-                        # --- Lifecycle: LLM end (stream) ---
-                        await self._dispatch_run_hook(
-                            "on_llm_end",
-                            lambda hook: hook.on_llm_end(agent=agent, response=model_response),
-                        )
+                            # --- Lifecycle: LLM end (stream) ---
+                            await self._dispatch_run_hook(
+                                "on_llm_end",
+                                lambda hook: hook.on_llm_end(agent=agent, response=model_response),
+                            )
+                            self._trace_request_segments(agent, messages_for_model)
+                            _trace_status = "completed"
+                            self._trace_token_usage(agent, messages_for_model)
+                        finally:
+                            self._trace_event(agent, "request_end", status=_trace_status)
 
                         # --- Runner-owned tool execution (streaming) ---
                         # Model.response_stream() only parsed tool_calls (run_tools=False).
@@ -1063,29 +1079,40 @@ class LoopMixin:
                         )
 
                         call_start = len(messages_for_model)
-                        model_call = await self._call_with_retry(
-                            active_model, messages_for_model, loop_state, agent, stream=False
-                        )
-                        model_response = model_call.response
-                        active_model = model_call.used_model
-                        if model_call.used_fallback:
-                            agent.run_response.fallback_used = True
-                        if model_call.used_fallback or fallback_transaction_model is not None:
-                            if fallback_transaction_marker is None and call_start < len(messages_for_model):
-                                fallback_transaction_marker = messages_for_model[call_start]
-                            fallback_transaction_model = active_model
-                        # Stamp truthful model id onto RunResponse: reflects the
-                        # model that actually answered, including any per-call
-                        # fallback. Final turn naturally wins because each turn
-                        # overwrites the previous value.
-                        if loop_state.last_used_model_id is not None:
-                            agent.run_response.model = loop_state.last_used_model_id
+                        if messages is None:
+                            self._persist_turn_user_message(agent, message, user_messages)
+                        self._trace_session_prelude(agent, messages_for_model)
+                        self._trace_event(agent, "request_begin")
+                        _trace_status = "failed"
+                        try:
+                            model_call = await self._call_with_retry(
+                                active_model, messages_for_model, loop_state, agent, stream=False
+                            )
+                            model_response = model_call.response
+                            active_model = model_call.used_model
+                            if model_call.used_fallback:
+                                agent.run_response.fallback_used = True
+                            if model_call.used_fallback or fallback_transaction_model is not None:
+                                if fallback_transaction_marker is None and call_start < len(messages_for_model):
+                                    fallback_transaction_marker = messages_for_model[call_start]
+                                fallback_transaction_model = active_model
+                            # Stamp truthful model id onto RunResponse: reflects the
+                            # model that actually answered, including any per-call
+                            # fallback. Final turn naturally wins because each turn
+                            # overwrites the previous value.
+                            if loop_state.last_used_model_id is not None:
+                                agent.run_response.model = loop_state.last_used_model_id
 
-                        # --- Lifecycle: LLM end (non-stream) ---
-                        await self._dispatch_run_hook(
-                            "on_llm_end",
-                            lambda hook: hook.on_llm_end(agent=agent, response=model_response),
-                        )
+                            # --- Lifecycle: LLM end (non-stream) ---
+                            await self._dispatch_run_hook(
+                                "on_llm_end",
+                                lambda hook: hook.on_llm_end(agent=agent, response=model_response),
+                            )
+                            self._trace_request_segments(agent, messages_for_model)
+                            _trace_status = "completed"
+                            self._trace_token_usage(agent, messages_for_model)
+                        finally:
+                            self._trace_event(agent, "request_end", status=_trace_status)
 
                         # --- Runner-owned tool execution ---
                         tool_result = await self._handle_tool_calls_in_runner(

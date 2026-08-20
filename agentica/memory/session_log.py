@@ -20,6 +20,7 @@ JSONL format (CC-aligned):
     {"type":"compact_boundary","uuid":"...","parent_uuid":null,"timestamp":"...","summary":"..."}
 """
 import glob
+import hashlib
 import json
 import os
 import time
@@ -298,6 +299,9 @@ class SessionLog:
         self._turn_user_uuid: Optional[str] = None
         self._turn_written_tool_call_ids: set = set()
         self._turn_written_tool_call_rounds: set = set()
+        # What ``append_trace_prelude`` last wrote, so the same header is not
+        # repeated on every request of the session.
+        self._trace_prelude_key: Optional[str] = None
 
     def begin_turn(self) -> None:
         """Open a turn for incremental writes (resets the per-turn bookkeeping).
@@ -508,6 +512,90 @@ class SessionLog:
         # Do NOT update _last_uuid — goal entries are out-of-band and must
         # not interfere with the conversation UUID chain.
         return entry_uuid
+
+    # ------------------------------------------------------------------
+    # Trace lifecycle events (observability; never replayed into the model)
+    # ------------------------------------------------------------------
+    # ``type="event"`` rows share the JSONL with the conversation. They are
+    # out-of-band like ``goal``: parent_uuid is null, ``_last_uuid`` is not
+    # advanced, ``load()`` never projects them. Resume stays a whitelist of
+    # user/assistant/system/tool; adding a new event name cannot feed the
+    # model. The Trace page derives its timeline from these rows plus
+    # existing ``tool`` / ``compact_boundary`` entries.
+
+    def append_event(self, name: str, **payload: Any) -> str:
+        """Append a lifecycle event. Returns the entry uuid.
+
+        ``name`` is the event kind (``request_begin``, ``request_end``,
+        ``thinking``, ``text``, ``tool_call``, ``approval_decision``,
+        ``token_usage``). Extra fields are stored on the row as-is.
+        """
+        entry_uuid = str(uuid4())
+        entry: Dict[str, Any] = {
+            "type": "event",
+            "name": name,
+            "uuid": entry_uuid,
+            "parent_uuid": None,
+            "session_id": self.session_id,
+            "cwd": self._cwd,
+            "timestamp": _iso_now(),
+            "version": self._version,
+            "git_branch": self._git_branch,
+        }
+        entry.update(payload)
+        self._append(entry)
+        return entry_uuid
+
+    def append_trace_prelude(
+        self,
+        *,
+        model: Optional[str],
+        provider: Optional[str],
+        context_window: Optional[int],
+        tools: List[str],
+        system_prompt: str,
+    ) -> bool:
+        """Write the observability header for this session. True if it wrote.
+
+        Three things the timeline cannot reconstruct from the conversation
+        rows: which model answered, which tools it could see, and the exact
+        system prompt it was given. None of them is in ``load()``'s whitelist,
+        so this cannot feed the model — it only makes the Trace page able to
+        answer "what was this run actually configured with".
+
+        Deduplicated by content, not by "once": a session that switches profile
+        or reloads skills mid-flight writes a second header rather than letting
+        the first one describe requests it no longer matches. The key lives on
+        the instance, so a new process (``/resume``, an evicted gateway agent)
+        writes one header of its own — which is correct, since it is a fresh
+        prompt build.
+        """
+        digest = hashlib.sha1(
+            "\u0000".join(
+                [str(model or ""), str(provider or ""), *tools, system_prompt]
+            ).encode("utf-8", "replace")
+        ).hexdigest()
+        if digest == self._trace_prelude_key:
+            return False
+        self._trace_prelude_key = digest
+        self.append_event(
+            "session_meta",
+            model=model,
+            provider=provider,
+            context_window=context_window,
+            tool_count=len(tools),
+            prelude_hash=digest,
+        )
+        self.append_event("tool_list_ready", tools=list(tools), count=len(tools))
+        if system_prompt:
+            self.append_event(
+                "system_prompt", content=system_prompt, chars=len(system_prompt)
+            )
+        return True
+
+    def iter_raw_entries(self):
+        """Yield every JSONL object, skipping blank and corrupt lines."""
+        yield from self._iter_entries()
 
     def load_goal(self) -> Optional[Dict[str, Any]]:
         """Read the LAST goal entry's payload, or None.
@@ -921,7 +1009,7 @@ class SessionLog:
         tail_uuid: Optional[str] = None
         for entry in self._iter_entries():
             entry_type = entry.get("type", "")
-            if entry_type == "goal":
+            if entry_type in ("goal", "event"):
                 # Out-of-band: deliberately outside the conversation chain.
                 continue
             tail_uuid = entry.get("uuid") or tail_uuid

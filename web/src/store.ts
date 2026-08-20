@@ -1,0 +1,280 @@
+import { useSyncExternalStore } from "react";
+
+export type ChatMsg = {
+  role: "user" | "assistant";
+  content: string;
+  ts?: number;
+  files?: string[];
+  steps?: Array<Record<string, any>>;
+  durationSec?: number;
+  aborted?: boolean;
+  error?: string;
+};
+
+export type Session = {
+  title: string;
+  msgs: ChatMsg[];
+  ts: number;
+  tokIn: number;
+  tokOut: number;
+  tokTotal: number;
+  requests: number;
+  totalTime: number;
+  lastInputTokens: number;
+  dir: string;
+  projectId?: string;
+  archived?: boolean;
+  unread?: boolean;
+};
+
+export type QueuedMessage = { id: string; sessionId: string; text: string; files: File[]; ts: number };
+
+export type ProfileForm = {
+  name: string;
+  editing: boolean;
+  model_provider: string;
+  model_name: string;
+  base_url: string;
+  api_key: string;
+  reasoning_effort: string;
+  max_tokens: string;
+  context_window: string;
+  temperature: string;
+  top_p: string;
+  aux_provider: string;
+  aux_model: string;
+  aux_base_url: string;
+  aux_api_key: string;
+  envRows: { key: string; value: string }[];
+};
+
+export type CronForm = {
+  id: string | null;
+  name: string;
+  prompt: string;
+  schedule: string;
+  timeout_seconds: string;
+  max_retries: string;
+  validate_run: boolean;
+};
+
+export type SkillForm = {
+  name: string;
+  editing: boolean;
+  description: string;
+  trigger: string;
+  content: string;
+};
+
+export type McpForm = {
+  name: string;
+  kind: "stdio" | "sse";
+  command: string;
+  args: string;
+  url: string;
+  envRows: { key: string; value: string }[];
+};
+
+export type AppState = {
+  curSess: string | null;
+  sessions: Record<string, Session>;
+  streams: Record<string, { abortCtrl: AbortController; aiMsg: ChatMsg }>;
+  pendingFiles: File[];
+  messageQueue: QueuedMessage[];
+  serverModel: string;
+  serverDir: string;
+  serverProvider: string;
+  serverModelName: string;
+  serverVersion: string;
+  serverConfigPath: string;
+  serverReasoningEffort: string;
+  serverContextWindow: number;
+  serverProfile: string;
+  serverThinking: string;
+  profilesData: { active: string; profiles: any[] };
+  providers: string[];
+  inputText: string;
+  modelDDOpen: boolean;
+  approvalMenuOpen: boolean;
+  chatMenuOpen: boolean;
+  ctxTipOpen: boolean;
+  selectedApprovalMode: string;
+  sidebarCollapsed: boolean;
+  theme: string;
+  toast: { show: boolean; msg: string };
+  confirm: { open: boolean; title: string; msg: string; okLabel: string; onOk: (() => void) | null };
+  dirModal: { open: boolean; forNewSession: boolean; value: string };
+  dirHistory: string[];
+  dirBrowse: { open: boolean; path: string; parent: string | null; dirs: { name: string; path: string }[] };
+  pendingNewChatDir: string;
+  accountPanelOpen: boolean;
+  pluginsPanelOpen: boolean;
+  pluginsTab: string;
+  pluginsSearch: string;
+  pluginsData: { tools: any[]; skills: any[]; mcpServers: any[] };
+  skillForm: SkillForm | null;
+  mcpForm: McpForm | null;
+  settingsTab: string;
+  settingsModal: { open: boolean };
+  profileForm: ProfileForm | null;
+  cronJobs: any[];
+  cronForm: CronForm | null;
+  cronRuns: Record<string, any[]>;
+  cronRunsOpen: string[];
+  cronBusy: string;
+  sidebarSearch: string;
+};
+
+export function emptyProfileForm(): ProfileForm {
+  return {
+    name: "", editing: false, model_provider: "", model_name: "", base_url: "", api_key: "",
+    reasoning_effort: "", max_tokens: "", context_window: "", temperature: "", top_p: "",
+    aux_provider: "", aux_model: "", aux_base_url: "", aux_api_key: "",
+    envRows: [],
+  };
+}
+
+export function emptyCronForm(): CronForm {
+  return {
+    id: null, name: "", prompt: "", schedule: "",
+    timeout_seconds: "", max_retries: "0", validate_run: true,
+  };
+}
+
+export function emptySkillForm(): SkillForm {
+  return { name: "", editing: false, description: "", trigger: "", content: "" };
+}
+
+export function emptyMcpForm(): McpForm {
+  return { name: "", kind: "stdio", command: "", args: "", url: "", envRows: [] };
+}
+
+const listeners = new Set<() => void>();
+let rev = 0;
+
+const state: AppState = {
+  curSess: null,
+  sessions: {},
+  streams: {},
+  pendingFiles: [],
+  messageQueue: [],
+  serverModel: "-",
+  serverDir: "",
+  serverProvider: "",
+  serverModelName: "",
+  serverVersion: "",
+  serverConfigPath: "",
+  serverReasoningEffort: "",
+  serverContextWindow: 128000,
+  serverProfile: "",
+  serverThinking: "",
+  profilesData: { active: "", profiles: [] },
+  providers: [],
+  inputText: "",
+  modelDDOpen: false,
+  approvalMenuOpen: false,
+  chatMenuOpen: false,
+  ctxTipOpen: false,
+  selectedApprovalMode: localStorage.getItem("ag_approval") || "auto",
+  sidebarCollapsed: false,
+  theme: localStorage.getItem("ag_theme") || "auto",
+  toast: { show: false, msg: "" },
+  confirm: { open: false, title: "", msg: "", okLabel: "Delete", onOk: null },
+  dirModal: { open: false, forNewSession: false, value: "" },
+  dirHistory: [],
+  dirBrowse: { open: false, path: "", parent: null, dirs: [] },
+  pendingNewChatDir: "",
+  accountPanelOpen: false,
+  pluginsPanelOpen: false,
+  pluginsTab: "skills",
+  pluginsSearch: "",
+  pluginsData: { tools: [], skills: [], mcpServers: [] },
+  skillForm: null,
+  mcpForm: null,
+  settingsTab: "settings",
+  settingsModal: { open: false },
+  profileForm: null,
+  cronJobs: [],
+  cronForm: null,
+  cronRuns: {},
+  cronRunsOpen: [],
+  cronBusy: "",
+  sidebarSearch: "",
+};
+
+export function getState() { return state; }
+
+export function bump() {
+  rev += 1;
+  listeners.forEach((l) => l());
+}
+
+export function setState(patch: Partial<AppState>) {
+  Object.assign(state, patch);
+  bump();
+}
+
+export function subscribe(fn: () => void) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+export function useAppState(): AppState {
+  useSyncExternalStore(subscribe, () => rev, () => rev);
+  return state;
+}
+
+export function showToast(msg: string, ms = 1800) {
+  state.toast = { show: true, msg };
+  bump();
+  window.setTimeout(() => { state.toast = { show: false, msg: "" }; bump(); }, ms);
+}
+
+/** Ask before something irreversible. The dialog is rendered by <ConfirmDialog />. */
+export function askConfirm(opts: { title: string; msg: string; okLabel?: string; onOk: () => void }) {
+  setState({
+    confirm: {
+      open: true, title: opts.title, msg: opts.msg,
+      okLabel: opts.okLabel || "Delete", onOk: opts.onOk,
+    },
+  });
+}
+
+export function closeConfirm() {
+  setState({ confirm: { open: false, title: "", msg: "", okLabel: "Delete", onOk: null } });
+}
+
+export function saveSessions() {
+  localStorage.setItem("ag_s", JSON.stringify(state.sessions));
+}
+
+export function resolvedTheme(raw: string) {
+  if (raw === "dark" || raw === "light") return raw;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+/** Theme is applied on <html> so it covers every route, not just the chat page. */
+export function applyTheme(raw: string) {
+  document.documentElement.dataset.theme = resolvedTheme(raw);
+}
+
+export function setTheme(raw: string) {
+  localStorage.setItem("ag_theme", raw);
+  applyTheme(raw);
+  setState({ theme: raw });
+}
+
+export const UNFILED_PROJECT_ID = "unfiled";
+
+export function projectIdForDir(dir: string) {
+  const d = (dir || "").trim();
+  if (!d) return UNFILED_PROJECT_ID;
+  return "dir:" + encodeURIComponent(d.replace(/\/+$/, ""));
+}
+
+export function projectNameForDir(dir: string) {
+  const d = (dir || "").replace(/\/+$/, "");
+  if (!d) return "Unfiled";
+  const parts = d.split("/").filter(Boolean);
+  return parts[parts.length - 1] || d;
+}

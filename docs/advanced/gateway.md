@@ -194,7 +194,7 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 
 ### Web 网页（内置 UI）
 
-`agentica-gateway` 启动后自带 Web UI，无需任何 IM 配置即可直接对话，记忆落在 `~/.agentica/workspace`：
+`agentica-gateway` 启动后自带 Web UI（Vite + React SPA，产物在 `agentica/gateway/ui/`），无需任何 IM 配置即可直接对话。pip 运行时不需要 Node。会话与 CLI 共用同一份 `~/.agentica` Session JSONL；`http://localhost:8881/traces` 按 Task 画时间轴（旧 session 没有生命周期事件时只列事件、不强行画图）。
 
 <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
 
@@ -455,6 +455,9 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 |--------|------|------|
 | GET | `/health` / `/api/health` | 健康检查（免 token） |
 | GET | `/chat` | 内置 Web UI（免 token） |
+| GET | `/traces` | Session Trace 页（与 `/chat` 同一份 SPA） |
+| GET | `/api/sessions/{id}/trace/analysis` | 读时分析：Task / 模型条 / 工具条 |
+| GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
 | POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`, `user_id`） |
 | WS | `/ws` | 流式事件订阅 |
 | GET | `/api/channels` | 列出已注册渠道 + 连接状态 |
