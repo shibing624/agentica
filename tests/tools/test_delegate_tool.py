@@ -10,6 +10,7 @@ import asyncio
 import shlex
 import sys
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import List, Optional
 
 import pytest
@@ -20,6 +21,7 @@ from agentica.tools.builtin.delegate_tool import (
     BuiltinDelegateTool,
     agentica_command,
     delegation_depth,
+    provider_for_model,
 )
 
 
@@ -64,13 +66,26 @@ class _FakeRegistry:
         return [p for p in items if p.running]
 
 
-def _tool(registry, *, mode="allow-all", provider="deepseek", model="deepseek-chat", work_dir="/tmp/proj"):
+def _tool(
+    registry,
+    *,
+    mode="allow-all",
+    provider: Optional[str] = "deepseek",
+    model: Optional[str] = "deepseek-chat",
+    work_dir="/tmp/proj",
+    profile_lookup=None,
+sdk_model=None,
+):
     return BuiltinDelegateTool(
         background_process_registry=registry,
         permission_mode=lambda: mode,
         work_dir=work_dir,
         model_provider=provider,
         model_name=model,
+        model=sdk_model,
+        # Default "no profile matches" so argv tests never depend on the
+        # machine's real config.yaml.
+        profile_lookup=profile_lookup or (lambda name: None),
     )
 
 
@@ -142,13 +157,108 @@ class TestWhatItStarts:
         assert argv[argv.index("--model_provider") + 1] == "deepseek"
         assert argv[argv.index("--model_name") + 1] == "deepseek-chat"
 
-    def test_a_provider_qualified_model_overrides_both(self):
+    def test_the_callers_own_model_runs_on_its_profile_when_one_matches(self):
         registry = _FakeRegistry()
-        _delegate(_tool(registry), task="port the parser", model="zhipuai/glm-4.7-flash")
+        _delegate(
+            _tool(registry, profile_lookup=lambda name: {"deepseek-chat": "deepseek-main"}.get(name)),
+            task="port the parser",
+        )
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--model_provider") + 1] == "zhipuai"
-        assert argv[argv.index("--model_name") + 1] == "glm-4.7-flash"
+        # A profile carries base_url/api_key/tuning along; bare provider/name
+        # flags cannot leave the child's active endpoint.
+        assert argv[argv.index("--profile") + 1] == "deepseek-main"
+        assert "--model_provider" not in argv
+
+    def test_a_model_that_matches_a_profile_runs_on_it(self):
+        registry = _FakeRegistry()
+        _delegate(
+            _tool(registry, profile_lookup=lambda name: {"claude-opus-5": "venus-opus-5-anthropic"}.get(name)),
+            task="port the parser",
+            model="anthropic/claude-opus-5",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-opus-5-anthropic"
+        assert "--model_provider" not in argv
+
+    def test_an_sdk_model_sends_its_endpoint_as_a_flag_and_its_key_in_the_env(self):
+        registry = _FakeRegistry()
+        sdk_model = SimpleNamespace(
+            id="internal-only-model", api_key="sk-sdk-key", base_url="http://llm.internal/v1"
+        )
+        _delegate(
+            _tool(
+                registry,
+                provider="openai",
+                model=sdk_model.id,
+                sdk_model=sdk_model,
+            ),
+            task="port the parser",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_provider") + 1] == "openai"
+        assert argv[argv.index("--model_name") + 1] == "internal-only-model"
+        # base_url is not a secret: it rides as a flag, so ps shows the truth
+        # about where the worker sends traffic.
+        assert argv[argv.index("--base_url") + 1] == "http://llm.internal/v1"
+        # The key never appears in the command line; the child's model client
+        # reads it from its environment.
+        assert "sk-sdk-key" not in registry.started[0].command
+        assert registry.started[0].env["OPENAI_API_KEY"] == "sk-sdk-key"
+
+    def test_an_sdk_claude_model_uses_the_anthropic_env_var(self):
+        registry = _FakeRegistry()
+        sdk_model = SimpleNamespace(id="claude-opus-5", api_key="sk-ant", base_url=None)
+        _delegate(
+            _tool(
+                registry,
+                provider="anthropic",
+                model=sdk_model.id,
+                sdk_model=sdk_model,
+            ),
+            task="port the parser",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_provider") + 1] == "anthropic"
+        assert registry.started[0].env["ANTHROPIC_API_KEY"] == "sk-ant"
+        assert "--base_url" not in argv
+
+    def test_an_sdk_model_without_a_key_env_var_is_refused_not_launched(self):
+        registry = _FakeRegistry()
+        sdk_model = SimpleNamespace(id="gpt-4o", api_key="azure-secret", base_url=None)
+        _delegate(
+            _tool(
+                registry,
+                provider="azure",
+                model=sdk_model.id,
+                sdk_model=sdk_model,
+            ),
+            task="port the parser",
+        )
+
+        # Azure (and any provider without an env var the child's model client
+        # reads) cannot hand a key to the child at all.
+        assert registry.started == []
+
+    def test_an_sdk_model_with_a_profile_match_still_prefers_the_profile(self):
+        registry = _FakeRegistry()
+        sdk_model = SimpleNamespace(id="glm-5.3-external", api_key="sk", base_url="http://x/v1")
+        _delegate(
+            _tool(
+                registry,
+                provider="openai",
+                model=sdk_model.id,
+                sdk_model=sdk_model,
+                profile_lookup=lambda name: {"glm-5.3-external": "venus-glm-5.3"}.get(name),
+            ),
+            task="port the parser",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-glm-5.3"
 
     def test_a_bare_model_name_keeps_the_callers_provider(self):
         registry = _FakeRegistry()
@@ -253,6 +363,22 @@ class TestRefusals:
         result = _delegate(_tool(registry), task="build it", work_dir="/no/such/place")
 
         assert result.startswith("Nothing delegated")
+        assert registry.started == []
+
+    def test_a_cross_provider_model_with_no_profile_or_key_starts_nothing(self):
+        registry = _FakeRegistry()
+
+        result = _delegate(
+            _tool(registry),
+            task="port the parser",
+            model="anthropic/claude-opus-5",
+        )
+
+        # Credentials never travel the command line, so a provider nothing on
+        # this machine is configured for can only fail authentication (the
+        # child falls back to the provider's public endpoint + env key).
+        assert result.startswith("Nothing delegated")
+        assert "claude-opus-5" in result
         assert registry.started == []
 
 

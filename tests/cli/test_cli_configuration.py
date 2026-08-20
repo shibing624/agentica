@@ -812,16 +812,24 @@ class TestCLIConfiguration(unittest.TestCase):
 
         captured = {}
 
+        from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        real_delegate = BuiltinDelegateTool(
+            background_process_registry=BackgroundProcessRegistry(),
+            permission_mode=lambda: "allow-all",
+        )
+
         class FakeDeepAgent:
             def __init__(self, **kwargs):
                 captured.update(kwargs)
-                self.tools = []
+                self.tools = [real_delegate]
 
         with (
             patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
             patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
         ):
-            create_agent(
+            agent = create_agent(
                 {
                     "model_provider": "zhipuai",
                     "model_name": "glm-5",
@@ -833,7 +841,8 @@ class TestCLIConfiguration(unittest.TestCase):
                 skills_registry=None,
                 **create_agent_kwargs,
             )
-        return [tool.name for tool in captured["tools"]]
+        tools = captured["tools"] + list(getattr(agent, "tools", []) or [])
+        return [tool.name for tool in tools]
 
     def test_an_interactive_session_can_delegate(self):
         from agentica.tools.background_processes import BackgroundProcessRegistry

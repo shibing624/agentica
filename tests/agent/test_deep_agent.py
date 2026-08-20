@@ -21,6 +21,40 @@ class TestDeepAgentDefaults(unittest.TestCase):
         self.assertTrue(any(isinstance(tool, SkillTool) for tool in agent.tools))
         load_mcp_tools.assert_called_once()
 
+    def test_deep_agent_with_a_registry_registers_delegate(self):
+        """The SDK path: no config.yaml involved — the model object itself is
+        the credential source the delegated worker inherits."""
+        from agentica.agent.deep import DeepAgent
+        from agentica.model.openai import OpenAIChat
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "agentica.agent.base.Agent._load_mcp_tools"
+        ), patch("agentica.agent.base.Agent._merge_tool_system_prompts"):
+            agent = DeepAgent(
+                model=OpenAIChat(
+                    id="internal-only-model", api_key="sk-sdk", base_url="http://llm.internal/v1"
+                ),
+                workspace=tmpdir,
+                include_skills=False,
+                background_process_registry=BackgroundProcessRegistry(),
+            )
+
+        delegates = [t for t in agent.tools if t.name == "builtin_delegate_tool"]
+        self.assertEqual(len(delegates), 1)
+
+    def test_deep_agent_without_a_registry_has_no_delegate(self):
+        from agentica.agent.deep import DeepAgent
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "agentica.agent.base.Agent._load_mcp_tools"
+        ), patch("agentica.agent.base.Agent._merge_tool_system_prompts"):
+            agent = DeepAgent(model=MagicMock(), workspace=tmpdir, include_skills=False)
+
+        self.assertNotIn(
+            "builtin_delegate_tool", [t.name for t in agent.tools]
+        )
+
     def test_deep_agent_model_exposes_file_tools(self):
         from agentica.agent.deep import DeepAgent
         from agentica.model.openai import OpenAIChat

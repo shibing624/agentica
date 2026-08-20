@@ -1031,23 +1031,9 @@ def create_agent(
     # cron-spawned agent — neither of which has one — simply do not get the tool.
     # Nor does a worker that was itself delegated: MAX_DEPTH stops a tree of
     # agents spawning agents with nobody watching the bill.
-    from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool, MAX_DEPTH, delegation_depth
-
-    if background_process_registry is not None and delegation_depth() < MAX_DEPTH:
-        cli_tools.insert(
-            0,
-            BuiltinDelegateTool(
-                background_process_registry=background_process_registry,
-                # Read at call time, not now: /permissions switches the tier in
-                # place without rebuilding the agent, and a worker must start
-                # under the tier in effect when it is spawned. `new_agent` is
-                # assigned a few lines below, before any tool can run.
-                permission_mode=lambda: new_agent.tool_config.permission_mode,
-                work_dir=work_dir,
-                model_provider=agent_config.get("model_provider"),
-                model_name=agent_config.get("model_name"),
-            ),
-        )
+    # The tool itself is registered inside DeepAgent (the worker needs the model
+    # object's credentials, and config.yaml may not have any); the removal below
+    # runs after the agent is built.
 
     new_agent = DeepAgent(
         model=model,
@@ -1087,6 +1073,21 @@ def create_agent(
         # wrote uncommitted, instead of letting both find out at merge time.
         peer_conflict_checker=build_peer_conflict_checker(peer_session),
     )
+
+    # A one-shot `--query` run and a cron-spawned agent have no process
+    # registry, and a worker they started could never be waited on or reported
+    # back; MAX_DEPTH likewise stops a worker from delegating further. The tool
+    # is registered inside DeepAgent, so here it is only ever removed.
+    from agentica.tools.builtin.delegate_tool import (
+        BuiltinDelegateTool,
+        MAX_DEPTH,
+        delegation_depth,
+    )
+
+    if background_process_registry is None or delegation_depth() >= MAX_DEPTH:
+        new_agent.tools = [
+            tool for tool in (new_agent.tools or []) if not isinstance(tool, BuiltinDelegateTool)
+        ]
 
     if skills_registry and len(skills_registry) > 0:
         has_skill_tool = any(isinstance(tool, SkillTool) for tool in (new_agent.tools or []))

@@ -2,6 +2,7 @@
 """Tests for agentica.subagent registry execution helpers."""
 import asyncio
 import inspect
+import re
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -718,7 +719,9 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
     assert "resume_from_run_id" in hint
     assert "timeout" in hint
     # Larger timeout suggestion must be strictly greater than the failed one.
-    assert "2" in hint  # 1s * 2 = 2s
+    suggested = re.search(r"timeout=([\d.]+)\)", hint)
+    assert suggested, f"hint must suggest a concrete timeout: {hint!r}"
+    assert float(suggested.group(1)) > 0.05
 
 
 # ---------------------------------------------------------------------------

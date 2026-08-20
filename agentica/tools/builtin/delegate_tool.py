@@ -25,11 +25,16 @@ import os
 import shlex
 import sys
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
+from agentica.model.defaults import provider_env_var
+from agentica.global_config import get_profiles
 from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
+
+if TYPE_CHECKING:
+    from agentica.model.base import Model
 
 # Depth of the current process in a delegation chain: 0 for the session the user
 # started, 1 for anything it delegated to. The env var travels to the child, and
@@ -37,6 +42,46 @@ from agentica.utils.log import logger
 # spends the user's money in a way nobody is watching.
 DEPTH_ENV_VAR = "AGENTICA_DELEGATE_DEPTH"
 MAX_DEPTH = 1
+
+
+def profile_for_model(model_name: str) -> Optional[str]:
+    """Name of the first config.yaml profile whose main model is ``model_name``.
+
+    A delegated worker cannot receive credentials on the command line, and bare
+    ``--model_provider``/``--model_name`` flags cannot leave the child's active
+    endpoint (see ``resolve_model_config``). Launching the child on a *profile*
+    is the only way a model crosses endpoints with its base_url, api_key and
+    tuning intact.
+    """
+    for name, profile in get_profiles().items():
+        if isinstance(profile, dict) and profile.get("model_name") == model_name:
+            return name
+    return None
+
+
+# Model class name → provider key. Only the base classes appear: the
+# agentica.DeepSeekChat / MoonshotChat / ... factories all return plain
+# OpenAIChat instances (with their own base_url), so every OpenAI-compatible
+# provider lands on "openai" and the child gets the base_url + api_key as one
+# pair. AzureOpenAIChat subclasses OpenAIChat but stands EARLIER in the MRO,
+# so it is detected first and correctly refused (Azure credentials have no
+# environment variable the child could read). A third-party Model class that
+# agentica does not know maps to nothing; the worker then resolves its own
+# model from config.yaml / the environment.
+_MODEL_CLASS_PROVIDERS = {
+    "OpenAIChat": "openai",
+    "AzureOpenAIChat": "azure",
+    "Claude": "anthropic",
+}
+
+
+def provider_for_model(model: "Model") -> Optional[str]:
+    """The provider key a Model instance belongs to, or None if unrecognized."""
+    for klass in type(model).__mro__:
+        provider = _MODEL_CLASS_PROVIDERS.get(klass.__name__)
+        if provider:
+            return provider
+    return None
 
 # Same ceiling as SubagentRegistry.MAX_CONCURRENT: three parallel workers is
 # already more than a person can follow, and each one here is a full model.
@@ -91,6 +136,8 @@ class BuiltinDelegateTool(Tool):
         work_dir: Optional[str] = None,
         model_provider: Optional[str] = None,
         model_name: Optional[str] = None,
+        model: Optional["Model"] = None,
+        profile_lookup: Optional[Callable[[str], Optional[str]]] = None,
     ):
         """
         Args:
@@ -104,6 +151,14 @@ class BuiltinDelegateTool(Tool):
             work_dir: default working directory for children.
             model_provider, model_name: what the caller itself runs on. Children
                 inherit it so delegated work does not silently change model.
+            model: the caller's own Model object (the SDK path — no CLI config
+                involved). Its provider/id/base_url/api_key describe the worker's
+                model; the key travels to the child in its environment, never
+                on the command line. Supplied by the caller when it has a real
+                model; model_provider/model_name are the CLI's split form of
+                the same thing.
+            profile_lookup: maps a model name to the config.yaml profile that
+                runs it; injectable so tests do not read the real config.
                 API keys are never passed on the command line — the child reads
                 config.yaml / the environment like any other agentica run.
         """
@@ -113,6 +168,8 @@ class BuiltinDelegateTool(Tool):
         self._work_dir = work_dir
         self._model_provider = model_provider
         self._model_name = model_name
+        self._model = model
+        self._profile_lookup = profile_lookup or profile_for_model
         self.register(self.delegate, is_destructive=True)
 
     async def delegate(self, task: str, label: str = "", work_dir: str = "", model: str = "") -> str:
@@ -145,7 +202,11 @@ class BuiltinDelegateTool(Tool):
                 when the point of delegating is to work on another checkout.
             model: Model for the worker, as "provider/name" (e.g.
                 "deepseek/deepseek-chat") or just a name to keep your provider.
-                Defaults to your own model.
+                A model that a config.yaml profile runs is delegated on that
+                profile so its endpoint and key come along. A provider nothing
+                on this machine is configured for is refused instead of
+                launched into an authentication failure. Defaults to your own
+                model.
 
         Returns:
             str: The worker's id and how to reach its result, or why it was refused.
@@ -183,9 +244,45 @@ class BuiltinDelegateTool(Tool):
             "--permissions",
             self._permission_mode(),
         ]
+        child_env: dict = {}
         provider, model_name = self._resolve_model(model)
         if provider and model_name:
-            argv += ["--model_provider", provider, "--model_name", model_name]
+            profile = self._profile_lookup(model_name)
+            if profile:
+                argv += ["--profile", profile]
+            elif self._model is not None:
+                # SDK caller: its model object IS the configuration (no
+                # config.yaml involved). The flags describe the model — the
+                # base_url is not a secret and rides along as a flag — while
+                # the api_key reaches the child through the environment, never
+                # the command line where `ps` would show it.
+                api_key = getattr(self._model, "api_key", None)
+                key_var = provider_env_var(provider)
+                if api_key and not key_var:
+                    return (
+                        f"Nothing delegated: provider '{provider}' has no environment variable a "
+                        f"worker could take an API key from, and credentials never travel the "
+                        f"command line. Run such work in-process (the `task` tool) instead."
+                    )
+                argv += ["--model_provider", provider, "--model_name", model_name]
+                base_url = getattr(self._model, "base_url", None)
+                if base_url:
+                    argv += ["--base_url", str(base_url)]
+                if api_key and key_var:
+                    child_env[key_var] = api_key
+            elif provider != self._model_provider:
+                # No profile runs this model and the provider is not the one
+                # this session runs on: the child would fall back to that
+                # provider's public endpoint plus an env key that likely does
+                # not exist — a guaranteed 401 six seconds later.
+                return (
+                    f"Nothing delegated: no config.yaml profile runs '{model_name}' on provider "
+                    f"'{provider}', and a worker never receives credentials on the command line, "
+                    f"so it would fail authentication. Pick a model one of your profiles runs, "
+                    f"or add a profile for it first."
+                )
+            else:
+                argv += ["--model_provider", provider, "--model_name", model_name]
         if target_dir:
             argv += ["--work_dir", target_dir]
 
@@ -193,7 +290,7 @@ class BuiltinDelegateTool(Tool):
         item = self._registry.start(
             command,
             cwd=target_dir,
-            env={DEPTH_ENV_VAR: str(delegation_depth() + 1)},
+            env={DEPTH_ENV_VAR: str(delegation_depth() + 1), **child_env},
             kind="delegate",
             label=name,
         )

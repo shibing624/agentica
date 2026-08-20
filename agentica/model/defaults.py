@@ -38,6 +38,17 @@ def _configured_api_key(provider_key: str) -> Optional[str]:
     return value
 
 
+def provider_env_var(provider_key: str) -> Optional[str]:
+    """Primary env var that holds this provider's API key, or None if unknown.
+
+    The child of a delegated run inherits its credentials this way: the key is
+    never put on the command line (``ps`` would show it), only in the process
+    environment, and each provider's model client reads its own variable.
+    """
+    pair = _PROVIDER_ENV_VARS.get(provider_key)
+    return pair[0] if pair else None
+
+
 def _create_model(provider_key: str) -> Model:
     if provider_key == "openai":
         from agentica.model.openai import OpenAIChat
