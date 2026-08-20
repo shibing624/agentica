@@ -136,9 +136,22 @@ export type AppState = {
   passwordSet: boolean;
   /** Still the password the gateway generated on first start. */
   passwordIsInitial: boolean;
+  /** The signed-in account. Also names the ``users/<id>/`` partition its
+   *  conversations and memory live in, so it is what the sidebar shows. */
   accountId: string;
+  /** "admin" or "user". Only account management is admin-only. */
+  accountRole: string;
   minPasswordLength: number;
   passwordForm: { old: string; next: string; repeat: string; busy: boolean };
+  /** The account table, admin only. Empty until the panel loads it. */
+  users: Array<{
+    user_id: string; role: string; created_at: string;
+    password_is_initial: boolean; has_password: boolean; is_admin: boolean;
+  }>;
+  userForm: { username: string; role: string; busy: boolean };
+  /** A password the server just generated, shown once. There is no second
+   *  chance to read it: nothing stores somebody else's credential in clear. */
+  issuedSecret: { userId: string; password: string } | null;
 };
 
 export function emptyProfileForm(): ProfileForm {
@@ -219,8 +232,12 @@ const state: AppState = {
   sidebarSearch: "",
   passwordSet: false,
   passwordIsInitial: false,
-  accountId: "admin",
+  accountId: "default",
+  accountRole: "user",
   minPasswordLength: 6,
+  users: [],
+  userForm: { username: "", role: "user", busy: false },
+  issuedSecret: null,
   passwordForm: { old: "", next: "", repeat: "", busy: false },
 };
 

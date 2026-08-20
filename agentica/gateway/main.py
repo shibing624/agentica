@@ -218,11 +218,11 @@ async def lifespan(app: FastAPI):
         # app gets served (uvicorn/gunicorn point at `main:app` too), and an
         # account that exists only when started one particular way is an
         # account that is missing exactly when somebody is locked out.
-        seeded = accounts.store().seed_admin()
+        seeded = accounts.store().seed_default_account()
         if accounts.store().password_is_initial():
             password = seeded or accounts.store().read_initial_password()
             if password:
-                logger.info("\n" + _sign_in_notice(accounts.ADMIN_USER_ID, password))
+                logger.info("\n" + _sign_in_notice(accounts.default_account_id(), password))
             else:
                 # The 0600 copy is gone but the flag says it was never changed:
                 # nobody can tell the user what to type, so say that instead of
@@ -233,7 +233,7 @@ async def lifespan(app: FastAPI):
                     "before it was changed — run `agentica-gateway --set-password`"
                 )
         else:
-            logger.info(f"  Sign in as {accounts.ADMIN_USER_ID} with your web password")
+            logger.info(f"  Sign in as {accounts.default_account_id()} with your web password")
         logger.info(f"  Runtime (port + token): {_display_home_path(str(runtime_path))}")
 
     # A desktop shell owns this process; if the shell is killed outright there

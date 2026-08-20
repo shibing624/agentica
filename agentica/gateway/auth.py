@@ -30,9 +30,10 @@ A browser is never asked for the token. It used to be — the banner printed
 as a second, worse login: the credential changed on every restart, it was
 useless to anyone whose gateway was started detached or by the desktop shell,
 and it made the browser and the desktop app behave differently for no reason
-the user could see. Now first start seeds an ``admin`` password
-(``accounts.seed_admin``) and browsers go to ``/login``. The query form still
-works, because a script that has the token should not need a second credential.
+the user could see. Now first start seeds a password for the ``default``
+account (``accounts.seed_default_account``) and browsers go to ``/login``. The
+query form still works, because a script that has the token should not need a
+second credential.
 
 What is deliberately *not* behind the gate, and why each one has to be open:
 
@@ -86,7 +87,12 @@ _token: Optional[str] = None
 
 @dataclass
 class Principal:
-    """Who the current request is."""
+    """Who the current request is.
+
+    ``user_id`` is both the login and the data partition it owns
+    (``users/<id>/`` — see ``accounts.py``), so a route that reads it gets the
+    right sessions for free rather than having to map one id to the other.
+    """
 
     user_id: str
     # How they got in: "session" (a signed-in browser), "token" (the machine
@@ -94,6 +100,15 @@ class Principal:
     # "open" (the gate is off). Only "session" is ambient, which is what the
     # CSRF check and the password rules turn on.
     kind: str
+    # "admin" or "user". Gates account management and nothing else: the rest of
+    # the gateway configures one machine, and this is that machine's owner's
+    # machine. Resolved from the account record on every request, so demoting
+    # somebody does not wait for their cookie to expire.
+    role: str = accounts.ROLE_USER
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == accounts.ROLE_ADMIN
 
 
 def auth_enabled() -> bool:
@@ -128,11 +143,12 @@ def reset_token_for_tests() -> None:
 def token_account() -> str:
     """The account a machine-token holder acts as.
 
-    The web account, not ``settings.default_user_id`` — that one names a data
-    partition on disk (``users/<id>/``) and has no business deciding who is
-    signed in.
+    The seeded one, which is also the data partition it owns. A token holder
+    can read a 0600 file on this machine, so they are that machine's owner —
+    handing them a *different* account would show the desktop shell an empty
+    conversation list next to a browser that has them all.
     """
-    return accounts.ADMIN_USER_ID
+    return accounts.default_account_id()
 
 
 def _is_open(path: str) -> bool:
@@ -201,13 +217,22 @@ def resolve(request: Request) -> tuple[Optional[Principal], bool]:
     presented, from_query = machine_token(request)
     if presented is not None:
         if token_is_valid(presented):
-            return Principal(token_account(), "token"), from_query
+            account = token_account()
+            # An admin either way: on a machine whose accounts have not been
+            # seeded yet there is no record to read a role from, and the token
+            # holder is the one who would seed it.
+            return Principal(account, "token", _role(account, accounts.ROLE_ADMIN)), from_query
         return None, False
 
     session = accounts.store().read_session(request.cookies.get(SESSION_COOKIE))
     if session is not None:
-        return Principal(session.user_id, "session"), False
+        return Principal(session.user_id, "session", _role(session.user_id)), False
     return None, False
+
+
+def _role(user_id: str, fallback: str = accounts.ROLE_USER) -> str:
+    account = accounts.store().get_account(user_id)
+    return account.role if account is not None else fallback
 
 
 def set_session_cookie(response: Response, token: str) -> None:
@@ -275,7 +300,7 @@ async def token_middleware(request: Request, call_next):
         # Still name who the request is: a route behind the gate reads
         # `request.state.principal` unconditionally, and the alternative is
         # every such route guessing at a missing attribute.
-        request.state.principal = Principal(token_account(), "open")
+        request.state.principal = Principal(token_account(), "open", accounts.ROLE_ADMIN)
         return await call_next(request)
 
     if request.method == "OPTIONS" or _is_open(request.url.path):
@@ -310,6 +335,18 @@ async def token_middleware(request: Request, call_next):
             response, accounts.store().open_session(principal.user_id, "token")
         )
     return response
+
+
+def websocket_account(websocket) -> str:
+    """Which account a ``/ws`` connection acts as.
+
+    A browser arrives with the session cookie; a script presents the machine
+    token and is therefore the machine's owner. The connect frame carries no
+    account of its own — a socket that could name one would be choosing whose
+    conversations to write to.
+    """
+    session = accounts.store().read_session(websocket.cookies.get(SESSION_COOKIE))
+    return session.user_id if session is not None else token_account()
 
 
 def websocket_token_ok(websocket, handshake_params: Optional[dict] = None) -> bool:

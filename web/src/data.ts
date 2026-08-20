@@ -29,12 +29,19 @@ export async function loadAuthStatus() {
   setState({
     passwordSet: !!data.password_set,
     passwordIsInitial: !!data.password_is_initial,
-    accountId: data.account_id || "admin",
+    accountId: data.user_id || data.default_account_id || "default",
+    accountRole: data.role || "user",
     // The server owns the minimum: a number hardcoded here would go stale the
     // day it moves and the only symptom is a form that rejects what the API
     // accepts (or worse, the reverse).
     minPasswordLength: data.min_password_length || 6,
   });
+}
+
+/** The account table. Admin-only server-side; a 403 just leaves it empty. */
+export async function loadUsers() {
+  const { ok, data } = await api.fetchUsers();
+  setState({ users: ok && data ? data.users || [] : [] });
 }
 
 export async function loadProfiles() {

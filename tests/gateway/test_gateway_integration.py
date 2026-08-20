@@ -126,7 +126,7 @@ class TestSessionEndpoints:
         client, mock_svc = mock_app
         resp = client.delete("/api/sessions/s1")
         assert resp.status_code == 200
-        mock_svc.delete_session.assert_called_with("s1")
+        mock_svc.delete_session.assert_called_with("s1", owner="default")
 
     def test_delete_nonexistent_session(self, mock_app):
         client, mock_svc = mock_app
@@ -141,7 +141,7 @@ class TestSessionEndpoints:
         data = resp.json()
         assert data["status"] == "renamed"
         assert data["name"] == "New Name"
-        mock_svc.rename_session.assert_called_with("s1", "New Name")
+        mock_svc.rename_session.assert_called_with("s1", "New Name", owner="default")
 
     def test_rename_empty_name(self, mock_app):
         client, _ = mock_app
@@ -153,14 +153,14 @@ class TestSessionEndpoints:
         resp = client.post("/api/sessions/s1/archive")
         assert resp.status_code == 200
         assert resp.json()["status"] == "archived"
-        mock_svc.archive_session.assert_called_with("s1", archived=True)
+        mock_svc.archive_session.assert_called_with("s1", archived=True, owner="default")
 
     def test_unarchive_session(self, mock_app):
         client, mock_svc = mock_app
         resp = client.post("/api/sessions/s1/unarchive")
         assert resp.status_code == 200
         assert resp.json()["status"] == "unarchived"
-        mock_svc.archive_session.assert_called_with("s1", archived=False)
+        mock_svc.archive_session.assert_called_with("s1", archived=False, owner="default")
 
 
 class TestConfigEndpoints:

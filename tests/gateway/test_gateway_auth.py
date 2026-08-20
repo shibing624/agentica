@@ -21,16 +21,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 TOKEN = "test-token-not-a-real-secret"
 
-#: The one web account. Not `settings.default_user_id` — that names a data
-#: partition on disk and deliberately has nothing to do with signing in.
-ADMIN_ID = "admin"
+#: The account seeded on first start, which is also the data partition it owns
+#: (`users/default/`) — see `gateway/accounts.py`.
+ADMIN_ID = "default"
 
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     """A gateway with the gate ON and a pinned token.
 
-    Startup seeds the `admin` account, so this client is a *fresh install*: a
+    Startup seeds the `default` account, so this client is a *fresh install*: a
     generated password exists and is flagged as generated. A test that wants no
     password at all has to clear it and say why.
     """
@@ -170,7 +170,7 @@ class TestPasswordLogin:
         # A fresh gateway: seeded, and honest that it is still the generated one.
         assert body["password_set"] is True
         assert body["password_is_initial"] is True
-        assert body["account_id"] == ADMIN_ID
+        assert body["default_account_id"] == ADMIN_ID
         assert body["min_password_length"] == 6
 
     def test_the_seeded_password_is_the_way_in(self, client):
@@ -189,7 +189,7 @@ class TestPasswordLogin:
         from agentica.gateway import accounts
 
         first = accounts.store().read_initial_password()
-        assert accounts.store().seed_admin() is None
+        assert accounts.store().seed_default_account() is None
         assert accounts.store().read_initial_password() == first
 
     def test_the_generated_password_is_readable_but_only_by_its_owner(self, client):
@@ -309,7 +309,7 @@ class TestPasswordLogin:
         from agentica.gateway.main import _sign_in_notice
 
         notice = _sign_in_notice(ADMIN_ID, "abcd-efgh")
-        assert "admin / abcd-efgh" in notice
+        assert f"{ADMIN_ID} / abcd-efgh" in notice
         assert TOKEN not in notice
         assert "token" not in notice.lower()
         # The frame lines up even though one line is Chinese (CJK glyphs are two
@@ -452,6 +452,179 @@ class TestAccountStore:
             st.check_password("ghost", "x")
 
 
+class TestAccounts:
+    """More than one account, and the partition each of them owns."""
+
+    def store(self, tmp_path):
+        from agentica.gateway.accounts import AccountStore
+
+        return AccountStore(tmp_path / "auth.json")
+
+    def test_the_seeded_account_is_named_after_its_data_partition(self, tmp_path):
+        """It used to be `admin`, and an account id is now a directory name:
+        `users/admin/` is not where any existing conversation lives."""
+        from agentica.gateway import accounts
+
+        st = self.store(tmp_path)
+        assert st.seed_default_account()
+        assert accounts.default_account_id() == "default"
+        (only,) = st.list_accounts()
+        assert only.user_id == "default"
+        assert only.is_admin is True
+
+    def test_a_pre_existing_admin_account_is_renamed_and_keeps_its_password(self, tmp_path):
+        """The upgrade path. Leaving `admin` alone would keep working while
+        pointing at an empty partition, which looks like lost history."""
+        st = self.store(tmp_path)
+        st.set_password("admin", "correct horse battery")
+        token = st.open_session("admin", "password")
+
+        assert st.seed_default_account() is None  # an account already exists
+        assert [a.user_id for a in st.list_accounts()] == ["default"]
+        assert st.check_password("default", "correct horse battery") is True
+        assert st.check_password("admin", "correct horse battery") is False
+        # The desktop shell's cookie is one of these; re-pointed, not dropped.
+        session = st.read_session(token)
+        assert session is not None and session.user_id == "default"
+
+    def test_a_generated_password_is_returned_and_not_stored_in_clear(self, tmp_path):
+        st = self.store(tmp_path)
+        st.seed_default_account()
+        password = st.create_account("kk")
+        assert len(password) >= 6
+        assert password not in st.path.read_text()
+        assert st.check_password("kk", password) is True
+
+    def test_a_new_account_is_a_plain_user(self, tmp_path):
+        st = self.store(tmp_path)
+        st.seed_default_account()
+        st.create_account("kk")
+        assert st.is_admin("kk") is False
+        assert st.is_admin("default") is True
+
+    @pytest.mark.parametrize("bad", ["", "../etc", "a/b", "-flag", "x" * 33, "kk!"])
+    def test_an_id_that_is_not_a_safe_directory_name_is_refused(self, tmp_path, bad):
+        st = self.store(tmp_path)
+        with pytest.raises(ValueError):
+            st.create_account(bad)
+
+    def test_a_username_is_case_folded(self, tmp_path):
+        """The id is a directory name, so `KK` and `kk` cannot be two accounts
+        on a case-insensitive filesystem — and typing it capitalised at the
+        login form is not a different user."""
+        st = self.store(tmp_path)
+        st.create_account("KK")
+        assert [a.user_id for a in st.list_accounts()] == ["kk"]
+        with pytest.raises(ValueError):
+            st.create_account("Kk")
+
+    def test_the_last_administrator_cannot_be_removed(self, tmp_path):
+        st = self.store(tmp_path)
+        st.seed_default_account()
+        st.create_account("kk")
+        with pytest.raises(ValueError):
+            st.delete_account("default")
+        st.delete_account("kk")
+        assert [a.user_id for a in st.list_accounts()] == ["default"]
+
+    def test_removing_an_account_signs_only_that_account_out(self, tmp_path):
+        st = self.store(tmp_path)
+        st.seed_default_account()
+        st.create_account("kk")
+        mine, theirs = st.open_session("default", "password"), st.open_session("kk", "password")
+        st.delete_account("kk")
+        assert st.read_session(theirs) is None
+        assert st.read_session(mine) is not None
+
+    def test_a_password_change_does_not_sign_everybody_else_out(self, tmp_path):
+        """It used to clear every session on the machine, which turned one
+        user's hygiene into everybody else's interruption."""
+        st = self.store(tmp_path)
+        st.seed_default_account()
+        st.create_account("kk")
+        theirs = st.open_session("kk", "password")
+        st.set_password("default", "a brand new one")
+        assert st.read_session(theirs) is not None
+
+    def test_the_readable_copy_is_deleted_when_the_password_moves_on(self, tmp_path):
+        """It only ever holds the seeded password, so a stale copy would be a
+        credential that no longer works sitting in plaintext."""
+        st = self.store(tmp_path)
+        st.seed_default_account()
+        assert st.initial_password_path.is_file()
+        st.set_password("default", "chosen by a person")
+        assert not st.initial_password_path.exists()
+        assert st.password_is_initial() is False
+
+
+class TestUserRoutes:
+    """`/api/auth/users` — the only admin-only surface in the gateway."""
+
+    def _sign_in_as(self, client, user_id):
+        from agentica.gateway import accounts
+
+        password = accounts.store().create_account(user_id)
+        client.cookies.clear()
+        resp = client.post("/api/auth/login", json={"username": user_id, "password": password})
+        assert resp.status_code == 200, resp.text
+        return resp
+
+    def test_an_admin_can_list_add_reset_and_remove(self, client):
+        listing = client.get("/api/auth/users", headers=_auth()).json()
+        assert [u["user_id"] for u in listing["users"]] == [ADMIN_ID]
+
+        created = client.post("/api/auth/users", headers=_auth(),
+                              json={"username": "kk"}).json()
+        assert created["generated"] is True and len(created["password"]) >= 6
+        assert client.post("/api/auth/login",
+                           json={"username": "kk", "password": created["password"]}).status_code == 200
+
+        client.cookies.clear()
+        reset = client.post("/api/auth/users/kk/password", headers=_auth()).json()
+        assert reset["password"] != created["password"]
+        assert client.request("DELETE", "/api/auth/users/kk", headers=_auth()).status_code == 200
+        assert [u["user_id"] for u in client.get("/api/auth/users", headers=_auth()).json()["users"]] == [ADMIN_ID]
+
+    def test_a_plain_user_cannot_see_or_change_the_account_table(self, client):
+        self._sign_in_as(client, "kk")
+        assert client.get("/api/auth/users").status_code == 403
+        assert client.post("/api/auth/users", json={"username": "zz"}).status_code == 403
+        assert client.request("DELETE", f"/api/auth/users/{ADMIN_ID}").status_code == 403
+
+    def test_a_plain_user_may_still_use_the_gateway(self, client):
+        """Only account management is gated. The rest configures one machine,
+        and a locked-out account would just be a broken product."""
+        self._sign_in_as(client, "kk")
+        assert client.get("/api/status").status_code == 200
+        assert client.get("/api/sessions").status_code == 200
+
+    def test_status_names_the_signed_in_account_and_its_role(self, client):
+        self._sign_in_as(client, "kk")
+        body = client.get("/api/auth/status").json()
+        assert body["user_id"] == "kk"
+        assert body["role"] == "user" and body["is_admin"] is False
+
+    def test_you_cannot_remove_the_account_you_are_holding(self, client):
+        """It would sign the admin out and can leave the machine with none."""
+        from agentica.gateway import accounts
+
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
+        client.post("/api/auth/login", json={"username": ADMIN_ID, "password": "correct horse battery"})
+        assert client.request("DELETE", f"/api/auth/users/{ADMIN_ID}").status_code == 400
+
+    def test_sessions_are_listed_per_account(self, client):
+        """The route reads the owner off the credential, so two accounts asking
+        the same question get two different partitions."""
+        from agentica.gateway import deps
+
+        client.get("/api/sessions", headers=_auth())
+        assert deps.agent_service.list_sessions.call_args.kwargs == {"owner": ADMIN_ID}
+
+        self._sign_in_as(client, "kk")
+        client.get("/api/sessions")
+        assert deps.agent_service.list_sessions.call_args.kwargs == {"owner": "kk"}
+
+
 class TestCsrf:
     """SameSite=Lax is the real defence; this is the second line."""
 
@@ -508,7 +681,7 @@ class TestOpenBindGuard:
         from agentica.gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
-        accounts.store().seed_admin()
+        accounts.store().seed_default_account()
         assert accounts.store().has_password() is True
         assert "generated" in _refuse_open_bind("0.0.0.0")
 
@@ -517,7 +690,7 @@ class TestOpenBindGuard:
         from agentica.gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
-        accounts.store().seed_admin()
+        accounts.store().seed_default_account()
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         assert _refuse_open_bind("0.0.0.0") is None
 

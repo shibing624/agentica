@@ -1,5 +1,8 @@
 import * as api from "../api";
-import { loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders, loadStatus } from "../data";
+import {
+  loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders,
+  loadStatus, loadUsers,
+} from "../data";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import { IconClose } from "../icons";
@@ -11,10 +14,16 @@ import {
 } from "../store";
 import { CronPanel } from "./CronPanel";
 
-/** Tab ids are stable (they are stored in `settingsTab`); only the label moves. */
-const TABS: Array<[string, (S: Strings) => string]> = [
+/** Tab ids are stable (they are stored in `settingsTab`); only the label moves.
+ *
+ *  `users` is the one admin-only tab, and it is hidden rather than disabled for
+ *  a plain account: everything else here configures this one machine and anyone
+ *  signed in may change it, so a row of locked tabs would suggest a permission
+ *  system that does not exist. */
+const TABS: Array<[string, (S: Strings) => string, boolean?]> = [
   ["settings", (S) => S.settings.tabGeneral],
   ["profiles", (S) => S.nav.profile],
+  ["users", (S) => S.settings.tabUsers, true],
   ["cron", (S) => S.settings.tabCron],
   ["archived", (S) => S.settings.tabArchived],
 ];
@@ -232,14 +241,15 @@ export function SettingsModal() {
           </div>
         </div>
         <div className="plugins-tabs">
-          {TABS.map(([id, label]) => (
+          {TABS.filter(([, , adminOnly]) => !adminOnly || s.accountRole === "admin").map(([id, label]) => (
             <button key={id} className={"plugins-tab" + (s.settingsTab === id ? " active" : "")}
-                    onClick={() => setState({ settingsTab: id })}>{label(S)}</button>
+                    onClick={() => { setState({ settingsTab: id }); if (id === "users") void loadUsers(); }}>{label(S)}</button>
           ))}
         </div>
         <div className="settings-body">
           {s.settingsTab === "settings" && <GeneralTab />}
           {s.settingsTab === "profiles" && <ProfilesTab />}
+          {s.settingsTab === "users" && <UsersTab />}
           {s.settingsTab === "cron" && <CronPanel />}
           {s.settingsTab === "archived" && (
             <div className="settings-list">
@@ -367,6 +377,116 @@ function ProfilesTab() {
   );
 }
 
+
+/** The account table.
+ *
+ *  A new account is empty rather than a copy: it owns its own
+ *  ``users/<name>/`` partition, so it sees its own conversations and memory and
+ *  none of the creator's. Only account management lands here — models, skills,
+ *  cron and the working directory belong to the machine and stay on the tabs
+ *  everyone can reach.
+ */
+function UsersTab() {
+  const s = useAppState();
+  const S = useStrings();
+  const f = s.userForm;
+  const set = (p: Partial<typeof f>) => setState({ userForm: { ...f, ...p } });
+
+  async function create() {
+    const username = f.username.trim().toLowerCase();
+    if (!username) return;
+    set({ busy: true });
+    // No password field: one typed here would have to be relayed to its owner
+    // by hand anyway, and a generated one is shown once and cannot be weak.
+    const { ok, data } = await api.createUserApi(username, f.role);
+    set({ busy: false });
+    if (!ok) { showToast((data as any)?.detail || S.common.saveFailed, 3500); return; }
+    setState({
+      userForm: { username: "", role: "user", busy: false },
+      issuedSecret: { userId: username, password: String((data as any)?.password || "") },
+    });
+    await loadUsers();
+  }
+
+  async function reset(userId: string) {
+    const { ok, data } = await api.resetUserPasswordApi(userId);
+    if (!ok) { showToast((data as any)?.detail || S.settings.setFailed, 3500); return; }
+    setState({ issuedSecret: { userId, password: String((data as any)?.password || "") } });
+    await loadUsers();
+  }
+
+  function remove(userId: string) {
+    askConfirm({
+      title: S.settings.removeUser,
+      msg: S.settings.removeUserMsg(userId),
+      onOk: async () => {
+        const { ok, data } = await api.deleteUserApi(userId);
+        if (!ok) { showToast((data as any)?.detail || S.common.deleteFailed, 3500); return; }
+        await loadUsers();
+        showToast(S.settings.userDeleted);
+      },
+    });
+  }
+
+  return (
+    <div className="settings-list">
+      <div className="settings-block">
+        <div className="settings-block-title">{S.settings.addUser}</div>
+        <div className="pf-row">
+          <input className="pf-input" placeholder={S.settings.usernamePlaceholder}
+                 value={f.username} onChange={(e) => set({ username: e.target.value })} />
+          <div className="pf-toggle">
+            {([["user", S.settings.roleUser], ["admin", S.settings.roleAdmin]] as const).map(([v, label]) => (
+              <button key={v} className={"pf-toggle-btn" + (f.role === v ? " active" : "")}
+                      onClick={() => set({ role: v })}>{label}</button>
+            ))}
+          </div>
+          <button className="dp-btn primary" disabled={f.busy || !f.username.trim()}
+                  onClick={() => void create()}>{S.common.create}</button>
+        </div>
+        <div className="settings-item-meta">{S.settings.addUserMeta}</div>
+      </div>
+
+      {s.issuedSecret && (
+        <div className="settings-block secret-block">
+          <div className="settings-block-title">{S.settings.issuedFor(s.issuedSecret.userId)}</div>
+          <div className="config-path-row">
+            <code className="config-path-val">{s.issuedSecret.password}</code>
+            <button className="cron-act" onClick={() => {
+              void navigator.clipboard.writeText(s.issuedSecret!.password);
+              showToast(S.common.copied);
+            }}>{S.common.copy}</button>
+            <button className="cron-act" onClick={() => setState({ issuedSecret: null })}>{S.common.cancel}</button>
+          </div>
+          <div className="settings-item-meta">{S.settings.issuedOnce}</div>
+        </div>
+      )}
+
+      {s.users.map((u) => (
+        <div key={u.user_id} className={"settings-item" + (u.user_id === s.accountId ? " active" : "")}>
+          <div className="settings-item-head">
+            <span className="settings-name">
+              {u.user_id}
+              <span className="settings-active"> {u.is_admin ? S.settings.roleAdmin : S.settings.roleUser}</span>
+              {u.user_id === s.accountId && <span className="settings-active"> ● {S.settings.you}</span>}
+            </span>
+            <div className="settings-item-actions">
+              <button className="cron-act" onClick={() => void reset(u.user_id)}>{S.settings.resetPassword}</button>
+              {u.user_id !== s.accountId && (
+                <button className="cron-act danger" onClick={() => remove(u.user_id)}>{S.common.delete}</button>
+              )}
+            </div>
+          </div>
+          <div className="settings-item-meta">
+            {u.created_at ? u.created_at.replace("T", " ") : ""}
+            {u.password_is_initial ? " · " + S.settings.generatedPassword : ""}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ProfileForm() {
   const s = useAppState();
   const S = useStrings();
@@ -429,9 +549,9 @@ function ProfileForm() {
 /** Loaded lazily so the settings modal always opens with current server state
  *  rather than whatever the chat page fetched at boot. */
 export async function primeSettings(tab: string) {
-  setState({ settingsModal: { open: true }, settingsTab: tab });
+  setState({ settingsModal: { open: true }, settingsTab: tab, issuedSecret: null });
   await Promise.all([
     loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(),
-    loadAuthStatus(),
+    loadAuthStatus(), ...(tab === "users" ? [loadUsers()] : []),
   ]);
 }

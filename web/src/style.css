@@ -10,6 +10,9 @@
   --t:150ms ease;
   --user-bg:#dfe8f0;--user-fg:#1a1a1a;
   --code-bg:#f4f4f4;
+  /* Trace lane track. A tool lane is mostly empty, so it needs more contrast
+     against the card than --bg3 gives, in both themes. */
+  --lane-track:#e2e5ea;
 }
 [data-theme="dark"]{
   --bg:#0a0a0a;--bg2:#141414;--bg3:#222;--bg-input:#141414;
@@ -18,6 +21,7 @@
   --accent:#e0e0e0;--accent-soft:rgba(255,255,255,.05);
   --user-bg:#1e2a35;--user-fg:#e0e0e0;
   --code-bg:#1a1a1a;
+  --lane-track:#2b2b2b;
 }
 html,body{height:100%;overflow:hidden}
 body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);background:var(--bg);display:flex;transition:background .2s,color .2s}

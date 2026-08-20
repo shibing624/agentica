@@ -9,10 +9,14 @@ from pydantic import BaseModel
 
 
 class ChatRequest(BaseModel):
-    """Chat request payload."""
+    """Chat request payload.
+
+    No ``user_id``: who is talking is decided by the session cookie
+    (``request.state.principal``), never by the body. It used to be a field, and
+    a field naming a user is a field naming somebody else's conversations.
+    """
     message: str
     session_id: str = "default"
-    user_id: str = "default"
     agent_id: str = "main"
     work_dir: Optional[str] = None
     goal: str = ""
@@ -31,7 +35,6 @@ class ChatResponse(BaseModel):
 
 class MemoryRequest(BaseModel):
     content: str
-    user_id: str = "default"
     long_term: bool = False
 
 
@@ -65,7 +68,6 @@ class PolishPromptRequest(BaseModel):
 class GoalRequest(BaseModel):
     objective: str
     session_id: str = "default"
-    user_id: str = "default"
 
 
 class SkillCreateRequest(BaseModel):

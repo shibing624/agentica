@@ -10,6 +10,11 @@
 .trace-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--fg);font-size:12.5px;outline:none;font-family:var(--sans)}
 .trace-rail-label{padding:2px 16px 4px;font-size:11px;font-weight:700;color:var(--fg3);letter-spacing:.03em}
 .trace-rail-list{flex:1;overflow-y:auto;padding:0 8px 10px;display:flex;flex-direction:column;gap:2px}
+.trace-rail-group{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
+.trace-rail-project{display:flex;align-items:center;gap:6px;padding:6px 10px 2px;font-size:11px;color:var(--fg2);font-weight:600}
+.trace-rail-project svg{width:13px;height:13px;flex-shrink:0;opacity:.7}
+.trp-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trp-count{margin-left:auto;color:var(--fg3);font-family:var(--mono);font-size:10px}
 .trace-rail-item{width:100%;text-align:left;border:none;background:transparent;color:var(--fg);border-radius:9px;padding:8px 10px;cursor:pointer;display:flex;flex-direction:column;gap:2px}
 .trace-rail-item:hover{background:var(--bg3)}
 .trace-rail-item.active{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--fg)}
@@ -66,8 +71,12 @@
 .lane-total{font-family:var(--mono);font-size:10px;color:var(--fg2)}
 .lane-row{display:flex;align-items:center;gap:8px;margin-bottom:3px}
 .lane-name{width:110px;flex-shrink:0;text-align:right;font-size:10px;color:var(--fg3);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lane-ord{display:inline-block;min-width:13px;margin-right:4px;color:var(--fg3);opacity:.65}
+.lane-count{margin-left:4px;color:var(--fg3);opacity:.6}
 .lane{position:relative;flex:1;height:12px;background:var(--bg3);border-radius:3px;overflow:hidden}
+/* A tool lane is mostly empty — the call sits somewhere inside the round — so
+   the track itself has to read as a track, or a short segment looks like a
+   stray mark floating on the card. */
+.lane.is-tool{background:var(--lane-track)}
 .lane-seg{position:absolute;top:0;height:100%;border-radius:2px;min-width:2px}
 .lane-seg.pending{background:repeating-linear-gradient(45deg,#10b981,#10b981 3px,transparent 3px,transparent 6px);min-width:6px}
 /* The axis is a row like the lanes, so its ticks share their coordinate space:

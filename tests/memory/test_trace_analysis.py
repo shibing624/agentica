@@ -392,3 +392,67 @@ def test_interrupt_compensation_tool_call_stays_off_the_lane():
     out = analyze_entries(entries)
     assert out["toolSpans"] == []
     assert out["modelSegments"][0]["kind"] == "tool_call"
+
+
+def test_an_event_can_carry_the_moment_it_happened(tmp_path):
+    """A streamed request only knows afterwards when reasoning stopped, so the
+    row has to be able to say so. Stamping it at write time collapsed the whole
+    request into one instant and the timeline drew a single bar."""
+    import time
+
+    from agentica.memory.session_log import iso_timestamp
+
+    log = SessionLog(session_id="s1", base_dir=str(tmp_path))
+    then = time.time() - 30
+    log.append_event("thinking", timestamp=iso_timestamp(then))
+    (row,) = [e for e in log.iter_raw_entries() if e.get("name") == "thinking"]
+    assert row["timestamp"] == iso_timestamp(then)
+    assert row["timestamp"] < iso_timestamp()
+
+
+def test_phase_marks_are_written_in_the_order_they_happened(tmp_path):
+    """The analyzer chains segments — one mark's timestamp is the next one's
+    start — so a fixed thinking → text order would run the chain backwards for
+    a model that answers before it calls a tool, and a negative segment draws as
+    a flat edge."""
+    import time
+
+    from agentica.model.message import Message
+    from agentica.runner.persist import PersistMixin
+
+    log = SessionLog(session_id="s1", base_dir=str(tmp_path))
+    agent = type("A", (), {"_session_log": log})()
+    now = time.time()
+    messages = [Message(
+        role="assistant", content="answer", reasoning_content="hmm",
+        tool_calls=[{"id": "call-1", "function": {"name": "read_file", "arguments": "{}"}}],
+    )]
+    # Reasoning ran first, the reply came later, the tool call closes the stream.
+    PersistMixin._trace_request_segments(
+        agent, messages, {"thinking": now - 4, "text": now - 1},
+    )
+    marks = [e["name"] for e in log.iter_raw_entries()]
+    assert marks == ["thinking", "text", "tool_call"]
+    stamps = [e["timestamp"] for e in log.iter_raw_entries()]
+    assert stamps == sorted(stamps)
+
+
+def test_a_streamed_turn_shows_thinking_and_reply_as_separate_phases(tmp_path):
+    """End to end over the analyzer: the phases a round reports must add up to
+    what the model actually spent, not to one lump."""
+    import time
+
+    from agentica.memory.session_log import iso_timestamp
+    from agentica.memory.trace import analyze_entries
+
+    log = SessionLog(session_id="s1", base_dir=str(tmp_path))
+    t0 = time.time()
+    log.append("user", "hi")
+    log.append_event("request_begin", timestamp=iso_timestamp(t0))
+    log.append_event("thinking", timestamp=iso_timestamp(t0 + 2))
+    log.append_event("text", timestamp=iso_timestamp(t0 + 5))
+    log.append_event("request_end", status="completed", timestamp=iso_timestamp(t0 + 5))
+
+    (round0,) = analyze_entries(list(log.iter_raw_entries()))["rounds"]
+    assert round0["phases"]["thinking"] == 2000
+    assert round0["phases"]["text"] == 3000

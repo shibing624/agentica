@@ -61,9 +61,16 @@ export async function uploadFileApi(file: File, targetDir?: string) {
 }
 
 export const fetchAuthStatus = () => request("/api/auth/status");
-export const loginApi = (password: string, user_id?: string) =>
-  postJson("/api/auth/login", user_id ? { password, user_id } : { password });
+export const loginApi = (username: string, password: string) =>
+  postJson("/api/auth/login", { username, password });
 export const logoutApi = () => postJson("/api/auth/logout", {});
+export const fetchUsers = () => request("/api/auth/users");
+export const createUserApi = (username: string, role: string, password?: string) =>
+  postJson("/api/auth/users", password ? { username, role, password } : { username, role });
+export const resetUserPasswordApi = (userId: string) =>
+  postJson(`/api/auth/users/${encodeURIComponent(userId)}/password`, {});
+export const deleteUserApi = (userId: string) =>
+  request(`/api/auth/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
 export const setPasswordApi = (password: string, old_password?: string) =>
   postJson("/api/auth/password", old_password ? { password, old_password } : { password });
 

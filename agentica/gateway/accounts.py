@@ -16,23 +16,34 @@ Storage is ``$AGENTICA_HOME/gateway/auth.json``, ``0600``. Not the cache dir:
 losing a password hash to a cache wipe is not a recoverable inconvenience, and
 surviving a restart is the reason sessions are on disk at all.
 
-Accounts are keyed by an account id so that a second account is a row here
-rather than a redesign. Exactly one exists today — ``admin``, seeded on first
-start — because there is no registration route and no admin UI.
+**An account id is the data user id.** It names the ``users/<id>/`` partition
+holding that account's sessions and memory, so signing in as ``kk`` shows kk's
+conversations and nobody else's. Two consequences that are not optional:
 
-**An account id is not a data user id.** ``settings.default_user_id`` partitions
-sessions, memory and skills under ``users/<id>/`` on disk; this file only
-answers "may you in". They were briefly the same string, which reads as a
-simplification and is a trap: renaming the login would have moved every existing
-conversation out of view.
+- The seeded account is called ``default`` — the same string as
+  ``settings.default_user_id`` — so the first account owns the data that
+  already exists rather than starting next to it. It used to be ``admin``,
+  which read fine until the id became a path: every conversation on the
+  machine would have been one directory away from the only account that could
+  see it.
+- The id is a directory name, so ``_ID_RE`` is a whitelist and there is no
+  rename. Renaming is what would move a conversation out of view, which is the
+  trap this design is otherwise built to avoid.
+
+Roles decide one thing: who may add, reset and remove accounts
+(``ROLE_ADMIN``). Everything else — models, skills, cron, the working
+directory — is machine-wide configuration that any signed-in account may
+change, because this is somebody's own machine and not a tenanted service.
 
 A gateway with no password is not a gateway with no credential. First start
-seeds ``admin`` with a generated one and prints it, because the alternative was
-a ``/chat?token=…`` URL from the log — per process, so it changed on every
+seeds ``default`` with a generated one and prints it, because the alternative
+was a ``/chat?token=…`` URL from the log — per process, so it changed on every
 restart, and unusable to anyone whose gateway was started detached or by the
 desktop shell. The plaintext is kept at ``initial-password`` (``0600``) *only*
 while it is still the generated one, so a user who scrolled past the banner can
-still get in; changing the password deletes it.
+still get in; changing the password deletes it. A password an admin generates
+for somebody else is shown once, on the page that created the account, and
+never written down.
 
 Password hashing is ``hashlib.scrypt`` — stdlib, no new dependency, and a real
 slow hash. The stored form is ``scrypt$n$r$p$<salt b64>$<hash b64>``: the
@@ -43,20 +54,36 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from agentica.config import AGENTICA_HOME
 from agentica.utils.log import logger
 
+from .config import settings
+
 AUTH_FILE = Path(AGENTICA_HOME) / "gateway" / "auth.json"
 
-#: The one web account. Not a data user id — see the module docstring.
-ADMIN_USER_ID = "admin"
+#: Roles. Only ``admin`` may manage accounts; both may use the gateway.
+ROLE_ADMIN = "admin"
+ROLE_USER = "user"
+
+# An account id is a directory name (``users/<id>/``), so it is a whitelist and
+# not a sanitiser: lowercase, digits, dash, underscore, 1–32 chars, starting
+# with an alphanumeric. That rules out `.`, `..`, separators and the leading
+# dash that reads as a flag.
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+# The account seeded before this one existed. Migrated once (see
+# `seed_default_account`) rather than kept working: its id would now name a
+# `users/admin/` partition, and every conversation on the machine lives in the
+# one it was renamed away from.
+_LEGACY_SEED_ID = "admin"
 
 # Six, because this gate's job is to stop a passer-by on the LAN, and the two
 # real defences are elsewhere: scrypt makes an offline guess expensive, and the
@@ -105,6 +132,45 @@ class LoginThrottled(Exception):
     def __init__(self, retry_after: float):
         self.retry_after = retry_after
         super().__init__(f"Too many failed attempts; retry in {retry_after:.0f}s")
+
+
+def default_account_id() -> str:
+    """The id of the account seeded on first start.
+
+    Read from ``settings.default_user_id`` rather than hardcoded, because that
+    setting is what names the data partition (``DEFAULT_USER_ID`` in the env).
+    Hardcoding ``"default"`` here would silently hand a machine configured with
+    ``DEFAULT_USER_ID=xuming`` an account that cannot see its own data.
+    """
+    return settings.default_user_id or "default"
+
+
+@dataclass
+class Account:
+    """One login, and the ``users/<id>/`` partition it owns."""
+
+    user_id: str
+    role: str
+    created_at: str
+    # Whether the password is still the one the gateway generated. The UI says
+    # so next to the name: a generated password is on somebody's screenshot or
+    # in a log, so "still initial" is the one thing worth nagging about.
+    password_is_initial: bool
+    has_password: bool
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == ROLE_ADMIN
+
+    def to_dict(self) -> dict:
+        return {
+            "user_id": self.user_id,
+            "role": self.role,
+            "created_at": self.created_at,
+            "password_is_initial": self.password_is_initial,
+            "has_password": self.has_password,
+            "is_admin": self.is_admin,
+        }
 
 
 @dataclass
@@ -239,26 +305,131 @@ class AccountStore:
         entry = accounts.get(user_id)
         return bool(isinstance(entry, dict) and entry.get("password"))
 
-    def set_password(self, user_id: str, password: str) -> None:
+    def set_password(self, user_id: str, password: str, *, initial: bool = False) -> None:
         if len(password) < MIN_PASSWORD_LENGTH:
             raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
         data = self._read()
         entry = data["accounts"].get(user_id)
         if not isinstance(entry, dict):
-            entry = {"created_at": _now().isoformat(timespec="seconds")}
+            # The first account on the machine is an admin whoever creates it:
+            # `--set-password` on a fresh install runs before the server has
+            # ever seeded one, and a machine whose only account cannot add the
+            # second one has no way back.
+            entry = {
+                "created_at": _now().isoformat(timespec="seconds"),
+                "role": ROLE_ADMIN if not data["accounts"] else ROLE_USER,
+            }
         entry["password"] = hash_password(password)
         entry["password_set_at"] = _now().isoformat(timespec="seconds")
-        entry["password_is_initial"] = False
+        entry["password_is_initial"] = initial
         data["accounts"][user_id] = entry
-        # Every other browser is signed out. A password change is what a user
-        # does after "somebody may have my cookie", so keeping those sessions
-        # alive would defeat the only reason they changed it.
-        data["sessions"] = {}
+        # This account's browsers are signed out; nobody else's. A password
+        # change is what somebody does after "my cookie may have leaked", so
+        # keeping their own sessions alive defeats the only reason they did it —
+        # and signing *everyone* out (which is what this used to do) makes one
+        # user's hygiene everybody else's interruption.
+        data["sessions"] = {
+            h: s for h, s in data["sessions"].items()
+            if not (isinstance(s, dict) and s.get("user_id") == user_id)
+        }
         self._write(data)
         self._failures.pop(user_id, None)
-        # The generated one is no longer the way in, so stop keeping a readable
-        # copy of it. Written before the file existed too, hence missing_ok.
+        # Any write invalidates the readable copy, which only ever holds the
+        # seeded account's generated password. `seed_default_account` writes it
+        # back afterwards; every other caller leaves it gone, so it can never
+        # hold a password that no longer works.
         self.initial_password_path.unlink(missing_ok=True)
+
+    # ---- accounts as a table ----
+
+    def list_accounts(self) -> List[Account]:
+        """Every account, oldest first — the order the admin page renders."""
+        out = [
+            self._account(uid, entry)
+            for uid, entry in self._read()["accounts"].items()
+            if isinstance(entry, dict)
+        ]
+        return sorted(out, key=lambda a: (a.created_at, a.user_id))
+
+    def get_account(self, user_id: str) -> Optional[Account]:
+        entry = self._read()["accounts"].get(user_id)
+        if not isinstance(entry, dict):
+            return None
+        return self._account(user_id, entry)
+
+    @staticmethod
+    def _account(user_id: str, entry: dict) -> Account:
+        return Account(
+            user_id=user_id,
+            role=str(entry.get("role") or ROLE_USER),
+            created_at=str(entry.get("created_at") or ""),
+            password_is_initial=bool(entry.get("password_is_initial")),
+            has_password=bool(entry.get("password")),
+        )
+
+    def is_admin(self, user_id: str) -> bool:
+        account = self.get_account(user_id)
+        return account is not None and account.is_admin
+
+    def create_account(
+        self, user_id: str, password: Optional[str] = None, role: str = ROLE_USER,
+    ) -> str:
+        """Add an account and return its password (generated when not given).
+
+        The generated password is returned rather than stored in plaintext: the
+        admin who created the account is looking at the page that will show it,
+        and a second readable copy of somebody else's credential has no reader
+        after that.
+        """
+        user_id = (user_id or "").strip().lower()
+        if not _ID_RE.match(user_id):
+            raise ValueError(
+                "A username is 1–32 characters of a–z, 0–9, dash or underscore, "
+                "starting with a letter or digit."
+            )
+        if role not in (ROLE_ADMIN, ROLE_USER):
+            raise ValueError(f"Unknown role: {role}")
+        if user_id in self._read()["accounts"]:
+            raise ValueError(f"{user_id} already exists")
+        generated = password is None
+        secret = password or generate_initial_password()
+        self.set_password(user_id, secret, initial=generated)
+        data = self._read()
+        data["accounts"][user_id]["role"] = role
+        self._write(data)
+        return secret
+
+    def delete_account(self, user_id: str) -> None:
+        """Remove an account and sign its browsers out.
+
+        The ``users/<id>/`` data is left on disk. Deleting a login is an
+        administrative act; deleting somebody's conversations is a different one
+        and must not happen as a side effect of it.
+        """
+        data = self._read()
+        if user_id not in data["accounts"]:
+            raise ValueError(f"{user_id} does not exist")
+        remaining_admins = [
+            uid for uid, e in data["accounts"].items()
+            if uid != user_id and isinstance(e, dict) and e.get("role") == ROLE_ADMIN
+        ]
+        if not remaining_admins:
+            raise ValueError("The last administrator cannot be removed")
+        data["accounts"].pop(user_id, None)
+        data["sessions"] = {
+            h: s for h, s in data["sessions"].items()
+            if not (isinstance(s, dict) and s.get("user_id") == user_id)
+        }
+        self._write(data)
+        self._failures.pop(user_id, None)
+
+    def reset_password(self, user_id: str) -> str:
+        """Generate a new password for an account and return it once."""
+        if self.get_account(user_id) is None:
+            raise ValueError(f"{user_id} does not exist")
+        password = generate_initial_password()
+        self.set_password(user_id, password, initial=True)
+        return password
 
     # ---- first run ----
 
@@ -267,21 +438,18 @@ class AccountStore:
         """Where the generated password is readable while it is still in use."""
         return self.path.parent / "initial-password"
 
-    def seed_admin(self) -> Optional[str]:
-        """Create the ``admin`` account on first start; return its password.
+    def seed_default_account(self) -> Optional[str]:
+        """Create the first account on first start; return its password.
 
         Returns None when any account already exists, so this is safe to call on
         every boot. The plaintext is both returned (to print) and written
         ``0600`` (so a gateway started detached, or by the desktop shell, is
         still reachable from a browser later).
         """
+        self._migrate_legacy_seed()
         if self._read()["accounts"]:
             return None
-        password = generate_initial_password()
-        self.set_password(ADMIN_USER_ID, password)
-        data = self._read()
-        data["accounts"][ADMIN_USER_ID]["password_is_initial"] = True
-        self._write(data)
+        password = self.create_account(default_account_id(), role=ROLE_ADMIN)
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(self.initial_password_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -293,9 +461,35 @@ class AccountStore:
             logger.warning(f"Could not store the initial password: {e}")
         return password
 
-    def password_is_initial(self, user_id: str = ADMIN_USER_ID) -> bool:
+    def _migrate_legacy_seed(self) -> None:
+        """Rename the pre-partition ``admin`` account to the data user id.
+
+        Once, in place, keeping the password hash — so the user signs in with
+        what they already had, and their existing conversations (which live in
+        ``users/<default>/``) are the ones that account now owns. Leaving
+        ``admin`` alone was the other option and is the bad one: it would keep
+        working while pointing at an empty ``users/admin/``, which looks exactly
+        like the upgrade having eaten every session.
+        """
+        target = default_account_id()
+        data = self._read()
+        entry = data["accounts"].get(_LEGACY_SEED_ID)
+        if not isinstance(entry, dict) or target in data["accounts"] or target == _LEGACY_SEED_ID:
+            return
+        entry.setdefault("role", ROLE_ADMIN)
+        data["accounts"][target] = data["accounts"].pop(_LEGACY_SEED_ID)
+        # The sessions carry the old id, so they would resolve to an account
+        # that no longer exists. Re-point rather than drop: the desktop shell's
+        # cookie is one of them.
+        for record in data["sessions"].values():
+            if isinstance(record, dict) and record.get("user_id") == _LEGACY_SEED_ID:
+                record["user_id"] = target
+        self._write(data)
+        logger.info(f"Web account '{_LEGACY_SEED_ID}' renamed to '{target}' (same password)")
+
+    def password_is_initial(self, user_id: Optional[str] = None) -> bool:
         """Whether this account still uses the password the gateway generated."""
-        entry = self._read()["accounts"].get(user_id)
+        entry = self._read()["accounts"].get(user_id or default_account_id())
         return bool(isinstance(entry, dict) and entry.get("password_is_initial"))
 
     def read_initial_password(self) -> Optional[str]:
@@ -313,7 +507,11 @@ class AccountStore:
         if isinstance(entry, dict):
             entry.pop("password", None)
             entry.pop("password_set_at", None)
-        data["sessions"] = {}
+            entry.pop("password_is_initial", None)
+        data["sessions"] = {
+            h: s for h, s in data["sessions"].items()
+            if not (isinstance(s, dict) and s.get("user_id") == user_id)
+        }
         self._write(data)
         self.initial_password_path.unlink(missing_ok=True)
 
@@ -394,7 +592,7 @@ class AccountStore:
             data["sessions"][digest] = raw
             self._write(data)
         return Session(
-            user_id=str(raw.get("user_id") or "default"),
+            user_id=str(raw.get("user_id") or default_account_id()),
             via=str(raw.get("via") or "password"),
             created_at=str(raw.get("created_at") or ""),
             expires_at=str(raw.get("expires_at") or ""),
@@ -433,7 +631,7 @@ def use_store_for_tests(path) -> AccountStore:
     return _store
 
 
-def set_password_interactive(user_id: str = ADMIN_USER_ID) -> int:
+def set_password_interactive(user_id: Optional[str] = None) -> int:
     """``agentica-gateway --set-password``: prompt twice, write, exit.
 
     Lives here rather than in ``main.py`` because it is the only way to set a
@@ -442,6 +640,7 @@ def set_password_interactive(user_id: str = ADMIN_USER_ID) -> int:
     """
     import getpass
 
+    user_id = user_id or default_account_id()
     first = getpass.getpass(f"New password for {user_id}: ")
     second = getpass.getpass("Repeat: ")
     if first != second:
@@ -453,5 +652,5 @@ def set_password_interactive(user_id: str = ADMIN_USER_ID) -> int:
         print(str(e))
         return 1
     logger.info(f"Password set for {user_id} in {store().path}")
-    print("Password set. All existing web sessions were signed out.")
+    print(f"Password set. Existing web sessions for {user_id} were signed out.")
     return 0

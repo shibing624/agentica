@@ -14,7 +14,7 @@ type Status = {
   auth_enabled: boolean;
   password_set: boolean;
   authenticated: boolean;
-  account_id: string;
+  default_account_id: string;
   password_is_initial: boolean;
   min_password_length: number;
 };
@@ -25,6 +25,7 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
   const [status, setStatus] = useState<Status | null>(null);
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   // Kept as the status code plus whatever the server said, not as a finished
   // sentence: a rendered message would not follow a language change.
@@ -40,7 +41,12 @@ export function LoginPage() {
       // Already in (or the gate is off): nothing to ask. Reaching this page
       // with a live session means a stale link, not a sign-out.
       if (st && (st.authenticated || !st.auth_enabled)) nav(next, { replace: true });
-      else input.current?.focus();
+      else {
+        // Prefilled with the account every machine has, so the single-account
+        // case is still "type the password and press Enter".
+        setUsername(st?.default_account_id || "default");
+        input.current?.focus();
+      }
     })();
   }, []);
 
@@ -49,7 +55,7 @@ export function LoginPage() {
     if (!password || busy) return;
     setBusy(true);
     setErr(null);
-    const { ok, status: code, data } = await api.loginApi(password);
+    const { ok, status: code, data } = await api.loginApi(username, password);
     setBusy(false);
     if (ok) { nav(next, { replace: true }); return; }
     setErr({ code, detail: String((data as any)?.detail || "") });
@@ -61,7 +67,7 @@ export function LoginPage() {
   // generic "wrong password" after a few typos just looks broken.
   const errorText = !err ? ""
     : err.code === 429 ? (err.detail || S.login.retryLater)
-    : err.code === 401 ? S.login.wrongPassword
+    : err.code === 401 ? S.login.wrongCredentials
     : (err.detail || S.login.failed);
 
   if (status === null) return <div className="login-wrap" />;
@@ -87,15 +93,16 @@ export function LoginPage() {
       <form className="login-card" onSubmit={submit}>
         <h1>Agentica</h1>
         <p className="login-hint">
-          {S.login.signInAs}<code>{status.account_id}</code>
+          {S.login.signInAs}<code>{status.default_account_id}</code>
           {status.password_is_initial ? S.login.printedOnStart : S.login.fullStop}
         </p>
-        {/* The username is fixed and the field is read-only — but it is here,
-            because a password manager will not offer to save a credential it
-            cannot see a username for, and the banner tells the user there is
-            one. */}
+        {/* Editable now that an admin can add accounts, and prefilled with the
+            seeded one so nothing changes for a machine that has just the one.
+            The field would be here regardless: a password manager will not
+            offer to save a credential it cannot see a username for. */}
         <input className="pf-input" type="text" autoComplete="username"
-               value={status.account_id} readOnly tabIndex={-1} />
+               placeholder={S.login.username}
+               value={username} onChange={(e) => setUsername(e.target.value)} />
         <input
           ref={input}
           className="pf-input"
@@ -106,7 +113,7 @@ export function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
         />
         {!!errorText && <div className="login-error">{errorText}</div>}
-        <button className="dp-btn primary login-submit" type="submit" disabled={busy || !password}>
+        <button className="dp-btn primary login-submit" type="submit" disabled={busy || !password || !username}>
           {busy ? S.login.submitting : S.login.submit}
         </button>
         <p className="login-foot">

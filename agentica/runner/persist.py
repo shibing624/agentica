@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import (
@@ -25,6 +26,7 @@ from agentica.model.message import Message
 from agentica.model.usage import split_prompt_usage
 from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
 from agentica.memory import AgentRun
+from agentica.memory.session_log import iso_timestamp
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -620,12 +622,21 @@ class PersistMixin:
             agent._session_log.append("assistant", persisted, **_assistant_meta)
 
     @staticmethod
-    def _trace_event(agent: "Agent", name: str, **payload: Any) -> None:
-        """Append a SessionLog lifecycle event. No-op without a session log."""
+    def _trace_event(
+        agent: "Agent", name: str, at: Optional[float] = None, **payload: Any
+    ) -> None:
+        """Append a SessionLog lifecycle event. No-op without a session log.
+
+        ``at`` is a ``time.time()`` reading of when the event actually happened,
+        for the phases that are only known to be over once the stream has moved
+        on from them.
+        """
         slog = agent._session_log
         if slog is None:
             return
-        slog.append_event(name, **payload)
+        slog.append_event(
+            name, timestamp=iso_timestamp(at) if at is not None else None, **payload
+        )
 
     @staticmethod
     def _trace_session_prelude(agent: "Agent", messages: List[Message]) -> None:
@@ -660,8 +671,26 @@ class PersistMixin:
         return call_id, name
 
     @staticmethod
-    def _trace_request_segments(agent: "Agent", messages: List[Message]) -> None:
-        """Write thinking / text / tool_call completion events for this request."""
+    def _trace_request_segments(
+        agent: "Agent",
+        messages: List[Message],
+        phase_ends: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """Write thinking / text / tool_call completion events for this request.
+
+        Each event marks the *end* of its phase — the analyzer chains them, so
+        one row's timestamp is the next row's start and the first starts at
+        ``request_begin``. ``phase_ends`` carries the moments the streaming loop
+        observed (``"thinking"`` when the last reasoning token arrived,
+        ``"text"`` when the last content token did); anything missing falls back
+        to now, which is also the whole story for a non-streamed call where the
+        response arrives in one piece.
+
+        The rows are written in the order those moments happened, not in a fixed
+        thinking → text → tool_call order: the chain would otherwise run
+        backwards for a model that answers before it calls a tool, and a
+        negative segment is drawn as a flat edge.
+        """
         assistant = None
         for msg in reversed(messages):
             if msg.role == "assistant":
@@ -669,19 +698,29 @@ class PersistMixin:
                 break
         if assistant is None:
             return
+        ends = phase_ends or {}
+        # Tool call arguments are only complete when the stream is: whatever
+        # time we are reading now is that moment.
+        now = time.time()
+        marks: List[tuple[float, str, Dict[str, Any]]] = []
+
         reasoning = assistant.reasoning_content or assistant.thinking
         if isinstance(reasoning, str) and reasoning.strip():
-            PersistMixin._trace_event(agent, "thinking")
+            marks.append((ends.get("thinking", now), "thinking", {}))
         content = assistant.content if isinstance(assistant.content, str) else ""
         if content.strip():
-            PersistMixin._trace_event(agent, "text")
+            marks.append((ends.get("text", now), "text", {}))
         for tc in assistant.tool_calls or []:
             if not isinstance(tc, dict):
                 continue
             call_id, name = PersistMixin._tool_call_id_and_name(tc)
             if not call_id:
                 continue
-            PersistMixin._trace_event(agent, "tool_call", tool_call_id=call_id, tool_name=name)
+            marks.append((now, "tool_call", {"tool_call_id": call_id, "tool_name": name}))
+
+        marks.sort(key=lambda m: m[0])
+        for at, name, payload in marks:
+            PersistMixin._trace_event(agent, name, at=at, **payload)
 
     @staticmethod
     def _trace_token_usage(agent: "Agent", messages: List[Message]) -> None:

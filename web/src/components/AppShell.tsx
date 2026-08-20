@@ -104,9 +104,13 @@ export function AppShell({
                 <div className="ctx-tip-row"><span>{S.nav.elapsed}</span><span>{fmtTime(usage.totalTime)}</span></div>
               )}
             </div>
-            {([["settings", S.nav.generalSettings, <IconGear key="g" />], ["profiles", S.nav.profile, <IconProfiles key="p" />],
-               ["cron", S.nav.cron, <IconClock key="c" />], ["archived", S.nav.archivedSessions, <IconArchive key="a" />]] as const).map(
-              ([tab, label, icon]) => (
+            {([["settings", S.nav.generalSettings, <IconGear key="g" />, false],
+               ["profiles", S.nav.profile, <IconProfiles key="p" />, false],
+               ["users", S.nav.users, <IconUser key="u" />, true],
+               ["cron", S.nav.cron, <IconClock key="c" />, false],
+               ["archived", S.nav.archivedSessions, <IconArchive key="a" />, false]] as const)
+              .filter(([, , , adminOnly]) => !adminOnly || s.accountRole === "admin")
+              .map(([tab, label, icon]) => (
                 <button key={tab} className="account-action"
                         onClick={() => { setState({ accountPanelOpen: false }); void primeSettings(tab); }}>
                   {icon}<span>{label}</span>
@@ -115,9 +119,15 @@ export function AppShell({
           </div>
           <button className="account-entry" onClick={() => setState({ accountPanelOpen: !s.accountPanelOpen })} title={S.nav.account}>
             <span className="account-avatar"><IconUser /></span>
+            {/* The signed-in account, not the model profile. The profile used
+                to be here and answered a question nobody asks of an avatar —
+                and now that the same install can have several accounts, whose
+                conversations these are is the thing worth naming. */}
             <span className="account-meta">
-              <span className="account-name">{s.serverProfile || "User"}</span>
-              <span className="account-sub">{S.nav.accountSub}</span>
+              <span className="account-name">{s.accountId}</span>
+              <span className="account-sub">
+                {s.accountRole === "admin" ? S.settings.roleAdmin : S.settings.roleUser}
+              </span>
             </span>
           </button>
         </div>

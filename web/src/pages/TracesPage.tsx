@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import * as api from "../api";
 import { AppShell } from "../components/AppShell";
+import { SessionTree } from "../components/SessionTree";
 import { getStrings, useStrings, type Strings } from "../i18n";
 import { fmtFileSize, fmtN, shortenPath } from "../lib/format";
-import { IconClose, IconCopy, IconSearch } from "../icons";
-import { showToast } from "../store";
+import { IconClose, IconCopy, IconFolder, IconSearch } from "../icons";
+import {
+  getState, projectIdForDir, projectNameForDir, showToast, useAppState,
+} from "../store";
 
 type Entry = {
   index: number;
@@ -118,6 +121,9 @@ function money(v: number | null) {
 
 export function TracesPage() {
   const S = useStrings();
+  // Subscribed, not just read: the rail groups by the working directory the
+  // client store knows for each session, and that arrives with `loadSessions`.
+  const state = useAppState();
   const [params, setParams] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
   const [sessions, setSessions] = useState<any[]>([]);
@@ -144,38 +150,63 @@ export function TracesPage() {
     });
   }, [sessionId]);
 
-  const filtered = useMemo(() => {
+  // Grouped by working directory, the same grouping the chat sidebar uses: a
+  // trace is read against the project it ran in, and the folder is what tells
+  // two same-named conversations apart.
+  const groups = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) =>
-      (s.name || "").toLowerCase().includes(q) || (s.session_id || "").toLowerCase().includes(q));
-  }, [sessions, search]);
+    const known = getState().sessions;
+    const fallbackDir = getState().serverDir || "";
+    const by = new Map<string, { name: string; dir: string; items: any[] }>();
+    for (const s of sessions) {
+      if (q && !(s.name || "").toLowerCase().includes(q)
+          && !(s.session_id || "").toLowerCase().includes(q)) continue;
+      const dir = known[s.session_id]?.dir || fallbackDir;
+      const id = projectIdForDir(dir);
+      let group = by.get(id);
+      if (!group) by.set(id, group = { name: projectNameForDir(dir), dir, items: [] });
+      group.items.push(s);
+    }
+    return [...by.values()];
+  }, [sessions, search, state.rev]);
+  const shown = groups.reduce((n, g) => n + g.items.length, 0);
 
   return (
-    <AppShell active="traces">
+    <AppShell active="traces" list={<><div className="project-list-label">{S.chat.projects}</div><SessionTree /></>}>
       {/* The middle column. Traces are read by walking a list and comparing, so
-          the picker stays on screen next to what it opened. */}
+          the picker stays on screen next to what it opened — and the left
+          sidebar keeps the conversation tree, because leaving a trace for the
+          conversation it describes is the most common next move. */}
       <aside className="trace-rail">
         <label className="trace-search">
           <IconSearch />
           <input placeholder={S.traces.searchSessions} value={search} onChange={(e) => setSearch(e.target.value)} />
           {search && <button className="search-clear" onClick={() => setSearch("")}><IconClose /></button>}
         </label>
-        <div className="trace-rail-label">{S.traces.sessions} {filtered.length ? `(${filtered.length})` : ""}</div>
+        <div className="trace-rail-label">{S.traces.sessions} {shown ? `(${shown})` : ""}</div>
         <div className="trace-rail-list">
-          {!filtered.length && <div className="s-empty">{S.traces.noSessions}</div>}
-          {filtered.map((s) => (
-            <button
-              key={s.session_id}
-              className={"trace-rail-item" + (s.session_id === sessionId ? " active" : "")}
-              onClick={() => setParams({ sessionId: s.session_id })}
-            >
-              <span className="tri-title">{s.name || s.session_id}</span>
-              <span className="tri-meta">
-                <span>{S.traces.rounds(s.user_count || 0)}</span>
-                <span>{fmtFileSize(s.size_bytes || 0)}</span>
-              </span>
-            </button>
+          {!shown && <div className="s-empty">{S.traces.noSessions}</div>}
+          {groups.map((g) => (
+            <div className="trace-rail-group" key={g.dir || g.name}>
+              <div className="trace-rail-project" title={g.dir}>
+                <IconFolder />
+                <span className="trp-name">{g.name}</span>
+                <span className="trp-count">{g.items.length}</span>
+              </div>
+              {g.items.map((s) => (
+                <button
+                  key={s.session_id}
+                  className={"trace-rail-item" + (s.session_id === sessionId ? " active" : "")}
+                  onClick={() => setParams({ sessionId: s.session_id })}
+                >
+                  <span className="tri-title">{s.name || s.session_id}</span>
+                  <span className="tri-meta">
+                    <span>{S.traces.rounds(s.user_count || 0)}</span>
+                    <span>{fmtFileSize(s.size_bytes || 0)}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </aside>
@@ -291,9 +322,46 @@ function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number
 
 const TICKS = [0, 0.25, 0.5, 0.75, 1];
 
+type ToolSpan = Analysis["toolSpans"][number];
+
 /**
- * The round on its own clock: a serial model lane, then one lane per tool call
- * in the order the model issued them, all sharing the round's time axis.
+ * One lane per tool name, so a round reads as "what did `execute` do" rather
+ * than as one row per call — twenty parallel `read_file`s used to push the
+ * model lane off the top of the card.
+ *
+ * A name gets a second lane when two of its calls overlap in time, which is
+ * exactly what a parallel batch does: drawn in one lane they would cover each
+ * other and the picture would claim the batch was serial.
+ */
+function toolLanes(spans: ToolSpan[]): Array<{ key: string; name: string; spans: ToolSpan[] }> {
+  const at = (ts?: string) => (ts ? Date.parse(ts) || 0 : 0);
+  const byName = new Map<string, ToolSpan[]>();
+  for (const sp of spans) {
+    const name = sp.name || "tool";
+    (byName.get(name) || byName.set(name, []).get(name)!).push(sp);
+  }
+  const out: Array<{ key: string; name: string; spans: ToolSpan[] }> = [];
+  for (const [name, group] of byName) {
+    const rows: Array<{ spans: ToolSpan[]; end: number }> = [];
+    for (const sp of group) {
+      const start = at(sp.callTs);
+      const end = at(sp.outputTs) || at(sp.approvalTs) || start;
+      const row = rows.find((r) => r.end <= start);
+      if (row) {
+        row.spans.push(sp);
+        row.end = end;
+      } else {
+        rows.push({ spans: [sp], end });
+      }
+    }
+    rows.forEach((row, i) => out.push({ key: `${name}#${i}`, name, spans: row.spans }));
+  }
+  return out;
+}
+
+/**
+ * The round on its own clock: a serial model lane, then one lane per tool name,
+ * all sharing the round's time axis.
  *
  * This replaced a stacked bar of per-phase totals. The totals answered "where
  * did the time go" and nothing else — two tools running side by side and the
@@ -310,6 +378,7 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
       .sort((a, b) => (Date.parse(a.callTs) || 0) - (Date.parse(b.callTs) || 0)),
     [analysis.toolSpans, round.taskIndex],
   );
+  const lanes = useMemo(() => toolLanes(spans), [spans]);
   if (!segs.length && !spans.length) return null;
 
   // The axis spans everything drawn, not `startTs..endTs`: a tool whose output
@@ -336,13 +405,6 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
   const phaseFor = (kind: string) =>
     kind === "thinking" ? "ph-thinking" : kind === "text" ? "ph-text" : "ph-args";
 
-  const used = new Set<string>();
-  for (const s of segs) used.add(phaseFor(s.kind));
-  for (const sp of spans) {
-    if (sp.approvalTs) used.add("ph-wait");
-    used.add("ph-exec");
-  }
-
   return (
     <div className="lane-block">
       <div className="lane-title">{S.traces.timeline}<span className="lane-total">{ms(span)}</span></div>
@@ -355,23 +417,28 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
           ))}
         </div>
       </div>
-      {spans.map((sp, i) => (
-        <div className="lane-row" key={sp.toolCallId}>
-          <span className="lane-name" title={sp.name}>
-            <span className="lane-ord">{i + 1}</span> {sp.name || "tool"}
+      {lanes.map((lane) => (
+        <div className="lane-row" key={lane.key}>
+          <span className="lane-name" title={lane.name}>
+            {lane.name}
+            {lane.spans.length > 1 && <span className="lane-count">×{lane.spans.length}</span>}
           </span>
-          <div className="lane">
-            {sp.approvalTs && (
-              <span className="lane-seg ph-wait" style={pos(sp.callTs, sp.approvalTs)}
-                    title={S.traces.approvalWait(ms(at(sp.approvalTs) - at(sp.callTs)))} />
-            )}
-            {sp.outputTs ? (
-              <span className="lane-seg ph-exec" style={pos(sp.approvalTs || sp.callTs, sp.outputTs)}
-                    title={S.traces.exec(ms(at(sp.outputTs) - at(sp.approvalTs || sp.callTs)))} />
-            ) : (
-              <span className="lane-seg ph-exec pending" style={pos(sp.callTs)}
-                    title={S.traces.noResult} />
-            )}
+          <div className="lane is-tool">
+            {lane.spans.map((sp) => (
+              <Fragment key={sp.toolCallId}>
+                {sp.approvalTs && (
+                  <span className="lane-seg ph-wait" style={pos(sp.callTs, sp.approvalTs)}
+                        title={S.traces.approvalWait(ms(at(sp.approvalTs) - at(sp.callTs)))} />
+                )}
+                {sp.outputTs ? (
+                  <span className="lane-seg ph-exec" style={pos(sp.approvalTs || sp.callTs, sp.outputTs)}
+                        title={S.traces.exec(ms(at(sp.outputTs) - at(sp.approvalTs || sp.callTs)))} />
+                ) : (
+                  <span className="lane-seg ph-exec pending" style={pos(sp.callTs)}
+                        title={S.traces.noResult} />
+                )}
+              </Fragment>
+            ))}
           </div>
         </div>
       ))}
@@ -383,13 +450,16 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
           ))}
         </div>
       </div>
-      {/* Colours only. The per-phase totals used to be printed here and are a
-          trap next to a wall-clock axis: they are sums across lanes, so a round
-          with four parallel tools reads "tool execution 9.4s" under an axis that
-          ends at 6.8s. Each bar carries its own duration on hover, and the round
-          header carries the totals. */}
+      {/* Colours only, and all six of them every time. The per-phase totals
+          used to be printed here and are a trap next to a wall-clock axis: they
+          are sums across lanes, so a round with four parallel tools reads "tool
+          execution 9.4s" under an axis that ends at 6.8s. Each bar carries its
+          own duration on hover, and the round header carries the totals. The
+          list is not filtered to the phases present either — a legend that
+          changes shape per round is one the reader has to re-read, and "no
+          approval wait in this round" is worth seeing. */}
       <div className="phase-legend">
-        {PHASES.filter((p) => used.has(p.cls)).map((p) => (
+        {PHASES.map((p) => (
           <span key={p.key} className="phase-key">
             <i className={"phase-dot " + p.cls} />{p.label(S)}
           </span>

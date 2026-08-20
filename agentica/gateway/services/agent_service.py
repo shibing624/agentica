@@ -327,7 +327,7 @@ class AgentService:
             )
             raise RuntimeError(f"AgentService init failed: {e}") from e
 
-    def _build_agent(self, session_id: str) -> DeepAgent:
+    def _build_agent(self, session_id: str, owner: Optional[str] = None) -> DeepAgent:
         """Build a new DeepAgent instance (sync, runs in thread).
 
         DeepAgent auto-includes: builtin tools, skills, agentic prompt,
@@ -424,7 +424,7 @@ class AgentService:
             tools=extra if extra else None,
             workspace=self._workspace,
             work_dir=work_dir,
-            user_id=settings.default_user_id,
+            user_id=self._owner(owner),
             num_history_turns=settings.num_history_turns,
             instructions=instructions,
             debug=settings.debug,
@@ -453,19 +453,25 @@ class AgentService:
         )
         return agent
 
-    async def _get_agent(self, session_id: str) -> DeepAgent:
+    async def _get_agent(self, session_id: str, owner: Optional[str] = None) -> DeepAgent:
         """Return the cached Agent for a session, creating one if absent.
 
         Raises RuntimeError if the agent cannot be built (e.g. SDK error).
         Times out after _AGENT_BUILD_TIMEOUT_S seconds.
+
+        A cached agent is only reused for the owner it was built for. The cache
+        is keyed by session id alone, and the id comes from the browser — so
+        without this check one account presenting another's id would run against
+        the agent already built for that partition, which is the one thing the
+        partition exists to prevent.
         """
         agent = self._cache.get(session_id)
-        if agent is not None:
+        if agent is not None and agent.user_id == self._owner(owner):
             return agent
 
         try:
             agent = await asyncio.wait_for(
-                asyncio.to_thread(self._build_agent, session_id),
+                asyncio.to_thread(self._build_agent, session_id, owner),
                 timeout=_AGENT_BUILD_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -584,6 +590,7 @@ class AgentService:
         user_id: str = "default",
         source: RunSource = RunSource.gateway,
         media: Optional[List["InboundMedia"]] = None,
+        owner: Optional[str] = None,
     ) -> ChatResult:
         """Send a message and return the full response (non-streaming).
 
@@ -594,6 +601,9 @@ class AgentService:
             message: User message
             session_id: Session identifier
             user_id: User identifier (for workspace memory isolation)
+            owner: Which ``users/<id>/`` partition this session is stored in.
+                Web routes pass the signed-in account; unset means the machine's
+                own partition (cron, IM channels, the CLI).
             media: Downloaded inbound media (image/voice/video payloads) from
                 the channel. Images attach to the run when the base model can
                 see them; audio/video attach when the base is Gemini. Anything
@@ -615,7 +625,7 @@ class AgentService:
             )
 
         async with lock:
-            agent = await self._get_agent(session_id)
+            agent = await self._get_agent(session_id, owner)
             self._note_peer_turn(session_id, message)
 
             media_plan = None
@@ -725,6 +735,7 @@ class AgentService:
         objective: str,
         session_id: str,
         user_id: str = "default",
+        owner: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Drive a bounded standing-goal loop (Agent.run_goal) for the web UI's
         "/goal <objective>" command.
@@ -743,7 +754,7 @@ class AgentService:
             )
 
         async with lock:
-            agent = await self._get_agent(session_id)
+            agent = await self._get_agent(session_id, owner)
             if self._workspace:
                 await asyncio.to_thread(self._workspace.set_user, user_id)
             # Carry the prior conversation into the goal loop so the model sees
@@ -774,6 +785,7 @@ class AgentService:
         on_tool_call: Optional[Callable[[str, dict], Any]] = None,
         on_tool_result: Optional[Callable[[str, str], Any]] = None,
         on_thinking: Optional[Callable[[str], Any]] = None,
+        owner: Optional[str] = None,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks.
 
@@ -784,6 +796,9 @@ class AgentService:
             message: User message
             session_id: Session identifier
             user_id: User identifier
+            owner: Which ``users/<id>/`` partition this session is stored in.
+                Web routes pass the signed-in account; unset means the machine's
+                own partition (cron, IM channels, the CLI).
             on_content: Called with each content delta
             on_tool_call: Called when a tool call starts (name, args)
             on_tool_result: Called when a tool call completes (name, result)
@@ -806,6 +821,7 @@ class AgentService:
             return await self._chat_stream_impl(
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
+                owner,
             )
 
     async def _chat_stream_impl(
@@ -818,10 +834,11 @@ class AgentService:
         on_tool_call: Optional[Callable[[str, dict], Any]],
         on_tool_result: Optional[Callable[[str, str], Any]],
         on_thinking: Optional[Callable[[str], Any]],
+        owner: Optional[str],
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
-        agent = await self._get_agent(session_id)
+        agent = await self._get_agent(session_id, owner)
         self._note_peer_turn(session_id, message)
 
         try:
@@ -904,7 +921,7 @@ class AgentService:
 
     # ============== Session management ==============
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    def list_sessions(self, owner: Optional[str] = None) -> List[Dict[str, Any]]:
         """List sessions from the persistent SessionLog (single source of truth).
 
         Returns rich metadata (name/preview/timestamps) so the UI can show
@@ -916,7 +933,7 @@ class AgentService:
         """
         # Scope to the current project (global base_dir) + user, so the sidebar
         # matches what the CLI shows when run from the same project directory.
-        base_dir = self._session_base_dir(str(settings.base_dir))
+        base_dir = self._session_base_dir(str(settings.base_dir), owner)
         out: List[Dict[str, Any]] = []
         for s in SessionLog.list_sessions(base_dir=base_dir):
             sid = s["session_id"]
@@ -936,9 +953,9 @@ class AgentService:
             })
         return out
 
-    def session_log_for(self, session_id: str) -> SessionLog:
+    def session_log_for(self, session_id: str, owner: Optional[str] = None) -> SessionLog:
         """Open the on-disk SessionLog for a session (may not exist yet)."""
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
         return SessionLog(session_id=session_id, base_dir=base_dir)
 
     def has_active_runs(self) -> bool:
@@ -949,14 +966,14 @@ class AgentService:
         """
         return any(lock.locked() for lock in self._session_locks.values())
 
-    def delete_session(self, session_id: str) -> bool:
+    def delete_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Delete a session: cached Agent + persistent SessionLog JSONL + meta.
 
         Removes the on-disk JSONL and sidecar meta so the session does not
         reappear after restart (SessionLog is the single source of truth).
         Returns True if either the cache or the on-disk log existed.
         """
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
         removed = self._cache.delete(session_id)
         self._session_work_dirs.pop(session_id, None)
         if self.agent_peers is not None:
@@ -979,19 +996,21 @@ class AgentService:
         logger.debug(f"Session deleted: {session_id}")
         return removed or log_existed
 
-    def rename_session(self, session_id: str, name: str) -> None:
+    def rename_session(self, session_id: str, name: str, owner: Optional[str] = None) -> None:
         """Rename a session by writing the sidecar .meta.json (SessionLog)."""
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
         SessionLog.rename_session(session_id, name, base_dir=base_dir)
 
-    def archive_session(self, session_id: str, archived: bool = True) -> None:
+    def archive_session(
+        self, session_id: str, archived: bool = True, owner: Optional[str] = None,
+    ) -> None:
         """Archive/unarchive a session by writing SessionLog sidecar metadata."""
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
         SessionLog.archive_session(session_id, archived=archived, base_dir=base_dir)
 
-    def clear_session(self, session_id: str) -> bool:
+    def clear_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Alias for delete_session (for compatibility)."""
-        return self.delete_session(session_id)
+        return self.delete_session(session_id, owner)
 
     def cancel_session(self, session_id: str) -> bool:
         """Cancel the in-flight run for a specific session.
@@ -1025,16 +1044,29 @@ class AgentService:
 
     # ============== Session storage scoping ==============
 
-    def _session_base_dir(self, work_dir: str) -> str:
+    def _session_base_dir(self, work_dir: str, owner: Optional[str] = None) -> str:
         """Resolve the SessionLog storage dir for a given project work_dir.
 
-        Sessions are scoped by project (work_dir) + user, mirroring exactly how
+        Sessions are scoped by project (work_dir) + owner, mirroring exactly how
         the Agent writes them (see ``SessionLog`` construction in the agent).
         This is what makes the Web sidebar and the CLI ``/resume`` list a
         consistent set of sessions for the same project + user.
         """
         from agentica.project_store import project_base_dir
-        return project_base_dir(work_dir, user_id=settings.default_user_id)
+        return project_base_dir(work_dir, user_id=self._owner(owner))
+
+    @staticmethod
+    def _owner(owner: Optional[str]) -> str:
+        """Which ``users/<id>/`` partition a call reads and writes.
+
+        Unset means the machine's own partition (``settings.default_user_id``),
+        which is what a cron run, an IM channel and the CLI all share. Only the
+        web surface has accounts, so only its routes pass an owner — and they
+        take it from the session cookie, never from the request body: a body
+        field naming somebody else's partition is not a parameter, it is a way
+        in.
+        """
+        return owner or settings.default_user_id
 
     def update_work_dir(self, new_dir: str) -> None:
         """Update the global work_dir and clear ALL cached agents.

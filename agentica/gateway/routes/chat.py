@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from .. import deps
@@ -25,22 +25,31 @@ except ImportError:
 router = APIRouter()
 
 
+def _account(request: Request) -> str:
+    """The signed-in account, which is also the ``users/<id>/`` partition its
+    sessions live in. Read from the credential, never from the payload."""
+    return request.state.principal.user_id
+
+
 # ============== Non-streaming chat ==============
 
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(
-    request: ChatRequest,
+    body: ChatRequest,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     """Send a message to the agent (non-streaming)."""
-    if request.work_dir:
-        await _apply_session_work_dir(svc, request.session_id, request.work_dir)
-    svc.set_session_approval_mode(request.session_id, request.approval_mode)
+    if body.work_dir:
+        await _apply_session_work_dir(svc, body.session_id, body.work_dir)
+    svc.set_session_approval_mode(body.session_id, body.approval_mode)
 
+    account = _account(request)
     result = await svc.chat(
-        message=request.message,
-        session_id=request.session_id,
-        user_id=request.user_id,
+        message=body.message,
+        session_id=body.session_id,
+        user_id=account,
+        owner=account,
     )
     return ChatResponse(
         content=result.content,
@@ -54,14 +63,18 @@ async def chat(
 
 @router.post("/api/goal")
 async def run_goal(
-    request: GoalRequest,
+    body: GoalRequest,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     """Drive a bounded standing-goal loop (Agent.run_goal) for the web UI's
     "/goal <objective>" command. Non-streaming — the loop runs several turns
     internally and returns only the final result."""
     try:
-        result = await svc.run_goal(request.objective, request.session_id, request.user_id)
+        account = _account(request)
+        result = await svc.run_goal(
+            body.objective, body.session_id, user_id=account, owner=account,
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return result
@@ -71,15 +84,17 @@ async def run_goal(
 
 @router.post("/api/chat/stream")
 async def chat_stream(
-    request: ChatRequest,
+    body: ChatRequest,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     """Send a message and stream the response via Server-Sent Events."""
-    if request.work_dir:
-        await _apply_session_work_dir(svc, request.session_id, request.work_dir)
-    svc.set_session_approval_mode(request.session_id, request.approval_mode)
+    if body.work_dir:
+        await _apply_session_work_dir(svc, body.session_id, body.work_dir)
+    svc.set_session_approval_mode(body.session_id, body.approval_mode)
 
-    session_id = request.session_id
+    session_id = body.session_id
+    account = _account(request)
 
     async def event_generator():
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
@@ -100,9 +115,10 @@ async def chat_stream(
             t0 = time.time()
             try:
                 result = await svc.chat_stream(
-                    message=request.message,
+                    message=body.message,
                     session_id=session_id,
-                    user_id=request.user_id,
+                    user_id=account,
+                    owner=account,
                     on_content=on_content,
                     on_tool_call=on_tool_call,
                     on_tool_result=on_tool_result,
@@ -202,16 +218,20 @@ async def chat_stream(
 # ============== Sessions ==============
 
 @router.get("/api/sessions")
-async def list_sessions(svc: AgentService = Depends(deps.get_agent_service)):
-    return {"sessions": svc.list_sessions()}
+async def list_sessions(
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    return {"sessions": svc.list_sessions(owner=_account(request))}
 
 
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(
     session_id: str,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    success = svc.delete_session(session_id)
+    success = svc.delete_session(session_id, owner=_account(request))
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "deleted"}
@@ -220,31 +240,34 @@ async def delete_session(
 @router.post("/api/sessions/{session_id}/rename")
 async def rename_session(
     session_id: str,
-    request: RenameRequest,
+    body: RenameRequest,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    name = request.name.strip()
+    name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="name must not be empty")
-    svc.rename_session(session_id, name)
+    svc.rename_session(session_id, name, owner=_account(request))
     return {"status": "renamed", "session_id": session_id, "name": name}
 
 
 @router.post("/api/sessions/{session_id}/archive")
 async def archive_session(
     session_id: str,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    svc.archive_session(session_id, archived=True)
+    svc.archive_session(session_id, archived=True, owner=_account(request))
     return {"status": "archived", "session_id": session_id}
 
 
 @router.post("/api/sessions/{session_id}/unarchive")
 async def unarchive_session(
     session_id: str,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    svc.archive_session(session_id, archived=False)
+    svc.archive_session(session_id, archived=False, owner=_account(request))
     return {"status": "unarchived", "session_id": session_id}
 
 
@@ -252,11 +275,13 @@ async def unarchive_session(
 
 @router.post("/api/memory")
 async def save_memory(
-    request: MemoryRequest,
+    body: MemoryRequest,
+    request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    await svc.save_memory(request.content, user_id=request.user_id, long_term=request.long_term)
-    return {"status": "saved", "user_id": request.user_id}
+    account = _account(request)
+    await svc.save_memory(body.content, user_id=account, long_term=body.long_term)
+    return {"status": "saved", "user_id": account}
 
 
 # ============== File upload ==============

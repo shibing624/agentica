@@ -30,7 +30,11 @@ def client_and_svc(tmp_path):
     log.append_event("token_usage", request={"input": 10, "cache_read": 0, "cache_write": 0, "output": 4, "total": 14})
     log.append_event("request_end", status="completed")
     log.append("assistant", "hi")
-    svc.session_log_for = MagicMock(side_effect=lambda sid: SessionLog(session_id=sid, base_dir=str(tmp_path)))
+    # `owner` is the signed-in account, which the route reads off the request:
+    # the trace of somebody else's session is not one this account may open.
+    svc.session_log_for = MagicMock(
+        side_effect=lambda sid, owner=None: SessionLog(session_id=sid, base_dir=str(tmp_path))
+    )
     svc.list_sessions = MagicMock(return_value=[])
 
     with TestClient(app, raise_server_exceptions=False) as client:

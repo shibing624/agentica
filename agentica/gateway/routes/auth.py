@@ -1,17 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Signing in and out.
+"""Signing in and out, and who else may sign in.
 
-Four routes, three of them open (a gate over the door is a locked room):
+Three of the sign-in routes are open (a gate over the door is a locked room):
 
 - ``GET  /api/auth/status`` — what the login page needs before it can render:
   is the gate even on, is there a password to type, am I already in. It says
   whether a password *exists*, which on the deployment that matters (loopback)
   is not a secret and is the difference between showing a form and showing the
   token instructions.
-- ``POST /api/auth/login`` — password in, session cookie out.
+- ``POST /api/auth/login`` — username + password in, session cookie out.
 - ``POST /api/auth/logout`` — closes the session server-side, not just the
   cookie: a copied cookie must stop working too.
-- ``POST /api/auth/password`` — set or change it. Behind the gate.
+- ``POST /api/auth/password`` — set or change your own. Behind the gate.
+
+The account table (``/api/auth/users``) is admin-only, and it is the only
+admin-only surface in the gateway. Everything else configures one machine
+(models, skills, cron, the working directory) and every signed-in account may
+change it; adding accounts is the one act that decides who those accounts are.
 """
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -20,21 +25,35 @@ from .. import accounts, auth
 router = APIRouter(prefix="/api/auth")
 
 
+def _require_admin(request: Request) -> auth.Principal:
+    principal: auth.Principal = request.state.principal
+    if not principal.is_admin:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return principal
+
+
 @router.get("/status")
 async def auth_status(request: Request):
     session = accounts.store().read_session(request.cookies.get(auth.SESSION_COOKIE))
+    # Signed out, the page still needs to know whether a password exists at
+    # all; signed in, everything else is about *this* account.
+    user_id = session.user_id if session else None
+    account = accounts.store().get_account(user_id) if user_id else None
     return {
         "auth_enabled": auth.auth_enabled(),
         "password_set": accounts.store().has_password(),
         "authenticated": (not auth.auth_enabled()) or session is not None,
-        "user_id": session.user_id if session else None,
+        "user_id": user_id,
         "via": session.via if session else None,
-        "account_id": accounts.ADMIN_USER_ID,
+        "role": account.role if account else None,
+        "is_admin": bool(account and account.is_admin),
+        "default_account_id": accounts.default_account_id(),
         # The login page says so, and the settings block nags. Not a secret: a
         # gateway that still has its generated password says as much to anybody
         # who can reach the login page, which is the population that should be
         # told to change it.
-        "password_is_initial": accounts.store().password_is_initial(),
+        "password_is_initial": account.password_is_initial if account
+        else accounts.store().password_is_initial(),
         "min_password_length": accounts.MIN_PASSWORD_LENGTH,
     }
 
@@ -42,9 +61,9 @@ async def auth_status(request: Request):
 @router.post("/login")
 async def login(request: Request, response: Response):
     body = await request.json()
-    # There is one account. Taking the id from the body would let a typo in a
-    # field the page does not even show read back as "wrong password".
-    user_id = accounts.ADMIN_USER_ID
+    # An empty username means the seeded account, so a bookmarked login page
+    # and the desktop shell keep working without one.
+    user_id = str(body.get("username") or "").strip().lower() or accounts.default_account_id()
     password = str(body.get("password") or "")
     if not password:
         raise HTTPException(status_code=400, detail="Password is required")
@@ -80,7 +99,7 @@ async def logout(request: Request, response: Response):
 
 @router.post("/password")
 async def set_password(request: Request, response: Response):
-    """Set or change the password.
+    """Set or change your own password.
 
     The old password is required — except for a session that got in with the
     machine token (the printed URL, or the desktop shell). That holder already
@@ -93,7 +112,7 @@ async def set_password(request: Request, response: Response):
     new = str(body.get("password") or "")
     old = str(body.get("old_password") or "")
     principal: auth.Principal = request.state.principal
-    user_id = accounts.ADMIN_USER_ID
+    user_id = principal.user_id
 
     session = accounts.store().read_session(request.cookies.get(auth.SESSION_COOKIE))
     privileged = principal.kind != "session" or (
@@ -109,8 +128,69 @@ async def set_password(request: Request, response: Response):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # set_password signs every browser out, including this one — so hand this
-    # one a fresh session instead of logging the user out of the page they just
-    # used to set it.
+    # set_password signs this account's browsers out, including this one — so
+    # hand this one a fresh session instead of logging the user out of the page
+    # they just used to set it.
     auth.set_session_cookie(response, accounts.store().open_session(user_id, "password"))
     return {"status": "ok", "user_id": user_id}
+
+
+@router.get("/users")
+async def list_users(request: Request):
+    principal = _require_admin(request)
+    return {
+        "users": [a.to_dict() for a in accounts.store().list_accounts()],
+        "current": principal.user_id,
+        "min_password_length": accounts.MIN_PASSWORD_LENGTH,
+    }
+
+
+@router.post("/users")
+async def create_user(request: Request):
+    """Add an account. Its password is returned once and never stored in clear.
+
+    A new account starts empty: it owns ``users/<name>/``, so it sees its own
+    conversations and memory rather than the creator's.
+    """
+    _require_admin(request)
+    body = await request.json()
+    password = str(body.get("password") or "") or None
+    try:
+        secret = accounts.store().create_account(
+            str(body.get("username") or ""),
+            password,
+            role=str(body.get("role") or accounts.ROLE_USER),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # `generated` tells the page whether to show the password: one it was given
+    # is already on the admin's screen, one we made is otherwise unrecoverable.
+    return {"status": "ok", "password": secret, "generated": password is None}
+
+
+@router.post("/users/{user_id}/password")
+async def reset_user_password(user_id: str, request: Request):
+    """Generate a new password for somebody else and return it once."""
+    _require_admin(request)
+    try:
+        return {"status": "ok", "password": accounts.store().reset_password(user_id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str, request: Request):
+    """Remove an account. Its ``users/<id>/`` data is left on disk.
+
+    Refused for your own account: signing yourself out by deleting the login
+    you are holding is never what was meant, and it can leave a machine with
+    no administrator.
+    """
+    principal = _require_admin(request)
+    if user_id == principal.user_id:
+        raise HTTPException(status_code=400, detail="You cannot remove your own account")
+    try:
+        accounts.store().delete_account(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok"}

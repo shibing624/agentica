@@ -77,14 +77,11 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8881/api/status
 
 两者分开是有原因的：cookie 里放的**不是**令牌本身。令牌是进程级的，一重启就变——cookie 若存令牌，每次重启 gateway 都得回终端重新捞地址；而且 cookie 泄露就等于主凭据泄露，没法只吊销一个浏览器。
 
-进门方式取决于有没有设密码：
+**账号** —— 首次启动会 seed 一个账号，名字就是数据分区名 `default`（等于 `DEFAULT_USER_ID`），随机密码打在启动日志里，同时写一份 `0600` 的 `$AGENTICA_HOME/gateway/initial-password`（改过密码就删掉）。浏览器打开 `/chat` 会 302 到 `/login`。
 
-| 有密码？ | 浏览器进门方式 |
-|---|---|
-| 没有（默认） | 启动日志打印 `…/chat?token=…`，打开一次即换成会话；之后 `/chat` 书签照常工作 |
-| 有 | 打开 `/chat` 会 302 到 `/login`，输密码换会话；启动日志不再打印令牌 |
+**账号 id 就是数据分区 id**：它命名 `users/<id>/`，也就是那个账号的会话与记忆。所以 `kk` 登录后看到的是 kk 自己的对话，看不到别人的；也所以账号名是白名单字符（它要当目录名用）、且不支持改名。管理员可以在 网页 设置 › 用户 里新增 / 重置密码 / 删除账号，新账号的密码由服务端生成、只显示一次（不留明文）。**「用户管理」是唯一的管理员专属功能**：模型 / 技能 / 定时任务 / 工作目录都是这台机器的配置，任何登录账号都能改。删除账号只是让它无法登录，`users/<id>/` 的数据仍留在磁盘上。
 
-设密码：`agentica-gateway --set-password`（在那台机器的终端上），或网页里 设置 › 常规 › 访问控制。密码用 `hashlib.scrypt` 存储，格式 `scrypt$n$r$p$salt$hash`（参数随 hash 一起存，以后调高成本不会作废旧密码）。改密码会让**其他所有浏览器退出登录**——改密码的场景就是"我的 cookie 可能被人拿到了"。连续失败 5 次后按 1s、2s、4s…（上限 60s）退避，返回 429 并带 `Retry-After`。
+设密码：`agentica-gateway --set-password`（在那台机器的终端上），或网页里 设置 › 常规 › 访问控制。密码用 `hashlib.scrypt` 存储，格式 `scrypt$n$r$p$salt$hash`（参数随 hash 一起存，以后调高成本不会作废旧密码）。改密码会让**这个账号的其他浏览器退出登录**（别人的不受影响）——改密码的场景就是"我的 cookie 可能被人拿到了"。连续失败 5 次后按 1s、2s、4s…（上限 60s）退避，返回 429 并带 `Retry-After`。
 
 **`--host` 不是 loopback 时必须先设密码，否则拒绝启动**（退出码 2）。令牌是打印在终端里、不重启改不了的东西，不适合暴露到网络；密码是人能自己轮换的凭据。`GATEWAY_AUTH=false` 不受这条约束——显式关门是明确意图，只会得到一条醒目的告警。
 
@@ -102,9 +99,13 @@ CSRF 的主防线是 `SameSite=Lax`；第二道是**带 cookie 的写请求必�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/auth/status` | 免凭据。门开着吗 / 有密码吗 / 我登录了吗 |
-| POST | `/api/auth/login` | `{"password": "…"}` → 下发会话 cookie |
+| POST | `/api/auth/login` | `{"username": "…", "password": "…"}` → 下发会话 cookie（`username` 省略即 `default`） |
 | POST | `/api/auth/logout` | 服务端销毁会话（不只是清 cookie） |
-| POST | `/api/auth/password` | 设置或修改密码；令牌持有者可以不填旧密码 |
+| POST | `/api/auth/password` | 设置或修改**自己**的密码；令牌持有者可以不填旧密码 |
+| GET | `/api/auth/users` | 账号列表（仅管理员） |
+| POST | `/api/auth/users` | 新增账号，返回一次性密码（仅管理员） |
+| POST | `/api/auth/users/{id}/password` | 重置某账号密码，返回一次性密码（仅管理员） |
+| DELETE | `/api/auth/users/{id}` | 删除账号，数据保留（仅管理员） |
 | POST | `/api/desktop/shutdown` | 仅限令牌持有者，优雅停机（Windows 上唯一的优雅路径） |
 
 ## 桌面应用（Electron 薄壳）

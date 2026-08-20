@@ -127,7 +127,7 @@ pip install -U "agentica[gateway]"
 agentica-gateway
 ```
 
-本机网页在 `http://127.0.0.1:8881/chat`（聊天、轨迹、设置）。首次启动会建一个 `admin` 账号并把随机初始密码打在终端里。微信 / 企微 / 飞书 / Telegram 直连见 [Gateway 文档](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
+本机网页在 `http://127.0.0.1:8881/chat`（聊天、轨迹、设置）。首次启动会建一个 `default` 账号并把随机初始密码打在终端里；管理员可以在「设置 › 用户」里加账号，每个账号有自己独立的会话和记忆。微信 / 企微 / 飞书 / Telegram 直连见 [Gateway 文档](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI 截图" />
 

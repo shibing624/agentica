@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import (
     Any,
     AsyncIterator,
@@ -835,6 +836,12 @@ class LoopMixin:
                         self._trace_session_prelude(agent, messages_for_model)
                         self._trace_event(agent, "request_begin")
                         _trace_status = "failed"
+                        # When each phase of this request actually ended. Only
+                        # the stream knows: by the time the assistant message is
+                        # on disk, thinking and the reply are one blob with one
+                        # timestamp. Filled as the last token of each kind
+                        # arrives, so the last write wins.
+                        phase_ends: dict[str, float] = {}
                         try:
                             model_call = await self._call_with_retry(
                                 active_model, messages_for_model, loop_state, agent, stream=True
@@ -860,6 +867,7 @@ class LoopMixin:
                                             if model_response.reasoning_content is None:
                                                 model_response.reasoning_content = ""
                                             model_response.reasoning_content += model_response_chunk.reasoning_content
+                                            phase_ends["thinking"] = time.time()
                                             yield RunResponse(
                                                 event=RunEvent.run_response,
                                                 reasoning_content=model_response_chunk.reasoning_content,
@@ -868,6 +876,7 @@ class LoopMixin:
                                             )
                                         if model_response_chunk.content is not None and model_response.content is not None:
                                             model_response.content += model_response_chunk.content
+                                            phase_ends["text"] = time.time()
                                             yield RunResponse(
                                                 event=RunEvent.run_response,
                                                 content=model_response_chunk.content,
@@ -910,7 +919,7 @@ class LoopMixin:
                                 "on_llm_end",
                                 lambda hook: hook.on_llm_end(agent=agent, response=model_response),
                             )
-                            self._trace_request_segments(agent, messages_for_model)
+                            self._trace_request_segments(agent, messages_for_model, phase_ends)
                             _trace_status = "completed"
                             self._trace_token_usage(agent, messages_for_model)
                         finally:

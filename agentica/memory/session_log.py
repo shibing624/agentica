@@ -79,10 +79,19 @@ def _get_default_base_dir(
     return project_base_dir(work_dir or os.getcwd(), user_id=user_id)
 
 
-def _iso_now() -> str:
-    """Return current time as ISO 8601 string with milliseconds (CC convention)."""
-    now = datetime.now(timezone.utc)
-    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+def iso_timestamp(epoch: Optional[float] = None) -> str:
+    """ISO 8601 with milliseconds (CC convention); now unless ``epoch`` is given.
+
+    ``epoch`` is a ``time.time()`` reading of a moment that has already passed.
+    The streaming loop captures one per phase of a request and writes the rows
+    when the request ends, so the timeline can show what happened when instead
+    of collapsing the whole call into the instant it was persisted.
+    """
+    moment = (
+        datetime.fromtimestamp(epoch, timezone.utc) if epoch is not None
+        else datetime.now(timezone.utc)
+    )
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
 def _parse_iso_timestamp(value: Any) -> Optional[float]:
@@ -360,7 +369,7 @@ class SessionLog:
             "parent_uuid": self._last_uuid,
             "session_id": self.session_id,
             "cwd": self._cwd,
-            "timestamp": _iso_now(),
+            "timestamp": iso_timestamp(),
             "version": self._version,
             "git_branch": self._git_branch,
             "content": content,
@@ -394,7 +403,7 @@ class SessionLog:
             "parent_uuid": None,  # breaks the chain — CC convention
             "session_id": self.session_id,
             "cwd": self._cwd,
-            "timestamp": _iso_now(),
+            "timestamp": iso_timestamp(),
             "version": self._version,
             "git_branch": self._git_branch,
             "summary": summary,
@@ -466,7 +475,7 @@ class SessionLog:
             "parent_uuid": self._last_uuid,
             "session_id": self.session_id,
             "cwd": self._cwd,
-            "timestamp": _iso_now(),
+            "timestamp": iso_timestamp(),
             "version": self._version,
             "git_branch": self._git_branch,
             "checkpoint": checkpoint,
@@ -504,7 +513,7 @@ class SessionLog:
             "parent_uuid": None,  # break chain like compact_boundary
             "session_id": self.session_id,
             "cwd": self._cwd,
-            "timestamp": _iso_now(),
+            "timestamp": iso_timestamp(),
             "version": self._version,
             "git_branch": self._git_branch,
             "goal": payload,
@@ -523,12 +532,20 @@ class SessionLog:
     # model. The Trace page derives its timeline from these rows plus
     # existing ``tool`` / ``compact_boundary`` entries.
 
-    def append_event(self, name: str, **payload: Any) -> str:
+    def append_event(self, name: str, *, timestamp: Optional[str] = None, **payload: Any) -> str:
         """Append a lifecycle event. Returns the entry uuid.
 
         ``name`` is the event kind (``request_begin``, ``request_end``,
         ``thinking``, ``text``, ``tool_call``, ``approval_decision``,
         ``token_usage``). Extra fields are stored on the row as-is.
+
+        ``timestamp`` (``iso_timestamp()``) records a moment that has already
+        passed. A streamed request only knows *afterwards* that reasoning
+        stopped at 1.9s and the reply finished at 4.7s, and stamping both rows
+        with the time they were written collapses the request into one instant —
+        which is what made the Trace timeline draw a single bar over a turn that
+        actually thought, called a tool and then answered. Rows stay in write
+        order; only the clock is corrected.
         """
         entry_uuid = str(uuid4())
         entry: Dict[str, Any] = {
@@ -538,7 +555,7 @@ class SessionLog:
             "parent_uuid": None,
             "session_id": self.session_id,
             "cwd": self._cwd,
-            "timestamp": _iso_now(),
+            "timestamp": timestamp or iso_timestamp(),
             "version": self._version,
             "git_branch": self._git_branch,
         }

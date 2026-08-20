@@ -10,8 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from agentica.utils.log import logger
 from .. import deps
-from ..auth import websocket_token_ok
-from ..config import settings
+from ..auth import websocket_account, websocket_token_ok
 
 router = APIRouter()
 
@@ -81,6 +80,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close(code=4401, reason="Local token required")
             return
 
+        account = websocket_account(websocket)
         client_id = params.get("client", {}).get("id", "unknown")
         ws_manager.active_connections[client_id] = websocket
         logger.debug(f"WebSocket connected: {client_id}")
@@ -98,7 +98,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         while True:
             message = await websocket.receive_json()
-            await _handle_message(websocket, client_id, message)
+            await _handle_message(websocket, client_id, message, account)
 
     except WebSocketDisconnect:
         pass
@@ -109,7 +109,7 @@ async def websocket_endpoint(websocket: WebSocket):
             ws_manager.disconnect(client_id)
 
 
-async def _handle_message(ws: WebSocket, client_id: str, message: dict) -> None:
+async def _handle_message(ws: WebSocket, client_id: str, message: dict, account: str) -> None:
     """Dispatch an incoming WebSocket request message."""
     if message.get("type") != "req":
         return
@@ -136,7 +136,8 @@ async def _handle_message(ws: WebSocket, client_id: str, message: dict) -> None:
             # Streaming agent via WebSocket (content-only; tool events not yet supported)
             text = params.get("message", "")
             session_id = params.get("sessionId", "default")
-            user_id = params.get("userId", settings.default_user_id)
+            # The account comes from the handshake credential, not the frame.
+            user_id = account
 
             async def on_content(delta: str):
                 await ws_manager.send_event(client_id, "agent.content", {
@@ -149,7 +150,8 @@ async def _handle_message(ws: WebSocket, client_id: str, message: dict) -> None:
                 chat_result = await deps.agent_service.chat_stream(
                     message=text,
                     session_id=session_id,
-                    user_id=user_id,
+                    user_id=account,
+                    owner=account,
                     on_content=on_content,
                 )
                 result = {

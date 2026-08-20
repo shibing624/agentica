@@ -4,12 +4,11 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import * as api from "../api";
 import { AppShell } from "../components/AppShell";
+import { promptRename, SessionTree } from "../components/SessionTree";
 import { getStrings, useStrings } from "../i18n";
 import { agoStr, fmtN, shortenPath, uid } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
-import {
-  archiveSession, createSession, deleteSession, newChat, renameSession, switchTo,
-} from "../sessions";
+import { createSession, newChat } from "../sessions";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconFolder, IconPencil, IconArchive,
   IconChat, IconCopy, IconFinder, IconTerminal, IconAsk, IconAuto,
@@ -241,62 +240,6 @@ function MessageView({ m }: { m: ChatMsg }) {
   );
 }
 
-function SessionTree() {
-  const s = useAppState();
-  const S = useStrings();
-  const q = s.sidebarSearch.toLowerCase();
-  const groups = useMemo(() => {
-    const by: Record<string, { id: string; name: string; dir: string; sessions: { id: string; session: Session }[] }> = {};
-    for (const [id, sess] of Object.entries(s.sessions)) {
-      if (sess.archived) continue;
-      if (q && !sess.title.toLowerCase().includes(q)) continue;
-      const pid = sess.projectId || projectIdForDir(sess.dir);
-      if (!by[pid]) by[pid] = { id: pid, name: projectNameForDir(sess.dir), dir: sess.dir, sessions: [] };
-      by[pid].sessions.push({ id, session: sess });
-    }
-    return Object.values(by).sort((a, b) => (b.sessions[0]?.session.ts || 0) - (a.sessions[0]?.session.ts || 0));
-  }, [s.rev, s.sidebarSearch]);
-  return (
-    <div className="s-list">
-      {!groups.length && <div className="s-empty">{q ? S.chat.noMatch : S.chat.noSessions}</div>}
-      {groups.map((g) => (
-        <div className="p-group" key={g.id}>
-          <div className="p-head">
-            <div className="p-main">
-              <div className="p-title">
-                <span className="p-icon"><IconFolder /></span>
-                <span className="p-title-text">{g.name}</span>
-                <span className="p-count">{g.sessions.length}</span>
-              </div>
-              <div className="p-dir" title={g.dir}>{shortenPath(g.dir)}</div>
-            </div>
-          </div>
-          {g.sessions.sort((a, b) => b.session.ts - a.session.ts).map(({ id, session }) => (
-            <div key={id} className={"s-item" + (id === s.curSess ? " active" : "")} onClick={() => switchTo(id)}>
-              <div className="s-main">
-                <span className="ti">{session.title}</span>
-              </div>
-              <span className="mt">{agoStr(session.ts)}</span>
-              <div className="s-actions">
-                <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); promptRename(id); }}><IconPencil /></button>
-                <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
-                <button className="db" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function promptRename(id: string) {
-  const sess = getState().sessions[id];
-  if (!sess) return;
-  const name = window.prompt(getStrings().chat.renamePrompt, sess.title);
-  if (name) renameSession(id, name);
-}
-
 function stopGen() {
   const st = getState();
   st.streams[st.curSess || ""]?.abortCtrl.abort();
@@ -367,7 +310,6 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     const resp = await api.streamChat({
       message,
       session_id: sessId,
-      user_id: "default",
       work_dir: sess.dir || st.serverDir || "",
       approval_mode: st.selectedApprovalMode,
     }, abortCtrl.signal);
