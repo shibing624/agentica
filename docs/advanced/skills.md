@@ -7,8 +7,7 @@ Skills 是 Agentica 的"提示即能力"系统——通过 Markdown 文件定义
 经验卡片可以自动编译为可跨会话复用的 `SKILL.md`（自进化）：
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.
-  png" width="900" alt="Agentica 自进化流程图" />
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica 自进化流程图" />
 </div>
 
 ## 核心概念

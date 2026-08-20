@@ -87,41 +87,21 @@ or venv `agentica-gateway` is invisible to it. Resolution therefore asks your
 login shell (`$SHELL -ilc 'command -v agentica-gateway'`); set
 `AGENTICA_GATEWAY_BIN` to skip that.
 
-## The icon
-
-The same waving cat as the browser tab and the SPA sidebar, taken straight from
-the repo's assets rather than a copy under `desktop/` — a duplicated binary is
-a second cat that drifts. Two files, because one cannot cover both platforms:
-
-| Platform | File | Why |
-|---|---|---|
-| Windows | `docs/assets/favicon.ico` | Multi-size (16/32/48), and `nativeImage` decodes ICO **only** on Windows — elsewhere it yields an empty image, which looks identical to having set no icon |
-| Everything else | `web/src/assets/cat.png` | 256², transparent |
-
-macOS ignores `BrowserWindow#icon` entirely and takes the icon from the app
-bundle, so a packaged build needs nothing — but `npm start` runs inside
-*Electron's* bundle, which is why `installDockIcon()` sets the dock explicitly
-while unpackaged.
-
-Packaging will need an `.icns`; generate it from the same cat, and point
-electron-builder at these paths rather than adding copies.
-
-## Not done here
-
-Packaging into an installer, auto-update, tray. The first version requires
-`agentica[gateway]` to already be installed on the machine — see
-`docs/learn_cc/web_v2.md` §5 for why that ordering is deliberate.
-
-## Verifying a change
-
-Two runnable checks, both from the repo root, both against a temporary
-`AGENTICA_HOME` *and* a temporary Electron `userData` (the port memory lives
-there, and a stale one would make the stickiness check meaningless):
+## Packaging
 
 ```bash
-python tmp/desktop_prereq_smoke.py   # gateway side: port, auth, login, orphan
-python tmp/desktop_shell_smoke.py    # the real shell: window, stickiness, attach, teardown
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac    # or dist:win / dist:linux
 ```
 
-The shell check reads the app's own `AGENTICA_DESKTOP_SMOKE` report rather than
-attaching a debugger to it, so the teardown it exercises is the one users get.
+Output lands in `desktop/dist/` as `agentica-desktop-<platform>-<arch>.<ext>`.
+A given OS can only build its own installers — the NSIS exe needs Windows and
+the deb/AppImage need Linux — so the full matrix runs in CI
+(`.github/workflows/desktop.yml`) and attaches the installers to the release for
+whatever `v*` tag was pushed. Builds are unsigned; the root README documents the
+one-time unlock each OS asks for.
+
+`npm start` and the installers agree on one thing that is easy to get wrong: the
+app is a **shell**, so an installer does not carry a gateway. `agentica[gateway]`
+has to be installed on the machine separately. Bundling a Python runtime would
+make the download self-contained and is a separate project; what it would *not*
+do is remove the gateway, because the window has no other way to reach one.

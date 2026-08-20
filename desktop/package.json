@@ -1,13 +1,95 @@
 {
   "name": "agentica-desktop",
-  "version": "0.1.0",
+  "version": "1.4.13",
   "private": true,
   "description": "Electron shell around the agentica gateway. Mechanism only: process lifecycle and one window.",
+  "author": "XuMing <xuming624@qq.com>",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/shibing624/agentica",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^43.4.1"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "io.github.shibing624.agentica",
+    "productName": "Agentica",
+    "copyright": "Copyright © 2026 XuMing",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "gateway.js",
+      "port-memory.js",
+      "util.js",
+      "package.json",
+      "build/icon.png"
+    ],
+    "npmRebuild": false,
+    "artifactName": "agentica-desktop-${platform}-${arch}.${ext}",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "Agentica ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "synopsis": "Local agent workbench: CLI, Web and Desktop over one ~/.agentica",
+      "desktop": {
+        "entry": {
+          "Name": "Agentica",
+          "Comment": "Local agent workbench"
+        }
+      }
+    }
   }
 }

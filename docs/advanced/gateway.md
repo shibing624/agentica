@@ -259,7 +259,7 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 
 `agentica-gateway` 启动后自带 Web UI（Vite + React SPA，产物在 `agentica/gateway/ui/`），无需任何 IM 配置即可直接对话。pip 运行时不需要 Node。会话与 CLI 共用同一份 `~/.agentica` Session JSONL；`http://localhost:8881/traces` 按 Task 画时间轴（旧 session 没有生命周期事件时只列事件、不强行画图）。
 
-<img src="https://github.com/shibing624/agentica/raw/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
+<img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
 
 > 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用（首次用启动日志里带 `?token=` 的地址，或设了密码后走 `/login`）；其余 IM 渠道都是可选的叠加层。
 
@@ -356,8 +356,8 @@ agentica-gateway
 ```
 
 <div style="display: flex; gap: 16px; align-items: flex-start;">
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="150" />
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="150" />
 </div>
 
 > 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。

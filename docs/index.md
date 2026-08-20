@@ -4,7 +4,7 @@
 本机 Agent CLI + Python SDK · 多会话协作 · `/goal` 长任务 · 微信/企微/飞书 Gateway
 
 <div align="center">
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/logo.png" height="30" alt="Logo">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/logo.png" height="30" alt="Logo">
 </div>
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
@@ -27,7 +27,7 @@
 ## 系统架构
 
 <div align="center">
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/architecturev2.jpg" alt="Architecture" width="600" />
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/architecturev2.jpg" alt="Architecture" width="600" />
 </div>
 
 ## 快速导航

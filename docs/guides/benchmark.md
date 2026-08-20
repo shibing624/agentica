@@ -4,11 +4,13 @@ Agentica 与 Codex CLI 在同一套题目、同一套 pytest 上的对照。底�
 
 判分在 harness 外面跑：对错、墙钟、crash、误报完成、误改文件都不读对方 TUI。原始机器输出仍在本地 `evaluation/code_benchmark/outputs/`（含 workdir，不入库）；GitHub 上只放 `summary.json` 和 `predictions.jsonl`。
 
-## Agentica vs Codex
+![Agentica vs OpenAI Codex](https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/benchmark-agentica-vs-codex.png)
+
+这张图由 `python evaluation/code_benchmark/plot_pk.py` 从下面两节引用的 `summary.json` 直接生成——不手抄数字，重跑一次改的是同一份数据。
+
+## Agentica vs Codex（coding）
 
 两边质量打平：全对、0 crash、0 误报、0 误改。差距在效率——同一模型下 Agentica 更快、更少工具、更少 token，更省钱。
-
-![Agentica_pk_Codex](https://github.com/shibing624/agentica/blob/main/docs/assets/polyglot-agentica-vs-codex.png)
 
 | 指标 | Agentica | Codex | 对比 |
 |---|---|---|---|
@@ -59,8 +61,6 @@ python evaluation/code_benchmark/run.py \
 [InfiAgent-DABench](https://github.com/InfiAgent/InfiAgent) 的 DAEval **validation** 封闭题：给 CSV，agent 用 pandas / sklearn 算出 `@name[value]`。判分是精确匹配（浮点 1e-6），与官方 `eval_closed_form.py` 同口径。这是 **data analysis** 类别，不是 Polyglot 那种改代码 + pytest。
 
 全量 **257 题**，同一模型、同一 Responses 接口、思考都是 `high`。Agentica 评测 agent 与 Polyglot 同一套（无 todo / `ls` / `glob` / `grep`）；prompt 点名 CSV、禁止题面没要求的清洗、算出 `@tag` 立刻停。准确率 Agentica 略高；效率差距更大——更快、更少工具、更少输入 token。
-
-![Agentica_pk_Codex_DABench](https://github.com/shibing624/agentica/blob/main/docs/assets/dabench-agentica-vs-codex.png)
 
 | 指标 | Agentica | Codex CLI | 对比 |
 |---|---|---|---|

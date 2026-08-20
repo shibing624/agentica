@@ -32,11 +32,16 @@ const {
 
 const log = (msg) => console.log(`[desktop] ${msg}`);
 
-/** The app icon, or null when the file is missing or this platform can't read
- *  it. Loaded once: `nativeImage` decoding is disk I/O, and the window and the
- *  dock want the same image. */
+/** The app icon, or null when the file is missing or unreadable. Loaded once:
+ *  `nativeImage` decoding is disk I/O, and the window and the dock want the
+ *  same image. */
 const icon = (() => {
-  const file = iconPath(process.platform, path.join(__dirname, ".."));
+  // A packaged build needs none: the installer put the icon where the platform
+  // looks for it (the .app bundle, the exe's resources, the .desktop entry).
+  // Reading it here would also mean reading out of app.asar, which nativeImage
+  // is not guaranteed to do — and the failure looks like a missing file.
+  if (app.isPackaged) return null;
+  const file = iconPath();
   const image = nativeImage.createFromPath(file);
   if (image.isEmpty()) {
     log(`no app icon at ${file} — using the default`);

@@ -49,27 +49,18 @@ function parsePort(content) {
 }
 
 /**
- * Which icon file this platform can actually use.
+ * The icon file, for runs that need one from disk.
  *
  * The same waving cat as the browser tab and the SPA sidebar — the shell is a
- * window onto that UI, so a different mark here would just be a second brand to
- * keep in sync. Two files because one cannot serve both platforms:
- *
- * - Windows wants the multi-size ICO (16/32/48), and `nativeImage` decodes ICO
- *   **only** on Windows, so handing it the ICO anywhere else yields an empty
- *   image and a default-looking window.
- * - Everywhere else takes the 256² transparent PNG. macOS ignores
- *   `BrowserWindow#icon` outright and reads the dock icon from the bundle, so
- *   there it is only good for an unpackaged run (see `installIcon`).
- *
- * Paths point at the repo's own assets rather than copies under `desktop/`:
- * a duplicated binary is a second cat that drifts, and electron-builder can
- * reference these same paths when packaging lands.
+ * window onto that UI, so a different mark here would be a second brand to keep
+ * in sync. It is the 1024² master electron-builder packages from
+ * (`make_icon.py` rebuilds it from `docs/assets/logo.png`), and one file covers
+ * every platform: `nativeImage` decodes PNG everywhere, whereas the ICO the
+ * favicon ships as decodes **only** on Windows and yields an empty image — which
+ * looks identical to having configured no icon at all — anywhere else.
  */
-function iconPath(platform, repoRoot) {
-  return platform === "win32"
-    ? path.join(repoRoot, "docs", "assets", "favicon.ico")
-    : path.join(repoRoot, "web", "src", "assets", "cat.png");
+function iconPath() {
+  return path.join(__dirname, "build", "icon.png");
 }
 
 module.exports = {

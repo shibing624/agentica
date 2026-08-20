@@ -377,7 +377,7 @@ for chunk in agent.run_stream_sync("Hello"):
 
 Let's build the LLM OS proposed by Andrej Karpathy [in this tweet](https://twitter.com/karpathy/status/1723140519554105733), [this tweet](https://twitter.com/karpathy/status/1707437820045062561) and [this video](https://youtu.be/zjkBMFhNj_g?t=2535).
 
-<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="600" />
+<img alt="LLM OS" src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/llmos.png" width="600" />
 
 - LLMs are the kernel process of an emerging operating system.
 - This process (LLM) can solve problems by coordinating other resources (memory, computation tools).
@@ -396,7 +396,7 @@ cd examples/applications/llm_os
 streamlit run main.py
 ```
 
-![llm_os](https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png)
+![llm_os](https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/llm_os_snap.png)
 
 - Open [localhost:8501](http://localhost:8501) to view your LLM OS.
 - `Web search`: 北京今天天气?

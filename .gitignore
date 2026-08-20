@@ -7,10 +7,13 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+# Anchored to the repo root: these are the Python packaging outputs. Unanchored,
+# `build/` also swallowed desktop/build/icon.png (the packaging icon master) —
+# the same way `lib/` once swallowed web/src/lib/.
 .Python
-build/
+/build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
@@ -216,3 +219,5 @@ examples/self_evolution/03_self_evolution_e2e_glm.py
 node_modules/
 web/dist/
 desktop/node_modules/
+# electron-builder output: installers are release assets, not repo content.
+desktop/dist/

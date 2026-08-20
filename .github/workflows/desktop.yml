@@ -1,0 +1,106 @@
+# Desktop installers for the Electron shell, one per platform+arch.
+#
+# This runs in CI and not on a laptop because it cannot run on a laptop: the
+# Windows NSIS installer needs Windows (or wine) and the Linux deb/AppImage
+# needs Linux (or docker), so a macOS dev box can only ever produce the two
+# dmgs. Three runners is the whole reason this file exists.
+#
+# Pushing a v* tag builds and attaches the installers to that tag's Release.
+# workflow_dispatch builds the same artifacts without touching any Release, so
+# the packaging can be exercised on a branch before a release depends on it.
+#
+# Nothing here is code-signed. macOS will quarantine an unsigned download and
+# SmartScreen will warn on the exe; the README documents the one-time unlock for
+# each. Signing needs a paid Apple/EV certificate, which is an account decision
+# rather than a build one.
+name: Desktop installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --mac
+          - os: windows-latest
+            args: --win
+          - os: ubuntu-latest
+            args: --linux
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # The installers carry their own version metadata, so a tag build must
+      # stamp it — otherwise every release ships an installer claiming whatever
+      # desktop/package.json happened to say. `npm version` rather than sed:
+      # this matrix includes macOS, whose BSD sed spells -i differently.
+      - name: Stamp the release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          cd desktop && npm version --no-git-tag-version --allow-same-version "$V"
+
+      - run: npm ci
+        working-directory: desktop
+
+      - name: Build installers
+        working-directory: desktop
+        shell: bash
+        env:
+          # Without this, electron-builder hunts for a signing identity in the
+          # runner's empty keychain and fails the build instead of producing an
+          # unsigned app.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.exe
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+
+  attach:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -lh installers
+          # The release is normally created by hand (release notes are written,
+          # not generated). Create it only if the tag has none yet, so a plain
+          # `git push --tags` still produces something downloadable.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" installers/* --clobber

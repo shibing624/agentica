@@ -1,6 +1,10 @@
 # Architecture Overview
 
-Agentica 采用分层架构，将 Agent 的**身份定义**与**执行引擎**解耦，同时内置了上下文压缩、会话持久化和并发安全工具执行等生产级能力。
+Agentica 采用分层架构，将 Agent 的**身份定义**与**执行引擎**解耦，同时内置了上下文压缩、会话持久化和并发安全工具执行等生产级能力。从底层模型路由到顶层多智能体协作：
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/architecturev2.jpg" width="800" alt="Agentica 架构图" />
+</div>
 
 ## 五层架构
 
@@ -77,6 +81,14 @@ Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，
 | `ToolsMixin` | 工具注册、tool system prompt 合并、builtin tool 管理 |
 | `AsToolMixin` | `Agent.as_tool()` — 把当前 Agent 包装成可被其它 Agent 调用的 Function |
 | `PrinterMixin` | 流式事件打印、格式化输出 |
+
+## 核心执行引擎（Agentic Loop）
+
+单体 Agent 跑在一个纯控制流的 `while(true)` 引擎里，严格由工具调用驱动，内置防死循环、成本追踪、[两层上下文压缩](../advanced/compression.md)（免费淘汰 → LLM 摘要）和四层安全护栏：
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Agent Loop 架构图" />
+</div>
 
 ## Runner 执行流程
 

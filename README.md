@@ -1,65 +1,50 @@
-[**🇨🇳中文**](https://github.com/shibing624/agentica/blob/main/README.md) | [**🌐English**](https://github.com/shibing624/agentica/blob/main/README_EN.md) | [**🇯🇵日本語**](https://github.com/shibing624/agentica/blob/main/README_JP.md)
-
-<div align="center">
+<p align="center">
   <a href="https://github.com/shibing624/agentica">
     <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/logo.png" height="150" alt="Agentica Logo">
   </a>
-</div>
+</p>
 
------------------
+<h1 align="center">Agentica</h1>
 
-# Agentica
+<p align="center"><b>一个人，一支 agent 团队。</b><br />CLI 终端、本机 Web、Desktop App 是同一套产品，跑在你自己的机器上。</p>
 
-**一个人，一支 agent 团队。**
+<h3 align="center"><a href="#桌面版">⬇️ 下载桌面版</a></h3>
 
-CLI 终端、本机 Web、Desktop App 是同一套产品：多个会话并行干活、互相通信；人走开了也能从微信/企微把本机 agent 喊回来。
+<p align="center">macOS · Windows · Linux</p>
 
-[![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
-[![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
-[![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/shibing624/agentica/blob/main/LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://github.com/shibing624/agentica/blob/main/requirements.txt)
-[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#社区与支持)
+<p align="center">
+  <a href="https://badge.fury.io/py/agentica"><img src="https://badge.fury.io/py/agentica.svg" alt="PyPI version" /></a>
+  <a href="https://github.com/shibing624/agentica"><img src="https://img.shields.io/github/stars/shibing624/agentica?style=social" alt="GitHub stars" /></a>
+  <a href="https://github.com/shibing624/agentica/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License Apache 2.0" /></a>
+  <a href="https://github.com/shibing624/agentica/blob/main/requirements.txt"><img src="https://img.shields.io/badge/Python-3.10%2B-green.svg" alt="Python 3.10+" /></a>
+  <a href="#社区与支持"><img src="https://img.shields.io/badge/wechat-group-green.svg?logo=wechat" alt="Wechat Group" /></a>
+</p>
 
-**Agentica** 是给开发者使用的本机 Agent：**CLI** + **Web** + **Desktop App** + Python SDK。一个终端会话就是一个可协作的 agent，多个会话组成一支队伍。
+<p align="center">简体中文 | <a href="https://github.com/shibing624/agentica/blob/main/README_EN.md">English</a></p>
 
-|  | |
-|------|------|
-| **CLI** | `agentica` 进交互终端；`delegate` / `task` / peer 消息让多个会话一起干活 |
-| **Web** | `agentica-gateway` 起本机网页（聊天、轨迹、设置），微信/企微等 IM 也可直连 |
-| **Desktop App** | Electron 壳，窗口里就是同一套 Web；同一 `~/.agentica` 上已有 gateway 就直接连过去 |
-| **人可以离开现场** | Web Gateway 与 `PEER_BRIDGE` 让微信/企微等 IM 直连本机 CLI：`@会话名` 自己寻址，或者只说一句人话让网关 agent 去群发 |
+## 为什么选 Agentica
 
-## 评测
+### 1. 🏆 同一个模型，更少的时间和 token
 
-同一 `deepseek-v4-flash-official`、同一 Responses 接口、思考 `high`，对 Codex CLI。完整说明与复现命令见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
+工具面刻意收窄、接口保持底层，对 DeepSeek 等开放模型深度适配。和 OpenAI Codex 各跑同一个模型、同一批公开题目，正面对比：
 
-**Coding** — [Aider Polyglot](https://github.com/Aider-AI/polyglot-benchmark) Python 全量 34 题，两边全对；Agentica 更快、更少工具、更少 token。
+<p align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/benchmark-agentica-vs-codex.png" width="920" alt="Benchmark: Agentica 在 coding 与 data analysis 两个公开题库上准确率不低于 Codex，墙钟和输入 token 都少一截" />
+</p>
 
-![Agentica_pk_Codex](https://github.com/shibing624/agentica/blob/main/docs/assets/polyglot-agentica-vs-codex.png)
+**编程题全对、数据分析题准确率更高——而且快一倍、输入 token 少三分之二。** 复现命令、逐项指标与原始 `predictions.jsonl` 见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
 
-| 指标 | Agentica | Codex CLI |
-|---|---|---|
-| 准确率 | **34/34（100%）** | **34/34（100%）** |
-| 总墙钟 | **1486s** | 2332s（1.57×） |
-| 平均墙钟 / 题 | **43.7s** | 68.6s |
-| tool calls | **139** | 168（1.21×） |
-| 输入 token | **1.24M** | 2.85M（2.30×） |
-| 输出 token | **173k** | 201k（1.17×） |
+### 2. 🤝 一个会话是一个 agent，多个会话是一支队伍
 
-**Data analysis** — [InfiAgent-DABench](https://github.com/InfiAgent/InfiAgent) DAEval validation 全量 257 题。准确率 Agentica 略高，墙钟和输入 token 差一截。
+一个终端会话就是一个可协作的 agent。进程内 `task` 拉临时 subagent，进程级 `delegate` 另起一整个 agent 去干独立的大活，跨终端 peer 消息让两个会话互相说话——都不需要额外部署任何东西。
 
-![Agentica_pk_Codex_DABench](https://github.com/shibing624/agentica/blob/main/docs/assets/dabench-agentica-vs-codex.png)
+### 3. 🧬 自进化，越用越强
 
-| 指标 | Agentica | Codex CLI |
-|---|---|---|
-| 准确率 | **220/257（85.6%）** | 215/257（83.66%） |
-| 总墙钟 | **3241s** | 6609s（2.04×） |
-| 平均墙钟 / 题 | **12.6s** | 25.7s |
-| tool calls | **499** | 861（1.73×） |
-| 输入 token | **3.87M** | 13.02M（3.36×） |
-| 输出 token | **277k** | 420k（1.51×） |
+跑完的经验自动编译成可跨会话复用的 `SKILL.md`；下次遇到同类任务，agent 读的是自己上次的结论，不是从零开始。流程见 [Skills 文档](https://shibing624.github.io/agentica/advanced/skills)。
 
-原始结果在 [`evaluation/code_benchmark/results/`](https://github.com/shibing624/agentica/tree/main/evaluation/code_benchmark/results)。
+### 4. 📱 人可以离开现场
+
+微信 / 企微 / 飞书 / Telegram 直连本机 agent：`@会话名` 自己寻址，或者只说一句人话，让网关 agent 去指挥这台机器上的所有会话。
 
 ## 安装
 
@@ -67,9 +52,59 @@ CLI 终端、本机 Web、Desktop App 是同一套产品：多个会话并行干
 pip install -U agentica
 ```
 
+### 桌面版
+
+窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
+
+> [!IMPORTANT]
+> 桌面版是个壳，服务端仍是 Python 的 gateway。装应用之前先装它：
+> `pip install -U "agentica[gateway]"`（同一台机器、能在终端里跑起来即可）。
+
+| 系统 | 安装包 |
+|---|---|
+| **macOS** 11+ | [Apple 芯片（arm64）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg) · [Intel（x64）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg) |
+| **Windows** 10+ | [x64 安装程序（NSIS）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe) |
+| **Linux** x64 | [AppImage（免安装）](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
+
+也都附在每个 [GitHub Release](https://github.com/shibing624/agentica/releases) 里。当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可：
+
+<details>
+<summary><b>🍎 macOS 提示「Agentica 已损坏，无法打开」</b></summary>
+
+macOS 给从网络下载的文件加了隔离标记，应用未签名时会被误报成「已损坏」。删掉标记即可：
+
+1. 打开 dmg，把 `Agentica.app` 拖进「应用程序」。
+2. 打开「终端」，粘贴这条命令回车（要输开机密码，输入时不显示字符）：
+
+   ```bash
+   sudo xattr -rd com.apple.quarantine /Applications/Agentica.app
+   ```
+
+</details>
+
+<details>
+<summary><b>🪟 Windows 提示「Windows 已保护你的电脑」</b></summary>
+
+SmartScreen 会拦未签名的安装程序：点「更多信息」→「仍要运行」。只有第一次需要。
+
+</details>
+
+<details>
+<summary><b>🐧 Linux 双击 AppImage 没反应</b></summary>
+
+浏览器下载的 AppImage 默认没有执行权限（deb 走包管理器，没这个问题）：
+
+```bash
+chmod +x agentica-desktop-linux-x86_64.AppImage
+```
+
+</details>
+
+也可以直接从源码跑：`cd desktop && npm install && npm start`，详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
+
 ## 配置
 
-三选一，配上任一模型厂商的 API Key 即可（优先级：shell 环境变量 > `.env` > `config.yaml`）：
+配上任一模型厂商的 API Key 即可（优先级：shell 环境变量 > `.env` > `config.yaml`）：
 
 ```bash
 export OPENAI_BASE_URL="https://api.openai.com/v1"
@@ -77,17 +112,19 @@ export OPENAI_API_KEY="sk-xxx"
 # 或用可免费起步的智谱：export ZAI_API_KEY="your-api-key"
 ```
 
-也可以写进 `~/.agentica/.env`，或运行 `agentica setup` 生成 `~/.agentica/config.yaml`（CLI 内随时用 `/model` 切换模型）。完整配置说明见 [安装文档](https://shibing624.github.io/agentica/getting-started/installation)。
+也可以写进 `~/.agentica/.env`，或运行 `agentica setup` 生成 `~/.agentica/config.yaml`（CLI 内随时 `/model` 切换）。完整说明见 [安装文档](https://shibing624.github.io/agentica/getting-started/installation)。
 
 ## 快速开始
 
 ### CLI（推荐先玩这个）
 
+终端输入：
+
 ```bash
 agentica
 ```
 
-进入交互终端后直接说话即可，例如「帮我看下这个仓库的单测为什么挂了」。多会话协作用 `delegate` / peer 消息，详见下文 [CLI](#cli) 一节。
+进交互终端后直接说话，例如「帮我看下这个仓库的单测为什么挂了」。
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/cli_snap.png" width="800" alt="Agentica CLI 截图" />
 
@@ -98,20 +135,9 @@ pip install -U "agentica[gateway]"
 agentica-gateway
 ```
 
-本机网页在 `http://127.0.0.1:8881/chat`（聊天、轨迹、设置）。微信 / 企微 / 飞书 / Telegram 等 IM 也可直连，详见 [Gateway 文档](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
+本机网页在 `http://127.0.0.1:8881/chat`（聊天、轨迹、设置）。首次启动会建一个 `admin` 账号并把随机初始密码打在终端里。微信 / 企微 / 飞书 / Telegram 直连见 [Gateway 文档](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI 截图" />
-
-### Desktop App
-
-窗口里就是同一套 Web UI。同一 `~/.agentica` 上已经有 gateway 就直接连过去，没有才拉起一个。
-
-```bash
-pip install -e ".[gateway]"   # 仓库根目录，一次即可
-cd desktop && npm install && npm start
-```
-
-详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
 
 ### Python SDK
 
@@ -152,43 +178,23 @@ agent = DeepAgent()
 
 **协作**
 
-- **多智能体** — SDK：`Agent.as_tool()`、Workflow、Swarm、[Markdown Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)；CLI：进程内 `task`、进程级 `delegate`、跨终端 peer 消息（见 [终端文档](https://shibing624.github.io/agentica/getting-started/terminal)）
+- **多智能体** — SDK：`Agent.as_tool()`、Workflow、Swarm、[Markdown Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)；CLI：`task` / `delegate` / peer 消息（见 [终端文档](https://shibing624.github.io/agentica/getting-started/terminal)）
 - **Actor-Critic 精炼** — `refine()` + 多 Critic 并行评审，`SchemaCritic` 程序级零成本验证 / `AgentCritic` 异构强模型把关，循环检测自动早停
 
 **记忆与进化**
 
-- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `users/{user_id}/AGENTS.md`（CLI default 也可写 `~/.agentica/AGENTS.md` symlink）
+- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `AGENTS.md`
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
-- **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`，流程见 [Skills 文档](https://shibing624.github.io/agentica/advanced/skills)
+- **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`
 
 **集成**
 
 - **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
 
-## 架构
+架构与执行引擎（Agentic Loop、两层上下文压缩、四层护栏）见 [架构文档](https://shibing624.github.io/agentica/introduction/architecture)。
 
-Agentica 提供从底层模型路由到顶层多智能体协作的完整抽象：
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/architecturev2.jpg" width="800" alt="Agentica 架构图" />
-</div>
-
-### 核心执行引擎 (Agentic Loop)
-
-Agentica 的单体 Agent 运行在一个纯粹的基于控制流的 `while(true)` 引擎中，严格依据工具调用来驱动，并内置防死循环、成本追踪、[两层上下文压缩](https://github.com/shibing624/agentica/blob/main/docs/advanced/compression.md)（免费淘汰 → LLM 摘要）和四层安全护栏：
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Agent Loop 架构图" />
-</div>
-
-## CLI
-
-```bash
-agentica
-```
-
-### 协作：`task` / `delegate` / peer
+## 多会话协作：`task` / `delegate` / peer
 
 | 机制 | 做什么 | 何时用 |
 |------|--------|--------|
@@ -230,13 +236,14 @@ agentica
 
 ## 🔥 News
 
+- [2026/08/20] **v1.4.13**：Web 换成 Vite + React SPA 并新增轨迹页；网页界面默认英文、设置里可切简体中文；新增 **Desktop App 安装包**（macOS dmg / Windows NSIS / Linux AppImage·deb）。详见 [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
 - [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
-- [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 
 <details>
 <summary>更多版本</summary>
 
+- [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
 - [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
