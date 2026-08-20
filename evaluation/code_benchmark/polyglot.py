@@ -77,7 +77,7 @@ def _read_config(exercise: Path) -> dict:
     return json.loads((exercise / ".meta" / "config.json").read_text(encoding="utf-8"))
 
 
-def build_instructions(exercise: Path, solution_files: List[str]) -> str:
+def build_instructions(exercise: Path, solution_files: List[str], test_files: Optional[List[str]] = None) -> str:
     parts: List[str] = []
     intro = exercise / ".docs" / "introduction.md"
     if intro.exists():
@@ -89,7 +89,8 @@ def build_instructions(exercise: Path, solution_files: List[str]) -> str:
     if extra.exists():
         parts.append(extra.read_text(encoding="utf-8"))
     file_list = " ".join(Path(name).name for name in solution_files)
-    parts.append(INSTRUCTIONS_ADDENDUM.format(file_list=file_list))
+    test_list = " ".join(Path(name).name for name in (test_files or []))
+    parts.append(INSTRUCTIONS_ADDENDUM.format(file_list=file_list, test_list=test_list or "the tests"))
     return "\n".join(parts)
 
 
@@ -138,7 +139,7 @@ async def run_one_exercise(
     solution_files = list(config.get("files", {}).get("solution", []))
     test_files = list(config.get("files", {}).get("test", []))
     work = copy_exercise(src, work_root / src.name)
-    prompt = build_instructions(work, solution_files)
+    prompt = build_instructions(work, solution_files, test_files)
     file_list = " ".join(Path(name).name for name in solution_files)
     started = time.time()
     last_error = ""

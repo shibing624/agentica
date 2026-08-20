@@ -212,15 +212,19 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 
 [Aider Polyglot](https://github.com/Aider-AI/polyglot-benchmark) Python 全量 34 题，同一 `deepseek-v4-flash-official`、同一 pytest。完整说明见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
 
+![总时长、tool calls、输入/输出 token：Agentica 均低于 Codex](docs/guides/img/polyglot-agentica-vs-codex.png)
+
 | 指标 | Agentica | Codex CLI |
 |---|---|---|
 | 准确率 | **34/34（100%）** | **34/34（100%）** |
-| 平均墙钟 / 题 | **60.0s** | 68.6s |
+| 总墙钟 | **1486s** | 2332s（1.57×） |
+| 平均墙钟 / 题 | **43.7s** | 68.6s |
+| tool calls | **139** | 168（1.21×） |
+| 输入 token | **1.24M** | 2.85M（2.30×） |
+| 输出 token | **173k** | 201k（1.17×） |
 | crash / 误报完成 / 误改 | **0** | **0** |
-| 输入 token | **2.60M** | 2.85M |
-| cache hit | 85.6% | 86.8% |
 
-原始结果：Agentica [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-223855-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-223855-polyglot/predictions.jsonl)；Codex [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/predictions.jsonl)。
+原始结果：Agentica [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260819-195326-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260819-195326-polyglot/predictions.jsonl)；Codex [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/predictions.jsonl)。
 
 ## 🔥 News
 

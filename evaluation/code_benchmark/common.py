@@ -26,9 +26,13 @@ Use the above instructions to modify the supplied files: {file_list}
 Don't change the names of existing functions or classes, as they may be referenced from other code like unit tests, etc.
 Only use standard libraries, don't suggest installing any packages.
 
+The solution files are already named: {file_list}. Tests are in: {test_list}. Read those files directly. Do not list, glob, or grep the directory.
+
 Run tests from this directory with:
 python -m pytest --rootdir=. --noconftest -q
 Do not run pytest from a parent directory; this tree sits inside another Python repo.
+
+Once that pytest command reports all tests passed, stop immediately. Do not re-read the solution, do not add extra tests, and do not write a long summary.
 """
 
 TEST_FAILURES = """
@@ -190,6 +194,29 @@ def resolve_responses_reasoning(extra_body: Optional[Dict[str, Any]]) -> Optiona
     return "high"
 
 
+# Directory listing and extra editors the Polyglot surface does not need.
+# Prompt already names the solution files; keeping `ls`/`glob` just burns a turn.
+EVAL_DROP_TOOLS = (
+    "ls",
+    "glob",
+    "grep",
+    "undo_edit",
+    "apply_patch",
+    "request_path_access",
+)
+
+
+def drop_eval_tools(agent) -> None:
+    """Remove unused tools from the eval agent's schema after construction."""
+    for name in EVAL_DROP_TOOLS:
+        if agent.model.functions:
+            agent.model.functions.pop(name, None)
+        for tool in agent.tools or []:
+            fns = getattr(tool, "functions", None)
+            if isinstance(fns, dict):
+                fns.pop(name, None)
+
+
 def build_model(
     model_id: str,
     *,
@@ -225,7 +252,7 @@ def build_coding_agent(model, work_dir: Path, isolated_home_dir: Path, *, tool_c
     from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig
 
     workspace = Workspace(str(isolated_home_dir / "workspace"), user_id="eval")
-    return DeepAgent(
+    agent = DeepAgent(
         model=model,
         work_dir=str(work_dir),
         workspace=workspace,
@@ -234,7 +261,7 @@ def build_coding_agent(model, work_dir: Path, isolated_home_dir: Path, *, tool_c
         include_execute=True,
         include_web_search=False,
         include_fetch_url=False,
-        include_todos=True,
+        include_todos=False,
         include_task=False,
         include_skills=False,
         include_ask_user_question=False,
@@ -260,6 +287,8 @@ def build_coding_agent(model, work_dir: Path, isolated_home_dir: Path, *, tool_c
             add_name_to_instructions=False,
         ),
     )
+    drop_eval_tools(agent)
+    return agent
 
 
 async def generate_text(model, prompt: str):

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Package version is already ``1.4.13``; keep accumulating here until the release cut.
 
 #### features
+- **评测 Polyglot 默认 Responses，并收紧 coding agent 工具面**：`--agent agentica` 默认 `--wire-api responses`。评测 agent 关掉 todo，并从 schema 去掉 `ls` / `glob` / `grep` / `undo_edit` / `apply_patch` / `request_path_access`。题目已经点名要改的文件和测试文件；prompt 要求直接读、pytest 全绿立刻停，不再 list、不再复读、不加额外测试。
+- **评测页换成 Responses 34 题对照**：公开表与柱状图用 Agentica `20260819-195326`（34/34，均 43.7s，139 次工具，输入 1.24M）对 Codex `20260817-215956`。`results/` 入库该跑次的 `summary.json` / `predictions.jsonl`。
 - **评测 `--wire-api responses` 与 Claude `/v1/messages`**：`--agent agentica --wire-api responses` 走 `OpenAIResponses`。`--agent claude` 配 `--base-url` 时写隔离 `CLAUDE_CONFIG_DIR` + `ANTHROPIC_BASE_URL`（去掉 OpenAI 兼容地址尾部的 `/v1`，Claude Code 再拼 `/v1/messages`），并设 `ANTHROPIC_AUTH_TOKEN`（`--bare` 仍要 API key，Bearer 给走 Anthropic 协议的网关），不读 `~/.claude`。
 - **`--agent codex` 认 Responses 关思考写法**：`--extra-body '{"reasoning": {"effort": "none"}}'` 写入隔离 `CODEX_HOME` 的 `model_reasoning_effort`。以前只读 `reasoning_effort`，缺这个键就默认 `high`，关思考传不进去。也认 `thinking_enabled: false`。
 - **README 增加 Polyglot 评测对照，对比表去掉 Gemini CLI**：数字与 `docs/guides/benchmark.md` 同一跑次（Agentica / Codex 各 34/34）。原始 `summary.json` / `predictions.jsonl` 在 `evaluation/code_benchmark/results/`。

@@ -82,8 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--extra-body",
         default=os.environ.get("CODE_BENCH_EXTRA_BODY"),
-        help='JSON extra_body. Agentica Chat Completions: {"thinking_enabled": false}. '
-        'Codex Responses: {"reasoning": {"effort": "none"}} to turn thinking off.',
+        help='JSON extra_body. Agentica/Codex Responses: {"reasoning": {"effort": "none"}} '
+        'to turn thinking off. Chat Completions leftover: {"thinking_enabled": false}.',
     )
     parser.add_argument(
         "--http-timeout",
@@ -93,9 +93,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--wire-api",
-        default="chat_completions",
+        default="responses",
         choices=("chat_completions", "responses"),
-        help="Agentica only: OpenAIChat vs OpenAIResponses",
+        help="Agentica only: OpenAIResponses (default) vs OpenAIChat",
     )
     return parser.parse_args()
 

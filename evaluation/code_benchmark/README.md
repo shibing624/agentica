@@ -11,7 +11,7 @@
 | **bigcodebench** | 函数级 + 真实库 | `--bench bigcodebench` | `pip install datasets` + 题面里的第三方库 |
 | **evalplus** | HumanEval+，只当管道 smoke | `--bench evalplus` | 仅 python |
 
-官方 Aider runner 其实也建议 Docker；这里**不用 aider**，只克隆 [polyglot-benchmark](https://github.com/Aider-AI/polyglot-benchmark) 的 Python 练习，用 agentica `DeepAgent`（`read_file` / `edit_file` / `execute`）改代码，再用 pytest 判分。
+官方 Aider runner 其实也建议 Docker；这里**不用 aider**，只克隆 [polyglot-benchmark](https://github.com/Aider-AI/polyglot-benchmark) 的 Python 练习，用 agentica `DeepAgent`（`read_file` / `edit_file` / `execute`，无 todo / `ls`）改代码，再用 pytest 判分。默认 `--wire-api responses`。
 
 ## 快速开始
 
@@ -37,7 +37,7 @@ OpenAI 兼容端点用 `--base-url` / `--api-key`，或环境变量 `OPENAI_BASE
 
 Python 子集大约 34 题（全量 Polyglot 是 225，含 JS/Go/Rust/Java/C++）。先跑 `--max-samples 5` 估成本，再拉满。
 
-已发布的 Agentica CLI vs Codex CLI 对照见 [`docs/guides/benchmark.md`](../../docs/guides/benchmark.md)，原始 `summary.json` / `predictions.jsonl` 在 [`results/`](results/)。
+已发布的 Agentica vs Codex CLI 对照见 [`docs/guides/benchmark.md`](../../docs/guides/benchmark.md)，原始 `summary.json` / `predictions.jsonl` 在 [`results/`](results/)。
 
 ## 输出
 
@@ -75,9 +75,9 @@ Polyglot 评测关掉了 `ask_user_question`，所以 `human_intervention_rate` 
 不要从它们的交互式 TUI 里抠内部指标。正确做法是：**同一套题目 + 同一套 pytest 判分**，把对方当成 headless 子进程包进来。墙钟、对错、crash/timeout、honesty、collateral 是我们在外面量的，不依赖它们开没开 telemetry。
 
 ```bash
-# 同一题、同一模型：agentica 走 Chat Completions；Codex CLI 只走 Responses
+# 同一题、同一模型：agentica 默认 Responses；Codex CLI 只走 Responses
 python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent agentica \
-  --model deepseek-v4-flash-official --extra-body '{"thinking_enabled": false}'
+  --model deepseek-v4-flash-official --extra-body '{"reasoning": {"effort": "high"}}'
 python evaluation/code_benchmark/run.py --bench polyglot --max-samples 5 --agent codex \
   --model deepseek-v4-flash-official --extra-body '{"reasoning": {"effort": "none"}}'
 ```
