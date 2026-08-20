@@ -12,9 +12,9 @@ There are exactly two credentials, and keeping them apart is the design:
 
 - **The machine token.** Per process and random (``AGENTICA_GATEWAY_TOKEN``
   pins it). It proves "I can read a 0600 file on this machine", which is the
-  same thing as "I could have run the agent myself". The startup banner prints
-  it once as ``/chat?token=…``; a desktop shell reads it out of
-  ``runtime.json``. Header forms (``Authorization: Bearer``,
+  same thing as "I could have run the agent myself". A desktop shell reads it
+  out of ``runtime.json`` and redeems it for a session before the first
+  navigation, so it never prompts. Header forms (``Authorization: Bearer``,
   ``X-Agentica-Token``) are for scripts.
 - **A session.** Issued by ``accounts.py`` when somebody redeems the machine
   token or types the password, written down, and carried in an HttpOnly cookie.
@@ -25,6 +25,15 @@ one browser, and because the token is per process, every gateway restart sent
 the user back to the terminal to copy a new URL. A session survives restarts
 and can be closed on its own.
 
+A browser is never asked for the token. It used to be — the banner printed
+``/chat?token=…`` and that was the only way in on a fresh install — which read
+as a second, worse login: the credential changed on every restart, it was
+useless to anyone whose gateway was started detached or by the desktop shell,
+and it made the browser and the desktop app behave differently for no reason
+the user could see. Now first start seeds an ``admin`` password
+(``accounts.seed_admin``) and browsers go to ``/login``. The query form still
+works, because a script that has the token should not need a second credential.
+
 What is deliberately *not* behind the gate, and why each one has to be open:
 
 - ``/webhook/*`` — third-party callbacks (Feishu). They authenticate with their
@@ -34,6 +43,8 @@ What is deliberately *not* behind the gate, and why each one has to be open:
   one of these *before* it knows the token, which is the whole point of them.
 - ``/assets/*`` — the compiled SPA. No user data, and serving a login page that
   cannot load its own stylesheet is worse than serving the stylesheet.
+- ``/favicon.ico``, ``/favicon.png`` — the tab icon, requested from the origin
+  root (including on ``/login`` before a session exists).
 - ``/login`` and ``/api/auth/{status,login,logout}`` — the way in. A gate over
   the door is a locked room.
 """
@@ -43,7 +54,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import Response
 
 from . import accounts
@@ -63,6 +74,7 @@ _OPEN_PREFIXES = ("/webhook/", "/assets/")
 _OPEN_PATHS = (
     "/", "/health", "/api/health", "/docs", "/openapi.json", "/redoc",
     "/login", "/api/auth/status", "/api/auth/login", "/api/auth/logout",
+    "/favicon.ico", "/favicon.png",
 )
 
 # Paths that answer with the SPA shell, so an unauthorized request should get
@@ -113,10 +125,14 @@ def reset_token_for_tests() -> None:
     _token = None
 
 
-def default_user_id() -> str:
-    """The account a machine-token holder acts as."""
-    from .config import settings
-    return settings.default_user_id
+def token_account() -> str:
+    """The account a machine-token holder acts as.
+
+    The web account, not ``settings.default_user_id`` — that one names a data
+    partition on disk (``users/<id>/``) and has no business deciding who is
+    signed in.
+    """
+    return accounts.ADMIN_USER_ID
 
 
 def _is_open(path: str) -> bool:
@@ -185,7 +201,7 @@ def resolve(request: Request) -> tuple[Optional[Principal], bool]:
     presented, from_query = machine_token(request)
     if presented is not None:
         if token_is_valid(presented):
-            return Principal(default_user_id(), "token"), from_query
+            return Principal(token_account(), "token"), from_query
         return None, False
 
     session = accounts.store().read_session(request.cookies.get(SESSION_COOKIE))
@@ -215,47 +231,23 @@ def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(SESSION_COOKIE, path="/")
 
 
-def _needs_token_page() -> bool:
-    """Whether the only way in is the printed URL."""
-    return not accounts.store().has_password()
-
-
 def _unauthorized(request: Request) -> Response:
     """Refuse, in the shape the caller can act on.
 
-    A browser asking for a page gets somewhere to go: the login page when a
-    password exists, otherwise an explanation of the token — pointing at the
-    login form on a gateway with no password would be a dead end. The message
-    names the file rather than the token, because whoever reads it is either the
-    owner of the machine (who can open the file) or somebody who should not be
-    told the value.
+    A browser asking for a page always goes to ``/login`` — there is always an
+    account to sign in as, because first start seeds one. The hand-written HTML
+    page that used to explain the token here is gone with the flow it described:
+    it existed for the window where a gateway had a token and no password, and
+    that window no longer opens.
     """
     from .runtime import RUNTIME_FILE
 
-    path = request.url.path
-    if path.startswith(_SHELL_PREFIXES):
-        if not _needs_token_page():
-            nxt = request.url.path
-            if request.url.query:
-                nxt = f"{nxt}?{request.url.query}"
-            return RedirectResponse(
-                f"/login?next={nxt}", status_code=302, headers={"Cache-Control": "no-store"},
-            )
-        return HTMLResponse(
-            "<!doctype html><meta charset=utf-8><title>Agentica · 需要令牌</title>"
-            "<style>body{font:14px/1.6 -apple-system,system-ui,sans-serif;"
-            "max-width:44em;margin:14vh auto;padding:0 6vw;color:#24292f}"
-            "code{background:#f3f4f6;padding:1px 5px;border-radius:4px}</style>"
-            "<h2>需要本机令牌</h2>"
-            "<p>这个页面能改配置、读文件、执行命令，所以要带一次令牌才能打开。</p>"
-            "<p>启动 gateway 的终端里打印了完整地址，形如 "
-            "<code>/chat?token=…</code>；打开一次之后浏览器会记住，"
-            "之后直接开 <code>/chat</code> 即可。</p>"
-            f"<p>令牌也记在 <code>{RUNTIME_FILE}</code> 里。想改成用密码登录："
-            "<code>agentica-gateway --set-password</code>。"
-            "要彻底关掉这道门：<code>GATEWAY_AUTH=false</code>。</p>",
-            status_code=401,
-            headers={"Cache-Control": "no-store"},
+    if request.url.path.startswith(_SHELL_PREFIXES):
+        nxt = request.url.path
+        if request.url.query:
+            nxt = f"{nxt}?{request.url.query}"
+        return RedirectResponse(
+            f"/login?next={nxt}", status_code=302, headers={"Cache-Control": "no-store"},
         )
     return JSONResponse(
         {
@@ -283,7 +275,7 @@ async def token_middleware(request: Request, call_next):
         # Still name who the request is: a route behind the gate reads
         # `request.state.principal` unconditionally, and the alternative is
         # every such route guessing at a missing attribute.
-        request.state.principal = Principal(default_user_id(), "open")
+        request.state.principal = Principal(token_account(), "open")
         return await call_next(request)
 
     if request.method == "OPTIONS" or _is_open(request.url.path):

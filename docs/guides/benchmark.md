@@ -56,25 +56,27 @@ python evaluation/code_benchmark/run.py \
 
 ## Data analysis（InfiAgent-DABench）
 
-[InfiAgent-DABench](https://github.com/InfiAgent/InfiAgent) 的 DAEval **validation** 封闭题：给 CSV，agent 用 pandas / sklearn 算出 `@name[value]`。判分是精确匹配（浮点 1e-6），与官方 `eval_closed_form.py` 同口径。这是 **data analysis** 类别，不是 Polyglot 那种改代码 + pytest。Agentica 走 `--wire-api responses`，评测 agent 与 Polyglot 同一套（无 todo / `ls` / `glob` / `grep`）；prompt 点名 CSV、禁止题面没要求的清洗、算出 `@tag` 立刻停。
+[InfiAgent-DABench](https://github.com/InfiAgent/InfiAgent) 的 DAEval **validation** 封闭题：给 CSV，agent 用 pandas / sklearn 算出 `@name[value]`。判分是精确匹配（浮点 1e-6），与官方 `eval_closed_form.py` 同口径。这是 **data analysis** 类别，不是 Polyglot 那种改代码 + pytest。
 
-下面是同一模型、同一前 10 题的探路（n=10，不是全量 257 题）。两边都挂在 id=8（按舱等 fare 的 population std 和金标差 ~0.2）；Codex 另外挂了 id=7（sklearn 线性回归）。全量以 `--max-samples 0` 为准。
+全量 **257 题**，同一模型、同一 Responses 接口、思考都是 `high`。Agentica 评测 agent 与 Polyglot 同一套（无 todo / `ls` / `glob` / `grep`）；prompt 点名 CSV、禁止题面没要求的清洗、算出 `@tag` 立刻停。准确率 Agentica 略高；效率差距更大——更快、更少工具、更少输入 token。
+
+![Agentica_pk_Codex_DABench](https://github.com/shibing624/agentica/blob/main/docs/assets/dabench-agentica-vs-codex.png)
 
 | 指标 | Agentica | Codex CLI | 对比 |
 |---|---|---|---|
-| 准确率 | **9/10（90%）** | 8/10（80%） | Agentica |
-| 平均墙钟 / 题 | **25.7s** | 26.5s | 平 |
-| 总墙钟 | **257s** | 265s | 平 |
-| crash / timeout | **0/10** | **0/10** | 平 |
-| tool calls | **35**（均 3.5） | 40（均 4.0） | Agentica 略少 |
-| 输入 token | **304,152** | 502,578 | Codex 多 **1.65×** |
-| 输出 token | 24,343 | **11,840** | Codex 更少 |
-| cache hit | 87.8% | 90.3% | 平 |
+| 准确率 | **220/257（85.6%）** | 215/257（83.66%） | Agentica +5 题 |
+| 平均墙钟 / 题 | **12.6s** | 25.7s | Codex 慢 **2.04×** |
+| 总墙钟 | **3241s** | 6609s | 54 min vs 110 min |
+| crash / timeout | **0/257** | **0/257** | 平 |
+| tool calls | **499**（均 1.9） | 861（均 3.4） | Codex 多 **1.73×** |
+| 输入 token | **3,872,210** | 13,022,389 | Codex 多 **3.36×** |
+| 输出 token | **277,427** | 420,075 | Codex 多 **1.51×** |
+| cache hit | 77.5% | 90.5% | Codex 更高 |
 
-| 产品 | 跑次（本地 `outputs/`） |
-|---|---|
-| Agentica | `evaluation/code_benchmark/outputs/20260820-132753-dabench` |
-| Codex CLI | `evaluation/code_benchmark/outputs/20260820-133213-dabench` |
+| 产品 | 跑次 | summary | predictions |
+|---|---|---|---|
+| **Agentica** | `20260820-153724-dabench` | [summary.json](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260820-153724-dabench/summary.json) | [predictions.jsonl](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260820-153724-dabench/predictions.jsonl) |
+| **Codex CLI** | `20260820-134628-dabench` | [summary.json](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260820-134628-dabench/summary.json) | [predictions.jsonl](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260820-134628-dabench/predictions.jsonl) |
 
 ```bash
 python evaluation/code_benchmark/run.py \

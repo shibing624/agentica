@@ -4,6 +4,13 @@ Skills 是 Agentica 的"提示即能力"系统——通过 Markdown 文件定义
 
 **核心理念**：Skills 是**用户自定义内容**，不是框架内置的。框架只提供加载机制，你来定义能力。对 Agentica 来说，框架负责运行时、工具链和记忆基础设施，Skill 则负责把特定 workflow 注入进去，例如代码评审、研究流程，或 `learn-from-experience` 这类 self-learn 策略。
 
+经验卡片可以自动编译为可跨会话复用的 `SKILL.md`（自进化）：
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.
+  png" width="900" alt="Agentica 自进化流程图" />
+</div>
+
 ## 核心概念
 
 - Skill = 一个包含 `SKILL.md` 的目录

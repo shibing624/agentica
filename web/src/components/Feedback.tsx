@@ -1,3 +1,4 @@
+import { useStrings } from "../i18n";
 import { closeConfirm, useAppState } from "../store";
 
 export function Toast() {
@@ -10,6 +11,7 @@ export function Toast() {
  *  `askConfirm` so a delete never depends on the browser's native prompt. */
 export function ConfirmDialog() {
   const s = useAppState();
+  const S = useStrings();
   if (!s.confirm.open) return null;
   const run = () => {
     const fn = s.confirm.onOk;
@@ -22,8 +24,8 @@ export function ConfirmDialog() {
         <h3>{s.confirm.title}</h3>
         <p>{s.confirm.msg}</p>
         <div className="confirm-actions">
-          <button className="dp-btn" onClick={closeConfirm}>取消</button>
-          <button className="dp-btn danger" onClick={run}>{s.confirm.okLabel}</button>
+          <button className="dp-btn" onClick={closeConfirm}>{S.common.cancel}</button>
+          <button className="dp-btn danger" onClick={run}>{s.confirm.okLabel || S.common.delete}</button>
         </div>
       </div>
     </div>

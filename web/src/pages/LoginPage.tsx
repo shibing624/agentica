@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
+import { useStrings } from "../i18n";
 
 /** Where to go after signing in. Only a local path is accepted: `next` comes
  *  off the query string, so an absolute URL here would be an open redirect. */
@@ -13,16 +14,21 @@ type Status = {
   auth_enabled: boolean;
   password_set: boolean;
   authenticated: boolean;
+  account_id: string;
+  password_is_initial: boolean;
   min_password_length: number;
 };
 
 export function LoginPage() {
+  const S = useStrings();
   const nav = useNavigate();
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
   const [status, setStatus] = useState<Status | null>(null);
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  // Kept as the status code plus whatever the server said, not as a finished
+  // sentence: a rendered message would not follow a language change.
+  const [err, setErr] = useState<{ code: number; detail: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -42,36 +48,34 @@ export function LoginPage() {
     e.preventDefault();
     if (!password || busy) return;
     setBusy(true);
-    setError("");
+    setErr(null);
     const { ok, status: code, data } = await api.loginApi(password);
     setBusy(false);
     if (ok) { nav(next, { replace: true }); return; }
-    // 429 carries how long to wait — worth showing verbatim, or the page just
-    // looks broken after a few typos.
-    setError(code === 429 ? String((data as any)?.detail || "请稍后再试")
-      : code === 401 ? "密码不对"
-      : String((data as any)?.detail || "登录失败"));
+    setErr({ code, detail: String((data as any)?.detail || "") });
     setPassword("");
     input.current?.focus();
   }
 
+  // 429 carries how long to wait, so the server's own wording wins there — a
+  // generic "wrong password" after a few typos just looks broken.
+  const errorText = !err ? ""
+    : err.code === 429 ? (err.detail || S.login.retryLater)
+    : err.code === 401 ? S.login.wrongPassword
+    : (err.detail || S.login.failed);
+
   if (status === null) return <div className="login-wrap" />;
 
-  // No password on this gateway: the printed token URL is the only way in, so
-  // send the user there instead of showing a form nothing can satisfy.
+  // Nobody can sign in: the account was created with a password on first start,
+  // so getting here means it was explicitly cleared. Say what fixes it instead
+  // of showing a form nothing can satisfy.
   if (!status.password_set) {
     return (
       <div className="login-wrap">
         <div className="login-card">
           <h1>Agentica</h1>
           <p className="login-hint">
-            这台 gateway 还没设密码，入口是启动终端里打印的那条
-            <code>/chat?token=…</code> 地址，打开一次浏览器就会记住。
-          </p>
-          <p className="login-hint">
-            想改成密码登录：在启动 gateway 的机器上执行
-            <code>agentica-gateway --set-password</code>，或在网页的
-            设置 › 常规 › 访问控制 里设一个。
+            {S.login.noPassword} <code>agentica-gateway --set-password</code> {S.login.noPasswordTail}
           </p>
         </div>
       </div>
@@ -82,22 +86,31 @@ export function LoginPage() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <h1>Agentica</h1>
-        <p className="login-hint">这个界面能改配置、读文件、执行命令，所以要先登录。</p>
+        <p className="login-hint">
+          {S.login.signInAs}<code>{status.account_id}</code>
+          {status.password_is_initial ? S.login.printedOnStart : S.login.fullStop}
+        </p>
+        {/* The username is fixed and the field is read-only — but it is here,
+            because a password manager will not offer to save a credential it
+            cannot see a username for, and the banner tells the user there is
+            one. */}
+        <input className="pf-input" type="text" autoComplete="username"
+               value={status.account_id} readOnly tabIndex={-1} />
         <input
           ref={input}
           className="pf-input"
           type="password"
           autoComplete="current-password"
-          placeholder="密码"
+          placeholder={S.login.password}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        {!!error && <div className="login-error">{error}</div>}
+        {!!errorText && <div className="login-error">{errorText}</div>}
         <button className="dp-btn primary login-submit" type="submit" disabled={busy || !password}>
-          {busy ? "登录中…" : "登录"}
+          {busy ? S.login.submitting : S.login.submit}
         </button>
         <p className="login-foot">
-          忘了密码？在这台机器上执行 <code>agentica-gateway --set-password</code> 重设。
+          {status.password_is_initial ? S.login.footInitial : S.login.footForgot}
         </p>
       </form>
     </div>

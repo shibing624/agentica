@@ -1,6 +1,8 @@
 import * as api from "../api";
-import { browseDir, loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders, loadStatus } from "../data";
-import { IconClose, IconFolder } from "../icons";
+import { loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders, loadStatus } from "../data";
+import { DirPicker } from "../components/DirPicker";
+import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
+import { IconClose } from "../icons";
 import { agoStr, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession } from "../sessions";
 import {
@@ -9,11 +11,12 @@ import {
 } from "../store";
 import { CronPanel } from "./CronPanel";
 
-const TABS: Array<[string, string]> = [
-  ["settings", "常规"],
-  ["profiles", "Profile"],
-  ["cron", "定时任务"],
-  ["archived", "归档"],
+/** Tab ids are stable (they are stored in `settingsTab`); only the label moves. */
+const TABS: Array<[string, (S: Strings) => string]> = [
+  ["settings", (S) => S.settings.tabGeneral],
+  ["profiles", (S) => S.nav.profile],
+  ["cron", (S) => S.settings.tabCron],
+  ["archived", (S) => S.settings.tabArchived],
 ];
 
 function patch(p: Partial<ProfileForm>) {
@@ -26,7 +29,7 @@ function patch(p: Partial<ProfileForm>) {
  *  blank here — empty means "keep existing" on the PUT. */
 async function editProfile(name: string) {
   const { ok, data } = await api.fetchProfileDetail(name);
-  if (!ok || !data) { showToast("读取 profile 失败", 2500); return; }
+  if (!ok || !data) { showToast(getStrings().settings.readFailed, 2500); return; }
   const d = data as any;
   const aux = d.auxiliary_model || {};
   setState({
@@ -54,9 +57,10 @@ async function editProfile(name: string) {
 async function saveProfile() {
   const f = getState().profileForm;
   if (!f) return;
+  const S = getStrings();
   const name = f.name.trim();
   if (!name || !f.model_provider.trim() || !f.model_name.trim()) {
-    showToast("name / provider / model_name 是必填项", 2500);
+    showToast(S.settings.required, 2500);
     return;
   }
   const aux = (f.aux_provider.trim() || f.aux_model.trim()) ? {
@@ -82,7 +86,7 @@ async function saveProfile() {
     env: Object.keys(env).length ? env : undefined,
   };
   const res = f.editing ? await api.updateProfileApi(name, body) : await api.createProfileApi(body);
-  if (!res.ok) { showToast((res.data as any)?.detail || "保存失败", 3000); return; }
+  if (!res.ok) { showToast((res.data as any)?.detail || S.common.saveFailed, 3000); return; }
   setState({ profileForm: null });
   await loadProfiles();
   if (f.editing && name === (getState().serverProfile || getState().profilesData.active)) {
@@ -90,7 +94,7 @@ async function saveProfile() {
     await api.switchProfileApi(name);
     await loadStatus();
   }
-  showToast(f.editing ? "profile 已更新" : "profile 已创建");
+  showToast(f.editing ? S.settings.profileUpdated : S.settings.profileCreated);
 }
 
 export async function switchProfile(name: string) {
@@ -99,39 +103,43 @@ export async function switchProfile(name: string) {
     setState({ modelDDOpen: false });
     return;
   }
+  const S = getStrings();
   const { ok, data } = await api.switchProfileApi(name);
-  if (!ok) { showToast((data as any)?.detail || "切换失败", 3000); return; }
+  if (!ok) { showToast((data as any)?.detail || S.settings.switchFailed, 3000); return; }
   setState({ modelDDOpen: false });
   await loadStatus();
   await loadProfiles();
-  showToast("已切换到 " + name);
+  showToast(S.settings.switchedTo(name));
 }
 
 function removeProfile(name: string) {
+  const S = getStrings();
   askConfirm({
-    title: "删除 profile",
-    msg: `“${name}” 将从 config.yaml 中移除。`,
+    title: S.settings.removeProfile,
+    msg: S.settings.removeProfileMsg(name),
     onOk: async () => {
       const { ok, data } = await api.deleteProfileApi(name);
-      if (!ok) { showToast((data as any)?.detail || "删除失败", 3000); return; }
+      if (!ok) { showToast((data as any)?.detail || S.common.deleteFailed, 3000); return; }
       await loadProfiles();
-      showToast("profile 已删除");
+      showToast(S.settings.profileDeleted);
     },
   });
 }
 
 async function toggleThinking(enabled: boolean) {
+  const S = getStrings();
   const { ok, data } = await api.setThinkingApi(enabled);
-  if (!ok) { showToast((data as any)?.detail || "设置失败", 3000); return; }
+  if (!ok) { showToast((data as any)?.detail || S.settings.setFailed, 3000); return; }
   setState({ serverThinking: (data as any)?.thinking || "" });
-  showToast(enabled ? "已开启 thinking" : "已关闭 thinking");
+  showToast(enabled ? S.settings.thinkingOn : S.settings.thinkingOff);
 }
 
 async function applyBaseDir(dir: string) {
   const raw = dir.trim();
   if (!raw) return;
+  const S = getStrings();
   const { ok, data } = await api.saveBaseDirApi(raw);
-  if (!ok) { showToast((data as any)?.detail || "目录设置失败", 3500); return; }
+  if (!ok) { showToast((data as any)?.detail || S.dir.setFailed, 3500); return; }
   await loadStatus();
   await loadDirHistory();
   const st = getState();
@@ -139,55 +147,59 @@ async function applyBaseDir(dir: string) {
     st.sessions[st.curSess].dir = st.serverDir || raw;
     saveSessions();
   }
-  showToast("工作目录已更新");
+  showToast(S.dir.updated);
 }
 
-/** Set or change the web password.
+/** Change the web password.
  *
  *  Worth having here as well as in `agentica-gateway --set-password`: that one
- *  is the only way to set the *first* password on a headless box, this one is
- *  the only way for somebody who is not at that terminal. Setting one also
- *  switches the entry point from the printed token URL to the login page, so
- *  the copy says so. */
+ *  is the only way in on a headless box, this one is the only way for somebody
+ *  who is not at that terminal — which includes every desktop-shell user, since
+ *  the shell signs itself in and shows no terminal at all. */
 function AccessBlock() {
   const s = useAppState();
+  const S = useStrings();
   const f = s.passwordForm;
+  const min = s.minPasswordLength;
   const set = (p: Partial<typeof f>) => setState({ passwordForm: { ...f, ...p } });
 
   async function save() {
-    if (f.next.length < 8) { showToast("密码至少 8 位", 2500); return; }
-    if (f.next !== f.repeat) { showToast("两次输入不一致", 2500); return; }
+    if (f.next.length < min) { showToast(S.settings.tooShort(min), 2500); return; }
+    if (f.next !== f.repeat) { showToast(S.settings.mismatch, 2500); return; }
     set({ busy: true });
     const { ok, data } = await api.setPasswordApi(f.next, f.old || undefined);
     set({ busy: false });
-    if (!ok) { showToast((data as any)?.detail || "设置失败", 3500); return; }
-    setState({ passwordForm: { old: "", next: "", repeat: "", busy: false }, passwordSet: true });
-    showToast("密码已更新，其他浏览器已退出登录");
+    if (!ok) { showToast((data as any)?.detail || S.settings.setFailed, 3500); return; }
+    setState({
+      passwordForm: { old: "", next: "", repeat: "", busy: false },
+      passwordSet: true, passwordIsInitial: false,
+    });
+    showToast(S.settings.passwordChanged);
   }
 
   return (
     <div className="settings-block">
-      <div className="settings-block-title">访问控制</div>
+      <div className="settings-block-title">{S.settings.access}</div>
       <div className="settings-item-meta">
-        {s.passwordSet
-          ? "已设密码：打开 /chat 会先要求登录，令牌 URL 不再打印。"
-          : "还没设密码：入口是启动时打印的 /chat?token=… 。设一个之后就走登录页，"
-            + "重启 gateway 也不用回终端重新取地址。"}
+        {S.settings.accessAccount(s.accountId)}{" "}
+        {s.passwordIsInitial
+          ? S.settings.accessInitial
+          : s.passwordSet ? S.settings.accessSet : S.settings.accessNone}
       </div>
       {s.passwordSet && (
         <input className="pf-input" type="password" autoComplete="current-password"
-               placeholder="当前密码" value={f.old} onChange={(e) => set({ old: e.target.value })} />
+               placeholder={S.settings.currentPassword} value={f.old} onChange={(e) => set({ old: e.target.value })} />
       )}
       <input className="pf-input" type="password" autoComplete="new-password"
-             placeholder="新密码（至少 8 位）" value={f.next} onChange={(e) => set({ next: e.target.value })} />
+             placeholder={S.settings.newPassword(min)} value={f.next} onChange={(e) => set({ next: e.target.value })} />
       <input className="pf-input" type="password" autoComplete="new-password"
-             placeholder="再输一次" value={f.repeat} onChange={(e) => set({ repeat: e.target.value })} />
+             placeholder={S.settings.repeatPassword} value={f.repeat} onChange={(e) => set({ repeat: e.target.value })} />
       <div className="pf-row">
         <button className="dp-btn primary" disabled={f.busy} onClick={() => void save()}>
-          {s.passwordSet ? "修改密码" : "设置密码"}
+          {s.passwordSet ? S.settings.changePassword : S.settings.setPassword}
         </button>
         {s.passwordSet && (
-          <button className="dp-btn" onClick={() => void logout()}>退出登录</button>
+          <button className="dp-btn" onClick={() => void logout()}>{S.settings.logout}</button>
         )}
       </div>
     </div>
@@ -201,6 +213,7 @@ async function logout() {
 
 export function SettingsModal() {
   const s = useAppState();
+  const S = useStrings();
   const archived = Object.entries(s.sessions).filter(([, sess]) => sess.archived);
   const close = () => setState({ settingsModal: { open: false }, profileForm: null, cronForm: null });
   return (
@@ -208,12 +221,12 @@ export function SettingsModal() {
       <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-head">
           <h3>
-            {TABS.find((t) => t[0] === s.settingsTab)?.[1] || "设置"}
+            {TABS.find((t) => t[0] === s.settingsTab)?.[1](S) || S.settings.title}
             <span className="settings-ver">{s.serverVersion ? "Agentica v" + s.serverVersion : ""}</span>
           </h3>
           <div className="settings-head-actions">
             {s.settingsTab === "profiles" && (
-              <button className="settings-new-btn" onClick={() => setState({ profileForm: emptyProfileForm() })}>+ 新建</button>
+              <button className="settings-new-btn" onClick={() => setState({ profileForm: emptyProfileForm() })}>{S.common.newItem}</button>
             )}
             <button className="ib" onClick={close}><IconClose /></button>
           </div>
@@ -221,7 +234,7 @@ export function SettingsModal() {
         <div className="plugins-tabs">
           {TABS.map(([id, label]) => (
             <button key={id} className={"plugins-tab" + (s.settingsTab === id ? " active" : "")}
-                    onClick={() => setState({ settingsTab: id })}>{label}</button>
+                    onClick={() => setState({ settingsTab: id })}>{label(S)}</button>
           ))}
         </div>
         <div className="settings-body">
@@ -230,14 +243,14 @@ export function SettingsModal() {
           {s.settingsTab === "cron" && <CronPanel />}
           {s.settingsTab === "archived" && (
             <div className="settings-list">
-              {!archived.length && <div className="settings-empty">没有归档会话</div>}
+              {!archived.length && <div className="settings-empty">{S.settings.noArchived}</div>}
               {archived.map(([id, sess]) => (
                 <div key={id} className="settings-item">
                   <div className="settings-item-head">
                     <span className="settings-name">{sess.title}</span>
                     <div className="settings-item-actions">
-                      <button className="cron-act" onClick={() => unarchiveSession(id)}>恢复</button>
-                      <button className="cron-act danger" onClick={() => deleteSession(id)}>删除</button>
+                      <button className="cron-act" onClick={() => unarchiveSession(id)}>{S.common.restore}</button>
+                      <button className="cron-act danger" onClick={() => deleteSession(id)}>{S.common.delete}</button>
                     </div>
                   </div>
                   <div className="settings-item-meta">{shortenPath(sess.dir)} · {agoStr(sess.ts)}</div>
@@ -253,59 +266,67 @@ export function SettingsModal() {
 
 function GeneralTab() {
   const s = useAppState();
+  const S = useStrings();
   const thinkingOn = !!s.serverThinking;
   return (
     <div className="settings-list">
       <div className="settings-block">
-        <div className="settings-block-title">主题</div>
+        <div className="settings-block-title">{S.settings.theme}</div>
         <div className="pf-toggle">
-          {([["auto", "跟随系统"], ["light", "浅色"], ["dark", "深色"]] as const).map(([v, label]) => (
+          {([["auto", S.settings.themeAuto], ["light", S.settings.themeLight], ["dark", S.settings.themeDark]] as const).map(([v, label]) => (
             <button key={v} className={"pf-toggle-btn" + (s.theme === v ? " active" : "")} onClick={() => setTheme(v)}>{label}</button>
           ))}
         </div>
       </div>
 
+      {/* Each language is labelled in itself, so it is readable to someone who
+          landed in the wrong one and cannot read the current UI. */}
       <div className="settings-block">
-        <div className="settings-block-title">思考过程（thinking）</div>
+        <div className="settings-block-title">{S.settings.language}</div>
+        <div className="pf-toggle">
+          {LANGS.map(({ id, label }) => (
+            <button key={id} className={"pf-toggle-btn" + (s.lang === id ? " active" : "")}
+                    onClick={() => setLang(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="settings-item-meta">{S.settings.languageMeta}</div>
+      </div>
+
+      <div className="settings-block">
+        <div className="settings-block-title">{S.settings.thinking}</div>
         <label className="pf-check">
           <input type="checkbox" checked={thinkingOn} onChange={(e) => void toggleThinking(e.target.checked)} />
-          让模型输出推理过程（仅支持 thinking 的模型有效，切换后下一轮生效）
+          {S.settings.thinkingLabel}
         </label>
       </div>
 
       <div className="settings-block">
-        <div className="settings-block-title">默认工作目录</div>
-        <div className="dm-row">
-          <input value={s.dirModal.value || s.serverDir} onChange={(e) => setState({ dirModal: { ...s.dirModal, value: e.target.value } })} />
-          <button className="cron-act" onClick={() => void browseDir(s.dirModal.value || s.serverDir)}>浏览</button>
-          <button className="dp-btn primary" onClick={() => void applyBaseDir(s.dirModal.value || s.serverDir)}>应用</button>
-        </div>
-        {!!s.dirHistory.length && (
-          <div className="dir-history">
-            {s.dirHistory.map((d) => (
-              <button className="dir-hist-item" key={d} onClick={() => setState({ dirModal: { ...s.dirModal, value: d } })} title={d}>
-                <IconFolder /> {shortenPath(d)}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="settings-block-title">{S.settings.defaultDir}</div>
+        <DirPicker
+          value={s.dirModal.value || s.serverDir}
+          onChange={(dir) => setState({ dirModal: { ...getState().dirModal, value: dir } })}
+          extraAction={
+            <button className="dp-btn primary"
+                    onClick={() => void applyBaseDir(s.dirModal.value || s.serverDir)}>{S.common.apply}</button>
+          }
+        />
       </div>
 
       <AccessBlock />
 
       <div className="settings-block">
-        <div className="settings-block-title">当前配置</div>
+        <div className="settings-block-title">{S.settings.current}</div>
         <div className="settings-item-meta">
           Profile: {s.serverProfile || "default"} · {s.serverProvider}/{s.serverModelName || s.serverModel}
           {s.serverReasoningEffort ? ` · effort=${s.serverReasoningEffort}` : ""}
-          {s.serverContextWindow ? ` · 上下文 ${s.serverContextWindow}` : ""}
+          {s.serverContextWindow ? ` · ${S.settings.contextWindow(s.serverContextWindow)}` : ""}
         </div>
         <div className="config-path-row">
           <code className="config-path-val">{s.serverConfigPath || "~/.agentica/config.yaml"}</code>
           <button className="cron-act" onClick={() => {
             const p = s.serverConfigPath;
-            if (p) { void navigator.clipboard.writeText(p); showToast("已复制"); }
-          }}>复制</button>
+            if (p) { void navigator.clipboard.writeText(p); showToast(S.common.copied); }
+          }}>{S.common.copy}</button>
         </div>
       </div>
     </div>
@@ -314,27 +335,28 @@ function GeneralTab() {
 
 function ProfilesTab() {
   const s = useAppState();
+  const S = useStrings();
   const active = s.serverProfile || s.profilesData.active;
   return (
     <>
       {s.profileForm && <ProfileForm />}
       <div className="settings-list">
-        {!(s.profilesData.profiles || []).length && <div className="settings-empty">还没有 profile，点“+ 新建”创建一个。</div>}
+        {!(s.profilesData.profiles || []).length && <div className="settings-empty">{S.settings.noProfiles}</div>}
         {(s.profilesData.profiles || []).map((p: any) => (
           <div key={p.name} className={"settings-item" + (p.name === active ? " active" : "")}>
             <div className="settings-item-head">
               <span className="settings-name">
-                {p.name}{p.name === active && <span className="settings-active"> ● 使用中</span>}
+                {p.name}{p.name === active && <span className="settings-active"> ● {S.settings.inUse}</span>}
               </span>
               <div className="settings-item-actions">
-                {p.name !== active && <button className="cron-act" onClick={() => void switchProfile(p.name)}>切换</button>}
-                <button className="cron-act" onClick={() => void editProfile(p.name)}>编辑</button>
-                <button className="cron-act danger" onClick={() => removeProfile(p.name)}>删除</button>
+                {p.name !== active && <button className="cron-act" onClick={() => void switchProfile(p.name)}>{S.settings.switch}</button>}
+                <button className="cron-act" onClick={() => void editProfile(p.name)}>{S.common.edit}</button>
+                <button className="cron-act danger" onClick={() => removeProfile(p.name)}>{S.common.delete}</button>
               </div>
             </div>
             <div className="settings-item-meta">
               {p.model_provider || "?"}/{p.model_name || "?"}{p.base_url ? " · " + p.base_url : ""}
-              {p.has_api_key ? ` · key ${p.api_key_masked}` : " · 无 key"}
+              {p.has_api_key ? ` · key ${p.api_key_masked}` : ` · ${S.settings.noKey}`}
             </div>
             {p.tuning?.length ? <div className="settings-item-tuning">{p.tuning.join(" · ")}</div> : null}
             {p.auxiliary ? <div className="settings-item-aux">aux: {p.auxiliary.model_provider || "?"}/{p.auxiliary.model_name || "?"}</div> : null}
@@ -347,21 +369,22 @@ function ProfilesTab() {
 
 function ProfileForm() {
   const s = useAppState();
+  const S = useStrings();
   const f = s.profileForm!;
   return (
     <div className="settings-form">
-      <h4>{f.editing ? `编辑 profile：${f.name}` : "新建 profile"}</h4>
-      <input className="pf-input" placeholder="profile 名（例如 default）" value={f.name} disabled={f.editing}
+      <h4>{f.editing ? S.settings.editProfile(f.name) : S.settings.newProfile}</h4>
+      <input className="pf-input" placeholder={S.settings.profileName} value={f.name} disabled={f.editing}
              onChange={(e) => patch({ name: e.target.value })} />
-      <div className="pf-section">主模型</div>
-      <input className="pf-input" list="provider-list" placeholder="provider（ark / deepseek / openai …）"
+      <div className="pf-section">{S.settings.mainModel}</div>
+      <input className="pf-input" list="provider-list" placeholder={S.settings.providerPlaceholder}
              value={f.model_provider} onChange={(e) => patch({ model_provider: e.target.value })} />
       <datalist id="provider-list">{s.providers.map((p) => <option key={p} value={p} />)}</datalist>
       <input className="pf-input" placeholder="model_name" value={f.model_name} onChange={(e) => patch({ model_name: e.target.value })} />
-      <input className="pf-input" placeholder="base_url（可选）" value={f.base_url} onChange={(e) => patch({ base_url: e.target.value })} />
-      <input className="pf-input" placeholder={f.editing ? "api_key（留空表示保持不变）" : "api_key"}
+      <input className="pf-input" placeholder={S.settings.baseUrlOptional} value={f.base_url} onChange={(e) => patch({ base_url: e.target.value })} />
+      <input className="pf-input" placeholder={f.editing ? S.settings.apiKeyKeep : "api_key"}
              value={f.api_key} onChange={(e) => patch({ api_key: e.target.value })} />
-      <div className="pf-section">调参（可选）</div>
+      <div className="pf-section">{S.settings.tuning}</div>
       <div className="pf-row">
         <input className="pf-input" placeholder="reasoning_effort（low/medium/high）" value={f.reasoning_effort} onChange={(e) => patch({ reasoning_effort: e.target.value })} />
         <input className="pf-input" type="number" placeholder="max_tokens" value={f.max_tokens} onChange={(e) => patch({ max_tokens: e.target.value })} />
@@ -371,12 +394,12 @@ function ProfileForm() {
         <input className="pf-input" type="number" step="0.1" placeholder="temperature" value={f.temperature} onChange={(e) => patch({ temperature: e.target.value })} />
       </div>
       <input className="pf-input" type="number" step="0.05" placeholder="top_p" value={f.top_p} onChange={(e) => patch({ top_p: e.target.value })} />
-      <div className="pf-section">辅助模型（可选，用于子代理等廉价调用）</div>
+      <div className="pf-section">{S.settings.auxModel}</div>
       <input className="pf-input" placeholder="aux provider" value={f.aux_provider} onChange={(e) => patch({ aux_provider: e.target.value })} />
       <input className="pf-input" placeholder="aux model_name" value={f.aux_model} onChange={(e) => patch({ aux_model: e.target.value })} />
-      <input className="pf-input" placeholder="aux base_url（可选）" value={f.aux_base_url} onChange={(e) => patch({ aux_base_url: e.target.value })} />
-      <input className="pf-input" placeholder="aux api_key（留空保持不变）" value={f.aux_api_key} onChange={(e) => patch({ aux_api_key: e.target.value })} />
-      <div className="pf-section">env 块（可选）</div>
+      <input className="pf-input" placeholder={S.settings.auxBaseUrl} value={f.aux_base_url} onChange={(e) => patch({ aux_base_url: e.target.value })} />
+      <input className="pf-input" placeholder={S.settings.auxApiKey} value={f.aux_api_key} onChange={(e) => patch({ aux_api_key: e.target.value })} />
+      <div className="pf-section">{S.settings.envBlock}</div>
       <div className="pf-env">
         {f.envRows.map((row, i) => (
           <div className="pf-env-row" key={i}>
@@ -394,10 +417,10 @@ function ProfileForm() {
           </div>
         ))}
       </div>
-      <button className="pf-add-env" onClick={() => patch({ envRows: [...f.envRows, { key: "", value: "" }] })}>+ 添加变量</button>
+      <button className="pf-add-env" onClick={() => patch({ envRows: [...f.envRows, { key: "", value: "" }] })}>{S.common.addVar}</button>
       <div className="pf-actions">
-        <button className="dp-btn" onClick={() => setState({ profileForm: null })}>取消</button>
-        <button className="dp-btn primary" onClick={() => void saveProfile()}>{f.editing ? "保存" : "创建"}</button>
+        <button className="dp-btn" onClick={() => setState({ profileForm: null })}>{S.common.cancel}</button>
+        <button className="dp-btn primary" onClick={() => void saveProfile()}>{f.editing ? S.common.save : S.common.create}</button>
       </div>
     </div>
   );

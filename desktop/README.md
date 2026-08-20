@@ -87,6 +87,25 @@ or venv `agentica-gateway` is invisible to it. Resolution therefore asks your
 login shell (`$SHELL -ilc 'command -v agentica-gateway'`); set
 `AGENTICA_GATEWAY_BIN` to skip that.
 
+## The icon
+
+The same waving cat as the browser tab and the SPA sidebar, taken straight from
+the repo's assets rather than a copy under `desktop/` — a duplicated binary is
+a second cat that drifts. Two files, because one cannot cover both platforms:
+
+| Platform | File | Why |
+|---|---|---|
+| Windows | `docs/assets/favicon.ico` | Multi-size (16/32/48), and `nativeImage` decodes ICO **only** on Windows — elsewhere it yields an empty image, which looks identical to having set no icon |
+| Everything else | `web/src/assets/cat.png` | 256², transparent |
+
+macOS ignores `BrowserWindow#icon` entirely and takes the icon from the app
+bundle, so a packaged build needs nothing — but `npm start` runs inside
+*Electron's* bundle, which is why `installDockIcon()` sets the dock explicitly
+while unpackaged.
+
+Packaging will need an `.icns`; generate it from the same cat, and point
+electron-builder at these paths rather than adding copies.
+
 ## Not done here
 
 Packaging into an installer, auto-update, tray. The first version requires

@@ -16,12 +16,23 @@ Storage is ``$AGENTICA_HOME/gateway/auth.json``, ``0600``. Not the cache dir:
 losing a password hash to a cache wipe is not a recoverable inconvenience, and
 surviving a restart is the reason sessions are on disk at all.
 
-Accounts are keyed by ``user_id`` because the workspace already partitions
-memory, skills and conversations under ``users/<id>/`` and ``/api`` has always
-taken a ``user_id`` — so a second account is a row here, not a redesign. Only
-one is reachable today: there is no registration route and no admin UI, so the
-account is whichever id the first ``set_password`` names (the CLI's
-``default``).
+Accounts are keyed by an account id so that a second account is a row here
+rather than a redesign. Exactly one exists today — ``admin``, seeded on first
+start — because there is no registration route and no admin UI.
+
+**An account id is not a data user id.** ``settings.default_user_id`` partitions
+sessions, memory and skills under ``users/<id>/`` on disk; this file only
+answers "may you in". They were briefly the same string, which reads as a
+simplification and is a trap: renaming the login would have moved every existing
+conversation out of view.
+
+A gateway with no password is not a gateway with no credential. First start
+seeds ``admin`` with a generated one and prints it, because the alternative was
+a ``/chat?token=…`` URL from the log — per process, so it changed on every
+restart, and unusable to anyone whose gateway was started detached or by the
+desktop shell. The plaintext is kept at ``initial-password`` (``0600``) *only*
+while it is still the generated one, so a user who scrolled past the banner can
+still get in; changing the password deletes it.
 
 Password hashing is ``hashlib.scrypt`` — stdlib, no new dependency, and a real
 slow hash. The stored form is ``scrypt$n$r$p$<salt b64>$<hash b64>``: the
@@ -44,7 +55,22 @@ from agentica.utils.log import logger
 
 AUTH_FILE = Path(AGENTICA_HOME) / "gateway" / "auth.json"
 
-MIN_PASSWORD_LENGTH = 8
+#: The one web account. Not a data user id — see the module docstring.
+ADMIN_USER_ID = "admin"
+
+# Six, because this gate's job is to stop a passer-by on the LAN, and the two
+# real defences are elsewhere: scrypt makes an offline guess expensive, and the
+# throttle below makes an online one take days. A longer minimum only pushes
+# people toward reusing a password they already have.
+MIN_PASSWORD_LENGTH = 6
+
+# Generated passwords are read off a terminal and typed into a browser once, so
+# the alphabet drops the glyphs that get misread (0/O, 1/l/I) and the groups are
+# short. 8 symbols from 30 is ~39 bits — with the throttle below, guessing it
+# online takes years, and it is meant to be replaced anyway.
+_INITIAL_ALPHABET = "23456789abcdefghjkmnpqrstuvwxy"
+_INITIAL_GROUPS = 2
+_INITIAL_GROUP_LEN = 4
 
 # scrypt cost. n=2**14 with r=8 is ~16MB and ~60ms here — the usual
 # "interactive login" point, slow enough to make offline guessing expensive and
@@ -119,6 +145,15 @@ def _digest(token: str) -> str:
     """What gets written down. The token itself never touches the disk, so a
     readable ``auth.json`` cannot be replayed as a session."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def generate_initial_password() -> str:
+    """A password a human can read off a terminal and type once."""
+    groups = [
+        "".join(secrets.choice(_INITIAL_ALPHABET) for _ in range(_INITIAL_GROUP_LEN))
+        for _ in range(_INITIAL_GROUPS)
+    ]
+    return "-".join(groups)
 
 
 def hash_password(password: str) -> str:
@@ -213,6 +248,7 @@ class AccountStore:
             entry = {"created_at": _now().isoformat(timespec="seconds")}
         entry["password"] = hash_password(password)
         entry["password_set_at"] = _now().isoformat(timespec="seconds")
+        entry["password_is_initial"] = False
         data["accounts"][user_id] = entry
         # Every other browser is signed out. A password change is what a user
         # does after "somebody may have my cookie", so keeping those sessions
@@ -220,6 +256,54 @@ class AccountStore:
         data["sessions"] = {}
         self._write(data)
         self._failures.pop(user_id, None)
+        # The generated one is no longer the way in, so stop keeping a readable
+        # copy of it. Written before the file existed too, hence missing_ok.
+        self.initial_password_path.unlink(missing_ok=True)
+
+    # ---- first run ----
+
+    @property
+    def initial_password_path(self) -> Path:
+        """Where the generated password is readable while it is still in use."""
+        return self.path.parent / "initial-password"
+
+    def seed_admin(self) -> Optional[str]:
+        """Create the ``admin`` account on first start; return its password.
+
+        Returns None when any account already exists, so this is safe to call on
+        every boot. The plaintext is both returned (to print) and written
+        ``0600`` (so a gateway started detached, or by the desktop shell, is
+        still reachable from a browser later).
+        """
+        if self._read()["accounts"]:
+            return None
+        password = generate_initial_password()
+        self.set_password(ADMIN_USER_ID, password)
+        data = self._read()
+        data["accounts"][ADMIN_USER_ID]["password_is_initial"] = True
+        self._write(data)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self.initial_password_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(password + "\n")
+        except OSError as e:
+            # The account exists and the password was just printed; not being
+            # able to cache it is worth a line, not a failed startup.
+            logger.warning(f"Could not store the initial password: {e}")
+        return password
+
+    def password_is_initial(self, user_id: str = ADMIN_USER_ID) -> bool:
+        """Whether this account still uses the password the gateway generated."""
+        entry = self._read()["accounts"].get(user_id)
+        return bool(isinstance(entry, dict) and entry.get("password_is_initial"))
+
+    def read_initial_password(self) -> Optional[str]:
+        """The generated password, for reprinting on a later boot."""
+        try:
+            return self.initial_password_path.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            return None
 
     def clear_password(self, user_id: str) -> None:
         """Drop the password (back to token-only). Also drops the sessions it
@@ -231,6 +315,7 @@ class AccountStore:
             entry.pop("password_set_at", None)
         data["sessions"] = {}
         self._write(data)
+        self.initial_password_path.unlink(missing_ok=True)
 
     def check_password(self, user_id: str, password: str) -> bool:
         """Verify a password, subject to throttling. Raises ``LoginThrottled``.
@@ -348,7 +433,7 @@ def use_store_for_tests(path) -> AccountStore:
     return _store
 
 
-def set_password_interactive(user_id: str) -> int:
+def set_password_interactive(user_id: str = ADMIN_USER_ID) -> int:
     """``agentica-gateway --set-password``: prompt twice, write, exit.
 
     Lives here rather than in ``main.py`` because it is the only way to set a

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import * as api from "../api";
-import { agoStr, fmtFileSize, fmtN, shortenPath } from "../lib/format";
-import { IconChat, IconClose, IconCopy, IconSearch, Logo } from "../icons";
+import { AppShell } from "../components/AppShell";
+import { getStrings, useStrings, type Strings } from "../i18n";
+import { fmtFileSize, fmtN, shortenPath } from "../lib/format";
+import { IconClose, IconCopy, IconSearch } from "../icons";
 import { showToast } from "../store";
 
 type Entry = {
@@ -75,13 +77,13 @@ type Analysis = {
   file: { path: string; sizeBytes: number; modifiedAt: string; name: string };
 };
 
-const PHASES: Array<{ key: string; label: string; cls: string }> = [
-  { key: "thinking", label: "思考", cls: "ph-thinking" },
-  { key: "text", label: "模型回复", cls: "ph-text" },
-  { key: "toolArgs", label: "工具参数生成", cls: "ph-args" },
-  { key: "toolWait", label: "审批等待", cls: "ph-wait" },
-  { key: "toolExec", label: "工具执行", cls: "ph-exec" },
-  { key: "other", label: "其它", cls: "ph-other" },
+const PHASES: Array<{ key: string; label: (S: Strings) => string; cls: string }> = [
+  { key: "thinking", label: (S) => S.traces.phaseThinking, cls: "ph-thinking" },
+  { key: "text", label: (S) => S.traces.phaseText, cls: "ph-text" },
+  { key: "toolArgs", label: (S) => S.traces.phaseArgs, cls: "ph-args" },
+  { key: "toolWait", label: (S) => S.traces.phaseWait, cls: "ph-wait" },
+  { key: "toolExec", label: (S) => S.traces.phaseExec, cls: "ph-exec" },
+  { key: "other", label: (S) => S.traces.phaseOther, cls: "ph-other" },
 ];
 
 const KIND_LABEL: Record<string, string> = {
@@ -115,12 +117,16 @@ function money(v: number | null) {
 }
 
 export function TracesPage() {
+  const S = useStrings();
   const [params, setParams] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
   const [sessions, setSessions] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [error, setError] = useState("");
+  // The failure is kept as its status code, not as a sentence: a message
+  // rendered once would stay in the language it was written in when the user
+  // switches languages.
+  const [errStatus, setErrStatus] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -128,15 +134,13 @@ export function TracesPage() {
   }, []);
 
   useEffect(() => {
-    if (!sessionId) { setAnalysis(null); setError(""); return; }
+    if (!sessionId) { setAnalysis(null); setErrStatus(0); return; }
     setLoading(true);
     void api.fetchTraceAnalysis(sessionId).then(({ ok, status, data }) => {
       setLoading(false);
-      if (ok) { setAnalysis(data as Analysis); setError(""); return; }
+      if (ok) { setAnalysis(data as Analysis); setErrStatus(0); return; }
       setAnalysis(null);
-      setError(status === 404
-        ? "这个会话还没有写入磁盘轨迹（新建但未发消息，或已被删除）。"
-        : `读取轨迹失败（HTTP ${status}）`);
+      setErrStatus(status || 500);
     });
   }, [sessionId]);
 
@@ -148,19 +152,18 @@ export function TracesPage() {
   }, [sessions, search]);
 
   return (
-    <div className="trace-page">
+    <AppShell active="traces">
+      {/* The middle column. Traces are read by walking a list and comparing, so
+          the picker stays on screen next to what it opened. */}
       <aside className="trace-rail">
-        <div className="side-head">
-          <div className="brand"><Logo /><span>轨迹观测</span></div>
-        </div>
         <label className="trace-search">
           <IconSearch />
-          <input placeholder="搜索会话" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input placeholder={S.traces.searchSessions} value={search} onChange={(e) => setSearch(e.target.value)} />
           {search && <button className="search-clear" onClick={() => setSearch("")}><IconClose /></button>}
         </label>
-        <div className="trace-rail-label">会话 {filtered.length ? `(${filtered.length})` : ""}</div>
+        <div className="trace-rail-label">{S.traces.sessions} {filtered.length ? `(${filtered.length})` : ""}</div>
         <div className="trace-rail-list">
-          {!filtered.length && <div className="s-empty">没有会话</div>}
+          {!filtered.length && <div className="s-empty">{S.traces.noSessions}</div>}
           {filtered.map((s) => (
             <button
               key={s.session_id}
@@ -169,31 +172,35 @@ export function TracesPage() {
             >
               <span className="tri-title">{s.name || s.session_id}</span>
               <span className="tri-meta">
-                <span>{s.user_count || 0} 轮</span>
+                <span>{S.traces.rounds(s.user_count || 0)}</span>
                 <span>{fmtFileSize(s.size_bytes || 0)}</span>
               </span>
             </button>
           ))}
         </div>
-        <Link className="trace-rail-back" to="/chat"><IconChat /><span>返回对话</span></Link>
       </aside>
 
       <div className="trace-main">
         {!sessionId && (
           <div className="trace-empty">
-            <h2>选择左侧会话查看执行轨迹</h2>
-            <p>同一工作目录下的 CLI 会话也会出现在这里，Web 与 CLI 共用同一份 session 日志。</p>
+            <h2>{S.traces.pickTitle}</h2>
+            <p>{S.traces.pickDesc}</p>
           </div>
         )}
-        {sessionId && loading && <div className="trace-empty"><p>加载中…</p></div>}
-        {sessionId && !loading && error && <div className="trace-empty"><p>{error}</p></div>}
+        {sessionId && loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
+        {sessionId && !loading && !!errStatus && (
+          <div className="trace-empty">
+            <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
+          </div>
+        )}
         {analysis && <TraceDetail a={analysis} />}
       </div>
-    </div>
+    </AppShell>
   );
 }
 
 function TraceDetail({ a }: { a: Analysis }) {
+  const S = useStrings();
   const t = a.totals;
   const tokens = t.tokens;
   return (
@@ -211,32 +218,28 @@ function TraceDetail({ a }: { a: Analysis }) {
         </div>
         <div className="trace-head-r">
           <span className="trace-badge">{a.session_id}</span>
-          <button className="dp-btn" onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast("已复制轨迹文件路径"); }}>
-            <IconCopy /> 复制路径
+          <button className="dp-btn" onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast(S.traces.copiedPath); }}>
+            <IconCopy /> {S.traces.copyPath}
           </button>
         </div>
       </div>
 
       <section className="trace-card">
-        <div className="trace-card-title">全局统计</div>
+        <div className="trace-card-title">{S.traces.totals}</div>
         <div className="stat-grid">
-          <Stat label="轮次" value={String(t.rounds)} />
-          <Stat label="输入 tokens" value={fmtN(tokens.input)} hint={tokens.cacheRead ? `缓存命中 ${fmtN(tokens.cacheRead)}` : undefined} />
-          <Stat label="成本" value={money(t.costUsd)} hint={a.meta.model ? undefined : "缺少模型信息"} />
-          <Stat label="工具调用" value={String(t.toolCalls)} hint={t.toolErrors ? `失败 ${t.toolErrors}` : `成功 ${t.toolOk}`} />
-          <Stat label="等待时间" value={ms(t.waitMs)} />
-          <Stat label="耗时" value={ms(t.elapsedMs)} hint={`模型 ${ms(t.llmMs)}`} />
-          <Stat label="响应次数" value={String(t.requests)} hint={a.reconnectCount ? `重试 ${a.reconnectCount}` : undefined} />
-          <Stat label="输出 tokens" value={fmtN(tokens.output)} />
-          <Stat label="输出 TPS" value={`${t.tps.toFixed(1)} tok/s`} />
+          <Stat label={S.traces.statRounds} value={String(t.rounds)} />
+          <Stat label={S.traces.statInput} value={fmtN(tokens.input)} hint={tokens.cacheRead ? S.traces.cacheHit(fmtN(tokens.cacheRead)) : undefined} />
+          <Stat label={S.traces.statCost} value={money(t.costUsd)} hint={a.meta.model ? undefined : S.traces.noModelInfo} />
+          <Stat label={S.traces.statToolCalls} value={String(t.toolCalls)} hint={t.toolErrors ? S.traces.failed(t.toolErrors) : S.traces.succeeded(t.toolOk)} />
+          <Stat label={S.traces.statWait} value={ms(t.waitMs)} />
+          <Stat label={S.traces.statElapsed} value={ms(t.elapsedMs)} hint={S.traces.modelTime(ms(t.llmMs))} />
+          <Stat label={S.traces.statRequests} value={String(t.requests)} hint={a.reconnectCount ? S.traces.retried(a.reconnectCount) : undefined} />
+          <Stat label={S.traces.statOutput} value={fmtN(tokens.output)} />
+          <Stat label={S.traces.statTps} value={`${t.tps.toFixed(1)} tok/s`} />
         </div>
-        {!a.hasTimeline && (
-          <p className="trace-note">
-            这个会话记录于轨迹事件上线之前，只能列出消息，不做时间线推测。
-          </p>
-        )}
+        {!a.hasTimeline && <p className="trace-note">{S.traces.noTimeline}</p>}
         {t.compactions > 0 && (
-          <p className="trace-note">上下文被压缩 {t.compactions} 次，压缩轮次单独成卡。</p>
+          <p className="trace-note">{S.traces.compactions(t.compactions)}</p>
         )}
       </section>
 
@@ -258,8 +261,9 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 }
 
 function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number; analysis: Analysis }) {
+  const S = useStrings();
   const [open, setOpen] = useState(ordinal === 1);
-  const label = round.compaction ? "上下文压缩" : `第 ${ordinal} 轮`;
+  const label = round.compaction ? S.traces.compaction : S.traces.round(ordinal);
   return (
     <section className={"trace-card round" + (round.compaction ? " compaction" : "")}>
       <button className="round-head" onClick={() => setOpen(!open)}>
@@ -267,18 +271,17 @@ function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number
         <span className="round-title">{label}</span>
         <span className="round-subject" title={round.title}>{round.title}</span>
         <span className="round-stats">
-          <span title="请求次数">⇅ {round.requests}</span>
-          <span title="工具调用 / 失败">🔧 {round.toolCalls}{round.toolErrors ? ` (${round.toolErrors} 失败)` : ""}</span>
-          <span title="输出 tokens">↑ {fmtN(round.tokens.output)}</span>
-          <span title="成本">{money(round.costUsd)}</span>
-          <span title="耗时">{ms(round.durationMs)}</span>
-          <span title="输出 TPS">{round.tps.toFixed(1)} tok/s</span>
+          <span title={S.traces.hRequests}>⇅ {round.requests}</span>
+          <span title={S.traces.hToolCalls}>🔧 {round.toolCalls}{round.toolErrors ? ` (${S.traces.failed(round.toolErrors)})` : ""}</span>
+          <span title={S.traces.hOutput}>↑ {fmtN(round.tokens.output)}</span>
+          <span title={S.traces.hCost}>{money(round.costUsd)}</span>
+          <span title={S.traces.hElapsed}>{ms(round.durationMs)}</span>
+          <span title={S.traces.hTps}>{round.tps.toFixed(1)} tok/s</span>
         </span>
       </button>
       {open && (
         <div className="round-body">
-          <PhaseBar round={round} />
-          <Lanes round={round} analysis={analysis} />
+          <Timeline round={round} analysis={analysis} />
           <EntryList entries={round.entries} />
         </div>
       )}
@@ -286,98 +289,125 @@ function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number
   );
 }
 
-function PhaseBar({ round }: { round: Round }) {
-  const total = PHASES.reduce((sum, p) => sum + (round.phases[p.key] || 0), 0);
-  if (total <= 0) return null;
-  return (
-    <div className="phase-block">
-      <div className="phase-title">执行阶段</div>
-      <div className="phase-bar">
-        {PHASES.map((p) => {
-          const v = round.phases[p.key] || 0;
-          if (v <= 0) return null;
-          return (
-            <span
-              key={p.key}
-              className={"phase-seg " + p.cls}
-              style={{ width: `${(v / total) * 100}%` }}
-              title={`${p.label} ${ms(v)}`}
-            />
-          );
-        })}
-      </div>
-      <div className="phase-legend">
-        {PHASES.map((p) => {
-          const v = round.phases[p.key] || 0;
-          if (v <= 0) return null;
-          return (
-            <span key={p.key} className="phase-key">
-              <i className={"phase-dot " + p.cls} />
-              {p.label} <b>{ms(v)}</b>
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+const TICKS = [0, 0.25, 0.5, 0.75, 1];
 
-/** Serial model lane + one lane per tool call, positioned on the round's clock. */
-function Lanes({ round, analysis }: { round: Round; analysis: Analysis }) {
-  const start = Date.parse(round.startTs) || 0;
-  const end = Date.parse(round.endTs) || start + 1;
-  const span = Math.max(end - start, 1);
+/**
+ * The round on its own clock: a serial model lane, then one lane per tool call
+ * in the order the model issued them, all sharing the round's time axis.
+ *
+ * This replaced a stacked bar of per-phase totals. The totals answered "where
+ * did the time go" and nothing else — two tools running side by side and the
+ * same two run back to back drew the identical picture, which is the one
+ * question worth asking of a trace. They are still on the round header as
+ * numbers, where a number is all they were.
+ */
+function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
+  const S = useStrings();
   const segs = analysis.modelSegments.filter((s) => s.taskIndex === round.taskIndex);
-  const spans = analysis.toolSpans.filter((s) => s.taskIndex === round.taskIndex);
+  const spans = useMemo(
+    () => analysis.toolSpans
+      .filter((s) => s.taskIndex === round.taskIndex)
+      .sort((a, b) => (Date.parse(a.callTs) || 0) - (Date.parse(b.callTs) || 0)),
+    [analysis.toolSpans, round.taskIndex],
+  );
   if (!segs.length && !spans.length) return null;
 
-  const pos = (from: string, to: string) => {
-    const a = Date.parse(from) || start;
-    const b = Date.parse(to || from) || a;
-    return { left: `${((a - start) / span) * 100}%`, width: `${Math.max(((b - a) / span) * 100, 0.5)}%` };
+  // The axis spans everything drawn, not `startTs..endTs`: a tool whose output
+  // lands after the round's last model event would otherwise run off the end
+  // and be clamped to a flat edge at 100%.
+  const stamps: number[] = [];
+  const at = (ts?: string) => (ts ? Date.parse(ts) || 0 : 0);
+  for (const s of segs) stamps.push(at(s.startTs), at(s.endTs));
+  for (const sp of spans) stamps.push(at(sp.callTs), at(sp.approvalTs), at(sp.outputTs));
+  const marks = stamps.filter((v) => v > 0);
+  const t0 = Math.min(...marks, at(round.startTs) || Infinity);
+  const t1 = Math.max(...marks, at(round.endTs) || 0);
+  const span = Math.max(t1 - t0, 1);
+
+  const pos = (from: string, to?: string) => {
+    const a = at(from) || t0;
+    const b = at(to) || a;
+    const left = Math.max(0, Math.min(100, ((a - t0) / span) * 100));
+    // A floor, so a sub-millisecond call is still a visible tick rather than a
+    // lane that reads as "never ran".
+    const width = Math.max(((b - a) / span) * 100, 0.6);
+    return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` };
   };
   const phaseFor = (kind: string) =>
     kind === "thinking" ? "ph-thinking" : kind === "text" ? "ph-text" : "ph-args";
 
+  const used = new Set<string>();
+  for (const s of segs) used.add(phaseFor(s.kind));
+  for (const sp of spans) {
+    if (sp.approvalTs) used.add("ph-wait");
+    used.add("ph-exec");
+  }
+
   return (
     <div className="lane-block">
+      <div className="lane-title">{S.traces.timeline}<span className="lane-total">{ms(span)}</span></div>
       <div className="lane-row">
-        <span className="lane-name">模型</span>
+        <span className="lane-name">{S.traces.laneModel}</span>
         <div className="lane">
           {segs.map((s) => (
             <span key={s.key} className={"lane-seg " + phaseFor(s.kind)} style={pos(s.startTs, s.endTs)}
-                  title={`${s.kind}${s.name ? " · " + s.name : ""} ${ms(Date.parse(s.endTs) - Date.parse(s.startTs))}`} />
+                  title={`${s.kind}${s.name ? " · " + s.name : ""} ${ms(at(s.endTs) - at(s.startTs))}`} />
           ))}
         </div>
       </div>
-      {spans.map((sp) => (
+      {spans.map((sp, i) => (
         <div className="lane-row" key={sp.toolCallId}>
-          <span className="lane-name" title={sp.name}>{sp.name || "tool"}</span>
+          <span className="lane-name" title={sp.name}>
+            <span className="lane-ord">{i + 1}</span> {sp.name || "tool"}
+          </span>
           <div className="lane">
             {sp.approvalTs && (
-              <span className="lane-seg ph-wait" style={pos(sp.callTs, sp.approvalTs)} title={`审批等待 ${ms(Date.parse(sp.approvalTs) - Date.parse(sp.callTs))}`} />
+              <span className="lane-seg ph-wait" style={pos(sp.callTs, sp.approvalTs)}
+                    title={S.traces.approvalWait(ms(at(sp.approvalTs) - at(sp.callTs)))} />
             )}
-            {sp.outputTs && (
+            {sp.outputTs ? (
               <span className="lane-seg ph-exec" style={pos(sp.approvalTs || sp.callTs, sp.outputTs)}
-                    title={`执行 ${ms(Date.parse(sp.outputTs) - Date.parse(sp.approvalTs || sp.callTs))}`} />
+                    title={S.traces.exec(ms(at(sp.outputTs) - at(sp.approvalTs || sp.callTs)))} />
+            ) : (
+              <span className="lane-seg ph-exec pending" style={pos(sp.callTs)}
+                    title={S.traces.noResult} />
             )}
-            {!sp.outputTs && <span className="lane-seg ph-exec pending" style={pos(sp.callTs, sp.callTs)} title="没有结果（被中断或仍在运行）" />}
           </div>
         </div>
       ))}
-      <div className="lane-axis"><span>0ms</span><span>{ms(span)}</span></div>
+      <div className="lane-axis">
+        <span className="lane-name" />
+        <div className="lane-ticks">
+          {TICKS.map((f) => (
+            <span key={f} className="lane-tick" style={{ left: `${f * 100}%` }}>{ms(Math.round(f * span))}</span>
+          ))}
+        </div>
+      </div>
+      {/* Colours only. The per-phase totals used to be printed here and are a
+          trap next to a wall-clock axis: they are sums across lanes, so a round
+          with four parallel tools reads "tool execution 9.4s" under an axis that
+          ends at 6.8s. Each bar carries its own duration on hover, and the round
+          header carries the totals. */}
+      <div className="phase-legend">
+        {PHASES.filter((p) => used.has(p.cls)).map((p) => (
+          <span key={p.key} className="phase-key">
+            <i className={"phase-dot " + p.cls} />{p.label(S)}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
 
 function EntryList({ entries }: { entries: Entry[] }) {
+  const S = useStrings();
   const [openAll, setOpenAll] = useState(false);
   return (
     <div className="entry-block">
       <div className="entry-head">
-        <span>摘要 ({entries.length})</span>
+        <span>{S.traces.summary(entries.length)}</span>
         <button className="entry-expand" onClick={() => setOpenAll(!openAll)}>
-          {openAll ? "全部收起" : "全部展开"}
+          {openAll ? S.traces.collapseAll : S.traces.expandAll}
         </button>
       </div>
       <div className="entry-list">
@@ -405,7 +435,7 @@ function EntryRow({ e, forceOpen }: { e: Entry; forceOpen: boolean }) {
       </button>
       {expanded && expandable && (
         <div className="entry-detail">
-          <button className="entry-copy" onClick={() => { void navigator.clipboard.writeText(e.detail); showToast("已复制"); }}>
+          <button className="entry-copy" onClick={() => { void navigator.clipboard.writeText(e.detail); showToast(getStrings().common.copied); }}>
             <IconCopy />
           </button>
           <pre>{e.detail}</pre>

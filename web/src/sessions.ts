@@ -1,4 +1,5 @@
 import * as api from "./api";
+import { getStrings } from "./i18n";
 import { uid } from "./lib/format";
 import {
   askConfirm, bump, getState, projectIdForDir, saveSessions, setState, showToast,
@@ -107,7 +108,7 @@ export function archiveSession(id: string) {
     localStorage.removeItem("ag_a");
   }
   bump();
-  showToast("已归档");
+  showToast(getStrings().session.archived);
 }
 
 export function unarchiveSession(id: string) {
@@ -117,15 +118,16 @@ export function unarchiveSession(id: string) {
   saveSessions();
   void api.unarchiveSessionApi(id);
   bump();
-  showToast("已恢复");
+  showToast(getStrings().session.restored);
 }
 
 export function deleteSession(id: string) {
   const sess = getState().sessions[id];
   if (!sess) return;
+  const S = getStrings();
   askConfirm({
-    title: "删除会话",
-    msg: `“${sess.title}” 及其服务端日志将被永久删除。`,
+    title: S.session.removeSession,
+    msg: S.session.removeSessionMsg(sess.title),
     onOk: async () => {
       const st = getState();
       delete st.sessions[id];
@@ -136,7 +138,7 @@ export function deleteSession(id: string) {
       saveSessions();
       bump();
       await api.deleteSessionApi(id);
-      showToast("会话已删除");
+      showToast(S.session.deleted);
     },
   });
 }

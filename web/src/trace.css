@@ -1,10 +1,10 @@
-/* Trace observation page: session rail + per-round timeline cards. */
-.trace-page{display:flex;height:100%;flex:1;min-width:0;width:100%}
+/* Traces: a middle picker column next to the shared app sidebar, then the
+   per-round timeline cards. */
 .trace-link{margin-left:8px;font-size:11px;color:var(--fg2);text-decoration:none;border:1px solid var(--border);border-radius:999px;padding:1px 8px}
 .trace-link:hover{background:var(--bg3);color:var(--fg)}
 
-/* ---- session rail ---- */
-.trace-rail{width:270px;min-width:270px;height:100vh;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column}
+/* ---- session picker (middle column) ---- */
+.trace-rail{width:250px;min-width:250px;height:100vh;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:12px}
 .trace-search{display:flex;align-items:center;gap:8px;margin:0 12px 8px;padding:6px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg)}
 .trace-search svg{width:14px;height:14px;color:var(--fg3);flex-shrink:0}
 .trace-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--fg);font-size:12.5px;outline:none;font-family:var(--sans)}
@@ -15,10 +15,6 @@
 .trace-rail-item.active{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--fg)}
 .tri-title{font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tri-meta{display:flex;gap:8px;font-size:10px;color:var(--fg3);font-family:var(--mono)}
-.trace-rail-back{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding:11px 14px;font-size:12.5px;color:var(--fg2);text-decoration:none}
-.trace-rail-back:hover{background:var(--bg3);color:var(--fg)}
-.trace-rail-back svg{width:15px;height:15px}
-
 /* ---- main column ---- */
 .trace-main{flex:1;overflow:auto;padding:18px 26px 40px;min-width:0}
 .trace-empty{color:var(--fg2);padding:60px 0;text-align:center}
@@ -54,11 +50,7 @@
 .round-body{padding:4px 14px 14px;border-top:1px solid var(--border)}
 
 /* ---- phase bar ---- */
-.phase-block{margin:10px 0 14px}
-.phase-title{font-size:11px;color:var(--fg3);margin-bottom:6px}
-.phase-bar{display:flex;height:14px;border-radius:4px;overflow:hidden;background:var(--bg3)}
-.phase-seg{display:block;height:100%}
-.phase-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:7px;font-size:10.5px;color:var(--fg3);font-family:var(--mono)}
+.phase-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:9px;margin-left:118px;font-size:10.5px;color:var(--fg3);font-family:var(--mono)}
 .phase-key{display:inline-flex;align-items:center;gap:5px}
 .phase-dot{width:8px;height:8px;border-radius:2px;display:inline-block}
 .ph-thinking{background:#7c5cff}
@@ -68,14 +60,24 @@
 .ph-exec{background:#10b981}
 .ph-other{background:#94a3b8}
 
-/* ---- lanes ---- */
-.lane-block{margin-bottom:14px}
+/* ---- timeline lanes ---- */
+.lane-block{margin:4px 0 16px}
+.lane-title{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--fg3);margin-bottom:7px}
+.lane-total{font-family:var(--mono);font-size:10px;color:var(--fg2)}
 .lane-row{display:flex;align-items:center;gap:8px;margin-bottom:3px}
 .lane-name{width:110px;flex-shrink:0;text-align:right;font-size:10px;color:var(--fg3);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane-ord{display:inline-block;min-width:13px;margin-right:4px;color:var(--fg3);opacity:.65}
 .lane{position:relative;flex:1;height:12px;background:var(--bg3);border-radius:3px;overflow:hidden}
 .lane-seg{position:absolute;top:0;height:100%;border-radius:2px;min-width:2px}
 .lane-seg.pending{background:repeating-linear-gradient(45deg,#10b981,#10b981 3px,transparent 3px,transparent 6px);min-width:6px}
-.lane-axis{display:flex;justify-content:space-between;margin-left:118px;font-size:9.5px;color:var(--fg3);font-family:var(--mono);margin-top:2px}
+/* The axis is a row like the lanes, so its ticks share their coordinate space:
+   a tick placed inside .lane-ticks lines up with a segment at the same
+   percentage, which a separately-padded strip does not. */
+.lane-axis{display:flex;align-items:center;gap:8px;margin-top:4px}
+.lane-ticks{position:relative;flex:1;height:13px;border-top:1px solid var(--border2)}
+.lane-tick{position:absolute;top:2px;font-size:9.5px;color:var(--fg3);font-family:var(--mono);transform:translateX(-50%);white-space:nowrap}
+.lane-tick:first-child{transform:none}
+.lane-tick:last-child{transform:translateX(-100%)}
 
 /* ---- entry stream ---- */
 .entry-block{border:1px solid var(--border);border-radius:10px;background:var(--bg);overflow:hidden}
@@ -110,4 +112,6 @@
 @media(max-width:900px){
   .trace-rail{display:none}
   .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .lane-name{width:70px}
+  .phase-legend{margin-left:0}
 }

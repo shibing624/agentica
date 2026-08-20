@@ -5,6 +5,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TracesPage } from "./pages/TracesPage";
 import { ConfirmDialog, Toast } from "./components/Feedback";
+import { applyLang } from "./i18n";
 import { applyTheme, getState } from "./store";
 
 /** Any 401 means the same thing — the session expired, or the gateway was
@@ -24,8 +25,11 @@ function AuthGate() {
 }
 
 export function App() {
-  // On <html>, so a deep link straight to /traces is themed too.
-  useEffect(() => { applyTheme(getState().theme); }, []);
+  // Both on <html>, so a deep link straight to /traces is themed and tagged too.
+  useEffect(() => {
+    applyTheme(getState().theme);
+    applyLang(getState().lang);
+  }, []);
   return (
     <BrowserRouter>
       <AuthGate />

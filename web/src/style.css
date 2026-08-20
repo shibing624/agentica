@@ -46,7 +46,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .sidebar.collapsed .side-search-item input{display:none}
 .side-head{padding:14px 16px 8px;display:flex;align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
-.brand-logo{width:24px;height:24px;border-radius:6px;flex-shrink:0}
+.brand-logo{width:24px;height:24px;flex-shrink:0;object-fit:contain}
 .side-nav{display:flex;flex-direction:column;gap:2px;padding:4px 8px 10px}
 .side-nav-item{width:100%;min-height:34px;border:none;border-radius:9px;background:transparent;color:var(--fg2);display:flex;align-items:center;gap:10px;padding:8px 10px;font-size:13px;font-weight:500;line-height:1;cursor:pointer;transition:background var(--t),color var(--t)}
 .side-nav-item:hover{background:var(--bg3);color:var(--fg)}
@@ -195,7 +195,9 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .ctx-ring.ctx-danger{color:#cf222e}
 [data-theme="dark"] .ctx-ring.ctx-warn{color:#e0a830}
 [data-theme="dark"] .ctx-ring.ctx-danger{color:#f85149}
-.ctx-wrap .ctx-tip{display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--bg);color:var(--fg);font-size:11px;padding:10px 14px;border-radius:var(--radius-sm);white-space:nowrap;z-index:200;box-shadow:0 4px 20px rgba(0,0,0,.18)!important;border:1px solid var(--border);min-width:220px}
+/* Opens upward, like .model-dd and .account-pop next to it: the trigger sits in
+   the composer footer, so downward is off-screen. */
+.ctx-wrap .ctx-tip{display:none;position:absolute;bottom:calc(100% + 6px);right:0;background:var(--bg);color:var(--fg);font-size:11px;padding:10px 14px;border-radius:var(--radius-sm);white-space:nowrap;z-index:200;box-shadow:0 -4px 20px rgba(0,0,0,.18)!important;border:1px solid var(--border);min-width:220px}
 .ctx-wrap:hover .ctx-tip,.ctx-wrap .ctx-tip.open{display:block}
 .ctx-tip-header{font-weight:600;font-size:11px;margin-bottom:6px;color:var(--fg);letter-spacing:.02em}
 .ctx-tip-row{display:flex;justify-content:space-between;gap:16px;padding:2px 0;font-size:11px;font-family:var(--mono)}
@@ -206,7 +208,6 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .ctx-tip-divider{border-top:1px solid var(--border);margin:6px 0}
 .input-ctx{height:26px;width:26px;padding:0;justify-content:center;border:1px solid var(--border)!important;border-radius:var(--radius-sm);background:transparent}
 .input-ctx:hover{background:var(--bg3)}
-.input-ctx .ctx-tip{top:auto!important;bottom:calc(100% + 6px);right:0}
 /* editable dir */
 .dir-wrap{position:relative;cursor:pointer}
 .dir-wrap:hover{color:var(--fg2)}
@@ -218,9 +219,11 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 @keyframes modalIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
 .dir-modal h3{font-size:14px;font-weight:600;margin-bottom:4px;color:var(--fg)}
 .dir-modal .dm-desc{font-size:12px;color:var(--fg2);margin:0 0 12px;line-height:1.4}
-.dir-modal .dm-row{display:flex;gap:8px;align-items:center;margin-bottom:12px;width:100%}
-.dir-modal input{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--fg);font-size:12px;font-family:var(--mono);outline:none}
-.dir-modal input:focus{border-color:var(--fg3);box-shadow:0 0 0 2px var(--accent-soft)}
+/* Not scoped to .dir-modal: the same picker sits in the settings modal, where
+   an unstyled row let the path input collapse and pushed 应用 onto its own line. */
+.dm-row{display:flex;gap:8px;align-items:center;margin-bottom:12px;width:100%}
+.dm-row input{flex:1;min-width:0;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--fg);font-size:12px;font-family:var(--mono);outline:none}
+.dm-row input:focus{border-color:var(--fg3);box-shadow:0 0 0 2px var(--accent-soft)}
 .dir-modal .dm-actions{display:flex;gap:6px;justify-content:space-between;align-items:center}
 .dir-modal .dm-left{display:flex;gap:6px}
 .dir-modal .dm-right{display:flex;gap:6px}
@@ -561,7 +564,7 @@ a.side-nav-item{text-decoration:none;color:inherit}
 /* disclaimer at bottom */
 /* ===== WELCOME ===== */
 .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;color:var(--fg2);gap:12px}
-.w-icon-img{width:56px;height:56px;border-radius:50%}
+.w-icon-img{width:56px;height:56px;object-fit:contain}
 .welcome h2{font-size:20px;font-weight:600;color:var(--fg);letter-spacing:-.02em}
 .welcome p{font-size:13px;max-width:380px;color:var(--fg2)}
 .welcome-dir-chip{display:flex;align-items:center;gap:7px;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg2);color:var(--fg2);font-size:12.5px;cursor:pointer;transition:all var(--t);margin-top:4px}

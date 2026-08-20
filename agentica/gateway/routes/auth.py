@@ -16,7 +16,6 @@ Four routes, three of them open (a gate over the door is a locked room):
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from .. import accounts, auth
-from ..config import settings
 
 router = APIRouter(prefix="/api/auth")
 
@@ -30,6 +29,12 @@ async def auth_status(request: Request):
         "authenticated": (not auth.auth_enabled()) or session is not None,
         "user_id": session.user_id if session else None,
         "via": session.via if session else None,
+        "account_id": accounts.ADMIN_USER_ID,
+        # The login page says so, and the settings block nags. Not a secret: a
+        # gateway that still has its generated password says as much to anybody
+        # who can reach the login page, which is the population that should be
+        # told to change it.
+        "password_is_initial": accounts.store().password_is_initial(),
         "min_password_length": accounts.MIN_PASSWORD_LENGTH,
     }
 
@@ -37,15 +42,17 @@ async def auth_status(request: Request):
 @router.post("/login")
 async def login(request: Request, response: Response):
     body = await request.json()
-    user_id = str(body.get("user_id") or settings.default_user_id)
+    # There is one account. Taking the id from the body would let a typo in a
+    # field the page does not even show read back as "wrong password".
+    user_id = accounts.ADMIN_USER_ID
     password = str(body.get("password") or "")
     if not password:
         raise HTTPException(status_code=400, detail="Password is required")
     if not accounts.store().has_password():
         raise HTTPException(
             status_code=409,
-            detail="No password is set on this gateway. Open the printed "
-                   "/chat?token=… URL, or run `agentica-gateway --set-password`.",
+            detail="No password is set on this gateway. Run "
+                   "`agentica-gateway --set-password` on the machine running it.",
         )
     try:
         ok = accounts.store().check_password(user_id, password)
@@ -86,7 +93,7 @@ async def set_password(request: Request, response: Response):
     new = str(body.get("password") or "")
     old = str(body.get("old_password") or "")
     principal: auth.Principal = request.state.principal
-    user_id = principal.user_id
+    user_id = accounts.ADMIN_USER_ID
 
     session = accounts.store().read_session(request.cookies.get(auth.SESSION_COOKIE))
     privileged = principal.kind != "session" or (

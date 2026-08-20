@@ -166,8 +166,8 @@ class GatewayProcess {
     const resolved = resolveCommand();
     if (!resolved) {
       throw new Error(
-        "找不到 agentica-gateway。请先 `pip install \"agentica[gateway]\"`，" +
-          "或用 AGENTICA_GATEWAY_BIN 指向可执行文件。"
+        "Cannot find agentica-gateway. Install it with `pip install \"agentica[gateway]\"`, " +
+          "or point AGENTICA_GATEWAY_BIN at the executable."
       );
     }
 
@@ -215,7 +215,7 @@ class GatewayProcess {
         // Dying at startup is the common failure (no API key, bad config), and
         // its explanation is in the child's stderr — not in a timeout message.
         throw new Error(
-          `gateway 启动失败 (exit ${exited.code ?? exited.signal})\n${stderrTail.trim()}`
+          `The gateway failed to start (exit ${exited.code ?? exited.signal})\n${stderrTail.trim()}`
         );
       }
       const record = readRuntime();
@@ -230,7 +230,9 @@ class GatewayProcess {
       await delay(POLL_MS);
     }
     await this.stop();
-    throw new Error(`gateway 在 ${START_TIMEOUT_MS / 1000}s 内没有就绪\n${stderrTail.trim()}`);
+    throw new Error(
+      `The gateway was not ready within ${START_TIMEOUT_MS / 1000}s\n${stderrTail.trim()}`
+    );
   }
 
   /** Whether the child is still running. */

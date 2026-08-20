@@ -25,7 +25,16 @@ export async function loadStatus() {
 
 export async function loadAuthStatus() {
   const { ok, data } = await api.fetchAuthStatus();
-  if (ok && data) setState({ passwordSet: !!data.password_set });
+  if (!ok || !data) return;
+  setState({
+    passwordSet: !!data.password_set,
+    passwordIsInitial: !!data.password_is_initial,
+    accountId: data.account_id || "admin",
+    // The server owns the minimum: a number hardcoded here would go stale the
+    // day it moves and the only symptom is a form that rejects what the API
+    // accepts (or worse, the reverse).
+    minPasswordLength: data.min_password_length || 6,
+  });
 }
 
 export async function loadProfiles() {

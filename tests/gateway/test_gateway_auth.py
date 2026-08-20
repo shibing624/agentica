@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import stat
+import unicodedata
 
 import pytest
 
@@ -20,10 +21,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 TOKEN = "test-token-not-a-real-secret"
 
+#: The one web account. Not `settings.default_user_id` — that names a data
+#: partition on disk and deliberately has nothing to do with signing in.
+ADMIN_ID = "admin"
+
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
-    """A gateway with the gate ON and a pinned token."""
+    """A gateway with the gate ON and a pinned token.
+
+    Startup seeds the `admin` account, so this client is a *fresh install*: a
+    generated password exists and is flagged as generated. A test that wants no
+    password at all has to clear it and say why.
+    """
     from agentica.gateway import auth, deps, runtime
     from agentica.gateway.main import app
 
@@ -95,17 +105,25 @@ class TestGate:
         assert client.cookies.get("agentica_session") is None
         assert accounts.store()._read()["sessions"] == {}
 
-    def test_shell_route_refuses_with_html_not_json(self, client):
-        """A browser is the only thing that opens /chat, so refuse in HTML."""
-        resp = client.get("/chat")
-        assert resp.status_code == 401
-        assert resp.headers["content-type"].startswith("text/html")
-        assert "GATEWAY_AUTH=false" in resp.text
+    def test_shell_route_refuses_by_sending_the_browser_to_the_login_page(self, client):
+        """A browser is the only thing that opens /chat, and it always has
+        somewhere to go now: first start seeds an account. The hand-written
+        "you need a token" HTML page is gone with the flow it described."""
+        resp = client.get("/chat", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/login?next=/chat"
 
     @pytest.mark.parametrize("path", ["/", "/health", "/api/health"])
     def test_probes_stay_open(self, client, path):
         """A desktop shell polls one of these before it knows the token."""
         assert client.get(path).status_code == 200
+
+    @pytest.mark.parametrize("path", ["/favicon.ico", "/favicon.png"])
+    def test_favicon_stays_open(self, client, path):
+        """The tab icon is fetched from the origin root, including /login."""
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert not resp.headers["content-type"].startswith("application/json")
 
     def test_third_party_webhook_stays_open(self, client):
         """Feishu signs its own callbacks and cannot carry our token; gating
@@ -148,8 +166,49 @@ class TestPasswordLogin:
         """The login page has to render before anybody is authorized."""
         body = client.get("/api/auth/status").json()
         assert body["auth_enabled"] is True
-        assert body["password_set"] is False
         assert body["authenticated"] is False
+        # A fresh gateway: seeded, and honest that it is still the generated one.
+        assert body["password_set"] is True
+        assert body["password_is_initial"] is True
+        assert body["account_id"] == ADMIN_ID
+        assert body["min_password_length"] == 6
+
+    def test_the_seeded_password_is_the_way_in(self, client):
+        """What a user does on a fresh install: read the password out of the
+        startup banner and type it."""
+        from agentica.gateway import accounts
+
+        password = accounts.store().read_initial_password()
+        assert password and len(password) >= 6
+        assert client.post("/api/auth/login", json={"password": password}).status_code == 200
+        assert client.get("/api/status").status_code == 200
+
+    def test_seeding_is_idempotent(self, client):
+        """It runs on every boot, so a second call must not mint a new password
+        and lock the user out of the one they wrote down."""
+        from agentica.gateway import accounts
+
+        first = accounts.store().read_initial_password()
+        assert accounts.store().seed_admin() is None
+        assert accounts.store().read_initial_password() == first
+
+    def test_the_generated_password_is_readable_but_only_by_its_owner(self, client):
+        """It is kept in plaintext on purpose — a gateway started detached or by
+        the desktop shell prints to a log nobody reads — so the mode matters."""
+        from agentica.gateway import accounts
+
+        path = accounts.store().initial_password_path
+        assert path.is_file()
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_changing_it_retires_the_plaintext_copy(self, client):
+        from agentica.gateway import accounts
+
+        path = accounts.store().initial_password_path
+        assert path.is_file()
+        accounts.store().set_password(ADMIN_ID, "chosen one")
+        assert not path.exists()
+        assert accounts.store().password_is_initial() is False
 
     def test_login_page_is_reachable_while_signed_out(self, client):
         assert client.get("/login").status_code == 200
@@ -157,7 +216,7 @@ class TestPasswordLogin:
     def test_login_then_api_works_without_any_token(self, client):
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         assert client.post(
             "/api/auth/login", json={"password": "correct horse battery"}
         ).status_code == 200
@@ -167,12 +226,18 @@ class TestPasswordLogin:
     def test_wrong_password_is_refused(self, client):
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         assert client.post("/api/auth/login", json={"password": "wrong"}).status_code == 401
         assert client.get("/api/status").status_code == 401
 
     def test_login_without_a_password_configured_says_so(self, client):
-        """A 401 here would read as "wrong password" on a gateway that has none."""
+        """A 401 here would read as "wrong password" on a gateway that has none.
+
+        Only reachable by clearing it explicitly now that first start seeds one.
+        """
+        from agentica.gateway import accounts
+
+        accounts.store().clear_password(ADMIN_ID)
         resp = client.post("/api/auth/login", json={"password": "anything"})
         assert resp.status_code == 409
         assert "--set-password" in resp.json()["detail"]
@@ -182,7 +247,7 @@ class TestPasswordLogin:
         reachable from the LAN in the deployment that required a password."""
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         codes = [
             client.post("/api/auth/login", json={"password": "no"}).status_code
             for _ in range(7)
@@ -201,7 +266,7 @@ class TestPasswordLogin:
         from agentica.gateway import accounts, auth, deps, runtime
         from agentica.gateway.main import app
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
         cookie = client.cookies.get("agentica_session")
 
@@ -221,7 +286,7 @@ class TestPasswordLogin:
         """Clearing the cookie is not enough: a copied cookie must stop too."""
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
         stolen = client.cookies.get("agentica_session")
         client.post("/api/auth/logout")
@@ -232,31 +297,36 @@ class TestPasswordLogin:
     def test_shell_route_sends_a_signed_out_browser_to_the_login_page(self, client):
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         resp = client.get("/chat", follow_redirects=False)
         assert resp.status_code == 302
         assert resp.headers["location"] == "/login?next=/chat"
 
-    def test_the_token_url_is_not_printed_once_a_password_exists(self, client):
-        """Printing a credential in the log has no upside when there is another
-        way in."""
-        from agentica.gateway import accounts, runtime
-        from agentica.gateway.main import _entry_url
+    def test_the_startup_notice_carries_the_password_and_not_the_token(self, client):
+        """The banner used to print `/chat?token=…`, which changed on every
+        restart and was the only way in. A password is what a person can be
+        told once."""
+        from agentica.gateway.main import _sign_in_notice
 
-        rec = runtime.GatewayRuntime(pid=1, host="127.0.0.1", port=8881,
-                                     token=TOKEN, version="")
-        assert TOKEN in _entry_url(rec)
-        accounts.store().set_password("default", "correct horse battery")
-        assert TOKEN not in _entry_url(rec)
+        notice = _sign_in_notice(ADMIN_ID, "abcd-efgh")
+        assert "admin / abcd-efgh" in notice
+        assert TOKEN not in notice
+        assert "token" not in notice.lower()
+        # The frame lines up even though one line is Chinese (CJK glyphs are two
+        # terminal columns wide, so len() would leave it ragged).
+        assert len({len(line.encode("utf-8")) for line in notice.splitlines()}) > 1
+        widths = {sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in line)
+                  for line in notice.splitlines()}
+        assert len(widths) == 1
 
     def test_changing_the_password_signs_other_browsers_out(self, client):
         """A password change is what a user does after "somebody may have my
         cookie"; keeping those sessions alive would defeat the point."""
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
-        other = accounts.store().open_session("default", "password")
+        other = accounts.store().open_session(ADMIN_ID, "password")
 
         assert client.post(
             "/api/auth/password",
@@ -266,9 +336,11 @@ class TestPasswordLogin:
         # The browser that made the change keeps working.
         assert client.get("/api/status").status_code == 200
 
-    def test_a_token_holder_may_set_the_first_password(self, client):
-        """There is no old password to type, and they already proved they can
-        read a 0600 file on this machine."""
+    def test_a_token_holder_may_change_it_without_the_old_one(self, client):
+        """They already proved they can read a 0600 file on this machine — which
+        is where the generated password is kept anyway. This is the desktop
+        shell's path: it signs itself in with the token and shows no terminal,
+        so requiring the printed password would strand it."""
         assert client.post(
             "/api/auth/password", headers=_auth(), json={"password": "first password"}
         ).status_code == 200
@@ -279,7 +351,7 @@ class TestPasswordLogin:
     def test_a_password_session_needs_the_old_one(self, client):
         from agentica.gateway import accounts
 
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
         resp = client.post(
             "/api/auth/password", json={"password": "another long one", "old_password": "nope"}
@@ -287,9 +359,14 @@ class TestPasswordLogin:
         assert resp.status_code == 400
 
     def test_a_short_password_is_refused(self, client):
-        resp = client.post("/api/auth/password", headers=_auth(), json={"password": "short"})
+        """Six, because scrypt and the login throttle are the real defences and a
+        longer minimum only pushes people toward a password they already use."""
+        resp = client.post("/api/auth/password", headers=_auth(), json={"password": "12345"})
         assert resp.status_code == 400
-        assert "8" in resp.json()["detail"]
+        assert "6" in resp.json()["detail"]
+        assert client.post(
+            "/api/auth/password", headers=_auth(), json={"password": "123456"}
+        ).status_code == 200
 
 
 class TestAccountStore:
@@ -302,20 +379,20 @@ class TestAccountStore:
 
     def test_the_file_holds_a_password_hash_so_it_is_0600(self, tmp_path):
         st = self.store(tmp_path)
-        st.set_password("default", "correct horse battery")
+        st.set_password(ADMIN_ID, "correct horse battery")
         assert stat.S_IMODE(st.path.stat().st_mode) == 0o600
         assert not list(st.path.parent.glob("*.tmp"))
 
     def test_the_plaintext_is_never_written(self, tmp_path):
         st = self.store(tmp_path)
-        st.set_password("default", "correct horse battery")
+        st.set_password(ADMIN_ID, "correct horse battery")
         assert "correct horse battery" not in st.path.read_text()
 
     def test_the_session_token_is_never_written(self, tmp_path):
         """Only its sha256 goes to disk, so a readable auth.json cannot be
         replayed as a session."""
         st = self.store(tmp_path)
-        token = st.open_session("default", "password")
+        token = st.open_session(ADMIN_ID, "password")
         assert token not in st.path.read_text()
         assert st.read_session(token) is not None
 
@@ -324,7 +401,7 @@ class TestAccountStore:
         from datetime import datetime, timedelta, timezone
 
         st = self.store(tmp_path)
-        token = st.open_session("default", "password")
+        token = st.open_session(ADMIN_ID, "password")
         data = json.loads(st.path.read_text())
         (digest,) = data["sessions"].keys()
         data["sessions"][digest]["expires_at"] = (
@@ -341,7 +418,7 @@ class TestAccountStore:
         from datetime import datetime, timedelta, timezone
 
         st = self.store(tmp_path)
-        token = st.open_session("default", "password")
+        token = st.open_session(ADMIN_ID, "password")
         data = json.loads(st.path.read_text())
         (digest,) = data["sessions"].keys()
         soon = datetime.now(timezone.utc) + timedelta(hours=2)
@@ -368,7 +445,7 @@ class TestAccountStore:
         from agentica.gateway.accounts import LoginThrottled
 
         st = self.store(tmp_path)
-        st.set_password("default", "correct horse battery")
+        st.set_password(ADMIN_ID, "correct horse battery")
         for _ in range(5):
             assert st.check_password("ghost", "x") is False
         with pytest.raises(LoginThrottled):
@@ -423,12 +500,25 @@ class TestOpenBindGuard:
         monkeypatch.setenv("GATEWAY_AUTH", "true")
         assert "set-password" in _refuse_open_bind("0.0.0.0")
 
-    def test_lan_bind_with_a_password_is_allowed(self, monkeypatch):
+    def test_lan_bind_with_only_the_generated_password_is_refused(self, monkeypatch):
+        """Seeding must not quietly satisfy this guard. The generated password
+        is printed to a log and kept in plaintext so a locked-out owner can get
+        in on loopback — neither is true of a credential facing a network."""
         from agentica.gateway import accounts
         from agentica.gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
-        accounts.store().set_password("default", "correct horse battery")
+        accounts.store().seed_admin()
+        assert accounts.store().has_password() is True
+        assert "generated" in _refuse_open_bind("0.0.0.0")
+
+    def test_lan_bind_with_a_chosen_password_is_allowed(self, monkeypatch):
+        from agentica.gateway import accounts
+        from agentica.gateway.main import _refuse_open_bind
+
+        monkeypatch.setenv("GATEWAY_AUTH", "true")
+        accounts.store().seed_admin()
+        accounts.store().set_password(ADMIN_ID, "correct horse battery")
         assert _refuse_open_bind("0.0.0.0") is None
 
     def test_gate_off_is_an_explicit_instruction_and_is_obeyed(self, monkeypatch):

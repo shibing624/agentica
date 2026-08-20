@@ -24,13 +24,26 @@
  */
 
 const path = require("node:path");
-const { app, BrowserWindow, dialog, Menu, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
 const {
-  HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, isAppUrl, restartDelayMs,
+  HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, iconPath, isAppUrl, restartDelayMs,
 } = require("./util");
 
 const log = (msg) => console.log(`[desktop] ${msg}`);
+
+/** The app icon, or null when the file is missing or this platform can't read
+ *  it. Loaded once: `nativeImage` decoding is disk I/O, and the window and the
+ *  dock want the same image. */
+const icon = (() => {
+  const file = iconPath(process.platform, path.join(__dirname, ".."));
+  const image = nativeImage.createFromPath(file);
+  if (image.isEmpty()) {
+    log(`no app icon at ${file} — using the default`);
+    return null;
+  }
+  return image;
+})();
 
 let gateway = null;
 let win = null;
@@ -56,6 +69,7 @@ function createWindow() {
     title: "Agentica",
     backgroundColor: "#ffffff",
     show: false,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -166,8 +180,8 @@ async function handleGatewayExit(code) {
   if (quitting) return;
   if (restarts >= MAX_GATEWAY_RESTARTS) {
     fatal(
-      `gateway 反复退出（最后一次 ${code}），已放弃重启。`,
-      "在终端里跑 `agentica-gateway` 看具体报错。"
+      `The gateway keeps exiting (last code ${code}); giving up on restarting it.`,
+      "Run `agentica-gateway` in a terminal to see the actual error."
     );
     return;
   }
@@ -179,7 +193,7 @@ async function handleGatewayExit(code) {
   try {
     await startGatewayAndWindow();
   } catch (err) {
-    fatal("gateway 重启失败。", err);
+    fatal("Could not restart the gateway.", err);
   }
 }
 
@@ -191,7 +205,7 @@ async function boot() {
     // A blank window with no explanation is the worst outcome here: the usual
     // causes (gateway not installed, no API key, bad config.yaml) are all
     // fixable, and the message says which one it is.
-    fatal("Agentica 启动失败。", err);
+    fatal("Agentica could not start.", err);
   }
 }
 
@@ -202,6 +216,12 @@ async function boot() {
  * could call: a window with no menu cannot be reloaded or inspected at all,
  * which turns any renderer hiccup into "quit and reopen", and a bridge would be
  * a capability that exists only in the desktop build.
+ *
+ * The shell's own text is English and does not follow the in-app language
+ * setting. That setting lives in the renderer's localStorage, and every string
+ * here is either a native `role` (which Electron localises itself, from the OS
+ * language) or a dialog that fires when the gateway never came up — i.e. when
+ * there is no renderer to read a preference from.
  */
 function installMenu() {
   const isMac = process.platform === "darwin";
@@ -210,7 +230,7 @@ function installMenu() {
     { role: "fileMenu" },
     { role: "editMenu" },
     {
-      label: "视图",
+      label: "View",
       submenu: [
         { role: "reload" },
         { role: "forceReload" },
@@ -227,6 +247,19 @@ function installMenu() {
   ]));
 }
 
+/**
+ * The dock icon, macOS and unpackaged runs only.
+ *
+ * macOS reads an app's icon from its bundle, so `BrowserWindow#icon` is ignored
+ * and a packaged build needs nothing here — but `npm start` runs inside
+ * Electron's own bundle, which is why a dev launch otherwise shows the generic
+ * Electron atom in the dock and the ⌘-Tab switcher.
+ */
+function installDockIcon() {
+  if (!icon || process.platform !== "darwin" || app.isPackaged) return;
+  app.dock.setIcon(icon);
+}
+
 // A second launch must reach the window that already exists, not start a
 // second gateway against the same ~/.agentica.
 if (!app.requestSingleInstanceLock()) {
@@ -241,6 +274,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     installMenu();
+    installDockIcon();
     return boot();
   });
 
@@ -287,6 +321,10 @@ function armSmokeProbe(target) {
             origin,
             spawned: gateway ? gateway.spawned : false,
             gatewayPid: gateway && gateway.child ? gateway.child.pid : null,
+            // Whether this platform's icon file decoded. An ICO handed to a
+            // non-Windows build decodes to an empty image, which looks exactly
+            // like having configured no icon at all.
+            iconSize: icon ? icon.getSize() : null,
             // What the page can see of itself: a signed-in SPA renders the
             // composer, the login page renders a password field.
             probe: await target.webContents.executeJavaScript(

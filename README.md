@@ -12,7 +12,7 @@
 
 **一个人，一支 agent 团队。**
 
-终端里起多个会话并行干活、互相通信；长任务跑着的时候人走开了，也能从微信/企微把它喊回来。
+CLI 终端、本机 Web、Desktop App 是同一套产品：多个会话并行干活、互相通信；人走开了也能从微信/企微把本机 agent 喊回来。
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
@@ -20,13 +20,46 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://github.com/shibing624/agentica/blob/main/requirements.txt)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#社区与支持)
 
-**Agentica** 是给开发者使用的本机 Agent CLI + Python SDK：把一个终端会话变成一个可协作的 agent，把多个会话组成一支可并行推进任务的队伍。
+**Agentica** 是给开发者使用的本机 Agent：**CLI** + **Web** + **Desktop App** + Python SDK。一个终端会话就是一个可协作的 agent，多个会话组成一支队伍。
 
 |  | |
 |------|------|
-| **多个会话一起干活** | `list_agents` / `send_message` 让不同终端里的 Agent 互相看见、互发进展，不靠复制粘贴同步上下文 |
-| **大活交给独立进程** | `delegate` 另起完整 `agentica --query --print` 进程（独立 context / cwd），`task` 用进程内 subagent 处理短活 |
-| **人可以离开现场** | `/goal` 让长任务持续推进；Web Gateway 与 `PEER_BRIDGE` 让微信/企微等 IM 直连本机 CLI：`@会话名` 自己寻址，或者只说一句人话让网关 agent 去群发、把跑着的任务喊回来 |
+| **CLI** | `agentica` 进交互终端；`delegate` / `task` / peer 消息让多个会话一起干活 |
+| **Web** | `agentica-gateway` 起本机网页（聊天、轨迹、设置），微信/企微等 IM 也可直连 |
+| **Desktop App** | Electron 壳，窗口里就是同一套 Web；同一 `~/.agentica` 上已有 gateway 就直接连过去 |
+| **人可以离开现场** | Web Gateway 与 `PEER_BRIDGE` 让微信/企微等 IM 直连本机 CLI：`@会话名` 自己寻址，或者只说一句人话让网关 agent 去群发 |
+
+## 评测
+
+同一 `deepseek-v4-flash-official`、同一 Responses 接口、思考 `high`，对 Codex CLI。完整说明与复现命令见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
+
+**Coding** — [Aider Polyglot](https://github.com/Aider-AI/polyglot-benchmark) Python 全量 34 题，两边全对；Agentica 更快、更少工具、更少 token。
+
+![Agentica_pk_Codex](https://github.com/shibing624/agentica/blob/main/docs/assets/polyglot-agentica-vs-codex.png)
+
+| 指标 | Agentica | Codex CLI |
+|---|---|---|
+| 准确率 | **34/34（100%）** | **34/34（100%）** |
+| 总墙钟 | **1486s** | 2332s（1.57×） |
+| 平均墙钟 / 题 | **43.7s** | 68.6s |
+| tool calls | **139** | 168（1.21×） |
+| 输入 token | **1.24M** | 2.85M（2.30×） |
+| 输出 token | **173k** | 201k（1.17×） |
+
+**Data analysis** — [InfiAgent-DABench](https://github.com/InfiAgent/InfiAgent) DAEval validation 全量 257 题。准确率 Agentica 略高，墙钟和输入 token 差一截。
+
+![Agentica_pk_Codex_DABench](https://github.com/shibing624/agentica/blob/main/docs/assets/dabench-agentica-vs-codex.png)
+
+| 指标 | Agentica | Codex CLI |
+|---|---|---|
+| 准确率 | **220/257（85.6%）** | 215/257（83.66%） |
+| 总墙钟 | **3241s** | 6609s（2.04×） |
+| 平均墙钟 / 题 | **12.6s** | 25.7s |
+| tool calls | **499** | 861（1.73×） |
+| 输入 token | **3.87M** | 13.02M（3.36×） |
+| 输出 token | **277k** | 420k（1.51×） |
+
+原始结果在 [`evaluation/code_benchmark/results/`](https://github.com/shibing624/agentica/tree/main/evaluation/code_benchmark/results)。
 
 ## 安装
 
@@ -54,9 +87,31 @@ export OPENAI_API_KEY="sk-xxx"
 agentica
 ```
 
-进入交互终端后直接说话即可，例如「帮我看下这个仓库的单测为什么挂了」。长任务用 `/goal`，多会话协作用 `delegate` / peer 消息，详见下文 [CLI](#cli) 一节。
+进入交互终端后直接说话即可，例如「帮我看下这个仓库的单测为什么挂了」。多会话协作用 `delegate` / peer 消息，详见下文 [CLI](#cli) 一节。
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/cli_snap.png" width="800" alt="Agentica CLI 截图" />
+
+### Web
+
+```bash
+pip install -U "agentica[gateway]"
+agentica-gateway
+```
+
+本机网页在 `http://127.0.0.1:8881/chat`（聊天、轨迹、设置）。微信 / 企微 / 飞书 / Telegram 等 IM 也可直连，详见 [Gateway 文档](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
+
+<img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI 截图" />
+
+### Desktop App
+
+窗口里就是同一套 Web UI。同一 `~/.agentica` 上已经有 gateway 就直接连过去，没有才拉起一个。
+
+```bash
+pip install -e ".[gateway]"   # 仓库根目录，一次即可
+cd desktop && npm install && npm start
+```
+
+详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
 
 ### Python SDK
 
@@ -89,9 +144,14 @@ agent = DeepAgent()
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **多模态** — 文本、图像、音频、视频理解
 
-**长任务与协作**
+**产品入口**
 
-- **`/goal` 长任务循环** — `await agent.run_goal("xxx")` 持续推进，自动判断完成、续跑、暂停；支持 token / wall-clock / turn 三种 hard cap；CLI `/goal /subgoal` 即开即用，详见 [文档](https://shibing624.github.io/agentica/advanced/goals)
+- **CLI** — `agentica` 交互终端；进程内 `task`、进程级 `delegate`、跨终端 peer 消息
+- **Web** — `agentica-gateway` 本机 SPA（聊天 / 轨迹 / 设置）+ IM 渠道
+- **Desktop App** — Electron 薄壳，同一套 Web，先 attach 再 spawn
+
+**协作**
+
 - **多智能体** — SDK：`Agent.as_tool()`、Workflow、Swarm、[Markdown Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)；CLI：进程内 `task`、进程级 `delegate`、跨终端 peer 消息（见 [终端文档](https://shibing624.github.io/agentica/getting-started/terminal)）
 - **Actor-Critic 精炼** — `refine()` + 多 Critic 并行评审，`SchemaCritic` 程序级零成本验证 / `AgentCritic` 异构强模型把关，循环检测自动早停
 
@@ -99,16 +159,12 @@ agent = DeepAgent()
 
 - **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `users/{user_id}/AGENTS.md`（CLI default 也可写 `~/.agentica/AGENTS.md` symlink）
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
-- **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`（流程见下图）
+- **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`，流程见 [Skills 文档](https://shibing624.github.io/agentica/advanced/skills)
 
 **集成**
 
 - **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica 自进化流程图" />
-</div>
 
 ## 架构
 
@@ -132,21 +188,6 @@ Agentica 的单体 Agent 运行在一个纯粹的基于控制流的 `while(true)
 agentica
 ```
 
-### 长任务：`/goal`
-
-让 Agent 持续向一个目标推进，每轮结束自动判断是否完成，没完成就续跑——直到 judge 判 done、预算耗尽、或用户主动停下。
-
-CLI：
-
-```text
-/goal 实现 xxx 功能并跑通 pytest    # 设置目标 + 自动开跑
-/goal status                       # 显示状态、预算、subgoals
-/goal pause | resume | clear
-/subgoal 必须补单测                  # 给目标加验收条件
-```
-
-完整说明：[Standing Goal Loop 文档](https://shibing624.github.io/agentica/advanced/goals)。
-
 ### 协作：`task` / `delegate` / peer
 
 | 机制 | 做什么 | 何时用 |
@@ -156,26 +197,6 @@ CLI：
 | peer | 两个交互终端互发纯文本（`list_agents` / `send_message`） | 告诉另一会话「这边改了什么」，不是雇工 |
 
 选型细节：[Choosing](https://shibing624.github.io/agentica/multi-agent/choosing) · [终端文档](https://shibing624.github.io/agentica/getting-started/terminal)。
-
-## Web UI / IM 集成
-
-```bash
-pip install -U "agentica[gateway]"
-```
-
-启动：
-
-```bash
-agentica-gateway
-```
-
-<img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI 截图" />
-
-Web 网页会启动在 `http://127.0.0.1:8881/chat`。
-
-除 Web 网页外，还支持手机端 IM 接入 QQ / 飞书 / 微信 / 企微 / Telegram / Discord / Slack 等，内置定时任务调度。
-
-IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway 文档](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
 
 ## 示例
 
@@ -202,31 +223,10 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 |---|---|---|---|
 | 模型选择 | ✅ 多厂商自由切换 | 仅 Claude 模型 | 仅 OpenAI 模型 |
 | 跨终端多会话协作 | ✅ peer + `delegate` / `task` | ❌ | ❌ |
-| `/goal` 长任务循环 | ✅ 预算控制 + 自动判完成 + 断点续跑 | ❌ | ❌ |
-| Web UI + IM Gateway | ✅ 微信 / 企微 / 飞书 / Telegram 等直连本机 | ❌ | ❌ |
+| Web + Desktop + IM | ✅ 本机网页 / Desktop App / 微信企微飞书 Telegram | ❌ | ❌ |
 | 自进化 Skill | ✅ 经验自动编译 `SKILL.md` | ❌ | ❌ |
 | Python SDK | ✅ 完整 SDK，可嵌入任意代码 | 部分（绑定 Claude） | ❌ |
 | 开源 | ✅ Apache 2.0 | ❌ | ✅ |
-
-## 评测
-
-[Aider Polyglot](https://github.com/Aider-AI/polyglot-benchmark) Python 全量 34 题，同一 `deepseek-v4-flash-official`、同一 pytest。完整说明见 [评测页](https://shibing624.github.io/agentica/guides/benchmark)。
-
-同一模型下 Agentica 更快、更少工具、更少 token，更省钱。
-
-![Agentica_pk_Codex](https://github.com/shibing624/agentica/blob/main/docs/assets/polyglot-agentica-vs-codex.png)
-
-| 指标 | Agentica | Codex CLI |
-|---|---|---|
-| 准确率 | **34/34（100%）** | **34/34（100%）** |
-| 总墙钟 | **1486s** | 2332s（1.57×） |
-| 平均墙钟 / 题 | **43.7s** | 68.6s |
-| tool calls | **139** | 168（1.21×） |
-| 输入 token | **1.24M** | 2.85M（2.30×） |
-| 输出 token | **173k** | 201k（1.17×） |
-| crash / 误报完成 / 误改 | **0** | **0** |
-
-原始结果：Agentica [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260819-195326-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260819-195326-polyglot/predictions.jsonl)；Codex [`summary.json`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/summary.json) / [`predictions.jsonl`](https://github.com/shibing624/agentica/blob/main/evaluation/code_benchmark/results/20260817-215956-polyglot/predictions.jsonl)。
 
 ## 🔥 News
 

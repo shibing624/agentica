@@ -15,6 +15,7 @@ import asyncio
 import os
 import socket
 import sys
+import unicodedata
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from agentica.config import AGENTICA_LOG_LEVEL
 from agentica.utils.log import enable_process_file_logging, logger
@@ -59,16 +60,33 @@ def _display_home_path(path: str) -> str:
     return path
 
 
-def _entry_url(record: "runtime.GatewayRuntime") -> str:
-    """The address to hand a human.
+def _sign_in_notice(user_id: str, password: str) -> str:
+    """The boxed "here is your password" block for the startup log.
 
-    Carries the token on the first hop, unless a password is set — then the
-    login page is the way in and printing a credential in the log is a leak
-    with no upside.
+    A box because this is the one line in a noisy startup log that the user has
+    to act on, and it competes with model-loading and channel chatter. Reprinted
+    on every boot while the password is still the generated one — the previous
+    design printed a per-process token URL, so anybody who scrolled past it, or
+    whose gateway was started by launchd or the desktop shell, had no way back
+    in short of resetting the password.
     """
-    if record.token and not accounts.store().has_password():
-        return f"{record.url}/chat?token={record.token}"
-    return f"{record.url}/chat"
+    lines = [
+        f"Web sign-in:  {user_id} / {password}",
+        "",
+        "This is the generated password and has not been changed yet.",
+        "Change it in the web UI (设置 › 常规 › 访问) or with",
+        "`agentica-gateway --set-password`.",
+    ]
+    # Padded by display width, not character count: the box has a Chinese line
+    # in it and a CJK glyph occupies two terminal columns, so ljust() would
+    # leave the right edge of the frame ragged.
+    def cols(text: str) -> int:
+        return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+
+    width = max(cols(line) for line in lines)
+    bar = "+" + "-" * (width + 4) + "+"
+    body = [f"|  {line}{' ' * (width - cols(line))}  |" for line in lines]
+    return "\n".join([bar, *body, bar])
 
 
 # How often the parent-pid watchdog looks. Short enough that a killed shell
@@ -180,8 +198,7 @@ async def lifespan(app: FastAPI):
         )
 
     # Publish how to reach this process (port + token) so a desktop shell or a
-    # second terminal can find it, and print the one URL that works on a cold
-    # browser — with the token, since without it /chat is a 401.
+    # second terminal can find it.
     record = runtime.GatewayRuntime(
         pid=os.getpid(),
         host=settings.host,
@@ -190,21 +207,34 @@ async def lifespan(app: FastAPI):
         version=__version__,
     )
     runtime_path = runtime.publish(record)
-    logger.info(f"Web service started — {_entry_url(record)}")
+    logger.info(f"Web service started — {record.url}/chat")
     if not auth.auth_enabled():
         logger.warning(
             "  API auth is OFF (GATEWAY_AUTH=false) — anything that can reach "
             f"{record.url} can run tools as you"
         )
-    elif accounts.store().has_password():
-        logger.info("  Sign in with your web password")
-        logger.info(f"  Runtime (port + token): {_display_home_path(str(runtime_path))}")
     else:
+        # Seeding here, not in `main()`: the CLI path is not the only way this
+        # app gets served (uvicorn/gunicorn point at `main:app` too), and an
+        # account that exists only when started one particular way is an
+        # account that is missing exactly when somebody is locked out.
+        seeded = accounts.store().seed_admin()
+        if accounts.store().password_is_initial():
+            password = seeded or accounts.store().read_initial_password()
+            if password:
+                logger.info("\n" + _sign_in_notice(accounts.ADMIN_USER_ID, password))
+            else:
+                # The 0600 copy is gone but the flag says it was never changed:
+                # nobody can tell the user what to type, so say that instead of
+                # printing a box with a blank in it.
+                logger.warning(
+                    "  The generated password was removed from "
+                    f"{_display_home_path(str(accounts.store().initial_password_path))} "
+                    "before it was changed — run `agentica-gateway --set-password`"
+                )
+        else:
+            logger.info(f"  Sign in as {accounts.ADMIN_USER_ID} with your web password")
         logger.info(f"  Runtime (port + token): {_display_home_path(str(runtime_path))}")
-        logger.info(
-            "  No web password set — the URL above is the way in. "
-            "`agentica-gateway --set-password` switches to a login page."
-        )
 
     # A desktop shell owns this process; if the shell is killed outright there
     # is nobody left to stop us, and an orphan gateway keeps holding the port
@@ -313,6 +343,18 @@ def _spa_index() -> HTMLResponse:
 
 if _UI_ASSETS.is_dir():
     app.mount("/assets", StaticFiles(directory=_UI_ASSETS), name="ui-assets")
+
+
+@app.get("/favicon.ico")
+@app.get("/favicon.png")
+async def web_favicon(request: Request):
+    """Tab icon for /chat and /login. Lives at the UI root, not under /assets."""
+    name = "favicon.ico" if request.url.path.endswith(".ico") else "favicon.png"
+    path = _UI_DIR / name
+    if not path.is_file():
+        return Response(status_code=404)
+    media = "image/x-icon" if name.endswith(".ico") else "image/png"
+    return FileResponse(path, media_type=media)
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -718,11 +760,13 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
 def _refuse_open_bind(host: str) -> Optional[str]:
     """Why this host must not be served, or None.
 
-    Binding past loopback puts ``execute`` on the network. The token alone is
-    not enough there: it is printed in a terminal and mailed around in a
-    ``runtime.json`` path, and there is no way to change it without a restart.
-    A password is the credential a person can rotate, so it is the price of
-    admission — and refusing at startup is the only moment anybody is watching.
+    Binding past loopback puts ``execute`` on the network, and the price of
+    admission is a password *the user chose*. The generated one does not count:
+    it is printed to a log and kept in plaintext next to ``auth.json`` so that a
+    locked-out owner can still get in on loopback — both fine for a machine you
+    are sitting at, and neither true of a credential facing a network. So this
+    refuses a fresh install as well as a seeded-but-unchanged one, and startup
+    is the only moment anybody is watching.
 
     ``GATEWAY_AUTH=false`` is not caught here on purpose: turning the gate off
     is an explicit instruction, and an explicit argument is intent. It gets a
@@ -730,12 +774,13 @@ def _refuse_open_bind(host: str) -> Optional[str]:
     """
     if host in LOOPBACK_HOSTS or not auth.auth_enabled():
         return None
-    if accounts.store().has_password():
+    store = accounts.store()
+    if store.has_password() and not store.password_is_initial():
         return None
     return (
-        f"refusing to serve {host}: that is reachable from the network and no "
-        "web password is set. Run `agentica-gateway --set-password` first, or "
-        "bind 127.0.0.1."
+        f"refusing to serve {host}: that is reachable from the network and the "
+        "web password is still the generated one. Run "
+        "`agentica-gateway --set-password` first, or bind 127.0.0.1."
     )
 
 
@@ -745,7 +790,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     args = _parse_args(argv)
     if args.set_password:
-        raise SystemExit(accounts.set_password_interactive(settings.default_user_id))
+        raise SystemExit(accounts.set_password_interactive())
 
     settings.host = args.host
     settings.parent_pid = args.parent_pid

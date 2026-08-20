@@ -76,6 +76,11 @@ export type McpForm = {
 };
 
 export type AppState = {
+  /** Bumped on every change. This store is a mutable singleton — `state` and
+   *  every object inside it keep their identity forever — so a `useMemo` over
+   *  store data can only be keyed on this. Keying on `state.sessions` looks
+   *  right and never recomputes. */
+  rev: number;
   curSess: string | null;
   sessions: Record<string, Session>;
   streams: Record<string, { abortCtrl: AbortController; aiMsg: ChatMsg }>;
@@ -101,6 +106,9 @@ export type AppState = {
   selectedApprovalMode: string;
   sidebarCollapsed: boolean;
   theme: string;
+  /** UI language. Lives here rather than in i18n.ts so a component reading
+   *  strings re-renders through the same `rev` bump as everything else. */
+  lang: "en" | "zh";
   toast: { show: boolean; msg: string };
   confirm: { open: boolean; title: string; msg: string; okLabel: string; onOk: (() => void) | null };
   dirModal: { open: boolean; forNewSession: boolean; value: string };
@@ -126,6 +134,10 @@ export type AppState = {
   /** Whether a web password exists. Decides what the access-control block
    *  offers ("set" vs "change") and whether logging out is a thing. */
   passwordSet: boolean;
+  /** Still the password the gateway generated on first start. */
+  passwordIsInitial: boolean;
+  accountId: string;
+  minPasswordLength: number;
   passwordForm: { old: string; next: string; repeat: string; busy: boolean };
 };
 
@@ -154,9 +166,9 @@ export function emptyMcpForm(): McpForm {
 }
 
 const listeners = new Set<() => void>();
-let rev = 0;
 
 const state: AppState = {
+  rev: 0,
   curSess: null,
   sessions: {},
   streams: {},
@@ -182,8 +194,9 @@ const state: AppState = {
   selectedApprovalMode: localStorage.getItem("ag_approval") || "auto",
   sidebarCollapsed: false,
   theme: localStorage.getItem("ag_theme") || "auto",
+  lang: localStorage.getItem("ag_lang") === "zh" ? "zh" : "en",
   toast: { show: false, msg: "" },
-  confirm: { open: false, title: "", msg: "", okLabel: "Delete", onOk: null },
+  confirm: { open: false, title: "", msg: "", okLabel: "", onOk: null },
   dirModal: { open: false, forNewSession: false, value: "" },
   dirHistory: [],
   dirBrowse: { open: false, path: "", parent: null, dirs: [] },
@@ -205,13 +218,16 @@ const state: AppState = {
   cronBusy: "",
   sidebarSearch: "",
   passwordSet: false,
+  passwordIsInitial: false,
+  accountId: "admin",
+  minPasswordLength: 6,
   passwordForm: { old: "", next: "", repeat: "", busy: false },
 };
 
 export function getState() { return state; }
 
 export function bump() {
-  rev += 1;
+  state.rev += 1;
   listeners.forEach((l) => l());
 }
 
@@ -226,7 +242,7 @@ export function subscribe(fn: () => void) {
 }
 
 export function useAppState(): AppState {
-  useSyncExternalStore(subscribe, () => rev, () => rev);
+  useSyncExternalStore(subscribe, () => state.rev, () => state.rev);
   return state;
 }
 
@@ -236,18 +252,20 @@ export function showToast(msg: string, ms = 1800) {
   window.setTimeout(() => { state.toast = { show: false, msg: "" }; bump(); }, ms);
 }
 
-/** Ask before something irreversible. The dialog is rendered by <ConfirmDialog />. */
+/** Ask before something irreversible. The dialog is rendered by <ConfirmDialog />.
+ *  An omitted `okLabel` is filled in there with the translated "Delete" — this
+ *  module must not import the string table, since the table reads the store. */
 export function askConfirm(opts: { title: string; msg: string; okLabel?: string; onOk: () => void }) {
   setState({
     confirm: {
       open: true, title: opts.title, msg: opts.msg,
-      okLabel: opts.okLabel || "Delete", onOk: opts.onOk,
+      okLabel: opts.okLabel || "", onOk: opts.onOk,
     },
   });
 }
 
 export function closeConfirm() {
-  setState({ confirm: { open: false, title: "", msg: "", okLabel: "Delete", onOk: null } });
+  setState({ confirm: { open: false, title: "", msg: "", okLabel: "", onOk: null } });
 }
 
 export function saveSessions() {

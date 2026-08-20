@@ -1,10 +1,10 @@
 import type { ReactNode, SVGProps } from "react";
+import catLogo from "./assets/cat.png";
 
-export const LOGO_SRC =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%234A90D9'/%3E%3Cstop offset='100%25' stop-color='%23A8D8EA'/%3E%3C/linearGradient%3E%3ClinearGradient id='body' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23E8F4FD'/%3E%3Cstop offset='100%25' stop-color='%23d0e8f8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23bg)'/%3E%3Cpath d='M28 38 L22 18 L38 30 Z' fill='%23E8F4FD'/%3E%3Cpath d='M72 38 L78 18 L62 30 Z' fill='%23E8F4FD'/%3E%3Cpath d='M28 38 L22 18 L38 30' fill='none' stroke='%23d0e8f8' stroke-width='1'/%3E%3Cpath d='M72 38 L78 18 L62 30' fill='none' stroke='%23d0e8f8' stroke-width='1'/%3E%3Cellipse cx='50' cy='52' rx='28' ry='28' fill='url(%23body)'/%3E%3Ccircle cx='39' cy='46' r='4.5' fill='%232C3E50'/%3E%3Ccircle cx='61' cy='46' r='4.5' fill='%232C3E50'/%3E%3Ccircle cx='40.2' cy='44.8' r='1.5' fill='white'/%3E%3Ccircle cx='62.2' cy='44.8' r='1.5' fill='white'/%3E%3Cellipse cx='50' cy='55' rx='3.5' ry='2' fill='%23F4A0B0'/%3E%3Cpath d='M46.5 55 Q50 59 53.5 55' stroke='%232C3E50' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3Cline x1='28' y1='52' x2='16' y2='48' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='28' y1='55' x2='16' y2='55' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='72' y1='52' x2='84' y2='48' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='72' y1='55' x2='84' y2='55' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E";
+export const LOGO_SRC = catLogo;
 
 export function Logo({ className = "brand-logo" }: { className?: string }) {
-  return <img className={className} src={LOGO_SRC} alt="logo" />;
+  return <img className={className} src={LOGO_SRC} alt="Agentica" />;
 }
 
 function S({ children, ...rest }: SVGProps<SVGSVGElement> & { children: ReactNode }) {
