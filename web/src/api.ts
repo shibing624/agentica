@@ -151,3 +151,9 @@ export function streamChat(payload: unknown, signal?: AbortSignal) {
     signal,
   });
 }
+
+export const steerChatApi = (session_id: string, message: string) =>
+  postJson<{ accepted: boolean }>("/api/chat/steer", { session_id, message });
+
+export const takeSteerApi = (session_id: string) =>
+  postJson<{ messages: string[] }>("/api/chat/steer/take", { session_id, message: "" });

@@ -1,6 +1,8 @@
 /**
  * Workspace file browser: directory list <-> file preview (penguin's drill-down).
- * Text over 12000 characters is truncated; Markdown has rendered/source views.
+ * Text over 256 KiB is truncated; source highlighting stops at 64 KiB.
+ * Markdown has rendered/source views. Source views (and fenced blocks inside
+ * rendered Markdown) use CodeFrame.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
@@ -10,8 +12,10 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
 import * as api from "../api";
+import { CodeFrame, MarkdownCode } from "../components/CodeFrame";
 import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
+import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { joinWorkspacePath } from "../lib/file-path";
 import { askConfirm, showToast } from "../store";
 import { IconCopy, IconFinder, IconFolder, IconTerminal } from "../icons";
@@ -136,11 +140,13 @@ export function WorkspaceBrowser({
     const { ok, data } = await api.fetchWorkspacePreview(root, filePath);
     if (nonce !== previewSeq) return;
     if (!ok || !data) { present({ path: filePath, name, kind: "unsupported" }); return; }
+    const content = data.content || "";
+    if (isMd && content.length > HIGHLIGHT_LIMIT) setRichView("source");
     present({
       path: filePath,
       name,
       kind: isHtml ? "html" : isMd ? "md" : "text",
-      content: data.content || "",
+      content,
       truncated: !!data.truncated,
     });
   }, [root]);
@@ -194,11 +200,6 @@ export function WorkspaceBrowser({
     const src = api.workspaceContentUrl(root, preview.path);
     const dl = api.workspaceContentUrl(root, preview.path, true);
     const sourceView = preview.kind === "text" || ((preview.kind === "md" || preview.kind === "html") && richView === "source");
-    const copyVisible = () => {
-      const text = preview.content || "";
-      if (!text) return;
-      void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));
-    };
     return (
       <div className="ws-browser">
         <div className="ws-preview-bar">
@@ -216,15 +217,9 @@ export function WorkspaceBrowser({
               ))}
             </div>
           )}
-          {sourceView && preview.content != null && (
-            <button type="button" className="ws-tool-btn ws-copy-btn" title={S.files.copyVisible}
-                    onClick={copyVisible}>
-              <IconCopy />
-            </button>
-          )}
           <a className="ws-tool-btn" href={dl} download={preview.name}>{S.files.download}</a>
         </div>
-        <div className="ws-preview-body">
+        <div className={"ws-preview-body" + (sourceView ? " source" : "")}>
           {preview.kind === "image" && <img src={src} alt={preview.name} />}
           {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
           {preview.kind === "html" && richView === "rendered" && preview.content !== undefined && (
@@ -252,14 +247,20 @@ export function WorkspaceBrowser({
                     const target = resolveRelative(dirOf(preview.path), href);
                     return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); void previewPath(target); }}>{children}</a>;
                   },
+                  pre: ({ children }) => <>{children}</>,
+                  code: MarkdownCode,
                 }}>{preview.content || ""}</Markdown>
               </div>
               {preview.truncated && <p className="ws-trunc">{S.files.previewTruncated}</p>}
             </>
           )}
-          {(preview.kind === "text" || ((preview.kind === "md" || preview.kind === "html") && richView === "source")) && (
+          {sourceView && (
             <>
-              <pre className="ws-source">{preview.content}</pre>
+              <CodeFrame
+                code={preview.content || ""}
+                language={languageFromFilename(preview.name)}
+                highlight={(preview.content || "").length <= HIGHLIGHT_LIMIT}
+              />
               {preview.truncated && <p className="ws-trunc">{S.files.previewTruncated}</p>}
             </>
           )}

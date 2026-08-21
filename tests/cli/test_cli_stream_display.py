@@ -119,12 +119,12 @@ class TestCLIStreamDisplay(unittest.TestCase):
         self.assertFalse(markdown_calls, "plain-text mode must not render Markdown")
 
 
-    def test_stream_display_manager_buffers_markdown_stream_until_finalize(self):
-        """Markdown mode buffers the streamed text and only renders on finalize.
+    def test_stream_display_manager_buffers_incomplete_markdown_until_finalize(self):
+        """An incomplete last block stays buffered; finalize flushes it.
 
-        Uses a real ``Console`` (StringIO-backed) instead of MagicMock because
-        the gutter proxy needs a working ``capture()`` to inspect rendered
-        ANSI. Assertions target the visible transcript, not mock call args.
+        A heading with no following block is still open, so it must not land
+        token-by-token. Uses a real ``Console`` (StringIO-backed) because the
+        gutter proxy needs a working ``capture()``.
         """
         from io import StringIO
         from rich.console import Console
@@ -137,12 +137,11 @@ class TestCLIStreamDisplay(unittest.TestCase):
 
         dm.stream_response("# Title")
         pre_final = buf.getvalue()
-        self.assertNotIn("Title", pre_final, "markdown mode should buffer stream text until finalize")
+        self.assertNotIn("Title", pre_final, "incomplete last block must stay buffered")
 
         dm.finalize()
         post_final = buf.getvalue()
         self.assertIn("Title", post_final, "finalize must flush the buffered markdown")
-        # Assistant ▏ gutter no longer decorates markdown — plain output
         self.assertNotIn("▏", post_final)
 
 
@@ -360,6 +359,131 @@ class TestCLIStreamDisplay(unittest.TestCase):
         self.assertIn("b0", blocks[1]["content"])
 
 
+class TestSafeCommitEnd(unittest.TestCase):
+    """Fence-aware blank-line boundary used to commit complete Markdown blocks."""
+
+    def test_no_boundary_without_blank_line_or_leftover(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        self.assertEqual(_safe_commit_end(""), 0)
+        self.assertEqual(_safe_commit_end("hello"), 0)
+        self.assertEqual(_safe_commit_end("hello\nworld"), 0)
+        self.assertEqual(_safe_commit_end("# Title\n\n"), 0)
+
+    def test_blank_line_commits_when_leftover_follows(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        text = "# Title\n\n- item"
+        self.assertEqual(_safe_commit_end(text), len("# Title\n\n"))
+
+    def test_list_items_without_blank_line_stay_one_block(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        self.assertEqual(_safe_commit_end("- a\n- b\n- c"), 0)
+        text = "- a\n- b\n\nNext"
+        self.assertEqual(_safe_commit_end(text), len("- a\n- b\n\n"))
+
+    def test_unclosed_fence_is_not_split(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        self.assertEqual(_safe_commit_end("```python\ncode\n\nstill"), 0)
+        text = "intro\n\n```python\ncode\n\nstill"
+        self.assertEqual(_safe_commit_end(text), len("intro\n\n"))
+
+    def test_closed_fence_commits_when_leftover_follows(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        closed = "```python\nx\n```\n"
+        self.assertEqual(_safe_commit_end(closed), 0)
+        text = closed + "\nnext"
+        self.assertEqual(_safe_commit_end(text), len(closed + "\n"))
+
+    def test_tilde_fence_matches_backtick_rules(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        self.assertEqual(_safe_commit_end("~~~python\ncode\n\nstill"), 0)
+        text = "~~~python\nx\n~~~\n\nnext"
+        self.assertEqual(_safe_commit_end(text), len("~~~python\nx\n~~~\n\n"))
+
+    def test_table_stays_together_until_blank_line(self):
+        from agentica.cli.display.stream import _safe_commit_end
+
+        table = "| a | b |\n|---|---|\n| 1 | 2 |"
+        self.assertEqual(_safe_commit_end(table), 0)
+        text = table + "\n\nnext"
+        self.assertEqual(_safe_commit_end(text), len(table + "\n\n"))
+
+
+class TestIncrementalMarkdownCommit(unittest.TestCase):
+    """Complete Markdown blocks print during the stream; the tail waits."""
+
+    def _mgr(self, setting="on"):
+        from io import StringIO
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        buf = StringIO()
+        con = Console(file=buf, width=80, force_terminal=False, no_color=True)
+        with patch("agentica.cli.display.stream.get_setting", return_value=setting):
+            dm = StreamDisplayManager(con)
+        return dm, buf
+
+    def test_heading_commits_when_next_block_starts(self):
+        dm, buf = self._mgr()
+        dm.stream_response("# Title\n\n")
+        self.assertNotIn("Title", buf.getvalue())
+        dm.stream_response("body still growing")
+        self.assertIn("Title", buf.getvalue())
+        self.assertNotIn("body still growing", buf.getvalue())
+        dm.finalize()
+        self.assertIn("body still growing", buf.getvalue())
+
+    def test_unclosed_fence_waits_until_closed_or_finalize(self):
+        dm, buf = self._mgr()
+        dm.stream_response("```python\nprint(1)\n")
+        self.assertNotIn("print(1)", buf.getvalue())
+        dm.stream_response("print(2)\n")
+        self.assertNotIn("print(2)", buf.getvalue())
+        dm.finalize()
+        out = buf.getvalue()
+        self.assertIn("print(1)", out)
+        self.assertIn("print(2)", out)
+
+    def test_closed_fence_commits_before_following_paragraph(self):
+        dm, buf = self._mgr()
+        dm.stream_response("```python\nx = 1\n```\n\n")
+        self.assertNotIn("x = 1", buf.getvalue())
+        dm.stream_response("after")
+        self.assertIn("x = 1", buf.getvalue())
+        self.assertNotIn("after", buf.getvalue())
+        dm.finalize()
+        self.assertIn("after", buf.getvalue())
+
+    def test_list_stays_together_until_blank_line(self):
+        dm, buf = self._mgr()
+        dm.stream_response("- a\n- b\n- c\n")
+        self.assertNotIn("- a", buf.getvalue())
+        dm.stream_response("\nNext para")
+        out = buf.getvalue()
+        self.assertIn("a", out)
+        self.assertIn("b", out)
+        self.assertIn("c", out)
+        self.assertNotIn("Next para", out)
+
+    def test_plain_mode_does_not_commit_markdown_mid_stream(self):
+        dm, buf = self._mgr(setting="off")
+        dm.stream_response("# Title\n\nbody")
+        self.assertNotIn("Title", buf.getvalue())
+        dm.finalize()
+        self.assertIn("Title", buf.getvalue())
+
+    def test_finalize_does_not_reprint_committed_blocks(self):
+        dm, buf = self._mgr()
+        dm.stream_response("# Title\n\nbody")
+        mid = buf.getvalue()
+        self.assertEqual(mid.count("Title"), 1)
+        dm.finalize()
+        self.assertEqual(buf.getvalue().count("Title"), 1)
 
 
 if __name__ == "__main__":

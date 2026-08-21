@@ -8,7 +8,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from agentica.gateway.workspace_files import (
-    TEXT_PREVIEW_CHARS,
+    TEXT_PREVIEW_BYTES,
     WorkspacePathError,
     list_entries,
     read_preview_text,
@@ -40,14 +40,23 @@ def test_list_and_stat(tmp_path):
     assert found == ["README.md", "src/a.py"]
 
 
-def test_preview_truncates_at_12000_chars(tmp_path):
+def test_preview_keeps_a_file_under_256kib(tmp_path):
     root = tmp_path / "ws"
     root.mkdir()
-    body = "x" * (TEXT_PREVIEW_CHARS + 50)
-    (root / "big.txt").write_text(body)
+    body = "x" * 20_000
+    (root / "ok.txt").write_text(body)
+    text, truncated = read_preview_text(root / "ok.txt")
+    assert truncated is False
+    assert text == body
+
+
+def test_preview_reads_only_the_first_256kib(tmp_path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "big.txt").write_bytes(b"x" * (TEXT_PREVIEW_BYTES + 50))
     text, truncated = read_preview_text(root / "big.txt")
     assert truncated is True
-    assert len(text) == TEXT_PREVIEW_CHARS
+    assert text.encode("utf-8") == b"x" * TEXT_PREVIEW_BYTES
 
 
 @pytest.fixture()

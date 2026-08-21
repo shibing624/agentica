@@ -1,12 +1,20 @@
 import { useSyncExternalStore } from "react";
 import * as api from "./api";
 
+/** Ordered stream of one assistant turn (text interleaves with tool groups). */
+export type MsgPart =
+  | { kind: "think"; text: string; t0?: number; ms?: number }
+  | { kind: "tool"; name: string; argsStr: string; result?: string; diff?: string; t0?: number; ms?: number }
+  | { kind: "text"; text: string }
+  | { kind: "steer"; text: string; ts?: number };
+
 export type ChatMsg = {
   role: "user" | "assistant";
   content: string;
   ts?: number;
   files?: string[];
   steps?: Array<Record<string, any>>;
+  parts?: MsgPart[];
   durationSec?: number;
   durationMs?: number;
   llmMs?: number;
@@ -18,6 +26,8 @@ export type ChatMsg = {
   previews?: string[];
   aborted?: boolean;
   error?: string;
+  /** Mid-run interrupt (CLI steer), not a new turn. */
+  steer?: boolean;
 };
 
 export type Session = {
@@ -96,8 +106,12 @@ export type AppState = {
   sessions: Record<string, Session>;
   streams: Record<string, { abortCtrl: AbortController; aiMsg: ChatMsg }>;
   goalRuns: Record<string, { status: string; objective: string; progress: string }>;
+  /** Blocking slash commands (``/compact``) that hold the session lock. */
+  commandRuns: Record<string, { kind: "compact" }>;
   pendingFiles: File[];
   messageQueue: QueuedMessage[];
+  /** Composer is in /goal mode: set a token budget, then type the objective. */
+  goalCompose: { budgetText: string } | null;
   serverModel: string;
   serverDir: string;
   serverProvider: string;
@@ -200,8 +214,10 @@ const state: AppState = {
   sessions: {},
   streams: {},
   goalRuns: {},
+  commandRuns: {},
   pendingFiles: [],
   messageQueue: [],
+  goalCompose: null,
   serverModel: "-",
   serverDir: "",
   serverProvider: "",

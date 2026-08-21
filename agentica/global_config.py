@@ -578,7 +578,7 @@ env: {}
 # gateway (web), and any SDK-created Agent/DeepAgent inherit these unless a
 # caller passes the equivalent constructor argument explicitly.
 settings:
-#  cli_markdown: auto        # off|auto|on — render only the final assistant reply
+#  cli_markdown: auto        # off|auto|on — Markdown the assistant reply; complete blocks stream live
 #  num_history_turns: 20     # conversation turns kept in the prompt window
 #  enable_evict: true        # Layer 1: drop old tool results under pressure
 #  enable_auto_compact: true # Layer 2: LLM-summarise when the window fills

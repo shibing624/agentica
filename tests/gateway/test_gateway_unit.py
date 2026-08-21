@@ -58,6 +58,45 @@ class TestAgentServiceApprovalMode:
         assert run_config.enabled_tools is None
 
 
+class TestAgentServiceSteer:
+    """Web interrupt is Agent.steer on the cached session agent."""
+
+    def _svc(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        return AgentService(workspace_path=str(tmp_path))
+
+    def test_steer_session_forwards_to_cached_agent(self, tmp_path):
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        agent.steer.return_value = True
+        svc._cache.put("s1", agent)
+        assert svc.steer_session("s1", "don't rewrite tests") is True
+        agent.steer.assert_called_once_with("don't rewrite tests")
+
+    def test_steer_session_missing_agent_is_false(self, tmp_path):
+        svc = self._svc(tmp_path)
+        assert svc.steer_session("missing", "hello") is False
+
+    def test_steer_session_wrong_owner_is_false(self, tmp_path):
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = "alice"
+        agent.steer.return_value = True
+        svc._cache.put("s1", agent)
+        assert svc.steer_session("s1", "x", owner="bob") is False
+        agent.steer.assert_not_called()
+
+    def test_take_undelivered_steer_returns_texts(self, tmp_path):
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        agent.pop_undelivered_steer.return_value = [("late", False), ("also", True)]
+        svc._cache.put("s1", agent)
+        assert svc.take_undelivered_steer("s1") == ["late", "also"]
+        agent.pop_undelivered_steer.assert_called_once()
+
+
 class TestAgentServiceRunSource:
     """AgentService passes gateway/cron run source into RunConfig."""
 
@@ -232,7 +271,7 @@ class TestAgentServiceStreamToolDispatch:
         async def on_tool_call(name, args):
             started.append(name)
 
-        async def on_tool_result(name, result):
+        async def on_tool_result(name, result, extra=None):
             results.append((name, result))
 
         with patch(
@@ -254,10 +293,33 @@ class TestAgentServiceStreamToolDispatch:
     def test_each_result_belongs_to_its_own_tool(self, tmp_path):
         _, results, _ = self._run(tmp_path)
         assert results == [
-            ("read_file", "ALPHA"),
+            ("read_file", ""),
             ("execute", "BETA"),
-            ("grep", "GAMMA"),
+            ("grep", ""),
         ]
+
+    def test_write_file_completed_carries_unified_diff(self):
+        from agentica.gateway.services.agent_service import dispatch_stream_chunk
+        from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+
+        extras = []
+
+        async def on_tool_result(name, result, extra=None):
+            extras.append(extra)
+
+        chunk = RunResponse(
+            event=RunEvent.tool_call_completed.value,
+            tool_call=ToolCallInfo(
+                tool_name="write_file",
+                content="Created file, absolute path: hello.py",
+                tool_display_meta={"files": [{
+                    "path": "hello.py", "action": "add", "before": "", "after": "hi\n",
+                }]},
+            ),
+        )
+        asyncio.run(dispatch_stream_chunk(chunk, on_tool_result=on_tool_result))
+        assert extras[0]["diff"].startswith("diff -- hello.py")
+        assert "+hi" in extras[0]["diff"]
 
 
 class TestAgentServiceCronUsesAuxiliaryModel:
@@ -823,61 +885,153 @@ class TestChannelManager:
 class TestResponseFormatter:
     """Test response formatting utilities."""
 
-    def test_format_write_file(self):
+    def test_format_write_file_keeps_full_content(self):
         from agentica.gateway.services.response_formatter import format_tool_call_args
         result = format_tool_call_args("write_file", {
             "file_path": "new.py",
             "content": "import os\nimport sys\n",
         })
-        assert result["_lines"] == 3  # 2 newlines + 1
         assert result["file_path"] == "new.py"
+        assert result["content"] == "import os\nimport sys\n"
 
-    def test_format_generic_truncation(self):
+    def test_format_read_file_truncates_one_liner(self):
         from agentica.gateway.services.response_formatter import format_tool_call_args
         long_str = "x" * 200
-        result = format_tool_call_args("some_tool", {"query": long_str, "limit": 10})
-        assert result["query"].endswith("...")
-        assert len(result["query"]) == 103  # 100 + "..."
-        assert result["limit"] == 10
+        result = format_tool_call_args("read_file", {"file_path": long_str, "offset": 0})
+        assert result["file_path"].endswith("...")
+        assert len(result["file_path"]) == 103
+        assert result["offset"] == 0
 
-    def test_format_tool_result_normal(self):
+    def test_format_execute_keeps_full_command(self):
+        from agentica.gateway.services.response_formatter import format_tool_call_args
+        cmd = "python3 /tmp/bubble_sort.py --n 10000 --seed 1"
+        result = format_tool_call_args("execute", {"command": cmd, "timeout": 300})
+        assert result["command"] == cmd
+        assert result["timeout"] == 300
+
+    def test_format_tool_result_hides_read_file(self):
         from agentica.gateway.services.response_formatter import format_tool_result
         from agentica.run_response import ToolCallInfo
-        name, result_str, is_task = format_tool_result(
+        name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="read_file", content="file contents here")
         )
         assert name == "read_file"
-        assert result_str == "file contents here"
-        assert is_task is False
+        assert result_str == ""
+        assert extra == {}
+
+    def test_format_tool_result_keeps_write_and_search(self):
+        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
+        for name, body in (
+            ("write_file", "Wrote 12 lines to foo.py"),
+            ("apply_patch", "Successfully applied patch to foo.py"),
+            ("write_todos", "Updated 3 todos"),
+            ("web_search", "1. example.com — hello"),
+            ("fetch_url", "<html>ok</html>"),
+            ("save_memory", "Saved to memory"),
+            ("search_memory", "- note about bubble sort"),
+        ):
+            _, result_str, extra = format_tool_result(
+                ToolCallInfo(tool_name=name, content=body)
+            )
+            assert result_str == body, name
+            assert extra == {}
+
+    def test_format_tool_result_write_file_includes_unified_diff(self):
+        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
+        name, result_str, extra = format_tool_result(ToolCallInfo(
+            tool_name="write_file",
+            content="Created file, absolute path: /tmp/a.py",
+            tool_display_meta={"files": [{
+                "path": "a.py", "action": "add", "before": "", "after": "print(1)\n",
+            }]},
+        ))
+        assert name == "write_file"
+        assert "Created file" in result_str
+        assert extra["diff"].startswith("diff -- a.py")
+        assert "+print(1)" in extra["diff"]
+
+    def test_format_tool_result_apply_patch_multi_file_diff(self):
+        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
+        _, _, extra = format_tool_result(ToolCallInfo(
+            tool_name="apply_patch",
+            content="Successfully applied patch to 2 files",
+            tool_display_meta={"files": [
+                {"path": "a.py", "action": "update", "before": "old\n", "after": "new\n"},
+                {"path": "b.py", "action": "delete", "before": "gone\n", "after": None},
+            ]},
+        ))
+        assert "diff -- a.py" in extra["diff"]
+        assert "-old" in extra["diff"]
+        assert "+new" in extra["diff"]
+        assert "diff -- b.py" in extra["diff"]
+        assert "-gone" in extra["diff"]
+
+    def test_format_tool_result_execute_keeps_full_output(self):
+        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
+        body = ("sorted ok\n" * 80)  # well past the old 500-char clip
+        name, result_str, extra = format_tool_result(
+            ToolCallInfo(tool_name="execute", content=body)
+        )
+        assert name == "execute"
+        assert result_str == body
+        assert extra == {}
 
     def test_format_tool_result_empty(self):
         from agentica.gateway.services.response_formatter import format_tool_result
         from agentica.run_response import ToolCallInfo
-        name, result_str, is_task = format_tool_result(
-            ToolCallInfo(tool_name="glob", content="")
+        name, result_str, extra = format_tool_result(
+            ToolCallInfo(tool_name="execute", content="")
         )
         assert result_str == "(no output)"
+        assert extra == {}
 
     def test_format_tool_result_error(self):
         from agentica.gateway.services.response_formatter import format_tool_result
         from agentica.run_response import ToolCallInfo
-        name, result_str, is_task = format_tool_result(
+        name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="permission denied", is_error=True)
         )
         assert result_str.startswith("Error: ")
+        assert extra == {}
 
-    def test_format_tool_result_task_meta(self):
+    def test_format_tool_result_read_file_error_still_shown(self):
+        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
+        _, result_str, _ = format_tool_result(
+            ToolCallInfo(tool_name="read_file", content="no such file", is_error=True)
+        )
+        assert "no such file" in result_str
+        assert result_str.startswith("Error: ")
+
+    def test_format_tool_result_task_keeps_detail(self):
         import json
         from agentica.gateway.services.response_formatter import format_tool_result
         from agentica.run_response import ToolCallInfo
-        task_content = json.dumps({"success": True, "tool_count": 3, "tool_calls_summary": ["a", "b"]})
-        name, result_str, is_task = format_tool_result(
-            ToolCallInfo(tool_name="task", content=task_content)
+        payload = {
+            "success": True,
+            "subagent_type": "explore",
+            "subagent_name": "explore-1",
+            "result": "Found foo in bar.py",
+            "tool_calls_summary": [
+                {"name": "read_file", "info": "bar.py"},
+                {"name": "grep", "info": "foo"},
+            ],
+            "execution_time": 1.5,
+            "tool_count": 2,
+        }
+        name, result_str, extra = format_tool_result(
+            ToolCallInfo(tool_name="task", content=json.dumps(payload))
         )
-        assert is_task is True
-        parsed = json.loads(result_str)
-        assert parsed["_task_meta"] is True
-        assert parsed["tool_count"] == 3
+        assert name == "task"
+        assert extra == {}
+        assert "Found foo in bar.py" in result_str
+        assert "read_file bar.py" in result_str
+        assert "grep foo" in result_str
+        assert "explore-1" in result_str
 
     def test_extract_metrics_none(self):
         from agentica.gateway.services.response_formatter import extract_metrics
@@ -890,23 +1044,16 @@ class TestResponseFormatter:
         result = extract_metrics(agent)
         assert result["input_tokens"] == [100]
 
-    def test_apply_patch(self):
+    def test_apply_patch_keeps_full_patch(self):
         from agentica.gateway.services.response_formatter import format_tool_call_args
-        result = format_tool_call_args("apply_patch", {
-            "patch": """*** Begin Patch
+        patch = """*** Begin Patch
 *** Update File: app.py
 @@
 -OLD = 1
 +NEW = 1
-*** Add File: test_app.py
-+def test_app():
-+    pass
-*** End Patch""",
-        })
-        assert result["_file_count"] == 2
-        assert result["_diff_del"] == 1
-        assert result["_diff_add"] == 3
-        assert result["_files"] == ["app.py", "test_app.py"]
+*** End Patch"""
+        result = format_tool_call_args("apply_patch", {"patch": patch})
+        assert result["patch"] == patch
 
 
 # ============== TestModelFactory ==============
@@ -1100,9 +1247,18 @@ class TestCompactSession:
         agent.working_memory.collapse_runs.assert_called_once()
         agent.tool_config.compression_manager.auto_compact.assert_awaited_once()
 
+    def test_compact_refused_when_session_locked(self, tmp_path):
+        agent = MagicMock()
+        svc = self._svc(tmp_path, agent)
+        busy_lock = MagicMock()
+        busy_lock.locked.return_value = True
+        svc._get_session_lock = MagicMock(return_value=busy_lock)
+        with pytest.raises(RuntimeError, match="already has an active run"):
+            asyncio.run(svc.compact_session("s1"))
+
 
 class TestGoalEventPayload:
-    def test_formats_cli_style_progress(self):
+    def test_formats_token_progress(self):
         from agentica.gateway.services.agent_service import goal_event_payload
         d = goal_event_payload({
             "status": "active",
@@ -1112,12 +1268,59 @@ class TestGoalEventPayload:
             "turns_used": 2,
             "turn_budget": 15,
         })
-        assert d["progress"] == "tokens 1,234/80,000 · turns 2/15"
+        assert d["progress"] == "tokens 1,234/80,000"
         assert d["objective"] == "ship it"
         assert d["status"] == "active"
+        assert "turns" not in d["progress"]
+        assert "wall" not in d["progress"]
 
-    def test_omitted_caps_are_bare_counts(self):
+    def test_unlimited_budget_is_bare_count(self):
         from agentica.gateway.services.agent_service import goal_event_payload
         d = goal_event_payload({"tokens_used": 10, "turns_used": 1})
-        assert d["progress"] == "tokens 10 · turns 1"
+        assert d["progress"] == "tokens 10"
+
+
+class TestWebRunGoalBudgets:
+    def _svc(self, tmp_path, agent):
+        from agentica.gateway.services.agent_service import AgentService
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        svc._get_agent = AsyncMock(return_value=agent)
+        return svc
+
+    def _agent(self):
+        agent = MagicMock()
+        agent.working_memory.get_messages.return_value = []
+        result = MagicMock()
+        result.status = "complete"
+        result.reason = "done"
+        result.response_content = "ok"
+        result.turns_used = 1
+        agent.run_goal = AsyncMock(return_value=result)
+        return agent
+
+    def test_default_is_unlimited_tokens_only(self, tmp_path):
+        agent = self._agent()
+        svc = self._svc(tmp_path, agent)
+        asyncio.run(svc.run_goal("hi", "s1"))
+        kwargs = agent.run_goal.call_args.kwargs
+        assert kwargs["token_budget"] == -1
+        assert "turn_budget" not in kwargs
+        assert "wall_clock_budget_sec" not in kwargs
+
+    def test_positive_token_budget_is_forwarded(self, tmp_path):
+        agent = self._agent()
+        svc = self._svc(tmp_path, agent)
+        asyncio.run(svc.run_goal("hi", "s1", token_budget=500_000))
+        assert agent.run_goal.call_args.kwargs["token_budget"] == 500_000
+
+    def test_run_goal_always_passes_stream_chunks(self, tmp_path):
+        agent = self._agent()
+        svc = self._svc(tmp_path, agent)
+        asyncio.run(svc.run_goal("hi", "s1"))
+        kwargs = agent.run_goal.call_args.kwargs
+        assert callable(kwargs["stream_chunks"])
+        assert kwargs["isolate"] is False
+        assert "seed_messages" not in kwargs
 

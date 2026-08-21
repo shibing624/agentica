@@ -9,6 +9,20 @@ export function fmtN(n: number) {
   return String(Math.round(n));
 }
 
+/** ``-1`` = unlimited, same as CLI ``/goal --tokens -1`` and penguin-harness. */
+export const UNLIMITED_TOKEN_BUDGET = -1;
+
+/** Parse the goal chip: empty → unlimited; ``500k`` / ``2m`` / a positive int. Invalid → null. */
+export function parseTokenBudget(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === "") return UNLIMITED_TOKEN_BUDGET;
+  const m = /^(\d+(?:\.\d+)?)([km])?$/i.exec(trimmed);
+  if (!m) return null;
+  const scale = m[2]?.toLowerCase() === "m" ? 1_000_000 : m[2]?.toLowerCase() === "k" ? 1_000 : 1;
+  const value = Math.round(Number(m[1]) * scale);
+  return value > 0 ? value : null;
+}
+
 export function fmtCost(cost: number) {
   if (cost > 0 && cost < 0.00005) return "<$0.0001";
   if (cost < 0.00995) return `$${cost.toFixed(4)}`;

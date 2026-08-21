@@ -1,28 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import * as api from "../api";
 import { ComposerDir } from "../components/ComposerDir";
+import { ChatMarkdown } from "../components/ChatMarkdown";
+import { SteerChip, WorkGroup } from "../components/WorkGroup";
 import { promptRename } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
 import { getStrings, useStrings } from "../i18n";
-import { fmtCost, fmtDurationMs, fmtN, fmtTps, uid } from "../lib/format";
+import { fmtCost, fmtDurationMs, fmtN, fmtTps, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
 import { createSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
-  IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconBook, IconDatabase,
+  IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook, IconDatabase,
   IconChevronDown,
 } from "../icons";
 import {
   bump, getState, pushPrefs, saveSessions, setState,
-  showToast, useAppState, type ChatMsg,
+  showToast, useAppState, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip } from "../components/ContextUsageTip";
+import { appendSteerPart, appendText, appendThink, appendTool, finishThink, finishTool, groupParts, partsOf } from "../lib/msgParts";
+import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import { useFilesPanel } from "../workspace/useFilesPanel";
@@ -37,15 +37,27 @@ export function ChatPage() {
   const s = useAppState();
   const S = useStrings();
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const goalBudgetRef = useRef<HTMLInputElement>(null);
+  const hadGoalCompose = useRef(false);
   const msgsRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
+  const followRef = useRef(createStreamFollow());
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
   const [skillsOpen, setSkillsOpen] = useState(false);
 
+  useEffect(() => {
+    if (s.goalCompose && !hadGoalCompose.current) {
+      goalBudgetRef.current?.focus();
+    }
+    hadGoalCompose.current = !!s.goalCompose;
+  }, [s.goalCompose]);
+
   const streaming = !!s.streams[s.curSess || ""];
   const goalRun = s.curSess ? s.goalRuns[s.curSess] : undefined;
-  const busy = streaming || !!goalRun;
+  const compacting = !!(s.curSess && s.commandRuns[s.curSess]);
+  const busy = streaming || !!goalRun || compacting;
+  const hasDraft = !!(s.inputText.trim() || s.pendingFiles.length);
+  const showStop = busy && !compacting && !hasDraft;
   const cur = s.curSess ? s.sessions[s.curSess] : null;
   const queued = s.messageQueue.filter((q) => q.sessionId === s.curSess);
   const q = slashQuery(s.inputText);
@@ -62,10 +74,22 @@ export function ChatPage() {
     void syncSessionRoundStats(s.curSess);
   }, [s.curSess, streaming]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = msgsRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [cur?.msgs.length, cur?.msgs[cur.msgs.length - 1]?.content, streaming]);
+    if (!el || !followRef.current.stick) return;
+    stickToBottom(el, followRef.current);
+  });
+
+  const syncJump = () => {
+    const el = msgsRef.current;
+    const follow = followRef.current;
+    setShowJump(
+      !follow.stick &&
+        !!el &&
+        el.scrollHeight - el.scrollTop - el.clientHeight > 1 &&
+        !!(cur && cur.msgs.length),
+    );
+  };
 
   useEffect(() => {
     const ta = taRef.current;
@@ -106,13 +130,21 @@ export function ChatPage() {
           </div>
         </div>
         <div className="chat-wrap">
-          <div className="chat" id="chatArea" ref={msgsRef} onScroll={() => {
-            const el = msgsRef.current;
-            if (!el) return;
-            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-            stickRef.current = atBottom;
-            setShowJump(!atBottom && !!(cur && cur.msgs.length));
-          }}>
+          <div className="chat" id="chatArea" ref={msgsRef}
+            onWheel={(e) => { followRef.current.wheel(e.deltaY); syncJump(); }}
+            onTouchStart={(e) => followRef.current.touchStart(e.touches[0]?.clientY ?? 0)}
+            onTouchMove={(e) => { followRef.current.touchMove(e.touches[0]?.clientY ?? 0); syncJump(); }}
+            onTouchEnd={() => followRef.current.touchEnd()}
+            onScroll={() => {
+              const el = msgsRef.current;
+              if (!el) return;
+              followRef.current.scrolled({
+                scrollTop: el.scrollTop,
+                scrollHeight: el.scrollHeight,
+                clientHeight: el.clientHeight,
+              });
+              syncJump();
+            }}>
             <div className="msgs">
               {!cur || !cur.msgs.length ? (
                 <div className="welcome welcome-new">
@@ -122,7 +154,7 @@ export function ChatPage() {
                 </div>
               ) : cur.msgs.map((m, i) => (
                 <MessageView key={i} m={m} workspace={workspace} onOpenFile={files.browsePath}
-                  live={streaming && i === cur.msgs.length - 1 && m.role === "assistant"} />
+                  live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)} />
               ))}
             </div>
           </div>
@@ -130,8 +162,8 @@ export function ChatPage() {
             <button type="button" className="scroll-bottom-btn visible" title={S.chat.jumpLatest}
                     onClick={() => {
                       const el = msgsRef.current;
-                      if (el) el.scrollTop = el.scrollHeight;
-                      stickRef.current = true;
+                      followRef.current.resume();
+                      if (el) stickToBottom(el, followRef.current);
                       setShowJump(false);
                     }}>
               <IconArrowDown />
@@ -145,13 +177,22 @@ export function ChatPage() {
               {goalRun.progress && <span className="goal-bar-progress">{goalRun.progress}</span>}
             </div>
           )}
+          {compacting && (
+            <div className="goal-bar">
+              <span className="goal-bar-status">{S.chat.compactingBar}</span>
+            </div>
+          )}
           {!!queued.length && (
             <div className="queue-bar">
               <span className="queue-label">{S.chat.queuedCount(queued.length)}</span>
               {queued.map((qItem) => (
                 <span className="queue-chip" key={qItem.id} title={qItem.text}>
-                  {qItem.text.slice(0, 40) || S.chat.attachmentOnly}
-                  <button onClick={() => setState({ messageQueue: getState().messageQueue.filter((x) => x.id !== qItem.id) })}><IconClose /></button>
+                  <button type="button" className="queue-chip-text" title={S.chat.editQueued}
+                          onClick={() => editQueued(qItem)}>
+                    {qItem.text.slice(0, 40) || S.chat.attachmentOnly}
+                  </button>
+                  <button type="button" title={S.chat.editQueued} onClick={() => editQueued(qItem)}><IconPencil /></button>
+                  <button type="button" onClick={() => setState({ messageQueue: getState().messageQueue.filter((x) => x.id !== qItem.id) })}><IconClose /></button>
                 </span>
               ))}
             </div>
@@ -172,6 +213,40 @@ export function ChatPage() {
             {slashOpen && (
               <SlashMenu items={slashItems} active={slashActive} onPick={(it) => pickSlash(it, taRef)} />
             )}
+            {s.goalCompose && (
+              <div className="goal-chip-row">
+                <span className="goal-chip">
+                  <span className="goal-chip-label">{S.chat.goalMode}</span>
+                  <label className="goal-chip-budget">
+                    <span>{S.chat.goalBudgetLabel}</span>
+                    <input
+                      ref={goalBudgetRef}
+                      value={s.goalCompose.budgetText}
+                      placeholder={S.chat.goalBudgetPlaceholder}
+                      title={S.chat.goalBudgetHint}
+                      onChange={(e) => setState({ goalCompose: { budgetText: e.target.value } })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          taRef.current?.focus();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setState({ goalCompose: null });
+                          requestAnimationFrame(() => taRef.current?.focus());
+                        }
+                      }}
+                    />
+                  </label>
+                  <button type="button" title={S.chat.goalRemove} onClick={() => {
+                    setState({ goalCompose: null });
+                    taRef.current?.focus();
+                  }}>
+                    <IconClose />
+                  </button>
+                </span>
+              </div>
+            )}
             {s.pendingFiles.length > 0 && (
               <div className="file-list">
                 {s.pendingFiles.map((f, i) => (
@@ -186,11 +261,11 @@ export function ChatPage() {
               ref={taRef}
               className="input-ta"
               rows={1}
-              placeholder={busy ? S.chat.placeholderStreaming : S.chat.placeholder}
+              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
               value={s.inputText}
               onChange={(e) => setState({ inputText: e.target.value })}
               onKeyDown={(e) => {
-                if (slashOpen && slashItems.length) {
+                if (slashOpen && slashItems.length && !compacting) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
                     setSlashActive((n) => (n + 1) % slashItems.length);
@@ -214,6 +289,10 @@ export function ChatPage() {
                 }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
+                  if (compacting) {
+                    showToast(S.chat.compactWait);
+                    return;
+                  }
                   void submit();
                 }
               }}
@@ -315,8 +394,11 @@ export function ChatPage() {
                     </div>
                   )}
                 </div>
-                <button className={"act-btn " + (streaming ? "stop" : "send")} onClick={() => streaming ? stopGen() : void submit()}>
-                  {streaming ? <IconStop /> : <IconSend />}
+                <button className={"act-btn " + (showStop ? "stop" : "send")}
+                        title={showStop ? S.chat.stop : S.chat.send}
+                        disabled={compacting}
+                        onClick={() => showStop ? stopGen() : void submit()}>
+                  {showStop ? <IconStop /> : <IconSend />}
                 </button>
               </div>
             </div>
@@ -332,45 +414,44 @@ function MessageView({ m, workspace, onOpenFile, live }: {
   m: ChatMsg; workspace: string; onOpenFile: (path: string) => void; live?: boolean;
 }) {
   const S = useStrings();
+  if (m.role === "user" && m.steer) {
+    return (
+      <div className="m m-steer-wrap">
+        <SteerChip text={m.content} ts={m.ts} />
+      </div>
+    );
+  }
+  const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
   return (
-    <div className={"m " + (m.role === "user" ? "m-u" : "m-a")}>
+    <div className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "")}>
       <div className="msg-stack">
-        {m.role === "assistant" && m.steps && m.steps.length > 0 && (
-          <details className="steps-block" open>
-            <summary className="steps-summary">
-              {m.durationSec ? S.chat.ranFor(Math.round(m.durationSec)) : S.chat.running}
-              {" · "}
-              {S.chat.toolCalls(m.steps.filter((x) => x.type === "tool").length)}
-            </summary>
-            {m.steps.map((st, i) => (
-              st.type === "thinking" ? (
-                <div className="step-think" key={i}>{st.text}</div>
-              ) : (
-                <details className="step-tool" key={i}>
-                  <summary>
-                    <span className="step-tool-name">{st.name}</span>
-                    <span className="step-tool-args">{st.argsStr}</span>
-                  </summary>
-                  {st.argsStr && <pre className="step-pre">{st.argsStr}</pre>}
-                  {st.result != null && <pre className="step-pre out">{String(st.result).slice(0, 8000)}</pre>}
-                </details>
-              )
-            ))}
-          </details>
-        )}
-        {(m.content || m.previews?.length || !m.error) && (
-          <div className="bub">
-            {!!m.previews?.length && (
-              <div className="msg-previews">
-                {m.previews.map((src, i) => <img key={i} src={src} alt="" />)}
-              </div>
-            )}
-            {m.role === "user" ? m.content : (
-              <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {m.content || ""}
-              </Markdown>
-            )}
-          </div>
+        {segs ? segs.map((seg, i) => {
+          const isLast = !!live && i === segs.length - 1;
+          if (seg.type === "work") {
+            return <WorkGroup key={i} items={seg.items} isLast={isLast} />;
+          }
+          if (seg.part.kind === "steer") {
+            return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} />;
+          }
+          const text = seg.part.kind === "text" ? seg.part.text : "";
+          if (!text && !isLast) return null;
+          return (
+            <div className={"bub" + (live && isLast ? " streaming-bub" : "")} key={i}>
+              <ChatMarkdown text={text} streaming={!!live && isLast} />
+              {live && isLast ? <span className="stream-caret" /> : null}
+            </div>
+          );
+        }) : (
+          (m.content || m.previews?.length || !m.error) && (
+            <div className="bub">
+              {!!m.previews?.length && (
+                <div className="msg-previews">
+                  {m.previews.map((src, i) => <img key={i} src={src} alt="" />)}
+                </div>
+              )}
+              {m.content}
+            </div>
+          )
         )}
         <MessageFilesCard
           text={m.content || ""}
@@ -378,6 +459,7 @@ function MessageView({ m, workspace, onOpenFile, live }: {
           uploaded={m.files}
           workspace={workspace || null}
           onOpenFile={onOpenFile}
+          live={!!live}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}
         {m.error && <div className="msg-error">{S.chat.error(m.error)}</div>}
@@ -429,18 +511,104 @@ function stopGen() {
   st.streams[st.curSess || ""]?.abortCtrl.abort();
 }
 
-/** Enter always accepts input: while a turn or /goal is running the line
- *  is queued rather than dropped, and the queue drains when the run ends. */
-function isBusy(sessId: string) {
-  const st = getState();
-  return !!st.streams[sessId] || !!st.goalRuns[sessId];
+/** Coalesce stream paints: rAF, but never denser than 120ms so a fast
+ *  answer does not reparse growing markdown every token (that is the
+ *  flash). Structural events (tool start/end) call flushStream and paint now. */
+const BUMP_MIN_INTERVAL_MS = 120;
+let streamRaf = 0;
+let streamThrottle = 0;
+let lastBumpAt = 0;
+function bumpStream() {
+  if (streamRaf || streamThrottle) return;
+  const commit = () => {
+    streamRaf = 0;
+    streamThrottle = 0;
+    lastBumpAt = Date.now();
+    bump();
+  };
+  const wait = lastBumpAt + BUMP_MIN_INTERVAL_MS - Date.now();
+  if (wait > 0) {
+    streamThrottle = window.setTimeout(commit, wait);
+    return;
+  }
+  streamRaf = requestAnimationFrame(commit);
+}
+function flushStream() {
+  if (streamRaf) {
+    cancelAnimationFrame(streamRaf);
+    streamRaf = 0;
+  }
+  if (streamThrottle) {
+    window.clearTimeout(streamThrottle);
+    streamThrottle = 0;
+  }
+  lastBumpAt = Date.now();
+  bump();
 }
 
-function enqueueMessage(sessId: string, text: string, files: File[]) {
+/** Enter always accepts input: while a turn or /goal is running, plain text
+ *  steers the current run; attachments and slash commands queue until it ends.
+ *  ``/compact`` holds the same session lock as a chat turn, so a second send
+ *  409s. While it runs we block rather than queue. */
+function isCompacting(sessId: string) {
+  return !!getState().commandRuns[sessId];
+}
+
+function isBusy(sessId: string) {
+  const st = getState();
+  return !!st.streams[sessId] || !!st.goalRuns[sessId] || !!st.commandRuns[sessId];
+}
+
+function enqueueMessage(sessId: string, text: string, files: File[], opts?: { atFront?: boolean; silent?: boolean }) {
+  const item = { id: uid(), sessionId: sessId, text, files, ts: Date.now() };
+  const rest = getState().messageQueue;
+  setState({ messageQueue: opts?.atFront ? [item, ...rest] : [...rest, item] });
+  if (!opts?.silent && !opts?.atFront) showToast(getStrings().chat.queuedToast);
+}
+
+async function requeueLateSteer(sessId: string) {
+  const parked = await api.takeSteerApi(sessId);
+  const late = (parked.ok && parked.data?.messages) ? parked.data.messages : [];
+  for (let i = late.length - 1; i >= 0; i--) {
+    enqueueMessage(sessId, late[i], [], { atFront: true, silent: true });
+  }
+}
+
+function editQueued(qItem: QueuedMessage) {
   setState({
-    messageQueue: [...getState().messageQueue, { id: uid(), sessionId: sessId, text, files, ts: Date.now() }],
+    inputText: qItem.text,
+    pendingFiles: [...getState().pendingFiles, ...qItem.files],
+    messageQueue: getState().messageQueue.filter((x) => x.id !== qItem.id),
   });
-  showToast(getStrings().chat.queuedToast);
+}
+
+function appendSteerBubble(sessId: string, text: string) {
+  const live = getState().streams[sessId]?.aiMsg;
+  if (live) {
+    appendSteerPart(live, text);
+    saveSessions();
+    bump();
+    return;
+  }
+  const sess = getState().sessions[sessId];
+  if (!sess) return;
+  sess.msgs.push({ role: "user", content: text, ts: Date.now(), steer: true });
+  sess.ts = Date.now();
+  saveSessions();
+  bump();
+}
+
+async function applySteer(sessId: string, text: string): Promise<boolean> {
+  const S = getStrings();
+  const { ok, data } = await api.steerChatApi(sessId, text);
+  if (ok && data?.accepted) {
+    appendSteerBubble(sessId, text);
+    showToast(S.chat.interruptToast);
+    return true;
+  }
+  enqueueMessage(sessId, text, [], { silent: true });
+  showToast(S.chat.interruptQueued);
+  return false;
 }
 
 function setGoalRun(sessId: string, patch: { status: string; objective: string; progress: string }) {
@@ -453,26 +621,86 @@ function clearGoalRun(sessId: string) {
   setState({ goalRuns: next });
 }
 
+function ensureSession(): string | null {
+  const st = getState();
+  if (!st.curSess) {
+    const dir = st.pendingNewChatDir || st.serverDir;
+    if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: "" } }); return null; }
+    createSession(dir);
+  }
+  return getState().curSess;
+}
+
 async function submit() {
   const st = getState();
   const text = st.inputText.trim();
   const files = st.pendingFiles.slice();
-  if (!text && !files.length) return;
-  if (!st.curSess) {
-    const dir = st.pendingNewChatDir || st.serverDir;
-    if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: "" } }); return; }
-    createSession(dir);
+  const S = getStrings();
+
+  if (st.goalCompose) {
+    const budget = parseTokenBudget(st.goalCompose.budgetText);
+    if (budget === null) {
+      showToast(S.chat.goalBudgetInvalid);
+      return;
+    }
+    if (!text) {
+      showToast(S.chat.goalNeedObjective);
+      return;
+    }
+    const sessId = ensureSession();
+    if (!sessId) return;
+    if (isCompacting(sessId)) {
+      showToast(S.chat.compactWait);
+      return;
+    }
+    setState({ inputText: "", pendingFiles: [], goalCompose: null });
+    if (isBusy(sessId)) {
+      enqueueMessage(sessId, `/goal ${text}`, files);
+      return;
+    }
+    await runGoalCmd(sessId, text, budget);
+    return;
   }
-  const sessId = getState().curSess!;
+
+  if (!text && !files.length) return;
   const cmd = parseWebCommand(text);
+  if (cmd?.kind === "goal") {
+    setState({ inputText: cmd.arg, pendingFiles: [], goalCompose: { budgetText: "" } });
+    return;
+  }
+  if (cmd?.kind === "queue") {
+    if (!cmd.arg && !files.length) {
+      showToast(S.chat.queueNeedPrompt);
+      setState({ inputText: "/queue " });
+      return;
+    }
+    const sessId = ensureSession();
+    if (!sessId) return;
+    setState({ inputText: "", pendingFiles: [] });
+    if (isBusy(sessId)) {
+      enqueueMessage(sessId, cmd.arg, files);
+      return;
+    }
+    await sendMessage(sessId, cmd.arg, files);
+    return;
+  }
+  const sessId = ensureSession();
+  if (!sessId) return;
+  if (isCompacting(sessId)) {
+    showToast(S.chat.compactWait);
+    return;
+  }
   setState({ inputText: "", pendingFiles: [] });
   if (isBusy(sessId)) {
+    if (!files.length && !cmd) {
+      await applySteer(sessId, text);
+      return;
+    }
     enqueueMessage(sessId, text, files);
     return;
   }
   if (cmd) {
-    if (cmd.kind === "compact") await runCompact(sessId, cmd.arg);
-    else await runGoalCmd(sessId, cmd.arg);
+    await runCompact(sessId, cmd.arg);
     return;
   }
   await sendMessage(sessId, text, files);
@@ -486,10 +714,41 @@ async function drainQueue(sessId: string) {
   const cmd = parseWebCommand(next.text);
   if (cmd) {
     if (cmd.kind === "compact") await runCompact(sessId, cmd.arg);
-    else await runGoalCmd(sessId, cmd.arg);
+    else if (cmd.kind === "goal") await runGoalCmd(sessId, cmd.arg);
+    else await sendMessage(sessId, cmd.arg, next.files);
     return;
   }
   await sendMessage(sessId, next.text, next.files);
+}
+
+function applyLiveSseEvent(aiMsg: ChatMsg, evt: any): boolean {
+  if (evt.event === "thinking") {
+    appendThink(aiMsg, evt.data);
+    bumpStream();
+    return true;
+  }
+  if (evt.event === "tool_call") {
+    appendTool(aiMsg, evt.data.name, JSON.stringify(evt.data.args || {}));
+    flushStream();
+    return true;
+  }
+  if (evt.event === "tool_result") {
+    finishTool(aiMsg, evt.data.result, evt.data.diff);
+    flushStream();
+    return true;
+  }
+  if (evt.event === "content") {
+    appendText(aiMsg, evt.data);
+    bumpStream();
+    return true;
+  }
+  if (evt.event === "error") {
+    finishThink(aiMsg);
+    aiMsg.error = String(evt.data);
+    flushStream();
+    return true;
+  }
+  return false;
 }
 
 async function sendMessage(sessId: string, text: string, files: File[]) {
@@ -525,7 +784,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
   saveSessions();
 
   const abortCtrl = new AbortController();
-  const aiMsg: ChatMsg = { role: "assistant", content: "", steps: [], ts: Date.now(), durationSec: 0 };
+  const aiMsg: ChatMsg = { role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0 };
   st.streams[sessId] = { abortCtrl, aiMsg };
   sess.msgs.push(aiMsg);
   bump();
@@ -553,7 +812,6 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
-    let curThinking = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -566,29 +824,8 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
         if (raw === "[DONE]") continue;
         let evt: any;
         try { evt = JSON.parse(raw); } catch { continue; }
-        if (evt.event === "thinking") {
-          curThinking += evt.data;
-          const last = aiMsg.steps![aiMsg.steps!.length - 1];
-          if (last && last.type === "thinking") last.text = curThinking;
-          else aiMsg.steps!.push({ type: "thinking", text: curThinking });
-          bump();
-        } else if (evt.event === "tool_call") {
-          curThinking = "";
-          aiMsg.steps!.push({ type: "tool", name: evt.data.name, argsStr: JSON.stringify(evt.data.args || {}) });
-          bump();
-        } else if (evt.event === "tool_result") {
-          const steps = aiMsg.steps || [];
-          for (let i = steps.length - 1; i >= 0; i--) {
-            if (steps[i].type === "tool" && steps[i].result == null) { steps[i].result = evt.data.result; break; }
-          }
-          bump();
-        } else if (evt.event === "content") {
-          aiMsg.content += evt.data;
-          bump();
-        } else if (evt.event === "error") {
-          aiMsg.error = String(evt.data);
-          bump();
-        } else if (evt.event === "done" && evt.data) {
+        if (applyLiveSseEvent(aiMsg, evt)) continue;
+        if (evt.event === "done" && evt.data) {
           const prevCost = sess.costUsd || 0;
           const turn = evt.data.turn_usage || {};
           aiMsg.durationSec = (typeof evt.data.duration_ms === "number")
@@ -620,6 +857,8 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     if (e?.name === "AbortError") aiMsg.aborted = true;
     else aiMsg.error = String(e?.message || e);
   } finally {
+    flushStream();
+    finishThink(aiMsg);
     if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - t0) / 1000;
     delete getState().streams[sessId];
     if (getState().curSess !== sessId) {
@@ -628,31 +867,52 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     }
     saveSessions();
     bump();
+    await requeueLateSteer(sessId);
     await drainQueue(sessId);
   }
 }
 
-function parseWebCommand(text: string): { kind: "compact" | "goal"; arg: string } | null {
+function parseWebCommand(text: string): { kind: "compact" | "goal" | "queue"; arg: string } | null {
   if (text === "/compact" || text.startsWith("/compact ")) {
     return { kind: "compact", arg: text.slice("/compact".length).trim() };
   }
   if (text === "/goal" || text.startsWith("/goal ")) {
     return { kind: "goal", arg: text.slice("/goal".length).trim() };
   }
+  if (text === "/queue" || text.startsWith("/queue ")) {
+    return { kind: "queue", arg: text.slice("/queue".length).trim() };
+  }
+  if (text === "/q" || text.startsWith("/q ")) {
+    return { kind: "queue", arg: text.slice("/q".length).trim() };
+  }
   return null;
 }
 
 function pickSlash(it: SlashItem, taRef: { current: HTMLTextAreaElement | null }) {
+  if (it.cmd === "/goal") {
+    setState({ inputText: "", goalCompose: { budgetText: "" } });
+    return;
+  }
   if (it.cmd === "/compact") {
-    setState({ inputText: "" });
+    const st = getState();
+    if (st.curSess && isCompacting(st.curSess)) {
+      showToast(getStrings().chat.compactWait);
+      return;
+    }
+    setState({ inputText: "", goalCompose: null });
     void (async () => {
-      const st = getState();
-      if (!st.curSess) {
-        const dir = st.pendingNewChatDir || st.serverDir;
+      const stNow = getState();
+      if (!stNow.curSess) {
+        const dir = stNow.pendingNewChatDir || stNow.serverDir;
         if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: "" } }); return; }
         createSession(dir);
       }
-      await runCompact(getState().curSess!, "");
+      const sessId = getState().curSess!;
+      if (isBusy(sessId)) {
+        enqueueMessage(sessId, "/compact", []);
+        return;
+      }
+      await runCompact(sessId, "");
     })();
     return;
   }
@@ -660,54 +920,77 @@ function pickSlash(it: SlashItem, taRef: { current: HTMLTextAreaElement | null }
   requestAnimationFrame(() => taRef.current?.focus());
 }
 
-function pushLocalTurn(sessId: string, userText: string, assistantText: string, error?: string) {
+function beginCommand(sessId: string, userText: string) {
   const sess = getState().sessions[sessId];
-  if (!sess) return;
+  if (!sess) return null;
   sess.msgs.push({ role: "user", content: userText, ts: Date.now() });
-  sess.msgs.push({
-    role: "assistant", content: assistantText, ts: Date.now(),
-    error, durationSec: 0,
-  });
   sess.ts = Date.now();
+  setState({ commandRuns: { ...getState().commandRuns, [sessId]: { kind: "compact" } } });
   saveSessions();
-  bump();
+  return sess;
+}
+
+function endCommand(sessId: string) {
+  const next = { ...getState().commandRuns };
+  delete next[sessId];
+  setState({ commandRuns: next });
+  if (getState().curSess !== sessId) {
+    const other = getState().sessions[sessId];
+    if (other) other.unread = true;
+  }
+  saveSessions();
 }
 
 async function runCompact(sessId: string, instructions: string) {
   const S = getStrings();
+  if (isCompacting(sessId)) return;
+  const userText = instructions ? `/compact ${instructions}` : "/compact";
+  const sess = beginCommand(sessId, userText);
+  if (!sess) return;
+  const aiMsg: ChatMsg = { role: "assistant", content: "", ts: Date.now(), durationSec: 0 };
   try {
     const { ok, data, status } = await api.compactSessionApi(sessId, instructions);
     if (!ok) {
       const detail = (data && (data.detail || data.error)) || `HTTP ${status}`;
-      pushLocalTurn(sessId, instructions ? `/compact ${instructions}` : "/compact", "", S.chat.compactFailed(String(detail)));
-      return;
+      aiMsg.error = S.chat.compactFailed(String(detail));
+    } else {
+      aiMsg.content = S.chat.compactOk(data.messages_before, data.messages_after);
+      if (data.usage) applySessionUsage(sessId, data.usage);
     }
-    const msg = S.chat.compactOk(data.messages_before, data.messages_after);
-    pushLocalTurn(sessId, instructions ? `/compact ${instructions}` : "/compact", msg);
-    if (data.usage) applySessionUsage(sessId, data.usage);
+  } catch (e: any) {
+    aiMsg.error = S.chat.compactFailed(String(e?.message || e));
   } finally {
+    sess.msgs.push(aiMsg);
+    endCommand(sessId);
     await drainQueue(sessId);
   }
 }
 
-async function runGoalCmd(sessId: string, objective: string) {
+async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIMITED_TOKEN_BUDGET) {
   const S = getStrings();
   if (!objective || objective === "status") {
     showToast(S.chat.goalNeedObjective);
-    setState({ inputText: "/goal " });
+    setState({ inputText: "", goalCompose: { budgetText: "" } });
     await drainQueue(sessId);
     return;
   }
   const sess = getState().sessions[sessId];
   if (!sess) return;
   sess.msgs.push({ role: "user", content: `/goal ${objective}`, ts: Date.now() });
-  const aiMsg: ChatMsg = { role: "assistant", content: "", ts: Date.now() };
+  const abortCtrl = new AbortController();
+  const aiMsg: ChatMsg = { role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0 };
+  getState().streams[sessId] = { abortCtrl, aiMsg };
   sess.msgs.push(aiMsg);
   saveSessions();
   setGoalRun(sessId, { status: "active", objective, progress: "" });
   bump();
+  const t0 = performance.now();
   try {
-    const resp = await api.streamGoal({ objective, session_id: sessId });
+    const resp = await api.streamGoal({
+      objective,
+      session_id: sessId,
+      token_budget: tokenBudget,
+    }, abortCtrl.signal);
     if (!resp.ok || !resp.body) {
       let detail = `HTTP ${resp.status}`;
       try {
@@ -732,6 +1015,7 @@ async function runGoalCmd(sessId: string, objective: string) {
         if (raw === "[DONE]") continue;
         let evt: any;
         try { evt = JSON.parse(raw); } catch { continue; }
+        if (applyLiveSseEvent(aiMsg, evt)) continue;
         if (evt.event === "status" && evt.data) {
           const d = evt.data;
           setGoalRun(sessId, {
@@ -739,21 +1023,25 @@ async function runGoalCmd(sessId: string, objective: string) {
             objective: d.objective || objective,
             progress: d.progress || "",
           });
-        } else if (evt.event === "error") {
-          aiMsg.error = String(evt.data);
-          bump();
         } else if (evt.event === "done" && evt.data) {
-          aiMsg.content = evt.data.content || evt.data.reason || evt.data.status || "";
+          if (!aiMsg.content && evt.data.content) appendText(aiMsg, evt.data.content);
+          if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - t0) / 1000;
           bump();
         }
       }
     }
   } catch (e: any) {
-    aiMsg.error = String(e?.message || e);
+    if (e?.name === "AbortError") aiMsg.aborted = true;
+    else aiMsg.error = String(e?.message || e);
   } finally {
+    flushStream();
+    finishThink(aiMsg);
+    if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - t0) / 1000;
+    delete getState().streams[sessId];
     clearGoalRun(sessId);
     saveSessions();
     bump();
+    await requeueLateSteer(sessId);
     await drainQueue(sessId);
   }
 }

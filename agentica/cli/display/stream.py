@@ -33,6 +33,64 @@ from .console import (
 from .messages import _has_markdown
 from .tool_format import _display_tool_impl, format_execute_expand, format_tool_display
 
+# Opening/closing fence line: 0-3 spaces, then 3+ backticks or tildes.
+_FENCE_LINE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+
+
+def _parse_fence_line(line: str) -> Optional[Tuple[str, int, str]]:
+    """Return ``(char, count, rest)`` if ``line`` is a fence marker."""
+    match = _FENCE_LINE.match(line)
+    if match is None:
+        return None
+    marker = match.group(2)
+    return marker[0], len(marker), match.group(3)
+
+
+def _safe_commit_end(text: str) -> int:
+    """Largest offset that can be printed as Markdown without later rewrite.
+
+    A blank line outside a fence ends a block. A closing fence line also
+    ends a block. Commit only when leftover remains after that boundary —
+    the last block may still grow.
+    """
+    if not text:
+        return 0
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    last_boundary = 0
+    offset = 0
+    length = len(text)
+    while offset < length:
+        newline_at = text.find("\n", offset)
+        if newline_at == -1:
+            break
+        line = text[offset:newline_at]
+        if line.endswith("\r"):
+            line = line[:-1]
+        if in_fence:
+            parsed = _parse_fence_line(line)
+            if (
+                parsed is not None
+                and parsed[0] == fence_char
+                and parsed[1] >= fence_len
+                and parsed[2].strip() == ""
+            ):
+                in_fence = False
+                last_boundary = newline_at + 1
+        else:
+            parsed = _parse_fence_line(line)
+            if parsed is not None:
+                in_fence = True
+                fence_char = parsed[0]
+                fence_len = parsed[1]
+            elif not line.strip():
+                last_boundary = newline_at + 1
+        offset = newline_at + 1
+    if 0 < last_boundary < length:
+        return last_boundary
+    return 0
+
 
 def _is_background_execute(tool_args: Optional[dict], result_str: str = "") -> bool:
     """True when this execute call/result is a detached background start."""
@@ -138,10 +196,11 @@ class StreamDisplayManager:
         self._response_buffer = []
         # Buffer for the CURRENT response segment — the run of assistant text
         # since the last boundary (tool call / thinking start) or turn start.
-        # Flushed as plain text by ``_flush_segment_as_plain_text`` at the next
-        # boundary (so it lands in the LLM's native order), or rendered as
-        # Markdown by ``finalize`` when it turns out to be the final answer.
+        # Complete Markdown blocks are committed live; the incomplete tail is
+        # flushed by ``_flush_segment`` at the next thinking/tool boundary, or
+        # by ``finalize`` when it is the final answer.
         self._segment_text = ""
+        self._committed_len = 0
         self._turn_started_at = None
         # Populated by ``finalize()`` from its kwargs, then read back by
         # ``_build_turn_summary()``. Kept as instance state (rather than
@@ -187,25 +246,48 @@ class StreamDisplayManager:
 
     # No more box methods; gutter is used instead.
 
-    def _flush_segment_as_plain_text(self):
-        """Emit the current buffered segment as plain text and reset it.
+    def _print_plain(self, text: str) -> None:
+        for line in text.split("\n"):
+            self._assistant_console.print(line, highlight=False, markup=False)
+
+    def _print_markdown(self, text: str) -> None:
+        if not text.strip():
+            return
+        md_width = max(20, (self._raw_console.width or 80) - 4)
+        self._assistant_console.print(Markdown(text), width=md_width)
+
+    def _flush_committed_markdown(self) -> None:
+        """Print complete Markdown blocks; leave the incomplete tail buffered."""
+        if not self._should_render_markdown(self._segment_text):
+            return
+        pending = self._segment_text[self._committed_len:]
+        boundary = _safe_commit_end(pending)
+        if boundary <= 0:
+            return
+        self._print_markdown(pending[:boundary])
+        self._committed_len += boundary
+
+    def _flush_segment(self):
+        """Emit whatever of the current segment is still buffered, then reset.
 
         Called at every boundary that produces its own live output —
         ``start_thinking`` and ``start_tool_section``. Reaching such a
         boundary proves the preceding assistant text was a *mid-turn
         preamble* (not the final answer), so we print it now, right before
         the thinking / tool output, preserving the LLM's native emission
-        order. The final segment, in contrast, stays buffered until
-        ``finalize`` where it is rendered as Markdown in one shot.
+        order. Complete Markdown blocks may already have been committed;
+        only the remainder is flushed here.
         """
         if not self._segment_text:
             return
-        # Split on newlines and print through the gutter console so lines
-        # line up with the rest of the assistant output. Trailing partial
-        # line (no ``\n``) still gets printed as its own line.
-        for line in self._segment_text.split("\n"):
-            self._assistant_console.print(line, highlight=False, markup=False)
+        remaining = self._segment_text[self._committed_len:]
+        if remaining:
+            if self._should_render_markdown("".join(self._response_buffer)):
+                self._print_markdown(remaining)
+            else:
+                self._print_plain(remaining)
         self._segment_text = ""
+        self._committed_len = 0
 
     def start_thinking(self):
         """Start thinking section.
@@ -220,7 +302,7 @@ class StreamDisplayManager:
             # plain text FIRST so it appears above the thinking, matching the
             # LLM's native ``text → thinking`` emission order instead of being
             # held back until the next tool call.
-            self._flush_segment_as_plain_text()
+            self._flush_segment()
             self._raw_console.print()
             self.thinking_shown = True
             self.in_thinking = True
@@ -260,7 +342,7 @@ class StreamDisplayManager:
             # mid-turn preamble (the model paused to call a tool). Flush
             # it to the screen as plain text so the user can read what the
             # model said before the tool call runs.
-            self._flush_segment_as_plain_text()
+            self._flush_segment()
             if not self.response_started:
                 self.console.print()
                 if self._turn_started_at is None:
@@ -1235,30 +1317,25 @@ class StreamDisplayManager:
             self.response_started = True
 
     def stream_response(self, content: str):
-        """Buffer response content silently; render lazily on segment boundary.
+        """Buffer response content and commit complete Markdown blocks live.
 
-        Assistant text is NOT printed token-by-token as it streams. Instead
-        each chunk accumulates into ``_segment_text`` and is flushed at one of
-        two well-defined moments:
+        Tokens accumulate in ``_segment_text``. Complete blocks (a blank line
+        or a closed fence, with leftover after them) are printed as Markdown
+        immediately so the user sees headings / lists / code as they close.
+        The incomplete tail stays buffered until:
 
-        * On the next boundary that produces its own live output —
-          ``start_thinking`` or ``start_tool_section``. Reaching such a
-          boundary proves the segment was a *mid-turn preamble*, so it is
-          printed as plain text right before the thinking / tool output. This
-          keeps the LLM's native emission order (e.g. ``text → thinking →
-          tool``) intact, whichever way it interleaves.
-        * On ``finalize`` — no further boundary arrived, so the segment is the
-          final answer. It is rendered as Markdown in one shot.
+        * the next thinking / tool boundary (``_flush_segment``), or
+        * ``finalize``, where it is the final answer.
 
         The spinner ("⠋ answering… 3s") stays on the status bar the whole
-        time, so the user still gets a heartbeat that the model is producing
-        tokens. The tradeoff: the final answer isn't a live typewriter, but it
-        also never flash-erases-and-redraws — and preambles land in order.
+        time. Incomplete blocks are not redrawn, so there is no
+        flash-erase-redraw.
         """
         self.start_response()
         self._response_buffer.append(content)
         self._segment_text += content
         self.has_content_output = True
+        self._flush_committed_markdown()
 
     def _should_render_markdown(self, text: str) -> bool:
         if self._cli_markdown_mode == "on":
@@ -1377,26 +1454,17 @@ class StreamDisplayManager:
         if self.has_content_output:
             # ``full_text`` (whole turn) drives the render-mode decision so
             # a code fence anywhere in the turn still upgrades the tail to
-            # Markdown. The actual render target is the final segment —
-            # earlier segments were already emitted as plain text at their
-            # trailing thinking/tool boundary.
+            # Markdown. Already-committed blocks stay in scrollback; only
+            # the incomplete tail is rendered here.
             full_text = "".join(self._response_buffer)
-            tail_text = self._segment_text
-            if tail_text:
+            remaining = self._segment_text[self._committed_len:]
+            if remaining:
                 if self._should_render_markdown(full_text):
-                    # Constrain markdown width to ``console.width - 4`` so
-                    # code blocks and headings don't hug the terminal edge
-                    # — leaves a small right-side gutter of breathing
-                    # room. Without this cap, code fences and heading
-                    # underlines stretch to the far right and look loud.
-                    md_width = max(20, (self._raw_console.width or 80) - 4)
-                    self._assistant_console.print(Markdown(tail_text), width=md_width)
+                    self._print_markdown(remaining)
                 else:
-                    # No markdown features detected — print as plain text,
-                    # preserving line breaks exactly as the model sent them.
-                    for line in tail_text.split("\n"):
-                        self._assistant_console.print(line, highlight=False, markup=False)
-                self._segment_text = ""
+                    self._print_plain(remaining)
+            self._segment_text = ""
+            self._committed_len = 0
 
         # Draw the closing separator only if this turn actually produced
         # output (tool calls, streamed text, or thinking). A no-op turn

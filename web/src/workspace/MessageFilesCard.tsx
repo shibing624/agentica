@@ -3,7 +3,7 @@ import { useStrings } from "../i18n";
 import {
   extractFilePaths, extractToolPaths, toWorkspaceRelative,
 } from "../lib/file-path";
-import * as api from "../api";
+import { statWorkspaceFilesBatched } from "../lib/workspaceStat";
 
 const MAX_VISIBLE = 3;
 
@@ -20,13 +20,14 @@ function PathLabel({ path }: { path: string }) {
 }
 
 export function MessageFilesCard({
-  text, steps, uploaded, workspace, onOpenFile,
+  text, steps, uploaded, workspace, onOpenFile, live,
 }: {
   text: string;
   steps?: Array<Record<string, any>>;
   uploaded?: string[];
   workspace: string | null;
   onOpenFile: (path: string) => void;
+  live?: boolean;
 }) {
   const S = useStrings();
   const candidates = useMemo(() => {
@@ -45,22 +46,27 @@ export function MessageFilesCard({
     }
     return out;
   }, [text, steps, uploaded, workspace]);
+  const sig = candidates.join("\0");
 
-  const [paths, setPaths] = useState<string[] | null>(null);
+  const [paths, setPaths] = useState<string[]>([]);
   useEffect(() => {
-    setPaths(null);
-    if (!workspace || candidates.length === 0) return;
+    // Streaming tokens rewrite `text` every frame; the extracted path set
+    // rarely changes, but a new array still retriggered POST /stat. Wait
+    // until the turn settles, then one batched lookup.
+    if (live) return;
+    if (!workspace || !sig) {
+      setPaths([]);
+      return;
+    }
     let cancelled = false;
-    void api.statWorkspaceFiles(workspace, candidates).then(({ ok, data }) => {
-      if (cancelled || !ok) return;
-      const existing = new Set(data?.existing || []);
-      setPaths(candidates.filter((p) => existing.has(p)));
+    void statWorkspaceFilesBatched(workspace, candidates).then((existing) => {
+      if (!cancelled) setPaths(existing);
     });
     return () => { cancelled = true; };
-  }, [candidates, workspace]);
+  }, [live, workspace, sig]);
 
   const [expanded, setExpanded] = useState(false);
-  if (paths === null || paths.length === 0) return null;
+  if (live || paths.length === 0) return null;
 
   const visible = expanded ? paths : paths.slice(0, MAX_VISIBLE);
   const hidden = paths.length - visible.length;

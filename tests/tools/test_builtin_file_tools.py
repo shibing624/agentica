@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
+
 import pytest
 
 from agentica.tools.builtin import BuiltinFileTool
@@ -336,6 +338,62 @@ class TestBuiltinFileToolGrep:
         assert "LINE_C" in result
         assert "LINE_A" not in result
         assert "LINE_D" not in result
+
+    def test_grep_fallback_context_lines(self, file_tool, tmp_dir):
+        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            result = asyncio.run(file_tool.grep("MATCH", str(tmp_dir), context_lines=1))
+        assert "LINE_B" in result
+        assert "LINE_C" in result
+        assert "LINE_A" not in result
+        assert "LINE_D" not in result
+        assert "MATCH" in result
+
+    def test_grep_fallback_asymmetric_before_after(self, file_tool, tmp_dir):
+        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            before_only = asyncio.run(
+                file_tool.grep("MATCH", str(tmp_dir), before_context=1)
+            )
+            after_only = asyncio.run(
+                file_tool.grep("MATCH", str(tmp_dir), after_context=1)
+            )
+        assert "LINE_B" in before_only and "LINE_C" not in before_only
+        assert "LINE_C" in after_only and "LINE_B" not in after_only
+
+    def test_grep_fallback_context_lines_wins_over_before_after(self, file_tool, tmp_dir):
+        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            result = asyncio.run(
+                file_tool.grep(
+                    "MATCH",
+                    str(tmp_dir),
+                    context_lines=1,
+                    before_context=10,
+                    after_context=10,
+                )
+            )
+        assert "LINE_B" in result
+        assert "LINE_C" in result
+        assert "LINE_A" not in result
+        assert "LINE_D" not in result
+
+    def test_grep_fallback_separated_matches_get_group_separator(self, file_tool, tmp_dir):
+        Path(tmp_dir, "f.py").write_text("M1\nX\nY\nZ\nM2\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            grouped = asyncio.run(file_tool.grep("M[12]", str(tmp_dir), context_lines=1))
+        assert "M1" in grouped and "M2" in grouped
+        assert "X" in grouped and "Z" in grouped
+        assert "Y" not in grouped
+        assert "--" in grouped
+
+    def test_grep_fallback_overlapping_context_merges(self, file_tool, tmp_dir):
+        Path(tmp_dir, "f.py").write_text("A\nM1\nB\nM2\nC\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            result = asyncio.run(file_tool.grep("M[12]", str(tmp_dir), context_lines=1))
+        assert "A" in result and "B" in result and "C" in result
+        assert result.count("B") == 1
+        assert "--" not in result
 
     def test_grep_default_returns_content_with_line_numbers(self, file_tool, tmp_dir):
         # Default output_mode is "content" — must return matching lines with

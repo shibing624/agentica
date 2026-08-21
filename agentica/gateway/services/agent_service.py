@@ -19,6 +19,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
+import inspect
 
 from agentica.utils.log import logger
 from agentica import DeepAgent
@@ -59,35 +60,67 @@ _AGENT_BUILD_TIMEOUT_S = 30
 CRON_SESSION_PREFIX = "scheduled_"
 
 
+async def dispatch_stream_chunk(
+    chunk,
+    on_content: Optional[Callable[[str], Any]] = None,
+    on_tool_call: Optional[Callable[[str, dict], Any]] = None,
+    on_tool_result: Optional[Callable[..., Any]] = None,
+    on_thinking: Optional[Callable[[str], Any]] = None,
+) -> None:
+    """Fan a ``run_stream`` chunk out to the same callbacks chat uses."""
+    if chunk is None:
+        return
+
+    async def _emit(fn, *args):
+        if fn is None:
+            return
+        maybe = fn(*args)
+        if inspect.isawaitable(maybe):
+            await maybe
+
+    display_event = classify_run_response(chunk)
+
+    if display_event.kind == RunDisplayEventKind.TOOL_STARTED:
+        tool_info = chunk.tool_call
+        if tool_info:
+            tool_name = tool_info.tool_name or "unknown"
+            display_args = format_tool_call_args(tool_name, tool_info.tool_args)
+            await _emit(on_tool_call, tool_name, display_args)
+        return
+
+    if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
+        if chunk.tool_call and on_tool_result:
+            t_name, result_str, extra = format_tool_result(chunk.tool_call)
+            await _emit(on_tool_result, t_name, result_str, extra)
+        return
+
+    if display_event.kind in (
+        RunDisplayEventKind.METADATA_SKIP,
+        RunDisplayEventKind.TELEMETRY_ONLY,
+    ):
+        return
+
+    if display_event.kind == RunDisplayEventKind.CONTENT_DELTA:
+        if chunk.reasoning_content:
+            await _emit(on_thinking, chunk.reasoning_content)
+        if chunk.content:
+            await _emit(on_content, chunk.content)
+
+
 def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Compact status dict for the web goal bar (CLI ``status_line`` / budget)."""
+    """Web goal bar: tokens only (empty/unlimited budget shows the running total)."""
     tokens_used = int(payload.get("tokens_used") or 0)
     token_budget = payload.get("token_budget")
-    turns_used = int(payload.get("turns_used") or 0)
-    turn_budget = payload.get("turn_budget")
-    wall_used = float(payload.get("wall_clock_used_sec") or 0)
-    wall_budget = payload.get("wall_clock_budget_sec")
-    parts: List[str] = []
     if token_budget is not None:
-        parts.append(f"tokens {tokens_used:,}/{int(token_budget):,}")
+        progress = f"tokens {tokens_used:,}/{int(token_budget):,}"
     else:
-        parts.append(f"tokens {tokens_used:,}")
-    if turn_budget is not None:
-        parts.append(f"turns {turns_used}/{int(turn_budget)}")
-    else:
-        parts.append(f"turns {turns_used}")
-    if wall_budget is not None:
-        parts.append(f"wall {wall_used:.0f}s/{float(wall_budget):.0f}s")
+        progress = f"tokens {tokens_used:,}"
     return {
         "status": payload.get("status") or "active",
         "objective": payload.get("objective") or "",
-        "progress": " · ".join(parts),
-        "turns_used": turns_used,
+        "progress": progress,
         "tokens_used": tokens_used,
         "token_budget": token_budget,
-        "turn_budget": turn_budget,
-        "wall_clock_used_sec": wall_used,
-        "wall_clock_budget_sec": wall_budget,
         "message": payload.get("message") or "",
     }
 
@@ -802,14 +835,22 @@ class AgentService:
         session_id: str,
         user_id: str = "default",
         owner: Optional[str] = None,
+        token_budget: int = -1,
         on_event: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        on_content: Optional[Callable[[str], Any]] = None,
+        on_tool_call: Optional[Callable[[str, dict], Any]] = None,
+        on_tool_result: Optional[Callable[..., Any]] = None,
+        on_thinking: Optional[Callable[[str], Any]] = None,
     ) -> Dict[str, Any]:
-        """Drive a bounded standing-goal loop (Agent.run_goal) for the web UI's
-        "/goal <objective>" command.
+        """Drive a standing-goal loop (Agent.run_goal) for the web UI's ``/goal``.
 
-        Budgets are capped conservatively since this runs behind a single
-        HTTP request in a local gateway. ``on_event`` receives a compact
-        status dict after each ``goal.*`` event so the web bar can tick.
+        Web exposes one knob: ``token_budget`` (``-1`` = unlimited, the default).
+        Turn and wall-clock caps stay off here; CLI ``/goal --turns/--wall`` still
+        has them. ``on_event`` receives a compact status dict after each
+        ``goal.*`` event so the web bar can tick. Content / tool / thinking
+        callbacks match ``chat_stream`` so the UI paints each turn as it happens.
+        Runs on the cached session agent (``isolate=False``), not a clone, so
+        steer / cancel / the next chat turn see the same instance.
         """
         await self._ensure_initialized()
 
@@ -827,21 +868,21 @@ class AgentService:
             data["event"] = getattr(event, "value", str(event))
             on_event(data)
 
+        async def _on_chunk(chunk) -> None:
+            await dispatch_stream_chunk(
+                chunk, on_content, on_tool_call, on_tool_result, on_thinking,
+            )
+
         async with lock:
             agent = await self._get_agent(session_id, owner)
             if self._workspace:
                 await asyncio.to_thread(self._workspace.set_user, user_id)
-            # Carry the prior conversation into the goal loop so the model sees
-            # the context the user has been building up. Web previously lost it
-            # because run_goal() clones a fresh agent with empty working memory.
-            seed_messages = agent.working_memory.get_messages()
             result = await agent.run_goal(
                 objective,
-                turn_budget=15,
-                token_budget=80_000,
-                wall_clock_budget_sec=300,
-                seed_messages=seed_messages,
+                token_budget=token_budget,
+                isolate=False,
                 event_callback=_cb if on_event else None,
+                stream_chunks=_on_chunk,
             )
             return {
                 "status": result.status,
@@ -935,7 +976,7 @@ class AgentService:
         source: RunSource = RunSource.gateway,
         on_content: Optional[Callable[[str], Any]] = None,
         on_tool_call: Optional[Callable[[str, dict], Any]] = None,
-        on_tool_result: Optional[Callable[[str, str], Any]] = None,
+        on_tool_result: Optional[Callable[..., Any]] = None,
         on_thinking: Optional[Callable[[str], Any]] = None,
         owner: Optional[str] = None,
         media: Optional[List["InboundMedia"]] = None,
@@ -954,7 +995,7 @@ class AgentService:
                 own partition (cron, IM channels, the CLI).
             on_content: Called with each content delta
             on_tool_call: Called when a tool call starts (name, args)
-            on_tool_result: Called when a tool call completes (name, result)
+            on_tool_result: Called when a tool call completes (name, result, extra)
             on_thinking: Called with each reasoning delta
             media: Pasted/attached images from the web UI (same routing as IM).
 
@@ -986,7 +1027,7 @@ class AgentService:
         source: RunSource,
         on_content: Optional[Callable[[str], Any]],
         on_tool_call: Optional[Callable[[str, dict], Any]],
-        on_tool_result: Optional[Callable[[str, str], Any]],
+        on_tool_result: Optional[Callable[..., Any]],
         on_thinking: Optional[Callable[[str], Any]],
         owner: Optional[str],
         media: Optional[List["InboundMedia"]],
@@ -1022,39 +1063,20 @@ class AgentService:
                     continue
 
                 display_event = classify_run_response(chunk)
-
                 if display_event.kind == RunDisplayEventKind.TOOL_STARTED:
                     tool_info = chunk.tool_call
                     if tool_info:
-                        tool_name = tool_info.tool_name or "unknown"
-                        display_args = format_tool_call_args(tool_name, tool_info.tool_args)
-                        tools_used.append(tool_name)
+                        tools_used.append(tool_info.tool_name or "unknown")
                         tool_calls += 1
-                        if on_tool_call:
-                            await on_tool_call(tool_name, display_args)
-                    continue
-
-                if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
-                    if chunk.tool_call and on_tool_result:
-                        t_name, result_str, _ = format_tool_result(chunk.tool_call)
-                        await on_tool_result(t_name, result_str)
-                    continue
-
-                if display_event.kind == RunDisplayEventKind.METADATA_SKIP:
-                    continue
-                if display_event.kind == RunDisplayEventKind.TELEMETRY_ONLY:
-                    continue
-
-                if display_event.kind == RunDisplayEventKind.CONTENT_DELTA:
+                elif display_event.kind == RunDisplayEventKind.CONTENT_DELTA:
                     if chunk.reasoning_content:
                         reasoning_content += chunk.reasoning_content
-                        if on_thinking:
-                            await on_thinking(chunk.reasoning_content)
-
                     if chunk.content:
                         full_content += chunk.content
-                        if on_content:
-                            await on_content(chunk.content)
+
+                await dispatch_stream_chunk(
+                    chunk, on_content, on_tool_call, on_tool_result, on_thinking,
+                )
 
             return ChatResult(
                 content=full_content.strip(),
@@ -1234,6 +1256,41 @@ class AgentService:
         except Exception as e:
             logger.warning(f"Failed to cancel session {session_id}: {e}")
             return False
+
+    def _cached_agent_for_owner(self, session_id: str, owner: Optional[str] = None):
+        """Cached agent for this session, only if it belongs to ``owner``.
+
+        Does not build a new agent: steering a session that is not running
+        (or not this account's) must return False so the caller can queue.
+        """
+        agent = self._cache.get(session_id)
+        if agent is None or agent.user_id != self._owner(owner):
+            return None
+        return agent
+
+    def steer_session(self, session_id: str, guidance: str, owner: Optional[str] = None) -> bool:
+        """Inject mid-run guidance (CLI ``agent.steer``) for a web session.
+
+        Returns True when the live run accepted it (delivered at the next
+        tool-batch boundary). False means the caller must queue a fresh turn:
+        no cached agent, wrong owner, or the run ended in the TOCTOU window.
+        """
+        agent = self._cached_agent_for_owner(session_id, owner)
+        if agent is None:
+            return False
+        return bool(agent.steer(guidance))
+
+    def take_undelivered_steer(self, session_id: str, owner: Optional[str] = None) -> List[str]:
+        """Pop steering accepted too late for this run, so the web UI can queue it.
+
+        Same contract as CLI ``promote_late_steer``: a True from ``steer()``
+        during the final inference is parked on the agent and must be taken
+        after the run ends, or it sits forever.
+        """
+        agent = self._cached_agent_for_owner(session_id, owner)
+        if agent is None:
+            return []
+        return [text for text, _relayed in agent.pop_undelivered_steer()]
 
     # ============== Work directory ==============
 

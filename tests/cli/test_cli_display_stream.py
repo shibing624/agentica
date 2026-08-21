@@ -502,12 +502,12 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
 class TestStreamDisplayManagerSegmentOrdering(unittest.TestCase):
     """Preamble text must land in the LLM's NATIVE emission order.
 
-    ``stream_response`` buffers text silently; the buffer is flushed as plain
-    text at the next boundary that produces its own live output — thinking
-    start OR tool start. Whatever remains at ``finalize`` is the final answer
-    (rendered as Markdown). Regression guard for the ``text -> thinking ->
-    tool`` inversion where the buffered preamble used to surface AFTER the
-    thinking block (it was only flushed on a tool call, never on thinking).
+    ``stream_response`` keeps the current segment until a thinking or tool
+    boundary, then flushes it so preamble text lands in the LLM's native
+    order. Complete Markdown blocks may already have been committed earlier;
+    the remainder is flushed at the boundary. Regression guard for the
+    ``text -> thinking -> tool`` inversion where the buffered preamble used
+    to surface AFTER the thinking block.
     """
 
     def _mgr_and_buf(self):
@@ -550,17 +550,39 @@ class TestStreamDisplayManagerSegmentOrdering(unittest.TestCase):
         )
 
     def test_final_segment_stays_buffered_until_finalize(self):
-        """The final answer is silent while streaming; it only lands when
-        ``finalize`` renders it in one shot (spinner covers the wait)."""
+        """An incomplete last block (no blank-line boundary) stays silent
+        until ``finalize``. Complete earlier blocks may already have landed."""
         mgr, buf = self._mgr_and_buf()
         mgr.stream_response("FINALANSWER")
         self.assertNotIn(
             "FINALANSWER",
             buf.getvalue(),
-            "final answer must not be printed token-by-token during streaming",
+            "incomplete last block must not print token-by-token",
         )
         mgr.finalize()
         self.assertIn("FINALANSWER", buf.getvalue())
+
+    def test_markdown_preamble_still_lands_before_thinking(self):
+        from unittest.mock import patch
+
+        mgr, buf = self._mgr_and_buf()
+        with patch("agentica.cli.display.stream.get_setting", return_value="on"):
+            mgr._cli_markdown_mode = "on"
+        mgr.stream_response("# Looking\n\nI'll search")
+        mgr.start_thinking()
+        mgr.stream_thinking("THINKINGLINE\n")
+        mgr.end_thinking()
+        mgr.finalize()
+        out = buf.getvalue()
+        self.assertLess(
+            out.index("Looking"),
+            out.index("THINKINGLINE"),
+            "committed markdown preamble must appear BEFORE thinking",
+        )
+        self.assertLess(
+            out.index("I'll search") if "I'll search" in out else out.index("search"),
+            out.index("THINKINGLINE"),
+        )
 
 
 class TestReadFileCountSummary(unittest.TestCase):

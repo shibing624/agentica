@@ -112,6 +112,96 @@ class TestChatEndpoint:
         assert resp.status_code == 422  # validation error
 
 
+class TestSteerEndpoint:
+    """POST /api/chat/steer is the web interrupt; false is not an HTTP error."""
+
+    def test_steer_accepted(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.steer_session = MagicMock(return_value=True)
+        resp = client.post("/api/chat/steer", json={"session_id": "s1", "message": "stop rewriting"})
+        assert resp.status_code == 200
+        assert resp.json() == {"accepted": True}
+        mock_svc.steer_session.assert_called_once()
+
+    def test_steer_refused_is_200(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.steer_session = MagicMock(return_value=False)
+        resp = client.post("/api/chat/steer", json={"session_id": "s1", "message": "too late"})
+        assert resp.status_code == 200
+        assert resp.json() == {"accepted": False}
+
+    def test_take_undelivered(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.take_undelivered_steer = MagicMock(return_value=["late note"])
+        resp = client.post("/api/chat/steer/take", json={"session_id": "s1"})
+        assert resp.status_code == 200
+        assert resp.json() == {"messages": ["late note"]}
+
+
+class TestGoalEndpoint:
+    """POST /api/goal: web standing-goal. Default token_budget=-1 (unlimited)."""
+
+    def test_omitted_token_budget_is_unlimited(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.run_goal = AsyncMock(return_value={
+            "status": "complete", "reason": "done", "content": "ok", "turns_used": 1,
+        })
+        with client.stream("POST", "/api/goal", json={
+            "objective": "ship it", "session_id": "s1",
+        }) as resp:
+            assert resp.status_code == 200
+            list(resp.iter_lines())
+        assert mock_svc.run_goal.await_count == 1
+        assert mock_svc.run_goal.call_args.kwargs["token_budget"] == -1
+
+    def test_token_budget_forwarded(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.run_goal = AsyncMock(return_value={
+            "status": "complete", "reason": "done", "content": "ok", "turns_used": 1,
+        })
+        with client.stream("POST", "/api/goal", json={
+            "objective": "ship it", "session_id": "s1", "token_budget": 500_000,
+        }) as resp:
+            assert resp.status_code == 200
+            list(resp.iter_lines())
+        assert mock_svc.run_goal.call_args.kwargs["token_budget"] == 500_000
+
+    def test_streams_content_and_tools_before_done(self, mock_app):
+        client, mock_svc = mock_app
+
+        async def fake_run_goal(*_a, on_content=None, on_tool_call=None, on_tool_result=None, **kw):
+            if on_tool_call:
+                await on_tool_call("read_file", {"path": "a.py"})
+            if on_tool_result:
+                await on_tool_result("read_file", "print(1)")
+            if on_content:
+                await on_content("hello ")
+                await on_content("world")
+            on_event = kw.get("on_event")
+            if on_event:
+                on_event({"status": "active", "objective": "ship it", "progress": "tokens 10"})
+            return {
+                "status": "complete", "reason": "done", "content": "hello world", "turns_used": 1,
+            }
+
+        mock_svc.run_goal = fake_run_goal
+        events = []
+        with client.stream("POST", "/api/goal", json={
+            "objective": "ship it", "session_id": "s1",
+        }) as resp:
+            assert resp.status_code == 200
+            for line in resp.iter_lines():
+                if not line or line == "data: [DONE]":
+                    continue
+                if line.startswith("data: "):
+                    events.append(json.loads(line[6:]))
+        kinds = [e["event"] for e in events]
+        assert kinds == ["tool_call", "tool_result", "content", "content", "status", "done"]
+        assert events[0]["data"]["name"] == "read_file"
+        assert events[2]["data"] == "hello "
+        assert events[-1]["data"]["status"] == "complete"
+
+
 class TestSessionEndpoints:
     """Test /api/sessions endpoints."""
 
@@ -399,6 +489,14 @@ class TestTempDirAndCompactEndpoints:
         assert resp.status_code == 200
         assert resp.json()["messages_before"] == 40
         mock_svc.compact_session.assert_awaited()
+
+    def test_compact_busy_session_is_409(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.compact_session = AsyncMock(
+            side_effect=RuntimeError("Session 's1' already has an active run. Wait for it to complete or cancel it first.")
+        )
+        resp = client.post("/api/sessions/s1/compact", json={})
+        assert resp.status_code == 409
 
 
 class TestSchedulerEndpoints:

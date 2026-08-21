@@ -10,10 +10,11 @@ export function slashQuery(text: string): string | null {
 }
 
 export function webSlashItems(skills: Array<Record<string, any>>, S: {
-  slashGoal: string; slashCompact: string;
+  slashGoal: string; slashCompact: string; slashQueue: string;
 }): SlashItem[] {
   const out: SlashItem[] = [
     { cmd: "/goal", name: "/goal", desc: S.slashGoal, kind: "command" },
+    { cmd: "/queue", name: "/queue", desc: S.slashQueue, kind: "command" },
     { cmd: "/compact", name: "/compact", desc: S.slashCompact, kind: "command" },
   ];
   for (const sk of skills || []) {

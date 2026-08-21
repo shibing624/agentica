@@ -8,6 +8,7 @@ thin delegation. The goal loop (set objective → run turns → evaluate → sto
 lives here, mirroring the existing PromptsMixin / ToolsMixin tradition.
 """
 
+import inspect
 import time
 from typing import (
     Any,
@@ -132,6 +133,20 @@ class GoalMixin:
             GoalTool(mgr.session_log, judge_model=mgr.judge_model, work_dir=work_dir)
         )
 
+    def detach_goal_tool(self) -> None:
+        """Remove ``GoalTool`` after an in-place ``run_goal`` so later chat
+        turns do not keep ``verify_completion`` / ``update_goal``.
+        """
+        from agentica.tools.goal_tool import GoalTool
+
+        if not self.tools:
+            return
+        remaining = [t for t in self.tools if not isinstance(t, GoalTool)]
+        if len(remaining) == len(self.tools):
+            return
+        self.tools = remaining
+        self._wire_tools_to_self()
+
     async def run_goal(
         self,
         objective: str,
@@ -141,6 +156,8 @@ class GoalMixin:
         wall_clock_budget_sec: Optional[float] = None,
         attach_goal_tool: bool = True,
         event_callback: Optional[Callable[..., None]] = None,
+        stream_chunks: Optional[Callable[[RunResponse], Any]] = None,
+        isolate: bool = True,
         verifier: Optional[Callable[..., Any]] = None,
         seed_messages: Optional[Sequence[Union[Message, Dict[str, Any]]]] = None,
         auto_judge: bool = False,
@@ -187,6 +204,19 @@ class GoalMixin:
                 False: completion comes only from ``verify_completion`` /
                 verifier, and the loop otherwise runs until a budget cap.
             event_callback: ``goal.*`` event hook.
+            stream_chunks: Optional per-chunk hook. When set, each turn
+                uses ``run_stream`` and this is called with every
+                ``RunResponse`` chunk (sync or async). The web ``/goal``
+                path uses it so tool calls and tokens appear as they
+                happen, matching ordinary chat. Unset keeps ``run()``
+                (SDK / tests). The CLI does not use this — its REPL
+                already streams via ``run_stream_sync``.
+            isolate: When True (SDK default), the loop runs on ``clone()``
+                so two concurrent ``run_goal()`` calls on one instance
+                cannot share memory or steer buffers. The gateway holds a
+                per-session lock and must pass False: Web steer / cancel /
+                the next chat turn all address the cached agent, and a
+                clone would leave them talking to an idle parent.
             verifier: Optional callable that decides per-turn whether the
                 goal is satisfied, WITHOUT an LLM call. Signature:
                 ``(VerifierContext) -> Optional[VerifierResult]`` (sync or
@@ -211,18 +241,15 @@ class GoalMixin:
         """
         from agentica.goals import GoalRunResult
 
-        # Clone the agent so concurrent run_goal() calls on the same instance
-        # are safe.  Swarm._clone_agent_for_task() uses the same pattern.
-        agent = self.clone()
+        # SDK default: clone so concurrent run_goal() calls on one instance
+        # cannot share memory or steer buffers. The gateway holds a
+        # per-session lock and passes isolate=False — Web steer / cancel /
+        # the next chat turn all address the cached agent.
+        agent = self.clone() if isolate else self
 
-        # Seed the cloned agent's working memory with the prior conversation so
-        # the goal loop begins from real context. The CLI drives /goal on the
-        # live agent and keeps history naturally; this makes the Web path
-        # symmetric. hydrate_runs_from_history() rebuilds AgentRun entries that
-        # the prompt builder (get_messages_from_last_n_runs) actually reads —
-        # appending to working_memory.messages alone is NOT enough (that field
-        # is archive/trim only, not prompt assembly).
-        if seed_messages:
+        # Seed only the clone. Hydrating the live agent would duplicate
+        # history it already holds.
+        if isolate and seed_messages:
             seed_dicts = [
                 m.model_dump(exclude_none=True) if isinstance(m, Message) else m
                 for m in seed_messages
@@ -257,27 +284,34 @@ class GoalMixin:
         last_run_response: Optional[RunResponse] = None
         tokens_baseline = 0
 
-        while True:
-            step = await agent.run_goal_step(prompt, tokens_baseline=tokens_baseline)
-            last_run_response = step.run_response
-            tokens_baseline = step.tokens_baseline
-
-            if not step.decision.should_continue:
-                final_state = mgr.load()
-                return GoalRunResult(
-                    status=step.decision.status,
-                    reason=step.decision.reason,
-                    run_response=last_run_response,
-                    goal=final_state,
-                    turns_used=final_state.turns_used if final_state else 0,
+        try:
+            while True:
+                step = await agent.run_goal_step(
+                    prompt, tokens_baseline=tokens_baseline, stream_chunks=stream_chunks,
                 )
-            prompt = step.decision.continuation_prompt
+                last_run_response = step.run_response
+                tokens_baseline = step.tokens_baseline
+
+                if not step.decision.should_continue:
+                    final_state = mgr.load()
+                    return GoalRunResult(
+                        status=step.decision.status,
+                        reason=step.decision.reason,
+                        run_response=last_run_response,
+                        goal=final_state,
+                        turns_used=final_state.turns_used if final_state else 0,
+                    )
+                prompt = step.decision.continuation_prompt
+        finally:
+            if not isolate and attach_goal_tool:
+                agent.detach_goal_tool()
 
     async def run_goal_step(
         self,
         prompt: str,
         *,
         tokens_baseline: int = 0,
+        stream_chunks: Optional[Callable[[RunResponse], Any]] = None,
     ) -> "GoalStepResult":
         """Run ONE turn of the standing-goal loop and evaluate it.
 
@@ -306,6 +340,8 @@ class GoalMixin:
                 turns of this goal. Each turn's per-run token usage is added
                 on and returned as ``result.tokens_baseline``; pass it back on
                 the next call.
+            stream_chunks: When set, this turn uses ``run_stream`` and the
+                hook sees every chunk. Unset uses ``run()``.
 
         Returns:
             ``GoalStepResult`` with the turn's ``run_response``, the
@@ -316,7 +352,19 @@ class GoalMixin:
         mgr = self.get_goal_manager()
 
         t0 = time.monotonic()
-        response = await self.run(prompt)
+        if stream_chunks is None:
+            response = await self.run(prompt)
+        else:
+            from agentica.run_config import RunConfig
+            async for chunk in self.run_stream(
+                prompt, config=RunConfig(stream_intermediate_steps=True),
+            ):
+                if chunk is None:
+                    continue
+                maybe = stream_chunks(chunk)
+                if inspect.isawaitable(maybe):
+                    await maybe
+            response = self.run_response
         elapsed = time.monotonic() - t0
 
         final_text, token_delta, new_baseline, tool_pairs = mgr.extract_turn_signals(

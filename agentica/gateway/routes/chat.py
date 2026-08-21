@@ -18,7 +18,7 @@ from agentica.memory.trace import last_completed_round
 from .. import deps
 from ..channels.base import InboundMedia
 from ..config import settings
-from ..models import ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest, RenameRequest, GoalRequest
+from ..models import ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest, RenameRequest, GoalRequest, SteerRequest
 from ..services.agent_service import AgentService
 
 try:
@@ -27,6 +27,27 @@ except ImportError:
     AgentCancelledError = None
 
 router = APIRouter()
+
+
+def _sse_stream_hooks(queue: "asyncio.Queue[dict | None]"):
+    """Same content/tool/thinking events for chat and /goal."""
+
+    async def on_content(delta: str):
+        await queue.put({"event": "content", "data": delta})
+
+    async def on_tool_call(name: str, args: dict):
+        await queue.put({"event": "tool_call", "data": {"name": name, "args": args}})
+
+    async def on_tool_result(name: str, result: str, extra: dict | None = None):
+        data = {"name": name, "result": result}
+        if extra:
+            data.update(extra)
+        await queue.put({"event": "tool_result", "data": data})
+
+    async def on_thinking(delta: str):
+        await queue.put({"event": "thinking", "data": delta})
+
+    return on_content, on_tool_call, on_tool_result, on_thinking
 
 # Inline image payloads in JSON; keep well under typical provider inline caps.
 _MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024
@@ -89,6 +110,39 @@ async def chat(
     )
 
 
+# ============== Mid-run interrupt (CLI steer) ==============
+
+@router.post("/api/chat/steer")
+async def steer_chat(
+    body: SteerRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Inject guidance into the current run at the next tool-batch boundary.
+
+    ``accepted: false`` is not an error — the run ended between the UI check
+    and this call, and the client must queue a fresh turn instead of dropping
+    the text (same TOCTOU contract as CLI ``agent.steer``).
+    """
+    accepted = svc.steer_session(body.session_id, body.message, owner=_account(request))
+    return {"accepted": accepted}
+
+
+@router.post("/api/chat/steer/take")
+async def take_steer(
+    body: SteerRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Pop steering that outlived the run so the web UI can queue it.
+
+    ``message`` is ignored; the body reuses SteerRequest so the client always
+    posts ``session_id``.
+    """
+    messages = svc.take_undelivered_steer(body.session_id, owner=_account(request))
+    return {"messages": messages}
+
+
 # ============== Standing goal ("/goal <objective>") ==============
 
 @router.post("/api/goal")
@@ -97,15 +151,18 @@ async def run_goal(
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """Drive a bounded standing-goal loop for the web UI's ``/goal``.
+    """Drive a standing-goal loop for the web UI's ``/goal``.
 
-    Streams ``status`` events (CLI-equivalent progress) then a final ``done``.
+    Streams ``status`` events (token progress), the same ``content`` /
+    ``thinking`` / ``tool_call`` / ``tool_result`` events as ``/api/chat/stream``,
+    then a final ``done``. ``token_budget`` of ``-1`` (default) is unlimited.
     """
     session_id = body.session_id
     account = _account(request)
 
     async def event_generator():
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
+        on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(queue)
 
         def on_event(data: dict):
             queue.put_nowait({"event": "status", "data": data})
@@ -114,7 +171,12 @@ async def run_goal(
             try:
                 result = await svc.run_goal(
                     body.objective, session_id, user_id=account, owner=account,
+                    token_budget=body.token_budget,
                     on_event=on_event,
+                    on_content=on_content,
+                    on_tool_call=on_tool_call,
+                    on_tool_result=on_tool_result,
+                    on_thinking=on_thinking,
                 )
                 await queue.put({"event": "done", "data": result})
             except RuntimeError as e:
@@ -168,18 +230,7 @@ async def chat_stream(
 
     async def event_generator():
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
-
-        async def on_content(delta: str):
-            await queue.put({"event": "content", "data": delta})
-
-        async def on_tool_call(name: str, args: dict):
-            await queue.put({"event": "tool_call", "data": {"name": name, "args": args}})
-
-        async def on_tool_result(name: str, result: str):
-            await queue.put({"event": "tool_result", "data": {"name": name, "result": result}})
-
-        async def on_thinking(delta: str):
-            await queue.put({"event": "thinking", "data": delta})
+        on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(queue)
 
         async def run_agent():
             t0 = time.time()

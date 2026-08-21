@@ -81,6 +81,18 @@ export const IconProfiles = () => (
     <path d="M5 6h6M5 8.5h6M5 11h3.5" strokeLinecap="round" />
   </S>
 );
+export const IconCheck = () => (
+  <S strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="8" cy="8" r="5.4" />
+    <path d="M5.3 8.15l1.85 1.85 3.6-3.7" />
+  </S>
+);
+export const IconSpinner = () => (
+  <S className="icon-spin" strokeWidth="1.6" strokeLinecap="round">
+    <circle cx="8" cy="8" r="5.4" opacity="0.25" />
+    <path d="M8 2.6a5.4 5.4 0 014.4 2.3" />
+  </S>
+);
 export const IconUser = () => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
     <circle cx="8" cy="5.2" r="2.9" />

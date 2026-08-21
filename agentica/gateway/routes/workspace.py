@@ -18,7 +18,7 @@ from ..config import settings
 from ..workspace_files import (
     CONTENT_TYPES,
     MAX_READ_BYTES,
-    TEXT_PREVIEW_CHARS,
+    TEXT_PREVIEW_BYTES,
     WorkspacePathError,
     content_type_for,
     is_text_ext,
@@ -73,7 +73,7 @@ async def workspace_content(
         if not is_text_ext(name):
             raise HTTPException(status_code=415, detail="not a text file")
         text, truncated = read_preview_text(target)
-        return {"name": name, "content": text, "truncated": truncated, "limit": TEXT_PREVIEW_CHARS}
+        return {"name": name, "content": text, "truncated": truncated, "limit": TEXT_PREVIEW_BYTES}
     size = target.stat().st_size
     if size > MAX_READ_BYTES and not download:
         raise HTTPException(status_code=413, detail="file too large to preview")

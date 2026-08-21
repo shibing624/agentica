@@ -216,6 +216,10 @@ CLI 行为：
 - `/resume <session_id>` 重进旧 session 时，goal 强制改为 `paused(reason="resume-safety")`，等用户显式 `/goal resume`
 - judge 连续 3 次 JSON 解析失败 → `paused(reason="judge-broken")`，避免 silent 死循环
 
+## Web 用法
+
+网页输入 `/goal`（或斜杠菜单选中）进入目标模式：先填 **一个 token 预算**（留空 = 不限，支持 `500k` / `2m`），再写目标内容后发送。网关只把 `token_budget` 传给 `run_goal`（默认 `-1`），不设 turns / wall，并传 `isolate=False`——loop 打在该会话缓存的 agent 上，插话 / 停止 / 下一轮聊天才能看见同一只实例。运行中状态条只显示 `tokens used` 或 `tokens used/budget`。每一轮的思考、工具调用和正文与普通对话同一套 SSE 流式画出，不再等整轮结束才出字。CLI `--turns` / `--wall` 仍只在终端生效。
+
 ---
 
 ## 事件（用于 tracing / 观测）

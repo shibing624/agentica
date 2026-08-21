@@ -8,7 +8,8 @@ symlink escapes are both refused.
 from __future__ import annotations
 
 from pathlib import Path
-TEXT_PREVIEW_CHARS = 12000
+# 256 KiB preview cap; 50 MiB hard ceiling for a full inline read.
+TEXT_PREVIEW_BYTES = 256 * 1024
 MAX_READ_BYTES = 50 * 1024 * 1024
 
 CONTENT_TYPES = {
@@ -172,11 +173,10 @@ def stat_existing(root: str, paths: list[str]) -> list[str]:
     return found
 
 
-def read_preview_text(path: Path, *, limit: int = TEXT_PREVIEW_CHARS) -> tuple[str, bool]:
-    data = path.read_bytes()
-    if len(data) > MAX_READ_BYTES:
-        data = data[:MAX_READ_BYTES]
-    text = data.decode("utf-8", errors="replace")
-    if len(text) > limit:
-        return text[:limit], True
-    return text, False
+def read_preview_text(path: Path, *, limit: int = TEXT_PREVIEW_BYTES) -> tuple[str, bool]:
+    """First ``limit`` bytes only — do not slurp a multi-megabyte file then slice."""
+    size = path.stat().st_size
+    with path.open("rb") as f:
+        data = f.read(limit)
+    truncated = size > len(data)
+    return data.decode("utf-8", errors="replace"), truncated

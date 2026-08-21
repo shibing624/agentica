@@ -803,6 +803,93 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     assert result.status == "complete"
 
 
+def test_agent_run_goal_stream_chunks_uses_run_stream():
+    """Web /goal passes stream_chunks so each turn uses run_stream, not run()."""
+    from unittest.mock import AsyncMock, patch
+    from agentica.agent import Agent
+    from agentica.goals import GoalRunResult
+    from agentica.run_response import RunResponse
+
+    agent = Agent.__new__(Agent)
+    agent.model = None
+    agent.auxiliary_model = _fake_model('{"done": true, "reason": "the answer is 42"}')
+    agent.auxiliary_task_models = {}
+    agent.session_id = "agent-rungoal-stream"
+    agent._session_log = None
+    agent.goal_manager = None
+    agent.work_dir = None
+    agent.tools = None
+    agent.user_id = None
+    agent.task_anchor = None
+    agent._anchor_session_id = None
+    agent._tool_runtime_configs = {}
+    agent._skill_runtime_configs = {}
+    agent.clone = lambda: agent
+
+    rr = RunResponse(content="42")
+    agent.run_response = rr
+    agent.run = AsyncMock(return_value=rr)
+    seen = []
+
+    async def hook(chunk):
+        seen.append(chunk.content)
+
+    async def fake_stream(self, *a, **k):
+        yield rr
+
+    with patch.object(Agent, "run_stream", fake_stream):
+        result = asyncio.run(agent.run_goal(
+            "compute 17+9+16",
+            turn_budget=3,
+            auto_judge=True,
+            attach_goal_tool=False,
+            stream_chunks=hook,
+        ))
+
+    agent.run.assert_not_called()
+    assert seen == ["42"]
+    assert isinstance(result, GoalRunResult)
+    assert result.status == "complete"
+    assert result.run_response is rr
+
+
+def test_agent_run_goal_isolate_false_does_not_clone():
+    """Gateway /goal must run on the live agent so steer/cancel share buffers."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from agentica.agent import Agent
+    from agentica.run_response import RunResponse
+
+    agent = Agent.__new__(Agent)
+    agent.model = None
+    agent.auxiliary_model = _fake_model('{"done": true, "reason": "the answer is 42"}')
+    agent.auxiliary_task_models = {}
+    agent.session_id = "agent-rungoal-live"
+    agent._session_log = None
+    agent.goal_manager = None
+    agent.work_dir = None
+    agent.tools = None
+    agent.user_id = None
+    agent.task_anchor = None
+    agent._anchor_session_id = None
+    agent._tool_runtime_configs = {}
+    agent._skill_runtime_configs = {}
+    agent.clone = MagicMock(side_effect=AssertionError("must not clone"))
+
+    rr = RunResponse(content="42")
+    with patch.object(Agent, "run", new=AsyncMock(return_value=rr)):
+        result = asyncio.run(agent.run_goal(
+            "compute 17+9+16",
+            turn_budget=3,
+            auto_judge=True,
+            attach_goal_tool=False,
+            isolate=False,
+        ))
+
+    agent.clone.assert_not_called()
+    assert result.status == "complete"
+    assert result.run_response is rr
+
+
 def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     """A tight token_budget must short-circuit before the judge runs."""
     from unittest.mock import AsyncMock, patch

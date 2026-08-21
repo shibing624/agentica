@@ -90,6 +90,21 @@ def _in_noise_dir(
         return any(resolved.startswith(root + os.sep) for root in nested)
     return False
 
+
+def _merged_grep_windows(
+    match_lines: List[int], before: int, after: int, n_lines: int,
+) -> List[Tuple[int, int]]:
+    """Inclusive 1-based [start, end] spans around matches; overlap/adjacent merge."""
+    windows: List[Tuple[int, int]] = []
+    for ln in match_lines:
+        start = max(1, ln - before)
+        end = min(n_lines, ln + after)
+        if windows and start <= windows[-1][1] + 1:
+            windows[-1] = (windows[-1][0], max(windows[-1][1], end))
+        else:
+            windows.append((start, end))
+    return windows
+
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
     "/dev/stdin", "/dev/tty", "/dev/console",
@@ -1028,6 +1043,7 @@ class BuiltinFileTool(Tool):
             return await self._run_grep_fallback(
                 pattern, path, include, output_mode, limit, fixed_strings,
                 case_insensitive, _GREP_TIMEOUT,
+                context_lines, before_context, after_context,
             )
 
         # Build rg command arguments
@@ -1100,6 +1116,7 @@ class BuiltinFileTool(Tool):
             return await self._run_grep_fallback(
                 pattern, path, include, output_mode, limit, fixed_strings,
                 case_insensitive, _GREP_TIMEOUT,
+                context_lines, before_context, after_context,
             )
         finally:
             if proc is not None and not drained:
@@ -1136,6 +1153,9 @@ class BuiltinFileTool(Tool):
             fixed_strings: bool,
             case_insensitive: bool = False,
             timeout: int = _GREP_TIMEOUT,
+            context_lines: int = 0,
+            before_context: int = 0,
+            after_context: int = 0,
     ) -> str:
         """Run the pure-Python fallback in an executor with a hard timeout.
 
@@ -1150,6 +1170,7 @@ class BuiltinFileTool(Tool):
                 loop.run_in_executor(
                     None, self._grep_fallback, pattern, path, include,
                     output_mode, limit, fixed_strings, case_insensitive,
+                    context_lines, before_context, after_context,
                 ),
                 timeout=timeout,
             )
@@ -1169,6 +1190,9 @@ class BuiltinFileTool(Tool):
             limit: int,
             fixed_strings: bool,
             case_insensitive: bool = False,
+            context_lines: int = 0,
+            before_context: int = 0,
+            after_context: int = 0,
     ) -> str:
         """Fallback grep using pure Python when ripgrep is not available."""
         base_path = self._resolve_path(path)
@@ -1199,11 +1223,17 @@ class BuiltinFileTool(Tool):
 
         results = []
         file_counts = {}
+        n_emitted = 0
 
         match_pattern = pattern.lower() if (case_insensitive and fixed_strings) else pattern
+        if context_lines > 0:
+            before, after = context_lines, context_lines
+        else:
+            before, after = max(0, before_context), max(0, after_context)
+        use_context = output_mode == "content" and (before > 0 or after > 0)
 
         for fp in files:
-            if len(results) >= limit:
+            if output_mode != "count" and n_emitted >= limit:
                 break
 
             try:
@@ -1222,18 +1252,36 @@ class BuiltinFileTool(Tool):
                 else:
                     matched = regex_pattern.search(line)
                 if matched:
-                    file_matches.append({
-                        "line_num": line_num,
-                        "content": line.strip()[:200],
-                    })
+                    file_matches.append(line_num)
 
-            if file_matches:
-                file_counts[str(fp)] = len(file_matches)
-                if output_mode == "content":
-                    for match in file_matches[:limit - len(results)]:
-                        results.append(f"{fp}:{match['line_num']}: {match['content']}")
-                elif output_mode == "files_with_matches":
-                    results.append(str(fp))
+            if not file_matches:
+                continue
+            file_counts[str(fp)] = len(file_matches)
+            if output_mode == "files_with_matches":
+                results.append(str(fp))
+                n_emitted += 1
+                continue
+            if output_mode != "content":
+                continue
+
+            taken = file_matches[:limit - n_emitted]
+            n_emitted += len(taken)
+            match_set = set(taken)
+            if use_context:
+                windows = _merged_grep_windows(taken, before, after, len(lines))
+                chunks: List[str] = []
+                for start, end in windows:
+                    block = []
+                    for ln in range(start, end + 1):
+                        body = lines[ln - 1].rstrip("\n")[:200]
+                        sep = ":" if ln in match_set else "-"
+                        block.append(f"{fp}:{ln}{sep}{body}")
+                    chunks.append("\n".join(block))
+                results.append("\n--\n".join(chunks) if chunks else "")
+            else:
+                for ln in taken:
+                    body = lines[ln - 1].rstrip("\n")[:200]
+                    results.append(f"{fp}:{ln}: {body}")
 
         # Format output
         if output_mode == "count":
@@ -1242,7 +1290,7 @@ class BuiltinFileTool(Tool):
         elif output_mode == "files_with_matches":
             result = "\n".join(sorted(set(results))) if results else f"No matches found for '{pattern}'"
         else:  # content
-            result = "\n".join(results) if results else f"No matches found for '{pattern}'"
+            result = "\n".join(r for r in results if r) if results else f"No matches found for '{pattern}'"
 
         result = truncate_if_too_long(result)
         logger.debug(f"Grep(fallback) for '{pattern}': found {len(file_counts)} files, result length: {len(result)} chars")

@@ -32,6 +32,17 @@ class ChatRequest(BaseModel):
     images: List[ChatImage] = []
 
 
+class SteerRequest(BaseModel):
+    """Mid-run interrupt: inject guidance at the next tool-batch boundary.
+
+    Same contract as CLI ``agent.steer()``: accepted only while a run is
+    in flight. ``session_id`` is required; an empty ``message`` is rejected
+    by the agent and comes back as ``accepted: false``.
+    """
+    session_id: str
+    message: str = ""
+
+
 class CompactRequest(BaseModel):
     """Optional extra instructions for ``/compact`` (same as the CLI args)."""
     instructions: str = ""
@@ -79,6 +90,9 @@ class PolishPromptRequest(BaseModel):
 class GoalRequest(BaseModel):
     objective: str
     session_id: str = "default"
+    # ``-1`` = unlimited (web default). A positive int is a hard cap.
+    # Turns and wall-clock are not web knobs — CLI ``/goal --turns/--wall`` still has them.
+    token_budget: int = -1
 
 
 class SkillCreateRequest(BaseModel):

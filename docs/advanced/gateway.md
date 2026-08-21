@@ -526,7 +526,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | GET | `/login` | 登录页（设了密码时；与 `/chat` 同一份 SPA） |
 | POST | `/api/auth/login` / `/logout` / `/password` | 登录、退出、改密码，见「鉴权」 |
 | GET | `/api/workspace/files` | 列出工作目录下的文件（`root` + 相对 `path`） |
-| GET | `/api/workspace/content` | 预览（`preview=1`，超 12000 字符截断）或下载（`download=1`） |
+| GET | `/api/workspace/content` | 预览（`preview=1`，超过 256 KiB 截断）或下载（`download=1`） |
 | POST | `/api/workspace/stat` | 批量确认相对路径是否存在 |
 | POST | `/api/workspace/upload` | 上传到当前目录（multipart，需 `X-Agentica-Client`） |
 | GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
@@ -534,6 +534,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
 | GET | `/api/sessions/{id}/usage` | 本会话 Context Window 拆分（与 CLI `/usage` 同一套 `measure_context`：system prompt / 规则 / 技能 / 工具定义 / 对话的 token 数）以及消息数、API 调用、费用 |
 | POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套 native + Layer 2 摘要 |
+| POST | `/api/goal` | Web `/goal`：standing-goal 循环。body：`objective`、`session_id`、`token_budget`（默认 `-1` = 不限；不传 turns / wall） |
 | POST | `/api/fs/temp` | 为新建对话创建一个临时工作目录（`$AGENTICA_HOME/tmp/web-chats`） |
 | POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`，可选 `images`） |
 | WS | `/ws` | 流式事件订阅 |
