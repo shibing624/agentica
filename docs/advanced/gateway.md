@@ -17,6 +17,8 @@ HTTP API + WebSocket 流式接口 + 多个 IM 平台机器人 + 定时任务调�
 pip install "agentica[gateway]"
 ```
 
+PyPI 的 wheel 已经打进编译好的 Web UI，运行时不需要 Node。源码在仓库 `web/`，改界面请看那边的 README（`npm run dev`）；不要把 `agentica/gateway/ui/` 提交进 git。
+
 按需追加 IM 平台 SDK（每个 IM 都是可选 extras，不装则该渠道自动跳过）：
 
 ```bash

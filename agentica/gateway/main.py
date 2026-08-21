@@ -319,8 +319,9 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 
 
 # ============== Static files + SPA ==============
-# Production: Vite writes into gateway/ui/. pip users get that dist; Node is
-# not required at runtime. Dev: `cd web && npm run dev` proxies /api to here.
+# Production: Vite writes into gateway/ui/ (gitignored). Release/CI run
+# `cd web && npm run build` before `python -m build`, so pip users get the
+# dist and do not need Node. Dev: `cd web && npm run dev` proxies /api here.
 
 _UI_DIR = Path(__file__).parent / "ui"
 _UI_ASSETS = _UI_DIR / "assets"

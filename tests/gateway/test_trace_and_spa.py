@@ -79,3 +79,12 @@ def test_chat_and_traces_serve_html(client_and_svc):
         resp = client.get(path)
         assert resp.status_code in (200, 503)
         assert "text/html" in resp.headers["content-type"]
+
+
+def test_spa_index_explains_how_to_build_when_dist_is_missing(tmp_path, monkeypatch):
+    import agentica.gateway.main as gateway_main
+
+    monkeypatch.setattr(gateway_main, "_UI_DIR", tmp_path)
+    resp = gateway_main._spa_index()
+    assert resp.status_code == 503
+    assert b"npm run build" in resp.body

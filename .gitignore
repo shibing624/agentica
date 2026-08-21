@@ -218,6 +218,9 @@ examples/self_evolution/03_self_evolution_e2e_glm.py
 .worktrees/
 node_modules/
 web/dist/
+# Vite production output. Source lives in web/; `npm run build` writes here
+# and the sdist/wheel ships it. Hashed filenames change every build.
+agentica/gateway/ui/
 desktop/node_modules/
 # electron-builder output: installers are release assets, not repo content.
 desktop/dist/

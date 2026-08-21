@@ -37,10 +37,36 @@ jobs:
           python -c "import agentica; print(agentica.__version__, agentica.__file__)"
           pip uninstall -y agentica
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Verify current wheel
         run: |
           pip install build
-          python -m build --wheel
+          python -m build
+          python <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import tarfile
+          wheels = list(Path("dist").glob("agentica-*.whl"))
+          sdists = list(Path("dist").glob("agentica-*.tar.gz"))
+          assert len(wheels) == 1, wheels
+          assert len(sdists) == 1, sdists
+          w = ZipFile(wheels[0]).namelist()
+          t = tarfile.open(sdists[0]).getnames()
+          for names in (w, t):
+              assert any(n.endswith("agentica/gateway/ui/index.html") for n in names), names
+          assert any(n.endswith(".woff2") and "/gateway/ui/assets/" in n for n in w), w
+          PY
           export WHEEL_PATH=$(python -c "from pathlib import Path; wheels=list(Path('dist').glob('agentica-*.whl')); assert len(wheels) == 1, wheels; print(wheels[0])")
           pip install "$WHEEL_PATH"
           export EXPECTED_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")

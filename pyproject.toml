@@ -286,7 +286,22 @@ include = ["agentica*"]
 exclude = ["tests*", "examples*", "docs*", "scripts*"]
 
 [tool.setuptools.package-data]
-agentica = ["py.typed", "**/*.md", "**/*.js", "**/*.html", "**/*.css", "**/*.yaml", "**/*.json"]
+# gateway/ui is Vite output (gitignored; npm run build before python -m build).
+# js/html/css globs alone would ship a SPA whose KaTeX fonts and png/ico 404.
+agentica = [
+    "py.typed",
+    "**/*.md",
+    "**/*.js",
+    "**/*.html",
+    "**/*.css",
+    "**/*.yaml",
+    "**/*.json",
+    "gateway/ui/*",
+    "gateway/ui/**/*",
+]
+
+[tool.setuptools.exclude-package-data]
+agentica = ["**/.DS_Store"]
 
 [tool.pytest.ini_options]
 log_cli = true
