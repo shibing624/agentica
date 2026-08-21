@@ -33,6 +33,7 @@ from agentica.global_config import (
 from agentica.cli import self_manage
 from agentica.config import AGENTICA_HOME
 from agentica.cost_tracker import get_model_supports_images
+from agentica.compression.manager import parse_compact_token_limit
 from ..models import (
     ModelSwitchRequest,
     ProfileSwitchRequest,
@@ -110,7 +111,6 @@ async def status():
     active_profile = get_active_profile_name()
     config_path = self_manage.config_file_path()
     model_name = svc.model_name if svc else settings.model_name
-    from agentica.compression.manager import parse_compact_token_limit
     profile = get_profile(active_profile) or {}
     compact_token_limit = parse_compact_token_limit(profile.get("compact_token_limit"))
     if compact_token_limit is None:

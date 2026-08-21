@@ -17,6 +17,7 @@ from agentica.cli.runtime import (
     _build_environment_context,
     _build_fallback_models,
     _build_sibling_model,
+    _resolve_compact_token_limit,
 )
 from agentica.cli.setup import (
     apply_named_profile_to_agent_config,
@@ -317,7 +318,6 @@ def _rebuild_live_model(ctx: CommandContext):
     }
     ctx.current_agent.model = get_model(**model_kwargs)
     ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
-    from agentica.cli.runtime import _resolve_compact_token_limit
     cap = _resolve_compact_token_limit(ctx.agent_config)
     ctx.current_agent.tool_config.compact_token_limit = cap
     cm = ctx.current_agent.tool_config.compression_manager

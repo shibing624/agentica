@@ -21,6 +21,7 @@ from agentica.agent.config import (
 )
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.global_config import get_setting
+from agentica.compression.manager import parse_compact_token_limit
 from agentica.skills import load_system_skills
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -860,8 +861,6 @@ def _resolve_compression_flags(agent_config: dict) -> tuple[bool, bool]:
 
 def _resolve_compact_token_limit(agent_config: dict) -> Optional[int]:
     """CLI flag / profile wins; else config.yaml settings; else unset."""
-    from agentica.compression.manager import parse_compact_token_limit
-
     cap = parse_compact_token_limit(agent_config.get("compact_token_limit"))
     if cap is not None:
         return cap

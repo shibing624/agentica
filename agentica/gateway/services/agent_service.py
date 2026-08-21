@@ -39,6 +39,7 @@ from agentica.global_config import (
 )
 from agentica.memory.session_log import SessionLog
 from agentica.skills import get_skill_registry, load_system_skills
+from agentica.compression.manager import parse_compact_token_limit
 
 from ..config import settings
 from .media_understanding import media_understanding
@@ -483,7 +484,6 @@ class AgentService:
         permission_mode = self.get_session_approval_mode(session_id)
         enable_evict = get_setting("enable_evict", True)
         enable_auto_compact = get_setting("enable_auto_compact", True)
-        from agentica.compression.manager import parse_compact_token_limit
         profile = get_profile(get_active_profile_name()) or {}
         compact_token_limit = parse_compact_token_limit(profile.get("compact_token_limit"))
         if compact_token_limit is None:
