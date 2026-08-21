@@ -117,7 +117,32 @@ class TestCompressionSwitches(unittest.TestCase):
         agent = _agent()
         self.assertTrue(agent.tool_config.enable_evict)
         self.assertTrue(agent.tool_config.enable_auto_compact)
+        self.assertIsNone(agent.tool_config.compact_token_limit)
+        self.assertIsNone(agent.tool_config.compression_manager.compact_token_limit)
         self.assertIsNotNone(agent.tool_config.compression_manager)
+
+    def test_compact_token_limit_wires_to_manager(self):
+        from agentica.agent.config import ToolConfig
+
+        agent = _agent(tool_config=ToolConfig(compact_token_limit=300_000))
+        self.assertEqual(agent.tool_config.compact_token_limit, 300_000)
+        self.assertEqual(agent.tool_config.compression_manager.compact_token_limit, 300_000)
+
+    def test_compact_token_limit_is_layer1_working_window(self):
+        from agentica.agent.config import ToolConfig
+        from agentica.compression import EvictionResult
+
+        agent = _agent(tool_config=ToolConfig(compact_token_limit=8_000))
+        agent.model.context_window = 32_768
+        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
+             patch("agentica.runner.compress.count_tokens", return_value=7_000):
+            asyncio.run(
+                CompressMixin._maybe_compress_messages(
+                    [Message(role="user", content="hi")], agent, agent.model, LoopState(),
+                )
+            )
+        evict.assert_called_once()
+        self.assertEqual(evict.call_args.kwargs["context_window"], 8_000)
 
     def test_layer1_off_skips_evict(self):
         from agentica.agent.config import ToolConfig

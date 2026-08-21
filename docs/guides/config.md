@@ -65,6 +65,7 @@ profiles:
     reasoning_effort: max
     max_tokens: 8192
     context_window: 1000000
+    compact_token_limit: 300000  # 压缩工作阈值；不改 context_window
     temperature: 0.7
     top_p: 0.95
     # 可选 auxiliary model（后台调用 + `task` subagent）；省略则复用 main
@@ -79,6 +80,7 @@ settings:
   num_history_turns: 20
   # enable_evict: true         # Layer 1 淘汰旧工具结果（默认开）
   # enable_auto_compact: true  # Layer 2 窗口满时自动摘要（默认开；/compact 仍可用）
+  # compact_token_limit: 300000  # 可选工作阈值；不配 = 窗口×0.95 才摘要
   # gateway 入站图片/语音/视频：底模看不了时用这个 Gemini 描述/转写
   # media_model:
   #   model_provider: openai

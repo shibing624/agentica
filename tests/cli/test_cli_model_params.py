@@ -193,6 +193,14 @@ class TestCLIModelParams(unittest.TestCase):
             args = parse_args()
         self.assertEqual(args.reasoning_effort, "low")
 
+    def test_compact_token_limit_flag(self):
+        import sys
+        from agentica.cli.runtime import parse_args
+
+        with patch.object(sys, "argv", ["agentica", "--compact-token-limit", "300000"]):
+            args = parse_args()
+        self.assertEqual(args.compact_token_limit, 300000)
+
     def test_resolve_model_config_carries_profile_tuning_params(self):
         import argparse
         from agentica.cli.setup import resolve_model_config
@@ -205,6 +213,7 @@ class TestCLIModelParams(unittest.TestCase):
             "reasoning_effort": "high",
             "max_tokens": 4096,
             "context_window": 500000,
+            "compact_token_limit": 300000,
             "temperature": 0.3,
             "top_p": 0.9,
             "default_headers": {"X-Sticky-Routing": "token"},
@@ -225,6 +234,7 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(resolved["reasoning_effort"], "high")
         self.assertEqual(resolved["max_tokens"], 4096)
         self.assertEqual(resolved["context_window"], 500000)
+        self.assertEqual(resolved["compact_token_limit"], 300000)
         self.assertEqual(resolved["temperature"], 0.3)
         self.assertEqual(resolved["top_p"], 0.9)
         self.assertEqual(resolved["default_headers"], {"X-Sticky-Routing": "token"})

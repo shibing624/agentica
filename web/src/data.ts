@@ -20,6 +20,7 @@ export async function loadStatus() {
     // the first profile switch.
     serverReasoningEffort: data.tuning?.reasoning_effort || "",
     serverContextWindow: data.context_window || getState().serverContextWindow,
+    serverCompactTokenLimit: data.compact_token_limit || 0,
     serverSupportsImages: !!data.supports_images,
     serverMediaModel: data.media_model || "",
   });

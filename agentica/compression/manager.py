@@ -118,8 +118,8 @@ class CompressionManager:
     """
     model: Optional[Any] = None
     compress_token_limit: Optional[int] = None
-    compact_token_limit: Optional[int] = None
     compress_target_token_limit: Optional[int] = None
+    compact_token_limit: Optional[int] = None
 
     stats: Dict[str, Any] = field(default_factory=dict)
 

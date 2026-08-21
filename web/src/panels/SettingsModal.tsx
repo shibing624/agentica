@@ -58,6 +58,7 @@ async function editProfile(name: string) {
       reasoning_effort: d.reasoning_effort || "",
       max_tokens: d.max_tokens ? String(d.max_tokens) : "",
       context_window: d.context_window ? String(d.context_window) : "",
+      compact_token_limit: d.compact_token_limit ? String(d.compact_token_limit) : "",
       temperature: d.temperature != null ? String(d.temperature) : "",
       top_p: d.top_p != null ? String(d.top_p) : "",
       aux_provider: aux.model_provider || "",
@@ -95,6 +96,7 @@ async function saveProfile() {
     reasoning_effort: f.reasoning_effort.trim() || undefined,
     max_tokens: parseInt(f.max_tokens, 10) || undefined,
     context_window: parseInt(f.context_window, 10) || undefined,
+    compact_token_limit: parseInt(f.compact_token_limit, 10) || undefined,
     temperature: f.temperature.trim() ? parseFloat(f.temperature) : undefined,
     top_p: f.top_p.trim() ? parseFloat(f.top_p) : undefined,
     auxiliary_model: aux,
@@ -421,6 +423,7 @@ function ConfigFileBlock() {
         Profile: {s.serverProfile || "default"} · {s.serverProvider}/{s.serverModelName || s.serverModel}
         {s.serverReasoningEffort ? ` · effort=${s.serverReasoningEffort}` : ""}
         {s.serverContextWindow ? ` · ${S.settings.contextWindow(s.serverContextWindow)}` : ""}
+        {s.serverCompactTokenLimit ? ` · ${S.settings.compactTokenLimit(s.serverCompactTokenLimit)}` : ""}
       </div>
     </div>
   );
@@ -486,9 +489,12 @@ function ProfileForm() {
       </div>
       <div className="pf-row">
         <input className="pf-input" type="number" placeholder="context_window" value={f.context_window} onChange={(e) => patch({ context_window: e.target.value })} />
-        <input className="pf-input" type="number" step="0.1" placeholder="temperature" value={f.temperature} onChange={(e) => patch({ temperature: e.target.value })} />
+        <input className="pf-input" type="number" placeholder="compact_token_limit" value={f.compact_token_limit} onChange={(e) => patch({ compact_token_limit: e.target.value })} />
       </div>
-      <input className="pf-input" type="number" step="0.05" placeholder="top_p" value={f.top_p} onChange={(e) => patch({ top_p: e.target.value })} />
+      <div className="pf-row">
+        <input className="pf-input" type="number" step="0.1" placeholder="temperature" value={f.temperature} onChange={(e) => patch({ temperature: e.target.value })} />
+        <input className="pf-input" type="number" step="0.05" placeholder="top_p" value={f.top_p} onChange={(e) => patch({ top_p: e.target.value })} />
+      </div>
       <div className="pf-section">{S.settings.auxModel}</div>
       <input className="pf-input" placeholder="aux provider" value={f.aux_provider} onChange={(e) => patch({ aux_provider: e.target.value })} />
       <input className="pf-input" placeholder="aux model_name" value={f.aux_model} onChange={(e) => patch({ aux_model: e.target.value })} />

@@ -791,6 +791,7 @@ class TestProfileCrudEndpoints:
             "base_url": "https://example/v1", "api_key": "sk-1234567890abcdef",
             "wire_api": "responses", "reasoning": "high",
             "max_tokens": 8192, "context_window": 1000000,
+            "compact_token_limit": 300000,
             "temperature": 0.7, "top_p": 0.95,
             "auxiliary_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash",
                                 "base_url": "https://open.bigmodel.cn", "api_key": "sk-aux"},
@@ -805,6 +806,7 @@ class TestProfileCrudEndpoints:
         assert d["has_api_key"] is True
         assert d["wire_api"] == "responses"
         assert d["reasoning"] == "high"
+        assert d["compact_token_limit"] == 300000
         assert d["env"]["SERPER_API_KEY"] == "xxx"
         assert d["auxiliary_model"]["model_provider"] == "zhipuai"
 
@@ -821,12 +823,14 @@ class TestProfileCrudEndpoints:
                 "name": "test-p", "model_provider": "deepseek",
                 "model_name": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",
                 "api_key": "sk-xxx",
+                "compact_token_limit": 300000,
             })
         assert resp.status_code == 200
         args, kwargs = m.call_args
         assert args[0] == "test-p"
         assert args[1]["model_provider"] == "deepseek"
         assert args[1]["api_key"] == "sk-xxx"
+        assert args[1]["compact_token_limit"] == 300000
         assert kwargs["make_active"] is False
 
     def test_create_responses_profile(self, mock_app):

@@ -60,6 +60,7 @@ export type ProfileForm = {
   reasoning_effort: string;
   max_tokens: string;
   context_window: string;
+  compact_token_limit: string;
   temperature: string;
   top_p: string;
   aux_provider: string;
@@ -120,6 +121,7 @@ export type AppState = {
   serverConfigPath: string;
   serverReasoningEffort: string;
   serverContextWindow: number;
+  serverCompactTokenLimit: number;
   serverProfile: string;
     serverSupportsImages: boolean;
     serverMediaModel: string;
@@ -185,7 +187,7 @@ export type AppState = {
 export function emptyProfileForm(): ProfileForm {
   return {
     name: "", editing: false, model_provider: "", model_name: "", base_url: "", api_key: "",
-    reasoning_effort: "", max_tokens: "", context_window: "", temperature: "", top_p: "",
+    reasoning_effort: "", max_tokens: "", context_window: "", compact_token_limit: "", temperature: "", top_p: "",
     aux_provider: "", aux_model: "", aux_base_url: "", aux_api_key: "",
     envRows: [],
   };
@@ -226,6 +228,7 @@ const state: AppState = {
   serverConfigPath: "",
   serverReasoningEffort: "",
   serverContextWindow: 128000,
+  serverCompactTokenLimit: 0,
   serverProfile: "",
     serverSupportsImages: false,
     serverMediaModel: "",

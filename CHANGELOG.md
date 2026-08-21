@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- **`compact_token_limit`：压缩工作阈值，不改模型 `context_window`**。1M 窗口可以配 `300000`，Layer 2 在 `min(该值, 窗口×0.95)` 触发摘要；Layer 1 的 0.8/0.5 相对 `min(该值, 窗口)`。不配则和现在一样（约 95% 窗口才摘要）。写在 config.yaml 的 profile 上，也可写 `settings.compact_token_limit` 做全局默认。CLI：`/config set compact_token_limit 300000`、`--compact-token-limit`。Web 模型配置有填才显示。SDK：`ToolConfig(compact_token_limit=300000)`。
 - **设置 › 记忆**：新 tab 编辑本账号的用户级 `AGENTS.md`（`workspace/users/<账号>/AGENTS.md`，进 system prompt 的常驻说明），可预览和编辑。账号菜单也有「记忆」入口。对话抽取开关接到已有的 `auto_extract_memory`（事实仍进 `memory/*.md` 召回，不写进 AGENTS.md）。改完会清掉冻结的 context 快照，下一轮对话读到新内容。
 - **「Profile」中文改叫「模型配置」**。
 - **个人助理的 Web 地址可点**：和 `config.yaml` 一样走 `POST /api/open`，用系统默认浏览器打开 `http://127.0.0.1:8881/chat`。

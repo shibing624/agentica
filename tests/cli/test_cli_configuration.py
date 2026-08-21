@@ -772,6 +772,44 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertTrue(evict)
         self.assertFalse(auto)
 
+    def test_resolve_compact_token_limit_profile_then_settings(self):
+        from agentica.cli.runtime import _resolve_compact_token_limit
+
+        self.assertIsNone(_resolve_compact_token_limit({}))
+        self.assertEqual(_resolve_compact_token_limit({"compact_token_limit": 300_000}), 300_000)
+        with patch("agentica.cli.runtime.get_setting", return_value=8000):
+            self.assertEqual(_resolve_compact_token_limit({}), 8000)
+            self.assertEqual(_resolve_compact_token_limit({"compact_token_limit": 300_000}), 300_000)
+
+    def test_create_agent_wires_compact_token_limit(self):
+        from agentica.cli.runtime import create_agent
+
+        captured = {}
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.tools = []
+
+        with (
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
+            patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
+        ):
+            create_agent(
+                {
+                    "model_provider": "zhipuai",
+                    "model_name": "glm-5",
+                    "debug": False,
+                    "work_dir": None,
+                    "compact_token_limit": 300_000,
+                },
+                extra_tools=[],
+                workspace=None,
+                skills_registry=None,
+            )
+
+        self.assertEqual(captured["tool_config"].compact_token_limit, 300_000)
+
     def test_create_agent_sets_background_registry_user_id(self):
         """Background command logs should use the current workspace user segment."""
         from agentica.cli.runtime import create_agent

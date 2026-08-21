@@ -180,6 +180,7 @@ class TestResolveModelConfig(_CliSetupTestBase):
             "model_provider": "openai", "model_name": "gpt-5.6-sol",
             "base_url": "https://example/v1", "api_key": "sk-x",
             "wire_api": "responses", "reasoning": "high",
+            "compact_token_limit": 300000,
         }, name="a")
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["model_provider"], "openai")
@@ -188,6 +189,7 @@ class TestResolveModelConfig(_CliSetupTestBase):
         self.assertEqual(resolved["api_key"], "sk-x")
         self.assertEqual(resolved["wire_api"], "responses")
         self.assertEqual(resolved["reasoning"], "high")
+        self.assertEqual(resolved["compact_token_limit"], 300000)
 
     def test_cli_args_override_profile(self):
         self._write_profile({
@@ -1027,6 +1029,7 @@ class TestProfileValidation(_CliSetupTestBase):
             "reasoning_effort": "ultra",
             "max_tokens": 0,
             "context_window": -1,
+            "compact_token_limit": 0,
             "temperature": 5.0,
             "top_p": 2.0,
             "enable_cache_control": "yes",
@@ -1037,7 +1040,7 @@ class TestProfileValidation(_CliSetupTestBase):
         joined = " | ".join(errors)
         for needle in (
             "model_provider", "model_name", "base_url", "reasoning_effort",
-            "max_tokens", "context_window", "temperature", "top_p",
+            "max_tokens", "context_window", "compact_token_limit", "temperature", "top_p",
             "enable_cache_control", "cache_control_messages",
             "cache_control_session_header", "auxiliary_model",
         ):

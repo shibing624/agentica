@@ -40,7 +40,13 @@ def test_list_profiles_shape(client):
     c, _ = client
     profiles = {
         "default": {"model_provider": "openai", "model_name": "gpt-4o", "api_key": "sk-testkey-xxxx"},
-        "cheap": {"model_provider": "deepseek", "model_name": "deepseek-v4-flash", "base_url": "https://api.deepseek.com"},
+        "cheap": {
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "context_window": 1000000,
+            "compact_token_limit": 300000,
+        },
     }
     with patch("agentica.gateway.routes.settings.get_profiles", return_value=profiles), \
          patch("agentica.gateway.routes.settings.get_active_profile_name", return_value="default"):
@@ -53,6 +59,8 @@ def test_list_profiles_shape(client):
     cheap = next(p for p in data["profiles"] if p["name"] == "cheap")
     assert cheap["model_provider"] == "deepseek"
     assert cheap["base_url"] == "https://api.deepseek.com"
+    assert "compact_token_limit=300000" in cheap["tuning"]
+    assert "context_window=1000000" in cheap["tuning"]
 
 
 def test_create_switch_delete_profile(client):

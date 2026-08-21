@@ -140,9 +140,21 @@ CLI：`--no-evict` / `--no-auto-compact`（也认 `--evict` / `--auto-compact` �
 settings:
   enable_evict: true
   enable_auto_compact: true
+  # compact_token_limit: 300000   # optional working cap; see below
 ```
 
 Gateway 读同一对 settings。SDK 的 `Agent()` **不**读 config.yaml——只认构造时传入的 `ToolConfig`。
+
+### 工作阈值 `compact_token_limit`
+
+`model.context_window` 是服务商硬上限，不要把它填小来“早点压缩”。另设绝对 token 帽：
+
+```
+Layer 2 触发 = min(compact_token_limit 或 ∞, int(window × 0.95))
+Layer 1 的 0.8 / 0.5 相对 min(compact_token_limit 或 ∞, window)
+```
+
+不配则和现在完全一样（约 95% 窗口才摘要）。1M 窗口配 `300000` 就在 30 万处摘要；32k 窗口配 `128000` 仍被窗口挡住。写在 profile 上（每个模型可以不同），或 `settings.compact_token_limit` 做全局默认。CLI：`/config set compact_token_limit 300000`、`--compact-token-limit`。SDK：`ToolConfig(compact_token_limit=300000)`。
 
 ## Layer 0：工具输出预算
 

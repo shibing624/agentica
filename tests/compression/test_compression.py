@@ -946,6 +946,80 @@ class TestLayerThresholds(unittest.TestCase):
         self.assertFalse(cm.should_auto_compact([], model, context_tokens=7_000))
 
 
+class TestCompactTokenLimit(unittest.TestCase):
+    """compact_token_limit is a cap on the existing layers, not a third window."""
+
+    def test_unset_matches_ratio(self):
+        from agentica.compression.manager import (
+            AUTO_COMPACT_THRESHOLD_RATIO,
+            auto_compact_threshold,
+            working_context_window,
+        )
+
+        window = 1_000_000
+        self.assertEqual(auto_compact_threshold(window), int(window * AUTO_COMPACT_THRESHOLD_RATIO))
+        self.assertEqual(working_context_window(window), window)
+
+    def test_cap_below_window_is_absolute_layer2_trigger(self):
+        from agentica.compression.manager import (
+            CompressionManager,
+            auto_compact_threshold,
+            working_context_window,
+        )
+
+        window, cap = 1_000_000, 300_000
+        self.assertEqual(auto_compact_threshold(window, cap), cap)
+        self.assertEqual(working_context_window(window, cap), cap)
+        cm = CompressionManager(compact_token_limit=cap)
+        model = SimpleNamespace(context_window=window, id="gpt-5.6-sol")
+        self.assertFalse(cm.should_auto_compact([], model, context_tokens=cap - 1))
+        self.assertTrue(cm.should_auto_compact([], model, context_tokens=cap))
+
+    def test_cap_above_window_is_ignored(self):
+        from agentica.compression.manager import (
+            AUTO_COMPACT_THRESHOLD_RATIO,
+            auto_compact_threshold,
+            working_context_window,
+        )
+
+        window, cap = 32_768, 128_000
+        self.assertEqual(
+            auto_compact_threshold(window, cap),
+            int(window * AUTO_COMPACT_THRESHOLD_RATIO),
+        )
+        self.assertEqual(working_context_window(window, cap), window)
+
+    def test_small_cap_on_32k_fires_at_cap(self):
+        from agentica.compression.manager import CompressionManager, auto_compact_threshold
+
+        window, cap = 32_768, 8_000
+        self.assertEqual(auto_compact_threshold(window, cap), cap)
+        cm = CompressionManager(compact_token_limit=cap)
+        model = SimpleNamespace(context_window=window, id="test")
+        self.assertFalse(cm.should_auto_compact([], model, context_tokens=7_999))
+        self.assertTrue(cm.should_auto_compact([], model, context_tokens=8_000))
+
+    def test_layer1_still_before_layer2_with_cap(self):
+        from agentica.compression.evict import EVICT_THRESHOLD_RATIO
+        from agentica.compression.manager import auto_compact_threshold, working_context_window
+
+        window, cap = 1_000_000, 300_000
+        working = working_context_window(window, cap)
+        layer1 = int(working * EVICT_THRESHOLD_RATIO)
+        layer2 = auto_compact_threshold(window, cap)
+        self.assertLess(layer1, layer2)
+
+    def test_parse_rejects_junk(self):
+        from agentica.compression.manager import parse_compact_token_limit
+
+        self.assertIsNone(parse_compact_token_limit(None))
+        self.assertIsNone(parse_compact_token_limit(0))
+        self.assertIsNone(parse_compact_token_limit(-1))
+        self.assertIsNone(parse_compact_token_limit("nope"))
+        self.assertEqual(parse_compact_token_limit("8000"), 8000)
+        self.assertEqual(parse_compact_token_limit(8000), 8000)
+
+
 class TestNativeCompactionLimits(unittest.TestCase):
     """native_compaction_token_limit must never collapse to a degenerate value.
 

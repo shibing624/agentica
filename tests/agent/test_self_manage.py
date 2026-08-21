@@ -91,6 +91,12 @@ class TestSelfManagePrimitives(unittest.TestCase):
             # A valid value is accepted and persisted.
             self.sm.set_profile_field("temperature", "0.5")
             self.assertEqual(gc.get_profile()["temperature"], 0.5)
+            self.sm.set_profile_field("compact_token_limit", "300000")
+            self.assertEqual(gc.get_profile()["compact_token_limit"], 300000)
+            with self.assertRaises(ValueError):
+                self.sm.set_profile_field("compact_token_limit", "0")
+            self.sm.set_profile_field("compact_token_limit", "none")
+            self.assertNotIn("compact_token_limit", gc.get_profile())
 
     def test_set_profile_field_extra_body_accepts_json_object(self):
         from agentica import global_config as gc
