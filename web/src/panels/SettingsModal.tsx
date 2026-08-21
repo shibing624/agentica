@@ -419,12 +419,6 @@ function ConfigFileBlock() {
         </button>
         {after}
       </p>
-      <div className="settings-item-meta">
-        Profile: {s.serverProfile || "default"} · {s.serverProvider}/{s.serverModelName || s.serverModel}
-        {s.serverReasoningEffort ? ` · effort=${s.serverReasoningEffort}` : ""}
-        {s.serverContextWindow ? ` · ${S.settings.contextWindow(s.serverContextWindow)}` : ""}
-        {s.serverCompactTokenLimit ? ` · ${S.settings.compactTokenLimit(s.serverCompactTokenLimit)}` : ""}
-      </div>
     </div>
   );
 }

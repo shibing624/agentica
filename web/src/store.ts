@@ -121,7 +121,6 @@ export type AppState = {
   serverConfigPath: string;
   serverReasoningEffort: string;
   serverContextWindow: number;
-  serverCompactTokenLimit: number;
   serverProfile: string;
     serverSupportsImages: boolean;
     serverMediaModel: string;
@@ -228,7 +227,6 @@ const state: AppState = {
   serverConfigPath: "",
   serverReasoningEffort: "",
   serverContextWindow: 128000,
-  serverCompactTokenLimit: 0,
   serverProfile: "",
     serverSupportsImages: false,
     serverMediaModel: "",
