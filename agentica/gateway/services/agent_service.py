@@ -91,20 +91,20 @@ def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "message": payload.get("message") or "",
     }
 
-# Web sessions default to "ask" approval mode, which strips write tools
-# (write_file/edit_file/apply_patch/execute) from the schema sent to the model (see
-# _run_config_for_session below) — but the agent's static tool instructions
-# still describe the full toolset for prompt-cache reasons. Without this, a
-# model that tries a stripped tool anyway gets back an opaque "Function not
-# found" instead of understanding why. Baked in once as a standing agent
-# instruction (not per-message) so it doesn't bloat session history and
-# stays part of the cache-friendly static prompt zone.
+# Web sessions default to "auto" approval mode (writes restricted to work_dir).
+# "ask" is opt-in via the approval selector. The agent's static tool
+# instructions still describe the full toolset for prompt-cache reasons.
+# Without this, a model that tries a stripped tool anyway gets back an
+# opaque "Function not found" instead of understanding why. Baked in once
+# as a standing agent instruction (not per-message) so it doesn't bloat
+# session history and stays part of the cache-friendly static prompt zone.
 _APPROVAL_MODE_INSTRUCTION = (
     "This session's approval mode can restrict tool access at runtime: in "
     "\"ask\" mode, only read-only tools are enabled "
-    "(ls/read_file/glob/grep/web_search/fetch_url/task) — write_file, "
-    "edit_file, apply_patch, and execute are disabled. In \"auto\" mode, writes are "
-    "restricted to the session's work_dir. If a tool call unexpectedly "
+    "(read_file/glob/grep/web_search/fetch_url/task/search_memory/list_agents) — write_file, "
+    "apply_patch, and execute are disabled. In \"auto\" mode, writes are "
+    "restricted to the session's work_dir and request_path_access can "
+    "escalate a blocked path. If a tool call unexpectedly "
     "fails with \"Function ... not found\", it almost certainly means the "
     "current approval mode disabled it — do not retry the call. Instead, "
     "tell the user the current mode is read-only and that they need to "

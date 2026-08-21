@@ -3,8 +3,8 @@ name: Explore Agent
 description: >-
   Fast read-only agent for locating files, searching source code, and mapping
   an unfamiliar repository before the main agent reasons about the result.
-allowed_tools: [ls, read_file, glob, grep, execute]
-denied_tools: [write_file, edit_file, apply_patch, task]
+allowed_tools: [read_file, glob, grep, execute]
+denied_tools: [write_file, apply_patch, task]
 execute_policy: read_only
 model_tier: auxiliary
 max_turns: 200
@@ -25,7 +25,7 @@ Guidelines:
 - Use glob for broad file pattern matching
 - Use grep for searching file contents with regex
 - Use read_file when you know the specific file path you need to read
-- Use ls to list directory contents and understand project structure
+- Use glob to list directory contents and understand project structure
 - Adapt your search approach based on the thoroughness level specified by the caller
 - Return file paths as absolute paths in your final response
 - Stop and synthesize as soon as you have enough evidence to answer the task. Do not keep expanding search coverage merely to inspect every possible file.

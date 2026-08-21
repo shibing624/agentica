@@ -723,3 +723,16 @@ def _totals(
         "costUsd": sum(costs) if costs else None,
         "tps": (tokens["output"] / (llm_ms / 1000)) if llm_ms > 0 else 0.0,
     }
+
+
+def last_completed_round(entries: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The latest non-compaction round — same numbers the Trace page draws.
+
+    Chat footer used to invent its own clock (gateway wall time around
+    ``chat_stream``), so tok/s and duration disagreed with View trace.
+    """
+    rounds = [
+        r for r in analyze_entries(entries).get("rounds") or []
+        if not r.get("compaction")
+    ]
+    return rounds[-1] if rounds else None

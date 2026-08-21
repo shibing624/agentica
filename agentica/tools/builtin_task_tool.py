@@ -298,16 +298,10 @@ class BuiltinTaskTool(Tool):
         elif tool_name in ("glob", "search_file"):
             pattern = tool_args.get("pattern", "")
             return f"pattern: {pattern}"
-        elif tool_name == "ls":
-            directory = tool_args.get("directory", ".")
-            return directory.rsplit("/", 1)[-1] if "/" in directory else directory
         elif tool_name == "execute":
             cmd = tool_args.get("command", "")
             return cmd[:80] + ("..." if len(cmd) > 80 else "")
         elif tool_name == "write_file":
-            fp = tool_args.get("file_path", "")
-            return fp.rsplit("/", 1)[-1] if "/" in fp else fp
-        elif tool_name == "edit_file":
             fp = tool_args.get("file_path", "")
             return fp.rsplit("/", 1)[-1] if "/" in fp else fp
         elif tool_name == "apply_patch":

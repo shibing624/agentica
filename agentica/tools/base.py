@@ -193,7 +193,7 @@ class Function(BaseModel):
     post_hook: Optional[Callable] = None
     # If True, this tool may execute concurrently with other concurrency_safe tools.
     # Read-only tools (read_file, glob, grep, web_search, fetch_url …) should be True.
-    # Write/shell tools (execute, write_file, edit_file …) must remain False (default).
+    # Write/shell tools (execute, write_file, apply_patch …) must remain False (default).
     # Mirrors CC's StreamingToolExecutor.isConcurrencySafe flag.
     concurrency_safe: bool = False
     # Name of a boolean argument that decides concurrency safety per call.

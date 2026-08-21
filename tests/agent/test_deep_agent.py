@@ -70,10 +70,15 @@ class TestDeepAgentDefaults(unittest.TestCase):
             agent.update_model()
 
         self.assertIn("read_file", agent.model.functions)
-        self.assertIn("ls", agent.model.functions)
+        self.assertIn("apply_patch", agent.model.functions)
+        self.assertNotIn("ls", agent.model.functions)
+        self.assertNotIn("edit_file", agent.model.functions)
+        self.assertNotIn("undo_edit", agent.model.functions)
+        self.assertNotIn("request_path_access", agent.model.functions)
         tool_names = {tool["function"]["name"] for tool in agent.model.tools}
         self.assertIn("read_file", tool_names)
-        self.assertIn("ls", tool_names)
+        self.assertIn("apply_patch", tool_names)
+        self.assertNotIn("ls", tool_names)
 
     def test_deep_agent_enables_experience_capture_by_default(self):
         """DeepAgent is the self-evolving flagship: experience + all capture_* on."""

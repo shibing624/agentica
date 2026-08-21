@@ -62,8 +62,8 @@ def get_builtin_tools(
 
     Args:
         work_dir: Work directory for file operations
-        include_file_tools: Whether to include file tools (ls, read_file, write_file,
-            edit_file, apply_patch, glob, grep)
+        include_file_tools: Whether to include file tools (read_file, write_file,
+            apply_patch, glob, grep; request_path_access only in auto mode)
         include_execute: Whether to include code execution tool
         include_web_search: Whether to include web search tool
         include_fetch_url: Whether to include URL fetching tool

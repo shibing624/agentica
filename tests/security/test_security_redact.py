@@ -6,7 +6,7 @@ def test_high_confidence_masks_unambiguous_secrets():
     """Default ``high_confidence`` level masks vendor-prefixed keys, JWTs,
     private-key blocks, auth headers, DB connstr passwords, URL query tokens
     and JSON secret fields — but leaves plain ``key: value`` pairs alone so
-    edit_file round-trips don't break."""
+    apply_patch round-trips don't break."""
     from agentica.security.redact import redact_sensitive_text
 
     private_key = (
@@ -47,7 +47,7 @@ def test_high_confidence_masks_unambiguous_secrets():
 
 def test_high_confidence_preserves_source_code_identifiers():
     """High-confidence mode must NOT rewrite plain ``api_key=existing_key``
-    style source code — that's what broke edit_file round-trips."""
+    style source code — that's what broke apply_patch round-trips."""
     from agentica.security.redact import redact_sensitive_text
 
     text = (
@@ -57,7 +57,7 @@ def test_high_confidence_preserves_source_code_identifiers():
         'self.api_key = config.get("api_key")\n'
     )
     redacted = redact_sensitive_text(text)
-    # Default level leaves these untouched so edit_file matches survive.
+    # Default level leaves these untouched so apply_patch matches survive.
     assert redacted == text
 
 
@@ -89,7 +89,7 @@ def test_tools_safety_reexports_central_redactor():
 def test_tool_outputs_pass_through_by_default(monkeypatch):
     """With redaction toggles off (the default), tool result text reaches the
     LLM verbatim — so read_file output that the LLM later feeds back into
-    edit_file as old_string will match byte-for-byte."""
+    apply_patch will match byte-for-byte."""
     import asyncio
 
     from agentica.model.openai import OpenAIChat

@@ -8,6 +8,8 @@ export type ChatMsg = {
   files?: string[];
   steps?: Array<Record<string, any>>;
   durationSec?: number;
+  durationMs?: number;
+  llmMs?: number;
   tokIn?: number;
   tokOut?: number;
   costUsd?: number;

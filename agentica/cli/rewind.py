@@ -16,7 +16,7 @@ from agentica.utils.log import logger
 
 # Tool names whose tool_args carry a write target. These are the ones we
 # snapshot before execution so a turn rewind can restore turn-start content.
-_REWRITE_TOOLS = {"write_file", "edit_file", "apply_patch"}
+_REWRITE_TOOLS = {"write_file", "apply_patch"}
 
 # ``*** Update File: path`` / ``*** Add File: path`` / ``*** Delete File: path``
 _PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)

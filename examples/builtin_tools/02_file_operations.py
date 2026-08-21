@@ -4,10 +4,9 @@
 @description: Agent File Operations Demo
 
 This example demonstrates Agent's built-in file system capabilities:
-- ls: List directory contents
 - read_file: Read file contents
 - write_file: Write to files
-- edit_file: Edit existing files
+- apply_patch: Edit existing files
 - glob: Find files by pattern
 - grep: Search file contents
 """

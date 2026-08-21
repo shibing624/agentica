@@ -92,9 +92,7 @@ CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定�
 |------|------|
 | `read_file` | 读取文件内容（支持分页，避免大文件撑爆上下文） |
 | `write_file` | 创建或完整覆写文件 |
-| `edit_file` | 精确字符串替换（比 write_file 更安全，适合小改动） |
 | `apply_patch` | 一次补丁新增、更新或删除多个文件 |
-| `ls` | 列出目录内容 |
 | `glob` | 文件模式匹配（`**/*.py`） |
 | `grep` | 内容搜索（基于 ripgrep） |
 | `execute` | 执行 Shell 命令（git、pytest、pip 等） |
@@ -470,7 +468,7 @@ CLI 实时展示 Agent 的每一个动作：
 ```
 DeepAgent > 好的，我来分析这段代码。
 
-  ✂️  edit_file app.py
+  ✎  apply_patch app.py
       old: "def foo():"
       new: "def foo(x: int) -> str:"
       ✓ Done

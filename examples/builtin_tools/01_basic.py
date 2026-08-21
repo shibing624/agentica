@@ -4,7 +4,7 @@
 @description: Agent with Built-in Tools usage examples
 
 Agent + get_builtin_tools() provides:
-- File tools: ls, read_file, write_file, edit_file, glob, grep
+- File tools: read_file, write_file, apply_patch, glob, grep
 - Execute: execute shell commands
 - Web tools: web_search, fetch_url
 - Task tools: write_todos

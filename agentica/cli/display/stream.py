@@ -277,7 +277,7 @@ class StreamDisplayManager:
         Every tool call counts toward the per-turn total reported in the closing
         separator (``… · N tools``), INCLUDING read-only / write-diff tools whose
         call line is deferred to completion. Otherwise a turn that only ran
-        ``read_file`` / ``grep`` / ``edit_file`` etc. would show "0 tools" and
+        ``read_file`` / ``grep`` / ``write_file`` etc. would show "0 tools" and
         confuse the user — the visible tool calls and the reported count must
         agree.
 
@@ -440,8 +440,6 @@ class StreamDisplayManager:
             return "no matches" if tool_name == "grep" else ""
         if tool_name == "grep":
             return f"{n} lines"
-        if tool_name == "ls":
-            return f"{n} items"
         if tool_name == "glob":
             return f"{n} files"
         if tool_name == "web_search":
@@ -471,53 +469,6 @@ class StreamDisplayManager:
             else:
                 line += f" [dim]{elapsed_str}[/dim]"
         self._assistant_console.print(line)
-
-    def _display_edit_merged(self, tool_name: str, tool_args: dict,
-                             result_content: str, is_error: bool,
-                             elapsed_str: str,
-                             tool_call_id: Optional[str] = None,
-                             tool_display_meta: Optional[dict] = None) -> None:
-        """One summary line + the FULL unified diff for edit tools.
-
-        ``  ✎ edit_file config.py - Edited 1 file (+1 -1)`` followed by one
-        complete real-file diff. Errors surface a truncated message.
-        """
-        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        raw_path = str(tool_args.get("file_path", ""))
-        display_path = self._display_path(raw_path)
-
-        line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
-        if display_path:
-            line += f" [dim]{display_path}[/dim]"
-        key = tool_call_id or tool_args.get("file_path", "")
-        captured_old_content = self._write_old.pop(key, None)
-        if is_error:
-            # Tool errors are single diagnostic messages — the cause lives at
-            # the START/MIDDLE, so an 80-char tail window hid exactly what
-            # mattered. Print the whole message.
-            line += f" [dim]- error{elapsed_str}[/dim]"
-            self._assistant_console.print(line)
-            err_lines = self._shorten_workdir_text(str(result_content)).strip().splitlines() or [""]
-            self._display_full_result_lines(err_lines, is_error=True, elapsed_str="")
-            return
-
-        changes = (tool_display_meta or {}).get("files") or []
-        change = changes[0] if changes else None
-        old_content = change.get("before") if change else captured_old_content
-        new_content = change.get("after") if change else self._read_diff_target(tool_args)
-        if change:
-            display_path = self._display_path(str(change.get("path") or raw_path))
-        diff_text = self._build_file_diff(old_content, new_content, display_path)
-        added, removed = self._diff_line_counts(diff_text)
-        line += f" [dim]- Edited 1 file (+{added} -{removed}){elapsed_str}[/dim]"
-        self._assistant_console.print(line)
-        if not diff_text:
-            return
-        # word_wrap: single-line entries (e.g. CHANGELOG items) run to 1KB+;
-        # without folding, Rich crops everything past the console edge and the
-        # actual -/+ change is invisible.
-        self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
-                                  line_numbers=False, word_wrap=True))
 
     def _display_patch_summary(self, result_content: str, is_error: bool,
                                elapsed_str: str, tool_args: dict,
@@ -589,13 +540,6 @@ class StreamDisplayManager:
                 "\n".join(detail_lines), style="dim", highlight=False, markup=False
             )
 
-    def _read_diff_target(self, tool_args: dict) -> Optional[str]:
-        """Read a write tool's post-call file content for display-only diffing."""
-        fp = tool_args.get("file_path")
-        if not fp:
-            return None
-        return self._read_diff_path(self._resolve_diff_path(str(fp)))
-
     @staticmethod
     def _build_file_diff(old_content: Optional[str], new_content: Optional[str],
                          filename: str) -> str:
@@ -615,14 +559,6 @@ class StreamDisplayManager:
         hunks = "\n".join(unified_lines[2:]).rstrip("\n")
         return f"diff -- {filename}\n{hunks}"
 
-    @staticmethod
-    def _diff_line_counts(diff_text: str) -> tuple[int, int]:
-        """Count added/removed content lines, excluding unified-diff headers."""
-        lines = diff_text.splitlines()
-        added = sum(line.startswith("+") and not line.startswith("+++") for line in lines)
-        removed = sum(line.startswith("-") and not line.startswith("---") for line in lines)
-        return added, removed
-
     def _display_write_merged(self, tool_name: str, tool_args: dict,
                               result_content: str, is_error: bool,
                               elapsed_str: str,
@@ -631,7 +567,7 @@ class StreamDisplayManager:
         """One summary line + the FULL old→new diff for write_file.
 
         Keeps the existing created/updated line-count summary and renders the
-        same git-style real-file diff as edit tools. For a brand-new file the
+        same git-style real-file diff. For a brand-new file the
         old side is empty. Successful diffs are never folded.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
@@ -677,12 +613,12 @@ class StreamDisplayManager:
     # Read-only tools whose call line is deferred to completion so the call
     # line and result summary collapse into ONE line, e.g.
     # ``  🔎 grep 'pat' in path - 5 lines``. No separate result footer.
-    _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
+    _DEFERRED_TOOLS = frozenset({"glob", "grep", "read_file", "web_search", "fetch_url"})
 
     # Single-file write tools: call line is deferred to completion and rendered
     # as one summary line plus the real pre/post unified diff. apply_patch is
     # handled separately from the executor's multi-file result summary.
-    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "write_file"})
+    _WRITE_DIFF_TOOLS = frozenset({"write_file"})
 
     # Tools whose success result is pure noise on success. The call line itself
     # already tells the user what happened; errors are still surfaced.
@@ -781,16 +717,10 @@ class StreamDisplayManager:
 
         if tool_name in self._WRITE_DIFF_TOOLS:
             self.start_tool_section()
-            if tool_name == "write_file":
-                self._display_write_merged(
-                    tool_name, tool_args or {}, result_content, is_error,
-                    elapsed_str, tool_call_id, tool_display_meta
-                )
-            else:
-                self._display_edit_merged(
-                    tool_name, tool_args or {}, result_content, is_error,
-                    elapsed_str, tool_call_id, tool_display_meta
-                )
+            self._display_write_merged(
+                tool_name, tool_args or {}, result_content, is_error,
+                elapsed_str, tool_call_id, tool_display_meta
+            )
             return
 
         # Suppress noisy success results; the call line is enough.
@@ -814,7 +744,7 @@ class StreamDisplayManager:
 
         result_str = _strip_internal_tool_notices(str(result_content))
 
-        if tool_name in ("grep", "glob", "execute", "ls", "read_file"):
+        if tool_name in ("grep", "glob", "execute", "read_file"):
             cwd = str(Path.cwd())
             if cwd in result_str:
                 result_str = result_str.replace(cwd + "/", "").replace(cwd, ".")

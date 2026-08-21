@@ -276,18 +276,17 @@ class BuiltinExecuteTool(Tool):
         """Executes a shell command, capturing both stdout and stderr.
 
         IMPORTANT — Use dedicated tools instead of bash equivalents:
-        - File search:    Use glob tool    (NOT find, ls -R, or locate)
+        - File search:    Use glob tool    (NOT find, ls, ls -R, or locate)
         - Content search: Use grep tool    (NOT grep, rg, or ag)
         - Read files:     Use read_file    (NOT cat, head, tail, less, or more)
-        - Edit files:     Use edit_file    (NOT sed, awk, or perl -i)
+        - Edit files:     Use apply_patch  (NOT sed, awk, or perl -i)
         - Write files:    Use write_file   (NOT echo >, tee, or cat <<EOF)
-        - List files:     Use ls tool      (NOT ls command in bash)
 
         The execute tool is for commands that have NO dedicated tool equivalent:
         git, python, pytest, pip, npm, make, docker, curl (POST), etc.
 
         Before executing:
-        1. Verify target directory exists (use ls tool first if unsure)
+        1. Verify target directory exists (use glob first if unsure)
         2. Always quote file paths with spaces: cd "/path with spaces/"
         3. Use absolute paths; avoid cd when possible
 
@@ -335,7 +334,7 @@ class BuiltinExecuteTool(Tool):
             - execute(command="find . -name '*.py'")   → use glob(pattern="**/*.py")
             - execute(command="grep -r 'TODO' .")      → use grep(pattern="TODO")
             - execute(command="cat file.txt")           → use read_file(file_path="file.txt")
-            - execute(command="sed -i 's/old/new/' f")  → use edit_file(...)
+            - execute(command="sed -i 's/old/new/' f")  → use apply_patch(...)
 
         Args:
             command: Exact shell command to execute without normalization or repair
@@ -524,7 +523,7 @@ class BuiltinExecuteTool(Tool):
 
         # Redact sensitive text only when the operator opts in. Default is
         # off because rewriting tool output corrupts byte-exact round-trips
-        # for downstream edit_file calls.
+        # for downstream apply_patch calls.
         if redact_tool_outputs_enabled():
             output = redact_sensitive_text(output)
 

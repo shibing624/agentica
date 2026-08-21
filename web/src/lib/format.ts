@@ -23,14 +23,23 @@ export function fmtTime(sec: number) {
   return `${m}m ${s}s`;
 }
 
-export function fmtTurnDuration(sec: number) {
-  if (!sec) return "0s";
-  if (sec < 60) return `${Math.round(sec)}s`;
+/** Wall / LLM duration, shared by the chat footer and the Trace round header. */
+export function fmtDurationMs(ms: number) {
+  if (ms <= 0) return "0ms";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const sec = ms / 1000;
+  if (sec < 10) return `${sec.toFixed(2)}s`;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
   if (m < 60) return `${m}m${String(s).padStart(2, "0")}s`;
   const h = Math.floor(m / 60);
   return `${h}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+export function fmtTps(n: number) {
+  if (!n) return "0 tok/s";
+  return `${n.toFixed(1)} tok/s`;
 }
 
 export function shortenPath(p: string) {

@@ -13,6 +13,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
+from agentica.memory.trace import last_completed_round
+
 from .. import deps
 from ..channels.base import InboundMedia
 from ..config import settings
@@ -257,6 +259,13 @@ async def chat_stream(
                     done["cache_hit_percent"] = result.turn_usage["cache_hit_percent"]
                     if result.turn_usage.get("cost_usd") is not None:
                         done["cost_usd"] = result.turn_usage["cost_usd"]
+                log = svc.session_log_for(session_id, owner=account)
+                if log.path.exists():
+                    rd = last_completed_round(log.iter_raw_entries())
+                    if rd is not None:
+                        done["duration_ms"] = rd["durationMs"]
+                        done["llm_ms"] = rd["llmMs"]
+                        done["tps"] = rd["tps"]
                 if result.media_notes:
                     done["media_notes"] = result.media_notes
                 await queue.put({"event": "done", "data": done})

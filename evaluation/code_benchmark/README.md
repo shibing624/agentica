@@ -12,7 +12,7 @@
 | **bigcodebench** | 函数级 + 真实库 | `--bench bigcodebench` | `pip install datasets` + 题面里的第三方库 |
 | **evalplus** | HumanEval+，只当管道 smoke | `--bench evalplus` | 仅 python |
 
-官方 Aider runner 其实也建议 Docker；这里**不用 aider**，只克隆 [polyglot-benchmark](https://github.com/Aider-AI/polyglot-benchmark) 的 Python 练习，用 agentica `DeepAgent`（`read_file` / `edit_file` / `execute`，无 todo / `ls`）改代码，再用 pytest 判分。默认 `--wire-api responses`。
+官方 Aider runner 其实也建议 Docker；这里**不用 aider**，只克隆 [polyglot-benchmark](https://github.com/Aider-AI/polyglot-benchmark) 的 Python 练习，用 agentica `DeepAgent`（`read_file` / `apply_patch` / `write_file` / `execute`，无 todo / `glob` / `grep`）改代码，再用 pytest 判分。默认 `--wire-api responses`。
 
 ## 快速开始
 

@@ -30,8 +30,8 @@ name: Data Analyst
 description: >-
   Read-only analyst for inspecting local CSV and JSON data and reporting
   reproducible findings.
-allowed_tools: [ls, read_file, glob, grep, execute]
-denied_tools: [write_file, edit_file, apply_patch, task]
+allowed_tools: [read_file, glob, grep, execute]
+denied_tools: [write_file, apply_patch, task]
 execute_policy: read_only
 model_tier: auxiliary
 tool_call_limit: 40
@@ -94,7 +94,7 @@ my-project/
 name: Security Research
 description: Collects security evidence without changing the repository.
 allowed_tools: [read_file, ls, glob, grep, web_search, fetch_url, execute]
-denied_tools: [write_file, edit_file, apply_patch, task]
+denied_tools: [write_file, apply_patch, task]
 execute_policy: read_only
 model_tier: main
 max_turns: 120

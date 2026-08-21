@@ -87,14 +87,21 @@ class TestFileToolDiagnosticsIntegration(unittest.TestCase):
         result = asyncio.run(tool.write_file("app.py", "x = 1\n"))
         self.assertIn("absolute path", result)
 
-    def test_edit_file_appends_diagnostics(self):
+    def test_apply_patch_appends_diagnostics(self):
         path = os.path.join(self.work, "app.py")
         with open(path, "w") as f:
             f.write("a = 1\n")
         checker = _FakeChecker(new_text="New diagnostics introduced by this edit:\n  error app.py:1:1 oops")
         tool = BuiltinFileTool(work_dir=self.work, diagnostics_checker=checker)
         asyncio.run(tool.read_file("app.py"))
-        result = asyncio.run(tool.edit_file("app.py", "a = 1", "a = undefined_name"))
+        result = asyncio.run(tool.apply_patch(
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-a = 1\n"
+            "+a = undefined_name\n"
+            "*** End Patch"
+        ))
         self.assertIn("oops", result)
 
 

@@ -715,11 +715,10 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
         con.print("  [dim]allow-all[/dim]  - all tools exposed, no restriction (default)")
         con.print()
         con.print(
-            "None of these are hard dead ends: if a write/read is blocked (outside work_dir "
-            "in auto mode, or a sensitive path like ~/.ssh, ~/.aws/credentials, /etc — blocked "
-            "in ANY mode including allow-all), the agent can call request_path_access(path, "
+            "In auto mode, if a write/read is blocked (outside work_dir, or a "
+            "sensitive path like ~/.ssh), the agent can call request_path_access(path, "
             "reason) to ask you for a one-time yes/no approval, which then whitelists that "
-            "path for the rest of the session.",
+            "path for the rest of the session. ask and allow-all do not expose that tool.",
             style="dim",
         )
         con.print()

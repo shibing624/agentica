@@ -68,17 +68,16 @@ class TestSandboxPathValidation:
 class TestBuiltinFileToolDescriptions:
     """Tests for builtin file-tool schema descriptions."""
 
-    def test_read_file_and_edit_file_descriptions_allow_relative_and_tilde_paths(self):
-        """read_file/edit_file prompt text should not imply absolute-only paths."""
+    def test_read_file_and_apply_patch_descriptions_allow_relative_and_tilde_paths(self):
+        """read_file/apply_patch prompt text should not imply absolute-only paths."""
         from agentica.tools.builtin import BuiltinFileTool
 
         read_description = BuiltinFileTool.read_file.__doc__
-        edit_description = BuiltinFileTool.edit_file.__doc__
+        patch_description = BuiltinFileTool.apply_patch.__doc__
 
         assert "~" in read_description
         assert "relative" in read_description.lower()
-        assert "~" in edit_description
-        assert "relative" in edit_description.lower()
+        assert "read_file" in patch_description
 
     def test_file_tools_register_on_init(self):
         """BuiltinFileTool must expose file functions immediately on init."""
@@ -86,14 +85,16 @@ class TestBuiltinFileToolDescriptions:
 
         tool = BuiltinFileTool(work_dir="/tmp")
 
-        assert "ls" in tool.functions
+        assert "ls" not in tool.functions
         assert "read_file" in tool.functions
         assert "write_file" in tool.functions
-        assert "edit_file" in tool.functions
+        assert "edit_file" not in tool.functions
+        assert "undo_edit" not in tool.functions
         assert "multi_edit_file" not in tool.functions
         assert "apply_patch" in tool.functions
         assert "glob" in tool.functions
         assert "grep" in tool.functions
+        assert "request_path_access" not in tool.functions
 
 
 class TestSandboxCommandBlocking:

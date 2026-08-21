@@ -77,7 +77,7 @@ UNLIMITED_BUDGET_VALUE = -1
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 # Auto-pause after N consecutive turns where every tool call failed. Guards
 # against the agent getting stuck repeating the same broken tool invocation
-# (e.g. retrying an edit_file with the same wrong path) until the turn
+# (e.g. retrying an apply_patch with the same wrong path) until the turn
 # budget runs out. 3 in a row is conservative — flakes don't trip it but a
 # real loop will.
 MAX_CONSECUTIVE_TOOL_FAILURES = 3

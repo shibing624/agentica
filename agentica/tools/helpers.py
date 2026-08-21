@@ -43,9 +43,8 @@ def file_change_meta(
 def file_display_meta(changes: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Wrap one or more file changes as a write tool's display metadata.
 
-    A single envelope shape covers all three write tools: ``edit_file`` and
-    ``write_file`` report one file, ``apply_patch`` reports every file it
-    mutated atomically.
+    A single envelope shape covers both write tools: ``write_file`` reports
+    one file, ``apply_patch`` reports every file it mutated atomically.
     """
     return {"files": changes}
 

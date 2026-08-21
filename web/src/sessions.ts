@@ -72,6 +72,53 @@ export async function hydrateSession(id: string) {
   sess.msgs = msgs;
   saveSessions();
   bump();
+  void syncSessionRoundStats(id);
+}
+
+/** Stamp each assistant footer with the same round the Trace page draws. */
+export async function syncSessionRoundStats(id: string) {
+  const { ok, data } = await api.fetchTraceAnalysis(id);
+  if (!ok || !data?.rounds) return;
+  const sess = getState().sessions[id];
+  if (!sess) return;
+  const rounds = (data.rounds as Array<{
+    compaction?: boolean;
+    durationMs: number;
+    llmMs: number;
+    tokens: {
+      prompt: number;
+      output: number;
+      cacheRead: number;
+      cacheHitPercent: number | null;
+    };
+    costUsd: number | null;
+  }>).filter((r) => !r.compaction);
+  const streaming = !!getState().streams[id];
+  const assistants = sess.msgs.filter((m) => m.role === "assistant");
+  const n = streaming ? Math.max(0, assistants.length - 1) : assistants.length;
+  let changed = false;
+  for (let i = 0; i < n && i < rounds.length; i++) {
+    const m = assistants[i];
+    const rd = rounds[i];
+    if (
+      m.llmMs === rd.llmMs
+      && m.durationMs === rd.durationMs
+      && m.tokIn === rd.tokens.prompt
+      && m.tokOut === rd.tokens.output
+    ) continue;
+    m.llmMs = rd.llmMs;
+    m.durationMs = rd.durationMs;
+    m.durationSec = rd.durationMs / 1000;
+    m.tokIn = rd.tokens.prompt;
+    m.tokOut = rd.tokens.output;
+    m.cacheRead = rd.tokens.cacheRead;
+    m.cacheHitPercent = rd.tokens.cacheHitPercent;
+    if (rd.costUsd != null) m.costUsd = rd.costUsd;
+    changed = true;
+  }
+  if (!changed) return;
+  saveSessions();
+  bump();
 }
 
 export function createSession(dir: string) {

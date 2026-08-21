@@ -111,7 +111,7 @@ class TestHandlerPermissionGate(unittest.TestCase):
 
     def test_auto_mode_allows_read(self):
         handler = self._handler()  # AUTO
-        call = ACPToolCall(name="ls", arguments={"directory": "."})
+        call = ACPToolCall(name="glob", arguments={"pattern": "*", "path": "."})
         result = asyncio.run(handler._execute_tool(call))
         self.assertFalse(result.isError)
 

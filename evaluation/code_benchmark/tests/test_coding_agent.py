@@ -16,12 +16,12 @@ def test_addendum_skips_listing_and_stops_when_green():
     assert "{test_list}" in INSTRUCTIONS_ADDENDUM
 
 
-def test_drop_eval_tools_removes_ls():
+def test_drop_eval_tools_removes_glob():
     class Model:
-        functions = {"ls": object(), "read_file": object()}
+        functions = {"glob": object(), "read_file": object()}
 
     class FileTool:
-        functions = {"ls": object(), "read_file": object()}
+        functions = {"glob": object(), "read_file": object()}
 
     class Agent:
         model = Model()
@@ -29,12 +29,12 @@ def test_drop_eval_tools_removes_ls():
 
     agent = Agent()
     drop_eval_tools(agent)
-    assert "ls" not in agent.model.functions
+    assert "glob" not in agent.model.functions
     assert "read_file" in agent.model.functions
-    assert "ls" not in agent.tools[0].functions
+    assert "glob" not in agent.tools[0].functions
 
 
-def test_eval_agent_schema_has_no_todo_or_ls(tmp_path):
+def test_eval_agent_schema_has_no_todo_or_glob(tmp_path):
     model = build_model("test-model", api_key="test-key", wire_api="responses")
     agent = build_coding_agent(model, tmp_path, tmp_path / "home")
     names = set()
@@ -45,5 +45,9 @@ def test_eval_agent_schema_has_no_todo_or_ls(tmp_path):
     assert "todo" not in names
     assert "write_todos" not in names
     assert "read_file" in names
+    assert "apply_patch" in names
+    assert "write_file" in names
+    assert "ls" not in names
+    assert "edit_file" not in names
     assert "grep" not in names
     assert "execute" in names

@@ -205,8 +205,8 @@ def test_strip_openai_style_tool_artifacts():
     """OpenAI wire format: role='tool' dropped, assistant.tool_calls -> text only."""
     history = [
         _user("hello"),
-        _assistant("ok", tool_calls=[{"id": "c1", "type": "function", "function": {"name": "ls"}}]),
-        _tool("c1", "ls", "file1"),
+        _assistant("ok", tool_calls=[{"id": "c1", "type": "function", "function": {"name": "glob"}}]),
+        _tool("c1", "glob", "file1"),
         _assistant("done"),
     ]
     out = strip_all_tool_artifacts(history, drop_system=True)
@@ -232,9 +232,9 @@ def test_strip_anthropic_style_list_content_tool_artifacts():
             role="assistant",
             content=[
                 {"type": "text", "text": "Let me check."},
-                {"type": "tool_use", "id": "toolu_01", "name": "ls", "input": {}},
+                {"type": "tool_use", "id": "toolu_01", "name": "glob", "input": {}},
             ],
-            tool_calls=[{"id": "toolu_01", "type": "function", "function": {"name": "ls"}}],
+            tool_calls=[{"id": "toolu_01", "type": "function", "function": {"name": "glob"}}],
         ),
         Message(
             role="user",

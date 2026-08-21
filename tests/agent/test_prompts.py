@@ -104,9 +104,9 @@ class TestPromptModules:
         assert "exact path string" in content
         assert "read_file` grounds only that exact" in content
         assert "does not ground sibling files" in content
-        assert "call `ls` or `glob` on the parent" in content
+        assert "call `glob` on the parent" in content
         assert "common filenames like `base.py`" in content
-        assert "empty `ls`/`glob` result is" in content
+        assert "empty `glob` result is" in content
 
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt
@@ -215,7 +215,7 @@ class TestGetSystemMessage:
         msg = await agent.get_system_message()
 
         assert msg is not None
-        for phantom in ("read_file", "edit_file", "apply_patch", "glob"):
+        for phantom in ("read_file", "apply_patch", "glob"):
             assert phantom not in msg.content
 
     @pytest.mark.asyncio

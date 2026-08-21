@@ -25,11 +25,6 @@ class TestExtractRewritePaths(unittest.TestCase):
         self.assertEqual(len(p), 1)
         self.assertTrue(p[0].endswith("a.py"))
 
-    def test_edit_file(self):
-        p = extract_rewrite_paths("edit_file", {"file_path": "sub/b.py"}, self.work)
-        self.assertEqual(len(p), 1)
-        self.assertTrue(p[0].endswith(os.path.join("sub", "b.py")))
-
     def test_apply_patch_multi_file(self):
         patch = (
             "*** Begin Patch\n"

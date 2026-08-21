@@ -101,7 +101,7 @@ where you look up what to pass.
 
 When the user says "remember: always X" / "from now on ..." / "never ...", that
 is a **standing instruction**, not a config.yaml field and not a `save_memory`
-fact. There is no dedicated tool: append a line with `edit_file` (or
+fact. There is no dedicated tool: append a line with `apply_patch` (or
 `write_file` if the file is missing).
 
 | Scope | File | Who sees it |

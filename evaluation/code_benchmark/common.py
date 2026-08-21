@@ -194,18 +194,15 @@ def resolve_responses_reasoning(extra_body: Optional[Dict[str, Any]]) -> Optiona
     return "high"
 
 
-# Directory listing and extra editors the eval surface does not need.
+# Directory listing extras the eval surface does not need.
 # Polyglot: prompt already names the solution and test files.
 # DABench: every DAEval row has exactly one `file_name` CSV, copied into an
-# empty workdir; the prompt interpolates that name. `ls`/`glob`/`grep` can
+# empty workdir; the prompt interpolates that name. `glob`/`grep` can
 # only rediscover that file or scan CSV as text, which burns a turn.
+# Editing is `apply_patch` + `write_file` (no `edit_file`).
 EVAL_DROP_TOOLS = (
-    "ls",
     "glob",
     "grep",
-    "undo_edit",
-    "apply_patch",
-    "request_path_access",
 )
 
 

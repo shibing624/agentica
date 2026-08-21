@@ -176,7 +176,7 @@ Agent + `get_builtin_tools()` 的场景化示例，展示内置工具的实际�
 | # | 示例 | 描述 | 关键概念 |
 |---|------|------|----------|
 | 01 | [basic.py](builtin_tools/01_basic.py) | 基础用法 | `Agent + get_builtin_tools()`, 内置工具 |
-| 02 | [file_operations.py](builtin_tools/02_file_operations.py) | 文件操作 | `ls`, `read_file`, `write_file`, `edit_file` |
+| 02 | [file_operations.py](builtin_tools/02_file_operations.py) | 文件操作 | `read_file`, `write_file`, `apply_patch` |
 | 03 | [code_execute_demo.py](builtin_tools/03_code_execute_demo.py) | 代码执行 | `execute` 工具 |
 | 04 | [web_search_demo.py](builtin_tools/04_web_search_demo.py) | 网页搜索 | `web_search`, `fetch_url` |
 

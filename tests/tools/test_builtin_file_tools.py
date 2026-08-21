@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for BuiltinFileTool (ls / read / write / glob / grep)."""
+"""Tests for BuiltinFileTool (read / write / glob / grep)."""
 import asyncio
 import json
 import os
@@ -24,38 +24,6 @@ class BlockingSubprocess:
         await asyncio.Future()
 
 
-class TestBuiltinFileToolLs:
-    def test_ls_empty_dir(self, file_tool, tmp_dir):
-        result = asyncio.run(file_tool.ls(tmp_dir))
-        items = json.loads(result)
-        assert isinstance(items, list)
-        assert len(items) == 0
-
-    def test_ls_with_files(self, file_tool, tmp_dir):
-        # Create a file and a subdirectory
-        Path(tmp_dir, "hello.txt").write_text("hello")
-        Path(tmp_dir, "subdir").mkdir()
-
-        result = asyncio.run(file_tool.ls(tmp_dir))
-        items = json.loads(result)
-        names = {i["name"] for i in items}
-        assert "hello.txt" in names
-        assert "subdir" in names
-        # Check types
-        types = {i["name"]: i["type"] for i in items}
-        assert types["hello.txt"] == "file"
-        assert types["subdir"] == "dir"
-
-    def test_ls_nonexistent_dir(self, file_tool):
-        with pytest.raises(FileNotFoundError):
-            asyncio.run(file_tool.ls("/nonexistent_dir_abc123"))
-
-    def test_ls_file_not_dir(self, file_tool, tmp_dir):
-        f = Path(tmp_dir, "afile.txt")
-        f.write_text("x")
-        with pytest.raises(NotADirectoryError):
-            asyncio.run(file_tool.ls(str(f)))
-
 
 class TestBuiltinFileToolReadFile:
     def test_path_tool_descriptions_require_grounded_paths(self):
@@ -63,7 +31,6 @@ class TestBuiltinFileToolReadFile:
             BuiltinFileTool.read_file,
             BuiltinFileTool.grep,
             BuiltinFileTool.glob,
-            BuiltinFileTool.edit_file,
             BuiltinFileTool.apply_patch,
         ):
             description = " ".join((fn.__doc__ or "").split()).lower()
@@ -159,15 +126,22 @@ class TestMissingPathErrors:
         assert "Did you mean:" not in msg
         assert "run glob '**/config.py'" not in msg
 
-    def test_edit_file_missing_path_does_not_suggest_candidates(self, file_tool, tmp_dir):
+    def test_apply_patch_missing_path_does_not_suggest_candidates(self, file_tool, tmp_dir):
         Path(tmp_dir, "src").mkdir()
         Path(tmp_dir, "src", "config.py").write_text("X = 1\n")
 
         with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.edit_file("missing-dir/config.py", "a", "b"))
+            asyncio.run(file_tool.apply_patch(
+                "*** Begin Patch\n"
+                "*** Update File: missing-dir/config.py\n"
+                "@@\n"
+                "-a\n"
+                "+b\n"
+                "*** End Patch"
+            ))
 
         msg = str(exc.value)
-        assert "File not found:" in msg
+        assert "File not found:" in msg or "not found" in msg.lower()
         assert "Did you mean:" not in msg
         assert "src/config.py" not in msg
 
@@ -200,11 +174,18 @@ class TestBuiltinFileToolReadCorrectness:
         r2 = asyncio.run(file_tool.read_file(str(p)))
         assert "same-size-b" in r2
 
-    def test_edit_file_reflected_on_next_read(self, file_tool, tmp_dir):
+    def test_apply_patch_reflected_on_next_read(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "edit.txt")
-        p.write_text("hello world")
+        p.write_text("hello world\n")
         asyncio.run(file_tool.read_file(str(p)))
-        asyncio.run(file_tool.edit_file(str(p), old_string="world", new_string="agentica"))
+        asyncio.run(file_tool.apply_patch(
+            "*** Begin Patch\n"
+            "*** Update File: edit.txt\n"
+            "@@\n"
+            "-hello world\n"
+            "+hello agentica\n"
+            "*** End Patch"
+        ))
         r = asyncio.run(file_tool.read_file(str(p)))
         assert "hello agentica" in r
         assert "hello world" not in r
@@ -279,6 +260,24 @@ class TestBuiltinFileToolGlob:
         assert len(files) == 2
         assert all(f.endswith(".py") for f in files)
 
+    def test_glob_manages_own_timeout(self, file_tool):
+        fn = file_tool.functions["glob"]
+        assert fn.manages_own_timeout is True
+
+    def test_glob_default_timeout_still_bounds(self, tmp_dir):
+        """When the walk hangs, the hardcoded default still bounds it."""
+        import time as _time
+        tool = BuiltinFileTool(work_dir=tmp_dir)
+
+        def slow_glob(self, pattern):
+            _time.sleep(0.2)
+            return iter(())
+
+        with patch("agentica.tools.builtin.file_tool._GLOB_TIMEOUT", 0.05), \
+             patch.object(Path, "glob", slow_glob):
+            with pytest.raises(TimeoutError, match=r"Narrow `path`"):
+                asyncio.run(tool.glob("**/*", str(tmp_dir)))
+
     def test_glob_recursive(self, file_tool, tmp_dir):
         sub = Path(tmp_dir, "sub")
         sub.mkdir()
@@ -299,6 +298,45 @@ class TestBuiltinFileToolGlob:
 
 
 class TestBuiltinFileToolGrep:
+    def test_grep_schema_omits_timeout_and_multiline(self):
+        import inspect
+        from agentica.tools.builtin.execute_tool import BuiltinExecuteTool
+
+        grep_params = inspect.signature(BuiltinFileTool.grep).parameters
+        glob_params = inspect.signature(BuiltinFileTool.glob).parameters
+        wait_params = inspect.signature(BuiltinExecuteTool.wait).parameters
+        execute_params = inspect.signature(BuiltinExecuteTool.execute).parameters
+        assert "timeout" not in grep_params
+        assert "multiline" not in grep_params
+        assert "timeout" not in glob_params
+        assert "timeout" in wait_params
+        assert "timeout" in execute_params
+
+    def test_grep_docstring_states_context_precedence(self):
+        doc = BuiltinFileTool.grep.__doc__ or ""
+        assert "ignored when" in doc
+        assert "before_context" in doc
+        assert "after_context" in doc
+
+    def test_grep_context_lines_wins_over_before_after(self, file_tool, tmp_dir):
+        import shutil
+        if shutil.which("rg") is None:
+            pytest.skip("rg not installed")
+        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
+        result = asyncio.run(
+            file_tool.grep(
+                "MATCH",
+                str(tmp_dir),
+                context_lines=1,
+                before_context=10,
+                after_context=10,
+            )
+        )
+        assert "LINE_B" in result
+        assert "LINE_C" in result
+        assert "LINE_A" not in result
+        assert "LINE_D" not in result
+
     def test_grep_default_returns_content_with_line_numbers(self, file_tool, tmp_dir):
         # Default output_mode is "content" — must return matching lines with
         # line numbers, not just a path list. A bare path-only response was the
@@ -381,27 +419,8 @@ class TestBuiltinFileToolGrep:
 
         with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None), \
              patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 0.05):
-            with pytest.raises(TimeoutError, match=r"grep timed out"):
+            with pytest.raises(TimeoutError, match=r"Narrow `path`"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
-
-    def test_grep_timeout_arg_respected(self, tmp_dir):
-        """The LLM-passed `timeout` arg is used as-is, overriding the default
-        (no clamping, no upper cap)."""
-        import time as _time
-        tool = BuiltinFileTool(work_dir=tmp_dir)
-
-        def slow_worker(*args, **kwargs):
-            _time.sleep(0.2)
-            return "should not reach"
-        tool._grep_fallback = slow_worker
-
-        # Patch the default _GREP_TIMEOUT up to 100s; passing timeout=0.05 must
-        # still fire at 0.05s, proving the caller's value wins and is not clamped
-        # back toward the default.
-        with patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 100), \
-             patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            with pytest.raises(TimeoutError, match=r"grep timed out after 0.05 seconds"):
-                asyncio.run(tool.grep("x", str(tmp_dir), timeout=0.05))
 
     def test_grep_default_timeout_still_bounds(self, tmp_dir):
         """When no timeout arg is passed, the module default still bounds the
@@ -451,12 +470,12 @@ class TestFileToolRegistrationGuard:
     the final tool schema sent to the LLM.
 
     This test exists because a past bug placed self.register() calls outside
-    __init__(), causing read_file / ls / glob to silently disappear from the
+    __init__(), causing read_file / glob to silently disappear from the
     model's tool list while execute remained available — the model then fell
     back to shell commands.
     """
 
-    EXPECTED_FUNCTIONS = {"ls", "read_file", "write_file", "edit_file",
+    EXPECTED_FUNCTIONS = {"read_file", "write_file",
                           "apply_patch", "glob", "grep"}
 
     def test_file_tool_functions_in_tool_dict(self):
@@ -486,4 +505,36 @@ class TestFileToolRegistrationGuard:
             f"Functions missing from Model.get_tools_for_api(): {missing}. "
             f"Likely cause: self.register() not called in __init__."
         )
+        by_name = {
+            t["function"]["name"]: t["function"]["parameters"]["properties"]
+            for t in api_tools
+        }
+        assert "timeout" not in by_name["grep"]
+        assert "multiline" not in by_name["grep"]
+        assert "timeout" not in by_name["glob"]
+
+    def test_auto_mode_schema_includes_request_path_access(self):
+        from agentica.agent import Agent
+        from agentica.agent.config import ToolConfig
+        from agentica.model.openai import OpenAIChat
+
+        # The tool is built with the default tier; the agent's tier is what
+        # decides, so an "auto" agent must never end up sandboxed with no way
+        # to ask for an exception.
+        file_tool = BuiltinFileTool(work_dir="/tmp")
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            tools=[file_tool],
+            tool_config=ToolConfig(permission_mode="auto"),
+        )
+        agent.update_model()
+        api_names = {t["function"]["name"] for t in agent.model.get_tools_for_api()}
+        assert "request_path_access" in api_names
+        assert "ls" not in api_names
+        assert "edit_file" not in api_names
+
+        agent.set_permission_mode("allow-all")
+        agent.update_model()
+        api_names = {t["function"]["name"] for t in agent.model.get_tools_for_api()}
+        assert "request_path_access" not in api_names
 

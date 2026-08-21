@@ -139,7 +139,7 @@ def _maybe_redact_tool_output(text: str) -> str:
 
     Without the toggle, we still scan for and mask unterminated private-key
     blocks (a hard floor — those are never legitimate), but ordinary text
-    flows through verbatim so ``read_file`` -> ``edit_file`` / ``apply_patch`` round-trips
+    flows through verbatim so ``read_file`` -> ``apply_patch`` round-trips
     keep working.
     """
     key_begin = _STREAM_PRIVATE_KEY_BEGIN_RE.search(text)
@@ -1069,7 +1069,7 @@ class Model(ABC):
             if isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
                 # Stream redaction is an opt-in safety net (default OFF) because
                 # it rewrites byte-exact text the LLM later has to match with
-                # edit_file. When disabled we pass each generator chunk straight
+                # apply_patch. When disabled we pass each generator chunk straight
                 # through; the unterminated-private-key floor still applies
                 # below to the assembled result.
                 stream_redact = redact_streamed_text_enabled()

@@ -34,8 +34,7 @@ def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:
 def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
     """Format tool call arguments for frontend display.
 
-    For file-editing tools (edit_file, apply_patch, write_file, plus historical
-    multi_edit_file logs),
+    For file-editing tools (apply_patch, write_file),
     computes diff metadata (lines added/deleted) instead of sending
     the full content to the frontend. For other tools, truncates long
     string arguments to 100 characters.
@@ -50,31 +49,7 @@ def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
     """
     display_args: dict = {}
 
-    if tool_name == "edit_file":
-        old_s = tool_args.get("old_string", "")
-        new_s = tool_args.get("new_string", "")
-        display_args["_diff_add"] = new_s.count("\n") + (1 if new_s else 0)
-        display_args["_diff_del"] = old_s.count("\n") + (1 if old_s else 0)
-        fp = tool_args.get("file_path") or tool_args.get("file") or tool_args.get("path", "")
-        if fp:
-            display_args["file_path"] = fp
-
-    elif tool_name == "multi_edit_file":
-        edits = tool_args.get("edits", [])
-        total_add = total_del = 0
-        for ed in (edits if isinstance(edits, list) else []):
-            old_s = ed.get("old_string", "")
-            new_s = ed.get("new_string", "")
-            total_del += old_s.count("\n") + (1 if old_s else 0)
-            total_add += new_s.count("\n") + (1 if new_s else 0)
-        display_args["_diff_add"] = total_add
-        display_args["_diff_del"] = total_del
-        display_args["_edit_count"] = len(edits) if isinstance(edits, list) else 0
-        fp = tool_args.get("file_path") or tool_args.get("file") or tool_args.get("path", "")
-        if fp:
-            display_args["file_path"] = fp
-
-    elif tool_name == "apply_patch":
+    if tool_name == "apply_patch":
         patch = str(tool_args.get("patch", ""))
         file_markers = re.findall(
             r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", patch, re.MULTILINE

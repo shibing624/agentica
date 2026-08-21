@@ -12,7 +12,7 @@ If the user explicitly asks you to remember something, act immediately, and
 where you put it depends on what it is:
 
 - A **standing instruction** ("always ...", "never ...", "from now on ...")
-  belongs in an AGENTS.md — append a line with `edit_file` / `write_file`.
+  belongs in an AGENTS.md — append a line with `apply_patch` / `write_file`.
   This user's file is `<user-agents-md>`; project-only rules go in
   `<repo root>/AGENTS.md`. Follow it for the rest of this session from the
   conversation history; the next session loads the file into the system

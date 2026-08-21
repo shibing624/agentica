@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
     goal: str = ""
     skill: str = ""
     tool: str = ""
-    approval_mode: str = "ask"
+    approval_mode: str = "auto"
     images: List[ChatImage] = []
 
 

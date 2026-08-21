@@ -9,9 +9,9 @@ import { ComposerDir } from "../components/ComposerDir";
 import { promptRename } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
 import { getStrings, useStrings } from "../i18n";
-import { fmtCost, fmtN, fmtTurnDuration, uid } from "../lib/format";
+import { fmtCost, fmtDurationMs, fmtN, fmtTps, uid } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
-import { createSession } from "../sessions";
+import { createSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
@@ -57,6 +57,10 @@ export function ChatPage() {
 
   useEffect(() => { void loadPlugins(); }, []);
   useEffect(() => { if (slashOpen) setSkillsOpen(false); }, [slashOpen]);
+  useEffect(() => {
+    if (!s.curSess) return;
+    void syncSessionRoundStats(s.curSess);
+  }, [s.curSess, streaming]);
 
   useEffect(() => {
     const el = msgsRef.current;
@@ -387,7 +391,10 @@ function MessageFooter({ m, live }: { m: ChatMsg; live?: boolean }) {
   const S = useStrings();
   if (live) return null;
   const showStats = m.role === "assistant" && m.tokIn != null;
-  const tps = (m.durationSec && m.tokOut) ? m.tokOut / m.durationSec : 0;
+  const durationMs = m.durationMs ?? ((m.durationSec || 0) * 1000);
+  const tps = (m.llmMs && m.tokOut)
+    ? m.tokOut / (m.llmMs / 1000)
+    : ((m.durationSec && m.tokOut) ? m.tokOut / m.durationSec : 0);
   const copy = () => {
     if (!m.content) return;
     void navigator.clipboard.writeText(m.content).then(() => showToast(S.common.copied));
@@ -405,9 +412,9 @@ function MessageFooter({ m, live }: { m: ChatMsg; live?: boolean }) {
             </span>
           )}
           <span title={S.chat.ctxOutput}>↓ {fmtN(m.tokOut || 0)}</span>
-          {tps > 0 && <span title={S.chat.tokPerSecTip}>{S.chat.tokPerSec(tps)}</span>}
+          {tps > 0 && <span title={S.chat.tokPerSecTip}>{fmtTps(tps)}</span>}
           {(m.costUsd || 0) > 0 && <span title={S.chat.costUsdTip}>{fmtCost(m.costUsd || 0)}</span>}
-          {!!m.durationSec && <span title={S.chat.durationTip}>{fmtTurnDuration(m.durationSec)}</span>}
+          {!!durationMs && <span title={S.chat.durationTip}>{fmtDurationMs(durationMs)}</span>}
         </>
       )}
       <button type="button" className="msg-copy" title={S.common.copy} onClick={copy}>
@@ -584,7 +591,11 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
         } else if (evt.event === "done" && evt.data) {
           const prevCost = sess.costUsd || 0;
           const turn = evt.data.turn_usage || {};
-          aiMsg.durationSec = evt.data.response_time || (performance.now() - t0) / 1000;
+          aiMsg.durationSec = (typeof evt.data.duration_ms === "number")
+            ? evt.data.duration_ms / 1000
+            : (evt.data.response_time || (performance.now() - t0) / 1000);
+          if (typeof evt.data.duration_ms === "number") aiMsg.durationMs = evt.data.duration_ms;
+          if (typeof evt.data.llm_ms === "number") aiMsg.llmMs = evt.data.llm_ms;
           aiMsg.tokIn = (turn.input_tokens ?? evt.data.input_tokens) || 0;
           aiMsg.tokOut = (turn.output_tokens ?? evt.data.output_tokens) || 0;
           aiMsg.cacheRead = turn.cache_read_tokens ?? evt.data.cache_read_tokens ?? 0;

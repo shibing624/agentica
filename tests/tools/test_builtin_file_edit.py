@@ -20,7 +20,10 @@ class TestBuiltinFileToolRequestPathAccess:
 
         sandbox = SandboxConfig(enabled=True, writable_dirs=[tmp_dir])
         return BuiltinFileTool(
-            work_dir=tmp_dir, sandbox_config=sandbox, consent_callback=consent_callback
+            work_dir=tmp_dir,
+            sandbox_config=sandbox,
+            consent_callback=consent_callback,
+            permission_mode="auto",
         )
 
     # -- sandboxed ("auto"/"ask") writable_dirs escalation --------------
@@ -79,15 +82,16 @@ class TestBuiltinFileToolRequestPathAccess:
         data = json.loads(result)
         assert data["granted"] is True
 
-    # -- sensitive-path escalation (applies in ANY permission mode) -----
+    # -- sensitive-path guard (always on; schema escalation only in auto) --
 
     def test_sensitive_write_blocked_even_in_allow_all_mode(self, tmp_dir):
         """allow-all disables sandbox scoping, but sensitive system/credentials
-        paths still require explicit escalation — the model shouldn't silently
-        touch ~/.ssh or /etc even when the sandbox is fully open."""
+        paths still refuse the write. The model cannot escalate: request_path_access
+        is not in the schema outside auto."""
         tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None)
-        with pytest.raises(PermissionError, match="request_path_access"):
+        with pytest.raises(PermissionError, match="sensitive"):
             asyncio.run(tool.write_file("/etc/hosts", "content"))
+        assert "request_path_access" not in tool.functions
 
     def test_sensitive_write_granted_after_user_approval(self, tmp_dir):
         home = str(Path.home())
@@ -130,6 +134,19 @@ class TestBuiltinFileToolRequestPathAccess:
 
         content = asyncio.run(tool.read_file(target))
         assert "fake-key" in content
+
+    def test_request_path_access_in_schema_only_for_auto(self, tmp_dir):
+        allow = BuiltinFileTool(work_dir=tmp_dir, permission_mode="allow-all")
+        ask = BuiltinFileTool(work_dir=tmp_dir, permission_mode="ask")
+        auto = BuiltinFileTool(work_dir=tmp_dir, permission_mode="auto")
+        assert "request_path_access" not in allow.functions
+        assert "request_path_access" not in ask.functions
+        assert "request_path_access" in auto.functions
+
+        allow.set_permission_mode("auto")
+        assert "request_path_access" in allow.functions
+        allow.set_permission_mode("ask")
+        assert "request_path_access" not in allow.functions
 
 
 class TestBuiltinFileToolApplyPatch:
@@ -378,198 +395,6 @@ class TestBuiltinFileToolApplyPatch:
 
             assert not outside.exists()
 
-
-class TestBuiltinFileToolEditFile:
-    @staticmethod
-    def _read(file_tool, file_path):
-        asyncio.run(file_tool.read_file(file_path))
-
-    def test_edit_without_read_succeeds(self, file_tool, tmp_dir):
-        """No freshness machinery: edit works without a prior read, no tips."""
-        fp = os.path.join(tmp_dir, "unread.txt")
-        Path(fp).write_text("before")
-        result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
-        assert "Successfully" in result
-        assert "Tip:" not in result
-        assert Path(fp).read_text() == "after"
-
-    def test_edit_after_external_change_succeeds(self, file_tool, tmp_dir):
-        """External on-disk change is invisible to edit_file — no tip, plain edit."""
-        fp = os.path.join(tmp_dir, "external.txt")
-        Path(fp).write_text("before")
-        self._read(file_tool, fp)
-        Path(fp).write_text("after!")
-        result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
-        assert "Successfully" in result
-        assert "changed on disk" not in result
-        assert Path(fp).read_text() == "final!"
-
-    def test_edit_failure_hints_read_or_reread(self, file_tool, tmp_dir):
-        """A failed exact-string edit gives one stateless recovery action."""
-        fp = os.path.join(tmp_dir, "not_found.txt")
-        Path(fp).write_text("before")
-        with pytest.raises(ValueError) as exc:
-            asyncio.run(file_tool.edit_file(fp, "missing", "after"))
-        msg = str(exc.value)
-        assert "String not found" in msg
-        assert "Current file state:" not in msg
-        assert "Read or re-read the relevant region" in msg
-        assert "read_file" in msg
-        assert "old_string" in msg
-
-    def test_edit_string_not_found_does_not_show_fuzzy_region(self, file_tool, tmp_dir):
-        """A stale-guess old_string stays a stateless exact-match failure."""
-        fp = os.path.join(tmp_dir, "test_writer.py")
-        Path(fp).write_text(
-            "def test_writer():\n"
-            '    assert search_calls == ["saved preference"]\n'
-            "    assert documents == []\n"
-        )
-        with pytest.raises(ValueError) as exc:
-            asyncio.run(
-                file_tool.edit_file(
-                    fp,
-                    'assert search_calls == ["new preference"]\nassert documents == []',
-                    'assert search_calls == ["x"]\nassert documents == []',
-                )
-            )
-        msg = str(exc.value)
-        assert "String not found" in msg
-        assert "Most similar region" not in msg
-        assert 'assert search_calls == ["saved preference"]' not in msg
-        assert "Read or re-read the relevant region" in msg
-
-    def test_single_edit(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "edit.txt")
-        Path(fp).write_text("hello world")
-        self._read(file_tool, fp)
-        result = asyncio.run(file_tool.edit_file(fp, "world", "python"))
-        assert "Successfully" in result
-        assert Path(fp).read_text() == "hello python"
-
-    def test_edit_result_carries_the_exact_change_executed(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "edit.txt")
-        Path(fp).write_text("first = 1\nsecond = 1\n")
-
-        result = asyncio.run(file_tool.edit_file(fp, "second = 1", "second = 2"))
-
-        assert result.display_meta == {
-            "files": [{
-                "path": str(Path(fp).resolve()),
-                "action": "update",
-                "before": "first = 1\nsecond = 1\n",
-                "after": "first = 1\nsecond = 2\n",
-            }]
-        }
-
-    def test_multiple_edits_via_separate_calls(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "multi.txt")
-        Path(fp).write_text("aaa bbb ccc")
-        self._read(file_tool, fp)
-        result1 = asyncio.run(file_tool.edit_file(fp, "aaa", "111"))
-        assert "Successfully" in result1
-        result2 = asyncio.run(file_tool.edit_file(fp, "ccc", "333"))
-        assert "Successfully" in result2
-        assert Path(fp).read_text() == "111 bbb 333"
-
-    def test_python_error_hint_null_literal(self):
-        """NameError on JSON `null`/`true`/`false` gets a structured hint
-        pointing the LLM at the source rather than retrying blindly."""
-        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
-        sample = "Traceback ...\n  File ...\nNameError: name 'null' is not defined"
-        hint = _detect_python_error_hint(sample)
-        assert hint is not None
-        assert "JSON literal" in hint
-        assert "None" in hint
-
-    def test_python_error_hint_syntax_error(self):
-        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
-        sample = "  File 'x.py', line 5\n    if x = 1\nSyntaxError: invalid syntax"
-        hint = _detect_python_error_hint(sample)
-        assert hint is not None
-        assert "SyntaxError" in hint
-
-    def test_python_error_hint_module_not_found(self):
-        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
-        sample = "ModuleNotFoundError: No module named 'foobar_widget'"
-        hint = _detect_python_error_hint(sample)
-        assert hint is not None
-        assert "dependency" in hint or "pip install" in hint
-
-    def test_python_error_hint_returns_none_for_normal_output(self):
-        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
-        assert _detect_python_error_hint("") is None
-        assert _detect_python_error_hint("Hello world") is None
-        assert _detect_python_error_hint("AssertionError: 1 != 2") is None  # genuine logic bug
-
-    def test_edit_replace_all(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "replall.txt")
-        Path(fp).write_text("x x x")
-        self._read(file_tool, fp)
-        result = asyncio.run(file_tool.edit_file(fp, "x", "y", replace_all=True))
-        assert "Successfully" in result
-        assert Path(fp).read_text() == "y y y"
-
-    def test_quote_fallback_preserves_unrelated_typographic_quotes(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "quotes.txt")
-        Path(fp).write_text(
-            'title = \u201ckeep\u201d\nvalue = \u2018old\u2019\n',
-            encoding="utf-8",
-        )
-        result = asyncio.run(file_tool.edit_file(fp, "value = 'old'", "value = 'new'"))
-        assert "Successfully" in result
-        assert Path(fp).read_text(encoding="utf-8") == (
-            'title = \u201ckeep\u201d\nvalue = \'new\'\n'
-        )
-
-    def test_quote_fallback_replace_all_preserves_unrelated_content(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "quotes_all.txt")
-        Path(fp).write_text(
-            'title = \u201ckeep\u201d\nvalue = \'old\'\nvalue = \'old\'\n',
-            encoding="utf-8",
-        )
-        result = asyncio.run(file_tool.edit_file(
-            fp,
-            "value = \u2018old\u2019",
-            "value = 'new'",
-            replace_all=True,
-        ))
-        assert "Successfully" in result
-        assert Path(fp).read_text(encoding="utf-8") == (
-            'title = \u201ckeep\u201d\nvalue = \'new\'\nvalue = \'new\'\n'
-        )
-
-    def test_edit_string_not_found(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "nf.txt")
-        Path(fp).write_text("hello")
-        self._read(file_tool, fp)
-        with pytest.raises(ValueError):
-            asyncio.run(file_tool.edit_file(fp, "zzz", "yyy"))
-        # File should be unchanged
-        assert Path(fp).read_text() == "hello"
-
-    def test_edit_nonexistent_file(self, file_tool):
-        with pytest.raises(FileNotFoundError):
-            asyncio.run(file_tool.edit_file("/no/such/file.txt", "a", "b"))
-
-    def test_edit_multiple_matches_no_replace_all(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "dup.txt")
-        Path(fp).write_text("foo bar foo")
-        self._read(file_tool, fp)
-        with pytest.raises(ValueError, match="Found 2 occurrences"):
-            asyncio.run(file_tool.edit_file(fp, "foo", "baz"))
-        # File unchanged
-        assert Path(fp).read_text() == "foo bar foo"
-
-    def test_edit_no_side_effect_on_failure(self, file_tool, tmp_dir):
-        """A failed edit should not modify the file."""
-        fp = os.path.join(tmp_dir, "atomic.txt")
-        Path(fp).write_text("aaa bbb")
-        self._read(file_tool, fp)
-        with pytest.raises(ValueError):
-            asyncio.run(file_tool.edit_file(fp, "zzz", "999"))
-        # File should be unchanged
-        assert Path(fp).read_text() == "aaa bbb"
 
 
 class TestRemovedMultiEditFileTool:

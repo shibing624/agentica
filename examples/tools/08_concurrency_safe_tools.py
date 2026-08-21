@@ -12,7 +12,7 @@
 
 内置工具中已自动标记 concurrency_safe：
   True：  ls, read_file, glob, grep, web_search, fetch_url
-  False： execute, write_file, edit_file（默认）
+  False： execute, write_file, apply_patch（默认）
 
 用法：
     python 08_concurrency_safe_tools.py

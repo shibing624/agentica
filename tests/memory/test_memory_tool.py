@@ -79,7 +79,9 @@ class TestBuiltinMemoryTool:
         """No `remember` tool exists: the prompt is what routes a rule."""
         prompt = self.tool.get_system_prompt()
         assert "AGENTS.md" in prompt
-        assert "edit_file" in prompt
+        assert "edit_file" not in prompt
+        assert "apply_patch" in prompt
+        assert "write_file" in prompt
         assert "next session" in prompt
 
     def test_save_memory(self):

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
 import { getStrings, useStrings, type Strings } from "../i18n";
-import { fmtFileSize, fmtN, shortenPath } from "../lib/format";
+import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps, shortenPath } from "../lib/format";
 import { IconCopy, IconDatabase } from "../icons";
 import { showToast } from "../store";
 import { switchTo } from "../sessions";
@@ -111,15 +111,9 @@ const KIND_LABEL: Record<string, string> = {
   goal: "goal",
 };
 
-function ms(v: number) {
-  if (v <= 0) return "0ms";
-  if (v < 1000) return `${v}ms`;
-  return `${(v / 1000).toFixed(v < 10000 ? 2 : 1)}s`;
-}
-
 function money(v: number | null) {
   if (v === null || v === undefined) return "—";
-  return v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+  return fmtCost(v);
 }
 
 export function TracesPage() {
@@ -198,11 +192,11 @@ function TraceDetail({ a }: { a: Analysis }) {
           <Stat label={S.traces.statInput} value={fmtN(tokens.prompt)} hint={<CacheMark tokens={tokens} S={S} />} />
           <Stat label={S.traces.statCost} value={money(t.costUsd)} hint={a.meta.model ? undefined : S.traces.noModelInfo} />
           <Stat label={S.traces.statToolCalls} value={String(t.toolCalls)} hint={t.toolErrors ? S.traces.failed(t.toolErrors) : S.traces.succeeded(t.toolOk)} />
-          <Stat label={S.traces.statWait} value={ms(t.waitMs)} />
-          <Stat label={S.traces.statElapsed} value={ms(t.elapsedMs)} hint={S.traces.modelTime(ms(t.llmMs))} />
+          <Stat label={S.traces.statWait} value={fmtDurationMs(t.waitMs)} />
+          <Stat label={S.traces.statElapsed} value={fmtDurationMs(t.elapsedMs)} hint={S.traces.modelTime(fmtDurationMs(t.llmMs))} />
           <Stat label={S.traces.statRequests} value={String(t.requests)} hint={a.reconnectCount ? S.traces.retried(a.reconnectCount) : undefined} />
           <Stat label={S.traces.statOutput} value={fmtN(tokens.output)} />
-          <Stat label={S.traces.statTps} value={`${t.tps.toFixed(1)} tok/s`} />
+          <Stat label={S.traces.statTps} value={fmtTps(t.tps)} />
         </div>
         {!a.hasTimeline && <p className="trace-note">{S.traces.noTimeline}</p>}
         {t.compactions > 0 && (
@@ -259,8 +253,8 @@ function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number
           )}
           <span title={S.traces.hOutput}>↑ {fmtN(round.tokens.output)}</span>
           <span title={S.traces.hCost}>{money(round.costUsd)}</span>
-          <span title={S.traces.hElapsed}>{ms(round.durationMs)}</span>
-          <span title={S.traces.hTps}>{round.tps.toFixed(1)} tok/s</span>
+          <span title={S.traces.hElapsed}>{fmtDurationMs(round.durationMs)}</span>
+          <span title={S.traces.hTps}>{fmtTps(round.tps)}</span>
         </span>
       </button>
       {open && (
@@ -360,13 +354,13 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
 
   return (
     <div className="lane-block">
-      <div className="lane-title">{S.traces.timeline}<span className="lane-total">{ms(span)}</span></div>
+      <div className="lane-title">{S.traces.timeline}<span className="lane-total">{fmtDurationMs(span)}</span></div>
       <div className="lane-row">
         <span className="lane-name">{S.traces.laneModel}</span>
         <div className="lane">
           {segs.map((s) => (
             <span key={s.key} className={"lane-seg " + phaseFor(s.kind)} style={pos(s.startTs, s.endTs)}
-                  title={`${s.kind}${s.name ? " · " + s.name : ""} ${ms(at(s.endTs) - at(s.startTs))}`} />
+                  title={`${s.kind}${s.name ? " · " + s.name : ""} ${fmtDurationMs(at(s.endTs) - at(s.startTs))}`} />
           ))}
         </div>
       </div>
@@ -381,11 +375,11 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
               <Fragment key={sp.toolCallId}>
                 {sp.approvalTs && (
                   <span className="lane-seg ph-wait" style={pos(sp.callTs, sp.approvalTs)}
-                        title={S.traces.approvalWait(ms(at(sp.approvalTs) - at(sp.callTs)))} />
+                        title={S.traces.approvalWait(fmtDurationMs(at(sp.approvalTs) - at(sp.callTs)))} />
                 )}
                 {sp.outputTs ? (
                   <span className="lane-seg ph-exec" style={pos(sp.approvalTs || sp.callTs, sp.outputTs)}
-                        title={S.traces.exec(ms(at(sp.outputTs) - at(sp.approvalTs || sp.callTs)))} />
+                        title={S.traces.exec(fmtDurationMs(at(sp.outputTs) - at(sp.approvalTs || sp.callTs)))} />
                 ) : (
                   <span className="lane-seg ph-exec pending" style={pos(sp.callTs)}
                         title={S.traces.noResult} />
@@ -399,7 +393,7 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
         <span className="lane-name" />
         <div className="lane-ticks">
           {TICKS.map((f) => (
-            <span key={f} className="lane-tick" style={{ left: `${f * 100}%` }}>{ms(Math.round(f * span))}</span>
+            <span key={f} className="lane-tick" style={{ left: `${f * 100}%` }}>{fmtDurationMs(Math.round(f * span))}</span>
           ))}
         </div>
       </div>
@@ -455,7 +449,7 @@ function EntryRow({ e, forceOpen }: { e: Entry; forceOpen: boolean }) {
         <span className="entry-caret">{expandable ? (expanded ? "▾" : "▸") : ""}</span>
         <span className={"entry-kind k-" + e.kind}>{KIND_LABEL[e.kind] || e.kind}</span>
         <span className="entry-summary">{e.summary}</span>
-        {e.durationMs !== undefined && <span className="entry-dur">{ms(e.durationMs)}</span>}
+        {e.durationMs !== undefined && <span className="entry-dur">{fmtDurationMs(e.durationMs)}</span>}
       </button>
       {expanded && expandable && (
         <div className="entry-detail">

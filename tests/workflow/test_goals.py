@@ -1031,7 +1031,7 @@ def test_consecutive_tool_failures_auto_pause(tmp_path: Path):
         d = asyncio.run(
             mgr.evaluate_after_turn(
                 f"r{i}",
-                tool_calls=[("edit_file", True), ("run_pytest", True)],
+                tool_calls=[("apply_patch", True), ("run_pytest", True)],
             )
         )
         assert d.status == "active"
@@ -1041,7 +1041,7 @@ def test_consecutive_tool_failures_auto_pause(tmp_path: Path):
     final = asyncio.run(
         mgr.evaluate_after_turn(
             "stuck",
-            tool_calls=[("edit_file", True)],
+            tool_calls=[("apply_patch", True)],
         )
     )
     assert final.status == "paused"
@@ -1059,7 +1059,7 @@ def test_any_tool_success_resets_failure_counter(tmp_path: Path):
     asyncio.run(
         mgr.evaluate_after_turn(
             "r1",
-            tool_calls=[("edit_file", True), ("ls", True)],
+            tool_calls=[("apply_patch", True), ("glob", True)],
         )
     )
     assert mgr.load().consecutive_tool_failures == 1
@@ -1068,7 +1068,7 @@ def test_any_tool_success_resets_failure_counter(tmp_path: Path):
     asyncio.run(
         mgr.evaluate_after_turn(
             "r2",
-            tool_calls=[("edit_file", True), ("read_file", False)],
+            tool_calls=[("apply_patch", True), ("read_file", False)],
         )
     )
     assert mgr.load().consecutive_tool_failures == 0
@@ -1080,7 +1080,7 @@ def test_turns_with_no_tool_calls_do_not_reset_counter(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
     mgr.set("x")
 
-    asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=[("edit_file", True)]))
+    asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=[("apply_patch", True)]))
     assert mgr.load().consecutive_tool_failures == 1
 
     # No tool calls — counter must stay at 1, not reset to 0.

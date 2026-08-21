@@ -236,8 +236,8 @@ class _CumulativeToolStreamAgent:
         # started -> completed, with the cumulative list growing each chunk.
         t1 = {"id": "call_1", "tool_name": "read_file",
               "tool_args": {"file_path": "a.py"}}
-        t2 = {"id": "call_2", "tool_name": "ls",
-              "tool_args": {"directory": "."}}
+        t2 = {"id": "call_2", "tool_name": "glob",
+              "tool_args": {"pattern": "*", "path": "."}}
         # call_1 started
         yield SimpleNamespace(event="ToolCallStarted", content=None, tools=[dict(t1)])
         # call_1 completed (cumulative list still has call_1, now with content)
@@ -283,8 +283,8 @@ def test_spawn_dedupes_subagent_tool_events_by_call_id():
     completed = [e for e in received if e["type"] == "subagent.tool_completed"]
     assert len(started) == 2
     assert len(completed) == 2
-    assert [e["tool_name"] for e in started] == ["read_file", "ls"]
-    assert [e["tool_name"] for e in completed] == ["read_file", "ls"]
+    assert [e["tool_name"] for e in started] == ["read_file", "glob"]
+    assert [e["tool_name"] for e in completed] == ["read_file", "glob"]
     start_event = next(event for event in received if event["type"] == "subagent.start")
     assert start_event["max_turns"] == 100
     assert start_event["tool_call_limit"] is None
@@ -735,7 +735,7 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
 
 def test_builtin_subagent_configs_are_read_only():
     """Built-in subagents deny write/edit tools and restrict execute to reads."""
-    forbidden = {"write_file", "edit_file", "apply_patch"}
+    forbidden = {"write_file", "apply_patch"}
     configs = get_subagent_configs()
     assert set(configs) == {"explore", "research", "code"}
     for cfg in configs.values():
@@ -752,7 +752,7 @@ def test_builtin_subagent_configs_are_read_only():
 
 
 def test_select_child_tools_strips_edit_tools_for_code_subagent():
-    """Even if the parent has write_file/edit_file, a ``code`` subagent must not
+    """Even if the parent has write_file, a ``code`` subagent must not
     inherit them — the cheap aux model must not be able to edit. ``execute`` is
     inherited but wrapped by the read-only policy."""
     from agentica.subagent import SubagentRegistry, get_subagent_config
@@ -764,10 +764,8 @@ def test_select_child_tools_strips_edit_tools_for_code_subagent():
         tools=[
             Function(name="read_file", entrypoint=lambda: None),
             Function(name="write_file", entrypoint=lambda: None),
-            Function(name="edit_file", entrypoint=lambda: None),
             Function(name="apply_patch", entrypoint=lambda: None),
             Function(name="execute", entrypoint=lambda: None),
-            Function(name="ls", entrypoint=lambda: None),
             Function(name="glob", entrypoint=lambda: None),
             Function(name="grep", entrypoint=lambda: None),
         ],
@@ -781,7 +779,7 @@ def test_select_child_tools_strips_edit_tools_for_code_subagent():
         else:
             child_tool_names.update(SubagentRegistry._tool_names(tool))
 
-    assert child_tool_names == {"read_file", "ls", "glob", "grep", "execute"}, (
+    assert child_tool_names == {"read_file", "glob", "grep", "execute"}, (
         f"code subagent must only inherit read-only tools, got {child_tool_names}"
     )
 
@@ -1180,15 +1178,19 @@ def test_readonly_subagent_investigation_leaves_edits_to_parent():
             for tool in child_tools
             for name in tool.functions
         }
-        assert child_functions == {"read_file", "ls", "glob", "grep"}
+        assert child_functions == {"read_file", "glob", "grep"}
 
         async def parent_edits_after_investigation():
             await parent_file_tool.read_file(str(file_path))
-            return await parent_file_tool.edit_file(
-                str(file_path),
-                "before",
-                "after",
+            patch = (
+                "*** Begin Patch\n"
+                "*** Update File: example.py\n"
+                "@@\n"
+                "-value = 'before'\n"
+                "+value = 'after'\n"
+                "*** End Patch"
             )
+            return await parent_file_tool.apply_patch(patch)
 
         result = asyncio.run(parent_edits_after_investigation())
         assert "Successfully" in result

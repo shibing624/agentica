@@ -69,11 +69,13 @@ class TestAgentPermissionMode(unittest.TestCase):
         self.assertTrue(agent._is_tool_enabled("read_file"))
         self.assertFalse(agent._is_tool_enabled("write_file"))
 
-    def test_ask_mode_keeps_listing_peers_but_not_messaging_them(self):
-        """Listing the user's other sessions reads a directory; messaging one
-        writes into its mailbox and acts on its behalf."""
+    def test_ask_mode_keeps_listing_peers_and_searching_memory(self):
+        """Listing sessions and recalling memory are reads; messaging a peer
+        or saving memory writes, so ask hides those."""
         agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
         self.assertTrue(agent._is_tool_enabled("list_agents"))
+        self.assertTrue(agent._is_tool_enabled("search_memory"))
+        self.assertFalse(agent._is_tool_enabled("save_memory"))
         self.assertFalse(agent._is_tool_enabled("send_message"))
         self.assertFalse(agent._is_tool_enabled("apply_patch"))
 
@@ -164,6 +166,24 @@ class TestDeepAgentPermissionMode(unittest.TestCase):
 
         agent.set_permission_mode("auto")
         self.assertTrue(file_tool._sandbox_config.enabled)
+        self.assertIn("request_path_access", file_tool.functions)
+
+        agent.set_permission_mode("allow-all")
+        self.assertNotIn("request_path_access", file_tool.functions)
+
+    def test_request_path_access_only_registered_in_auto(self):
+        allow = self._build()
+        ask = self._build(permission_mode="ask")
+        auto = self._build(permission_mode="auto")
+        from agentica.tools.builtin import BuiltinFileTool
+
+        def names(agent):
+            tool = next(t for t in agent.tools if isinstance(t, BuiltinFileTool))
+            return set(tool.functions)
+
+        self.assertNotIn("request_path_access", names(allow))
+        self.assertNotIn("request_path_access", names(ask))
+        self.assertIn("request_path_access", names(auto))
 
 
 if __name__ == "__main__":

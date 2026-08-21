@@ -185,7 +185,7 @@ async def demo_combined():
          only fires after N turns or right before context compaction.
          ``extract_min_seconds_between`` provides a cross-process frequency
          cap. Together these slash extraction cost vs the old per-turn path.
-      Standing rules belong in ``users/{user_id}/AGENTS.md`` (edit_file), not
+      Standing rules belong in ``users/{user_id}/AGENTS.md`` (apply_patch), not
       a memory→AGENTS.md compile step — that path was deleted.
     """
     print("\n" + "=" * 60)

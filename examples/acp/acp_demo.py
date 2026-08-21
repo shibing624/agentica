@@ -140,11 +140,11 @@ async def demo_acp_handlers():
     print(f"   Stats: {list_result['stats']}")
     
     # Call tool (async)
-    print("\n5. Call Tool (ls)")
+    print("\n5. Call Tool (glob)")
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     call_result = await handlers.handle_tools_call({
-        "name": "ls",
-        "arguments": {"directory": project_root}
+        "name": "glob",
+        "arguments": {"pattern": "*", "path": project_root}
     })
     print(f"   Success: {not call_result['isError']}")
     print(f"   Content preview: {call_result['content'][:100]}...")

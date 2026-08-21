@@ -158,7 +158,7 @@ class TestToolCallInfo:
         meta = {"files": [{"path": "a.py", "before": "old", "after": "new"}]}
         info = ToolCallInfo.from_dict({
             "tool_call_id": "c1",
-            "tool_name": "edit_file",
+            "tool_name": "apply_patch",
             "content": "ok",
             "metrics": {"time": 0.2},
             "tool_display_meta": meta,

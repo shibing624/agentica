@@ -67,10 +67,8 @@ def _generate_session_id() -> str:
 
 # Builtin tools — single source of truth for all CLI display/listing.
 BUILTIN_TOOLS = [
-    "ls",
     "read_file",
     "write_file",
-    "edit_file",
     "apply_patch",
     "glob",
     "grep",
@@ -82,10 +80,8 @@ BUILTIN_TOOLS = [
 
 # Tool icons for CLI display
 TOOL_ICONS = {
-    "ls": "📁",
     "read_file": "📖",
     "write_file": "✏️",
-    "edit_file": "✂️",
     "apply_patch": "✎",
     "glob": "🔍",
     "grep": "🔎",

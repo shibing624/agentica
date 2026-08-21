@@ -54,7 +54,7 @@ class TestParseValidFrontmatter(_LoaderTestCase):
             "summarizer",
             "---\n"
             "description: Summarizes source files\n"
-            "allowed_tools: [read_file, ls, glob, grep]\n"
+            "allowed_tools: [read_file, glob, grep]\n"
             "tool_call_limit: 10\n"
             "---\n"
             "You are a source summarization expert.\n",
@@ -65,7 +65,7 @@ class TestParseValidFrontmatter(_LoaderTestCase):
         self.assertIn("summarizer", configs)
         cfg = configs["summarizer"]
         self.assertEqual(cfg.description, "Summarizes source files")
-        self.assertEqual(set(cfg.allowed_tools), {"read_file", "ls", "glob", "grep"})
+        self.assertEqual(set(cfg.allowed_tools), {"read_file", "glob", "grep"})
 
         defined = loader.list_defined_agents()
         names = [d["id"] for d in defined]

@@ -730,7 +730,7 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
             Message(role="user", content="old"),
             Message(role="assistant", content="old answer"),
             Message(role="user", content="current question"),
-            Message(role="assistant", tool_calls=[{"id": "t1", "function": {"name": "ls", "arguments": "{}"}}]),
+            Message(role="assistant", tool_calls=[{"id": "t1", "function": {"name": "glob", "arguments": "{}"}}]),
             Message(role="tool", tool_call_id="t1", content="file list"),
         ])
         self.assertEqual([m.role for m in msgs[-3:]], ["user", "assistant", "tool"])
@@ -758,7 +758,7 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
             Message(role="assistant", content="old answer"),
             Message(role="user", content="current question"),
             Message(role="assistant", tool_calls=[
-                {"id": "toolu_1", "function": {"name": "ls", "arguments": "{}"}},
+                {"id": "toolu_1", "function": {"name": "glob", "arguments": "{}"}},
             ]),
             Message(role="user", content=[
                 {"type": "tool_result", "tool_use_id": "toolu_1", "content": "file list"},

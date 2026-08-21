@@ -42,7 +42,7 @@ Built-in Tools:
     - ls: List directory contents
     - read_file: Read file content
     - write_file: Write file content
-    - edit_file: Edit file
+    - apply_patch: Edit file
     - glob: File pattern matching
     - grep: Search file content
     - execute: Execute Python code

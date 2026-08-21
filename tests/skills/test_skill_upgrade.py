@@ -1752,7 +1752,7 @@ class TestOriginalTaskAnchoring(unittest.TestCase):
         async def _go():
             await hooks.on_agent_start(agent)
             await hooks.on_tool_end(
-                agent, tool_name="ls", tool_args={"path": "/missing"},
+                agent, tool_name="glob", tool_args={"pattern": "*", "path": "/missing"},
                 result="FileNotFoundError: /missing", is_error=True, elapsed=0.01,
             )
             await hooks.on_agent_end(agent, output="failed")
@@ -1861,10 +1861,10 @@ class TestSourceTasksPersistence(unittest.TestCase):
         from agentica.experience.compiler import CompiledCard
         compiled_store, _ = self._make_compiled_store()
         card = CompiledCard(
-            title="ls_PermissionError",
+            title="glob_PermissionError",
             content="ok",
             experience_type="tool_error",
-            tool_name="ls",
+            tool_name="glob",
             source_task="",
         )
         path = asyncio.run(compiled_store.write(card))

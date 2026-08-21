@@ -178,11 +178,6 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "write_file":
         file_path = tool_args.get("file_path", "")
         return _extract_filename(file_path)
-    
-    # File editing tools - show filename only
-    if tool_name == "edit_file":
-        file_path = tool_args.get("file_path", "")
-        return _extract_filename(file_path)
 
     if tool_name == "apply_patch":
         patch = str(tool_args.get("patch", ""))
@@ -224,11 +219,7 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
             return url[:57] + "..."
         return url
     
-    # ls/glob/grep - show shortened path/pattern
-    if tool_name == "ls":
-        directory = tool_args.get("directory", ".")
-        return _shorten_path(directory)
-
+    # glob/grep - show shortened path/pattern
     if tool_name == "glob":
         pattern = tool_args.get("pattern", "*")
         path = tool_args.get("path", ".")

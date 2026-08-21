@@ -43,10 +43,10 @@ class PermissionMode(str, Enum):
 
 # Default classification of the builtin ACP tools.
 DEFAULT_READ_ONLY_TOOLS = frozenset({
-    "read_file", "ls", "glob", "grep", "web_search", "fetch_url",
+    "read_file", "glob", "grep", "web_search", "fetch_url",
 })
 DEFAULT_WRITE_TOOLS = frozenset({
-    "write_file", "edit_file", "apply_patch", "execute",
+    "write_file", "apply_patch", "execute",
 })
 
 

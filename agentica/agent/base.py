@@ -762,12 +762,19 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         if not self.tools:
             return
         from agentica.tools.builtin import BuiltinTodoTool, BuiltinMemoryTool
+        from agentica.tools.builtin.file_tool import BuiltinFileTool
         from agentica.tools.builtin_task_tool import BuiltinTaskTool
         from agentica.tools.skill_tool import SkillTool
 
         for tool in self.tools:
             if isinstance(tool, Tool):
                 tool.set_agent_model(self.model)
+            if isinstance(tool, BuiltinFileTool):
+                # The agent's tier is the only authority: a tool built by hand
+                # or by get_builtin_tools() defaults to "allow-all", and an
+                # "auto" agent holding it would sandbox writes while hiding
+                # request_path_access — a dead end with no way to escalate.
+                tool.set_permission_mode(self.tool_config.permission_mode)
             if isinstance(tool, BuiltinTodoTool):
                 tool.set_agent(self)
             elif isinstance(tool, BuiltinTaskTool):
@@ -1193,14 +1200,20 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 
         Mutates ``tool_config.permission_mode`` and the shared
         ``sandbox_config.enabled`` flag in place. Already-constructed tool
-        instances (write_file/edit_file/execute) hold a reference to this
+        instances (write_file/apply_patch/execute) hold a reference to this
         same ``sandbox_config`` object, so they observe the new mode on
-        their very next call. See ``agentica.agent.permissions`` for the
-        exact semantics of "ask" / "auto" / "allow-all".
+        their very next call. File tools also sync ``request_path_access``
+        into or out of the schema (only ``auto`` exposes it). See
+        ``agentica.agent.permissions`` for the exact semantics of
+        "ask" / "auto" / "allow-all".
         """
         validate_permission_mode(mode)
         self.tool_config.permission_mode = mode
         self.sandbox_config.enabled = sandbox_should_be_enabled(mode)
+        from agentica.tools.builtin.file_tool import BuiltinFileTool
+        for tool in self.tools or []:
+            if isinstance(tool, BuiltinFileTool):
+                tool.set_permission_mode(mode)
 
     def rebind_work_dir(self, work_dir: str) -> str:
         """Move this agent's *execution* into another directory, mid-run.

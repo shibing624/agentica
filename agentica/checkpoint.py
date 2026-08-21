@@ -3,10 +3,9 @@
 @author:XuMing(xuming624@qq.com)
 @description: Durable file checkpoint / rollback primitive for coding agents.
 
-Unlike the in-memory per-file ``undo_edit`` on ``BuiltinFileTool`` (single
-process, lost on restart), ``CheckpointManager`` persists pre-edit file content
-to disk under ``~/.agentica/cache/checkpoints/<session_id>/<checkpoint_id>/`` so a run
-can be rolled back across multiple files and even across process restarts.
+``CheckpointManager`` persists pre-edit file content to disk under
+``~/.agentica/cache/checkpoints/<session_id>/<checkpoint_id>/`` so a run can be
+rolled back across multiple files and even across process restarts.
 
 Design (kept deliberately small):
     cm = CheckpointManager(session_id="abc")
@@ -21,8 +20,8 @@ This is an SDK primitive: it never auto-runs. Callers (CLI commands, user code,
 a tool that wraps it) decide when to create/restore. It is intentionally NOT
 wired into ``BuiltinFileTool``'s edit path: per-edit auto-snapshots produced one
 single-file checkpoint dir per edit (no retention cap, and defeating the whole
-multi-file point). In-process undo there is handled by ``undo_edit``; reach for
-``CheckpointManager`` when you want explicit, durable, multi-file rollback.
+multi-file point). Reach for ``CheckpointManager`` when you want explicit,
+durable, multi-file rollback.
 """
 import difflib
 import json

@@ -65,16 +65,16 @@ class TestCLIToolRender(unittest.TestCase):
             fake.width = 80
             manager = StreamDisplayManager(fake, work_dir=root)
             manager._capture_file_before_call(
-                "edit_file",
-                {"file_path": "pkg/sample.py", "old_string": "value = 1\n", "new_string": "value = 2\n"},
+                "write_file",
+                {"file_path": "pkg/sample.py", "content": "value = 2\n"},
                 "call-1",
             )
             target.write_text("value = 2\n", encoding="utf-8")
 
-            manager._display_edit_merged(
-                "edit_file",
-                {"file_path": "pkg/sample.py", "old_string": "value = 1\n", "new_string": "value = 2\n"},
-                "Successfully applied 1 edit",
+            manager._display_write_merged(
+                "write_file",
+                {"file_path": "pkg/sample.py", "content": "value = 2\n"},
+                "Updated file, absolute path: pkg/sample.py",
                 False,
                 " (100ms)",
                 "call-1",
@@ -85,7 +85,7 @@ class TestCLIToolRender(unittest.TestCase):
             syntax = fake.print.call_args_list[-1].args[0]
             diff_text = str(syntax.code)
 
-        self.assertIn("Edited 1 file (+1 -1)", rendered)
+        self.assertIn("updated 1 line", rendered)
         self.assertIn("pkg/sample.py", rendered)
         self.assertIn("diff -- pkg/sample.py", diff_text)
         self.assertEqual(diff_text.count("pkg/sample.py"), 1)
@@ -101,25 +101,23 @@ class TestCLIToolRender(unittest.TestCase):
             target.write_text("first = 1\nsecond = 1\n", encoding="utf-8")
             first = {
                 "file_path": "sample.py",
-                "old_string": "first = 1",
-                "new_string": "first = 2",
+                "content": "first = 2\nsecond = 1\n",
             }
             second = {
                 "file_path": "sample.py",
-                "old_string": "second = 1",
-                "new_string": "second = 2",
+                "content": "first = 2\nsecond = 2\n",
             }
             fake = MagicMock()
             fake.width = 80
             manager = StreamDisplayManager(fake, work_dir=root)
 
-            manager.display_tool("edit_file", first, tool_call_id="edit-1")
-            manager.display_tool("edit_file", second, tool_call_id="edit-2")
+            manager.display_tool("write_file", first, tool_call_id="write-1")
+            manager.display_tool("write_file", second, tool_call_id="write-2")
             target.write_text("first = 2\nsecond = 2\n", encoding="utf-8")
 
             manager.display_tool_result(
-                "edit_file", "Successfully replaced 1 occurrence", elapsed=0.1,
-                tool_args=first, tool_call_id="edit-1",
+                "write_file", "Updated file", elapsed=0.1,
+                tool_args=first, tool_call_id="write-1",
                 tool_display_meta={"files": [{
                     "path": str(target), "action": "update",
                     "before": "first = 1\nsecond = 1\n",
@@ -127,8 +125,8 @@ class TestCLIToolRender(unittest.TestCase):
                 }]},
             )
             manager.display_tool_result(
-                "edit_file", "Successfully replaced 1 occurrence", elapsed=0.1,
-                tool_args=second, tool_call_id="edit-2",
+                "write_file", "Updated file", elapsed=0.1,
+                tool_args=second, tool_call_id="write-2",
                 tool_display_meta={"files": [{
                     "path": str(target), "action": "update",
                     "before": "first = 2\nsecond = 1\n",
@@ -252,21 +250,21 @@ class TestCLIToolRender(unittest.TestCase):
         chunk = RunResponse(
             event=RunEvent.tool_call_completed.value,
             tools=[{
-                "tool_call_id": "edit-1",
-                "tool_name": "edit_file",
-                "content": "Successfully replaced 1 occurrence",
+                "tool_call_id": "write-1",
+                "tool_name": "write_file",
+                "content": "Updated file",
             }],
             tool_call=ToolCallInfo(
-                tool_call_id="edit-1",
-                tool_name="edit_file",
-                content="Successfully replaced 1 occurrence",
+                tool_call_id="write-1",
+                tool_name="write_file",
+                content="Updated file",
                 elapsed=0.1,
                 tool_display_meta=meta,
             ),
         )
 
         payload = _completed_tool_payload(chunk)
-        self.assertEqual(payload["tool_call_id"], "edit-1")
+        self.assertEqual(payload["tool_call_id"], "write-1")
         self.assertEqual(payload["tool_display_meta"], meta)
         self.assertEqual(payload["metrics"]["time"], 0.1)
 
@@ -711,7 +709,7 @@ class TestCLIToolRender(unittest.TestCase):
         """Read-only tools skip the start-time call line (deferred to completion)."""
         from agentica.cli.display import StreamDisplayManager
 
-        for name in ("read_file", "ls", "glob", "grep", "web_search", "fetch_url"):
+        for name in ("read_file", "glob", "grep", "web_search", "fetch_url"):
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
@@ -835,7 +833,7 @@ class TestCLIToolRender(unittest.TestCase):
         """Write-diff tools defer the call line until completion."""
         from agentica.cli.display import StreamDisplayManager
 
-        for name in ("edit_file", "apply_patch"):
+        for name in ("write_file", "apply_patch"):
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
@@ -848,8 +846,8 @@ class TestCLIToolRender(unittest.TestCase):
             fake.print.assert_not_called(), f"{name} call line must be deferred"
 
 
-    def test_display_edit_file_merged_shows_real_file_diff_and_summary(self):
-        """edit_file diffs the real pre/post file and reports changed lines."""
+    def test_display_write_file_merged_shows_real_file_diff_and_summary(self):
+        """write_file diffs the real pre/post file and reports changed lines."""
         import tempfile
         from agentica.cli.display import StreamDisplayManager
 
@@ -859,29 +857,28 @@ class TestCLIToolRender(unittest.TestCase):
                 f.write("DEBUG = False\nKEEP = 1\n")
             args = {
                 "file_path": path,
-                "old_string": "DEBUG = False\n",
-                "new_string": "DEBUG = True\n",
+                "content": "DEBUG = True\nKEEP = 1\n",
             }
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
-            dm.display_tool("edit_file", args, tool_call_id="edit-1")
+            dm.display_tool("write_file", args, tool_call_id="write-1")
             with open(path, "w") as f:
                 f.write("DEBUG = True\nKEEP = 1\n")
             dm.display_tool_result(
-                "edit_file",
-                "Successfully applied 1 edit to config.py",
+                "write_file",
+                "Updated file, absolute path: config.py",
                 is_error=False,
                 elapsed=0.12,
                 tool_args=args,
-                tool_call_id="edit-1",
+                tool_call_id="write-1",
             )
 
         text = "\n".join(str(c) for c in fake.print.call_args_list)
-        self.assertIn("edit_file", text)
+        self.assertIn("write_file", text)
         self.assertIn("config.py", text)
         self.assertNotIn(td, text)
-        self.assertIn("Edited 1 file (+1 -1)", text)
+        self.assertIn("updated 2 lines", text)
         self.assertNotIn("ms)", text)
         syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertEqual(len(syntax_args), 1)
@@ -1330,22 +1327,6 @@ class TestCLIToolRender(unittest.TestCase):
 
         return StreamDisplayManager(console), output
 
-    def test_edit_file_diff_word_wraps_long_lines(self):
-        dm, output = self._stream_console()
-        dm.display_tool_result(
-            "edit_file",
-            "Successfully replaced 1 occurrence(s) in 'CHANGELOG.md'.",
-            is_error=False,
-            elapsed=0.1,
-            tool_args={"file_path": "CHANGELOG.md"},
-            tool_display_meta={"files": [
-                {"path": "CHANGELOG.md", "before": self._LONG_OLD, "after": self._LONG_NEW},
-            ]},
-        )
-        rendered = output.getvalue()
-        self.assertIn("OLD_TAIL_MARK", rendered)
-        self.assertIn("NEW_TAIL_MARK", rendered)
-
     def test_write_file_diff_word_wraps_long_lines(self):
         dm, output = self._stream_console()
         dm.display_tool_result(
@@ -1393,7 +1374,7 @@ class TestCLIToolRender(unittest.TestCase):
 
     # --- Tool errors must render in full ----------------------------------
     #
-    # edit_file/write_file errors are single diagnostic messages whose key
+    # write_file/apply_patch errors are single diagnostic messages whose key
     # facts ("found 2 occurrences", the suggested fix) sit at the START and
     # MIDDLE of the text; an 80-char tail window kept only the boilerplate
     # ending and hid the actual cause.
@@ -1406,21 +1387,6 @@ class TestCLIToolRender(unittest.TestCase):
         "read_file, copy the exact current text into old_string, then retry "
         "the edit."
     )
-
-    def test_edit_file_error_shows_full_message(self):
-        dm, output = self._stream_console()
-        dm.display_tool_result(
-            "edit_file",
-            self._LONG_EDIT_ERROR,
-            is_error=True,
-            elapsed=0.05,
-            tool_args={"file_path": "docs/learn_cc/reasonix_v1.md"},
-        )
-        rendered = output.getvalue()
-        self.assertIn("- error", rendered)
-        self.assertIn("found 2 occurrences", rendered)
-        self.assertIn("replace_all=True", rendered)
-        self.assertNotIn("error: ...", rendered)
 
     def test_write_file_error_shows_full_message(self):
         dm, output = self._stream_console()
@@ -1456,7 +1422,7 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("preflight detail line 13", rendered)
 
     def test_generic_tool_error_shows_full_message(self):
-        # Non-execute tools (cronjob, self_manage, undo_edit, ...) previously
+        # Non-execute tools (cronjob, self_manage, ...) previously
         # got a 4-line tail window on errors; the failure reason sits at the
         # START of the message for these, exactly what was folded away.
         error = "\n".join(

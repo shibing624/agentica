@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Trace analysis invariants — sequential scan, not timestamp slicing."""
 from agentica.memory.session_log import SessionLog
-from agentica.memory.trace import analyze_entries
+from agentica.memory.trace import analyze_entries, last_completed_round
 
 
 def _e(ts, **fields):
@@ -95,7 +95,7 @@ def test_tool_approval_wait_is_subtracted_from_llm_ms():
     entries = [
         _e("2026-01-01T00:00:00.000Z", type="user", content="edit"),
         _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
-        _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="edit_file"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="apply_patch"),
         _e("2026-01-01T00:00:12.000Z", type="event", name="approval_decision", tool_call_id="c1", decision="allow"),
         _e("2026-01-01T00:00:13.000Z", type="event", name="request_end", status="completed"),
         _e("2026-01-01T00:00:14.000Z", type="tool", tool_call_id="c1", content="ok"),
@@ -475,3 +475,29 @@ def test_a_streamed_turn_shows_thinking_and_reply_as_separate_phases(tmp_path):
     (round0,) = analyze_entries(list(log.iter_raw_entries()))["rounds"]
     assert round0["phases"]["thinking"] == 2000
     assert round0["phases"]["text"] == 3000
+
+
+def test_last_completed_round_tps_uses_llm_ms_not_gateway_wall():
+    """Chat used to divide output by chat_stream wall time (~4s → 2.8 tok/s).
+
+    Trace divides by request_begin→end minus approval wait (1.90s → 5.3 tok/s).
+    Footer and View trace must share this round.
+    """
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="hi"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:01.100Z", type="event", name="token_usage",
+           request={"input": 8900, "cache_read": 4400, "cache_write": 0, "output": 10, "total": 13310}),
+        _e("2026-01-01T00:00:02.900Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:02.900Z", type="assistant", content="hi"),
+    ]
+    rd = last_completed_round(entries)
+    assert rd is not None
+    assert rd["durationMs"] == 1900
+    assert rd["llmMs"] == 1900
+    assert rd["tokens"]["output"] == 10
+    tps = rd["tps"]
+    assert abs(tps - (10 / 1.9)) < 1e-9
+    assert f"{tps:.1f}" == "5.3"
+    # The wrong denominator (gateway wall ~3.57s) is what printed 2.8 tok/s.
+    assert f"{10 / 3.57:.1f}" == "2.8"

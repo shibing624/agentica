@@ -122,20 +122,6 @@ class ACPHandlers:
                 },
             ),
             ACPTool(
-                name="edit_file",
-                description="Edit a file by replacing text",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string", "description": "Path to the file"},
-                        "old_string": {"type": "string", "description": "Text to replace"},
-                        "new_string": {"type": "string", "description": "Replacement text"},
-                        "replace_all": {"type": "boolean", "description": "Replace all occurrences"},
-                    },
-                    "required": ["file_path", "old_string", "new_string"],
-                },
-            ),
-            ACPTool(
                 name="apply_patch",
                 description="Apply one context patch across multiple files",
                 inputSchema={
@@ -144,16 +130,6 @@ class ACPHandlers:
                         "patch": {"type": "string", "description": "Complete patch envelope"},
                     },
                     "required": ["patch"],
-                },
-            ),
-            ACPTool(
-                name="ls",
-                description="List directory contents",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "directory": {"type": "string", "description": "Directory path"},
-                    },
                 },
             ),
             ACPTool(
@@ -316,7 +292,7 @@ class ACPHandlers:
         try:
             # File operations - use singleton instance
             if tool_name in (
-                "read_file", "write_file", "edit_file", "apply_patch", "ls", "glob", "grep"
+                "read_file", "write_file", "apply_patch", "glob", "grep"
             ):
                 file_tool = self._get_file_tool()
                 method = getattr(file_tool, tool_name)

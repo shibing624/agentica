@@ -1219,7 +1219,7 @@ def register_custom_subagent(
         ...     name="data-analyst",
         ...     description="Analyzes data and reports facts",
         ...     system_prompt="You are a data analysis expert...",
-        ...     allowed_tools=["read_file", "ls", "glob", "grep"],
+        ...     allowed_tools=["read_file", "glob", "grep"],
         ...     max_turns=50,
         ... )
     """

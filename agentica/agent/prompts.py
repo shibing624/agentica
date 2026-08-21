@@ -28,8 +28,8 @@ from agentica.utils.timer import Timer
 # tool would otherwise be told to prefer `read_file` / `apply_patch` over
 # `execute` — naming eight tools it cannot call.
 _FILE_TOOL_NAMES = frozenset({
-    "read_file", "write_file", "edit_file",
-    "apply_patch", "glob", "grep", "ls",
+    "read_file", "write_file",
+    "apply_patch", "glob", "grep",
 })
 
 

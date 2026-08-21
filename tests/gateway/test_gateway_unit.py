@@ -25,8 +25,9 @@ class TestAgentServiceApprovalMode:
         from agentica.gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
+        assert svc._DEFAULT_APPROVAL_MODE == "auto"
         svc.set_session_approval_mode("s1", "full")
-        assert svc.get_session_approval_mode("s1") == svc._DEFAULT_APPROVAL_MODE
+        assert svc.get_session_approval_mode("s1") == "auto"
 
     def test_valid_modes_are_persisted(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
@@ -822,19 +823,6 @@ class TestChannelManager:
 class TestResponseFormatter:
     """Test response formatting utilities."""
 
-    def test_format_edit_file(self):
-        from agentica.gateway.services.response_formatter import format_tool_call_args
-        result = format_tool_call_args("edit_file", {
-            "file_path": "test.py",
-            "old_string": "line1\nline2\nline3",
-            "new_string": "line1\nnewline\nline3\nline4",
-        })
-        # "line1\nline2\nline3" → 2 newlines + 1 = 3
-        assert result["_diff_del"] == 3
-        # "line1\nnewline\nline3\nline4" → 3 newlines + 1 = 4
-        assert result["_diff_add"] == 4
-        assert result["file_path"] == "test.py"
-
     def test_format_write_file(self):
         from agentica.gateway.services.response_formatter import format_tool_call_args
         result = format_tool_call_args("write_file", {
@@ -866,7 +854,7 @@ class TestResponseFormatter:
         from agentica.gateway.services.response_formatter import format_tool_result
         from agentica.run_response import ToolCallInfo
         name, result_str, is_task = format_tool_result(
-            ToolCallInfo(tool_name="ls", content="")
+            ToolCallInfo(tool_name="glob", content="")
         )
         assert result_str == "(no output)"
 
@@ -901,19 +889,6 @@ class TestResponseFormatter:
         agent.run_response.metrics = {"input_tokens": [100], "output_tokens": [50]}
         result = extract_metrics(agent)
         assert result["input_tokens"] == [100]
-
-    def test_multi_edit_file(self):
-        from agentica.gateway.services.response_formatter import format_tool_call_args
-        result = format_tool_call_args("multi_edit_file", {
-            "file_path": "test.py",
-            "edits": [
-                {"old_string": "a\nb", "new_string": "c"},
-                {"old_string": "d", "new_string": "e\nf\ng"},
-            ],
-        })
-        assert result["_edit_count"] == 2
-        assert result["_diff_del"] == 3  # "a\nb" = 2+1, "d" = 0+1
-        assert result["_diff_add"] == 4  # "c" = 0+1, "e\nf\ng" = 2+1
 
     def test_apply_patch(self):
         from agentica.gateway.services.response_formatter import format_tool_call_args

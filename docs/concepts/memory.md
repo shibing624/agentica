@@ -43,7 +43,7 @@ agent = Agent(
 workspace/
 +-- users/
     +-- {user_id}/   # 多用户隔离（CLI 的 user_id 是 default）
-        +-- AGENTS.md        # 这个 user 的常驻规则（人可改，agent 也可用 edit_file 改）
+        +-- AGENTS.md        # 这个 user 的常驻规则（人可改，agent 也可用 apply_patch 改）
         +-- MEMORY.md        # 记忆索引（仅存条目链接，≤200行/25KB）
         +-- memory/          # 记忆内容文件（每条独立 .md）
             +-- feedback_python_style.md
@@ -125,7 +125,7 @@ User prefers concise, typed Python. Avoid unnecessary comments.
 |---|---|---|
 | 落盘位置 | 用户级：`~/.agentica/workspace/users/{user_id}/AGENTS.md`（CLI 的 user_id 是 `default`，也可通过 symlink `~/.agentica/AGENTS.md` 改同一份文件）；项目级：`<repo 根>/AGENTS.md` | `memory/*.md` + `MEMORY.md` 索引 |
 | 何时进 system prompt | **下个会话起**全量注入（见下）；本会话靠对话历史 | 只在后续提问与它相关时被召回 |
-| 谁来写 | 人手写，或 agent 用 `edit_file` / `write_file` | `save_memory` |
+| 谁来写 | 人手写，或 agent 用 `apply_patch` / `write_file` | `save_memory` |
 | 适合 | "always ..." / "never ..." / "从现在开始 ..." | 用户是谁、某个决定为什么这么定、环境怎么搭的 |
 
 规则这一侧**没有专门的工具**，也不需要固定格式：`AGENTS.md` 就是一个 markdown 文件，人和 agent 用同一种方式改它。写法说明在 bundled `agentica` skill 里（`self_manage` 只管 `config.yaml` / `.env` / 升级，不管常驻规则）。

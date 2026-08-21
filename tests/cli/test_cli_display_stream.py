@@ -378,7 +378,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         self.assertRegex(out, r"\d+\.\ds", "rule must show elapsed seconds")
 
     def test_finalize_rule_counts_deferred_and_write_tools(self):
-        """Regression: ``read_file`` / ``grep`` (deferred) and ``edit_file`` /
+        """Regression: ``read_file`` / ``grep`` (deferred) and
         ``write_file`` (write-diff) used to be EXCLUDED from ``tool_count``
         because ``display_tool`` returned before incrementing. A turn that only
         read/edited files would then show "0 tools", contradicting the visible
@@ -387,7 +387,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         def render(mgr):
             mgr.display_tool("read_file", {"file_path": "a.py"})
             mgr.display_tool("grep", {"pattern": "x"})
-            mgr.display_tool("edit_file", {"file_path": "a.py"})
+            mgr.display_tool("apply_patch", {"patch": "*** Begin Patch\n*** End Patch"})
             mgr.display_tool("write_file", {"file_path": "b.py", "content": "x"})
             mgr.stream_response("done")
             mgr.finalize()

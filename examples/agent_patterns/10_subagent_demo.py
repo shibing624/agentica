@@ -59,7 +59,7 @@ def demo_custom_subagent():
         system_prompt="""You are a read-only data flow explorer.
 Locate schemas, transformations, and consumers. Report facts with path:line references.
 Do not edit files or make correctness verdicts.""",
-        allowed_tools=["read_file", "ls", "glob", "grep"],
+        allowed_tools=["read_file", "glob", "grep"],
         tool_call_limit=10,
     )
     
