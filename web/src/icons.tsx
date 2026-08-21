@@ -24,6 +24,12 @@ export const IconSearch = () => (
 export const IconClose = () => (
   <S strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></S>
 );
+export const IconExpand = () => (
+  <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />
+    <path d="M9.5 3.5L12.5 6.5M12.5 3.5v3h-3" />
+  </S>
+);
 export const IconClock = () => (
   <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="8" cy="9" r="5.5" />

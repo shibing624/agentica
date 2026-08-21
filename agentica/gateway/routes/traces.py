@@ -44,6 +44,9 @@ async def trace_analysis(
         raise HTTPException(status_code=404, detail="Session not found")
     analysis = analyze_entries(log.iter_raw_entries())
     analysis["session_id"] = session_id
+    # jsonl used to stamp the gateway process cwd; prefer the session's project.
+    analysis["meta"]["cwd"] = log._cwd
+    analysis["meta"]["gitBranch"] = log._git_branch
     stat = log.path.stat()
     analysis["file"] = {
         "path": str(log.path),

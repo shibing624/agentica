@@ -294,9 +294,12 @@ class SessionLog:
         if project_work_dir:
             ensure_project_work_dir(self.base_dir, project_work_dir)
         self._last_uuid: Optional[str] = None
-        self._cwd: str = os.getcwd()
+        # Stamp the session's project, not the process cwd. The gateway serves
+        # many sessions from one process whose cwd is the agentica checkout;
+        # using getcwd() made every web trace look like git:main …/Codes/agentica.
+        self._cwd: str = self._stamp_cwd(project_work_dir, self.base_dir)
         self._version: str = self._get_version()
-        self._git_branch: Optional[str] = self._get_git_branch()
+        self._git_branch: Optional[str] = self._get_git_branch(self._cwd)
         # Optional search index for dual-write (FTS5 acceleration).
         # If set, each append() also writes to the search index.
         self._search_index = search_index
@@ -339,17 +342,34 @@ class SessionLog:
             return "unknown"
 
     @staticmethod
-    def _get_git_branch() -> Optional[str]:
+    def _stamp_cwd(work_dir: Optional[str], base_dir: Path) -> str:
+        raw = work_dir
+        if not raw:
+            recorded = read_project_file(base_dir).get("work_dir")
+            if isinstance(recorded, str) and recorded:
+                raw = recorded
+        if raw:
+            return os.path.abspath(os.path.expanduser(raw))
+        return os.getcwd()
+
+    def set_cwd(self, work_dir: str) -> None:
+        """Point later stamps at a new project directory (worktree rebind)."""
+        self._cwd = os.path.abspath(os.path.expanduser(work_dir))
+        self._git_branch = self._get_git_branch(self._cwd)
+
+    @staticmethod
+    def _get_git_branch(cwd: Optional[str] = None) -> Optional[str]:
         import subprocess
         try:
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
+                cwd=cwd,
                 capture_output=True, text=True, timeout=3,
             )
-            branch = result.stdout.strip()
-            return branch if branch else None
-        except Exception:
+        except (OSError, UnicodeError, subprocess.SubprocessError):
             return None
+        branch = result.stdout.strip()
+        return branch if result.returncode == 0 and branch else None
 
     # ------------------------------------------------------------------
     # Append operations (write-only, atomic per line)
@@ -1580,6 +1600,7 @@ class SessionLog:
         new_log = SessionLog(
             new_session_id,
             base_dir=str(self.base_dir),
+            work_dir=self._cwd,
             search_index=self._search_index if self._search_index_healthy else None,
         )
 

@@ -128,7 +128,7 @@ User prefers concise, typed Python. Avoid unnecessary comments.
 | 谁来写 | 人手写，或 agent 用 `apply_patch` / `write_file` | `save_memory` |
 | 适合 | "always ..." / "never ..." / "从现在开始 ..." | 用户是谁、某个决定为什么这么定、环境怎么搭的 |
 
-规则这一侧**没有专门的工具**，也不需要固定格式：`AGENTS.md` 就是一个 markdown 文件，人和 agent 用同一种方式改它。写法说明在 bundled `agentica` skill 里（`self_manage` 只管 `config.yaml` / `.env` / 升级，不管常驻规则）。
+规则这一侧**没有专门的工具**，也不需要固定格式：`AGENTS.md` 就是一个 markdown 文件，人和 agent 用同一种方式改它。Web 设置 › 记忆编辑的就是这份用户级文件。写法说明在 bundled `agentica` skill 里（`self_manage` 只管 `config.yaml` / `.env` / 升级，不管常驻规则）。
 
 外部 workflow（如 `learn-from-experience`）要把确认偏好写成常驻规则时，直接往 `~/.agentica/workspace/users/{user_id}/AGENTS.md` 追加普通行即可；默认 CLI 用户也可以写 `~/.agentica/AGENTS.md`，它是指向同一份文件的 symlink。经验卡片若进 prompt，是直接从 EXPERIENCE 相关性召回注入（`## Learned Experiences`），**只保留用户纠正类**（`correction`）；`tool_error` / `success_pattern` 不进 system prompt。事实记忆同理，走 `get_relevant_memories`，也不写进 AGENTS.md。
 

@@ -546,6 +546,8 @@ class TestSettings:
         assert s.port == 8881
         assert s.debug is False
         assert s.parent_pid == 0
+        assert s.wechat_token_file.endswith("wxbot_token.json")
+        assert s.wechat_allowed_users == []
 
     def test_peer_bridge_on_by_default_and_env_opts_out(self):
         """PEER_BRIDGE defaults to on; falsey values disable it."""
@@ -878,6 +880,49 @@ class TestChannelManager:
         mgr.register(ch)
         assert mgr.get_channel(ChannelType.FEISHU) is ch
         assert mgr.get_channel(ChannelType.TELEGRAM) is None
+
+
+class TestChannelCatalog:
+    """Personal Assistant page payload: every entry, live status."""
+
+    def test_web_always_on_and_wechat_listed(self):
+        from agentica.gateway.channels.catalog import CATALOG, channel_overview
+        data = channel_overview(
+            None, host="127.0.0.1", port=8881,
+            web_url="http://127.0.0.1:8881/chat",
+        )
+        assert data["web_url"] == "http://127.0.0.1:8881/chat"
+        assert data["listen"]["loopback"] is True
+        ids = [c["id"] for c in data["catalog"]]
+        assert ids[0] == "web"
+        assert "wechat" in ids and "qq" in ids
+        assert len(ids) == len(CATALOG)
+        web = data["catalog"][0]
+        assert web["connected"] is True and web["configured"] is True
+        wechat = next(c for c in data["catalog"] if c["id"] == "wechat")
+        assert wechat["recommended"] is True
+        assert wechat["configured"] is False
+        assert wechat["env"][0]["name"] == "WECHAT_TOKEN_FILE"
+
+    def test_registered_im_is_configured(self):
+        from agentica.gateway.channels.base import ChannelType
+        from agentica.gateway.channels.catalog import channel_overview
+        from agentica.gateway.services.channel_manager import ChannelManager
+        mgr = ChannelManager()
+        ch = MagicMock()
+        ch.channel_type = ChannelType.WECHAT
+        ch.is_connected = True
+        ch.set_handler = MagicMock()
+        mgr.register(ch)
+        data = channel_overview(
+            mgr, host="0.0.0.0", port=8881,
+            web_url="http://192.168.1.8:8881/chat",
+        )
+        wechat = next(c for c in data["catalog"] if c["id"] == "wechat")
+        assert wechat["configured"] is True
+        assert wechat["connected"] is True
+        assert data["listen"]["loopback"] is False
+        assert data["channels"] == ["wechat"]
 
 
 # ============== TestResponseFormatter ==============

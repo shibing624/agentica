@@ -57,8 +57,7 @@ pip install -U agentica
 窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
 
 > [!IMPORTANT]
-> 装桌面版应用之前先装服务端：
-> `pip install -U "agentica[gateway]"`。当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可：
+> 当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可。机器上还没有 `agentica-gateway` 时，桌面版会在**第一次打开**时用 uv 安装一份托管 runtime（Python 3.12 + `agentica[gateway]`），放在 Application Support，不进 `~/.agentica`。已经 `pip install` 过的继续用你原来的。
 
 <details>
 <summary><b>🍎 macOS 提示「Agentica 已损坏，无法打开」</b></summary>

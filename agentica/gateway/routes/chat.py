@@ -444,17 +444,27 @@ async def compact_session(
     return result
 
 
-# ============== Memory ==============
+# ============== Memory (user-level AGENTS.md) ==============
 
-@router.post("/api/memory")
-async def save_memory(
+@router.get("/api/memory")
+async def get_memory(
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """This account's ``users/<id>/AGENTS.md`` — standing rules in the system prompt."""
+    return await svc.read_user_agents_md(_account(request))
+
+
+@router.put("/api/memory")
+async def put_memory(
     body: MemoryRequest,
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    account = _account(request)
-    await svc.save_memory(body.content, user_id=account, long_term=body.long_term)
-    return {"status": "saved", "user_id": account}
+    try:
+        return await svc.write_user_agents_md(_account(request), body.content)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ============== File upload ==============

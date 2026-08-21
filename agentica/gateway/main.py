@@ -364,9 +364,12 @@ async def web_favicon(request: Request):
 @app.get("/traces/{full_path:path}", response_class=HTMLResponse)
 @app.get("/users", response_class=HTMLResponse)
 @app.get("/users/{full_path:path}", response_class=HTMLResponse)
+@app.get("/assistant", response_class=HTMLResponse)
+@app.get("/assistant/{full_path:path}", response_class=HTMLResponse)
 @app.get("/login", response_class=HTMLResponse)
 async def web_spa(full_path: str = ""):
-    """Serve the SPA shell. Client router owns /chat, /traces, /users and /login.
+    """Serve the SPA shell. Client router owns /chat, /traces, /users,
+    /assistant and /login.
 
     ``/login`` is outside the token gate (see ``auth._OPEN_PATHS``) — it is the
     one page a signed-out browser must be able to load.
@@ -500,18 +503,17 @@ async def _setup_channels() -> None:
         except Exception as e:
             logger.error(f"Failed to create DingTalk channel: {e}")
 
-    # Personal WeChat: only enabled when an explicit token file or
-    # allowlist is configured (avoids triggering interactive QR login on
-    # every gateway startup by accident).
-    if settings.wechat_token_file or settings.wechat_allowed_users:
-        try:
-            wechat = WeChatChannel(
-                token_file=settings.wechat_token_file,
-                allowed_users=settings.wechat_allowed_users,
-            )
-            deps.channel_manager.register(wechat)
-        except Exception as e:
-            logger.error(f"Failed to create WeChat channel: {e}")
+    # Personal WeChat: always registered. A cached token reconnects
+    # silently; QR login is started from the Personal Assistant page, not
+    # at process start (that used to pop a scan window on every boot).
+    try:
+        wechat = WeChatChannel(
+            token_file=settings.wechat_token_file,
+            allowed_users=settings.wechat_allowed_users,
+        )
+        deps.channel_manager.register(wechat)
+    except Exception as e:
+        logger.error(f"Failed to create WeChat channel: {e}")
 
     # Slack: enabled when both bot token and app-level (Socket Mode) token
     # are provided.
@@ -544,6 +546,24 @@ _channel_queue_lock = asyncio.Lock()
 # Cap pending messages per session so a spamming user can't grow the queue
 # without bound; messages beyond this are dropped with a warning.
 _MAX_CHANNEL_QUEUE = 20
+
+
+def _home_account() -> str:
+    """The one person this personal-assistant gateway belongs to.
+
+    Web, desktop and IM share this partition (sessions, memory, AGENTS.md).
+    Whoever scanned the WeChat QR while signed in is that person; until then
+    it is ``settings.default_user_id``.
+    """
+    from .channels.base import ChannelType
+    from .channels.wechat import WeChatChannel
+
+    cm = deps.channel_manager
+    if cm is not None:
+        ch = cm.get_channel(ChannelType.WECHAT)
+        if isinstance(ch, WeChatChannel) and ch.gateway_user_id:
+            return ch.gateway_user_id
+    return settings.default_user_id
 
 
 async def _handle_channel_message(message) -> None:
@@ -617,7 +637,7 @@ async def _channel_queue_worker(session_id: str, queue: asyncio.Queue) -> None:
 
 async def _process_channel_message(message, session_id: str) -> None:
     """Route a single channel message through the agent and reply."""
-    user_id = message.sender_id or settings.default_user_id
+    user_id = _home_account()
 
     try:
         # Materialise media references (image/voice/video) the channel put
@@ -654,6 +674,7 @@ async def _process_channel_message(message, session_id: str) -> None:
             message=text,
             session_id=session_id,
             user_id=user_id,
+            owner=user_id,
             media=media,
         )
 

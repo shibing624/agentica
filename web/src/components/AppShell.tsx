@@ -10,6 +10,7 @@ import { loadSessions, newChat } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
+  IconChat, IconDatabase,
 } from "../icons";
 import { setState, useAppState, type Session } from "../store";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
@@ -36,7 +37,13 @@ import { SessionTree } from "./SessionTree";
 export function AppLayout() {
   const { pathname } = useLocation();
   const S = useStrings();
-  const active = pathname.startsWith("/traces") ? "traces" : pathname.startsWith("/users") ? "users" : "chat";
+  const active = pathname.startsWith("/traces")
+    ? "traces"
+    : pathname.startsWith("/users")
+      ? "users"
+      : pathname.startsWith("/assistant")
+        ? "assistant"
+        : "chat";
   return (
     <AppShell
       active={active}
@@ -50,7 +57,7 @@ export function AppLayout() {
 export function AppShell({
   active, list, children,
 }: {
-  active: "chat" | "traces" | "users";
+  active: "chat" | "traces" | "users" | "assistant";
   list?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -121,6 +128,8 @@ export function AppShell({
               )}
             </div>
             {([["settings", S.nav.generalSettings, <IconGear key="g" />, "settings"],
+               ["assistant", S.nav.assistant, <IconChat key="asst" />, "assistant"],
+               ["memory", S.nav.memory, <IconDatabase key="m" />, "memory"],
                ["profiles", S.nav.profile, <IconProfiles key="p" />, "profiles"],
                ["users", S.nav.users, <IconUser key="u" />, "users"],
                ["cron", S.nav.cron, <IconClock key="c" />, "cron"],

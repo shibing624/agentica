@@ -107,6 +107,7 @@ def main():
         "reasoning": resolved.get("reasoning"),
         "top_p": args.top_p if args.top_p is not None else resolved.get("top_p"),
         "context_window": args.context_window if args.context_window is not None else resolved.get("context_window"),
+        "compact_token_limit": args.compact_token_limit if args.compact_token_limit is not None else resolved.get("compact_token_limit"),
         # Raw passthrough dicts (profile-only, no CLI flag — see cli/setup.py's
         # _RAW_PASSTHROUGH_KEYS) for endpoints whose tuning knobs don't map to
         # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
@@ -167,6 +168,7 @@ def main():
                 args.reasoning_effort,
                 args.top_p,
                 args.context_window,
+                args.compact_token_limit,
                 args.enable_cache_control,
                 args.cache_control_messages,
                 args.cache_control_session_header,

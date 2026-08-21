@@ -358,6 +358,15 @@ def parse_args():
         "(not sent to the API)",
     )
     parser.add_argument(
+        "--compact-token-limit",
+        type=int,
+        dest="compact_token_limit",
+        help="Working token cap for auto-compression. Layer 2 fires at "
+        "min(this, 95%% of context_window). Does not change the model's "
+        "context_window. Profile compact_token_limit / settings.compact_token_limit "
+        "also apply.",
+    )
+    parser.add_argument(
         "--reasoning_effort",
         type=str,
         choices=["low", "medium", "high", "max"],
@@ -849,6 +858,16 @@ def _resolve_compression_flags(agent_config: dict) -> tuple[bool, bool]:
     return bool(evict), bool(auto)
 
 
+def _resolve_compact_token_limit(agent_config: dict) -> Optional[int]:
+    """CLI flag / profile wins; else config.yaml settings; else unset."""
+    from agentica.compression.manager import parse_compact_token_limit
+
+    cap = parse_compact_token_limit(agent_config.get("compact_token_limit"))
+    if cap is not None:
+        return cap
+    return parse_compact_token_limit(get_setting("compact_token_limit", None))
+
+
 def create_agent(
     agent_config: dict,
     extra_tools: Optional[List] = None,
@@ -889,6 +908,7 @@ def create_agent(
         configured_permission_mode = agent_config.get("permissions")
         permission_mode = configured_permission_mode if isinstance(configured_permission_mode, str) else "allow-all"
     enable_evict, enable_auto_compact = _resolve_compression_flags(agent_config)
+    compact_token_limit = _resolve_compact_token_limit(agent_config)
     load_system_skills()
     model = get_model(
         model_provider=agent_config["model_provider"],
@@ -1064,6 +1084,7 @@ def create_agent(
             permission_mode=permission_mode,
             enable_evict=enable_evict,
             enable_auto_compact=enable_auto_compact,
+            compact_token_limit=compact_token_limit,
         ),
         # Tell the model when another live session already has the file it just
         # wrote uncommitted, instead of letting both find out at merge time.

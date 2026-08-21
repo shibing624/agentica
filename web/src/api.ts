@@ -33,9 +33,11 @@ function putJson<T = any>(url: string, body: unknown) {
 }
 
 export const fetchStatus = () => request("/api/status");
+export const fetchChannels = () => request("/api/channels");
 export const fetchPrefs = () => request("/api/prefs");
 export const savePrefsApi = (body: {
   theme?: string; lang?: string; approval_mode?: string; last_session_id?: string | null;
+  auto_extract_memory?: boolean;
 }) => putJson("/api/prefs", body);
 export const fetchProfiles = () => request("/api/profiles");
 export const fetchProviders = () => request("/api/providers");
@@ -44,9 +46,14 @@ export const switchProfileApi = (name: string) => postJson("/api/profile/switch"
 export const fetchDirHistory = () => request("/api/config/dir_history");
 export const deleteDirHistoryApi = (path?: string) =>
   request(`/api/config/dir_history${path ? "?path=" + encodeURIComponent(path) : ""}`, { method: "DELETE" });
-export const fetchConfigFile = () => request<{ path: string; content: string }>("/api/config/file");
 export const saveBaseDirApi = (base_dir: string) => postJson("/api/config/base_dir", { base_dir });
 export const openPathApi = (path: string, app: string) => postJson("/api/open", { path, app });
+export const openUrlApi = (url: string) => postJson("/api/open", { url, app: "finder" });
+export const startWechatQrApi = () => postJson<{
+  status: string; qrcode?: string; png?: string; expires_in?: number; detail?: string;
+}>("/api/channels/wechat/qr", {});
+export const pollWechatQrApi = (id: string) =>
+  request<{ status: string }>(`/api/channels/wechat/qr?id=${encodeURIComponent(id)}`);
 export const fetchFsBrowse = (path: string) => request(`/api/fs/browse${path ? "?path=" + encodeURIComponent(path) : ""}`);
 export const fetchSessions = () => request("/api/sessions");
 export const deleteSessionApi = (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" });
@@ -157,3 +164,14 @@ export const steerChatApi = (session_id: string, message: string) =>
 
 export const takeSteerApi = (session_id: string) =>
   postJson<{ messages: string[] }>("/api/chat/steer/take", { session_id, message: "" });
+
+export type MemoryDoc = {
+  content: string;
+  path: string;
+  empty_template: boolean;
+  auto_extract: boolean;
+  user_id: string;
+};
+
+export const fetchMemory = () => request<MemoryDoc>("/api/memory");
+export const saveMemoryApi = (content: string) => putJson<MemoryDoc>("/api/memory", { content });

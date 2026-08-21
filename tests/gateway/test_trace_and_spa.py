@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """Gateway Trace routes and SPA hosting."""
+import json
+
 import pytest
 
 pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
@@ -73,9 +75,47 @@ def test_trace_analysis_and_events(client_and_svc):
     assert text["detail"] == "hi"
 
 
+def test_trace_header_uses_session_work_dir_not_stamped_process_cwd(tmp_path, monkeypatch):
+    """A session in /Temp with no git must not show git:main …/Codes/agentica."""
+    from agentica.gateway.main import app
+    from agentica.gateway import deps
+
+    gateway = tmp_path / "Codes" / "agentica"
+    gateway.mkdir(parents=True)
+    import subprocess
+    subprocess.run(["git", "init", "-b", "main"], cwd=gateway, check=True, capture_output=True)
+    work = tmp_path / "Temp"
+    work.mkdir()
+    monkeypatch.chdir(gateway)
+
+    stale = SessionLog(session_id="sess-temp", base_dir=str(tmp_path / "sessions"))
+    stale.append("user", "hello")
+    stamped = json.loads(stale.path.read_text(encoding="utf-8").splitlines()[0])
+    assert stamped["cwd"] == str(gateway)
+    assert stamped["git_branch"] == "main"
+
+    live = SessionLog(
+        session_id="sess-temp", base_dir=str(tmp_path / "sessions"), work_dir=str(work),
+    )
+    svc = MagicMock()
+    svc._ensure_initialized = AsyncMock()
+    svc.session_log_for = MagicMock(side_effect=lambda sid, owner=None: live)
+    svc.list_sessions = MagicMock(return_value=[])
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        original = deps.agent_service
+        deps.agent_service = svc
+        try:
+            analysis = client.get("/api/sessions/sess-temp/trace/analysis").json()
+        finally:
+            deps.agent_service = original
+    assert analysis["meta"]["cwd"] == str(work.resolve())
+    assert analysis["meta"]["gitBranch"] is None
+
+
 def test_chat_and_traces_serve_html(client_and_svc):
     client, _ = client_and_svc
-    for path in ("/chat", "/traces", "/users"):
+    for path in ("/chat", "/traces", "/users", "/assistant"):
         resp = client.get(path)
         assert resp.status_code in (200, 503)
         assert "text/html" in resp.headers["content-type"]

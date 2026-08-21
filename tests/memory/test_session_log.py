@@ -3,6 +3,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -438,6 +439,47 @@ class TestJSONLFormat:
             assert "cwd" in e
             assert "version" in e
             assert "git_branch" in e
+
+    def test_stamps_work_dir_not_process_cwd(self, tmp_dir, tmp_path, monkeypatch):
+        """Web sessions must not inherit the gateway process's git checkout."""
+        gateway = tmp_path / "gateway-repo"
+        gateway.mkdir()
+        subprocess.run(
+            ["git", "init", "-b", "main"], cwd=gateway, check=True, capture_output=True,
+        )
+        work = tmp_path / "Temp"
+        work.mkdir()
+        monkeypatch.chdir(gateway)
+        log = SessionLog("s-wd", base_dir=tmp_dir, work_dir=str(work))
+        log.append("user", "hi")
+        entry = json.loads(log.path.read_text(encoding="utf-8").splitlines()[0])
+        assert entry["cwd"] == str(work.resolve())
+        assert entry["git_branch"] is None
+
+    def test_git_branch_is_read_from_the_work_dir(self, tmp_dir, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", "-b", "feature"], cwd=repo, check=True, capture_output=True,
+        )
+        log = SessionLog("s-git", base_dir=tmp_dir, work_dir=str(repo))
+        log.append("user", "hi")
+        entry = json.loads(log.path.read_text(encoding="utf-8").splitlines()[0])
+        assert entry["cwd"] == str(repo.resolve())
+        assert entry["git_branch"] == "feature"
+
+    def test_set_cwd_updates_later_stamps(self, tmp_dir, tmp_path):
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        log = SessionLog("s-move", base_dir=tmp_dir, work_dir=str(a))
+        log.append("user", "one")
+        log.set_cwd(str(b))
+        log.append("user", "two")
+        lines = [json.loads(x) for x in log.path.read_text(encoding="utf-8").splitlines()]
+        assert lines[0]["cwd"] == str(a.resolve())
+        assert lines[1]["cwd"] == str(b.resolve())
 
     def test_unicode_content(self, tmp_dir):
         log = SessionLog("unicode", base_dir=tmp_dir)

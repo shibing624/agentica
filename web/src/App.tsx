@@ -5,6 +5,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TracesPage } from "./pages/TracesPage";
 import { UsersPage } from "./pages/UsersPage";
+import { AssistantPage } from "./pages/AssistantPage";
 import { AppLayout } from "./components/AppShell";
 import { ConfirmDialog, Toast } from "./components/Feedback";
 import { applyLang } from "./i18n";
@@ -41,6 +42,7 @@ export function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/traces" element={<TracesPage />} />
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
         </Route>
         <Route path="/login" element={<LoginPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />

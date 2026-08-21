@@ -57,8 +57,8 @@ class ChatResponse(BaseModel):
 
 
 class MemoryRequest(BaseModel):
+    """Replace this account's user-level AGENTS.md."""
     content: str
-    long_term: bool = False
 
 
 class SendRequest(BaseModel):
@@ -164,5 +164,6 @@ class BaseDirRequest(BaseModel):
 
 
 class OpenRequest(BaseModel):
-    path: str
+    path: str = ""
+    url: str = ""
     app: str = "finder"  # "finder" or "terminal"

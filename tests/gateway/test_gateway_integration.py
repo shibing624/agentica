@@ -58,7 +58,20 @@ def mock_app():
     mock_svc._invalidate_cache = AsyncMock()
     mock_svc.reload_profile = AsyncMock()
     mock_svc.has_active_runs = MagicMock(return_value=False)
-    mock_svc.save_memory = AsyncMock()
+    mock_svc.read_user_agents_md = AsyncMock(return_value={
+        "content": "# User Instructions\n",
+        "path": "/tmp/AGENTS.md",
+        "empty_template": True,
+        "auto_extract": True,
+        "user_id": "default",
+    })
+    mock_svc.write_user_agents_md = AsyncMock(return_value={
+        "content": "be brief\n",
+        "path": "/tmp/AGENTS.md",
+        "empty_template": False,
+        "auto_extract": True,
+        "user_id": "default",
+    })
     mock_svc._cache = MagicMock()
     mock_svc._cache.keys = MagicMock(return_value=[])
     mock_svc._workspace = None
@@ -329,6 +342,18 @@ class TestConfigEndpoints:
         assert "supports_images" in data
         assert "media_model" in data
 
+    def test_channels_catalog(self, mock_app):
+        client, _ = mock_app
+        resp = client.get("/api/channels")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["web_url"].endswith("/chat")
+        assert "guide_url" in data
+        ids = [c["id"] for c in data["catalog"]]
+        assert ids[0] == "web"
+        assert "wechat" in ids and "qq" in ids
+        assert "channels" in data and "status" in data
+
     def test_browse_missing_dir_is_400(self, mock_app):
         client, _ = mock_app
         resp = client.get("/api/fs/browse", params={"path": "/no/such/agentica-dir"})
@@ -460,6 +485,73 @@ class TestWebPrefs:
         }
         assert client.get("/api/prefs").json() == body
         assert (tmp_path / "gateway" / "prefs" / "default.json").is_file()
+
+    def test_auto_extract_memory_pref_roundtrip(self, mock_app, tmp_path, monkeypatch):
+        client, mock_svc = mock_app
+        import agentica.gateway.routes.settings as settings_routes
+        monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+        saved = client.put("/api/prefs", json={"auto_extract_memory": False})
+        assert saved.status_code == 200
+        assert saved.json()["auto_extract_memory"] is False
+        mock_svc._invalidate_cache.assert_awaited()
+        assert client.get("/api/prefs").json()["auto_extract_memory"] is False
+
+
+class TestMemoryEndpoints:
+    def test_get_memory(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.get("/api/memory")
+        assert resp.status_code == 200
+        assert resp.json()["path"] == "/tmp/AGENTS.md"
+        mock_svc.read_user_agents_md.assert_awaited_once()
+
+    def test_put_memory(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.put("/api/memory", json={"content": "be brief\n"})
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "be brief\n"
+        mock_svc.write_user_agents_md.assert_awaited_once()
+
+
+class TestOpenUrlAndWechatQr:
+    def test_open_url(self, mock_app, monkeypatch):
+        client, _ = mock_app
+        import agentica.gateway.routes.settings as settings_routes
+        called = []
+        monkeypatch.setattr(
+            settings_routes.subprocess,
+            "Popen",
+            lambda args, **kw: called.append(args) or MagicMock(),
+        )
+        resp = client.post("/api/open", json={"url": "http://127.0.0.1:8881/chat"})
+        assert resp.status_code == 200
+        assert called
+        assert "http://127.0.0.1:8881/chat" in called[0]
+
+    def test_open_url_rejects_javascript(self, mock_app):
+        client, _ = mock_app
+        resp = client.post("/api/open", json={"url": "javascript:alert(1)"})
+        assert resp.status_code == 400
+
+    def test_wechat_qr_start_and_poll(self, mock_app):
+        client, _ = mock_app
+        from agentica.gateway import deps
+        from agentica.gateway.channels.base import ChannelType
+
+        ch = deps.channel_manager.get_channel(ChannelType.WECHAT)
+        assert ch is not None
+        ch.start_web_qr = AsyncMock(return_value={
+            "status": "pending", "qrcode": "qid", "png": "aaa", "expires_in": 120,
+        })
+        ch.poll_web_qr = AsyncMock(return_value={"status": "wait"})
+        started = client.post("/api/channels/wechat/qr")
+        assert started.status_code == 200
+        assert started.json()["png"] == "aaa"
+        polled = client.get("/api/channels/wechat/qr", params={"id": "qid"})
+        assert polled.status_code == 200
+        assert polled.json()["status"] == "wait"
+        ch.start_web_qr.assert_awaited_once()
+        ch.poll_web_qr.assert_awaited_once()
 
 
 class TestTempDirAndCompactEndpoints:

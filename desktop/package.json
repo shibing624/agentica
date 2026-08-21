@@ -29,6 +29,7 @@
     "files": [
       "main.js",
       "gateway.js",
+      "runtime.js",
       "port-memory.js",
       "util.js",
       "package.json",

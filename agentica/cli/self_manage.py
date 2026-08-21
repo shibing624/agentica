@@ -145,11 +145,12 @@ def read_config_summary(reveal_secrets: bool = False) -> Dict[str, Any]:
 _EDITABLE_PROFILE_FIELDS = {
     "model_provider", "model_name", "base_url", "api_key",
     "wire_api", "max_tokens", "temperature", "reasoning", "reasoning_effort", "top_p", "context_window",
+    "compact_token_limit",
     "extra_body", "extra_headers",
 }
 
 # Values that are numeric on the model side; coerced from string input.
-_NUMERIC_FIELDS = {"max_tokens", "context_window"}
+_NUMERIC_FIELDS = {"max_tokens", "context_window", "compact_token_limit"}
 _FLOAT_FIELDS = {"temperature", "top_p"}
 # Raw passthrough dicts for endpoints whose tuning knobs don't map to a
 # standard OpenAI param (e.g. Hunyuan's taiji gateway wants reasoning_effort

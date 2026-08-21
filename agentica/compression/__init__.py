@@ -14,7 +14,13 @@ from agentica.compression.evict import (
     EVICT_THRESHOLD_RATIO,
     EVICT_TARGET_RATIO,
 )
-from agentica.compression.manager import CompressionManager
+from agentica.compression.manager import (
+    CompressionManager,
+    parse_compact_token_limit,
+    working_context_window,
+    auto_compact_threshold,
+    AUTO_COMPACT_THRESHOLD_RATIO,
+)
 from agentica.compression.tool_result_storage import (
     maybe_persist_result,
     enforce_tool_batch_budget,
@@ -30,6 +36,10 @@ from agentica.compression.tool_result_classification import (
 
 __all__ = [
     "CompressionManager",
+    "parse_compact_token_limit",
+    "working_context_window",
+    "auto_compact_threshold",
+    "AUTO_COMPACT_THRESHOLD_RATIO",
     "evict_context",
     "evict_tool_results",
     "shrink_tool_call_arguments",

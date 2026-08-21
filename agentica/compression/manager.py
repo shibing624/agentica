@@ -30,6 +30,49 @@ _ANTHROPIC_STREAMING_REQUIRED = "Streaming is required for operations that may t
 AUTO_COMPACT_THRESHOLD_RATIO = 0.95
 
 
+def parse_compact_token_limit(raw: Any) -> Optional[int]:
+    """Positive token cap, or None when unset / non-positive / unparseable."""
+    if raw is None or raw == "":
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def working_context_window(
+    context_window: int,
+    compact_token_limit: Optional[int] = None,
+) -> int:
+    """Window Layer 1 treats as full. The provider window is the hard cap."""
+    if context_window <= 0:
+        return 0
+    cap = parse_compact_token_limit(compact_token_limit)
+    if cap is None:
+        return context_window
+    return min(cap, context_window)
+
+
+def auto_compact_threshold(
+    context_window: int,
+    compact_token_limit: Optional[int] = None,
+) -> int:
+    """Layer 2 trigger: min(compact_token_limit or ∞, int(window × 0.95)).
+
+    A user cap is an absolute working budget (Codex-style 300k on a 1M
+    model), not 95% of that budget. Unset → today's 95% of the window.
+    A cap above the window is ignored; the ratio still leaves headroom.
+    """
+    if context_window <= 0:
+        return 0
+    ratio = int(context_window * AUTO_COMPACT_THRESHOLD_RATIO)
+    cap = parse_compact_token_limit(compact_token_limit)
+    if cap is None:
+        return ratio
+    return min(cap, ratio)
+
+
 def _covered_prefix_hash(msgs: List["Message"]) -> str:
     """Stable hash over the messages a summary replaces (role + content).
 
@@ -56,8 +99,11 @@ class CompressionManager:
     Args:
         model: Model used for summarisation. Optional — callers normally pass
             the active model to :meth:`auto_compact`, which takes precedence.
-        compress_token_limit: Token threshold. If None, auto-resolved from
-            ``model.context_window * 0.8`` at runtime.
+        compress_token_limit: Native-compact threshold. If None, auto-resolved
+            from ``model.context_window * 0.8`` at runtime.
+        compact_token_limit: Optional user working cap (absolute tokens).
+            Does not rewrite ``model.context_window``. Unset leaves Layer 2 at
+            95% of the window. Never auto-filled.
         compress_target_token_limit: Target after compaction. If None,
             auto-resolved from ``model.context_window * 0.5``.
 
@@ -72,6 +118,7 @@ class CompressionManager:
     """
     model: Optional[Any] = None
     compress_token_limit: Optional[int] = None
+    compact_token_limit: Optional[int] = None
     compress_target_token_limit: Optional[int] = None
 
     stats: Dict[str, Any] = field(default_factory=dict)
@@ -121,6 +168,9 @@ class CompressionManager:
         threshold = provider_limit
         if self.compress_token_limit is not None:
             threshold = min(threshold, self.compress_token_limit)
+        cap = parse_compact_token_limit(self.compact_token_limit)
+        if cap is not None:
+            threshold = min(threshold, cap)
         tokens = model.estimate_native_compaction_tokens(messages, tools)
         if tokens < threshold:
             return False
@@ -140,7 +190,10 @@ class CompressionManager:
         model: Optional[Any] = None,
         context_tokens: Optional[int] = None,
     ) -> bool:
-        """Return True once token count reaches AUTO_COMPACT_THRESHOLD_RATIO of the window.
+        """Return True once token count reaches the Layer 2 threshold.
+
+        Default: ``AUTO_COMPACT_THRESHOLD_RATIO`` of ``model.context_window``.
+        With ``compact_token_limit`` set: ``min(that, int(window × 0.95))``.
 
         Public because the decision has a side effect outside this class: the
         runner must fire ``on_pre_compact`` (which flushes memory buffers
@@ -152,14 +205,15 @@ class CompressionManager:
         context_window = model.context_window if model is not None else None
         if context_window is None:
             return False
-        threshold = int(context_window * AUTO_COMPACT_THRESHOLD_RATIO)
+        threshold = auto_compact_threshold(context_window, self.compact_token_limit)
         model_id = model.id if model else 'gpt-4o'
         tokens = context_tokens if context_tokens is not None else count_tokens(messages, None, model_id, None)
         over = tokens >= threshold
         if over:
             logger.debug(
                 f"Auto-compact threshold hit: {tokens:,} tokens "
-                f">= {threshold:,} (window={context_window:,})"
+                f">= {threshold:,} (window={context_window:,}"
+                f"{f', cap={self.compact_token_limit:,}' if self.compact_token_limit else ''})"
             )
         return over
 

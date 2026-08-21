@@ -47,7 +47,7 @@ Actions:
                                    Requires key + value. Optional profile (defaults to active).
                                    Editable keys: model_provider, model_name, base_url, api_key,
                                    wire_api, max_tokens, temperature, reasoning,
-                                   reasoning_effort, top_p, context_window,
+                                   reasoning_effort, top_p, context_window, compact_token_limit,
                                    extra_body, extra_headers (value must be a JSON object string
                                    for these two, e.g. '{{"chat_template_kwargs": {{"reasoning_effort": "high"}}}}').
 - action='set_env'              -> set a .env variable. Requires key + value.

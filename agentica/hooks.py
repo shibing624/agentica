@@ -498,6 +498,9 @@ class MemoryExtractHooks(RunHooks):
         if not buf:
             return
 
+        if not agent.long_term_memory_config.auto_extract_memory:
+            return
+
         # If any turn in the window already called save_memory, the model
         # self-curated — skip extraction. Mirrors CC's hasMemoryWritesSince.
         if any(save_called for _, _, save_called in buf):

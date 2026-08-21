@@ -175,6 +175,8 @@ def _clean_prefs(raw: dict) -> dict:
     last = raw.get("last_session_id")
     if isinstance(last, str) and last.strip():
         out["last_session_id"] = last.strip()
+    if isinstance(raw.get("auto_extract_memory"), bool):
+        out["auto_extract_memory"] = raw["auto_extract_memory"]
     return out
 
 
@@ -190,8 +192,13 @@ async def put_prefs(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Expected a JSON object")
-    merged = _clean_prefs({**_read_prefs(uid), **body})
+    previous = _read_prefs(uid)
+    merged = _clean_prefs({**previous, **body})
     _write_prefs(uid, merged)
+    old_extract = previous.get("auto_extract_memory", True)
+    new_extract = merged.get("auto_extract_memory", True)
+    if bool(old_extract) != bool(new_extract) and deps.agent_service is not None:
+        await deps.agent_service._invalidate_cache()
     return merged
 
 
@@ -606,27 +613,43 @@ async def make_temp_workspace():
 
 @router.post("/api/open")
 async def open_path(request: OpenRequest):
-    """Open a path in Finder or Terminal (local deployments only)."""
+    """Open a local path or an http(s) URL with the OS default handler."""
+    url = (request.url or "").strip()
+    if url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Only http(s) URLs can be opened")
+        try:
+            _open_os(url, app="finder")
+            return {"status": "ok"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    if not request.path:
+        raise HTTPException(status_code=400, detail="path or url is required")
     p = Path(request.path).expanduser()
     if not p.exists():
         raise HTTPException(status_code=404, detail="Path not found")
 
     try:
-        if sys.platform == "darwin":
-            if request.app == "terminal":
-                subprocess.Popen(["open", "-a", "Terminal", str(p)])
-            else:
-                subprocess.Popen(["open", str(p)])
-        elif sys.platform == "linux":
-            if request.app == "terminal":
-                for term in ["gnome-terminal", "xterm", "konsole"]:
-                    if shutil.which(term):
-                        subprocess.Popen([term, f"--working-directory={str(p)}"])
-                        break
-            else:
-                subprocess.Popen(["xdg-open", str(p)])
-        else:
-            subprocess.Popen(["explorer", str(p)])
+        _open_os(str(p), app=request.app)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _open_os(target: str, app: str) -> None:
+    if sys.platform == "darwin":
+        if app == "terminal":
+            subprocess.Popen(["open", "-a", "Terminal", target])
+        else:
+            subprocess.Popen(["open", target])
+    elif sys.platform == "linux":
+        if app == "terminal":
+            for term in ["gnome-terminal", "xterm", "konsole"]:
+                if shutil.which(term):
+                    subprocess.Popen([term, f"--working-directory={target}"])
+                    break
+        else:
+            subprocess.Popen(["xdg-open", target])
+    else:
+        subprocess.Popen(["explorer", target])

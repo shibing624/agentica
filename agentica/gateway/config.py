@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agentica.config import AGENTICA_WORKSPACE_DIR, AGENTICA_NUM_HISTORY_TURNS
+from agentica.config import AGENTICA_CACHE_DIR, AGENTICA_WORKSPACE_DIR, AGENTICA_NUM_HISTORY_TURNS
 from agentica.global_config import apply_global_config, get_profile
 
 
@@ -264,8 +264,10 @@ class Settings:
                 u.strip() for u in os.getenv("DINGTALK_ALLOWED_USERS", "").split(",") if u.strip()
             ],
 
-            # WeChat (personal)
-            wechat_token_file=os.getenv("WECHAT_TOKEN_FILE") or None,
+            # WeChat (personal): always have a token path so the Personal
+            # Assistant page can mint a QR without the user exporting env.
+            wechat_token_file=os.getenv("WECHAT_TOKEN_FILE")
+            or str(Path(AGENTICA_CACHE_DIR) / "wxbot_token.json"),
             wechat_allowed_users=[
                 u.strip() for u in os.getenv("WECHAT_ALLOWED_USERS", "").split(",") if u.strip()
             ],

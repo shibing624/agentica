@@ -26,6 +26,7 @@
 const path = require("node:path");
 const { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
+const { resolveExistingCommand } = require("./runtime");
 const {
   HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, iconPath, isAppUrl, restartDelayMs,
 } = require("./util");
@@ -202,16 +203,47 @@ async function handleGatewayExit(code) {
   }
 }
 
+function showSetupWindow() {
+  const w = new BrowserWindow({
+    width: 520,
+    height: 220,
+    title: "Agentica",
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    backgroundColor: "#ffffff",
+    show: true,
+    ...(icon ? { icon } : {}),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:36px 40px;font:15px/1.45 system-ui,-apple-system,sans-serif;color:#1a1a1a">
+  <h1 style="font-size:18px;margin:0 0 10px">Installing Agentica</h1>
+  <p style="margin:0;color:#444">No Python gateway on this machine. Downloading a one-time runtime (uv + Python 3.12 + agentica). The window opens when it is ready.</p>
+</body></html>`;
+  w.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  return w;
+}
+
 async function boot() {
   gateway = new GatewayProcess(log, path.join(app.getPath("userData"), "gateway-port"));
+  let splash = null;
+  if (!resolveExistingCommand() && process.env.AGENTICA_DESKTOP_NO_BOOTSTRAP !== "1") {
+    splash = showSetupWindow();
+  }
   try {
     await startGatewayAndWindow();
   } catch (err) {
-    // A blank window with no explanation is the worst outcome here: the usual
-    // causes (gateway not installed, no API key, bad config.yaml) are all
-    // fixable, and the message says which one it is.
+    if (splash && !splash.isDestroyed()) splash.close();
     fatal("Agentica could not start.", err);
+    return;
   }
+  if (splash && !splash.isDestroyed()) splash.close();
 }
 
 /**

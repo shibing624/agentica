@@ -14,7 +14,7 @@ on the next `pip install -U` — so anything that *could* ship over HTTP must.
 ## Run it
 
 ```bash
-pip install -e ".[gateway]"   # from the repo root, once
+pip install -e ".[gateway]"   # from the repo root; skip if you want first-launch bootstrap
 cd desktop
 npm install
 npm start
@@ -77,15 +77,21 @@ answering on that port.
 | Variable | Effect |
 |---|---|
 | `AGENTICA_GATEWAY_BIN` | Path to the gateway executable. Skips shell resolution. |
+| `AGENTICA_DESKTOP_RUNTIME` | Override the managed-runtime root (tests). Default: macOS `~/Library/Application Support/Agentica`, Linux `~/.local/share/agentica`, Windows `%LOCALAPPDATA%\\Agentica`. |
+| `AGENTICA_DESKTOP_PACKAGE` | pip spec for first-launch install (default `agentica[gateway]`). |
+| `AGENTICA_DESKTOP_IGNORE_EXISTING=1` | Skip login-shell PATH / python; only env + managed runtime + bootstrap. |
+| `AGENTICA_DESKTOP_NO_BOOTSTRAP=1` | Never download uv/Python. Fail if nothing is already installed. |
 | `AGENTICA_HOME` | Data root. Must match the one your CLI uses, or the app sees a different set of sessions. |
 | `GATEWAY_AUTH=false` | Turns the auth gate off in the spawned gateway. |
 | `AGENTICA_DESKTOP_SMOKE=1` | Print one `DESKTOP-SMOKE-RESULT {json}` line describing what the window loaded, then quit through the normal quit path. |
 | `AGENTICA_DESKTOP_SMOKE_SHOT` | With the above: also write a PNG of the window there. |
 
 An app launched from the Dock does not inherit your shell's `PATH`, so a conda
-or venv `agentica-gateway` is invisible to it. Resolution therefore asks your
-login shell (`$SHELL -ilc 'command -v agentica-gateway'`); set
-`AGENTICA_GATEWAY_BIN` to skip that.
+or venv `agentica-gateway` is invisible to it. Resolution asks the login shell
+first (`$SHELL -ilc 'command -v agentica-gateway'`), then a managed venv under
+Application Support. If neither exists, the first launch downloads uv, installs
+CPython 3.12, and `pip install`s `agentica[gateway]` into that venv — once.
+`~/.agentica` stays data-only. Set `AGENTICA_GATEWAY_BIN` to skip the search.
 
 ## Packaging
 
@@ -100,8 +106,8 @@ the deb/AppImage need Linux — so the full matrix runs in CI
 whatever `v*` tag was pushed. Builds are unsigned; the root README documents the
 one-time unlock each OS asks for.
 
-`npm start` and the installers agree on one thing that is easy to get wrong: the
-app is a **shell**, so an installer does not carry a gateway. `agentica[gateway]`
-has to be installed on the machine separately. Bundling a Python runtime would
-make the download self-contained and is a separate project; what it would *not*
-do is remove the gateway, because the window has no other way to reach one.
+`npm start` and the installers agree: the app is a **shell** and does not
+carry a Python interpreter inside the `.app`. A machine that already has
+`agentica-gateway` (CLI `pip install`) keeps using it. A machine that does not
+gets a managed runtime on first launch, outside the bundle, so a later
+`pip install -U` still updates the gateway without a new dmg.

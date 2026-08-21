@@ -605,6 +605,33 @@ class Workspace:
         self._ensure_home_agent_md_symlink(path)
         return path
 
+    def read_user_agents_md(self) -> str:
+        """Return this user's AGENTS.md body (empty string if the file is missing)."""
+        path = self.user_agent_md_path()
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    def write_user_agents_md(self, content: str) -> Path:
+        """Replace this user's AGENTS.md. Clears the frozen context snapshot.
+
+        The Runner only re-reads AGENTS.md when ``get_frozen_context()`` is
+        None. The workspace instance is shared across gateway sessions, so
+        leaving the snapshot in place would keep serving the pre-edit file
+        until process restart.
+        """
+        if len(content) > self.MAX_MEMORY_CHARACTER_COUNT:
+            raise ValueError(
+                f"AGENTS.md exceeds {self.MAX_MEMORY_CHARACTER_COUNT} characters"
+            )
+        path = self.user_agent_md_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+        self._context_snapshot = None
+        return path
+
     def _ensure_home_agent_md_symlink(self, target: Path) -> None:
         """Expose ``~/.agentica/AGENTS.md`` as the default user's alias.
 

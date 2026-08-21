@@ -16,11 +16,12 @@
  *    closing the window cannot take down the terminal's gateway.
  */
 
-const { spawn, execFileSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { choosePort, readPreferredPort, rememberPort } = require("./port-memory");
+const { resolveCommand } = require("./runtime");
 
 /** How long to wait for a freshly spawned gateway to answer. The first start
  *  loads the model config and builds an Agent, which is not instant. */
@@ -82,37 +83,11 @@ async function health(record, timeoutMs = 1500) {
  *
  * A GUI app launched from Finder/Dock does not inherit the shell's PATH — it
  * gets a bare `/usr/bin:/bin:/usr/sbin:/sbin`, which is never where a conda or
- * venv `agentica-gateway` lives. So resolution asks the user's login shell,
- * the same way their terminal would answer.
+ * venv `agentica-gateway` lives. Resolution asks the user's login shell, then
+ * a managed runtime under Application Support, then (once) bootstraps one
+ * with uv. AGENTICA_GATEWAY_BIN skips the search.
  */
-function resolveCommand() {
-  if (process.env.AGENTICA_GATEWAY_BIN) {
-    return { command: process.env.AGENTICA_GATEWAY_BIN, args: [] };
-  }
-
-  const shell = process.env.SHELL || "/bin/sh";
-  const found = (script) => {
-    try {
-      const out = execFileSync(shell, ["-ilc", script], {
-        encoding: "utf8",
-        timeout: 8_000,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-      return out.trim().split("\n").pop().trim() || null;
-    } catch {
-      return null;
-    }
-  };
-
-  const bin = found("command -v agentica-gateway");
-  if (bin) return { command: bin, args: [] };
-
-  // A source checkout that was never `pip install`ed still has the module.
-  const py = found("command -v python3 || command -v python");
-  if (py) return { command: py, args: ["-m", "agentica.gateway.main"] };
-
-  return null;
-}
+// resolveCommand lives in runtime.js so the ladder can be tested without Electron.
 
 class GatewayProcess {
   /**
@@ -163,11 +138,12 @@ class GatewayProcess {
   }
 
   async _spawnOn(port) {
-    const resolved = resolveCommand();
+    const resolved = await resolveCommand({ log: this.log });
     if (!resolved) {
       throw new Error(
-        "Cannot find agentica-gateway. Install it with `pip install \"agentica[gateway]\"`, " +
-          "or point AGENTICA_GATEWAY_BIN at the executable."
+        "Cannot find agentica-gateway. The app installs a managed runtime on "
+        + "first launch when the network is available; to install yourself run "
+        + "`pip install \"agentica[gateway]\"`, or set AGENTICA_GATEWAY_BIN."
       );
     }
 
@@ -182,15 +158,19 @@ class GatewayProcess {
       "--port", String(port),
       "--parent-pid", String(process.pid),
     ];
-    this.log(`starting ${resolved.command} ${args.join(" ")}`);
+    this.log(`starting ${resolved.command} ${args.join(" ")} (${resolved.source})`);
 
+    const env = { ...process.env, PYTHONUNBUFFERED: "1" };
+    if (resolved.pathPrefix) {
+      env.PATH = `${resolved.pathPrefix}${path.delimiter}${env.PATH || ""}`;
+    }
     const child = spawn(resolved.command, args, {
       // The gateway's default project directory is the cwd it was launched
       // from — which for an app started from the Dock is `/`, so the agent
       // would open on the filesystem root. A GUI launch has no meaningful cwd,
       // so home is the honest default; the user picks a project in the UI.
       cwd: os.homedir(),
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.child = child;

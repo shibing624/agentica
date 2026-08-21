@@ -61,7 +61,7 @@ async def test_rapid_messages_are_queued_and_processed_in_order(patched_deps):
     release = asyncio.Event()
     first_started = asyncio.Event()
 
-    async def slow_chat(message, session_id, user_id, media=None):
+    async def slow_chat(message, session_id, user_id, media=None, owner=None):
         # Block the first message so the next two arrive while it "runs".
         if not first_started.is_set():
             first_started.set()
@@ -99,7 +99,7 @@ async def test_queue_full_drops_excess(patched_deps):
 
     release = asyncio.Event()
 
-    async def blocking_chat(message, session_id, user_id, media=None):
+    async def blocking_chat(message, session_id, user_id, media=None, owner=None):
         await release.wait()
         return ChatResult(content="ok", session_id=session_id)
 
@@ -157,7 +157,7 @@ async def test_media_message_fetches_payloads_and_replies_with_notes(patched_dep
     )
     channel_manager.get_channel = MagicMock(return_value=channel)
 
-    async def chat(message, session_id, user_id, media=None):
+    async def chat(message, session_id, user_id, media=None, owner=None):
         assert media and media[0].kind == "image"
         return ChatResult(
             content="是只猫",
@@ -214,7 +214,7 @@ async def test_image_only_success_sends_nonempty_placeholder(patched_deps):
 
     seen = {}
 
-    async def chat(message, session_id, user_id, media=None):
+    async def chat(message, session_id, user_id, media=None, owner=None):
         seen["message"] = message
         seen["media"] = media
         return ChatResult(content="ok", session_id=session_id)
@@ -227,3 +227,47 @@ async def test_image_only_success_sends_nonempty_placeholder(patched_deps):
 
     assert seen["message"].strip()
     assert seen["media"] and seen["media"][0].kind == "image"
+
+
+@pytest.mark.asyncio
+async def test_im_chat_uses_home_account_not_sender(patched_deps):
+    """Personal assistant: WeChat openid is not a workspace tenant."""
+    agent_service, _ = patched_deps
+    seen = {}
+
+    async def chat(message, session_id, user_id, media=None, owner=None):
+        seen["user_id"] = user_id
+        seen["owner"] = owner
+        return ChatResult(content="ok", session_id=session_id)
+
+    agent_service.chat = AsyncMock(side_effect=chat)
+    await gw_main._process_channel_message(
+        _make_message("你好", sender="o9cq@im.wechat"), "sess:wx"
+    )
+    assert seen["user_id"] != "o9cq@im.wechat"
+    assert seen["user_id"] == seen["owner"]
+
+
+@pytest.mark.asyncio
+async def test_im_chat_uses_bound_wechat_owner(patched_deps, tmp_path):
+    agent_service, channel_manager = patched_deps
+    from agentica.gateway.channels.base import ChannelType
+    from agentica.gateway.channels.wechat import WeChatChannel
+
+    ch = WeChatChannel(token_file=str(tmp_path / "t.json"))
+    ch.bind_owner("llli")
+    channel_manager.get_channel = MagicMock(
+        side_effect=lambda ct: ch if ct == ChannelType.WECHAT else None
+    )
+
+    seen = {}
+
+    async def chat(message, session_id, user_id, media=None, owner=None):
+        seen["user_id"] = user_id
+        seen["owner"] = owner
+        return ChatResult(content="ok", session_id=session_id)
+
+    agent_service.chat = AsyncMock(side_effect=chat)
+    await gw_main._process_channel_message(_make_message("你好"), "sess:wx")
+    assert seen["user_id"] == "llli"
+    assert seen["owner"] == "llli"

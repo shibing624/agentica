@@ -112,7 +112,7 @@ CSRF 的主防线是 `SameSite=Lax`；第二道是**带 cookie 的写请求必�
 
 ## 桌面应用（Electron 薄壳）
 
-`desktop/` 是一层 Electron 壳：单实例，同一 `~/.agentica` 上已经有 gateway 就直接连过去，否则拉起 `agentica-gateway --port <上次那个> --parent-pid <自己>`，就绪后开窗口加载 `/chat`。窗口里就是浏览器看到的同一份 SPA，没有第二套 UI，也没有 preload / IPC；令牌先换成会话再注入 cookie，渲染进程读不到。
+`desktop/` 是一层 Electron 壳：单实例，同一 `~/.agentica` 上已经有 gateway 就直接连过去，否则拉起 `agentica-gateway`。机器上还没有这份二进制时，第一次打开会用 uv 在 Application Support 装一份托管 runtime（不进 `~/.agentica`）。窗口里就是浏览器看到的同一份 SPA，没有第二套 UI，也没有 preload / IPC；令牌先换成会话再注入 cookie，渲染进程读不到。
 
 几处不显然的设计：
 
@@ -246,7 +246,7 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 | 渠道 | 依赖 extras | 连接方式 | 需要公网 | 启用所需环境变量 |
 |------|------------|----------|----------|------------------|
 | Web 网页 | 内置 `[gateway]` | HTTP（内置 `/chat` UI） | 否（本机 `http://localhost:8881/chat`） | 无需配置，启动即开；可用 `HOST` / `PORT` 调整监听 |
-| 个人微信 | `wechat` | ilinkai HTTP 长轮询 | 否 | `WECHAT_TOKEN_FILE` 或 `WECHAT_ALLOWED_USERS` |
+| 个人微信 | `wechat` | ilinkai HTTP 长轮询 | 否 | 默认开启。token 落在 `WECHAT_TOKEN_FILE`（默认 `~/.agentica/cache/wxbot_token.json`）；网页点「配置」扫码 |
 | 飞书 Lark | 内置 `[gateway]` | WebSocket 长连接 | 否 | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` |
 | Telegram | `telegram` | 长轮询 | 否 | `TELEGRAM_BOT_TOKEN` |
 | Discord | `discord` | Gateway 长连接 | 否 | `DISCORD_BOT_TOKEN` |
@@ -262,7 +262,7 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
 
-> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用（首次用启动日志里带 `?token=` 的地址，或设了密码后走 `/login`）；其余 IM 渠道都是可选的叠加层。
+> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用（首次用启动日志里带 `?token=` 的地址，或设了密码后走 `/login`）；其余 IM 渠道都是可选的叠加层。网页和桌面版里打开 **设置 › 个人助理**（或 `/assistant`）即可看到本机 Web 地址和微信 / 企微 / QQ / 飞书等的连接方法与当前状态。
 
 ## 配置（环境变量）
 
@@ -324,16 +324,14 @@ agentica-gateway
 零配置就能先跑：`agentica-gateway` 启动后自带 Web UI（用启动日志里那条 `http://127.0.0.1:8881/chat?token=…`），
 无需任何 IM 配置即可对话，记忆落地在 `~/.agentica/workspace`。
 
-想接一个 IM 渠道，**微信 ClawBot 最省事**：不用去开放平台申请应用，
-装好依赖、启动后终端直接打印二维码，用**个人微信**扫码确认即上线：
+想接个人微信：装好 `agentica[wechat]` 后启动 gateway，打开 **设置 › 个人助理**，点微信那一行的「配置」，用个人微信扫码即可。白名单留空 = 不限制：
 
 ```bash
 pip install 'agentica[wechat]'   # 提供 qrcode / pycryptodome / Pillow，用于扫码与媒体收发
-# 启动 gateway 后按提示扫码；白名单留空 = 不限制，任何用户都能访问
-WECHAT_ALLOWED_USERS=
+# 默认 token：~/.agentica/cache/wxbot_token.json ；WECHAT_ALLOWED_USERS 留空
 ```
 
-> 二维码只输出到终端（SSH / 无桌面环境也能扫），同时会在本地保存 PNG 并自动尝试打开浏览器。
+> 二维码只在网页里点「配置」时生成，离开页面就消失；过期或没扫都会显示「失败」，再点配置会换一张新码。
 > token 默认缓存到 `~/.agentica/cache/wxbot_token.json`，下次启动免扫码。
 
 其余渠道只需补对应的 app 凭证，白名单**默认全部留空即可**（见下文各渠道小节），
@@ -382,26 +380,17 @@ settings:
 
 #### 启用条件
 
-为了避免 `agentica-gateway` 每次启动都弹出扫码窗口，
-微信渠道**只在以下任一变量被显式设置时**才会注册：
+微信渠道**默认注册**。token 文件默认是 `~/.agentica/cache/wxbot_token.json`（可用 `WECHAT_TOKEN_FILE` 改路径），`WECHAT_ALLOWED_USERS` 默认留空。
 
-| 你设置了… | 行为 |
-|----------|------|
-| 都没设 | 渠道**不注册**，gateway 启动安静无打扰 ✅ |
-| 仅 `WECHAT_TOKEN_FILE` | 渠道注册；`token.json` 存在 → 直接复用；不存在 → **触发扫码登录** |
-| 仅 `WECHAT_ALLOWED_USERS` | 渠道注册；按默认路径 `~/.agentica/cache/wxbot_token.json` 加载；如果该文件不存在 → **同样触发扫码登录** |
-| 两个都设 | 同上，只是 token 落盘到你指定的路径 |
+| 状态 | 行为 |
+|------|------|
+| 已有有效 token | 启动时直接连上，网页显示「已连接」 |
+| 没有 token | 启动安静，网页显示「失败」；点「配置」才拉二维码 |
+| 二维码过期 / 没扫 | 显示「失败」；再进个人助理页时二维码是空的，需再点「配置」 |
 
-> ⚠️ 这意味着只用 `WECHAT_ALLOWED_USERS` 做"白名单收紧"是不够安全的——
-> 只要默认 token 路径下没有有效凭据，gateway 在启动时就会拉起一个后台
-> 扫码流程（PNG 写到 `<token_file_dir>/wx_qr.png` 并尝试用默认浏览器打开）。
->
-> **生产部署建议**：
->
-> 1. 在受控环境完成一次扫码，把生成的 `token.json` 备份；
-> 2. 用 `WECHAT_TOKEN_FILE` 显式指定该文件的部署路径；
-> 3. 只在这台机器上启用微信渠道，token 失效时手动重扫并替换文件，
->    不要让无人值守的 gateway 进程意外触发交互式登录。
+点「配置」（或扫码成功）时，当前登录的网页账号会写进 token 文件的 `gateway_user_id`。之后微信进线、网页、桌面共用这个账号的会话和记忆，不再按微信 openid 另开分区。已连上时再点一次「配置」也会完成绑定。
+
+启动时**不会**再弹出扫码窗口。CLI / token 过期后的终端重登仍走原来的 `login_qr()`。
 
 ### 飞书（Lark）
 
@@ -531,14 +520,18 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | POST | `/api/workspace/upload` | 上传到当前目录（multipart，需 `X-Agentica-Client`） |
 | GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
 | GET | `/api/sessions/{id}/trace/analysis` | 整份轨迹分析（重启后按 session id 跨 project 定位 jsonl） |
-| GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
+| GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话 / `auto_extract_memory`），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
+| GET / PUT | `/api/memory` | 当前账号的用户级 `AGENTS.md`（常驻说明，进 system prompt）。PUT body：`{content}` |
 | GET | `/api/sessions/{id}/usage` | 本会话 Context Window 拆分（与 CLI `/usage` 同一套 `measure_context`：system prompt / 规则 / 技能 / 工具定义 / 对话的 token 数）以及消息数、API 调用、费用 |
 | POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套 native + Layer 2 摘要 |
 | POST | `/api/goal` | Web `/goal`：standing-goal 循环。body：`objective`、`session_id`、`token_budget`（默认 `-1` = 不限；不传 turns / wall） |
 | POST | `/api/fs/temp` | 为新建对话创建一个临时工作目录（`$AGENTICA_HOME/tmp/web-chats`） |
 | POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`，可选 `images`） |
 | WS | `/ws` | 流式事件订阅 |
-| GET | `/api/channels` | 列出已注册渠道 + 连接状态 |
+| GET | `/api/channels` | 列出已注册渠道 + 连接状态，以及网页「个人助理」用的完整 catalog（含未配置的 IM、`web_url`、监听地址） |
+| POST | `/api/channels/wechat/qr` | 个人助理「配置」：生成微信登录二维码（`png` base64 + `qrcode` id + `expires_in`） |
+| GET | `/api/channels/wechat/qr?id=` | 轮询该二维码：`wait` / `confirmed` / `expired` |
+| POST | `/api/open` | 用系统默认程序打开本地路径（`path`）或 http(s) URL（`url`，默认浏览器） |
 | POST | `/api/send` | 主动向某个 IM 渠道发送一条消息 |
 | GET | `/api/jobs` 等 | Cron / 定时任务管理（详见 routes/scheduler.py） |
 

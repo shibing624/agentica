@@ -11,9 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- **设置 › 记忆**：新 tab 编辑本账号的用户级 `AGENTS.md`（`workspace/users/<账号>/AGENTS.md`，进 system prompt 的常驻说明），可预览和编辑。账号菜单也有「记忆」入口。对话抽取开关接到已有的 `auto_extract_memory`（事实仍进 `memory/*.md` 召回，不写进 AGENTS.md）。改完会清掉冻结的 context 快照，下一轮对话读到新内容。
+- **「Profile」中文改叫「模型配置」**。
+- **个人助理的 Web 地址可点**：和 `config.yaml` 一样走 `POST /api/open`，用系统默认浏览器打开 `http://127.0.0.1:8881/chat`。
+- **个人微信默认就能扫码**：`WECHAT_TOKEN_FILE` 默认 `~/.agentica/cache/wxbot_token.json`，`WECHAT_ALLOWED_USERS` 默认空。gateway 启动不再弹码；网页点「配置」才生成二维码（过期约 120 秒）。没扫或过期显示「失败」；离开再进个人助理页，码是空的，要再点配置。
+- **微信 / 网页 / 桌面是同一个人**：点「配置」扫码时登录的账号就是机主。IM 不再用微信 openid 另开 `users/<openid>/` 分区；会话、记忆、AGENTS.md 都进这个账号。已连上的再点一次「配置」也会绑到当前登录账号。
+- **设置 › 个人助理**：设置弹窗第二个 tab（常规旁边），展示本机 Web 地址和微信 / 企微 / QQ / 飞书等 IM 的接入状态与连接方法。账号菜单同一项打开这个 tab。`/assistant` 仍是同一套内容的独立页。`GET /api/channels` 增加 `catalog` / `web_url` / `listen`。
+- **桌面版第一次打开会自己装 Python runtime**：安装包仍然不含解释器（壳最难更新）。找不到 `agentica-gateway` 时用 uv 在 Application Support 装 CPython 3.12 + `agentica[gateway]`，不进 `~/.agentica`；已经 pip 过的继续用原来的。`AGENTICA_GATEWAY_BIN` / `AGENTICA_DESKTOP_NO_BOOTSTRAP` 可跳过。
 - **CLI 运行中输入提示改直白**：Enter 插话显示 `Steered the current query. Tip: Tab or /queue queues a request.`；Tab 排队显示 `Queued the next request. Enter steers the current query.`。原先 `Guidance added to the current task` 没说清 steer 的是当前这一问，也没点出 `/queue`。
 - **CLI 回答按 Markdown 块增量落屏**：原先 `stream_response` 把整段缓冲到 `finalize` 才一次性 `print(Markdown)`，长回答只能盯着 `answering…`。现在围栏感知的空行一旦闭合一块（标题/列表/代码/表格）就立刻渲进 scrollback，未完成的尾部仍等结束；不用 Rich Live，避免和 prompt_toolkit 抢光标。`cli_markdown=off` 仍整段纯文本。
-- **Web `/goal` 打在会话那只活 agent 上**：原先 `run_goal()` 为 SDK 并发安全会 `clone()`，Web 的插话 / 停止 / 下一轮聊天打的是缓存里那只父 agent，clone 在跑时父 agent 从未 `_running`，插话一定失败并被改成排队，goal 结束下一轮也看不到刚做的工作。网关改为 `isolate=False`。SDK 默认仍 clone。
+- **设置 › Profile 顶部是本地 `config.yaml`**：原先「当前配置」和预览弹窗在常规页。现在这块在 Profile 最上面，路径是可点链接，走已有的 `POST /api/open` 用系统默认编辑器打开（本机 gateway / 桌面版）；打不开就 toast。预览弹窗去掉。`GET /api/config/file` 仍给别的调用方打码读文件。
 - **Web 思考与工具按真实调用顺序穿插**：思考是组里一行（11px、和工具同行高），正在流式的那段默认展开、正文随页面贴底，不再用 `max-height` 把最新思考裁在卡片里。工具同样一行一卡。正文仍会打断分组，所以时间线是思考 → 工具 → 回答 → 思考 → 工具 → 回答。流式光标只留在最下面那一个气泡。
 - **Web `/goal` 过程流式**：原先 `POST /api/goal` 只推 `status` 条，正文等整轮 `done` 才一次性出现。现在每轮走 `run_stream`，和普通对话同一套 `thinking` / `tool_call` / `tool_result` / `content` SSE，工具组和吐字穿插出现；顶栏 tokens 进度仍用 `status`。停止按钮、插话 chip 也挂到这一轮 live 消息上。
 - **Web `/goal` 只限 tokens，默认不限**：原先网关硬编码 turns 15 / tokens 80,000 / wall 300s，状态条三项一起显示。现在对齐 CLI 主闸：只传 `token_budget`（`GoalRequest.token_budget`，`-1` = 不限，网页默认）。输入 `/goal` 进入目标模式：先填 token 预算（空=不限，支持 k/m），再写目标。运行中状态条只显示 `tokens used` 或 `tokens used/budget`。CLI `--turns` / `--wall` 不动。
@@ -32,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **侧栏每个 Project 行右侧「+」在该项目下新建对话**；不再显示 project 路径（工作区已经有路径）。工作区 Details 点外面或 Esc 关掉。Markdown 预览支持 HTML 标签（如 `<p align="center">`）和 LaTeX；源码 / 纯文本预览右上角可复制可见文本。每轮结束后，鼠标悬停答案显示日期、↑输入 / ↓输出 tokens、**input cache tokens 与 cache hit**（与 CLI footer 同一口径）、tok/s、费用、耗时和复制；footer 每一项都有 tooltip（费用是「成本（USD）」）。用户消息悬停只显示简写日期时间和复制。新建对话可在输入栏选择/更换 work dir（浏览上级目录、改用临时工作区）。输入 `/` 可触发 `/goal`、`/compact` 和已安装 skill。可粘贴/预览图片：底模能看图则直接附上，否则由 `settings.media_model` 配置的模型描述后转交（未配置时提示如何在 config.yaml 里写 `media_model`）。流式输出贴底滚动，上滑后页面中间出现下拉箭头可跳回最新。输入框随内容长高。
 - **Web 读图提示不再写死 Gemini**：底模不能看图时，tip 显示 `settings.media_model` 里实际配置的 `model_name`；未配置则说明在 config.yaml 里怎么写该块（需要 `model_name`，以及 `model_provider` 或 `base_url`）。`GET /api/status` 增加 `media_model`。IM 渠道未配置时的回复同样不再写「指向 Gemini」。
 - **Web 输入栏、footer、/goal 与新建会话目录**：去掉输入框上方的 `Enter to send · …` tip（换行/粘贴写进 placeholder）。每轮 footer 的 cache 改成数据库图标，夹在输入 tokens 和输出 tokens 中间。`/goal` 运行时输入框上方显示 CLI 同款状态（`Goal [active]: …` + tokens/turns），期间再发的消息进入队列而不是 409「already has an active run」。新建会话选目录时可直接输入绝对路径；路径不存在或无法访问时提示「目录不存在或无法访问，已回退」，仍停留在旧目录上可继续改。
-- **设置 › 默认工作目录**：历史条目可单条删除；已不存在的路径（包括 pytest 留下的临时目录）打开设置时自动丢掉。输入绝对路径点应用 / 回车，非法路径同样提示「目录不存在或无法访问，已回退」。当前配置的 `config.yaml` 路径可预览（密钥打码）。`GET /api/config/file`、`DELETE /api/config/dir_history?path=`。
+- **设置 › 默认工作目录**：历史条目可单条删除；已不存在的路径（包括 pytest 留下的临时目录）打开设置时自动丢掉。输入绝对路径点应用 / 回车，非法路径同样提示「目录不存在或无法访问，已回退」。`DELETE /api/config/dir_history?path=`。
 - **Web 偏好落盘到 gateway，localStorage 只做首屏缓存**：主题、语言、审批档、上次打开的会话写入 `$AGENTICA_HOME/gateway/prefs/<账号>.json`（`GET/PUT /api/prefs`）。清浏览器缓存或换浏览器后仍能从本机读回；第一帧仍读 localStorage，登录后再对账。会话正文仍是 SessionLog，没有另起一份 SQLite。
 - **输入框 Skills / Permission 对齐可发现性**：Skills 按钮（打开的书 + 下箭头）弹出带搜索的列表，展示技能名和描述，悬停 tip 是完整 desc。Permission 三档跟 `agentica.agent.permissions` 一致，不是 Codex 截图里的「每次询问」：`ask` 是只读（只暴露只读工具）、`auto` 是工作目录内自动（全部工具，写入锁在 work_dir）、`allow-all` 是全部放行。图标按 Codex 习惯：眼睛 / 闪电 / 三角感叹号；按钮带下箭头，括号里跟英文 id。`/` 斜杠菜单过长时列表可滚、键盘选中项滚进视口，技能行也用打开的书。
 - **源码预览按语言语法高亮**：工作区打开 `.md` / `.py` / `.yaml` / `.toml` / `.java` 等文本文件（Markdown、HTML 切到「源码」也一样），以及对话里的围栏代码块，都画成带语言标签和复制按钮的代码卡片，用 highlight.js 着色（标题蓝、引用绿、跟常见 GitHub 主题同一套 token）。Markdown 渲染视图不变。源码卡片自己管横竖滚动（不再把纵向甩给外层、横向甩给 `<pre>`）：两条都是 8px 细条、始终可见、可拖滑块，点轨道跳到对应位置。
@@ -52,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **没有 `rg` 时 `grep` 的 context 不再静默失效**：纯 Python fallback 原先丢掉 `context_lines` / `before_context` / `after_context`，模型传了 `-C 3` 却只拿到匹配行。现在按 rg 同样的优先级切片（`context_lines > 0` 忽略 before/after，重叠窗口合并，组间 `--`）。
 - **Web `/compact` 发出后立刻显示用户那一行，压缩完成前不能再发**：以前要等压缩 API 回来才把 `/compact` 写进对话，期间发送按钮也不算 busy，于是用户以为没发出去再敲一次，第二条撞上 session 锁变成「already has an active run」。现在用户气泡马上出现；压缩期间 Enter / 发送键挡住（不是发出去再 409）。普通对话和 `/skill` 本来发出去就上屏，这条没改。
 - **对话 footer 和轨迹同一轮的 tok/s、耗时对不上**：footer 用整段 `chat_stream` 墙钟（含建 agent）当分母，10 token / 3.6s 显示成 `2.8 tok/s`、耗时再四舍五入成 `4s`；轨迹用 jsonl 里 request 的 LLM 时间，同一轮是 `5.3 tok/s` / `1.90s`。现在 `done` 带上 `last_completed_round` 的 `duration_ms` / `llm_ms` / `tps`（跟 View trace 同一套分析），footer 用 LLM 时间算 tok/s、用 round 墙钟显示耗时。两边共用 `fmtDurationMs`（不到 10s 两位小数）和 `fmtTps`（一位小数）。
+- **轨迹页顶栏的 git 分支和工作目录是会话自己的，不是 gateway 进程的**：jsonl 原先每条都盖 `os.getcwd()` 和进程里的 `git branch`，网页会话于是一律显示 `git:main` 和 `…/Codes/agentica`。现在按会话 `work_dir` 打戳、在那个目录探分支；没有 git 就不显示 `git:`。已写出的旧记录打开轨迹时也用会话目录覆盖。
 
 ## [1.4.13] - 2026-08-20
 

@@ -356,6 +356,33 @@ class TestWorkspace:
         assert "Alice ships on Fridays." in alice_context
         assert "Alice" not in bob_context
 
+    def test_write_user_agents_md_is_per_user_and_thaws_snapshot(self, temp_workspace_path):
+        """Settings Memory page writes this user's AGENTS.md, not another tenant's."""
+        alice = Workspace(temp_workspace_path, user_id="alice")
+        alice.initialize()
+        bob = Workspace(temp_workspace_path, user_id="bob")
+        bob.initialize()
+
+        alice.write_user_agents_md("Alice prefers typed Python.\n")
+        asyncio.run(alice.freeze_snapshots())
+        assert "Alice prefers typed Python." in (alice.get_frozen_context() or "")
+
+        alice.write_user_agents_md("Alice prefers Go.\n")
+        assert alice.get_frozen_context() is None
+        assert alice.read_user_agents_md() == "Alice prefers Go.\n"
+        assert "Alice" not in bob.read_user_agents_md()
+
+        bob.write_user_agents_md("Bob prefers detailed explanations.\n")
+        assert "Bob prefers detailed explanations." in bob.read_user_agents_md()
+        assert "Bob" not in alice.read_user_agents_md()
+
+    def test_write_user_agents_md_rejects_oversize(self, temp_workspace_path):
+        workspace = Workspace(temp_workspace_path)
+        workspace.initialize()
+        too_big = "x" * (Workspace.MAX_MEMORY_CHARACTER_COUNT + 1)
+        with pytest.raises(ValueError, match="exceeds"):
+            workspace.write_user_agents_md(too_big)
+
     def test_get_skills_dir(self, temp_workspace_path):
         """Test getting skills directory."""
         workspace = Workspace(temp_workspace_path)

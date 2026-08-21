@@ -119,6 +119,11 @@ class TestGate:
         assert resp.status_code == 302
         assert resp.headers["location"] == "/login?next=/chat"
 
+    def test_assistant_shell_also_sends_the_browser_to_login(self, client):
+        resp = client.get("/assistant", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/login?next=/assistant"
+
     @pytest.mark.parametrize("path", ["/", "/health", "/api/health"])
     def test_probes_stay_open(self, client, path):
         """A desktop shell polls one of these before it knows the token."""

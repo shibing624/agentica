@@ -1,14 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as api from "../api";
 import {
   loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders,
   loadStatus,
 } from "../data";
 import { openPasswordDialog } from "../components/ChangePasswordDialog";
-import { Dialog } from "../components/Dialog";
+import { ChatMarkdown } from "../components/ChatMarkdown";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
-import { IconClose } from "../icons";
+import { IconClose, IconExpand } from "../icons";
 import { agoStr, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession } from "../sessions";
 import {
@@ -16,14 +16,19 @@ import {
   showToast, useAppState, type ProfileForm,
 } from "../store";
 import { CronPanel } from "./CronPanel";
+import { AssistantPanel } from "../pages/AssistantPage";
 
 /** Tab ids are stable (they are stored in `settingsTab`); only the label moves.
  *
  *  Account management is a page (`/users`), not a tab: this modal configures
  *  the machine (theme, models, working directory) plus this account's cron
- *  jobs and archived chats. */
+ *  jobs and archived chats. Web URL and IM connectors are the 个人助理 tab
+ *  (same panel as `/assistant`).
+ */
 const TABS: Array<[string, (S: Strings) => string]> = [
   ["settings", (S) => S.settings.tabGeneral],
+  ["assistant", (S) => S.nav.assistant],
+  ["memory", (S) => S.nav.memory],
   ["profiles", (S) => S.nav.profile],
   ["cron", (S) => S.settings.tabCron],
   ["archived", (S) => S.settings.tabArchived],
@@ -220,6 +225,8 @@ export function SettingsModal() {
         </div>
         <div className="settings-body">
           {s.settingsTab === "settings" && <GeneralTab />}
+          {s.settingsTab === "assistant" && <div className="asst-body"><AssistantPanel /></div>}
+          {s.settingsTab === "memory" && <MemoryTab />}
           {s.settingsTab === "profiles" && <ProfilesTab />}
           {s.settingsTab === "cron" && <CronPanel />}
           {s.settingsTab === "archived" && (
@@ -245,15 +252,109 @@ export function SettingsModal() {
   );
 }
 
+function MemoryTab() {
+  const S = useStrings();
+  const M = S.settings.memory;
+  const [content, setContent] = useState("");
+  const [draft, setDraft] = useState("");
+  const [path, setPath] = useState("");
+  const [emptyTemplate, setEmptyTemplate] = useState(true);
+  const [autoExtract, setAutoExtract] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const apply = (data: api.MemoryDoc) => {
+    setContent(data.content || "");
+    setPath(data.path || "");
+    setEmptyTemplate(!!data.empty_template);
+    setAutoExtract(data.auto_extract !== false);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.fetchMemory().then(({ ok, data }) => {
+      if (cancelled) return;
+      if (!ok || !data) { showToast(M.loadFailed, 2500); return; }
+      apply(data);
+    });
+    return () => { cancelled = true; };
+  }, [M.loadFailed]);
+
+  const openEdit = () => {
+    setDraft(content);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    const { ok, data } = await api.saveMemoryApi(draft);
+    setBusy(false);
+    if (!ok || !data) {
+      showToast((data as any)?.detail || M.loadFailed, 3000);
+      return;
+    }
+    apply(data);
+    setEditing(false);
+    showToast(M.saved, 2500);
+  };
+
+  const toggleExtract = async () => {
+    const next = !autoExtract;
+    setAutoExtract(next);
+    const { ok } = await api.savePrefsApi({ auto_extract_memory: next });
+    if (!ok) {
+      setAutoExtract(!next);
+      showToast(S.settings.setFailed, 2500);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="mem-page">
+        <div className="settings-block-title">{M.editTitle}</div>
+        <textarea className="pf-input pf-textarea mem-editor" value={draft}
+                  onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
+        {path ? <div className="settings-item-meta">{path}</div> : null}
+        <div className="pf-actions">
+          <button className="dp-btn" onClick={() => setEditing(false)} disabled={busy}>{S.common.cancel}</button>
+          <button className="dp-btn primary" onClick={() => void save()} disabled={busy}>{S.common.save}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mem-page">
+      <p className="mem-intro">{M.intro}</p>
+
+      <div className="mem-section">
+        <div className="mem-section-head">
+          <div className="settings-block-title" style={{ marginBottom: 0 }}>{M.extractTitle}</div>
+          <button type="button" className={"mem-switch" + (autoExtract ? " on" : "")}
+                  role="switch" aria-checked={autoExtract} onClick={() => void toggleExtract()}>
+            <i />
+          </button>
+        </div>
+        <p className="mem-hint">{M.extractHint}</p>
+        <div className="mem-preview" role="button" tabIndex={0}
+             onClick={openEdit}
+             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEdit(); } }}>
+          {emptyTemplate || !content.trim() ? (
+            <span className="mem-preview-empty">{M.empty}</span>
+          ) : (
+            <div className="mem-preview-md"><ChatMarkdown text={content} /></div>
+          )}
+          <span className="mem-preview-expand" title={M.previewLabel}><IconExpand /></span>
+        </div>
+        <div className="mem-preview-label">{M.previewLabel}</div>
+      </div>
+    </div>
+  );
+}
+
 function GeneralTab() {
   const s = useAppState();
   const S = useStrings();
-  const [configPreview, setConfigPreview] = useState<string | null>(null);
-  const openConfigPreview = async () => {
-    const { ok, data } = await api.fetchConfigFile();
-    if (!ok || !data) { showToast(S.settings.readFailed, 2500); return; }
-    setConfigPreview(data.content || "");
-  };
   return (
     <div className="settings-list">
       <div className="settings-block">
@@ -292,28 +393,34 @@ function GeneralTab() {
       </div>
 
       <AccessBlock />
+    </div>
+  );
+}
 
-      <div className="settings-block">
-        <div className="settings-block-title">{S.settings.current}</div>
-        <div className="settings-item-meta">
-          Profile: {s.serverProfile || "default"} · {s.serverProvider}/{s.serverModelName || s.serverModel}
-          {s.serverReasoningEffort ? ` · effort=${s.serverReasoningEffort}` : ""}
-          {s.serverContextWindow ? ` · ${S.settings.contextWindow(s.serverContextWindow)}` : ""}
-        </div>
-        <div className="config-path-row">
-          <code className="config-path-val">{s.serverConfigPath || "~/.agentica/config.yaml"}</code>
-          <button className="cron-act" onClick={() => void openConfigPreview()}>{S.common.preview}</button>
-          <button className="cron-act" onClick={() => {
-            const p = s.serverConfigPath;
-            if (p) { void navigator.clipboard.writeText(p); showToast(S.common.copied); }
-          }}>{S.common.copy}</button>
-        </div>
-        {configPreview != null && (
-          <Dialog title={s.serverConfigPath || "config.yaml"} onClose={() => setConfigPreview(null)} wide>
-            <p className="settings-item-meta">{S.settings.configMasked}</p>
-            <pre className="config-preview">{configPreview}</pre>
-          </Dialog>
-        )}
+function ConfigFileBlock() {
+  const s = useAppState();
+  const S = useStrings();
+  const path = s.serverConfigPath || "~/.agentica/config.yaml";
+  const [before, after] = S.settings.localConfigHint.split("{path}");
+  const open = async () => {
+    if (!s.serverConfigPath) return;
+    const { ok, data } = await api.openPathApi(s.serverConfigPath, "finder");
+    if (!ok) showToast((data as any)?.detail || S.settings.openFailed, 3000);
+  };
+  return (
+    <div className="settings-block">
+      <div className="settings-block-title">{S.settings.localConfig}</div>
+      <p className="settings-item-meta">
+        {before}
+        <button type="button" className="config-path-link" onClick={() => void open()} title={path}>
+          {path}
+        </button>
+        {after}
+      </p>
+      <div className="settings-item-meta">
+        Profile: {s.serverProfile || "default"} · {s.serverProvider}/{s.serverModelName || s.serverModel}
+        {s.serverReasoningEffort ? ` · effort=${s.serverReasoningEffort}` : ""}
+        {s.serverContextWindow ? ` · ${S.settings.contextWindow(s.serverContextWindow)}` : ""}
       </div>
     </div>
   );
@@ -327,6 +434,7 @@ function ProfilesTab() {
     <>
       {s.profileForm && <ProfileForm />}
       <div className="settings-list">
+        <ConfigFileBlock />
         {!(s.profilesData.profiles || []).length && <div className="settings-empty">{S.settings.noProfiles}</div>}
         {(s.profilesData.profiles || []).map((p: any) => (
           <div key={p.name} className={"settings-item" + (p.name === active ? " active" : "")}>

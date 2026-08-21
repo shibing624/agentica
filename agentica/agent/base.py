@@ -692,6 +692,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             and self.tool_config.compression_manager.model is None
         ):
             self.tool_config.compression_manager.model = self.auxiliary_model
+        cap = self.tool_config.compact_token_limit
+        if cap is not None and cap <= 0:
+            cap = None
+            self.tool_config.compact_token_limit = None
+        self.tool_config.compression_manager.compact_token_limit = cap
 
         # Tracing: check Langfuse config when enabled
         if self.enable_tracing:
@@ -1242,6 +1247,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 
         previous = os.path.abspath(os.path.expanduser(self.work_dir)) if self.work_dir else None
         self.work_dir = resolved
+        if self._session_log is not None:
+            self._session_log.set_cwd(resolved)
 
         # writable_dirs is the shared SandboxConfig every builtin tool holds, so
         # replacing the old root here is what actually lets writes land.

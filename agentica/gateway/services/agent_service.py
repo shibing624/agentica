@@ -23,7 +23,7 @@ import inspect
 
 from agentica.utils.log import logger
 from agentica import DeepAgent
-from agentica.agent.config import ToolConfig
+from agentica.agent.config import ToolConfig, WorkspaceMemoryConfig
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
 from agentica.run_config import RunConfig
@@ -481,6 +481,7 @@ class AgentService:
         permission_mode = self.get_session_approval_mode(session_id)
         enable_evict = get_setting("enable_evict", True)
         enable_auto_compact = get_setting("enable_auto_compact", True)
+        auto_extract = self._auto_extract_for(owner)
         load_system_skills()
         agent = DeepAgent(
             session_id=session_id,
@@ -510,6 +511,15 @@ class AgentService:
                 permission_mode=permission_mode,
                 enable_evict=bool(enable_evict),
                 enable_auto_compact=bool(enable_auto_compact),
+            ),
+            long_term_memory_config=WorkspaceMemoryConfig(
+                auto_archive=True,
+                auto_extract_memory=auto_extract,
+                extract_every_n_turns=10,
+                extract_min_seconds_between=60,
+                load_workspace_context=True,
+                load_workspace_memory=True,
+                max_memory_entries=10,
             ),
         )
 
@@ -738,7 +748,9 @@ class AgentService:
 
             try:
                 if self._workspace:
-                    await asyncio.to_thread(self._workspace.set_user, user_id)
+                    await asyncio.to_thread(
+                        self._workspace.set_user, self._owner(owner or user_id)
+                    )
 
                 response = await agent.run(
                     self._expand_skill_invocation(message),
@@ -876,7 +888,9 @@ class AgentService:
         async with lock:
             agent = await self._get_agent(session_id, owner)
             if self._workspace:
-                await asyncio.to_thread(self._workspace.set_user, user_id)
+                await asyncio.to_thread(
+                    self._workspace.set_user, self._owner(owner or user_id)
+                )
             result = await agent.run_goal(
                 objective,
                 token_budget=token_budget,
@@ -1042,7 +1056,9 @@ class AgentService:
 
         try:
             if self._workspace:
-                await asyncio.to_thread(self._workspace.set_user, user_id)
+                await asyncio.to_thread(
+                    self._workspace.set_user, self._owner(owner or user_id)
+                )
 
             full_content = ""
             reasoning_content = ""
@@ -1155,8 +1171,8 @@ class AgentService:
 
     def session_log_for(self, session_id: str, owner: Optional[str] = None) -> SessionLog:
         """Open the on-disk SessionLog for a session (may not exist yet)."""
-        base_dir, _work_dir = self._locate_session(session_id, owner)
-        return SessionLog(session_id=session_id, base_dir=base_dir)
+        base_dir, work_dir = self._locate_session(session_id, owner)
+        return SessionLog(session_id=session_id, base_dir=base_dir, work_dir=work_dir or None)
 
     def _locate_session(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
         """Find the project directory that actually holds this session's jsonl.
@@ -1323,14 +1339,12 @@ class AgentService:
     def _owner(owner: Optional[str]) -> str:
         """Which ``users/<id>/`` partition a call reads and writes.
 
-        Unset means the machine's own partition (``settings.default_user_id``),
-        which is what an IM channel and the CLI share. Cron jobs carry their
-        own ``user_id`` and pass it here so a scheduled run writes into the
-        account that created the job. Only the web surface has accounts, so
-        only its routes pass an owner — and they
-        take it from the session cookie, never from the request body: a body
-        field naming somebody else's partition is not a parameter, it is a way
-        in.
+        Unset means the machine's own partition (``settings.default_user_id``).
+        IM channels pass the home account (whoever scanned WeChat, else
+        default) so web / desktop / IM share sessions and memory. Cron jobs
+        carry their own ``user_id``. Only the web surface has accounts, so
+        only its routes pass an owner — and they take it from the session
+        cookie, never from the request body.
         """
         return owner or settings.default_user_id
 
@@ -1344,34 +1358,42 @@ class AgentService:
         self._session_work_dirs.clear()
         logger.info(f"Global work_dir updated to: {new_dir}, all agent instances cleared")
 
-    # ============== Memory ==============
+    def _auto_extract_for(self, owner: Optional[str]) -> bool:
+        """Per-account toggle for conversation memory extraction. Default on."""
+        from agentica.gateway.routes.settings import _clean_prefs, _read_prefs
+        prefs = _clean_prefs(_read_prefs(self._owner(owner)))
+        return bool(prefs.get("auto_extract_memory", True))
 
-    async def save_memory(self, content: str, user_id: str = "default", long_term: bool = False) -> None:
-        """Persist content to Workspace memory."""
+    def _switch_workspace_user(self, owner: str) -> Workspace:
+        if self._workspace is None:
+            raise RuntimeError("Workspace is not initialized")
+        self._workspace.set_user(self._owner(owner))
+        return self._workspace
+
+    # ============== Memory (user AGENTS.md) ==============
+
+    async def read_user_agents_md(self, owner: str) -> dict:
+        """Return this account's user-level AGENTS.md for the settings page."""
         await self._ensure_initialized()
-        if self._workspace and self._workspace.exists():
-            await asyncio.to_thread(self._workspace.set_user, user_id)
-            await self._workspace.write_memory(content)
-            logger.debug(f"Memory saved for user {user_id}: {content[:50]}...")
+        ws = await asyncio.to_thread(self._switch_workspace_user, owner)
+        content = await asyncio.to_thread(ws.read_user_agents_md)
+        return {
+            "content": content,
+            "path": str(ws.user_agent_md_path()),
+            "empty_template": Workspace._is_empty_template(content),
+            "auto_extract": self._auto_extract_for(owner),
+            "user_id": self._owner(owner),
+        }
 
-    async def get_memory(self, user_id: str = "default", query: str = "", limit: int = 5) -> str:
-        """Retrieve memory for a user via search_memory (keyword/bigram matching).
-
-        Args:
-            user_id: User identifier
-            query: Search query (empty returns recent entries)
-            limit: Maximum number of entries
-        """
+    async def write_user_agents_md(self, owner: str, content: str) -> dict:
+        """Replace this account's user-level AGENTS.md."""
         await self._ensure_initialized()
-        if self._workspace and self._workspace.exists():
-            await asyncio.to_thread(self._workspace.set_user, user_id)
-            results = self._workspace.search_memory(query=query, limit=limit)
-            if results:
-                return "\n\n".join(
-                    f"**{r.get('title', 'Memory')}**: {r.get('content', '')}"
-                    for r in results
-                )
-        return ""
+        ws = await asyncio.to_thread(self._switch_workspace_user, owner)
+        try:
+            await asyncio.to_thread(ws.write_user_agents_md, content)
+        except ValueError as e:
+            raise RuntimeError(str(e)) from e
+        return await self.read_user_agents_md(owner)
 
     async def get_workspace_context(self, user_id: str = "default") -> str:
         """Retrieve workspace context prompt for a user."""

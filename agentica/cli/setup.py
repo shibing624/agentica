@@ -280,7 +280,7 @@ def _reasoning_effort_choices(provider: str, model_name: Optional[str]) -> tuple
 # values through a re-run of `agentica setup` when the user declines to edit.
 _TUNING_KEYS = (
     "wire_api", "reasoning", "reasoning_effort", "max_tokens",
-    "context_window", "temperature", "top_p",
+    "context_window", "compact_token_limit", "temperature", "top_p",
 )
 _CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header", "cache_keepalive")
 # extra_body / extra_headers are raw passthrough dicts for endpoints whose
@@ -407,6 +407,9 @@ def _validate_profile(data: dict) -> List[str]:
     cw = data.get("context_window")
     if cw is not None and not (isinstance(cw, int) and cw > 0):
         errors.append("context_window must be a positive integer.")
+    ctl = data.get("compact_token_limit")
+    if ctl is not None and not (isinstance(ctl, int) and ctl > 0):
+        errors.append("compact_token_limit must be a positive integer.")
     temp = data.get("temperature")
     if temp is not None and not (0.0 <= float(temp) <= 2.0):
         errors.append("temperature must be between 0.0 and 2.0.")
@@ -1238,6 +1241,7 @@ _PROFILE_CONFIG_KEYS = (
     "reasoning",
     "top_p",
     "context_window",
+    "compact_token_limit",
     "extra_body",
     "extra_headers",
     "default_headers",
@@ -1296,6 +1300,7 @@ def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str
         "reasoning": profile.get("reasoning"),
         "top_p": profile.get("top_p"),
         "context_window": profile.get("context_window"),
+        "compact_token_limit": profile.get("compact_token_limit"),
         "extra_body": profile.get("extra_body"),
         "extra_headers": profile.get("extra_headers"),
         "default_headers": profile.get("default_headers"),
@@ -1499,6 +1504,7 @@ def resolve_model_config(args, console=None) -> Dict:
         "reasoning": profile_params.get("reasoning"),
         "top_p": profile_params.get("top_p"),
         "context_window": profile_params.get("context_window"),
+        "compact_token_limit": profile_params.get("compact_token_limit"),
         # Raw passthrough dicts for endpoints whose tuning knobs don't map to
         # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
         "extra_body": profile_params.get("extra_body"),

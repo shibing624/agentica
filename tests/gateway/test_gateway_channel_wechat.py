@@ -2,7 +2,7 @@
 import asyncio
 import json
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
@@ -612,3 +612,113 @@ def test_run_loop_stops_after_bounded_relogin_attempts(tmp_path, monkeypatch):
 
     assert len(logins) == wechat._RELOGIN_MAX_ATTEMPTS
     assert sleeps == [wechat._RELOGIN_RETRY_DELAY] * wechat._RELOGIN_MAX_ATTEMPTS
+
+
+def test_create_login_qr_returns_png(tmp_path, monkeypatch):
+    from agentica.gateway.channels import wechat
+
+    bot = wechat.WxBotClient(token_file=str(tmp_path / "t.json"))
+
+    class FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"qrcode": "qid-1", "qrcode_img_content": "https://wx.example/qr"}
+
+    class FakeImg:
+        def save(self, buf, format=None):
+            buf.write(b"\x89PNG")
+
+    class FakeQR:
+        def add_data(self, url):
+            assert url.startswith("https://")
+
+        def make(self, fit=True):
+            return None
+
+        def make_image(self):
+            return FakeImg()
+
+    monkeypatch.setattr(wechat, "_ensure_qrcode", lambda: None)
+    wechat.qrcode = MagicMock()
+    wechat.qrcode.QRCode = lambda **kw: FakeQR()
+    monkeypatch.setattr(wechat.requests, "get", lambda *a, **k: FakeResp())
+
+    info = bot.create_login_qr()
+    assert info["qrcode"] == "qid-1"
+    assert info["png"]
+    assert info["expires_in"] == wechat.QR_TTL_SECONDS
+
+
+def test_poll_login_qr_persists_token_on_confirmed(tmp_path, monkeypatch):
+    from agentica.gateway.channels import wechat
+
+    bot = wechat.WxBotClient(token_file=str(tmp_path / "t.json"))
+
+    class FakeResp:
+        def json(self):
+            return {
+                "status": "confirmed",
+                "bot_token": "tok-1",
+                "ilink_bot_id": "bot-1",
+            }
+
+    monkeypatch.setattr(wechat.requests, "get", lambda *a, **k: FakeResp())
+    s = bot.poll_login_qr("qid-1")
+    assert s["status"] == "confirmed"
+    assert bot.token == "tok-1"
+    saved = json.loads((tmp_path / "t.json").read_text())
+    assert saved["bot_token"] == "tok-1"
+
+
+@pytest.mark.asyncio
+async def test_connect_without_token_does_not_open_qr(tmp_path, monkeypatch):
+    from agentica.gateway.channels.wechat import WeChatChannel, WxBotClient
+
+    called = []
+    monkeypatch.setattr(WxBotClient, "login_qr", lambda self: called.append(1))
+    ch = WeChatChannel(token_file=str(tmp_path / "missing.json"))
+    ok = await ch.connect()
+    assert ok is False
+    assert called == []
+    assert ch.is_connected is False
+
+
+@pytest.mark.asyncio
+async def test_start_web_qr_then_poll_confirmed_starts_loop(tmp_path, monkeypatch):
+    from agentica.gateway.channels.wechat import WeChatChannel, WxBotClient
+
+    ch = WeChatChannel(token_file=str(tmp_path / "t.json"))
+    monkeypatch.setattr(
+        WxBotClient,
+        "create_login_qr",
+        lambda self: {"qrcode": "qid", "url": "u", "png": "aaa", "expires_in": 120},
+    )
+
+    started = await ch.start_web_qr(owner="llli")
+    assert started["status"] == "pending"
+    assert started["png"] == "aaa"
+    assert ch.gateway_user_id == "llli"
+    assert json.loads((tmp_path / "t.json").read_text())["gateway_user_id"] == "llli"
+
+    monkeypatch.setattr(
+        WxBotClient,
+        "poll_login_qr",
+        lambda self, qr_id: {"status": "confirmed", "bot_token": "t", "ilink_bot_id": "b"},
+    )
+    monkeypatch.setattr(ch, "_begin_polling", AsyncMock(return_value=True))
+    polled = await ch.poll_web_qr("qid")
+    assert polled["status"] == "confirmed"
+    ch._begin_polling.assert_awaited_once()
+
+
+def test_bind_owner_persists_across_new_client(tmp_path):
+    from agentica.gateway.channels.wechat import WeChatChannel, WxBotClient
+
+    tf = str(tmp_path / "t.json")
+    ch = WeChatChannel(token_file=tf)
+    ch.bind_owner("llli")
+    assert ch.gateway_user_id == "llli"
+    again = WxBotClient(token_file=tf)
+    assert again.gateway_user_id == "llli"

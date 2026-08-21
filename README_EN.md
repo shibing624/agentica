@@ -57,9 +57,10 @@ pip install -U agentica
 The window is the same web UI, on the same `~/.agentica` — mixing it with the CLI or a browser makes no difference.
 
 > [!IMPORTANT]
-> The desktop app is a shell; the server is still the Python gateway. Install it
-> first: `pip install -U "agentica[gateway]"` (same machine, and it has to run
-> from a terminal).
+> These builds are **unsigned**, so the OS may block the first launch — one step, once.
+> If this machine has no `agentica-gateway` yet, the first launch installs a managed
+> runtime (uv + Python 3.12 + `agentica[gateway]`) under Application Support, not
+> inside `~/.agentica`. An existing `pip install` is used as-is.
 
 | OS | Installer |
 |---|---|
@@ -67,7 +68,7 @@ The window is the same web UI, on the same `~/.agentica` — mixing it with the 
 | **Windows** 10+ | [x64 installer (NSIS)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe) |
 | **Linux** x64 | [AppImage](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
 
-They are attached to every [GitHub Release](https://github.com/shibing624/agentica/releases) too. These builds are **unsigned**, so the OS may block the first launch — one step, once:
+They are attached to every [GitHub Release](https://github.com/shibing624/agentica/releases) too.
 
 <details>
 <summary><b>🍎 macOS says "Agentica is damaged and can't be opened"</b></summary>

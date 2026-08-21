@@ -26,6 +26,7 @@ Protocol alignment follows the official openclaw-weixin reference:
 import asyncio
 import base64
 import hashlib
+import io
 import json
 import os
 import struct
@@ -77,6 +78,8 @@ _POLL_BACKOFF_AFTER = 3
 _POLL_BACKOFF_DELAY = 30
 _RELOGIN_RETRY_DELAY = 60
 _RELOGIN_MAX_ATTEMPTS = 3
+# ilink QR codes last about two minutes; the web countdown uses this TTL.
+QR_TTL_SECONDS = 120
 
 # ``qrcode`` is only needed when the token cache is empty; lazy-import to
 # avoid pulling Pillow into core gateway installs. ``Crypto`` is only needed
@@ -130,6 +133,8 @@ class WxBotClient:
         self.token = token
         self.bot_id: Optional[str] = None
         self._buf = ""
+        # Gateway account this WeChat login belongs to (web/desktop login).
+        self.gateway_user_id = ""
         if not self.token:
             self._load()
 
@@ -140,6 +145,7 @@ class WxBotClient:
             self.token = d.get("bot_token", "")
             self.bot_id = d.get("ilink_bot_id", "")
             self._buf = d.get("updates_buf", "")
+            self.gateway_user_id = d.get("gateway_user_id", "") or ""
 
     def _save(self, **kw) -> None:
         """Persist current token state to disk."""
@@ -147,6 +153,7 @@ class WxBotClient:
             "bot_token": self.token or "",
             "ilink_bot_id": self.bot_id or "",
             "updates_buf": self._buf or "",
+            "gateway_user_id": self.gateway_user_id or "",
             **kw,
         }
         self._tf.write_text(json.dumps(d, ensure_ascii=False, indent=2), "utf-8")
@@ -238,12 +245,10 @@ class WxBotClient:
             f"aes_key must decode to 16 bytes (got {len(decoded)} after base64)"
         )
 
-    def login_qr(self, poll_interval: int = 2) -> dict:
-        """Interactive QR-code login flow.
+    def create_login_qr(self) -> dict:
+        """Fetch a login QR from ilink. Does not poll and does not open a browser.
 
-        Saves the QR PNG to ``<token_file_dir>/wx_qr.png``, opens it in the
-        default web browser, and polls until the QR is confirmed or expires.
-        Returns the final status payload on success.
+        Returns ``qrcode`` (id), ``url``, ``png`` (base64), ``expires_in``.
         """
         _ensure_qrcode()
         r = requests.get(f"{_API}/ilink/bot/get_bot_qrcode", params={"bot_type": 3}, timeout=10)
@@ -251,21 +256,60 @@ class WxBotClient:
         d = r.json()
         qr_id, url = d["qrcode"], d.get("qrcode_img_content", "")
         logger.info(f"WeChat: QR login ID = {qr_id}")
+        png_b64 = ""
+        if url:
+            try:
+                png_b64 = self._qr_png_b64(url)
+            except Exception as e:
+                logger.warning(f"WeChat: QR PNG render failed: {e}")
+        return {
+            "qrcode": qr_id,
+            "url": url,
+            "png": png_b64,
+            "expires_in": QR_TTL_SECONDS,
+        }
+
+    @staticmethod
+    def _qr_png_b64(url: str) -> str:
+        qr = qrcode.QRCode(box_size=8, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        buf = io.BytesIO()
+        qr.make_image().save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+    def poll_login_qr(self, qr_id: str) -> dict:
+        """One status check. On ``confirmed``, persists the token."""
+        s = requests.get(
+            f"{_API}/ilink/bot/get_qrcode_status",
+            params={"qrcode": qr_id},
+            timeout=60,
+        ).json()
+        st = s.get("status", "")
+        if st == "confirmed":
+            self.token = s.get("bot_token", "")
+            self.bot_id = s.get("ilink_bot_id", "")
+            self._save(login_time=time.strftime("%Y-%m-%d %H:%M:%S"))
+            logger.info(f"WeChat: QR login OK (bot_id={self.bot_id})")
+        return s
+
+    def login_qr(self, poll_interval: int = 2) -> dict:
+        """Interactive QR-code login for a terminal (CLI / session-expiry relogin).
+
+        Saves the QR PNG to ``<token_file_dir>/wx_qr.png``, opens it in the
+        default web browser, and polls until the QR is confirmed or expires.
+        Returns the final status payload on success.
+        """
+        info = self.create_login_qr()
+        qr_id, url = info["qrcode"], info.get("url") or ""
         if url:
             qr = qrcode.QRCode(box_size=2, border=2)
             qr.add_data(url)
             qr.make(fit=True)
-
-            # 1) ASCII QR printed to the terminal — works over SSH / headless
-            #    sessions without any browser, so the operator can scan
-            #    directly from the terminal.
             try:
                 qr.print_ascii(invert=True)
             except Exception as e:  # pragma: no cover - terminal edge cases
                 logger.warning(f"WeChat: ASCII QR render failed: {e}")
-
-            # 2) PNG fallback — saved next to the token file and auto-opened
-            #    in the default browser when one is available (needs Pillow).
             try:
                 img = self._tf.parent / "wx_qr.png"
                 qr.make_image().save(str(img))
@@ -280,11 +324,7 @@ class WxBotClient:
         while True:
             time.sleep(poll_interval)
             try:
-                s = requests.get(
-                    f"{_API}/ilink/bot/get_qrcode_status",
-                    params={"qrcode": qr_id},
-                    timeout=60,
-                ).json()
+                s = self.poll_login_qr(qr_id)
             except requests.exceptions.ReadTimeout:
                 continue
             st = s.get("status", "")
@@ -292,10 +332,6 @@ class WxBotClient:
                 logger.info(f"WeChat: QR status = {st}")
                 last = st
             if st == "confirmed":
-                self.token = s.get("bot_token", "")
-                self.bot_id = s.get("ilink_bot_id", "")
-                self._save(login_time=time.strftime("%Y-%m-%d %H:%M:%S"))
-                logger.info(f"WeChat: QR login OK (bot_id={self.bot_id})")
                 return s
             if st == "expired":
                 raise RuntimeError("WeChat: QR code expired")
@@ -693,34 +729,97 @@ class WeChatChannel(Channel):
         return ChannelType.WECHAT
 
     async def connect(self) -> bool:
-        """Initialize WxBotClient (running QR login if no token)."""
+        """Reuse a cached token. QR login is started from the web UI, not here."""
         try:
-            self._bot = WxBotClient(token_file=self.token_file)
-            self._main_loop = asyncio.get_running_loop()
-
+            self._ensure_bot()
             if not self._bot.token:
-                logger.warning("WeChat: no cached token, running QR login (interactive)...")
-                # login_qr() blocks until QR is scanned; run off the event loop
-                await asyncio.to_thread(self._bot.login_qr)
-
-            self._loop_thread = threading.Thread(
-                target=self._bot.run_loop,
-                args=(self._on_native_message,),
-                daemon=True,
-                name="wechat-poll",
-            )
-            self._loop_thread.start()
-
-            self._connected = True
-            logger.info(f"WeChat: Connected (bot_id={self._bot.bot_id})")
-            return True
-
+                logger.info("WeChat: no cached token; scan the QR in Personal Assistant")
+                return False
+            return await self._begin_polling()
         except ImportError as e:
             logger.error(f"WeChat: dependency missing: {e}")
             return False
         except Exception as e:
             logger.error(f"WeChat: Connect failed: {e}")
             return False
+
+    def _ensure_bot(self) -> WxBotClient:
+        if self._bot is None:
+            self._bot = WxBotClient(token_file=self.token_file)
+        if self._main_loop is None:
+            self._main_loop = asyncio.get_running_loop()
+        return self._bot
+
+    async def _begin_polling(self) -> bool:
+        if self._loop_thread is not None and self._loop_thread.is_alive():
+            self._connected = True
+            return True
+        self._loop_thread = threading.Thread(
+            target=self._bot.run_loop,
+            args=(self._on_native_message,),
+            daemon=True,
+            name="wechat-poll",
+        )
+        self._loop_thread.start()
+        self._connected = True
+        logger.info(f"WeChat: Connected (bot_id={self._bot.bot_id})")
+        return True
+
+    def bind_owner(self, owner: str) -> None:
+        """Remember which gateway account scanned this WeChat login."""
+        owner = (owner or "").strip()
+        if not owner:
+            return
+        bot = self._bot
+        if bot is None:
+            bot = WxBotClient(token_file=self.token_file)
+            self._bot = bot
+        if bot.gateway_user_id == owner:
+            return
+        bot.gateway_user_id = owner
+        bot._save()
+        logger.info(f"WeChat: bound to gateway account {owner!r}")
+
+    @property
+    def gateway_user_id(self) -> str:
+        if self._bot is not None and self._bot.gateway_user_id:
+            return self._bot.gateway_user_id
+        return ""
+
+    async def start_web_qr(self, owner: str = "") -> dict:
+        """Mint a QR for the Personal Assistant page. Does not wait for a scan."""
+        if owner:
+            self.bind_owner(owner)
+        if self.is_connected:
+            return {"status": "connected"}
+        bot = self._ensure_bot()
+        if owner:
+            self.bind_owner(owner)
+        if bot.token:
+            await self._begin_polling()
+            return {"status": "connected"}
+        info = await asyncio.to_thread(bot.create_login_qr)
+        if not info.get("png"):
+            raise RuntimeError("Could not render QR. pip install 'agentica[wechat]'")
+        return {
+            "status": "pending",
+            "qrcode": info["qrcode"],
+            "png": info["png"],
+            "expires_in": info["expires_in"],
+        }
+
+    async def poll_web_qr(self, qr_id: str, owner: str = "") -> dict:
+        """One status check for a QR minted by :meth:`start_web_qr`."""
+        bot = self._bot
+        if bot is None:
+            raise RuntimeError("No WeChat login in progress")
+        s = await asyncio.to_thread(bot.poll_login_qr, qr_id)
+        st = s.get("status") or "wait"
+        if st == "confirmed":
+            if owner:
+                self.bind_owner(owner)
+            await self._begin_polling()
+        return {"status": st}
 
     async def disconnect(self):
         """Mark disconnected. The polling thread is daemon and exits with the process."""

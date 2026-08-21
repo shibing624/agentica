@@ -19,6 +19,7 @@ from typing import (
 
 from agentica.utils.log import logger
 from agentica.compression.evict import evict_context
+from agentica.compression.manager import working_context_window
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
@@ -179,13 +180,22 @@ class CompressMixin:
         # Layer 1: evict (free). Gated on real context pressure: below the
         # threshold there is nothing to buy by dropping a result the window had
         # room for, and the model pays for it by re-running the tool.
+        # compact_token_limit is a working cap on the same layers, not a lie
+        # about model.context_window — Layer 0 batch budget still uses the
+        # provider window.
         _window = model.context_window if isinstance(model.context_window, int) else 0
-        context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
+        _cap = None
+        if cm is not None:
+            _cap = cm.compact_token_limit
+        elif agent is not None:
+            _cap = agent.tool_config.compact_token_limit
+        _working = working_context_window(_window, _cap)
+        context_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
         if enable_evict:
             reclaimed = evict_context(
                 messages,
                 context_tokens=context_tokens,
-                context_window=_window,
+                context_window=_working,
                 model_id=model.id,
             )
             if reclaimed.total:
@@ -206,7 +216,7 @@ class CompressMixin:
                 # Eviction rewrote content, so the count taken above is stale — and
                 # too high. Re-measure before deciding on Layer 2: an LLM summary
                 # bought for a request eviction already made fit is pure waste.
-                context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
+                context_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
 
         if not enable_auto_compact or cm is None:
             return
