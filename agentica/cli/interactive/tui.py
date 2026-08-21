@@ -417,7 +417,9 @@ def _setup_tui(
                 # inference boundary" — if the run finishes first, the text is
                 # promoted to a queued turn and app.py says so explicitly then.
                 display_user_message(text)
-                get_console().print("  Guidance added to the current task. Tab queues the next turn.")
+                get_console().print(
+                    "  Steered the current query. Tip: Tab or /queue queues a request."
+                )
             event.app.current_buffer.reset(append_to_history=True)
             event.app.invalidate()
             return
@@ -445,7 +447,9 @@ def _setup_tui(
             return
         _payload, images = _queue_next_turn(state, pending_queue, text)
         display_user_message(text, images=images)
-        get_console().print("  Queued as the next turn. Enter steers the current task.")
+        get_console().print(
+            "  Queued the next request. Enter steers the current query."
+        )
         buf.reset(append_to_history=True)
         event.app.invalidate()
 

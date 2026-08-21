@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- **CLI 运行中输入提示改直白**：Enter 插话显示 `Steered the current query. Tip: Tab or /queue queues a request.`；Tab 排队显示 `Queued the next request. Enter steers the current query.`。原先 `Guidance added to the current task` 没说清 steer 的是当前这一问，也没点出 `/queue`。
 - **CLI 回答按 Markdown 块增量落屏**：原先 `stream_response` 把整段缓冲到 `finalize` 才一次性 `print(Markdown)`，长回答只能盯着 `answering…`。现在围栏感知的空行一旦闭合一块（标题/列表/代码/表格）就立刻渲进 scrollback，未完成的尾部仍等结束；不用 Rich Live，避免和 prompt_toolkit 抢光标。`cli_markdown=off` 仍整段纯文本。
 - **Web `/goal` 打在会话那只活 agent 上**：原先 `run_goal()` 为 SDK 并发安全会 `clone()`，Web 的插话 / 停止 / 下一轮聊天打的是缓存里那只父 agent，clone 在跑时父 agent 从未 `_running`，插话一定失败并被改成排队，goal 结束下一轮也看不到刚做的工作。网关改为 `isolate=False`。SDK 默认仍 clone。
 - **Web 思考与工具按真实调用顺序穿插**：思考是组里一行（11px、和工具同行高），正在流式的那段默认展开、正文随页面贴底，不再用 `max-height` 把最新思考裁在卡片里。工具同样一行一卡。正文仍会打断分组，所以时间线是思考 → 工具 → 回答 → 思考 → 工具 → 回答。流式光标只留在最下面那一个气泡。
