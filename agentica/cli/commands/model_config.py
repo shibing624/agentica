@@ -183,6 +183,11 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
         key_display = "********" + api_key[-4:] if len(api_key) > 4 else "(not set)"
         con.print(f"  API Key:     {key_display}")
         con.print(f"  Context:     {model.context_window:,} tokens")
+        cap = ctx.agent_config.get("compact_token_limit")
+        if not cap and ctx.current_agent is not None:
+            cap = ctx.current_agent.tool_config.compact_token_limit
+        if cap:
+            con.print(f"  Compact at:  {int(cap):,} tokens")
 
     con.print()
     con.print("  [bold]-- Terminal --[/bold]")
@@ -312,6 +317,12 @@ def _rebuild_live_model(ctx: CommandContext):
     }
     ctx.current_agent.model = get_model(**model_kwargs)
     ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
+    from agentica.cli.runtime import _resolve_compact_token_limit
+    cap = _resolve_compact_token_limit(ctx.agent_config)
+    ctx.current_agent.tool_config.compact_token_limit = cap
+    cm = ctx.current_agent.tool_config.compression_manager
+    if cm is not None:
+        cm.compact_token_limit = cap
 
 
 
@@ -652,6 +663,8 @@ def _list_profiles(active_name: Optional[str] = None, active_source: Optional[st
             tuning.append(f"max_tokens={p['max_tokens']}")
         if p.get("context_window"):
             tuning.append(f"context={p['context_window']}")
+        if p.get("compact_token_limit"):
+            tuning.append(f"compact={p['compact_token_limit']}")
         if p.get("temperature") is not None:
             tuning.append(f"temp={p['temperature']}")
         if p.get("top_p") is not None:
