@@ -32,6 +32,8 @@ from agentica.workspace import Workspace
 from agentica.global_config import (
     apply_global_config,
     get_setting,
+    get_profile,
+    get_active_profile_name,
     set_active_profile,
     provider_api_key_env,
 )
@@ -481,6 +483,13 @@ class AgentService:
         permission_mode = self.get_session_approval_mode(session_id)
         enable_evict = get_setting("enable_evict", True)
         enable_auto_compact = get_setting("enable_auto_compact", True)
+        from agentica.compression.manager import parse_compact_token_limit
+        profile = get_profile(get_active_profile_name()) or {}
+        compact_token_limit = parse_compact_token_limit(profile.get("compact_token_limit"))
+        if compact_token_limit is None:
+            compact_token_limit = parse_compact_token_limit(
+                get_setting("compact_token_limit", None)
+            )
         auto_extract = self._auto_extract_for(owner)
         load_system_skills()
         agent = DeepAgent(
@@ -511,6 +520,7 @@ class AgentService:
                 permission_mode=permission_mode,
                 enable_evict=bool(enable_evict),
                 enable_auto_compact=bool(enable_auto_compact),
+                compact_token_limit=compact_token_limit,
             ),
             long_term_memory_config=WorkspaceMemoryConfig(
                 auto_archive=True,

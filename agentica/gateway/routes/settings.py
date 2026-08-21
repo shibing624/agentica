@@ -25,6 +25,7 @@ from agentica.global_config import (
     get_profiles,
     get_active_profile_name,
     get_profile,
+    get_setting,
     upsert_profile,
     delete_profile,
     load_global_config,
@@ -63,6 +64,7 @@ class ProfileFields:
     reasoning_effort: str = ""
     max_tokens: int = 0
     context_window: int = 0
+    compact_token_limit: int = 0
     temperature: float = 0.0
     top_p: float = 0.0
     auxiliary_model: Optional[dict] = None
@@ -72,7 +74,7 @@ class ProfileFields:
 PROFILE_FIELD_NAMES = tuple(f.name for f in fields(ProfileFields))
 TUNING_FIELD_NAMES = (
     "wire_api", "reasoning", "reasoning_effort", "max_tokens",
-    "temperature", "top_p", "context_window",
+    "temperature", "top_p", "context_window", "compact_token_limit",
 )
 
 
@@ -108,6 +110,11 @@ async def status():
     active_profile = get_active_profile_name()
     config_path = self_manage.config_file_path()
     model_name = svc.model_name if svc else settings.model_name
+    from agentica.compression.manager import parse_compact_token_limit
+    profile = get_profile(active_profile) or {}
+    compact_token_limit = parse_compact_token_limit(profile.get("compact_token_limit"))
+    if compact_token_limit is None:
+        compact_token_limit = parse_compact_token_limit(get_setting("compact_token_limit", None))
     return {
         "workspace": str(settings.workspace_path),
         "base_dir": str(settings.base_dir),
@@ -118,6 +125,7 @@ async def status():
         "media_model": media_model_label(),
         "model_thinking": settings.model_thinking or "",
         "context_window": context_window,
+        "compact_token_limit": compact_token_limit or 0,
         "version": __version__,
         "channels": deps.channel_manager.get_status() if deps.channel_manager else {},
         "scheduler": scheduler_status,

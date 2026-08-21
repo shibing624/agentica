@@ -583,6 +583,11 @@ settings:
 #  enable_evict: true        # Layer 1: drop old tool results under pressure
 #  enable_auto_compact: true # Layer 2: LLM-summarise when the window fills
 #                            # (/compact still works when this is false)
+#  compact_token_limit:      # optional working cap (absolute tokens). Does
+#                            # not rewrite the model's context_window. Layer 2
+#                            # fires at min(this, window×0.95). Unset = 95% of
+#                            # the provider window. Prefer the same field on a
+#                            # profile when only one model needs a smaller cap.
 #  resume_cwd: ask           # ask|session|current — directory to use when /resume
 #                            # picks a session started in another directory
 #  media_model:              # gateway: Gemini used to describe/transcribe

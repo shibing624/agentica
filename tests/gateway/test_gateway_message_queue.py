@@ -128,7 +128,7 @@ async def test_distinct_sessions_run_concurrently(patched_deps):
     both_running = asyncio.Event()
     running = set()
 
-    async def chat(message, session_id, user_id, media=None):
+    async def chat(message, session_id, user_id, media=None, owner=None):
         running.add(session_id)
         if len(running) == 2:
             both_running.set()

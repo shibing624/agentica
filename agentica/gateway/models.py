@@ -149,6 +149,7 @@ class ProfileUpsertRequest(BaseModel):
     reasoning_effort: Optional[str] = None
     max_tokens: Optional[int] = None
     context_window: Optional[int] = None
+    compact_token_limit: Optional[int] = None
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     auxiliary_model: Optional[dict] = None

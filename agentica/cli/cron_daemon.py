@@ -45,6 +45,7 @@ def run_cron_daemon(args, console) -> None:
         "reasoning_effort": profile.get("reasoning_effort"),
         "top_p": profile.get("top_p"),
         "context_window": profile.get("context_window"),
+        "compact_token_limit": profile.get("compact_token_limit"),
         "debug": verbose,
     }
 
