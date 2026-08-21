@@ -39,7 +39,7 @@ from .services.channel_manager import ChannelManager
 from .services.agent_peers import GatewayAgentPeers
 from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
-from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes
+from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes
 
 # ContextVar holding the current request ID — async-safe, no threading issues
 _request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -361,9 +361,11 @@ async def web_favicon(request: Request):
 @app.get("/chat/{full_path:path}", response_class=HTMLResponse)
 @app.get("/traces", response_class=HTMLResponse)
 @app.get("/traces/{full_path:path}", response_class=HTMLResponse)
+@app.get("/users", response_class=HTMLResponse)
+@app.get("/users/{full_path:path}", response_class=HTMLResponse)
 @app.get("/login", response_class=HTMLResponse)
 async def web_spa(full_path: str = ""):
-    """Serve the SPA shell. Client router owns /chat, /traces and /login.
+    """Serve the SPA shell. Client router owns /chat, /traces, /users and /login.
 
     ``/login`` is outside the token gate (see ``auth._OPEN_PATHS``) — it is the
     one page a signed-out browser must be able to load.
@@ -407,6 +409,7 @@ async def desktop_shutdown(request: Request):
 app.include_router(auth_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(chat.router)
+app.include_router(workspace_routes.router)
 app.include_router(traces_routes.router)
 app.include_router(scheduler_routes.router)
 app.include_router(plugins_routes.router)

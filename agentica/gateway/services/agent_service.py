@@ -44,6 +44,7 @@ from .model_factory import (
     get_self_manage_tools, get_self_manage_instructions,
 )
 from .response_formatter import extract_metrics, format_tool_call_args, format_tool_result
+from .session_usage import turn_usage_payload, usage_payload
 
 if TYPE_CHECKING:
     from ..channels.base import InboundMedia
@@ -56,6 +57,39 @@ _AGENT_BUILD_TIMEOUT_S = 30
 # history lives in the dedicated TaskRun store (agentica.cron.jobs), not the
 # chat session log. See AgentService.run_cron().
 CRON_SESSION_PREFIX = "scheduled_"
+
+
+def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Compact status dict for the web goal bar (CLI ``status_line`` / budget)."""
+    tokens_used = int(payload.get("tokens_used") or 0)
+    token_budget = payload.get("token_budget")
+    turns_used = int(payload.get("turns_used") or 0)
+    turn_budget = payload.get("turn_budget")
+    wall_used = float(payload.get("wall_clock_used_sec") or 0)
+    wall_budget = payload.get("wall_clock_budget_sec")
+    parts: List[str] = []
+    if token_budget is not None:
+        parts.append(f"tokens {tokens_used:,}/{int(token_budget):,}")
+    else:
+        parts.append(f"tokens {tokens_used:,}")
+    if turn_budget is not None:
+        parts.append(f"turns {turns_used}/{int(turn_budget)}")
+    else:
+        parts.append(f"turns {turns_used}")
+    if wall_budget is not None:
+        parts.append(f"wall {wall_used:.0f}s/{float(wall_budget):.0f}s")
+    return {
+        "status": payload.get("status") or "active",
+        "objective": payload.get("objective") or "",
+        "progress": " · ".join(parts),
+        "turns_used": turns_used,
+        "tokens_used": tokens_used,
+        "token_budget": token_budget,
+        "turn_budget": turn_budget,
+        "wall_clock_used_sec": wall_used,
+        "wall_clock_budget_sec": wall_budget,
+        "message": payload.get("message") or "",
+    }
 
 # Web sessions default to "ask" approval mode, which strips write tools
 # (write_file/edit_file/apply_patch/execute) from the schema sent to the model (see
@@ -93,6 +127,10 @@ class ChatResult:
     # model used, media skipped, …); the channel layer prefixes these to the
     # reply so IM users see them.
     media_notes: List[str] = field(default_factory=list)
+    # Session-level /usage snapshot (context breakdown + billed totals).
+    usage: Optional[Dict[str, Any]] = None
+    # This run's CostTracker split (input / cache read / hit / output / cost).
+    turn_usage: Optional[Dict[str, Any]] = None
 
 
 class LRUAgentCache:
@@ -363,7 +401,7 @@ class AgentService:
                 context_window=self.context_window,
                 reasoning=self.model_reasoning,
                 reasoning_effort=self.model_reasoning_effort,
-                thinking=settings.model_thinking,
+                thinking="enabled",
             )
             auxiliary_model = self._build_sibling_model("auxiliary")
             # The auxiliary model also serves as the task subagent model (CLI
@@ -376,7 +414,7 @@ class AgentService:
 
         # Extra tools: user-provided + cron + self-management (self-awareness)
         extra = list(self.extra_tools)
-        cron_tools = get_cron_tools()
+        cron_tools = get_cron_tools(owner=self._owner(owner))
         extra.extend(cron_tools)
         self_manage_tools = get_self_manage_tools()
         extra.extend(self_manage_tools)
@@ -555,6 +593,21 @@ class AgentService:
 
     # ============== Public API ==============
 
+    async def session_usage(
+        self,
+        session_id: str,
+        owner: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """CLI ``/usage`` for one web session: occupancy + session billing.
+
+        Builds the Agent if it is not cached yet, because the window
+        breakdown is measured from the live prompt (system / skills / tools
+        / history), not from the last SSE ``done`` event.
+        """
+        await self._ensure_initialized()
+        agent = await self._get_agent(session_id, owner)
+        return await usage_payload(agent, model_provider=self.model_provider)
+
     def get_context_window(self, session_id: Optional[str] = None) -> int:
         """Return the context window size for the model used by a session.
 
@@ -582,6 +635,25 @@ class AgentService:
         """
         expanded = get_skill_registry().expand_invocation(message)
         return expanded if expanded is not None else message
+
+    @staticmethod
+    async def _prepare_run_media(agent: Any, message: str, media: Optional[List["InboundMedia"]]):
+        """Route inbound images/audio/video the same way IM channels do.
+
+        Capable base models get the payload on ``agent.run(images=)`` /
+        ``audio=``. Everything else is described by ``settings.media_model``
+        (Gemini) and appended to the user text.
+        """
+        if not media:
+            return message, None, None, []
+        plan = await media_understanding.prepare(
+            media,
+            base_model_id=agent.model.id or "",
+            base_supports_images=bool(agent.model.supports_images),
+        )
+        if plan.text_parts:
+            message = message + "\n\n" + "\n\n".join(plan.text_parts)
+        return message, (plan.images or None), plan.audio, plan.notes
 
     async def chat(
         self,
@@ -627,17 +699,9 @@ class AgentService:
         async with lock:
             agent = await self._get_agent(session_id, owner)
             self._note_peer_turn(session_id, message)
-
-            media_plan = None
-            if media:
-                media_plan = await media_understanding.prepare(
-                    media,
-                    base_model_id=agent.model.id or "",
-                    base_supports_images=bool(agent.model.supports_images),
-                )
-                if media_plan.text_parts:
-                    message = message + "\n\n" + "\n\n".join(media_plan.text_parts)
-            media_notes = media_plan.notes if media_plan else []
+            message, run_images, run_audio, media_notes = await self._prepare_run_media(
+                agent, message, media,
+            )
 
             try:
                 if self._workspace:
@@ -646,8 +710,8 @@ class AgentService:
                 response = await agent.run(
                     self._expand_skill_invocation(message),
                     config=self._run_config_for_session(session_id, source),
-                    images=(media_plan.images or None) if media_plan else None,
-                    audio=media_plan.audio if media_plan else None,
+                    images=run_images,
+                    audio=run_audio,
                 )
 
                 content = (response.content or "").strip()
@@ -670,6 +734,8 @@ class AgentService:
                     tools_used=tools_used,
                     metrics=extract_metrics(agent),
                     media_notes=media_notes,
+                    usage=await usage_payload(agent, model_provider=self.model_provider),
+                    turn_usage=turn_usage_payload(agent),
                 )
 
             except Exception as e:
@@ -703,7 +769,7 @@ class AgentService:
 
         async with lock:
             agent = await asyncio.wait_for(
-                asyncio.to_thread(self._build_agent, session_id),
+                asyncio.to_thread(self._build_agent, session_id, user_id),
                 timeout=_AGENT_BUILD_TIMEOUT_S,
             )
             try:
@@ -736,13 +802,14 @@ class AgentService:
         session_id: str,
         user_id: str = "default",
         owner: Optional[str] = None,
+        on_event: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ) -> Dict[str, Any]:
         """Drive a bounded standing-goal loop (Agent.run_goal) for the web UI's
         "/goal <objective>" command.
 
-        Budgets are capped conservatively since this runs synchronously behind
-        a single HTTP request in a local, single-user gateway — there is no
-        UI for cancelling a runaway loop mid-flight yet.
+        Budgets are capped conservatively since this runs behind a single
+        HTTP request in a local gateway. ``on_event`` receives a compact
+        status dict after each ``goal.*`` event so the web bar can tick.
         """
         await self._ensure_initialized()
 
@@ -752,6 +819,13 @@ class AgentService:
                 f"Session '{session_id}' already has an active run. "
                 "Wait for it to complete or cancel it first."
             )
+
+        def _cb(event, payload: Dict[str, Any]) -> None:
+            if on_event is None:
+                return
+            data = goal_event_payload(payload)
+            data["event"] = getattr(event, "value", str(event))
+            on_event(data)
 
         async with lock:
             agent = await self._get_agent(session_id, owner)
@@ -767,12 +841,90 @@ class AgentService:
                 token_budget=80_000,
                 wall_clock_budget_sec=300,
                 seed_messages=seed_messages,
+                event_callback=_cb if on_event else None,
             )
             return {
                 "status": result.status,
                 "reason": result.reason,
                 "content": result.response_content,
                 "turns_used": result.turns_used,
+            }
+
+    async def compact_session(
+        self,
+        session_id: str,
+        owner: Optional[str] = None,
+        instructions: str = "",
+    ) -> Dict[str, Any]:
+        """Summarise this session's history — the web counterpart of CLI ``/compact``.
+
+        Same two-step as the CLI: native provider compact first, then
+        ``CompressionManager.auto_compact(force=True)``. A failed compact
+        leaves the transcript unchanged.
+        """
+        await self._ensure_initialized()
+        lock = self._get_session_lock(session_id)
+        if lock.locked():
+            raise RuntimeError(
+                f"Session '{session_id}' already has an active run. "
+                "Wait for it to complete or cancel it first."
+            )
+
+        async with lock:
+            agent = await self._get_agent(session_id, owner)
+            wm = agent.working_memory
+            messages = wm.messages
+            msg_count = len(messages)
+            if msg_count == 0:
+                return {"ok": False, "error": "No messages to compact."}
+
+            custom = instructions.strip() or None
+            model = agent.model
+            hooks = agent._run_hooks
+            if hooks is not None:
+                await hooks.on_pre_compact(agent=agent, messages=messages)
+
+            native_compacted = False
+            if model.supports_native_compaction:
+                try:
+                    result = await model.compact_context(messages, instructions=custom)
+                    if result is None:
+                        raise RuntimeError("model advertised native compaction but returned no checkpoint")
+                except Exception as error:
+                    logger.warning(
+                        "Native compaction failed (%s); falling back to local compaction", error
+                    )
+                else:
+                    messages[-1].provider_checkpoint = result.checkpoint
+                    wm.collapse_runs(messages)
+                    if agent._session_log is not None:
+                        agent._session_log.append_provider_checkpoint(result.checkpoint)
+                    native_compacted = True
+
+            if not native_compacted:
+                cm = agent.tool_config.compression_manager if agent.tool_config else None
+                if cm is None:
+                    return {"ok": False, "error": "No compression manager on this agent; nothing to compact with."}
+                compacted = await cm.auto_compact(
+                    messages,
+                    model=model,
+                    force=True,
+                    working_memory=wm,
+                    custom_instructions=custom,
+                )
+                if not compacted:
+                    return {"ok": False, "error": "Compaction failed; conversation left unchanged."}
+                wm.collapse_runs(messages)
+
+            if hooks is not None:
+                await hooks.on_post_compact(agent=agent, messages=messages)
+
+            return {
+                "ok": True,
+                "native": native_compacted,
+                "messages_before": msg_count,
+                "messages_after": len(messages),
+                "usage": await usage_payload(agent, model_provider=self.model_provider),
             }
 
     async def chat_stream(
@@ -786,6 +938,7 @@ class AgentService:
         on_tool_result: Optional[Callable[[str, str], Any]] = None,
         on_thinking: Optional[Callable[[str], Any]] = None,
         owner: Optional[str] = None,
+        media: Optional[List["InboundMedia"]] = None,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks.
 
@@ -803,6 +956,7 @@ class AgentService:
             on_tool_call: Called when a tool call starts (name, args)
             on_tool_result: Called when a tool call completes (name, result)
             on_thinking: Called with each reasoning delta
+            media: Pasted/attached images from the web UI (same routing as IM).
 
         Returns:
             ChatResult with accumulated content + metrics
@@ -821,7 +975,7 @@ class AgentService:
             return await self._chat_stream_impl(
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
-                owner,
+                owner, media,
             )
 
     async def _chat_stream_impl(
@@ -835,11 +989,15 @@ class AgentService:
         on_tool_result: Optional[Callable[[str, str], Any]],
         on_thinking: Optional[Callable[[str], Any]],
         owner: Optional[str],
+        media: Optional[List["InboundMedia"]],
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
         agent = await self._get_agent(session_id, owner)
         self._note_peer_turn(session_id, message)
+        message, run_images, run_audio, media_notes = await self._prepare_run_media(
+            agent, message, media,
+        )
 
         try:
             if self._workspace:
@@ -857,6 +1015,8 @@ class AgentService:
                     source,
                     stream_intermediate_steps=True,
                 ),
+                images=run_images,
+                audio=run_audio,
             ):
                 if chunk is None:
                     continue
@@ -904,6 +1064,9 @@ class AgentService:
                 tools_used=tools_used,
                 reasoning=reasoning_content,
                 metrics=extract_metrics(agent),
+                media_notes=media_notes,
+                usage=await usage_payload(agent, model_provider=self.model_provider),
+                turn_usage=turn_usage_payload(agent),
             )
 
         except (asyncio.CancelledError, AgentCancelledError, KeyboardInterrupt):
@@ -924,39 +1087,83 @@ class AgentService:
     def list_sessions(self, owner: Optional[str] = None) -> List[Dict[str, Any]]:
         """List sessions from the persistent SessionLog (single source of truth).
 
-        Returns rich metadata (name/preview/timestamps) so the UI can show
-        sessions across restarts, not just the in-memory LRU cache.
+        Returns rich metadata (name/preview/timestamps/work_dir) so the UI can
+        show sessions across restarts, not just the in-memory LRU cache.
+
+        The web sidebar is grouped by project, so this lists **every** project
+        under the owner's ``users/<id>/`` tree — not only ``settings.base_dir``.
+        Listing just the default work dir made a finished chat vanish after
+        opening its trace: navigating remounted the shell, refetched this
+        list, and overwrote the sidebar with a set that did not include it.
 
         Scheduled (cron) job runs are excluded — they're not interactive chat
         sessions and shouldn't clutter the sidebar; their execution history
         is tracked separately via the cron TaskRun store.
         """
-        # Scope to the current project (global base_dir) + user, so the sidebar
-        # matches what the CLI shows when run from the same project directory.
-        base_dir = self._session_base_dir(str(settings.base_dir), owner)
+        uid = self._owner(owner)
+        projects = SessionLog.list_projects(user_id=uid)
+        if not projects:
+            projects = [{
+                "base_dir": self._session_base_dir(str(settings.base_dir), owner),
+                "work_dir": str(settings.base_dir),
+            }]
         out: List[Dict[str, Any]] = []
-        for s in SessionLog.list_sessions(base_dir=base_dir):
-            sid = s["session_id"]
-            if sid.startswith(CRON_SESSION_PREFIX):
-                continue
-            preview = SessionLog.session_preview(s["path"])
-            first_user = (preview or {}).get("first_user", "")
-            name = s.get("name") or (first_user[:40] if first_user else "Chat")
-            out.append({
-                "session_id": sid,
-                "name": name,
-                "preview": first_user,
-                "user_count": (preview or {}).get("user_count", 0),
-                "last_timestamp": s.get("last_timestamp"),
-                "size_bytes": s.get("size_bytes", 0),
-                "archived": bool(s.get("archived")),
-            })
+        for project in projects:
+            base_dir = project["base_dir"]
+            work_dir = project.get("work_dir") or ""
+            for s in SessionLog.list_sessions(base_dir=base_dir):
+                sid = s["session_id"]
+                if sid.startswith(CRON_SESSION_PREFIX):
+                    continue
+                preview = SessionLog.session_preview(s["path"])
+                first_user = (preview or {}).get("first_user", "")
+                name = s.get("name") or (first_user[:40] if first_user else "Chat")
+                out.append({
+                    "session_id": sid,
+                    "name": name,
+                    "preview": first_user,
+                    "user_count": (preview or {}).get("user_count", 0),
+                    "last_timestamp": s.get("last_timestamp"),
+                    "size_bytes": s.get("size_bytes", 0),
+                    "archived": bool(s.get("archived")),
+                    "work_dir": s.get("work_dir") or work_dir,
+                })
+        out.sort(key=lambda row: str(row.get("last_timestamp") or ""), reverse=True)
         return out
 
     def session_log_for(self, session_id: str, owner: Optional[str] = None) -> SessionLog:
         """Open the on-disk SessionLog for a session (may not exist yet)."""
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
+        base_dir, _work_dir = self._locate_session(session_id, owner)
         return SessionLog(session_id=session_id, base_dir=base_dir)
+
+    def _locate_session(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
+        """Find the project directory that actually holds this session's jsonl.
+
+        ``_session_work_dirs`` is process memory. After a gateway restart it is
+        empty, and guessing ``settings.base_dir`` is how View trace 404'd a log
+        that had been written under another project. Search the owner's tree.
+        """
+        jsonl = f"{session_id}.jsonl"
+        remembered = self._session_work_dirs.get(session_id)
+        if remembered:
+            base = self._session_base_dir(remembered, owner)
+            if (Path(base) / jsonl).is_file():
+                return base, remembered
+        fallback_work = str(settings.base_dir)
+        fallback = self._session_base_dir(fallback_work, owner)
+        if (Path(fallback) / jsonl).is_file():
+            return fallback, fallback_work
+        hits = [
+            h for h in SessionLog.find_sessions(session_id, user_id=self._owner(owner))
+            if h.get("session_id") == session_id
+        ]
+        if hits:
+            hit = hits[0]
+            work_dir = hit.get("work_dir") or fallback_work
+            if work_dir:
+                self._session_work_dirs[session_id] = work_dir
+            return str(hit["base_dir"]), work_dir
+        return fallback, remembered or fallback_work
 
     def has_active_runs(self) -> bool:
         """Return True if any session currently has an in-flight run.
@@ -973,7 +1180,7 @@ class AgentService:
         reappear after restart (SessionLog is the single source of truth).
         Returns True if either the cache or the on-disk log existed.
         """
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
+        base_dir, _work_dir = self._locate_session(session_id, owner)
         removed = self._cache.delete(session_id)
         self._session_work_dirs.pop(session_id, None)
         if self.agent_peers is not None:
@@ -998,14 +1205,14 @@ class AgentService:
 
     def rename_session(self, session_id: str, name: str, owner: Optional[str] = None) -> None:
         """Rename a session by writing the sidecar .meta.json (SessionLog)."""
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
+        base_dir, _work_dir = self._locate_session(session_id, owner)
         SessionLog.rename_session(session_id, name, base_dir=base_dir)
 
     def archive_session(
         self, session_id: str, archived: bool = True, owner: Optional[str] = None,
     ) -> None:
         """Archive/unarchive a session by writing SessionLog sidecar metadata."""
-        base_dir = self._session_base_dir(self.get_session_work_dir(session_id), owner)
+        base_dir, _work_dir = self._locate_session(session_id, owner)
         SessionLog.archive_session(session_id, archived=archived, base_dir=base_dir)
 
     def clear_session(self, session_id: str, owner: Optional[str] = None) -> bool:
@@ -1060,8 +1267,10 @@ class AgentService:
         """Which ``users/<id>/`` partition a call reads and writes.
 
         Unset means the machine's own partition (``settings.default_user_id``),
-        which is what a cron run, an IM channel and the CLI all share. Only the
-        web surface has accounts, so only its routes pass an owner — and they
+        which is what an IM channel and the CLI share. Cron jobs carry their
+        own ``user_id`` and pass it here so a scheduled run writes into the
+        account that created the job. Only the web surface has accounts, so
+        only its routes pass an owner — and they
         take it from the session cookie, never from the request body: a body
         field naming somebody else's partition is not a parameter, it is a way
         in.
@@ -1191,8 +1400,8 @@ class AgentService:
     async def _invalidate_cache(self) -> None:
         """Clear the agent cache so agents rebuild on next request.
 
-        Used when a runtime-only setting changes (e.g. thinking toggle) that
-        does not require re-reading the profile.
+        Used when a runtime-only setting changes (model switch, work dir)
+        that does not require re-reading the profile.
         """
         async with self._init_lock:
             self._initialized = False

@@ -178,9 +178,11 @@ def _write_skill_md(path: Path, name: str, description: str, content: str, trigg
 async def list_skills():
     registry = _load_registry()
     skills = []
+    slash_by_name = {sk.name: slug for slug, sk in registry.auto_commands().items()}
     for s in registry.list_all():
         d = s.to_dict(include_content=False)
         d["editable"] = s.location == "user"
+        d["slash"] = slash_by_name.get(s.name) or ""
         skills.append(d)
     skills.sort(key=lambda x: x["name"])
     return {"skills": skills, "total": len(skills)}

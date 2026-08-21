@@ -30,10 +30,11 @@ conversations and nobody else's. Two consequences that are not optional:
   rename. Renaming is what would move a conversation out of view, which is the
   trap this design is otherwise built to avoid.
 
-Roles decide one thing: who may add, reset and remove accounts
-(``ROLE_ADMIN``). Everything else — models, skills, cron, the working
-directory — is machine-wide configuration that any signed-in account may
-change, because this is somebody's own machine and not a tenanted service.
+Roles decide one thing: who may add, change passwords of, and remove
+accounts (``ROLE_ADMIN``). Everything else — models, skills, cron, the
+working directory — is machine-wide configuration that any signed-in
+account may change, because this is somebody's own machine and not a
+tenanted service.
 
 A gateway with no password is not a gateway with no credential. First start
 seeds ``default`` with a generated one and prints it, because the alternative
@@ -41,9 +42,10 @@ was a ``/chat?token=…`` URL from the log — per process, so it changed on eve
 restart, and unusable to anyone whose gateway was started detached or by the
 desktop shell. The plaintext is kept at ``initial-password`` (``0600``) *only*
 while it is still the generated one, so a user who scrolled past the banner can
-still get in; changing the password deletes it. A password an admin generates
-for somebody else is shown once, on the page that created the account, and
-never written down.
+still get in; changing the password deletes it. An account the admin adds is given an
+initial password they typed (not one we generate and show once) — they
+already have to tell the new person how to get in, so typing it is the
+whole delivery.
 
 Password hashing is ``hashlib.scrypt`` — stdlib, no new dependency, and a real
 slow hash. The stored form is ``scrypt$n$r$p$<salt b64>$<hash b64>``: the
@@ -57,6 +59,7 @@ import os
 import re
 import secrets
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -73,11 +76,15 @@ AUTH_FILE = Path(AGENTICA_HOME) / "gateway" / "auth.json"
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
 
-# An account id is a directory name (``users/<id>/``), so it is a whitelist and
-# not a sanitiser: lowercase, digits, dash, underscore, 1–32 chars, starting
-# with an alphanumeric. That rules out `.`, `..`, separators and the leading
-# dash that reads as a flag.
-_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+# An account id is a directory name (``users/<id>/`` and the default Project
+# folder). Input is sanitised first (spaces/hyphens → ``_``, other junk
+# dropped); what remains must match this whitelist: 2–32 chars, a lowercase
+# letter then lowercase letters, digits or underscore.
+_ID_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
+
+# Workspace root already has these folders; an account of the same name would
+# mkdir over them as the default Project.
+_RESERVED_IDS = frozenset({"users", "skills"})
 
 # The account seeded before this one existed. Migrated once (see
 # `seed_default_account`) rather than kept working: its id would now name a
@@ -132,6 +139,36 @@ class LoginThrottled(Exception):
     def __init__(self, retry_after: float):
         self.retry_after = retry_after
         super().__init__(f"Too many failed attempts; retry in {retry_after:.0f}s")
+
+
+def normalize_account_id(raw: str) -> str:
+    """Turn typed input into a directory-safe account id.
+
+    Lowercase, NFKC, spaces/hyphens to ``_``, drop other characters, collapse
+    underscores, prefix ``u_`` when it would start with a digit, then cap at
+    32. Returns ``""`` when nothing usable is left — the caller refuses that.
+    """
+    text = unicodedata.normalize("NFKC", raw or "").strip().lower()
+    buf: list[str] = []
+    prev_us = False
+    for ch in text:
+        if ch.isspace() or ch == "-":
+            if buf and not prev_us:
+                buf.append("_")
+                prev_us = True
+            continue
+        if ("a" <= ch <= "z") or ("0" <= ch <= "9") or ch == "_":
+            if ch == "_" and prev_us:
+                continue
+            buf.append(ch)
+            prev_us = ch == "_"
+            continue
+    cleaned = "".join(buf).strip("_")
+    if cleaned[:1].isdigit():
+        cleaned = "u_" + cleaned
+    if len(cleaned) > 32:
+        cleaned = cleaned[:32].rstrip("_")
+    return cleaned
 
 
 def default_account_id() -> str:
@@ -381,12 +418,15 @@ class AccountStore:
         and a second readable copy of somebody else's credential has no reader
         after that.
         """
-        user_id = (user_id or "").strip().lower()
+        user_id = normalize_account_id(user_id)
         if not _ID_RE.match(user_id):
             raise ValueError(
-                "A username is 1–32 characters of a–z, 0–9, dash or underscore, "
-                "starting with a letter or digit."
+                "A username is 2–32 characters after cleanup: a letter, then "
+                "letters, digits or underscore. Spaces and hyphens become "
+                "underscores; other characters are dropped."
             )
+        if user_id in _RESERVED_IDS:
+            raise ValueError(f"{user_id} is reserved")
         if role not in (ROLE_ADMIN, ROLE_USER):
             raise ValueError(f"Unknown role: {role}")
         if user_id in self._read()["accounts"]:
@@ -422,14 +462,6 @@ class AccountStore:
         }
         self._write(data)
         self._failures.pop(user_id, None)
-
-    def reset_password(self, user_id: str) -> str:
-        """Generate a new password for an account and return it once."""
-        if self.get_account(user_id) is None:
-            raise ValueError(f"{user_id} does not exist")
-        password = generate_initial_password()
-        self.set_password(user_id, password, initial=True)
-        return password
 
     # ---- first run ----
 

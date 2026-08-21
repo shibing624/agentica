@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
-import { agoStr, shortenPath } from "../lib/format";
-import { archiveSession, deleteSession, renameSession, switchTo } from "../sessions";
-import { IconArchive, IconClose, IconFolder, IconPencil } from "../icons";
+import { agoStr } from "../lib/format";
+import { archiveSession, deleteSession, newChatInDir, renameSession, switchTo } from "../sessions";
+import { IconArchive, IconClose, IconFolder, IconPencil, IconPlus } from "../icons";
 import {
   getState, projectIdForDir, projectNameForDir, useAppState, type Session,
 } from "../store";
@@ -12,10 +12,9 @@ import {
  * The conversation list in the left sidebar, grouped by working directory.
  *
  * It lives here rather than in ChatPage because it is the sidebar's content on
- * every page, Traces included: the nav is the same nav, and a user who has just
- * read a trace usually wants to go back to that conversation. Picking one from
- * a page that is not chat therefore navigates to chat — the alternative is a
- * click that silently changes which session is current somewhere off screen.
+ * every page (chat, traces, users). Picking a session from a page that is not
+ * chat navigates to chat — a click that silently changed the current session
+ * off screen would look like a no-op.
  */
 export function SessionTree() {
   const s = useAppState();
@@ -23,6 +22,7 @@ export function SessionTree() {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const q = s.sidebarSearch.toLowerCase();
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => {
     const by: Record<string, { id: string; name: string; dir: string; sessions: { id: string; session: Session }[] }> = {};
     for (const [id, sess] of Object.entries(s.sessions)) {
@@ -40,36 +40,51 @@ export function SessionTree() {
     if (pathname !== "/chat") nav("/chat");
   };
 
+  const addIn = (dir: string) => {
+    newChatInDir(dir);
+    if (pathname !== "/chat") nav("/chat");
+  };
+
   return (
     <div className="s-list">
       {!groups.length && <div className="s-empty">{q ? S.chat.noMatch : S.chat.noSessions}</div>}
-      {groups.map((g) => (
-        <div className="p-group" key={g.id}>
-          <div className="p-head">
-            <div className="p-main">
-              <div className="p-title">
-                <span className="p-icon"><IconFolder /></span>
-                <span className="p-title-text">{g.name}</span>
-                <span className="p-count">{g.sessions.length}</span>
-              </div>
-              <div className="p-dir" title={g.dir}>{shortenPath(g.dir)}</div>
+      {groups.map((g) => {
+        const shut = !!collapsed[g.id];
+        return (
+          <div className="p-group" key={g.id}>
+            <div className="p-head">
+              <button type="button" className="p-caret" title={g.name}
+                      onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}>
+                {shut ? "▸" : "▾"}
+              </button>
+              <button type="button" className="p-main" onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}>
+                <div className="p-title">
+                  <span className="p-icon"><IconFolder /></span>
+                  <span className="p-title-text">{g.name}</span>
+                  <span className="p-count">{g.sessions.length}</span>
+                </div>
+              </button>
+              <button type="button" className="p-add" title={S.chat.newInProject}
+                      onClick={(e) => { e.stopPropagation(); addIn(g.dir); }}>
+                <IconPlus />
+              </button>
             </div>
+            {!shut && g.sessions.sort((a, b) => b.session.ts - a.session.ts).map(({ id, session }) => (
+              <div key={id} className={"s-item" + (id === s.curSess ? " active" : "")} onClick={() => pick(id)}>
+                <div className="s-main">
+                  <span className="ti">{session.title}</span>
+                </div>
+                <span className="mt">{agoStr(session.ts)}</span>
+                <div className="s-actions">
+                  <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); promptRename(id); }}><IconPencil /></button>
+                  <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
+                  <button className="db" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
+                </div>
+              </div>
+            ))}
           </div>
-          {g.sessions.sort((a, b) => b.session.ts - a.session.ts).map(({ id, session }) => (
-            <div key={id} className={"s-item" + (id === s.curSess ? " active" : "")} onClick={() => pick(id)}>
-              <div className="s-main">
-                <span className="ti">{session.title}</span>
-              </div>
-              <span className="mt">{agoStr(session.ts)}</span>
-              <div className="s-actions">
-                <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); promptRename(id); }}><IconPencil /></button>
-                <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
-                <button className="db" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

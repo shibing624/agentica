@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
+
 # Gateway tests require fastapi + lark-oapi etc. Skip cleanly if not installed.
 pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway] extras")
 
@@ -232,10 +234,14 @@ class TestAgentServiceStreamToolDispatch:
         async def on_tool_result(name, result):
             results.append((name, result))
 
-        result = asyncio.run(svc.chat_stream(
-            "go", session_id="s1", user_id="u1",
-            on_tool_call=on_tool_call, on_tool_result=on_tool_result,
-        ))
+        with patch(
+            "agentica.gateway.services.agent_service.usage_payload",
+            AsyncMock(return_value=None),
+        ):
+            result = asyncio.run(svc.chat_stream(
+                "go", session_id="s1", user_id="u1",
+                on_tool_call=on_tool_call, on_tool_result=on_tool_result,
+            ))
         return started, results, result
 
     def test_each_tool_reports_once_in_call_order(self, tmp_path):
@@ -416,6 +422,48 @@ class TestAgentServiceRunCron:
             sessions = svc.list_sessions()
 
         assert [s["session_id"] for s in sessions] == ["chat123"]
+
+    def test_list_sessions_includes_every_project(self, tmp_path):
+        """The web sidebar is grouped by work dir; listing only settings.base_dir
+        dropped a just-finished chat after opening its trace."""
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        dir_a = tmp_path / "repo-a"
+        dir_b = tmp_path / "repo-b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        SessionLog("sess-a", work_dir=str(dir_a), user_id="default").append("user", "hello a")
+        SessionLog("sess-b", work_dir=str(dir_b), user_id="default").append("user", "hello b")
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        sessions = svc.list_sessions(owner="default")
+        by_id = {s["session_id"]: s for s in sessions}
+        assert set(by_id) >= {"sess-a", "sess-b"}
+        assert by_id["sess-a"]["work_dir"] == str(dir_a)
+        assert by_id["sess-b"]["work_dir"] == str(dir_b)
+
+    def test_session_log_for_finds_other_project_after_restart(self, tmp_path, monkeypatch):
+        """View trace used settings.base_dir after a restart, so a chat that
+        lived in another project 404'd even though the jsonl was on disk."""
+        from agentica.gateway.config import settings
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        default_dir = tmp_path / "default-cwd"
+        other = tmp_path / "other-repo"
+        default_dir.mkdir()
+        other.mkdir()
+        log = SessionLog("s_trace1", work_dir=str(other), user_id="default")
+        log.append("user", "hello from other")
+
+        monkeypatch.setattr(settings, "base_dir", default_dir)
+        svc = AgentService(workspace_path=str(tmp_path))
+        assert svc._session_work_dirs == {}
+        found = svc.session_log_for("s_trace1", owner="default")
+        assert found.path.exists()
+        assert found.path == log.path
+        assert svc.get_session_work_dir("s_trace1") == str(other)
 
 
 # ============== TestSettings ==============
@@ -1033,4 +1081,68 @@ class TestGatewayStartupLogPath:
             "~/.agentica/logs/20260814-65634.log"
         )
         assert _display_home_path(str(tmp_path / "x.log")) == str(tmp_path / "x.log")
+
+
+class TestCompactSession:
+    def _svc(self, tmp_path, agent):
+        from agentica.gateway.services.agent_service import AgentService
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        svc._get_agent = AsyncMock(return_value=agent)
+        return svc
+
+    def test_empty_history_is_not_an_error_payload_ok_false(self, tmp_path):
+        agent = MagicMock()
+        agent.working_memory.messages = []
+        svc = self._svc(tmp_path, agent)
+        result = asyncio.run(svc.compact_session("s1"))
+        assert result["ok"] is False
+        assert "No messages" in result["error"]
+
+    def test_local_compact_collapses_runs(self, tmp_path):
+        messages = [MagicMock(), MagicMock(), MagicMock()]
+        agent = MagicMock()
+        agent.working_memory.messages = messages
+        agent.model.supports_native_compaction = False
+        agent.model.id = "gpt-4o-mini"
+        agent._run_hooks = None
+        agent._session_log = None
+        agent.tool_config.compression_manager.auto_compact = AsyncMock(return_value=True)
+        agent.run_response = None
+        agent.model.usage = None
+        # usage_payload walks working_memory + measure_context; stub the live
+        # agent enough that compact's return path can call it.
+        svc = self._svc(tmp_path, agent)
+        with patch(
+            "agentica.gateway.services.agent_service.usage_payload",
+            AsyncMock(return_value={"context_tokens": 12}),
+        ):
+            result = asyncio.run(svc.compact_session("s1"))
+        assert result["ok"] is True
+        assert result["native"] is False
+        assert result["messages_before"] == 3
+        agent.working_memory.collapse_runs.assert_called_once()
+        agent.tool_config.compression_manager.auto_compact.assert_awaited_once()
+
+
+class TestGoalEventPayload:
+    def test_formats_cli_style_progress(self):
+        from agentica.gateway.services.agent_service import goal_event_payload
+        d = goal_event_payload({
+            "status": "active",
+            "objective": "ship it",
+            "tokens_used": 1234,
+            "token_budget": 80_000,
+            "turns_used": 2,
+            "turn_budget": 15,
+        })
+        assert d["progress"] == "tokens 1,234/80,000 · turns 2/15"
+        assert d["objective"] == "ship it"
+        assert d["status"] == "active"
+
+    def test_omitted_caps_are_bare_counts(self):
+        from agentica.gateway.services.agent_service import goal_event_payload
+        d = goal_event_payload({"tokens_used": 10, "turns_used": 1})
+        assert d["progress"] == "tokens 10 · turns 1"
 

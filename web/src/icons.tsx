@@ -38,18 +38,17 @@ export const IconPlug = () => (
     <path d="M12 5.3v3.3a2.7 2.7 0 01-2.7 2.7h-2.6a2.7 2.7 0 01-2.7-2.7V5.3z" />
   </S>
 );
-export const IconTrace = () => (
-  <S strokeWidth="1.3" strokeLinecap="round">
-    <path d="M2 12.5h3.2M7.2 12.5h6.8" />
-    <rect x="2" y="3" width="3.2" height="7" rx="1" />
-    <rect x="7.2" y="5.5" width="2.6" height="4.5" rx="1" />
-    <rect x="11.4" y="4" width="2.6" height="6" rx="1" />
-  </S>
-);
 export const IconSidebar = () => (
   <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
     <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
     <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" />
+  </S>
+);
+export const IconDatabase = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round">
+    <ellipse cx="8" cy="4.2" rx="5.2" ry="2.1" />
+    <path d="M2.8 4.2v7.6c0 1.16 2.33 2.1 5.2 2.1s5.2-.94 5.2-2.1V4.2" />
+    <path d="M2.8 8c0 1.16 2.33 2.1 5.2 2.1s5.2-.94 5.2-2.1" />
   </S>
 );
 export const IconFolder = () => (
@@ -88,6 +87,12 @@ export const IconUser = () => (
     <path d="M2.4 14c.5-3.2 3-5 5.6-5s5.1 1.8 5.6 5z" />
   </svg>
 );
+export const IconLogout = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6.2 2.5H3.4A1.15 1.15 0 002.25 3.65v8.7c0 .64.51 1.15 1.15 1.15H6.2" />
+    <path d="M6.5 8h7.25M11.2 5.25L13.75 8 11.2 10.75" />
+  </S>
+);
 export const IconChat = () => (
   <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 3.5A1.5 1.5 0 013.5 2h9A1.5 1.5 0 0114 3.5v6A1.5 1.5 0 0112.5 11H6l-3 3v-3H3.5A1.5 1.5 0 012 9.5z" />
@@ -109,22 +114,38 @@ export const IconTerminal = () => (
     <path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0114.25 15H1.75A1.75 1.75 0 010 13.25V2.75zm7 7.5a.75.75 0 000 1.5h4.25a.75.75 0 000-1.5H7zm-3.22-4.97a.75.75 0 00-1.06 1.06L4.44 8 2.72 9.72a.75.75 0 101.06 1.06l2-2a.75.75 0 000-1.06l-2-2z" />
   </svg>
 );
+export const IconArrowDown = () => (
+  <S strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3v10M4.3 9.3L8 13l3.7-3.7" />
+  </S>
+);
+export const IconChevronDown = () => (
+  <S strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3.5 6.5L8 11l4.5-4.5" />
+  </S>
+);
+export const IconBook = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 4.2C6.6 3 4.4 2.8 2.6 3.6v8.6c1.8-.8 4-.6 5.4.6 1.4-1.2 3.6-1.4 5.4-.6V3.6C11.6 2.8 9.4 3 8 4.2z" />
+    <path d="M8 4.2v8.6" />
+  </S>
+);
 export const IconAsk = () => (
-  <S strokeWidth="1.3">
-    <circle cx="8" cy="8" r="6.25" />
-    <path d="M6.2 6.1a1.9 1.9 0 013.6.9c0 1.3-1.8 1.5-1.8 2.9" strokeLinecap="round" />
-    <circle cx="8" cy="11.7" r="0.2" fill="currentColor" stroke="none" />
+  <S strokeWidth="1.3" strokeLinecap="round">
+    <ellipse cx="8" cy="8" rx="5.4" ry="3.2" />
+    <circle cx="8" cy="8" r="1.35" />
   </S>
 );
 export const IconAuto = () => (
   <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" stroke="none">
-    <path d="M8.6 1.5L3 9.2h3.6L6.2 14.5 12.5 6.3H8.8z" />
+    <path d="M8.7 1.4L3.2 8.9h3.5L6.4 14.6 12.8 6.6H9.2z" />
   </svg>
 );
 export const IconAllowAll = () => (
   <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M4.5 7.3V5.1a3.5 3.5 0 016.7-1.35" />
-    <rect x="3" y="7.3" width="10" height="6.5" rx="1.3" />
+    <path d="M8 2.4L14.2 13.2H1.8z" />
+    <path d="M8 6.4v3.4" />
+    <circle cx="8" cy="11.35" r="0.45" fill="currentColor" stroke="none" />
   </S>
 );
 export const IconSend = () => (

@@ -160,18 +160,21 @@ def _gateway_cron_job_runner(job: Any) -> dict:
     return future.result()
 
 
-def get_cron_tools() -> List[Any]:
+def get_cron_tools(owner: Optional[str] = None) -> List[Any]:
     """Load the cron tool, wired for real immediate execution.
 
     Returns a ``CronTool`` (not the bare ``cronjob`` function) with a
     ``job_runner`` so ``cronjob(action="run", ...)`` actually executes the
     job now and returns its result — same as the CLI — instead of just
     marking it due for the next scheduler tick.
+
+    ``owner`` is the signed-in account: create/list/edit stay inside that
+    account's jobs. The CLI omits it (one user on the machine).
     """
     try:
         from agentica.tools.cron_tool import CronTool
         logger.debug("Loaded cron tool")
-        return [CronTool(job_runner=_gateway_cron_job_runner)]
+        return [CronTool(job_runner=_gateway_cron_job_runner, owner=owner)]
     except Exception as e:
         logger.warning(f"Failed to load cron tools: {e}")
         return []

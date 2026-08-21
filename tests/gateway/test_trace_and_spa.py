@@ -63,6 +63,10 @@ def test_trace_analysis_and_events(client_and_svc):
     assert analysis["file"]["sizeBytes"] > 0
     round0 = analysis["rounds"][0]
     assert round0["title"] == "hello"
+    assert round0["tokens"]["prompt"] == 10
+    assert round0["tokens"]["input"] == 10
+    assert round0["tokens"]["output"] == 4
+    assert round0["tokens"]["cacheHitPercent"] is None
     prompt = next(e for e in round0["entries"] if e["kind"] == "system_prompt")
     assert prompt["detail"] == "You are agentica."
     text = next(e for e in round0["entries"] if e["kind"] == "text")
@@ -71,7 +75,7 @@ def test_trace_analysis_and_events(client_and_svc):
 
 def test_chat_and_traces_serve_html(client_and_svc):
     client, _ = client_and_svc
-    for path in ("/chat", "/traces"):
+    for path in ("/chat", "/traces", "/users"):
         resp = client.get(path)
         assert resp.status_code in (200, 503)
         assert "text/html" in resp.headers["content-type"]

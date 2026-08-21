@@ -134,7 +134,7 @@ pip install -U "agentica[gateway]"
 agentica-gateway
 ```
 
-Serves at `http://127.0.0.1:8881/chat` (chat, traces, settings). The first start creates a `default` account and prints a random initial password in the terminal; an administrator can add more under Settings › Users, and each account gets its own conversations and memory. For WeChat / WeCom / Feishu / Telegram, see the [Gateway docs](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md).
+Serves at `http://127.0.0.1:8881/chat` (chat, traces, settings). The first start creates a `default` account and prints a random initial password in the terminal; an administrator can add more under User management, and each account gets its own conversations and memory. For WeChat / WeCom / Feishu / Telegram, see the [Gateway docs](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md).
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI screenshot" />
 

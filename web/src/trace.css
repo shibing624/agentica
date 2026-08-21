@@ -1,25 +1,9 @@
-/* Traces: a middle picker column next to the shared app sidebar, then the
-   per-round timeline cards. */
+/* Traces: a session accessory opened from the chat title chip, not a tab. */
 .trace-link{margin-left:8px;font-size:11px;color:var(--fg2);text-decoration:none;border:1px solid var(--border);border-radius:999px;padding:1px 8px}
 .trace-link:hover{background:var(--bg3);color:var(--fg)}
-
-/* ---- session picker (middle column) ---- */
-.trace-rail{width:250px;min-width:250px;height:100vh;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding-top:12px}
-.trace-search{display:flex;align-items:center;gap:8px;margin:0 12px 8px;padding:6px 10px;border:1px solid var(--border);border-radius:9px;background:var(--bg)}
-.trace-search svg{width:14px;height:14px;color:var(--fg3);flex-shrink:0}
-.trace-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--fg);font-size:12.5px;outline:none;font-family:var(--sans)}
-.trace-rail-label{padding:2px 16px 4px;font-size:11px;font-weight:700;color:var(--fg3);letter-spacing:.03em}
-.trace-rail-list{flex:1;overflow-y:auto;padding:0 8px 10px;display:flex;flex-direction:column;gap:2px}
-.trace-rail-group{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
-.trace-rail-project{display:flex;align-items:center;gap:6px;padding:6px 10px 2px;font-size:11px;color:var(--fg2);font-weight:600}
-.trace-rail-project svg{width:13px;height:13px;flex-shrink:0;opacity:.7}
-.trp-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.trp-count{margin-left:auto;color:var(--fg3);font-family:var(--mono);font-size:10px}
-.trace-rail-item{width:100%;text-align:left;border:none;background:transparent;color:var(--fg);border-radius:9px;padding:8px 10px;cursor:pointer;display:flex;flex-direction:column;gap:2px}
-.trace-rail-item:hover{background:var(--bg3)}
-.trace-rail-item.active{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--fg)}
-.tri-title{font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tri-meta{display:flex;gap:8px;font-size:10px;color:var(--fg3);font-family:var(--mono)}
+.trace-back{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:transparent;color:var(--fg2);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-bottom:12px;font-family:var(--sans)}
+.trace-back:hover{background:var(--bg3);color:var(--fg)}
+.trace-back::before{content:"←";font-size:13px;line-height:1}
 /* ---- main column ---- */
 .trace-main{flex:1;overflow:auto;padding:18px 26px 40px;min-width:0}
 .trace-empty{color:var(--fg2);padding:60px 0;text-align:center}
@@ -41,6 +25,8 @@
 .stat-label{font-size:11px;color:var(--fg3)}
 .stat-value{font-size:15px;font-weight:600;font-family:var(--mono);color:var(--fg)}
 .stat-hint{font-size:10px;color:var(--fg3);font-family:var(--mono);min-height:13px}
+.trace-cache{display:inline-flex;align-items:center;gap:3px}
+.trace-cache svg{width:11px;height:11px;flex-shrink:0}
 
 /* ---- round card ---- */
 .trace-card.round{padding:0;overflow:hidden}
@@ -51,7 +37,7 @@
 .round-caret.open{transform:rotate(90deg)}
 .round-title{font-size:13px;font-weight:600;flex-shrink:0}
 .round-subject{font-size:12px;color:var(--fg2);min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.round-stats{display:flex;gap:10px;flex-shrink:0;font-size:10.5px;color:var(--fg3);font-family:var(--mono)}
+.round-stats{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px 10px;flex-shrink:1;font-size:10.5px;color:var(--fg3);font-family:var(--mono)}
 .round-body{padding:4px 14px 14px;border-top:1px solid var(--border)}
 
 /* ---- phase bar ---- */
@@ -63,7 +49,6 @@
 .ph-args{background:#f59e0b}
 .ph-wait{background:#e879a0}
 .ph-exec{background:#10b981}
-.ph-other{background:#94a3b8}
 
 /* ---- timeline lanes ---- */
 .lane-block{margin:4px 0 16px}
@@ -119,7 +104,6 @@
 .entry-copy:hover{color:var(--fg)}
 
 @media(max-width:900px){
-  .trace-rail{display:none}
   .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .lane-name{width:70px}
   .phase-legend{margin-left:0}

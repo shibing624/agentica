@@ -3,6 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: Chat routes: /api/chat, /api/chat/stream, /api/sessions, /api/upload, /api/memory."""
 import asyncio
+import base64
 import json
 import shutil
 import time
@@ -13,8 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from .. import deps
+from ..channels.base import InboundMedia
 from ..config import settings
-from ..models import ChatRequest, ChatResponse, MemoryRequest, RenameRequest, GoalRequest
+from ..models import ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest, RenameRequest, GoalRequest
 from ..services.agent_service import AgentService
 
 try:
@@ -24,11 +26,36 @@ except ImportError:
 
 router = APIRouter()
 
+# Inline image payloads in JSON; keep well under typical provider inline caps.
+_MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024
+_MAX_CHAT_IMAGES = 8
+
 
 def _account(request: Request) -> str:
     """The signed-in account, which is also the ``users/<id>/`` partition its
     sessions live in. Read from the credential, never from the payload."""
     return request.state.principal.user_id
+
+
+def _images_to_media(images: list[ChatImage]) -> list[InboundMedia]:
+    """Decode the web UI's base64 images into the same InboundMedia IM uses."""
+    if len(images) > _MAX_CHAT_IMAGES:
+        raise HTTPException(status_code=400, detail=f"At most {_MAX_CHAT_IMAGES} images per message")
+    out: list[InboundMedia] = []
+    for img in images:
+        try:
+            raw = base64.b64decode(img.data, validate=False)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid image data")
+        if not raw:
+            continue
+        if len(raw) > _MAX_CHAT_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image exceeds {_MAX_CHAT_IMAGE_BYTES // (1024 * 1024)}MB",
+            )
+        out.append(InboundMedia(kind="image", data=raw, mime=img.mime or "image/png"))
+    return out
 
 
 # ============== Non-streaming chat ==============
@@ -50,6 +77,7 @@ async def chat(
         session_id=body.session_id,
         user_id=account,
         owner=account,
+        media=_images_to_media(body.images) if body.images else None,
     )
     return ChatResponse(
         content=result.content,
@@ -67,17 +95,57 @@ async def run_goal(
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """Drive a bounded standing-goal loop (Agent.run_goal) for the web UI's
-    "/goal <objective>" command. Non-streaming — the loop runs several turns
-    internally and returns only the final result."""
-    try:
-        account = _account(request)
-        result = await svc.run_goal(
-            body.objective, body.session_id, user_id=account, owner=account,
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    return result
+    """Drive a bounded standing-goal loop for the web UI's ``/goal``.
+
+    Streams ``status`` events (CLI-equivalent progress) then a final ``done``.
+    """
+    session_id = body.session_id
+    account = _account(request)
+
+    async def event_generator():
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        def on_event(data: dict):
+            queue.put_nowait({"event": "status", "data": data})
+
+        async def run_agent():
+            try:
+                result = await svc.run_goal(
+                    body.objective, session_id, user_id=account, owner=account,
+                    on_event=on_event,
+                )
+                await queue.put({"event": "done", "data": result})
+            except RuntimeError as e:
+                await queue.put({"event": "error", "data": str(e)})
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                await queue.put({"event": "error", "data": str(e)})
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run_agent())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    yield "data: [DONE]\n\n"
+                    break
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            svc.cancel_session(session_id)
+            task.cancel()
+            raise
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ============== SSE streaming chat ==============
@@ -123,6 +191,7 @@ async def chat_stream(
                     on_tool_call=on_tool_call,
                     on_tool_result=on_tool_result,
                     on_thinking=on_thinking,
+                    media=_images_to_media(body.images) if body.images else None,
                 )
                 elapsed = round(time.time() - t0, 2)
 
@@ -166,7 +235,7 @@ async def chat_stream(
                 if deps.agent_service:
                     ctx_window = deps.agent_service.get_context_window(session_id)
 
-                await queue.put({"event": "done", "data": {
+                done = {
                     "session_id": result.session_id,
                     "tool_calls": result.tool_calls,
                     "tools_used": result.tools_used,
@@ -177,7 +246,20 @@ async def chat_stream(
                     "response_time": elapsed,
                     "request_entries": request_entries,
                     "context_window": ctx_window,
-                }})
+                }
+                if result.usage:
+                    done["usage"] = result.usage
+                    if result.usage.get("window"):
+                        done["context_window"] = result.usage["window"]
+                if result.turn_usage:
+                    done["turn_usage"] = result.turn_usage
+                    done["cache_read_tokens"] = result.turn_usage["cache_read_tokens"]
+                    done["cache_hit_percent"] = result.turn_usage["cache_hit_percent"]
+                    if result.turn_usage.get("cost_usd") is not None:
+                        done["cost_usd"] = result.turn_usage["cost_usd"]
+                if result.media_notes:
+                    done["media_notes"] = result.media_notes
+                await queue.put({"event": "done", "data": done})
 
             except asyncio.CancelledError:
                 pass
@@ -269,6 +351,37 @@ async def unarchive_session(
 ):
     svc.archive_session(session_id, archived=False, owner=_account(request))
     return {"status": "unarchived", "session_id": session_id}
+
+
+@router.get("/api/sessions/{session_id}/usage")
+async def session_usage(
+    session_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Session-level context occupancy and billing, same shape as CLI ``/usage``."""
+    return await svc.session_usage(session_id, owner=_account(request))
+
+
+@router.post("/api/sessions/{session_id}/compact")
+async def compact_session(
+    session_id: str,
+    request: Request,
+    body: Optional[CompactRequest] = None,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Web ``/compact``: summarise this session the same way the CLI does."""
+    try:
+        result = await svc.compact_session(
+            session_id,
+            owner=_account(request),
+            instructions=(body.instructions if body else ""),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Compaction failed")
+    return result
 
 
 # ============== Memory ==============

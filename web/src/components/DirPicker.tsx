@@ -1,9 +1,11 @@
 import { useEffect } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import * as api from "../api";
 import { browseDir, loadDirHistory } from "../data";
 import { useStrings } from "../i18n";
-import { IconFolder } from "../icons";
+import { IconClose, IconFolder } from "../icons";
 import { shortenPath } from "../lib/format";
-import { getState, setState, useAppState } from "../store";
+import { getState, setState, showToast, useAppState } from "../store";
 
 /**
  * Absolute-path picker: type it, reuse a recent one, or walk the filesystem the
@@ -22,11 +24,12 @@ import { getState, setState, useAppState } from "../store";
  * with the path the user is editing.
  */
 export function DirPicker({
-  value, onChange, extraAction,
+  value, onChange, onCommit, extraAction,
 }: {
   value: string;
   onChange: (dir: string) => void;
-  extraAction?: React.ReactNode;
+  onCommit?: (dir: string) => void;
+  extraAction?: ReactNode;
 }) {
   const s = useAppState();
   const S = useStrings();
@@ -38,10 +41,29 @@ export function DirPicker({
     void browseDir(value || getState().serverDir);
   };
 
+  const removeHistory = async (dir: string, e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { ok, data } = await api.deleteDirHistoryApi(dir);
+    if (!ok) { showToast(S.common.deleteFailed); return; }
+    setState({ dirHistory: data?.history || getState().dirHistory.filter((d) => d !== dir) });
+  };
+
   return (
     <>
       <div className="dm-row">
-        <input value={value} placeholder="/absolute/path" onChange={(e) => onChange(e.target.value)} />
+        <input
+          value={value}
+          placeholder="/absolute/path"
+          spellCheck={false}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              onCommit?.(value);
+            }
+          }}
+        />
         <button className={"cron-act" + (browse.open ? " active" : "")} onClick={toggle}>
           {browse.open ? S.dir.collapse : S.dir.browse}
         </button>
@@ -51,9 +73,14 @@ export function DirPicker({
       {!!s.dirHistory.length && (
         <div className="dir-history">
           {s.dirHistory.map((d) => (
-            <button className="dir-hist-item" key={d} title={d} onClick={() => onChange(d)}>
-              <IconFolder /> {shortenPath(d)}
-            </button>
+            <span className="dir-hist-item" key={d} title={d}>
+              <button type="button" className="dir-hist-pick" onClick={() => onChange(d)}>
+                <IconFolder /> {shortenPath(d)}
+              </button>
+              <button type="button" className="dir-hist-x" title={S.common.delete} onClick={(e) => void removeHistory(d, e)}>
+                <IconClose />
+              </button>
+            </span>
           ))}
         </div>
       )}
@@ -71,9 +98,6 @@ export function DirPicker({
           </div>
           <div className="dir-browse-list">
             {!browse.dirs.length && <div className="settings-empty">{S.dir.noSubdirs}</div>}
-            {/* A click enters the folder. Selecting is what the button above is
-                for — the previous split (click to select, double-click to
-                enter) hid navigation behind a gesture nothing announced. */}
             {browse.dirs.map((d) => (
               <button className="dir-browse-item" key={d.path} onClick={() => void browseDir(d.path)}>
                 <IconFolder /> {d.name}

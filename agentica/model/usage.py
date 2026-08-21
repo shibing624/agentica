@@ -59,6 +59,21 @@ def split_prompt_usage(
     )
 
 
+def cache_hit_percent(prompt_tokens: int, cache_read_tokens: int) -> Optional[float]:
+    """Cache-read share of the prompt, or None when the provider reported none.
+
+    A hit of 99.95%+ that is not a true 100% is shown as 99.9, so a near-full
+    prefix match is not rounded up into "the whole prompt was cached".
+    """
+    if prompt_tokens <= 0 or cache_read_tokens <= 0:
+        return None
+    raw = cache_read_tokens / prompt_tokens * 100
+    rounded = round(raw, 1)
+    if raw < 100 and rounded >= 100:
+        return 99.9
+    return rounded
+
+
 class TokenDetails(BaseModel):
     """Detailed token breakdown (cached, reasoning, etc.)."""
     cached_tokens: int = 0

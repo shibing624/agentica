@@ -1,14 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
-import { AppShell } from "../components/AppShell";
-import { SessionTree } from "../components/SessionTree";
 import { getStrings, useStrings, type Strings } from "../i18n";
 import { fmtFileSize, fmtN, shortenPath } from "../lib/format";
-import { IconClose, IconCopy, IconFolder, IconSearch } from "../icons";
-import {
-  getState, projectIdForDir, projectNameForDir, showToast, useAppState,
-} from "../store";
+import { IconCopy, IconDatabase } from "../icons";
+import { showToast } from "../store";
+import { switchTo } from "../sessions";
 
 type Entry = {
   index: number;
@@ -22,7 +19,14 @@ type Entry = {
   durationMs?: number;
 };
 
-type Tokens = { input: number; cacheRead: number; cacheWrite: number; output: number };
+type Tokens = {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+  prompt: number;
+  cacheHitPercent: number | null;
+};
 
 type Round = {
   taskIndex: number;
@@ -58,7 +62,7 @@ type Analysis = {
     gitBranch: string | null;
     version: string | null;
     tools: string[];
-    systemPromptChars: number;
+    systemPromptTokens: number;
   };
   totals: {
     rounds: number;
@@ -86,7 +90,6 @@ const PHASES: Array<{ key: string; label: (S: Strings) => string; cls: string }>
   { key: "toolArgs", label: (S) => S.traces.phaseArgs, cls: "ph-args" },
   { key: "toolWait", label: (S) => S.traces.phaseWait, cls: "ph-wait" },
   { key: "toolExec", label: (S) => S.traces.phaseExec, cls: "ph-exec" },
-  { key: "other", label: (S) => S.traces.phaseOther, cls: "ph-other" },
 ];
 
 const KIND_LABEL: Record<string, string> = {
@@ -121,23 +124,15 @@ function money(v: number | null) {
 
 export function TracesPage() {
   const S = useStrings();
-  // Subscribed, not just read: the rail groups by the working directory the
-  // client store knows for each session, and that arrives with `loadSessions`.
-  const state = useAppState();
-  const [params, setParams] = useSearchParams();
+  const nav = useNavigate();
+  const [params] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   // The failure is kept as its status code, not as a sentence: a message
   // rendered once would stay in the language it was written in when the user
   // switches languages.
   const [errStatus, setErrStatus] = useState(0);
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    void api.fetchSessions().then(({ data }) => setSessions(data?.sessions || []));
-  }, []);
 
   useEffect(() => {
     if (!sessionId) { setAnalysis(null); setErrStatus(0); return; }
@@ -150,83 +145,24 @@ export function TracesPage() {
     });
   }, [sessionId]);
 
-  // Grouped by working directory, the same grouping the chat sidebar uses: a
-  // trace is read against the project it ran in, and the folder is what tells
-  // two same-named conversations apart.
-  const groups = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const known = getState().sessions;
-    const fallbackDir = getState().serverDir || "";
-    const by = new Map<string, { name: string; dir: string; items: any[] }>();
-    for (const s of sessions) {
-      if (q && !(s.name || "").toLowerCase().includes(q)
-          && !(s.session_id || "").toLowerCase().includes(q)) continue;
-      const dir = known[s.session_id]?.dir || fallbackDir;
-      const id = projectIdForDir(dir);
-      let group = by.get(id);
-      if (!group) by.set(id, group = { name: projectNameForDir(dir), dir, items: [] });
-      group.items.push(s);
-    }
-    return [...by.values()];
-  }, [sessions, search, state.rev]);
-  const shown = groups.reduce((n, g) => n + g.items.length, 0);
+  if (!sessionId) return <Navigate to="/chat" replace />;
+
+  const backToChat = () => {
+    switchTo(sessionId);
+    nav("/chat");
+  };
 
   return (
-    <AppShell active="traces" list={<><div className="project-list-label">{S.chat.projects}</div><SessionTree /></>}>
-      {/* The middle column. Traces are read by walking a list and comparing, so
-          the picker stays on screen next to what it opened — and the left
-          sidebar keeps the conversation tree, because leaving a trace for the
-          conversation it describes is the most common next move. */}
-      <aside className="trace-rail">
-        <label className="trace-search">
-          <IconSearch />
-          <input placeholder={S.traces.searchSessions} value={search} onChange={(e) => setSearch(e.target.value)} />
-          {search && <button className="search-clear" onClick={() => setSearch("")}><IconClose /></button>}
-        </label>
-        <div className="trace-rail-label">{S.traces.sessions} {shown ? `(${shown})` : ""}</div>
-        <div className="trace-rail-list">
-          {!shown && <div className="s-empty">{S.traces.noSessions}</div>}
-          {groups.map((g) => (
-            <div className="trace-rail-group" key={g.dir || g.name}>
-              <div className="trace-rail-project" title={g.dir}>
-                <IconFolder />
-                <span className="trp-name">{g.name}</span>
-                <span className="trp-count">{g.items.length}</span>
-              </div>
-              {g.items.map((s) => (
-                <button
-                  key={s.session_id}
-                  className={"trace-rail-item" + (s.session_id === sessionId ? " active" : "")}
-                  onClick={() => setParams({ sessionId: s.session_id })}
-                >
-                  <span className="tri-title">{s.name || s.session_id}</span>
-                  <span className="tri-meta">
-                    <span>{S.traces.rounds(s.user_count || 0)}</span>
-                    <span>{fmtFileSize(s.size_bytes || 0)}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      <div className="trace-main">
-        {!sessionId && (
-          <div className="trace-empty">
-            <h2>{S.traces.pickTitle}</h2>
-            <p>{S.traces.pickDesc}</p>
-          </div>
-        )}
-        {sessionId && loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
-        {sessionId && !loading && !!errStatus && (
+    <div className="trace-main">
+        <button className="trace-back" onClick={backToChat}>{S.traces.backToChat}</button>
+        {loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
+        {!loading && !!errStatus && (
           <div className="trace-empty">
             <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
           </div>
         )}
         {analysis && <TraceDetail a={analysis} />}
-      </div>
-    </AppShell>
+    </div>
   );
 }
 
@@ -259,7 +195,7 @@ function TraceDetail({ a }: { a: Analysis }) {
         <div className="trace-card-title">{S.traces.totals}</div>
         <div className="stat-grid">
           <Stat label={S.traces.statRounds} value={String(t.rounds)} />
-          <Stat label={S.traces.statInput} value={fmtN(tokens.input)} hint={tokens.cacheRead ? S.traces.cacheHit(fmtN(tokens.cacheRead)) : undefined} />
+          <Stat label={S.traces.statInput} value={fmtN(tokens.prompt)} hint={<CacheMark tokens={tokens} S={S} />} />
           <Stat label={S.traces.statCost} value={money(t.costUsd)} hint={a.meta.model ? undefined : S.traces.noModelInfo} />
           <Stat label={S.traces.statToolCalls} value={String(t.toolCalls)} hint={t.toolErrors ? S.traces.failed(t.toolErrors) : S.traces.succeeded(t.toolOk)} />
           <Stat label={S.traces.statWait} value={ms(t.waitMs)} />
@@ -281,7 +217,17 @@ function TraceDetail({ a }: { a: Analysis }) {
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function CacheMark({ tokens, S }: { tokens: Tokens; S: Strings }) {
+  if (tokens.cacheHitPercent === null || tokens.cacheHitPercent === undefined) return null;
+  return (
+    <span className="trace-cache" title={S.traces.hCache}>
+      <IconDatabase />
+      {fmtN(tokens.cacheRead)} / {tokens.cacheHitPercent.toFixed(1)}%
+    </span>
+  );
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint?: ReactNode }) {
   return (
     <div className="stat">
       <div className="stat-label">{label}</div>
@@ -304,6 +250,13 @@ function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number
         <span className="round-stats">
           <span title={S.traces.hRequests}>⇅ {round.requests}</span>
           <span title={S.traces.hToolCalls}>🔧 {round.toolCalls}{round.toolErrors ? ` (${S.traces.failed(round.toolErrors)})` : ""}</span>
+          <span title={S.traces.hInput}>↓ {fmtN(round.tokens.prompt)}</span>
+          {round.tokens.cacheHitPercent != null && (
+            <span className="trace-cache" title={S.traces.hCache}>
+              <IconDatabase />
+              {fmtN(round.tokens.cacheRead)} / {round.tokens.cacheHitPercent.toFixed(1)}%
+            </span>
+          )}
           <span title={S.traces.hOutput}>↑ {fmtN(round.tokens.output)}</span>
           <span title={S.traces.hCost}>{money(round.costUsd)}</span>
           <span title={S.traces.hElapsed}>{ms(round.durationMs)}</span>
@@ -450,14 +403,15 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
           ))}
         </div>
       </div>
-      {/* Colours only, and all six of them every time. The per-phase totals
-          used to be printed here and are a trap next to a wall-clock axis: they
-          are sums across lanes, so a round with four parallel tools reads "tool
-          execution 9.4s" under an axis that ends at 6.8s. Each bar carries its
-          own duration on hover, and the round header carries the totals. The
-          list is not filtered to the phases present either — a legend that
-          changes shape per round is one the reader has to re-read, and "no
-          approval wait in this round" is worth seeing. */}
+      {/* Colours only, and the five phases the lanes actually draw. The
+          per-phase totals used to be printed here and are a trap next to a
+          wall-clock axis: they are sums across lanes, so a round with four
+          parallel tools reads "tool execution 9.4s" under an axis that ends
+          at 6.8s. Each bar carries its own duration on hover, and the round
+          header carries the totals. The list is not filtered to the phases
+          present either — a legend that changes shape per round is one the
+          reader has to re-read, and "no approval wait in this round" is
+          worth seeing. */}
       <div className="phase-legend">
         {PHASES.map((p) => (
           <span key={p.key} className="phase-key">

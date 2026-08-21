@@ -33,13 +33,18 @@ function putJson<T = any>(url: string, body: unknown) {
 }
 
 export const fetchStatus = () => request("/api/status");
+export const fetchPrefs = () => request("/api/prefs");
+export const savePrefsApi = (body: {
+  theme?: string; lang?: string; approval_mode?: string; last_session_id?: string | null;
+}) => putJson("/api/prefs", body);
 export const fetchProfiles = () => request("/api/profiles");
 export const fetchProviders = () => request("/api/providers");
 export const fetchProfileDetail = (name: string) => request(`/api/profile/${encodeURIComponent(name)}`);
 export const switchProfileApi = (name: string) => postJson("/api/profile/switch", { name });
-export const setThinkingApi = (enabled: boolean) => postJson("/api/config/thinking", { enabled });
-export const fetchThinking = () => request("/api/config/thinking");
 export const fetchDirHistory = () => request("/api/config/dir_history");
+export const deleteDirHistoryApi = (path?: string) =>
+  request(`/api/config/dir_history${path ? "?path=" + encodeURIComponent(path) : ""}`, { method: "DELETE" });
+export const fetchConfigFile = () => request<{ path: string; content: string }>("/api/config/file");
 export const saveBaseDirApi = (base_dir: string) => postJson("/api/config/base_dir", { base_dir });
 export const openPathApi = (path: string, app: string) => postJson("/api/open", { path, app });
 export const fetchFsBrowse = (path: string) => request(`/api/fs/browse${path ? "?path=" + encodeURIComponent(path) : ""}`);
@@ -65,10 +70,10 @@ export const loginApi = (username: string, password: string) =>
   postJson("/api/auth/login", { username, password });
 export const logoutApi = () => postJson("/api/auth/logout", {});
 export const fetchUsers = () => request("/api/auth/users");
-export const createUserApi = (username: string, role: string, password?: string) =>
-  postJson("/api/auth/users", password ? { username, role, password } : { username, role });
-export const resetUserPasswordApi = (userId: string) =>
-  postJson(`/api/auth/users/${encodeURIComponent(userId)}/password`, {});
+export const createUserApi = (username: string, password: string) =>
+  postJson("/api/auth/users", { username, password });
+export const changeUserPasswordApi = (userId: string, password: string) =>
+  postJson(`/api/auth/users/${encodeURIComponent(userId)}/password`, { password });
 export const deleteUserApi = (userId: string) =>
   request(`/api/auth/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
 export const setPasswordApi = (password: string, old_password?: string) =>
@@ -92,13 +97,51 @@ export const fetchSkillDetail = (name: string) => request(`/api/skills/${encodeU
 export const createSkillApi = (body: unknown) => postJson("/api/skills", body);
 export const updateSkillApi = (name: string, body: unknown) => putJson(`/api/skills/${encodeURIComponent(name)}`, body);
 export const deleteSkillApi = (name: string) => request(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
-export const runGoalApi = (objective: string, session_id: string) => postJson("/api/goal", { objective, session_id });
+export function streamGoal(payload: unknown, signal?: AbortSignal) {
+  return fetch("/api/goal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+export const compactSessionApi = (session_id: string, instructions = "") =>
+  postJson(`/api/sessions/${encodeURIComponent(session_id)}/compact`, { instructions });
+export const makeTempDirApi = () => postJson<{ path: string }>("/api/fs/temp", {});
 export const createProfileApi = (body: unknown) => postJson("/api/profile", body);
 export const updateProfileApi = (name: string, body: unknown) => putJson(`/api/profile/${encodeURIComponent(name)}`, body);
 export const deleteProfileApi = (name: string) => request(`/api/profile/${encodeURIComponent(name)}`, { method: "DELETE" });
 export const fetchTraceAnalysis = (sessionId: string) => request(`/api/sessions/${sessionId}/trace/analysis`);
+export const fetchSessionUsage = (sessionId: string) => request(`/api/sessions/${sessionId}/usage`);
 export const fetchTraceEvents = (sessionId: string, offset = 0, limit = 200) =>
   request(`/api/sessions/${sessionId}/trace/events?offset=${offset}&limit=${limit}`);
+
+export function workspaceContentUrl(root: string, path: string, download = false) {
+  const q = new URLSearchParams({ root, path });
+  if (download) q.set("download", "1");
+  return `/api/workspace/content?${q.toString()}`;
+}
+
+export const fetchWorkspaceFiles = (root: string, path: string) =>
+  request(`/api/workspace/files?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`);
+
+export const fetchWorkspacePreview = (root: string, path: string) =>
+  request(`/api/workspace/content?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}&preview=1`);
+
+export const statWorkspaceFiles = (root: string, paths: string[]) =>
+  postJson<{ existing: string[] }>("/api/workspace/stat", { root, paths });
+
+export async function uploadWorkspaceFile(file: File, root: string, dir: string) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("root", root);
+  fd.append("path", dir);
+  return request("/api/workspace/upload", {
+    method: "POST",
+    body: fd,
+    headers: { [CLIENT_HEADER]: "web" },
+  });
+}
 
 export function streamChat(payload: unknown, signal?: AbortSignal) {
   return fetch("/api/chat/stream", {

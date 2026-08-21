@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_c
 from uuid import uuid4
 
 from agentica.utils.log import logger
+from agentica.utils.tokens import count_text_tokens
 
 if TYPE_CHECKING:
     from agentica.model.message import Message
@@ -606,7 +607,9 @@ class SessionLog:
         self.append_event("tool_list_ready", tools=list(tools), count=len(tools))
         if system_prompt:
             self.append_event(
-                "system_prompt", content=system_prompt, chars=len(system_prompt)
+                "system_prompt",
+                content=system_prompt,
+                tokens=count_text_tokens(system_prompt, model or "gpt-4o"),
             )
         return True
 

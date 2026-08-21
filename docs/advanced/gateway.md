@@ -79,7 +79,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8881/api/status
 
 **账号** —— 首次启动会 seed 一个账号，名字就是数据分区名 `default`（等于 `DEFAULT_USER_ID`），随机密码打在启动日志里，同时写一份 `0600` 的 `$AGENTICA_HOME/gateway/initial-password`（改过密码就删掉）。浏览器打开 `/chat` 会 302 到 `/login`。
 
-**账号 id 就是数据分区 id**：它命名 `users/<id>/`，也就是那个账号的会话与记忆。所以 `kk` 登录后看到的是 kk 自己的对话，看不到别人的；也所以账号名是白名单字符（它要当目录名用）、且不支持改名。管理员可以在 网页 设置 › 用户 里新增 / 重置密码 / 删除账号，新账号的密码由服务端生成、只显示一次（不留明文）。**「用户管理」是唯一的管理员专属功能**：模型 / 技能 / 定时任务 / 工作目录都是这台机器的配置，任何登录账号都能改。删除账号只是让它无法登录，`users/<id>/` 的数据仍留在磁盘上。
+**账号 id 就是数据分区 id**：它命名 `users/<id>/`，也就是那个账号的会话与记忆。所以 `kk` 登录后看到的是 kk 自己的对话，看不到别人的；也所以账号名会先规范化再当目录名（小写、空格/连字符变下划线、其它非法字符丢掉；清理后 2–32 位、字母开头、仅字母数字下划线），撞名则拒绝，且不支持改名。新增账号还会在 workspace 下建同名默认 Project 目录（就是 `<id>`，没有 `-default_project` 后缀）。管理员在网页 **用户管理**（右侧独立页，`/users`）里新增 / 修改密码 / 删除账号；新增时由管理员填写初始密码，新账号一律是用户——seed 的那一个是唯一管理员。**「用户管理」是唯一的管理员专属功能**（`/api/auth/users*` 非管理员一律 403）。模型 profile、技能、MCP、工作目录仍是这台机器的配置，任何登录账号都能改；**会话、归档、定时任务按账号隔离**——侧边栏只信服务端列表（同一个浏览器换账号不会把上一个人的 `localStorage` 会话带过来），`/api/scheduler/jobs` 只列出当前 cookie 所属账号的任务，任务跑起来也写进那个账号的分区。改自己的密码要填当前密码（内置管理员会提示初始密码打印在首次启动的终端里）；管理员改普通用户只填新密码。删除账号只是让它无法登录，`users/<id>/` 的数据仍留在磁盘上。
 
 设密码：`agentica-gateway --set-password`（在那台机器的终端上），或网页里 设置 › 常规 › 访问控制。密码用 `hashlib.scrypt` 存储，格式 `scrypt$n$r$p$salt$hash`（参数随 hash 一起存，以后调高成本不会作废旧密码）。改密码会让**这个账号的其他浏览器退出登录**（别人的不受影响）——改密码的场景就是"我的 cookie 可能被人拿到了"。连续失败 5 次后按 1s、2s、4s…（上限 60s）退避，返回 429 并带 `Retry-After`。
 
@@ -103,8 +103,8 @@ CSRF 的主防线是 `SameSite=Lax`；第二道是**带 cookie 的写请求必�
 | POST | `/api/auth/logout` | 服务端销毁会话（不只是清 cookie） |
 | POST | `/api/auth/password` | 设置或修改**自己**的密码；令牌持有者可以不填旧密码 |
 | GET | `/api/auth/users` | 账号列表（仅管理员） |
-| POST | `/api/auth/users` | 新增账号，返回一次性密码（仅管理员） |
-| POST | `/api/auth/users/{id}/password` | 重置某账号密码，返回一次性密码（仅管理员） |
+| POST | `/api/auth/users` | 新增账号（仅管理员）。body 含 `username` / `password`；角色固定为用户 |
+| POST | `/api/auth/users/{id}/password` | 修改某账号密码（仅管理员）。改别人只传 `password`；改自己还要 `old_password` |
 | DELETE | `/api/auth/users/{id}` | 删除账号，数据保留（仅管理员） |
 | POST | `/api/desktop/shutdown` | 仅限令牌持有者，优雅停机（Windows 上唯一的优雅路径） |
 
@@ -258,8 +258,6 @@ bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer—
 
 ### Web 网页（内置 UI）
 
-`agentica-gateway` 启动后自带 Web UI（Vite + React SPA，产物在 `agentica/gateway/ui/`），无需任何 IM 配置即可直接对话。pip 运行时不需要 Node。会话与 CLI 共用同一份 `~/.agentica` Session JSONL；`http://localhost:8881/traces` 按 Task 画时间轴（旧 session 没有生命周期事件时只列事件、不强行画图）。
-
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
 
 > 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用（首次用启动日志里带 `?token=` 的地址，或设了密码后走 `/login`）；其余 IM 渠道都是可选的叠加层。
@@ -292,7 +290,7 @@ profiles:
     model_provider: zhipuai
     model_name: glm-4.7-flash
     api_key: "your-key"
-    thinking: enabled        # 可选：enabled / disabled / auto
+    thinking: enabled        # 网关侧始终开启思考过程；此项仅 CLI / 其它入口会读
 active: default              # CLI `/model default` 也是改这个指针
 ```
 
@@ -300,7 +298,7 @@ active: default              # CLI `/model default` 也是改这个指针
 |------|------|------|
 | `AGENTICA_MODEL_PROVIDER` | 继承 config.yaml `active` profile（缺省 `deepseek`） | 主模型 provider；profile 已配时此变量仅作覆盖 |
 | `AGENTICA_MODEL_NAME` | 继承 config.yaml `active` profile（缺省 `deepseek-v4-flash`） | 主模型名；profile 已配时此变量仅作覆盖 |
-| `AGENTICA_MODEL_THINKING` | 继承 config.yaml `active` profile 的 `thinking`（缺省空） | 思维链模式开关（`enabled`/`disabled`/`auto`）；profile 已配时仅作覆盖 |
+| `AGENTICA_MODEL_THINKING` | 继承 config.yaml `active` profile 的 `thinking`（缺省空） | CLI 等入口的思维链开关。**网页 / 桌面版始终启用 thinking**（设置里已无此开关），不支持的模型会忽略 |
 | `AGENTICA_MODEL_BASE_URL` | 继承 profile 的 `base_url` | 自定义/兼容端点 |
 | `AGENTICA_MODEL_API_KEY` | 继承 profile 的 `api_key` | 主模型 key |
 | `AGENTICA_REASONING_EFFORT` | 继承 profile 的 `reasoning_effort` | low/medium/high/max |
@@ -522,12 +520,20 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 |--------|------|------|
 | GET | `/health` / `/api/health` | 健康检查（免凭据） |
 | GET | `/chat` | 内置 Web UI（首次需 `?token=` 或登录，之后走 cookie） |
-| GET | `/traces` | Session Trace 页（与 `/chat` 同一份 SPA） |
+| GET | `/traces` | 当前会话的 Trace 页（从对话标题进入；与 `/chat` 同一份 SPA） |
 | GET | `/login` | 登录页（设了密码时；与 `/chat` 同一份 SPA） |
 | POST | `/api/auth/login` / `/logout` / `/password` | 登录、退出、改密码，见「鉴权」 |
-| GET | `/api/sessions/{id}/trace/analysis` | 读时分析：Task / 模型条 / 工具条 |
+| GET | `/api/workspace/files` | 列出工作目录下的文件（`root` + 相对 `path`） |
+| GET | `/api/workspace/content` | 预览（`preview=1`，超 12000 字符截断）或下载（`download=1`） |
+| POST | `/api/workspace/stat` | 批量确认相对路径是否存在 |
+| POST | `/api/workspace/upload` | 上传到当前目录（multipart，需 `X-Agentica-Client`） |
 | GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
-| POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`, `user_id`） |
+| GET | `/api/sessions/{id}/trace/analysis` | 整份轨迹分析（重启后按 session id 跨 project 定位 jsonl） |
+| GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
+| GET | `/api/sessions/{id}/usage` | 本会话 Context Window 拆分（与 CLI `/usage` 同一套 `measure_context`：system prompt / 规则 / 技能 / 工具定义 / 对话的 token 数）以及消息数、API 调用、费用 |
+| POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套 native + Layer 2 摘要 |
+| POST | `/api/fs/temp` | 为新建对话创建一个临时工作目录（`$AGENTICA_HOME/tmp/web-chats`） |
+| POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`，可选 `images`） |
 | WS | `/ws` | 流式事件订阅 |
 | GET | `/api/channels` | 列出已注册渠道 + 连接状态 |
 | POST | `/api/send` | 主动向某个 IM 渠道发送一条消息 |
@@ -626,7 +632,9 @@ settings:
 
 打开后日志出现 `Cron scheduler started (60s tick)`。任务通过 HTTP API
 （`/api/scheduler/jobs`）或 CLI（`/cron add ...`）创建，支持 cron 表达式、
-自然语言间隔（`30m` / `every 2h`）和一次性 ISO datetime 三种调度语法。
+自然语言间隔（`30m` / `every 2h`）和一次性 ISO datetime。网页上每个登录账号
+只看到、也只能改自己的任务；调度器仍会执行所有账号到期的任务，跑的时候用该
+任务上记录的 `user_id` 作为数据分区。
 
 完整用法（字段说明、管理接口、运行结果查看）见
 [定时任务（Cron）](../guides/cron_scheduler.md)。

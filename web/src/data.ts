@@ -1,5 +1,6 @@
 import * as api from "./api";
-import { getState, setState } from "./store";
+import { applyLang } from "./i18n";
+import { applyTheme, getState, setState, writeLastSessionId } from "./store";
 
 /** Server-owned state loaders, shared by the chat page and every panel so a
  *  mutation can refresh its own list without reaching into a component. */
@@ -15,11 +16,12 @@ export async function loadStatus() {
     serverVersion: data.version || "",
     serverConfigPath: data.config_path || "",
     serverProfile: data.active_profile || "",
-    serverThinking: data.model_thinking || "",
     // Tuning is nested; reading a flat `reasoning_effort` left it blank until
     // the first profile switch.
     serverReasoningEffort: data.tuning?.reasoning_effort || "",
     serverContextWindow: data.context_window || getState().serverContextWindow,
+    serverSupportsImages: !!data.supports_images,
+    serverMediaModel: data.media_model || "",
   });
 }
 
@@ -31,11 +33,33 @@ export async function loadAuthStatus() {
     passwordIsInitial: !!data.password_is_initial,
     accountId: data.user_id || data.default_account_id || "default",
     accountRole: data.role || "user",
+    defaultAccountId: data.default_account_id || "default",
+    sessionVia: data.via || "",
     // The server owns the minimum: a number hardcoded here would go stale the
     // day it moves and the only symptom is a form that rejects what the API
     // accepts (or worse, the reverse).
     minPasswordLength: data.min_password_length || 6,
   });
+}
+
+export async function loadPrefs() {
+  const { ok, data } = await api.fetchPrefs();
+  if (!ok || !data) return;
+  if (data.theme) {
+    localStorage.setItem("ag_theme", data.theme);
+    applyTheme(data.theme);
+    setState({ theme: data.theme });
+  }
+  if (data.lang === "zh" || data.lang === "en") {
+    localStorage.setItem("ag_lang", data.lang);
+    applyLang(data.lang);
+    setState({ lang: data.lang });
+  }
+  if (data.approval_mode) {
+    localStorage.setItem("ag_approval", data.approval_mode);
+    setState({ selectedApprovalMode: data.approval_mode });
+  }
+  if (data.last_session_id) writeLastSessionId(data.last_session_id, false);
 }
 
 /** The account table. Admin-only server-side; a 403 just leaves it empty. */

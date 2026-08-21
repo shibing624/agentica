@@ -4,6 +4,11 @@ Tests that exercise the HTTP layer (routes, middleware, response format).
 Agent calls are mocked at the AgentService level to avoid real LLM calls.
 """
 from unittest.mock import MagicMock, AsyncMock, patch
+from pathlib import Path
+import json
+import os
+
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 import pytest
 
@@ -162,6 +167,64 @@ class TestSessionEndpoints:
         assert resp.json()["status"] == "unarchived"
         mock_svc.archive_session.assert_called_with("s1", archived=False, owner="default")
 
+    def test_session_usage(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.session_usage = AsyncMock(return_value={
+            "model": "openai/gpt-4o",
+            "window": 128000,
+            "context_tokens": 4200,
+            "percent_full": 3.3,
+            "messages": 4,
+            "api_calls": 2,
+            "cost_usd": 0.0123,
+            "input_tokens": 8000,
+            "output_tokens": 400,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cache_hit_percent": None,
+            "sections": [
+                {"label": "System prompt", "tokens": 2800, "share": 0.67, "nested": False},
+                {"label": "Conversation", "tokens": 1400, "share": 0.33, "nested": False},
+            ],
+        })
+        resp = client.get("/api/sessions/s1/usage")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["window"] == 128000
+        assert data["messages"] == 4
+        assert data["api_calls"] == 2
+        assert data["sections"][0]["label"] == "System prompt"
+        mock_svc.session_usage.assert_called_with("s1", owner="default")
+
+    def test_session_usage(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.session_usage = AsyncMock(return_value={
+            "model": "openai/gpt-4o",
+            "window": 128000,
+            "context_tokens": 4200,
+            "percent_full": 3.3,
+            "messages": 4,
+            "api_calls": 2,
+            "cost_usd": 0.0123,
+            "input_tokens": 8000,
+            "output_tokens": 400,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cache_hit_percent": None,
+            "sections": [
+                {"label": "System prompt", "tokens": 2800, "share": 0.67, "nested": False},
+                {"label": "Conversation", "tokens": 1400, "share": 0.33, "nested": False},
+            ],
+        })
+        resp = client.get("/api/sessions/s1/usage")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["window"] == 128000
+        assert data["messages"] == 4
+        assert data["api_calls"] == 2
+        assert data["sections"][0]["label"] == "System prompt"
+        mock_svc.session_usage.assert_called_with("s1", owner="default")
+
 
 class TestConfigEndpoints:
     """Test /api/status and /api/models endpoints."""
@@ -173,6 +236,13 @@ class TestConfigEndpoints:
         data = resp.json()
         assert "model" in data
         assert "workspace" in data
+        assert "supports_images" in data
+        assert "media_model" in data
+
+    def test_browse_missing_dir_is_400(self, mock_app):
+        client, _ = mock_app
+        resp = client.get("/api/fs/browse", params={"path": "/no/such/agentica-dir"})
+        assert resp.status_code == 400
 
     def test_list_models(self, mock_app):
         client, _ = mock_app
@@ -225,6 +295,112 @@ class TestBaseDirEndpoint:
         assert resp.status_code == 400
 
 
+class TestDirHistoryAndConfigFile:
+    def test_missing_paths_are_dropped(self, mock_app, tmp_path):
+        client, _ = mock_app
+        from agentica.config import AGENTICA_CACHE_DIR
+        hist = Path(AGENTICA_CACHE_DIR).expanduser() / "dir_history.json"
+        hist.parent.mkdir(parents=True, exist_ok=True)
+        hist.write_text(json.dumps(["/no/such/pytest-1207/gone", str(tmp_path)]))
+        resp = client.get("/api/config/dir_history")
+        assert resp.status_code == 200
+        data = resp.json()["history"]
+        assert str(tmp_path) in data
+        assert not any("pytest-1207" in p for p in data)
+
+    def test_delete_one_entry(self, mock_app, tmp_path):
+        client, _ = mock_app
+        other = tmp_path / "keep-me"
+        gone = tmp_path / "drop-me"
+        other.mkdir()
+        gone.mkdir()
+        from agentica.config import AGENTICA_CACHE_DIR
+        hist = Path(AGENTICA_CACHE_DIR).expanduser() / "dir_history.json"
+        hist.parent.mkdir(parents=True, exist_ok=True)
+        hist.write_text(json.dumps([str(other), str(gone)]))
+        resp = client.delete("/api/config/dir_history", params={"path": str(gone)})
+        assert resp.status_code == 200
+        left = resp.json()["history"]
+        assert str(gone) not in left
+        assert str(other) in left
+
+    def test_config_preview_masks_api_key(self, mock_app, tmp_path, monkeypatch):
+        home = tmp_path / "aghome"
+        home.mkdir()
+        (home / "config.yaml").write_text(
+            "active_profile: default\n"
+            "profiles:\n"
+            "  default:\n"
+            "    model_provider: openai\n"
+            "    model_name: gpt-4o\n"
+            "    api_key: sk-secret-key-abcdefgh\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AGENTICA_HOME", str(home))
+        client, _ = mock_app
+        resp = client.get("/api/config/file")
+        assert resp.status_code == 200
+        content = resp.json()["content"]
+        assert "sk-secret-key-abcdefgh" not in content
+        assert "sk-s...efgh" in content
+
+
+class TestWebPrefs:
+    def test_prefs_roundtrip_on_disk(self, mock_app, tmp_path, monkeypatch):
+        client, _ = mock_app
+        import agentica.gateway.routes.settings as settings_routes
+        monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+        empty = client.get("/api/prefs")
+        assert empty.status_code == 200
+        assert empty.json() == {}
+        saved = client.put("/api/prefs", json={
+            "theme": "dark",
+            "lang": "zh",
+            "approval_mode": "allow-all",
+            "last_session_id": "s1",
+            "garbage": 1,
+        })
+        assert saved.status_code == 200
+        body = saved.json()
+        assert body == {
+            "theme": "dark",
+            "lang": "zh",
+            "approval_mode": "allow-all",
+            "last_session_id": "s1",
+        }
+        assert client.get("/api/prefs").json() == body
+        assert (tmp_path / "gateway" / "prefs" / "default.json").is_file()
+
+
+class TestTempDirAndCompactEndpoints:
+    def test_temp_workspace_is_created_under_agentica_home(self, mock_app, tmp_path, monkeypatch):
+        client, _ = mock_app
+        monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+        import agentica.gateway.routes.settings as settings_routes
+        monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+        resp = client.post("/api/fs/temp", json={})
+        assert resp.status_code == 200
+        path = Path(resp.json()["path"])
+        assert path.is_dir()
+        assert path.parent == tmp_path / "tmp" / "web-chats"
+
+    def test_compact_empty_session_is_400(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.compact_session = AsyncMock(return_value={"ok": False, "error": "No messages to compact."})
+        resp = client.post("/api/sessions/s1/compact", json={})
+        assert resp.status_code == 400
+
+    def test_compact_ok(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.compact_session = AsyncMock(return_value={
+            "ok": True, "native": False, "messages_before": 40, "messages_after": 6,
+        })
+        resp = client.post("/api/sessions/s1/compact", json={"instructions": ""})
+        assert resp.status_code == 200
+        assert resp.json()["messages_before"] == 40
+        mock_svc.compact_session.assert_awaited()
+
+
 class TestSchedulerEndpoints:
     """Test /api/scheduler/* — cron job CRUD + actions + run history.
 
@@ -274,6 +450,28 @@ class TestSchedulerEndpoints:
         assert kwargs["prompt"] == "daily report"
         assert kwargs["schedule"] == "30 7 * * *"
         assert kwargs["name"] == "rep"
+        assert kwargs["user_id"] == "default"
+
+    def test_a_job_owned_by_someone_else_is_not_found(self, mock_app):
+        """The id of another account's job must 404, not 403 — otherwise the
+        status code confirms it exists."""
+        client, _ = mock_app
+        with patch("agentica.gateway.routes.scheduler.get_job",
+                   return_value=self._fake_job(user_id="kk")):
+            assert client.get("/api/scheduler/jobs/j1").status_code == 404
+            assert client.post("/api/scheduler/jobs/j1/pause").status_code == 404
+            assert client.delete("/api/scheduler/jobs/j1").status_code == 404
+
+    def test_create_ignores_a_user_id_in_the_body(self, mock_app):
+        client, _ = mock_app
+        with patch("agentica.gateway.routes.scheduler.cronjob",
+                   return_value='{"success":true,"job":{"id":"j1"}}') as m:
+            resp = client.post("/api/scheduler/jobs", json={
+                "prompt": "daily report", "schedule": "30 7 * * *", "user_id": "kk",
+            })
+        assert resp.status_code == 200
+        _, kwargs = m.call_args
+        assert kwargs["user_id"] == "default"
 
     def test_create_job_missing_fields(self, mock_app):
         client, _ = mock_app
@@ -360,7 +558,8 @@ class TestSchedulerEndpoints:
 
     def test_list_runs(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
+        with patch("agentica.gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
+             patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
             resp = client.get("/api/scheduler/runs")
         assert resp.status_code == 200
         data = resp.json()
@@ -372,7 +571,8 @@ class TestSchedulerEndpoints:
     def test_list_runs_result_full_uses_error_when_no_result(self, mock_app):
         client, _ = mock_app
         run = self._fake_run(result=None, error="boom")
-        with patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[run]):
+        with patch("agentica.gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
+             patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[run]):
             resp = client.get("/api/scheduler/runs")
         assert resp.json()["runs"][0]["result_full"] == "boom"
 

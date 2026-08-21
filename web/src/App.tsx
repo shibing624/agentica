@@ -4,6 +4,8 @@ import { setUnauthorizedHandler } from "./api";
 import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TracesPage } from "./pages/TracesPage";
+import { UsersPage } from "./pages/UsersPage";
+import { AppLayout } from "./components/AppShell";
 import { ConfirmDialog, Toast } from "./components/Feedback";
 import { applyLang } from "./i18n";
 import { applyTheme, getState } from "./store";
@@ -35,8 +37,11 @@ export function App() {
       <AuthGate />
       <Routes>
         <Route path="/" element={<Navigate to="/chat" replace />} />
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/traces" element={<TracesPage />} />
+        <Route element={<AppLayout />}>
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/traces" element={<TracesPage />} />
+          <Route path="/users" element={<UsersPage />} />
+        </Route>
         <Route path="/login" element={<LoginPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Routes>

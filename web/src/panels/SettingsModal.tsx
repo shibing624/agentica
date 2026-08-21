@@ -1,8 +1,11 @@
+import { useState } from "react";
 import * as api from "../api";
 import {
   loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders,
-  loadStatus, loadUsers,
+  loadStatus,
 } from "../data";
+import { openPasswordDialog } from "../components/ChangePasswordDialog";
+import { Dialog } from "../components/Dialog";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import { IconClose } from "../icons";
@@ -16,14 +19,12 @@ import { CronPanel } from "./CronPanel";
 
 /** Tab ids are stable (they are stored in `settingsTab`); only the label moves.
  *
- *  `users` is the one admin-only tab, and it is hidden rather than disabled for
- *  a plain account: everything else here configures this one machine and anyone
- *  signed in may change it, so a row of locked tabs would suggest a permission
- *  system that does not exist. */
-const TABS: Array<[string, (S: Strings) => string, boolean?]> = [
+ *  Account management is a page (`/users`), not a tab: this modal configures
+ *  the machine (theme, models, working directory) plus this account's cron
+ *  jobs and archived chats. */
+const TABS: Array<[string, (S: Strings) => string]> = [
   ["settings", (S) => S.settings.tabGeneral],
   ["profiles", (S) => S.nav.profile],
-  ["users", (S) => S.settings.tabUsers, true],
   ["cron", (S) => S.settings.tabCron],
   ["archived", (S) => S.settings.tabArchived],
 ];
@@ -135,20 +136,17 @@ function removeProfile(name: string) {
   });
 }
 
-async function toggleThinking(enabled: boolean) {
-  const S = getStrings();
-  const { ok, data } = await api.setThinkingApi(enabled);
-  if (!ok) { showToast((data as any)?.detail || S.settings.setFailed, 3000); return; }
-  setState({ serverThinking: (data as any)?.thinking || "" });
-  showToast(enabled ? S.settings.thinkingOn : S.settings.thinkingOff);
-}
-
 async function applyBaseDir(dir: string) {
   const raw = dir.trim();
   if (!raw) return;
   const S = getStrings();
-  const { ok, data } = await api.saveBaseDirApi(raw);
-  if (!ok) { showToast((data as any)?.detail || S.dir.setFailed, 3500); return; }
+  const previous = getState().serverDir;
+  const { ok } = await api.saveBaseDirApi(raw);
+  if (!ok) {
+    showToast(S.dir.invalid, 3500);
+    setState({ dirModal: { ...getState().dirModal, value: previous } });
+    return;
+  }
   await loadStatus();
   await loadDirHistory();
   const st = getState();
@@ -168,24 +166,6 @@ async function applyBaseDir(dir: string) {
 function AccessBlock() {
   const s = useAppState();
   const S = useStrings();
-  const f = s.passwordForm;
-  const min = s.minPasswordLength;
-  const set = (p: Partial<typeof f>) => setState({ passwordForm: { ...f, ...p } });
-
-  async function save() {
-    if (f.next.length < min) { showToast(S.settings.tooShort(min), 2500); return; }
-    if (f.next !== f.repeat) { showToast(S.settings.mismatch, 2500); return; }
-    set({ busy: true });
-    const { ok, data } = await api.setPasswordApi(f.next, f.old || undefined);
-    set({ busy: false });
-    if (!ok) { showToast((data as any)?.detail || S.settings.setFailed, 3500); return; }
-    setState({
-      passwordForm: { old: "", next: "", repeat: "", busy: false },
-      passwordSet: true, passwordIsInitial: false,
-    });
-    showToast(S.settings.passwordChanged);
-  }
-
   return (
     <div className="settings-block">
       <div className="settings-block-title">{S.settings.access}</div>
@@ -195,16 +175,8 @@ function AccessBlock() {
           ? S.settings.accessInitial
           : s.passwordSet ? S.settings.accessSet : S.settings.accessNone}
       </div>
-      {s.passwordSet && (
-        <input className="pf-input" type="password" autoComplete="current-password"
-               placeholder={S.settings.currentPassword} value={f.old} onChange={(e) => set({ old: e.target.value })} />
-      )}
-      <input className="pf-input" type="password" autoComplete="new-password"
-             placeholder={S.settings.newPassword(min)} value={f.next} onChange={(e) => set({ next: e.target.value })} />
-      <input className="pf-input" type="password" autoComplete="new-password"
-             placeholder={S.settings.repeatPassword} value={f.repeat} onChange={(e) => set({ repeat: e.target.value })} />
       <div className="pf-row">
-        <button className="dp-btn primary" disabled={f.busy} onClick={() => void save()}>
+        <button className="dp-btn primary" onClick={() => openPasswordDialog()}>
           {s.passwordSet ? S.settings.changePassword : S.settings.setPassword}
         </button>
         {s.passwordSet && (
@@ -241,15 +213,14 @@ export function SettingsModal() {
           </div>
         </div>
         <div className="plugins-tabs">
-          {TABS.filter(([, , adminOnly]) => !adminOnly || s.accountRole === "admin").map(([id, label]) => (
+          {TABS.map(([id, label]) => (
             <button key={id} className={"plugins-tab" + (s.settingsTab === id ? " active" : "")}
-                    onClick={() => { setState({ settingsTab: id }); if (id === "users") void loadUsers(); }}>{label(S)}</button>
+                    onClick={() => setState({ settingsTab: id })}>{label(S)}</button>
           ))}
         </div>
         <div className="settings-body">
           {s.settingsTab === "settings" && <GeneralTab />}
           {s.settingsTab === "profiles" && <ProfilesTab />}
-          {s.settingsTab === "users" && <UsersTab />}
           {s.settingsTab === "cron" && <CronPanel />}
           {s.settingsTab === "archived" && (
             <div className="settings-list">
@@ -277,7 +248,12 @@ export function SettingsModal() {
 function GeneralTab() {
   const s = useAppState();
   const S = useStrings();
-  const thinkingOn = !!s.serverThinking;
+  const [configPreview, setConfigPreview] = useState<string | null>(null);
+  const openConfigPreview = async () => {
+    const { ok, data } = await api.fetchConfigFile();
+    if (!ok || !data) { showToast(S.settings.readFailed, 2500); return; }
+    setConfigPreview(data.content || "");
+  };
   return (
     <div className="settings-list">
       <div className="settings-block">
@@ -303,18 +279,11 @@ function GeneralTab() {
       </div>
 
       <div className="settings-block">
-        <div className="settings-block-title">{S.settings.thinking}</div>
-        <label className="pf-check">
-          <input type="checkbox" checked={thinkingOn} onChange={(e) => void toggleThinking(e.target.checked)} />
-          {S.settings.thinkingLabel}
-        </label>
-      </div>
-
-      <div className="settings-block">
         <div className="settings-block-title">{S.settings.defaultDir}</div>
         <DirPicker
           value={s.dirModal.value || s.serverDir}
           onChange={(dir) => setState({ dirModal: { ...getState().dirModal, value: dir } })}
+          onCommit={(dir) => void applyBaseDir(dir)}
           extraAction={
             <button className="dp-btn primary"
                     onClick={() => void applyBaseDir(s.dirModal.value || s.serverDir)}>{S.common.apply}</button>
@@ -333,11 +302,18 @@ function GeneralTab() {
         </div>
         <div className="config-path-row">
           <code className="config-path-val">{s.serverConfigPath || "~/.agentica/config.yaml"}</code>
+          <button className="cron-act" onClick={() => void openConfigPreview()}>{S.common.preview}</button>
           <button className="cron-act" onClick={() => {
             const p = s.serverConfigPath;
             if (p) { void navigator.clipboard.writeText(p); showToast(S.common.copied); }
           }}>{S.common.copy}</button>
         </div>
+        {configPreview != null && (
+          <Dialog title={s.serverConfigPath || "config.yaml"} onClose={() => setConfigPreview(null)} wide>
+            <p className="settings-item-meta">{S.settings.configMasked}</p>
+            <pre className="config-preview">{configPreview}</pre>
+          </Dialog>
+        )}
       </div>
     </div>
   );
@@ -377,115 +353,6 @@ function ProfilesTab() {
   );
 }
 
-
-/** The account table.
- *
- *  A new account is empty rather than a copy: it owns its own
- *  ``users/<name>/`` partition, so it sees its own conversations and memory and
- *  none of the creator's. Only account management lands here — models, skills,
- *  cron and the working directory belong to the machine and stay on the tabs
- *  everyone can reach.
- */
-function UsersTab() {
-  const s = useAppState();
-  const S = useStrings();
-  const f = s.userForm;
-  const set = (p: Partial<typeof f>) => setState({ userForm: { ...f, ...p } });
-
-  async function create() {
-    const username = f.username.trim().toLowerCase();
-    if (!username) return;
-    set({ busy: true });
-    // No password field: one typed here would have to be relayed to its owner
-    // by hand anyway, and a generated one is shown once and cannot be weak.
-    const { ok, data } = await api.createUserApi(username, f.role);
-    set({ busy: false });
-    if (!ok) { showToast((data as any)?.detail || S.common.saveFailed, 3500); return; }
-    setState({
-      userForm: { username: "", role: "user", busy: false },
-      issuedSecret: { userId: username, password: String((data as any)?.password || "") },
-    });
-    await loadUsers();
-  }
-
-  async function reset(userId: string) {
-    const { ok, data } = await api.resetUserPasswordApi(userId);
-    if (!ok) { showToast((data as any)?.detail || S.settings.setFailed, 3500); return; }
-    setState({ issuedSecret: { userId, password: String((data as any)?.password || "") } });
-    await loadUsers();
-  }
-
-  function remove(userId: string) {
-    askConfirm({
-      title: S.settings.removeUser,
-      msg: S.settings.removeUserMsg(userId),
-      onOk: async () => {
-        const { ok, data } = await api.deleteUserApi(userId);
-        if (!ok) { showToast((data as any)?.detail || S.common.deleteFailed, 3500); return; }
-        await loadUsers();
-        showToast(S.settings.userDeleted);
-      },
-    });
-  }
-
-  return (
-    <div className="settings-list">
-      <div className="settings-block">
-        <div className="settings-block-title">{S.settings.addUser}</div>
-        <div className="pf-row">
-          <input className="pf-input" placeholder={S.settings.usernamePlaceholder}
-                 value={f.username} onChange={(e) => set({ username: e.target.value })} />
-          <div className="pf-toggle">
-            {([["user", S.settings.roleUser], ["admin", S.settings.roleAdmin]] as const).map(([v, label]) => (
-              <button key={v} className={"pf-toggle-btn" + (f.role === v ? " active" : "")}
-                      onClick={() => set({ role: v })}>{label}</button>
-            ))}
-          </div>
-          <button className="dp-btn primary" disabled={f.busy || !f.username.trim()}
-                  onClick={() => void create()}>{S.common.create}</button>
-        </div>
-        <div className="settings-item-meta">{S.settings.addUserMeta}</div>
-      </div>
-
-      {s.issuedSecret && (
-        <div className="settings-block secret-block">
-          <div className="settings-block-title">{S.settings.issuedFor(s.issuedSecret.userId)}</div>
-          <div className="config-path-row">
-            <code className="config-path-val">{s.issuedSecret.password}</code>
-            <button className="cron-act" onClick={() => {
-              void navigator.clipboard.writeText(s.issuedSecret!.password);
-              showToast(S.common.copied);
-            }}>{S.common.copy}</button>
-            <button className="cron-act" onClick={() => setState({ issuedSecret: null })}>{S.common.cancel}</button>
-          </div>
-          <div className="settings-item-meta">{S.settings.issuedOnce}</div>
-        </div>
-      )}
-
-      {s.users.map((u) => (
-        <div key={u.user_id} className={"settings-item" + (u.user_id === s.accountId ? " active" : "")}>
-          <div className="settings-item-head">
-            <span className="settings-name">
-              {u.user_id}
-              <span className="settings-active"> {u.is_admin ? S.settings.roleAdmin : S.settings.roleUser}</span>
-              {u.user_id === s.accountId && <span className="settings-active"> ● {S.settings.you}</span>}
-            </span>
-            <div className="settings-item-actions">
-              <button className="cron-act" onClick={() => void reset(u.user_id)}>{S.settings.resetPassword}</button>
-              {u.user_id !== s.accountId && (
-                <button className="cron-act danger" onClick={() => remove(u.user_id)}>{S.common.delete}</button>
-              )}
-            </div>
-          </div>
-          <div className="settings-item-meta">
-            {u.created_at ? u.created_at.replace("T", " ") : ""}
-            {u.password_is_initial ? " · " + S.settings.generatedPassword : ""}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function ProfileForm() {
   const s = useAppState();
@@ -549,9 +416,9 @@ function ProfileForm() {
 /** Loaded lazily so the settings modal always opens with current server state
  *  rather than whatever the chat page fetched at boot. */
 export async function primeSettings(tab: string) {
-  setState({ settingsModal: { open: true }, settingsTab: tab, issuedSecret: null });
+  setState({ settingsModal: { open: true }, settingsTab: tab });
   await Promise.all([
     loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(),
-    loadAuthStatus(), ...(tab === "users" ? [loadUsers()] : []),
+    loadAuthStatus(),
   ]);
 }

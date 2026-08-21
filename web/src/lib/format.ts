@@ -9,6 +9,12 @@ export function fmtN(n: number) {
   return String(Math.round(n));
 }
 
+export function fmtCost(cost: number) {
+  if (cost > 0 && cost < 0.00005) return "<$0.0001";
+  if (cost < 0.00995) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
 export function fmtTime(sec: number) {
   if (!sec) return "0s";
   if (sec < 60) return `${sec.toFixed(1)}s`;
@@ -17,10 +23,14 @@ export function fmtTime(sec: number) {
   return `${m}m ${s}s`;
 }
 
-export function fmtDurationCompact(sec: number) {
+export function fmtTurnDuration(sec: number) {
   if (!sec) return "0s";
   if (sec < 60) return `${Math.round(sec)}s`;
-  return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  if (m < 60) return `${m}m${String(s).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h${String(m % 60).padStart(2, "0")}m`;
 }
 
 export function shortenPath(p: string) {
@@ -42,4 +52,11 @@ export function fmtFileSize(n: number) {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
   return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+export function formatDateTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

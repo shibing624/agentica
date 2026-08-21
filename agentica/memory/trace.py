@@ -13,6 +13,8 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentica.cost_tracker import CostTracker
+from agentica.model.usage import cache_hit_percent
+from agentica.utils.tokens import count_text_tokens
 
 
 RELAYED_MARKER = "__RELAYED__"
@@ -49,6 +51,21 @@ def _is_steering_user(entry: Dict[str, Any]) -> bool:
 
 def _empty_tokens() -> Dict[str, int]:
     return {"input": 0, "cacheRead": 0, "cacheWrite": 0, "output": 0}
+
+
+def _token_view(tokens: Dict[str, int]) -> Dict[str, Any]:
+    """Fresh / cache buckets plus the CLI footer's prompt size and hit rate.
+
+    ``input`` is billed-fresh tokens; ``prompt`` is what the model actually
+    saw (fresh + cache read + cache write). The hit percent is the same
+    ``cache_hit_percent`` the status bar uses.
+    """
+    prompt = tokens["input"] + tokens["cacheRead"] + tokens["cacheWrite"]
+    return {
+        **tokens,
+        "prompt": prompt,
+        "cacheHitPercent": cache_hit_percent(prompt, tokens["cacheRead"]),
+    }
 
 
 def _clip(text: Any, cap: int) -> str:
@@ -143,7 +160,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "gitBranch": None,
         "version": None,
         "tools": [],
-        "systemPromptChars": 0,
+        "systemPromptTokens": 0,
     }
 
     for mi, entry in enumerate(messages):
@@ -166,7 +183,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             if isinstance(tools, list):
                 meta["tools"] = [str(x) for x in tools]
         elif event_name == "system_prompt":
-            meta["systemPromptChars"] = int(entry.get("chars") or len(entry.get("content") or ""))
+            meta["systemPromptTokens"] = _system_prompt_tokens(entry, meta.get("model"))
         elif entry_type == "assistant" and meta["model"] is None and entry.get("model"):
             meta["model"] = entry.get("model")
 
@@ -450,6 +467,21 @@ def _pair_markers(messages: List[Dict[str, Any]], indices: List[int]) -> Dict[in
     return paired
 
 
+def _system_prompt_tokens(entry: Dict[str, Any], model_id: Optional[str] = None) -> int:
+    """Token count for a ``system_prompt`` event.
+
+    New logs store ``tokens`` at write time. Older logs only have the string
+    (and a ``chars`` field we no longer display); recount from content.
+    """
+    tokens = entry.get("tokens")
+    if isinstance(tokens, int) and tokens >= 0:
+        return tokens
+    content = entry.get("content") or ""
+    if not isinstance(content, str) or not content:
+        return 0
+    return count_text_tokens(content, model_id or "gpt-4o")
+
+
 def _entry_row(
     messages: List[Dict[str, Any]],
     mi: int,
@@ -478,7 +510,7 @@ def _entry_row(
             row["detail"] = "\n".join(str(t) for t in tools)
         elif name == "system_prompt":
             content = entry.get("content") or ""
-            row["summary"] = f"{entry.get('chars') or len(content)} chars"
+            row["summary"] = f"{_system_prompt_tokens(entry)} tokens"
             row["detail"] = _detail(content)
         elif name == "request_end":
             row["summary"] = f"status={entry.get('status') or 'unknown'}"
@@ -640,7 +672,7 @@ def _build_rounds(
             "toolCalls": sum(1 for s in tool_spans if s["taskIndex"] == ti),
             "toolResults": len(tool_results),
             "toolErrors": tool_errors,
-            "tokens": dict(tokens),
+            "tokens": _token_view(tokens),
             "costUsd": _cost(model_id, tokens),
             "tps": (tokens["output"] / (llm_ms / 1000)) if llm_ms > 0 else 0.0,
             "phases": _phase_breakdown(task, model_segments, tool_spans, duration_ms),
@@ -684,7 +716,7 @@ def _totals(
         "toolOk": tool_results - tool_errors,
         "toolErrors": tool_errors,
         "compactions": compaction_count,
-        "tokens": tokens,
+        "tokens": _token_view(tokens),
         "elapsedMs": elapsed_ms,
         "llmMs": llm_ms,
         "waitMs": sum(r["waitMs"] for r in rounds),

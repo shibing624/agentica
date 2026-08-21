@@ -115,6 +115,14 @@ class TestResolveMediaModel:
         _patch_media_model(monkeypatch, {"model_name": "gemini-3.6-flash"})
         assert mu.resolve_media_model() is None
 
+    def test_label_is_configured_name(self, monkeypatch):
+        _patch_media_model(monkeypatch, _media_model(model_name="my-vision"))
+        assert mu.media_model_label() == "my-vision"
+
+    def test_label_none_when_unconfigured(self, monkeypatch):
+        _patch_media_model(monkeypatch, None)
+        assert mu.media_model_label() is None
+
 
 # ------------------------------------------------------------ prepare: image
 class TestPrepareImage:

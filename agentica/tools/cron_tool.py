@@ -407,16 +407,20 @@ class CronTool(Tool):
             cron scheduler daemon, appended to the tool's system prompt. Defaults
             to ``DEFAULT_DAEMON_HINT`` (safe for any non-CLI surface); the CLI
             passes ``CLI_DAEMON_HINT`` since it alone has the `/cron` command.
+        owner: when set (gateway web/chat), create/list/edit are scoped to this
+            account. The model cannot name a different ``user_id``.
     """
 
     def __init__(
         self,
         job_runner: Optional[Callable[[CronJob], dict]] = None,
         daemon_hint: Optional[str] = None,
+        owner: Optional[str] = None,
     ):
         super().__init__(name="cronjob", description=_CRONJOB_DESCRIPTION)
         self._job_runner = job_runner
         self._daemon_hint = daemon_hint or DEFAULT_DAEMON_HINT
+        self._owner = owner
         self.register(self.cronjob, is_destructive=True)
         # The immediate-run path spawns a sub-agent in a worker thread via its
         # own asyncio.run() loop, which the outer asyncio.wait_for() cannot
@@ -446,6 +450,12 @@ class CronTool(Tool):
         permissions: Optional[dict[str, Any]] = None,
     ) -> str:
         normalized = (action or "").strip().lower()
+        if self._owner:
+            user_id = self._owner
+        if job_id and self._owner:
+            scoped = get_job(job_id)
+            if scoped is not None and scoped.user_id != self._owner:
+                return _to_json({"success": False, "error": f"Job '{job_id}' not found. Use cronjob(action='list') to see jobs."})
         # Immediate trial run: only when an executor is wired (interactive CLI).
         if normalized in {"run", "run_now", "trigger"} and self._job_runner is not None:
             if not job_id:

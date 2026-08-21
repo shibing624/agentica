@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import * as api from "./api";
 
 export type ChatMsg = {
   role: "user" | "assistant";
@@ -7,6 +8,12 @@ export type ChatMsg = {
   files?: string[];
   steps?: Array<Record<string, any>>;
   durationSec?: number;
+  tokIn?: number;
+  tokOut?: number;
+  costUsd?: number;
+  cacheRead?: number;
+  cacheHitPercent?: number | null;
+  previews?: string[];
   aborted?: boolean;
   error?: string;
 };
@@ -21,6 +28,8 @@ export type Session = {
   requests: number;
   totalTime: number;
   lastInputTokens: number;
+  contextTokens: number;
+  costUsd: number;
   dir: string;
   projectId?: string;
   archived?: boolean;
@@ -84,6 +93,7 @@ export type AppState = {
   curSess: string | null;
   sessions: Record<string, Session>;
   streams: Record<string, { abortCtrl: AbortController; aiMsg: ChatMsg }>;
+  goalRuns: Record<string, { status: string; objective: string; progress: string }>;
   pendingFiles: File[];
   messageQueue: QueuedMessage[];
   serverModel: string;
@@ -95,14 +105,14 @@ export type AppState = {
   serverReasoningEffort: string;
   serverContextWindow: number;
   serverProfile: string;
-  serverThinking: string;
+    serverSupportsImages: boolean;
+    serverMediaModel: string;
   profilesData: { active: string; profiles: any[] };
   providers: string[];
   inputText: string;
   modelDDOpen: boolean;
   approvalMenuOpen: boolean;
   chatMenuOpen: boolean;
-  ctxTipOpen: boolean;
   selectedApprovalMode: string;
   sidebarCollapsed: boolean;
   theme: string;
@@ -141,17 +151,19 @@ export type AppState = {
   accountId: string;
   /** "admin" or "user". Only account management is admin-only. */
   accountRole: string;
+  /** The seeded administrator. Its initial password is the one printed at first start. */
+  defaultAccountId: string;
+  /** How the current session was issued: "password" | "token" | "desktop". */
+  sessionVia: string;
   minPasswordLength: number;
-  passwordForm: { old: string; next: string; repeat: string; busy: boolean };
-  /** The account table, admin only. Empty until the panel loads it. */
+  /** Change-password overlay. `userId` is whose password; current password
+   *  typed in the form is always the person at the keyboard's. */
+  passwordDialog: { open: boolean; userId: string };
+  /** The account table, admin only. Empty until the page loads it. */
   users: Array<{
     user_id: string; role: string; created_at: string;
     password_is_initial: boolean; has_password: boolean; is_admin: boolean;
   }>;
-  userForm: { username: string; role: string; busy: boolean };
-  /** A password the server just generated, shown once. There is no second
-   *  chance to read it: nothing stores somebody else's credential in clear. */
-  issuedSecret: { userId: string; password: string } | null;
 };
 
 export function emptyProfileForm(): ProfileForm {
@@ -185,6 +197,7 @@ const state: AppState = {
   curSess: null,
   sessions: {},
   streams: {},
+  goalRuns: {},
   pendingFiles: [],
   messageQueue: [],
   serverModel: "-",
@@ -196,14 +209,14 @@ const state: AppState = {
   serverReasoningEffort: "",
   serverContextWindow: 128000,
   serverProfile: "",
-  serverThinking: "",
+    serverSupportsImages: false,
+    serverMediaModel: "",
   profilesData: { active: "", profiles: [] },
   providers: [],
   inputText: "",
   modelDDOpen: false,
   approvalMenuOpen: false,
   chatMenuOpen: false,
-  ctxTipOpen: false,
   selectedApprovalMode: localStorage.getItem("ag_approval") || "auto",
   sidebarCollapsed: false,
   theme: localStorage.getItem("ag_theme") || "auto",
@@ -234,11 +247,11 @@ const state: AppState = {
   passwordIsInitial: false,
   accountId: "default",
   accountRole: "user",
+  defaultAccountId: "default",
+  sessionVia: "",
   minPasswordLength: 6,
   users: [],
-  userForm: { username: "", role: "user", busy: false },
-  issuedSecret: null,
-  passwordForm: { old: "", next: "", repeat: "", busy: false },
+  passwordDialog: { open: false, userId: "" },
 };
 
 export function getState() { return state; }
@@ -285,8 +298,40 @@ export function closeConfirm() {
   setState({ confirm: { open: false, title: "", msg: "", okLabel: "", onOk: null } });
 }
 
+/** Cache is per account: the same browser logging in as `kk` must not
+ *  resurrect `default`'s sidebar from a leftover `ag_s`. */
+function accountCachePrefix() {
+  return state.accountId || "default";
+}
+
 export function saveSessions() {
-  localStorage.setItem("ag_s", JSON.stringify(state.sessions));
+  localStorage.setItem("ag_s:" + accountCachePrefix(), JSON.stringify(state.sessions));
+}
+
+export function readSessionCache(): Record<string, Session> {
+  const namespaced = localStorage.getItem("ag_s:" + accountCachePrefix());
+  const raw = namespaced || localStorage.getItem("ag_s") || "{}";
+  return JSON.parse(raw);
+}
+
+export function readLastSessionId(): string | null {
+  return localStorage.getItem("ag_a:" + accountCachePrefix()) || localStorage.getItem("ag_a");
+}
+
+export function writeLastSessionId(id: string | null, persist = true) {
+  const key = "ag_a:" + accountCachePrefix();
+  if (id) localStorage.setItem(key, id);
+  else localStorage.removeItem(key);
+  if (persist) pushPrefs();
+}
+
+export function pushPrefs() {
+  void api.savePrefsApi({
+    theme: state.theme,
+    lang: state.lang,
+    approval_mode: state.selectedApprovalMode,
+    last_session_id: state.curSess,
+  });
 }
 
 export function resolvedTheme(raw: string) {
@@ -303,6 +348,7 @@ export function setTheme(raw: string) {
   localStorage.setItem("ag_theme", raw);
   applyTheme(raw);
   setState({ theme: raw });
+  pushPrefs();
 }
 
 export const UNFILED_PROJECT_ID = "unfiled";

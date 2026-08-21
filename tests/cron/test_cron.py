@@ -700,3 +700,19 @@ class TestCronToolClass:
         from agentica.tools.cron_tool import CronTool, CLI_DAEMON_HINT
         tool = CronTool(daemon_hint=CLI_DAEMON_HINT)
         assert "/cron daemon on" in tool.get_system_prompt()
+
+    def test_cron_tool_owner_cannot_see_another_account(self, tmp_cron_dir):
+        import json
+        from agentica.cron.jobs import create_job, get_job
+        from agentica.tools.cron_tool import CronTool
+
+        job = create_job(prompt="admin task", schedule="1h", user_id="default")
+        tool = CronTool(owner="kk")
+        listed = json.loads(tool.cronjob(action="list"))
+        assert listed["count"] == 0
+        paused = json.loads(tool.cronjob(action="pause", job_id=job.id))
+        assert paused["success"] is False
+
+        created = json.loads(tool.cronjob(action="create", prompt="kk task", schedule="1h"))
+        assert created["success"] is True
+        assert get_job(created["job"]["job_id"]).user_id == "kk"

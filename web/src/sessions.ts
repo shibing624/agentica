@@ -2,7 +2,8 @@ import * as api from "./api";
 import { getStrings } from "./i18n";
 import { uid } from "./lib/format";
 import {
-  askConfirm, bump, getState, projectIdForDir, saveSessions, setState, showToast,
+  askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
+  saveSessions, setState, showToast, writeLastSessionId,
   type ChatMsg, type Session,
 } from "./store";
 
@@ -10,7 +11,10 @@ import {
  *  tab so restoring a session there updates the tree without a reload. */
 
 export async function loadSessions() {
-  const local = JSON.parse(localStorage.getItem("ag_s") || "{}");
+  // Overlay only: token counts and the local dir live in the browser, but the
+  // list itself is the server's. Merging local-only ids is how logging in as
+  // `kk` used to resurrect `default`'s conversations from the same origin.
+  const local = readSessionCache();
   const { ok, data } = await api.fetchSessions();
   const serverList = (ok && data?.sessions) ? data.sessions : [];
   const merged: Record<string, Session> = {};
@@ -18,20 +22,22 @@ export async function loadSessions() {
   for (const sv of serverList) {
     const id = sv.session_id;
     const lc = local[id] || {};
+    const dir = sv.work_dir || lc.dir || st.serverDir || "";
     merged[id] = {
       title: sv.name || lc.title || "Chat",
       msgs: lc.msgs || [],
       ts: sv.last_timestamp ? new Date(sv.last_timestamp).getTime() : (lc.ts || Date.now()),
       tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
       requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
-      dir: lc.dir || st.serverDir || "",
-      archived: !!(sv.archived || lc.archived),
+      contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,
+      dir,
+      projectId: projectIdForDir(dir),
+      archived: !!sv.archived,
     };
   }
-  for (const id of Object.keys(local)) if (!merged[id]) merged[id] = local[id];
   setState({ sessions: merged });
   saveSessions();
-  const last = localStorage.getItem("ag_a");
+  const last = readLastSessionId();
   if (last && merged[last]) switchTo(last);
 }
 
@@ -40,7 +46,7 @@ export function switchTo(id: string) {
   st.curSess = id;
   const sess = st.sessions[id];
   if (sess) sess.unread = false;
-  localStorage.setItem("ag_a", id);
+  writeLastSessionId(id);
   bump();
   if (sess && !sess.msgs.length) void hydrateSession(id);
 }
@@ -72,7 +78,8 @@ export function createSession(dir: string) {
   const id = uid();
   getState().sessions[id] = {
     title: "New Chat", msgs: [], ts: Date.now(), tokIn: 0, tokOut: 0, tokTotal: 0,
-    requests: 0, totalTime: 0, lastInputTokens: 0, dir, projectId: projectIdForDir(dir),
+    requests: 0, totalTime: 0, lastInputTokens: 0, contextTokens: 0, costUsd: 0,
+    dir, projectId: projectIdForDir(dir),
   };
   saveSessions();
   switchTo(id);
@@ -85,7 +92,16 @@ export function newChat() {
   const dir = (cur && cur.dir) || st.pendingNewChatDir || st.serverDir;
   if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: st.serverDir } }); return; }
   setState({ curSess: null, pendingNewChatDir: dir, inputText: "" });
-  localStorage.removeItem("ag_a");
+  writeLastSessionId(null);
+}
+
+/** New empty conversation in a specific project (the sidebar + on that folder). */
+export function newChatInDir(dir: string) {
+  if (!dir) {
+    setState({ dirModal: { open: true, forNewSession: true, value: "" } });
+    return;
+  }
+  createSession(dir);
 }
 
 export function renameSession(id: string, name: string) {
@@ -105,7 +121,7 @@ export function archiveSession(id: string) {
   void api.archiveSessionApi(id);
   if (st.curSess === id) {
     st.curSess = null;
-    localStorage.removeItem("ag_a");
+    writeLastSessionId(null);
   }
   bump();
   showToast(getStrings().session.archived);
@@ -133,7 +149,7 @@ export function deleteSession(id: string) {
       delete st.sessions[id];
       if (st.curSess === id) {
         st.curSess = null;
-        localStorage.removeItem("ag_a");
+        writeLastSessionId(null);
       }
       saveSessions();
       bump();

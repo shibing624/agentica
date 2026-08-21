@@ -89,7 +89,7 @@ def base_supports_modality(model_id: str, modality: str) -> bool:
 
 
 def resolve_media_model() -> Optional[Dict[str, Any]]:
-    """The Gemini used for describe/transcribe, or None if unconfigured.
+    """The model used for describe/transcribe, or None if unconfigured.
 
     Reads ``settings.media_model``. ``model_name`` defaults to
     ``DEFAULT_MEDIA_MODEL_NAME``; ``model_provider`` or ``base_url`` must be
@@ -112,6 +112,14 @@ def resolve_media_model() -> Optional[Dict[str, Any]]:
         "api_key": api_key,
         "wire_api": wire_api,
     }
+
+
+def media_model_label() -> Optional[str]:
+    """Configured ``settings.media_model`` name, or None if the block is missing."""
+    spec = resolve_media_model()
+    if spec is None:
+        return None
+    return spec["model_name"]
 
 
 def sniff_image_mime(data: bytes) -> str:
@@ -262,8 +270,8 @@ class MediaUnderstandingService:
         )
         plan.notes.append(
             f"⚠️ 暂不支持{label}理解：底模不能处理，且未配置 settings.media_model"
-            f"（在 config.yaml 的 settings 里加上指向 Gemini 的 media_model，"
-            f"例如 model_name: {DEFAULT_MEDIA_MODEL_NAME}）"
+            f"（在 config.yaml 的 settings 中增加 media_model："
+            f"需要 model_name，以及 model_provider 或 base_url）"
         )
 
     async def _describe(self, spec: Dict[str, Any], blocks: List[dict]) -> str:
@@ -356,6 +364,7 @@ __all__ = [
     "base_supports_modality",
     "decode_voice",
     "is_gemini",
+    "media_model_label",
     "media_understanding",
     "resolve_media_model",
     "sniff_image_mime",

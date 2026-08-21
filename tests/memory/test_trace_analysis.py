@@ -41,6 +41,11 @@ def test_trace_prelude_is_written_once_per_content(tmp_path):
     assert log.append_trace_prelude(**args) is False
     names = [e.get("name") for e in log.iter_raw_entries()]
     assert names == ["session_meta", "tool_list_ready", "system_prompt"]
+    prompt = next(e for e in log.iter_raw_entries() if e.get("name") == "system_prompt")
+    assert "tokens" in prompt
+    assert "chars" not in prompt
+    assert isinstance(prompt["tokens"], int)
+    assert prompt["tokens"] > 0
     # A mid-session change (profile switch, skills reload) must be recorded, or
     # the header would describe requests it no longer matches.
     assert log.append_trace_prelude(**{**args, "system_prompt": "be verbose"}) is True
@@ -290,6 +295,9 @@ class TestRoundView:
         rd = analyze_entries(self._turn())["rounds"][0]
         prompt = next(e for e in rd["entries"] if e["kind"] == "system_prompt")
         assert prompt["detail"] == "You are agentica. Be terse."
+        assert prompt["summary"].endswith(" tokens")
+        assert "chars" not in prompt["summary"]
+        assert analyze_entries(self._turn())["meta"]["systemPromptTokens"] > 0
         tools = next(e for e in rd["entries"] if e["kind"] == "tool_list_ready")
         assert tools["detail"].splitlines() == ["read_file", "execute"]
         assert analyze_entries(self._turn())["meta"]["tools"] == ["read_file", "execute"]
@@ -332,9 +340,17 @@ class TestRoundView:
         assert totals["toolCalls"] == 1
         assert totals["toolOk"] == 1
         assert totals["toolErrors"] == 0
-        assert totals["tokens"] == {"input": 150, "cacheRead": 1900, "cacheWrite": 0, "output": 50}
+        assert totals["tokens"]["input"] == 150
+        assert totals["tokens"]["cacheRead"] == 1900
+        assert totals["tokens"]["cacheWrite"] == 0
+        assert totals["tokens"]["output"] == 50
+        assert totals["tokens"]["prompt"] == 2050
+        assert totals["tokens"]["cacheHitPercent"] == 92.7
         assert totals["costUsd"] > 0
         assert totals["tps"] > 0
+        rd = out["rounds"][0]
+        assert rd["tokens"]["prompt"] == 2050
+        assert rd["tokens"]["cacheHitPercent"] == 92.7
 
     def test_cost_is_none_without_a_known_model(self):
         entries = [e for e in self._turn() if e.get("name") != "session_meta"]
@@ -351,7 +367,10 @@ class TestRoundView:
                request={"cache_read": 900, "cache_write": 0, "output": 20, "total": 1020}),
             _e("2026-01-01T00:00:03.000Z", type="event", name="request_end", status="completed"),
         ]
-        assert analyze_entries(entries)["rounds"][0]["tokens"]["input"] == 100
+        tok = analyze_entries(entries)["rounds"][0]["tokens"]
+        assert tok["input"] == 100
+        assert tok["prompt"] == 1000
+        assert tok["cacheHitPercent"] == 90.0
 
     def test_old_session_without_events_still_shows_its_messages(self):
         entries = [

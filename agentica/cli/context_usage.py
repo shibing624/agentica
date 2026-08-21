@@ -84,6 +84,12 @@ async def measure_context(agent) -> ContextBreakdown:
     sources that fed it, and whatever is left over stays in the ``System prompt``
     row — that keeps the rows summing to the real total instead of inventing a
     precision the assembly does not support.
+
+    Every row is a tiktoken estimate of the *next request*, in tokens, and the
+    rows are siblings (they add up). ``System prompt`` is the remainder of the
+    assembled system message after Rules / Skills / Tool guide have been
+    attributed; Tool definitions are API schemas and are not inside that
+    string.
     """
     breakdown = ContextBreakdown(window=agent.model.context_window or 0)
     model_id = agent.model.id

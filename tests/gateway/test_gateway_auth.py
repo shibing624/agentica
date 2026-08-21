@@ -41,6 +41,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTICA_GATEWAY_TOKEN", TOKEN)
     monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "gateway" / "runtime.json")
     auth.reset_token_for_tests()
+    monkeypatch.setattr(
+        "agentica.gateway.routes.auth._scaffold_user",
+        lambda uid: (tmp_path / "ws" / "users" / uid).mkdir(parents=True, exist_ok=True),
+    )
 
     svc = MagicMock()
     svc._ensure_initialized = AsyncMock()
@@ -502,11 +506,52 @@ class TestAccounts:
         assert st.is_admin("kk") is False
         assert st.is_admin("default") is True
 
-    @pytest.mark.parametrize("bad", ["", "../etc", "a/b", "-flag", "x" * 33, "kk!"])
+    @pytest.mark.parametrize("bad", ["", "a", "!!!", ".", "..", "---", "_"])
     def test_an_id_that_is_not_a_safe_directory_name_is_refused(self, tmp_path, bad):
         st = self.store(tmp_path)
         with pytest.raises(ValueError):
             st.create_account(bad)
+
+    @pytest.mark.parametrize(
+        "raw, want",
+        [
+            ("John Doe", "john_doe"),
+            ("kk-1", "kk_1"),
+            ("1kk", "u_1kk"),
+            ("../etc", "etc"),
+            ("a/b", "ab"),
+            ("-flag", "flag"),
+            ("kk!", "kk"),
+            ("x" * 33, "x" * 32),
+        ],
+    )
+    def test_typed_usernames_are_sanitised_into_directory_ids(self, tmp_path, raw, want):
+        st = self.store(tmp_path)
+        st.create_account(raw)
+        assert [a.user_id for a in st.list_accounts()] == [want]
+
+    def test_a_sanitised_duplicate_is_refused(self, tmp_path):
+        st = self.store(tmp_path)
+        st.create_account("John Doe")
+        with pytest.raises(ValueError, match="already exists"):
+            st.create_account("john_doe")
+        with pytest.raises(ValueError, match="already exists"):
+            st.create_account("john doe")
+
+    @pytest.mark.parametrize("reserved", ["users", "skills"])
+    def test_reserved_workspace_folder_names_are_refused(self, tmp_path, reserved):
+        st = self.store(tmp_path)
+        with pytest.raises(ValueError, match="reserved"):
+            st.create_account(reserved)
+
+    def test_scaffold_project_folder_is_the_username(self, tmp_path, monkeypatch):
+        from agentica.gateway.routes.auth import _scaffold_user
+
+        monkeypatch.setattr("agentica.workspace.AGENTICA_WORKSPACE_DIR", str(tmp_path / "ws"))
+        _scaffold_user("kk")
+        assert (tmp_path / "ws" / "kk").is_dir()
+        assert not (tmp_path / "ws" / "kk-default_project").exists()
+        assert (tmp_path / "ws" / "users" / "kk").is_dir()
 
     def test_a_username_is_case_folded(self, tmp_path):
         """The id is a directory name, so `KK` and `kk` cannot be two accounts
@@ -569,21 +614,69 @@ class TestUserRoutes:
         assert resp.status_code == 200, resp.text
         return resp
 
-    def test_an_admin_can_list_add_reset_and_remove(self, client):
+    def test_an_admin_can_list_add_change_password_and_remove(self, client):
         listing = client.get("/api/auth/users", headers=_auth()).json()
         assert [u["user_id"] for u in listing["users"]] == [ADMIN_ID]
 
         created = client.post("/api/auth/users", headers=_auth(),
-                              json={"username": "kk"}).json()
-        assert created["generated"] is True and len(created["password"]) >= 6
+                              json={"username": "kk", "password": "kk-pass1", "role": "user"})
+        assert created.status_code == 200, created.text
+        assert created.json()["user_id"] == "kk"
         assert client.post("/api/auth/login",
-                           json={"username": "kk", "password": created["password"]}).status_code == 200
+                           json={"username": "kk", "password": "kk-pass1"}).status_code == 200
 
         client.cookies.clear()
-        reset = client.post("/api/auth/users/kk/password", headers=_auth()).json()
-        assert reset["password"] != created["password"]
+        # Token holder skips the caller's current password; the new one is
+        # typed, not generated — there is no second secret to copy off the page.
+        changed = client.post("/api/auth/users/kk/password", headers=_auth(),
+                              json={"password": "kk-pass2"})
+        assert changed.status_code == 200, changed.text
+        assert "password" not in changed.json()
+        assert client.post("/api/auth/login",
+                           json={"username": "kk", "password": "kk-pass2"}).status_code == 200
         assert client.request("DELETE", "/api/auth/users/kk", headers=_auth()).status_code == 200
         assert [u["user_id"] for u in client.get("/api/auth/users", headers=_auth()).json()["users"]] == [ADMIN_ID]
+
+    def test_creating_an_account_without_a_password_is_refused(self, client):
+        resp = client.post("/api/auth/users", headers=_auth(), json={"username": "kk"})
+        assert resp.status_code == 400
+
+    def test_creating_an_administrator_is_refused(self, client):
+        resp = client.post("/api/auth/users", headers=_auth(),
+                           json={"username": "boss", "password": "boss-pass", "role": "admin"})
+        assert resp.status_code == 400
+        ids = [u["user_id"] for u in client.get("/api/auth/users", headers=_auth()).json()["users"]]
+        assert "boss" not in ids
+
+    def test_changing_someone_else_does_not_need_a_current_password(self, client):
+        """The admin is already signed in. Changing a user is the new password
+        alone; asking for a current one is a reset in disguise."""
+        from agentica.gateway import accounts
+
+        accounts.store().set_password(ADMIN_ID, "admin-pass")
+        assert client.post("/api/auth/users", headers=_auth(),
+                           json={"username": "kk", "password": "old-kk"}).status_code == 200
+        client.cookies.clear()
+        assert client.post("/api/auth/login",
+                           json={"username": ADMIN_ID, "password": "admin-pass"}).status_code == 200
+        assert client.post("/api/auth/users/kk/password",
+                           json={"password": "new-kk"}).status_code == 200
+        assert client.post("/api/auth/login",
+                           json={"username": "kk", "password": "new-kk"}).status_code == 200
+
+    def test_changing_your_own_still_needs_the_current_password(self, client):
+        from agentica.gateway import accounts
+
+        accounts.store().set_password(ADMIN_ID, "admin-pass")
+        client.cookies.clear()
+        assert client.post("/api/auth/login",
+                           json={"username": ADMIN_ID, "password": "admin-pass"}).status_code == 200
+        assert client.post("/api/auth/users/" + ADMIN_ID + "/password",
+                           json={"password": "newer-pass"}).status_code == 400
+        assert client.post("/api/auth/users/" + ADMIN_ID + "/password",
+                           json={"password": "newer-pass", "old_password": "admin-pass"}).status_code == 200
+        assert client.post("/api/auth/login",
+                           json={"username": ADMIN_ID, "password": "newer-pass"}).status_code == 200
 
     def test_a_plain_user_cannot_see_or_change_the_account_table(self, client):
         self._sign_in_as(client, "kk")
@@ -623,6 +716,46 @@ class TestUserRoutes:
         self._sign_in_as(client, "kk")
         client.get("/api/sessions")
         assert deps.agent_service.list_sessions.call_args.kwargs == {"owner": "kk"}
+
+    def test_cron_jobs_are_listed_and_edited_per_account(self, client, tmp_path, monkeypatch):
+        """The scheduler used to treat the gateway as one user, so `kk`
+        opening Scheduled saw `default`'s jobs and could pause them."""
+        from agentica.cron import jobs as cronjobs
+
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir()
+        monkeypatch.setattr(cronjobs, "CRON_DIR", cron_dir)
+        monkeypatch.setattr(cronjobs, "JOBS_FILE", cron_dir / "jobs.json")
+        monkeypatch.setattr(cronjobs, "OUTPUT_DIR", cron_dir / "output")
+        monkeypatch.setattr(cronjobs, "RUNS_FILE", cron_dir / "runs.jsonl")
+
+        created = client.post(
+            "/api/scheduler/jobs", headers=_auth(),
+            json={"prompt": "admin job", "schedule": "every 1h", "name": "admin-job"},
+        )
+        assert created.status_code == 200, created.text
+        admin_id = created.json()["job"]["id"]
+
+        self._sign_in_as(client, "kk")
+        listing = client.get("/api/scheduler/jobs")
+        assert listing.status_code == 200
+        assert listing.json()["jobs"] == []
+        assert client.get(f"/api/scheduler/jobs/{admin_id}").status_code == 404
+        assert client.post(f"/api/scheduler/jobs/{admin_id}/pause").status_code == 404
+
+        mine = client.post(
+            "/api/scheduler/jobs",
+            json={"prompt": "kk job", "schedule": "every 2h", "name": "kk-job"},
+        )
+        assert mine.status_code == 200, mine.text
+        kk_id = mine.json()["job"]["id"]
+        kk_ids = [j["id"] for j in client.get("/api/scheduler/jobs").json()["jobs"]]
+        assert kk_ids == [kk_id]
+
+        client.cookies.clear()
+        admin_ids = [j["id"] for j in client.get("/api/scheduler/jobs", headers=_auth()).json()["jobs"]]
+        assert admin_id in admin_ids
+        assert kk_id not in admin_ids
 
 
 class TestCsrf:

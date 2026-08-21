@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, TYPE_CHECKING
 
-from agentica.model.usage import split_prompt_usage
+from agentica.model.usage import cache_hit_percent, split_prompt_usage
 
 if TYPE_CHECKING:
     from agentica.cost_tracker import CostTracker
@@ -109,13 +109,7 @@ class ProviderUsageSummary:
 
     @property
     def cache_hit_percent(self) -> float | None:
-        if self.prompt_tokens <= 0 or self.cache_read_tokens <= 0:
-            return None
-        raw_percent = self.cache_read_tokens / self.prompt_tokens * 100
-        rounded = round(raw_percent, 1)
-        if raw_percent < 100 and rounded >= 100:
-            return 99.9
-        return rounded
+        return cache_hit_percent(self.prompt_tokens, self.cache_read_tokens)
 
 
 def format_tokens_short(n: int) -> str:

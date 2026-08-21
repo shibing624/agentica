@@ -8,6 +8,12 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
+class ChatImage(BaseModel):
+    """One pasted/attached image, already read by the browser as base64."""
+    mime: str = "image/png"
+    data: str
+
+
 class ChatRequest(BaseModel):
     """Chat request payload.
 
@@ -23,6 +29,12 @@ class ChatRequest(BaseModel):
     skill: str = ""
     tool: str = ""
     approval_mode: str = "ask"
+    images: List[ChatImage] = []
+
+
+class CompactRequest(BaseModel):
+    """Optional extra instructions for ``/compact`` (same as the CLI args)."""
+    instructions: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -48,7 +60,6 @@ class CronJobCreateRequest(BaseModel):
     prompt: str
     schedule: str
     name: Optional[str] = None
-    user_id: str = "default"
     timezone: str = "Asia/Shanghai"
     deliver: str = "local"
     timeout_seconds: float = 0.0
@@ -132,10 +143,6 @@ class ProfileUpsertRequest(BaseModel):
 
 class RenameRequest(BaseModel):
     name: str
-
-
-class ThinkingToggleRequest(BaseModel):
-    enabled: bool
 
 
 class BaseDirRequest(BaseModel):

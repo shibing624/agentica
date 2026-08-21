@@ -808,21 +808,12 @@ def _render_context_breakdown(con, agent) -> None:
     con.print()
     con.print(
         f"  [bold cyan]Context Window[/bold cyan]  "
-        f"[dim]{_fmt_tokens(total)} / {_fmt_tokens(breakdown.window)} "
-        f"({breakdown.percent_full:.0f}% full, estimated)[/dim]"
+        f"[dim]{_fmt_tokens(total)} / {_fmt_tokens(breakdown.window)}[/dim]"
     )
     con.print(f"  {sep}")
     con.print(f"  {'Messages:':<24} {len(agent.working_memory.messages):>7}")
-    # Bars are shares of what is loaded, so they add up to the whole row of
-    # blocks. Scaling to the largest row instead would peg it at full width and
-    # read as "this section filled the window".
     for label, tokens in sections:
-        share = tokens / total if total else 0
-        filled = round(share * 10)
-        bar = "▓" * filled + "░" * (10 - filled)
-        con.print(
-            f"  {label:<24} {_fmt_tokens(tokens):>7} {share * 100:>3.0f}%  [dim]{bar}[/dim]"
-        )
+        con.print(f"  {label:<24} {_fmt_tokens(tokens):>7}")
     con.print(f"  {sep}")
 
     con.print()

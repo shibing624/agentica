@@ -66,6 +66,7 @@ class TestSkillsCrud:
         assert _names(listed) == ["web-skill"]
         row = listed.json()["skills"][0]
         assert row["editable"] is True and row["trigger"] == "/web"
+        assert row["slash"] == "/web"
         # An agent already built for this session has the old catalogue frozen.
         svc._invalidate_cache.assert_awaited()
 

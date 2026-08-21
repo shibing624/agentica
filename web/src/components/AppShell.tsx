@@ -1,36 +1,56 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router";
-import { loadAuthStatus, loadCronJobs, loadPlugins, loadProfiles, loadStatus } from "../data";
+import { Outlet, useLocation, useNavigate } from "react-router";
+import * as api from "../api";
+import { loadAuthStatus, loadCronJobs, loadPlugins, loadPrefs, loadProfiles, loadStatus } from "../data";
 import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
 import { PluginsPanel } from "../panels/PluginsPanel";
 import { primeSettings, SettingsModal } from "../panels/SettingsModal";
 import { loadSessions, newChat } from "../sessions";
 import {
-  Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug, IconTrace,
-  IconSidebar, IconArchive, IconGear, IconProfiles, IconUser,
+  Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
+  IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
 } from "../icons";
 import { setState, useAppState, type Session } from "../store";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DirModal } from "./DirModal";
+import { SessionTree } from "./SessionTree";
 
 /**
  * The frame every page inside the app shares: left navigation, the account
  * popover, and the modals any of that navigation can open.
  *
- * It exists because Traces is a view of this app and not a different app. It
- * used to be a whole second layout with its own brand block and its own "back
- * to chat" link, which meant the nav went away exactly when the user wanted to
- * act on what they had just read, and every panel reachable from the nav
- * (scheduled jobs, plugins, settings) was unreachable from there.
+ * Trace is a session accessory, not a top-level tab: the only way in is the
+ * "view trace" chip next to the conversation title, so this nav has no traces
+ * item. The session tree still sits here on `/traces` so leaving a trace for
+ * that conversation is one click.
  *
- * `list` is the column under the nav. Chat puts its session tree there; traces
- * puts nothing, because its own session picker is a middle column of its own —
- * two session lists in one sidebar is a puzzle, not a shortcut.
+ * Chat / traces / users share one shell via `<AppLayout>` so navigating to a
+ * trace does not remount this tree and refetch `/api/sessions` (that refetch
+ * used to replace the sidebar and drop a conversation the list had not yet
+ * included).
+ *
+ * `list` is the column under the nav — chat, traces, and users all put the
+ * same session tree there.
  */
+export function AppLayout() {
+  const { pathname } = useLocation();
+  const S = useStrings();
+  const active = pathname.startsWith("/traces") ? "traces" : pathname.startsWith("/users") ? "users" : "chat";
+  return (
+    <AppShell
+      active={active}
+      list={<><div className="project-list-label">{S.chat.projects}</div><SessionTree /></>}
+    >
+      <Outlet />
+    </AppShell>
+  );
+}
+
 export function AppShell({
   active, list, children,
 }: {
-  active: "chat" | "traces";
+  active: "chat" | "traces" | "users";
   list?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -42,9 +62,10 @@ export function AppShell({
   // one loaded (a deep link to /traces is a cold start too).
   useEffect(() => {
     void (async () => {
-      await loadStatus();
+      await Promise.all([loadStatus(), loadAuthStatus()]);
+      await loadPrefs();
       await loadSessions();
-      await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs(), loadAuthStatus()]);
+      await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs()]);
     })();
   }, []);
 
@@ -63,7 +84,7 @@ export function AppShell({
             <span className="nav-icon"><IconPlus /></span>
             <span className="nav-label">{S.nav.newChat}</span>
           </button>
-          {active === "chat" && (
+          {(active === "chat" || active === "traces") && (
             <label className="side-nav-item side-search-item" title={S.nav.search}>
               <span className="nav-icon"><IconSearch /></span>
               <input placeholder={S.nav.searchSessions} value={s.sidebarSearch}
@@ -86,11 +107,6 @@ export function AppShell({
             <span className="nav-icon"><IconPlug /></span>
             <span className="nav-label">{S.nav.plugins}</span>
           </button>
-          <button className={"side-nav-item" + (active === "traces" ? " active" : "")}
-                  onClick={() => nav("/traces")} title={S.nav.traces}>
-            <span className="nav-icon"><IconTrace /></span>
-            <span className="nav-label">{S.nav.traces}</span>
-          </button>
         </nav>
         {list}
         <div className="account-wrap">
@@ -104,18 +120,26 @@ export function AppShell({
                 <div className="ctx-tip-row"><span>{S.nav.elapsed}</span><span>{fmtTime(usage.totalTime)}</span></div>
               )}
             </div>
-            {([["settings", S.nav.generalSettings, <IconGear key="g" />, false],
-               ["profiles", S.nav.profile, <IconProfiles key="p" />, false],
-               ["users", S.nav.users, <IconUser key="u" />, true],
-               ["cron", S.nav.cron, <IconClock key="c" />, false],
-               ["archived", S.nav.archivedSessions, <IconArchive key="a" />, false]] as const)
-              .filter(([, , , adminOnly]) => !adminOnly || s.accountRole === "admin")
-              .map(([tab, label, icon]) => (
-                <button key={tab} className="account-action"
-                        onClick={() => { setState({ accountPanelOpen: false }); void primeSettings(tab); }}>
+            {([["settings", S.nav.generalSettings, <IconGear key="g" />, "settings"],
+               ["profiles", S.nav.profile, <IconProfiles key="p" />, "profiles"],
+               ["users", S.nav.users, <IconUser key="u" />, "users"],
+               ["cron", S.nav.cron, <IconClock key="c" />, "cron"],
+               ["archived", S.nav.archivedSessions, <IconArchive key="a" />, "archived"]] as const)
+              .filter(([, , , tab]) => tab !== "users" || s.accountRole === "admin")
+              .map(([key, label, icon, tab]) => (
+                <button key={key} className="account-action"
+                        onClick={() => {
+                          setState({ accountPanelOpen: false });
+                          if (tab === "users") nav("/users");
+                          else void primeSettings(tab);
+                        }}>
                   {icon}<span>{label}</span>
                 </button>
               ))}
+            <button className="account-action"
+                    onClick={() => { setState({ accountPanelOpen: false }); void signOut(); }}>
+              <IconLogout /><span>{S.settings.logout}</span>
+            </button>
           </div>
           <button className="account-entry" onClick={() => setState({ accountPanelOpen: !s.accountPanelOpen })} title={S.nav.account}>
             <span className="account-avatar"><IconUser /></span>
@@ -126,7 +150,7 @@ export function AppShell({
             <span className="account-meta">
               <span className="account-name">{s.accountId}</span>
               <span className="account-sub">
-                {s.accountRole === "admin" ? S.settings.roleAdmin : S.settings.roleUser}
+                {s.accountRole === "admin" ? S.users.roleAdmin : S.users.roleUser}
               </span>
             </span>
           </button>
@@ -138,8 +162,14 @@ export function AppShell({
       {s.dirModal.open && <DirModal />}
       {s.settingsModal.open && <SettingsModal />}
       {s.pluginsPanelOpen && <PluginsPanel />}
+      <ChangePasswordDialog />
     </>
   );
+}
+
+async function signOut() {
+  await api.logoutApi();
+  window.location.href = "/login";
 }
 
 function accountUsage(sessions: Record<string, Session>) {

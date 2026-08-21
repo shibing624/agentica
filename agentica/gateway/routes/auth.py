@@ -17,6 +17,10 @@ The account table (``/api/auth/users``) is admin-only, and it is the only
 admin-only surface in the gateway. Everything else configures one machine
 (models, skills, cron, the working directory) and every signed-in account may
 change it; adding accounts is the one act that decides who those accounts are.
+    A new account is created with an initial password the admin typed; it is
+    always a user, never a second administrator — one admin is enough, and a
+    second one makes password recovery a maze. Changing a user's password is
+    the new password alone; changing your own still needs the current one.
 """
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -63,7 +67,11 @@ async def login(request: Request, response: Response):
     body = await request.json()
     # An empty username means the seeded account, so a bookmarked login page
     # and the desktop shell keep working without one.
-    user_id = str(body.get("username") or "").strip().lower() or accounts.default_account_id()
+    raw = str(body.get("username") or "").strip()
+    if not raw:
+        user_id = accounts.default_account_id()
+    else:
+        user_id = accounts.normalize_account_id(raw) or raw.lower()
     password = str(body.get("password") or "")
     if not password:
         raise HTTPException(status_code=400, detail="Password is required")
@@ -147,35 +155,70 @@ async def list_users(request: Request):
 
 @router.post("/users")
 async def create_user(request: Request):
-    """Add an account. Its password is returned once and never stored in clear.
+    """Add an account. The initial password is the one the admin typed.
 
-    A new account starts empty: it owns ``users/<name>/``, so it sees its own
-    conversations and memory rather than the creator's.
+    A generated password that is shown once and then forgotten is a reset
+    flow in disguise — the admin still has to tell the new person how to
+    get in, so they type it here. New accounts are users; the seeded
+    account is the only administrator. A new account starts empty: it owns
+    ``users/<name>/``, so it sees its own conversations and memory rather
+    than the creator's.
     """
     _require_admin(request)
     body = await request.json()
-    password = str(body.get("password") or "") or None
-    try:
-        secret = accounts.store().create_account(
-            str(body.get("username") or ""),
-            password,
-            role=str(body.get("role") or accounts.ROLE_USER),
+    password = str(body.get("password") or "")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    username = accounts.normalize_account_id(str(body.get("username") or ""))
+    role = str(body.get("role") or accounts.ROLE_USER)
+    if role != accounts.ROLE_USER:
+        raise HTTPException(
+            status_code=400,
+            detail="New accounts are users. The seeded account is the only administrator.",
         )
+    try:
+        accounts.store().create_account(username, password, role=accounts.ROLE_USER)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # `generated` tells the page whether to show the password: one it was given
-    # is already on the admin's screen, one we made is otherwise unrecoverable.
-    return {"status": "ok", "password": secret, "generated": password is None}
+    _scaffold_user(username)
+    return {"status": "ok", "user_id": username}
 
 
 @router.post("/users/{user_id}/password")
-async def reset_user_password(user_id: str, request: Request):
-    """Generate a new password for somebody else and return it once."""
-    _require_admin(request)
+async def change_user_password(user_id: str, request: Request, response: Response):
+    """Change an account's password. Admin only.
+
+    Changing someone else is just the new password — the admin is already
+    signed in, and asking for a current password (theirs or the target's)
+    is a reset in disguise. Changing *your own* still needs the current
+    one, same as ``POST /api/auth/password``: that is the built-in
+    administrator proving they still know it. A token/desktop session may
+    skip that proof.
+    """
+    principal = _require_admin(request)
+    body = await request.json()
+    new = str(body.get("password") or "")
+    if accounts.store().get_account(user_id) is None:
+        raise HTTPException(status_code=404, detail=f"{user_id} does not exist")
+
+    if user_id == principal.user_id:
+        old = str(body.get("old_password") or "")
+        session = accounts.store().read_session(request.cookies.get(auth.SESSION_COOKIE))
+        privileged = principal.kind != "session" or (
+            session is not None and session.via in ("token", "desktop")
+        )
+        if not privileged:
+            if not old or not accounts.store().check_password(principal.user_id, old):
+                raise HTTPException(status_code=400, detail="Current password is incorrect")
+
     try:
-        return {"status": "ok", "password": accounts.store().reset_password(user_id)}
+        accounts.store().set_password(user_id, new)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if user_id == principal.user_id:
+        auth.set_session_cookie(response, accounts.store().open_session(user_id, "password"))
+    return {"status": "ok", "user_id": user_id}
 
 
 @router.delete("/users/{user_id}")
@@ -194,3 +237,17 @@ async def delete_user(user_id: str, request: Request):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok"}
+
+
+def _scaffold_user(user_id: str) -> None:
+    """Create ``users/<id>/`` and a default Project named after the account.
+
+    Sessions group by working directory, not by a Project entity — the
+    directory is the Project. The folder is the sanitised username itself
+    (``workspace/<id>/``), not a ``-default_project`` suffix.
+    """
+    from agentica.workspace import Workspace
+
+    ws = Workspace(user_id=user_id)
+    ws.initialize()
+    (ws.path / user_id).mkdir(parents=True, exist_ok=True)

@@ -288,3 +288,32 @@ def test_turn_usage_summary_omits_leading_zero_for_full_cache_turn():
         output_tokens=0,
     )
     assert format_turn_usage_summary(summary) == "in 76.2K · cache 76.2K / 100.0%"
+
+
+def test_context_breakdown_lists_token_counts_without_percent_or_bar(monkeypatch):
+    from agentica.cli.context_usage import ContextBreakdown
+
+    breakdown = ContextBreakdown(
+        sections=[("System prompt", 1800), ("Conversation", 5800)],
+        window=128000,
+    )
+
+    def _fake_run(coro):
+        coro.close()
+        return breakdown
+
+    monkeypatch.setattr(model_config, "_run_async_safe", _fake_run)
+    agent = SimpleNamespace(working_memory=SimpleNamespace(messages=[1, 2]))
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, color_system=None, width=120)
+    model_config._render_context_breakdown(console, agent)
+    out = buf.getvalue()
+    assert "Context Window" in out
+    assert "1.8K" in out
+    assert "5.8K" in out
+    assert "Messages:" in out
+    assert "full" not in out
+    assert "estimated" not in out
+    assert "▓" not in out
+    assert "%" not in out
+

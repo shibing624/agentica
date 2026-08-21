@@ -8,11 +8,13 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Optional
+from io import StringIO
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .. import deps
@@ -25,17 +27,20 @@ from agentica.global_config import (
     get_profile,
     upsert_profile,
     delete_profile,
+    load_global_config,
 )
 from agentica.cli import self_manage
+from agentica.config import AGENTICA_HOME
+from agentica.cost_tracker import get_model_supports_images
 from ..models import (
     ModelSwitchRequest,
     ProfileSwitchRequest,
     ProfileUpsertRequest,
-    ThinkingToggleRequest,
     BaseDirRequest,
     OpenRequest,
 )
 from ..services.agent_service import AgentService
+from ..services.media_understanding import is_gemini, media_model_label
 
 router = APIRouter()
 
@@ -102,12 +107,15 @@ async def status():
 
     active_profile = get_active_profile_name()
     config_path = self_manage.config_file_path()
+    model_name = svc.model_name if svc else settings.model_name
     return {
         "workspace": str(settings.workspace_path),
         "base_dir": str(settings.base_dir),
         "model": f"{svc.model_provider}/{svc.model_name}" if svc else f"{settings.model_provider}/{settings.model_name}",
         "model_provider": svc.model_provider if svc else settings.model_provider,
-        "model_name": svc.model_name if svc else settings.model_name,
+        "model_name": model_name,
+        "supports_images": get_model_supports_images(model_name) or is_gemini(model_name),
+        "media_model": media_model_label(),
         "model_thinking": settings.model_thinking or "",
         "context_window": context_window,
         "version": __version__,
@@ -124,6 +132,67 @@ async def status():
             "reasoning_effort": svc.model_reasoning_effort if svc else settings.model_reasoning_effort,
         },
     }
+
+
+_PREFS_THEME = {"auto", "light", "dark"}
+_PREFS_LANG = {"en", "zh"}
+_PREFS_APPROVAL = {"ask", "auto", "allow-all"}
+
+
+def _prefs_path(user_id: str) -> Path:
+    return Path(AGENTICA_HOME).expanduser() / "gateway" / "prefs" / f"{user_id}.json"
+
+
+def _read_prefs(user_id: str) -> dict:
+    path = _prefs_path(user_id)
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    return data if isinstance(data, dict) else {}
+
+
+def _write_prefs(user_id: str, data: dict) -> None:
+    path = _prefs_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _clean_prefs(raw: dict) -> dict:
+    out: dict = {}
+    theme = raw.get("theme")
+    if theme in _PREFS_THEME:
+        out["theme"] = theme
+    lang = raw.get("lang")
+    if lang in _PREFS_LANG:
+        out["lang"] = lang
+    mode = raw.get("approval_mode")
+    if mode in _PREFS_APPROVAL:
+        out["approval_mode"] = mode
+    last = raw.get("last_session_id")
+    if isinstance(last, str) and last.strip():
+        out["last_session_id"] = last.strip()
+    return out
+
+
+@router.get("/api/prefs")
+async def get_prefs(request: Request):
+    """Per-account UI prefs. localStorage is a first-paint cache of this file."""
+    return _clean_prefs(_read_prefs(request.state.principal.user_id))
+
+
+@router.put("/api/prefs")
+async def put_prefs(request: Request):
+    uid = request.state.principal.user_id
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+    merged = _clean_prefs({**_read_prefs(uid), **body})
+    _write_prefs(uid, merged)
+    return merged
 
 
 # ============== Models ==============
@@ -170,23 +239,6 @@ async def switch_model(
     settings.model_name = request.model_name
     await svc._invalidate_cache()
     return {"status": "ok", "model": f"{request.model_provider}/{request.model_name}"}
-
-
-# ============== Thinking ==============
-
-@router.post("/api/config/thinking")
-async def toggle_thinking(request: ThinkingToggleRequest):
-    new_val = "enabled" if request.enabled else ""
-    settings.model_thinking = new_val
-    svc = deps.agent_service
-    if svc:
-        await svc._invalidate_cache()
-    return {"status": "ok", "thinking": new_val}
-
-
-@router.get("/api/config/thinking")
-async def get_thinking():
-    return {"thinking": settings.model_thinking or ""}
 
 
 # ============== Providers + Profiles ==============
@@ -413,18 +465,48 @@ async def set_base_dir(request: BaseDirRequest):
 
 @router.get("/api/config/dir_history")
 async def get_dir_history():
-    history = await _load_dir_history()
-    current = str(settings.base_dir)
-    if current not in history:
-        history.insert(0, current)
-        await _save_dir_history(history)
+    """Recent working dirs. Missing / inaccessible paths are dropped so
+    leftover pytest tmpdirs do not stay in the settings chips forever."""
+    history = await _pruned_dir_history()
     return {"history": history}
 
 
 @router.delete("/api/config/dir_history")
-async def clear_dir_history():
-    await _save_dir_history([str(settings.base_dir)])
-    return {"status": "ok"}
+async def delete_dir_history(path: Optional[str] = None):
+    """Remove one history entry (``?path=``) or clear the list."""
+    history = await _pruned_dir_history()
+    if path:
+        history = [p for p in history if p != path]
+    else:
+        history = []
+    await _save_dir_history(history)
+    return {"status": "ok", "history": history}
+
+
+@router.get("/api/config/file")
+async def get_config_file():
+    """``config.yaml`` text for the settings preview. Secrets are masked."""
+    from ruamel.yaml import YAML
+
+    path = self_manage.config_file_path()
+    masked = _mask_config_tree(load_global_config())
+    buf = StringIO()
+    yaml = YAML()
+    yaml.default_flow_style = False
+    yaml.allow_unicode = True
+    yaml.dump(masked or {}, buf)
+    return {"path": path, "content": buf.getvalue()}
+
+
+def _mask_config_tree(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {
+            k: _mask_config_tree(v) if isinstance(v, (dict, list)) else self_manage.mask_secret(k, v)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_mask_config_tree(v) for v in obj]
+    return obj
 
 
 def _dir_history_file() -> Path:
@@ -432,12 +514,33 @@ def _dir_history_file() -> Path:
     return Path(AGENTICA_CACHE_DIR).expanduser() / "dir_history.json"
 
 
+def _existing_dirs(paths: list) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        p = Path(raw).expanduser()
+        try:
+            if not p.is_dir():
+                continue
+        except OSError:
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
 async def _load_dir_history() -> list[str]:
     f = _dir_history_file()
     if f.exists():
         try:
             text = await asyncio.to_thread(f.read_text)
-            return json.loads(text)
+            data = json.loads(text)
+            return data if isinstance(data, list) else []
         except Exception:
             pass
     return []
@@ -450,8 +553,14 @@ async def _save_dir_history(history: list[str]) -> None:
     await asyncio.to_thread(f.write_text, data)
 
 
+async def _pruned_dir_history() -> list[str]:
+    history = _existing_dirs(await _load_dir_history())
+    await _save_dir_history(history)
+    return history
+
+
 async def _add_dir_history(path: str) -> None:
-    history = await _load_dir_history()
+    history = await _pruned_dir_history()
     if path in history:
         history.remove(path)
     history.insert(0, path)
@@ -478,6 +587,19 @@ async def browse_fs(path: Optional[str] = None):
     ]
     parent = str(base.parent) if base.parent != base else None
     return {"path": str(base), "parent": parent, "dirs": dirs}
+
+
+@router.post("/api/fs/temp")
+async def make_temp_workspace():
+    """Create a throwaway working directory for a new web chat.
+
+    Same idea as leaving the CLI cwd blank: the directory must exist, so the
+    server makes one under ``$AGENTICA_HOME/tmp/web-chats``.
+    """
+    root = Path(AGENTICA_HOME) / "tmp" / "web-chats"
+    root.mkdir(parents=True, exist_ok=True)
+    path = Path(tempfile.mkdtemp(prefix="chat-", dir=str(root)))
+    return {"path": str(path)}
 
 
 # ============== Open in Finder / Terminal ==============

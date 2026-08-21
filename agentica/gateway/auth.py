@@ -80,7 +80,7 @@ _OPEN_PATHS = (
 
 # Paths that answer with the SPA shell, so an unauthorized request should get
 # somewhere it can act on rather than a JSON envelope no browser will render.
-_SHELL_PREFIXES = ("/chat", "/traces")
+_SHELL_PREFIXES = ("/chat", "/traces", "/users")
 
 _token: Optional[str] = None
 
