@@ -331,8 +331,9 @@ class SandboxConfig:
         blocked_paths: Path components that are always blocked for read/write.
             Access to any path containing these path components is denied.
             Uses path component matching (not substring) to avoid false positives.
-        blocked_commands: Shell command patterns that are blocked from execution.
-            Uses regex boundary matching to reduce false positives.
+        blocked_commands: Shell command literals that are blocked from execution.
+            Matched as finished operands (leading and trailing token boundary).
+            A trailing ``/`` is the root path, not a prefix of ``/Users/...``.
         allowed_commands: Optional whitelist of allowed command prefixes.
             If set (non-None), ONLY commands whose first token matches one of
             these prefixes are permitted. None means no whitelist restriction

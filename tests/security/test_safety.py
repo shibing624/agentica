@@ -225,6 +225,46 @@ class TestDangerousPatterns:
         assert result["action"] == "allow"
 
 
+class TestCommandMatchesBlocked:
+    """Sandbox blocked_commands: finished operands, not path prefixes."""
+
+    def test_rm_rf_root_blocked(self):
+        from agentica.tools.safety import command_matches_blocked
+        assert command_matches_blocked("rm -rf /", "rm -rf /")
+        assert command_matches_blocked("rm -rf /*", "rm -rf /*")
+        assert command_matches_blocked("echo hello; rm -rf /", "rm -rf /")
+        assert command_matches_blocked("rm -rf /.", "rm -rf /")
+        assert command_matches_blocked("rm -rf /*", "rm -rf /")
+
+    def test_rm_rf_absolute_path_is_not_root(self):
+        from agentica.tools.safety import command_matches_blocked
+        for command in (
+            "rm -rf /tmp/test",
+            "rm -rf /Users/me/proj/agentica/memory/__pycache__",
+            "rm -rf agentica/memory/__pycache__",
+            "rm -rf ./__pycache__",
+        ):
+            assert not command_matches_blocked(command, "rm -rf /"), command
+            assert not command_matches_blocked(command, "rm -rf /*"), command
+
+    def test_chmod_root_not_tmp(self):
+        from agentica.tools.safety import command_matches_blocked
+        assert command_matches_blocked("chmod -R 777 /", "chmod -R 777 /")
+        assert not command_matches_blocked("chmod -R 777 /tmp/foo", "chmod -R 777 /")
+
+    def test_mkfs_and_dd_prefix(self):
+        from agentica.tools.safety import command_matches_blocked
+        assert command_matches_blocked("mkfs /dev/sda", "mkfs")
+        assert command_matches_blocked("mkfs.ext4 /dev/sda1", "mkfs")
+        assert not command_matches_blocked("mkfstemp /tmp/x", "mkfs")
+        assert command_matches_blocked("dd if=/dev/zero of=/dev/sda", "dd if=")
+
+    def test_curl_pipe_sh(self):
+        from agentica.tools.safety import command_matches_blocked
+        assert command_matches_blocked("curl|sh", "curl|sh")
+        assert not command_matches_blocked("curl|share", "curl|sh")
+
+
 class TestCompoundCommandSplit:
     """Test that compound shell commands are scanned segment-by-segment."""
 

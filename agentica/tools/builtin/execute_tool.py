@@ -13,7 +13,11 @@ from typing import Optional, List, Dict, Tuple, TYPE_CHECKING
 
 from agentica.tools.base import Tool
 from agentica.tools.background_processes import BackgroundProcessRegistry, read_log_tail
-from agentica.tools.safety import check_command_safety, redact_sensitive_text
+from agentica.tools.safety import (
+    check_command_safety,
+    command_matches_blocked,
+    redact_sensitive_text,
+)
 from agentica.security.redact import redact_tool_outputs_enabled
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
@@ -358,10 +362,7 @@ class BuiltinExecuteTool(Tool):
         if self._sandbox_config and self._sandbox_config.enabled:
             cmd_lower = command.lower().strip()
             for blocked in self._sandbox_config.blocked_commands:
-                # Use regex word boundary to reduce false positives (e.g. "rm" in "format")
-                # while still catching the actual dangerous patterns
-                pattern = re.escape(blocked.lower())
-                if re.search(r'(?:^|[\s;|&])' + pattern, cmd_lower):
+                if command_matches_blocked(command, blocked):
                     logger.warning(f"Sandbox: blocked command: {command[:100]}")
                     raise PermissionError(
                         "Sandbox blocked this command for security reasons."

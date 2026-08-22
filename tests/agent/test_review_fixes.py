@@ -111,22 +111,18 @@ class TestSandboxCommandBlocking:
             asyncio.run(tool.execute("rm -rf /"))
 
     def test_safe_rm_not_blocked(self):
-        """'rm -rf /tmp/test' should NOT be blocked by 'rm -rf /' pattern."""
-        from agentica.tools.builtin import BuiltinExecuteTool
+        """Absolute-path rm is not 'rm -rf /'; do not actually execute rm."""
+        from agentica.tools.safety import command_matches_blocked
 
-        config = SandboxConfig(
-            enabled=True,
-            blocked_commands=["rm -rf /", "rm -rf /*"],
-        )
-        tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
-
-        # 'rm -rf /tmp/test' should not match 'rm -rf /' since 'rm -rf /tmp/test'
-        # does contain 'rm -rf /' as a prefix substring, but with boundary matching
-        # the pattern 'rm -rf /' is followed by 't' not by space/eol.
-        # Actually 'rm -rf /tmp' does start with 'rm -rf /' so it matches.
-        # This is expected behavior - blocking 'rm -rf /' also blocks any 'rm -rf /...'
-        with pytest.raises(PermissionError, match="[Ss]andbox"):
-            asyncio.run(tool.execute("rm -rf /tmp/test"))
+        blocked = ["rm -rf /", "rm -rf /*"]
+        allowed = [
+            "rm -rf /tmp/test",
+            "rm -rf /Users/me/proj/agentica/memory/__pycache__",
+            "rm -rf agentica/memory/__pycache__",
+            "rm -rf .",
+        ]
+        for command in allowed:
+            assert not any(command_matches_blocked(command, pat) for pat in blocked), command
 
     def test_piped_command_blocked(self):
         """Exact blocked pattern 'curl|sh' should be blocked."""
@@ -163,6 +159,23 @@ class TestSandboxCommandBlocking:
 
         with pytest.raises(PermissionError, match="[Ss]andbox"):
             asyncio.run(tool.execute("echo hello; rm -rf /"))
+
+    def test_workspace_rm_reaches_executor(self):
+        """Sandbox must not raise; subprocess is mocked so nothing is deleted."""
+        from agentica.tools.builtin import BuiltinExecuteTool
+
+        config = SandboxConfig(enabled=True)
+        tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"gone\n", b""))
+
+        with patch(
+            "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
+            new=AsyncMock(return_value=proc),
+        ):
+            result = asyncio.run(tool.execute("rm -rf agentica/memory/__pycache__"))
+        assert "gone" in result
 
 
 # =========================================================================

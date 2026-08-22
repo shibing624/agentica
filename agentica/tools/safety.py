@@ -91,6 +91,47 @@ _BLOCK_DESCRIPTIONS = frozenset({
 # Top-level shell separators that chain independent commands.
 # Order matters: longer tokens (&&, ||) must be tried before single chars (&, |).
 _SEPARATOR_TOKENS = ("&&", "||", ";", "|", "&")
+_SHELL_BOUNDARY_CHARS = " \t;|&"
+
+
+def command_matches_blocked(command: str, blocked: str) -> bool:
+    """Return True if ``command`` contains ``blocked`` as a finished operand.
+
+    Codex / OpenCode / Penguin do not treat ``rm -rf /tmp/foo`` as ``rm -rf /``.
+    They parse arguments (or rely on an OS sandbox); a string prefix of a path
+    is not a deny rule. This matcher keeps the configured literal patterns but
+    requires a trailing token boundary:
+
+    - A pattern that ends with ``/`` is the root (``/``, ``/*``, ``/.``), not
+      the start of ``/Users/...`` or ``/tmp/...``.
+    - A pattern that ends with ``=`` (``dd if=``) stays a prefix.
+    - A bare program name (``mkfs``) also matches a dotted binary (``mkfs.ext4``).
+    """
+    cmd = command.lower().strip()
+    pat = blocked.lower().strip()
+    if not cmd or not pat:
+        return False
+
+    start_ok = re.compile(rf"(?:^|(?<=[{re.escape(_SHELL_BOUNDARY_CHARS)}])){re.escape(pat)}")
+    if pat.endswith("="):
+        return start_ok.search(cmd) is not None
+
+    for match in start_ok.finditer(cmd):
+        if _blocked_match_finished(pat, cmd[match.end():]):
+            return True
+    return False
+
+
+def _blocked_match_finished(pat: str, rest: str) -> bool:
+    """Whether ``rest`` after a blocked pattern is a token/command boundary."""
+    if rest == "" or rest[0] in _SHELL_BOUNDARY_CHARS:
+        return True
+    if pat.endswith("/"):
+        token = re.match(r"[^\s;|&]*", rest).group(0)
+        return bool(re.fullmatch(r"[./]*\*?", token))
+    if " " not in pat and "/" not in pat and "|" not in pat:
+        return re.match(r"\.\S*(?:$|[\s;|&])", rest) is not None
+    return False
 
 
 def split_compound_command(command: str) -> List[str]:
