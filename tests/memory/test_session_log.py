@@ -528,6 +528,14 @@ class TestListSessions:
             assert "size_bytes" in s
             assert s["size_bytes"] > 0
 
+    def test_session_entry_first_timestamp_is_the_first_line(self, tmp_dir):
+        log = SessionLog("sess", base_dir=tmp_dir)
+        log.append("user", "first", timestamp="2026-01-01T00:00:00.000Z")
+        log.append("user", "later", timestamp="2026-06-01T00:00:00.000Z")
+        sessions = SessionLog.list_sessions(base_dir=tmp_dir)
+        assert sessions[0]["first_timestamp"] == "2026-01-01T00:00:00.000Z"
+        assert sessions[0]["last_timestamp"] == "2026-06-01T00:00:00.000Z"
+
     def test_list_sessions_empty(self, tmp_dir):
         sessions = SessionLog.list_sessions(base_dir=tmp_dir)
         assert sessions == []

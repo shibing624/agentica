@@ -32,7 +32,12 @@ export function SessionTree() {
       if (!by[pid]) by[pid] = { id: pid, name: projectNameForDir(sess.dir), dir: sess.dir, sessions: [] };
       by[pid].sessions.push({ id, session: sess });
     }
-    return Object.values(by).sort((a, b) => (b.sessions[0]?.session.ts || 0) - (a.sessions[0]?.session.ts || 0));
+    const grouped = Object.values(by);
+    for (const g of grouped) {
+      g.sessions.sort((a, b) => b.session.ts - a.session.ts);
+    }
+    grouped.sort((a, b) => (b.sessions[0]?.session.ts || 0) - (a.sessions[0]?.session.ts || 0));
+    return grouped;
   }, [s.rev, s.sidebarSearch]);
 
   const pick = (id: string) => {
@@ -69,7 +74,7 @@ export function SessionTree() {
                 <IconPlus />
               </button>
             </div>
-            {!shut && g.sessions.sort((a, b) => b.session.ts - a.session.ts).map(({ id, session }) => (
+            {!shut && g.sessions.map(({ id, session }) => (
               <div key={id} className={"s-item" + (id === s.curSess ? " active" : "")} onClick={() => pick(id)}>
                 <div className="s-main">
                   <span className="ti">{session.title}</span>

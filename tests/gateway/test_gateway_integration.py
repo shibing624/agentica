@@ -5,6 +5,7 @@ Agent calls are mocked at the AgentService level to avoid real LLM calls.
 """
 from unittest.mock import MagicMock, AsyncMock, patch
 from pathlib import Path
+import asyncio
 import json
 import os
 
@@ -58,6 +59,12 @@ def mock_app():
     mock_svc._invalidate_cache = AsyncMock()
     mock_svc.reload_profile = AsyncMock()
     mock_svc.has_active_runs = MagicMock(return_value=False)
+    mock_svc.has_cached_session = MagicMock(return_value=False)
+    mock_svc.is_session_active = MagicMock(return_value=False)
+    mock_svc.cancel_session = MagicMock(return_value=False)
+    mock_log = MagicMock()
+    mock_log.path.exists.return_value = False
+    mock_svc.session_log_for = MagicMock(return_value=mock_log)
     mock_svc.read_user_agents_md = AsyncMock(return_value={
         "content": "# User Instructions\n",
         "path": "/tmp/AGENTS.md",
@@ -76,12 +83,15 @@ def mock_app():
     mock_svc._cache.keys = MagicMock(return_value=[])
     mock_svc._workspace = None
 
+    from agentica.gateway.services import live_turn
+    live_turn.reset()
     with TestClient(app, raise_server_exceptions=False) as client:
         # Override deps AFTER lifespan has initialized
         original_svc = deps.agent_service
         deps.agent_service = mock_svc
         yield client, mock_svc
         deps.agent_service = original_svc
+        live_turn.reset()
 
 
 class TestHealthEndpoint:
@@ -184,12 +194,12 @@ class TestGoalEndpoint:
 
         async def fake_run_goal(*_a, on_content=None, on_tool_call=None, on_tool_result=None, **kw):
             if on_tool_call:
-                await on_tool_call("read_file", {"path": "a.py"})
+                on_tool_call("read_file", {"path": "a.py"})
             if on_tool_result:
-                await on_tool_result("read_file", "print(1)")
+                on_tool_result("read_file", "print(1)")
             if on_content:
-                await on_content("hello ")
-                await on_content("world")
+                on_content("hello ")
+                on_content("world")
             on_event = kw.get("on_event")
             if on_event:
                 on_event({"status": "active", "objective": "ship it", "progress": "tokens 10"})
@@ -893,3 +903,101 @@ class TestProfileCrudEndpoints:
         with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
             resp = client.delete("/api/profile/none")
         assert resp.status_code == 404
+
+
+class TestChatRunRegistry:
+    """Background run: disconnect does not cancel; Stop waits; reconnect replays."""
+
+    def test_create_run_returns_id_immediately(self, mock_app):
+        from agentica.gateway.services.agent_service import ChatResult
+        client, mock_svc = mock_app
+        mock_svc.chat_stream = AsyncMock(return_value=ChatResult(
+            content="hi", session_id="s1",
+        ))
+        resp = client.post("/api/chat/runs", json={"message": "hello", "session_id": "s1"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["run_id"]
+        assert body["session_id"] == "s1"
+        assert body["status"] in ("starting", "running", "completed")
+
+    def test_active_run_and_events_replay(self, mock_app):
+        from agentica.gateway.services.agent_service import ChatResult
+        client, mock_svc = mock_app
+
+        async def fake_stream(*_a, on_content=None, **_k):
+            if on_content:
+                on_content("hello")
+            return ChatResult(content="hello", session_id="s1")
+
+        mock_svc.chat_stream = fake_stream
+        created = client.post("/api/chat/runs", json={"message": "hi", "session_id": "s1"})
+        run_id = created.json()["run_id"]
+        events = []
+        with client.stream("GET", f"/api/chat/runs/{run_id}/events") as resp:
+            assert resp.status_code == 200
+            for line in resp.iter_lines():
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    events.append(json.loads(line[6:]))
+        kinds = [e.get("event") for e in events]
+        assert "content" in kinds or "done" in kinds
+        if events:
+            assert "seq" in events[0]
+
+    def test_cancel_missing_run_is_completed(self, mock_app):
+        client, _ = mock_app
+        resp = client.post("/api/chat/runs/missing/cancel")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+
+    def test_second_run_on_same_session_409s_while_active(self, mock_app):
+        from agentica.gateway.services.agent_service import ChatResult
+        client, mock_svc = mock_app
+        gate = {"release": False}
+
+        async def slow_stream(*_a, **_k):
+            for _ in range(50):
+                if gate["release"]:
+                    break
+                await asyncio.sleep(0.02)
+            return ChatResult(content="later", session_id="busy")
+
+        mock_svc.chat_stream = slow_stream
+        first = client.post("/api/chat/runs", json={"message": "one", "session_id": "busy"})
+        assert first.status_code == 200
+        second = client.post("/api/chat/runs", json={"message": "two", "session_id": "busy"})
+        assert second.status_code == 409
+        gate["release"] = True
+        run_id = first.json()["run_id"]
+        client.post(f"/api/chat/runs/{run_id}/cancel")
+
+    def test_disconnect_does_not_cancel_run(self, mock_app):
+        from agentica.gateway.services import live_turn
+        from agentica.gateway.services.agent_service import ChatResult
+        client, mock_svc = mock_app
+        gate = {"release": False}
+
+        async def slow_stream(*_a, on_content=None, **_k):
+            if on_content:
+                on_content("partial")
+            for _ in range(80):
+                if gate["release"]:
+                    break
+                await asyncio.sleep(0.02)
+            if on_content:
+                on_content(" done")
+            return ChatResult(content="partial done", session_id="keep")
+
+        mock_svc.chat_stream = slow_stream
+        created = client.post("/api/chat/runs", json={"message": "hi", "session_id": "keep"})
+        assert created.status_code == 200
+        run_id = created.json()["run_id"]
+        assert live_turn.active("keep") is not None
+        active = client.get("/api/chat/runs/active", params={"session_id": "keep"})
+        assert active.status_code == 200
+        assert active.json()["run"]["run_id"] == run_id
+        missing = client.get("/api/chat/runs/no-such-run/events")
+        assert missing.status_code == 404
+        gate["release"] = True
+        client.post(f"/api/chat/runs/{run_id}/cancel")
+

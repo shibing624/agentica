@@ -49,6 +49,7 @@ from .model_factory import (
 )
 from .response_formatter import extract_metrics, format_tool_call_args, format_tool_result
 from .session_usage import turn_usage_payload, usage_payload
+from . import live_turn
 
 if TYPE_CHECKING:
     from ..channels.base import InboundMedia
@@ -1147,6 +1148,10 @@ class AgentService:
         Scheduled (cron) job runs are excluded — they're not interactive chat
         sessions and shouldn't clutter the sidebar; their execution history
         is tracked separately via the cron TaskRun store.
+
+        Ordered by creation time (the first request's timestamp, newest
+        first) so the sidebar never reshuffles when a session gets new
+        messages. CLI /resume keeps its own mtime ordering.
         """
         uid = self._owner(owner)
         projects = SessionLog.list_projects(user_id=uid)
@@ -1171,12 +1176,14 @@ class AgentService:
                     "name": name,
                     "preview": first_user,
                     "user_count": (preview or {}).get("user_count", 0),
+                    "first_timestamp": s.get("first_timestamp"),
                     "last_timestamp": s.get("last_timestamp"),
                     "size_bytes": s.get("size_bytes", 0),
                     "archived": bool(s.get("archived")),
                     "work_dir": s.get("work_dir") or work_dir,
+                    "running": self.is_session_active(sid) or live_turn.active(sid) is not None,
                 })
-        out.sort(key=lambda row: str(row.get("last_timestamp") or ""), reverse=True)
+        out.sort(key=lambda row: str(row.get("first_timestamp") or ""), reverse=True)
         return out
 
     def session_log_for(self, session_id: str, owner: Optional[str] = None) -> SessionLog:
@@ -1230,6 +1237,7 @@ class AgentService:
         """
         base_dir, _work_dir = self._locate_session(session_id, owner)
         removed = self._cache.delete(session_id)
+        live_turn.drop(session_id)
         self._session_work_dirs.pop(session_id, None)
         if self.agent_peers is not None:
             # A deleted session must stop being addressable at once, not on the

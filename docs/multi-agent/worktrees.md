@@ -55,7 +55,7 @@ to coordinate (send_message) or to work in your own checkout (worktree(...)).
 ## 三、worktree：一个任务一个目录、一个分支
 
 ```bash
-# 启动时就进入自己的 worktree（不存在则创建，存在则复用）
+# 启动时就进入自己的 worktree（不存在则创建，进行中则复用）
 agentica --worktree gateway-peers
 ```
 
@@ -66,13 +66,20 @@ agentica --worktree gateway-peers
 agent 调用：worktree(action="use", name="gateway-peers")
 ```
 
-`worktree` 工具的三个动作：
+`worktree` 工具的动作：
 
 | 动作 | 作用 |
 |------|------|
 | `worktree(action="status")` | 列出本仓库所有 worktree，标出"你在这"，附带当前 git 位置 |
-| `worktree(action="use", name="<任务>")` | 进入该任务的 worktree，首次自动创建，之后永远复用 |
-| `worktree(action="merge")` | 把本 worktree 的分支并回基准分支，**worktree 保留** |
+| `worktree(action="use", name="<任务>")` | 进入该任务的 worktree；首次创建，**任务未完成时复用** |
+| `worktree(action="merge")` | 把本 worktree 的分支并回本地基准分支，然后**删除 checkout 和 `wt/<任务>` 分支**，会话回到主目录 |
+| `worktree(action="remove")` | 丢掉一个没有独有工作的 worktree（有未提交改动或未合入本地 base 的提交则拒绝） |
+
+进行中的同名 `use` 仍然复用，所以「切到 gateway-peers 再改」还能从另一个会话送达。合完目录就没了；下一次新功能用新名字，从当前本地 `main` 再拉一份。
+
+会话绑在 worktree 上时会 `git worktree lock`（reason `agentica pid=<pid>`），别的进程的 `git worktree remove` / prune 拿不走正在用的树。用户自己加的锁不会被抢走。holder pid 已死则视为遗弃，可以偷锁。
+
+退出交互会话时：只动 agentica 自己建的 `wt/*` worktree。没有独有工作（干净且不 ahead 本地 base）→ 自动删；有未提交或未合并的提交 → 留在盘上**并且保持 lock**（下次 `use` 在 pid 已死时偷锁）。手动 `git worktree add`、detached、Claude Code 的树一律不碰。没有按天数的定期清扫——「有没有独有工作」就是安全标准（agentica 以本地 `main` 为中心，不用「是否已 push」）。
 
 ### 就地切换到底动了什么
 
@@ -92,76 +99,45 @@ agent 调用：worktree(action="use", name="gateway-peers")
 
 ### 目录位置与命名
 
-默认：主 checkout 的**兄弟目录** `../<repo>-<任务>`，分支 `wt/<任务>`。
+默认：仓库内 `<repo>/.agentica/worktrees/<任务>`，分支 `wt/<任务>`（Claude Code 的 `.claude/worktrees/` 形态）。
 
 ```text
-~/Documents/Codes/agentica              主 checkout（main）
-~/Documents/Codes/agentica-gateway      wt/gateway
-~/Documents/Codes/agentica-paper        wt/paper
+~/Documents/Codes/agentica                         主 checkout（main）
+~/Documents/Codes/agentica/.agentica/worktrees/gateway   wt/gateway
+~/Documents/Codes/agentica/.agentica/worktrees/paper     wt/paper
 ```
 
-两种情况需要换地方，都用 `~/.agentica/config.yaml` 里的设置（`settings:` 块）：
+首次创建时会在 `.agentica/worktrees/.gitignore` 里写一个 `*`，**自我忽略**：`git status` 干净，且**不动仓库里那个被跟踪的 `.gitignore`**。`glob` / `grep` 会跳过仓库内的任何 worktree（问 `git worktree list`，不是按名字猜），绑定在该 worktree 里工作的会话仍然看得见自己的文件。
+
+两种情况需要换地方，都用 `~/.agentica/config.yaml` 里的设置（`settings:` 块；嵌套 `worktree.root` 和扁平行 `worktree.root` 都行）：
 
 ```yaml
 settings:
   worktree:
-    root: ~/worktrees          # 绝对路径 → <root>/<repo>/<任务>
-    # root: .agentica/worktrees  # 相对路径 → 仓库内 <repo>/.agentica/worktrees/<任务>
+    root: sibling              # 旧默认：../<repo>-<任务>
+    # root: ~/worktrees        # 绝对路径 → <root>/<repo>/<任务>
     link: [".env", ".envrc"]   # 新 worktree 里 symlink 过来的 gitignored 文件
 ```
 
-- **父目录塞了二十个仓库**，不想再散一堆 `xxx-yyy` → 指到一个集中目录
-- **共享挂载的父目录不可写** → 同上（不可写时报错会直接点名这个设置）
+- **不想 worktree 落在仓库里**（比如经常 `git clean -xdff`）→ `root: sibling`
+- **父目录塞了二十个仓库，想集中放** → 绝对路径
+- **共享挂载的父目录不可写** → 默认的仓库内布局正好不需要写父目录
 
-### 仓库内布局（`root: .agentica/worktrees`）
-
-这是 Claude Code 的 `.claude/worktrees/` 形态，**一等支持**，选它不需要任何额外准备：
-
-- 目录形如 `<repo>/.agentica/worktrees/<任务>`（不再插一层仓库名——仓库已经由位置隐含了）
-- 首次创建时会在 `.agentica/worktrees/.gitignore` 里写一个 `*`，**自我忽略**：`git status`
-  干净，且**不动仓库里那个被跟踪的 `.gitignore`**（那是共享文件，工具不该替你改）
-- agentica 自己的 `glob` / `grep` 会跳过**仓库内的任何 worktree**（不只是 `.agentica`）：
-  否则 `glob("**/*.py")` 把每个文件返回 N+1 份，而真正危险的不是噪音，是**改到副本那一份**上去。
-  这个排除是**问 git 要的**（`git worktree list`，按仓库缓存 10s），不是按名字猜的——
-  嵌套 worktree 不一定是 agentica 建的：人或另一个 agent 手打
-  `git worktree add .worktrees/x` 会造成一模一样的重复。实测本仓库当时就有
-  `.worktrees/wechat-media`（另一个会话的临时 worktree），`glob("**/peers.py")` 确实返回了
-  它那一份。绑定在该 worktree 里工作的会话仍然看得见自己的全部文件（排除永不包含搜索根自身）
-
-它的优点也是实打实的：不污染父目录、只要仓库可写就能用（共享挂载友好）、删掉仓库时
-worktree 跟着一起走、和 `.cursor/` `.claude/` 同一套心智。
-
-**唯一不可逆的代价**（也是它没被设为默认的原因）：嵌套 checkout 在主 checkout 里
-`git clean` 的射程内。实测——
-
-| 命令 | 结果 |
-|------|------|
-| `git clean -xdf`（单 `-f`，最常打的那条） | `Skipping repository .agentica/worktrees/docs` → **安全** |
-| `git clean -xdff`（双 `-f`） | `Removing .agentica/` → 树没了，**连别的会话未提交的改动一起**，注册项变 `prunable` |
-
-sibling 布局下这条命令完全无害。所以两种布局的错误代价不对称：sibling 选错是"报错 + 加一行
-配置"（可恢复、可见），仓库内选错是"某次双 `-f` 清理顺手删掉三个会话的活"（不可恢复）。
-默认因此留在 sibling；哪条更贴你的机器，改一行配置就切。
+`git clean -xdf`（单 `-f`）对嵌套 checkout 是 `Skipping repository`，安全；`git clean -xdff`（双 `-f`）会 `Removing .agentica/`。进行中的树有 `git worktree lock`；合完的已经被删掉。这是默认改成仓库内的原因：短命 checkout 不再值得为 `clean -xdff` 把目录散到父级去。
 
 `.env` 是 **symlink 而不是拷贝**：轮换一次密钥所有 worktree 同时生效，而且机器上只存在一份。
 
-### 合并回去，但不删 worktree
+### 合并回去，然后删除 worktree
 
-`worktree(action="merge")` 的顺序是刻意的，不是随手写的：
+`worktree(action="merge")` 的顺序是刻意的：
 
-1. **先在 worktree 里把基准分支合进当前分支**。冲突就留在写这段代码的会话手上、在它自己的目录里、
-   测试一条命令就能跑——而不是把一个半合并的 index 扔在所有会话共用的主 checkout 里。
-2. **再在主 checkout 里把分支并进基准分支**，此时必然是 fast-forward，共享目录被碰的时间最短。
-   两个会话同时 merge 时，git 自己的 `index.lock` 就是互斥锁，这里只是**等它**（重试 5 次），
-   不另造一把锁。
+1. **先在 worktree 里把基准分支合进当前分支**。冲突就留在写这段代码的会话手上、在它自己的目录里、测试一条命令就能跑——而不是把一个半合并的 index 扔在所有会话共用的主 checkout 里。
+2. **再在主 checkout 里把分支并进基准分支**，此时必然是 fast-forward，共享目录被碰的时间最短。两个会话同时 merge 时，git 自己的 `index.lock` 就是互斥锁，这里只是**等它**（重试 5 次），不另造一把锁。
+3. **会话回到主 checkout，删除 worktree 和 `wt/<任务>` 分支。** 合完之后它与本地 base 齐平，删除不会丢掉独有提交。若当时被别的活进程锁着，合并已经落在 main 上，目录会留下并说明原因。
 
-副产品正是长期可用的关键：合完之后这个 worktree **与基准分支齐平**，下次接着用不会背着旧历史。
+会被明确拒绝（而不是替你猜）的情况：worktree 里有未提交改动、主 checkout 不干净、主 checkout 不在基准分支上、当前分支没有新提交、在主 checkout 里执行 merge。
 
-会被明确拒绝（而不是替你猜）的情况：worktree 里有未提交改动、主 checkout 不干净、主 checkout
-不在基准分支上、当前分支没有新提交、在主 checkout 里执行 merge。
-
-**任何情况下都不会删除 worktree**，也没有自动清理——它值钱的地方就是那个已经暖好的 IDE 索引、
-装好的虚拟环境和一屏 shell 历史。要删就自己 `git worktree remove`。
+`remove` 的安全标准是 **「agentica 建的 `wt/` 分支，且没有独有工作」**：干净，且没有本地 base 上没有的提交。detached、别人的分支、Claude Code 的 checkout 一律拒绝。 
 
 ## 四、几个实测出来的坑
 
@@ -174,7 +150,6 @@ sibling 布局下这条命令完全无害。所以两种布局的错误代价不
    和真正的原因八竿子打不着。默认 symlink `.env`，其它用 `worktree.link` 加。
 3. **`index.lock` 冲突基本上是"多进程同一个工作树"的症状**，切了 worktree 就没了；
    但仓库级操作（`worktree add`、`fetch`、`gc`）仍会短暂锁 `.git`。
-4. **按任务命名，不要按会话命名**。一会话一 worktree 且不删除 = 目录爆炸；
-   让会话复用同名 worktree 才是可持续的，也才能两个会话在同一个任务上接力。
+4. **按任务命名，不要按会话命名。** 同名只在任务未完成时复用，合完即拆；两个会话仍能在同一个未完成的任务上接力，目录不会因此堆下去。
 5. `~/.agentica` 是共享的：session 列表和 profile 覆盖按 work_dir 分桶（正是我们要的），
    但 cron、skills、MEMORY.md 是全局共享——别指望它们被隔离。

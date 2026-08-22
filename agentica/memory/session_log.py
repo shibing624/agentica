@@ -1195,9 +1195,13 @@ class SessionLog:
     def _session_entry(cls, path: Path, work_dir: Optional[str]) -> Dict[str, Any]:
         """Build one listing row for a session transcript."""
         stat = path.stat()
+        first_timestamp = None
         last_timestamp = None
         try:
             with open(path, "rb") as fh:
+                head = fh.readline().decode("utf-8", errors="replace")
+                if head.strip():
+                    first_timestamp = json.loads(head).get("timestamp")
                 fh.seek(max(0, stat.st_size - 4096))
                 tail = fh.read().decode("utf-8", errors="replace")
                 lines = tail.strip().splitlines()
@@ -1215,6 +1219,7 @@ class SessionLog:
             "work_dir": work_dir,
             "size_bytes": stat.st_size,
             "mtime": stat.st_mtime,
+            "first_timestamp": first_timestamp,
             "last_timestamp": last_timestamp,
             "name": cls._meta_name(meta),
             "archived": cls._meta_archived(meta),

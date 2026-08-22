@@ -527,6 +527,11 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | POST | `/api/goal` | Web `/goal`：standing-goal 循环。body：`objective`、`session_id`、`token_budget`（默认 `-1` = 不限；不传 turns / wall） |
 | POST | `/api/fs/temp` | 为新建对话创建一个临时工作目录（`$AGENTICA_HOME/tmp/web-chats`） |
 | POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`，可选 `images`） |
+| POST | `/api/chat/stream` | 创建后台 run 并立刻订阅 SSE（便捷入口；断开不断 run） |
+| POST | `/api/chat/runs` | 创建后台 run，立刻返回 `run_id` / `status` |
+| GET | `/api/chat/runs/active?session_id=` | 该 session 进行中的 run（刷新后重连用） |
+| GET | `/api/chat/runs/{run_id}/events?after=` | 订阅或重连 SSE（`after` 为已消费的 seq；断开不取消 run） |
+| POST | `/api/chat/runs/{run_id}/cancel` | 显式取消并等待 session lock 释放；已结束则幂等返回终态 |
 | WS | `/ws` | 流式事件订阅 |
 | GET | `/api/channels` | 列出已注册渠道 + 连接状态，以及网页「个人助理」用的完整 catalog（含未配置的 IM、`web_url`、监听地址） |
 | POST | `/api/channels/wechat/qr` | 个人助理「配置」：生成微信登录二维码（`png` base64 + `qrcode` id + `expires_in`） |

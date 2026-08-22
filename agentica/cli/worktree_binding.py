@@ -77,8 +77,10 @@ class WorktreeBinder:
             lines.append(f"  {entry.describe()}{marker}")
         lines.append("")
         lines.append(
-            "Switch with worktree(action=\"use\", name=\"<task>\") — it is created "
-            "on first use and reused afterwards."
+            "Switch with worktree(action=\"use\", name=\"<task>\") — created "
+            "if missing, reused while the task is in progress. "
+            "worktree(action=\"merge\") lands on the local base and removes "
+            "the checkout; worktree(action=\"remove\") drops an unused one."
         )
         return "\n".join(lines)
 
@@ -92,33 +94,25 @@ class WorktreeBinder:
 
         cwd = self.work_dir()
         worktree = worktrees.ensure(cwd, name, base=base)
+        owned = worktrees.claim_lock(worktree.path)
         target = os.path.realpath(worktree.path)
         if target == os.path.realpath(cwd):
+            extra = ""
+            if not owned:
+                holder = worktrees.lock_holder_description(worktree.path)
+                extra = (
+                    f" another live session ({holder}) is in this worktree — "
+                    "sharing it; expect index.lock contention."
+                )
             return (
                 f"Already working in {worktree.path} "
-                f"(branch {worktree.branch_short}); nothing to move."
+                f"(branch {worktree.branch_short}); nothing to move.{extra}"
             )
 
-        # cwd first: everything below reads or reports it.
-        from agentica.cli.session_resume import enter_work_dir
-
-        if not enter_work_dir(worktree.path):
-            raise worktrees.WorktreeError(f"cannot enter {worktree.path}")
-
-        agent.rebind_work_dir(worktree.path)
-        self._agent_config["work_dir"] = worktree.path
-
-        peers = self._get_peers()
-        if peers is not None:
-            peers.rebind(worktree.path)
-
-        git_state.invalidate()
-        state = git_state.collect(worktree.path, ttl=0)
-
-        tui_state = self._get_tui_state()
-        if tui_state is not None:
-            tui_state["work_dir"] = worktree.path
-            tui_state["git_branch"] = state.branch
+        previous = os.path.realpath(cwd)
+        state = self._relocate(worktree.path)
+        if os.path.realpath(previous) != os.path.realpath(worktrees.main_root(worktree.path)):
+            worktrees.release_lock(previous)
 
         logger.info(f"Session bound to worktree {worktree.path} ({worktree.branch_short})")
 
@@ -130,6 +124,12 @@ class WorktreeBinder:
             lines.append(f"  {state.summary()}")
         if worktree.linked:
             lines.append(f"  linked from the main checkout: {', '.join(worktree.linked)}")
+        if not owned:
+            holder = worktrees.lock_holder_description(worktree.path)
+            lines.append(
+                f"  another live session ({holder}) is in this worktree — "
+                "sharing it; expect index.lock contention"
+            )
         lines.append(
             "  transcript: still written where this session started "
             "(one conversation stays one file)"
@@ -141,7 +141,7 @@ class WorktreeBinder:
         return "\n".join(lines)
 
     def merge(self, *, base: Optional[str] = None) -> str:
-        """Land this worktree's branch on the base branch, keeping the worktree."""
+        """Land this worktree's branch on the local base, then delete the checkout."""
         cwd = self.work_dir()
         result = worktrees.merge_back(cwd, base=base)
         git_state.invalidate()
@@ -154,14 +154,92 @@ class WorktreeBinder:
                 f"  resolve here ({cwd}), commit, then merge again:\n{files}"
             )
 
-        tui_state = self._get_tui_state()
-        state = git_state.collect(cwd, ttl=0)
-        if tui_state is not None:
-            tui_state["git_branch"] = state.branch
-        return (
+        main = worktrees.main_root(cwd)
+        root = worktrees.current_root(cwd)
+        self._relocate(main)
+        leftover = ""
+        try:
+            worktrees.remove(root)
+        except worktrees.WorktreeError as exc:
+            leftover = str(exc)
+
+        landed = (
             f"Merged {result.commits} commit(s) from {result.branch} into "
-            f"{result.base} ({result.merged_sha}).\n"
-            f"  this worktree is kept and is now level with {result.base}, "
-            "so it stays usable for the next task on the same thing.\n"
+            f"{result.base} ({result.merged_sha})."
+        )
+        if leftover:
+            return (
+                f"{landed}\n"
+                f"  now working in {main}.\n"
+                f"  worktree not removed: {leftover}"
+            )
+        return (
+            f"{landed}\n"
+            f"  worktree removed; now working in {main} on {result.base}.\n"
             f"  nothing was pushed — do that explicitly if you want it on the remote."
         )
+
+    def remove(self) -> str:
+        """Drop this worktree if it holds no unique work, and return to main."""
+        cwd = self.work_dir()
+        root = worktrees.current_root(cwd)
+        main = worktrees.main_root(cwd)
+        if os.path.realpath(root) == os.path.realpath(main):
+            raise worktrees.WorktreeError("this is the main checkout, not a worktree")
+        worktrees.check_removable(root)
+        self._relocate(main)
+        worktrees.remove(root)
+        return (
+            f"Removed worktree {root} and returned to {main}. "
+            "The branch is gone if it had no unique commits."
+        )
+
+    def release(self) -> Optional[str]:
+        """Session teardown: delete a clean unused *agentica* worktree.
+
+        Called from the CLI ``finally`` so a ``--worktree`` that never produced
+        unique work does not leak a directory. Foreign checkouts (detached,
+        Claude Code, a hand-made ``git worktree add``) are left alone. Unique
+        work (dirty or unmerged) is left on disk *and stays locked*; the next
+        ``use`` of the same name steals the lock once this pid is dead.
+        """
+        cwd = self.work_dir()
+        if not worktrees.is_git_repo(cwd):
+            return None
+        try:
+            root = worktrees.current_root(cwd)
+            main = worktrees.main_root(cwd)
+            entry = worktrees.resolve_entry(root)
+        except worktrees.WorktreeError:
+            return None
+        if entry.is_main or not worktrees.is_managed(entry):
+            return None
+        from agentica.cli.session_resume import enter_work_dir
+        enter_work_dir(main)
+        try:
+            worktrees.remove(root)
+            self._agent_config["work_dir"] = main
+            return root
+        except worktrees.WorktreeError:
+            return None
+
+    def _relocate(self, target: str):
+        """Move process cwd, agent execution, peer record and status bar together."""
+        from agentica.cli.session_resume import enter_work_dir
+
+        if not enter_work_dir(target):
+            raise worktrees.WorktreeError(f"cannot enter {target}")
+        agent = self._get_agent()
+        if agent is not None:
+            agent.rebind_work_dir(target)
+        self._agent_config["work_dir"] = target
+        peers = self._get_peers()
+        if peers is not None:
+            peers.rebind(target)
+        git_state.invalidate()
+        state = git_state.collect(target, ttl=0)
+        tui_state = self._get_tui_state()
+        if tui_state is not None:
+            tui_state["work_dir"] = target
+            tui_state["git_branch"] = state.branch
+        return state

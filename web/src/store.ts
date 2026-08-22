@@ -33,6 +33,7 @@ export type ChatMsg = {
 export type Session = {
   title: string;
   msgs: ChatMsg[];
+  /** First request time. Sidebar order and agoStr both use this. */
   ts: number;
   tokIn: number;
   tokOut: number;
@@ -46,6 +47,8 @@ export type Session = {
   projectId?: string;
   archived?: boolean;
   unread?: boolean;
+  /** Server says a run is in flight (refresh can reattach). */
+  running?: boolean;
 };
 
 export type QueuedMessage = { id: string; sessionId: string; text: string; files: File[]; ts: number };
@@ -105,12 +108,23 @@ export type AppState = {
   rev: number;
   curSess: string | null;
   sessions: Record<string, Session>;
-  streams: Record<string, { abortCtrl: AbortController; aiMsg: ChatMsg }>;
+  streams: Record<string, {
+    abortCtrl: AbortController;
+    aiMsg: ChatMsg;
+    userStopped?: boolean;
+    preparing?: boolean;
+    cancelling?: boolean;
+    reconnecting?: boolean;
+    runId?: string;
+    lastSeq?: number;
+  }>;
   goalRuns: Record<string, { status: string; objective: string; progress: string }>;
   /** Blocking slash commands (``/compact``) that hold the session lock. */
   commandRuns: Record<string, { kind: "compact" }>;
   pendingFiles: File[];
   messageQueue: QueuedMessage[];
+  /** After reload, ChatPage reattaches to this in-flight session. */
+  pendingResume: string | null;
   /** Composer is in /goal mode: set a token budget, then type the objective. */
   goalCompose: { budgetText: string } | null;
   serverModel: string;
@@ -218,6 +232,7 @@ const state: AppState = {
   commandRuns: {},
   pendingFiles: [],
   messageQueue: [],
+  pendingResume: null,
   goalCompose: null,
   serverModel: "-",
   serverDir: "",

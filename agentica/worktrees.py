@@ -14,18 +14,27 @@ and the ``worktree`` tool), because that is where a work_dir lives.
 
 Decisions that are not obvious:
 
-**Never delete anything.** ``ensure()`` creates or *reuses*; merging back leaves
-the worktree in place with its branch reset onto the base. A worktree costs a
-directory and buys a warm IDE index, an installed venv and a shell history; the
-user asked for them to persist across weeks, so nothing here removes one. That
-is also why an existing directory that is *not* a registered worktree is an
-error rather than something to clear out of the way.
+**A worktree is a feature checkout, not a standing room.** ``ensure()`` creates
+or reuses an *in-progress* directory (so a long-running session can still be
+told "切到 gateway-peers 再改"). ``merge_back()`` lands the branch on the local
+base; ``remove()`` deletes the checkout and the ``wt/<name>`` branch. Remove refuses anything that would lose work: a checkout agentica did not
+create (branch is not ``wt/<name>``, including detached), uncommitted files,
+commits not on the local base, no local ``main``/``master`` to compare
+against, or a lock held by a live process. That last one is why we take
+``git worktree lock`` while a session is bound — without it, another process
+(or a sweep) can ``git worktree remove`` a tree the agent is mid-edit in.
+The lock stays on a dirty tree when the session exits; a later ``claim_lock``
+steals it once the pid is dead.
+
+**Default path is inside the repository.** ``<repo>/.agentica/worktrees/<task>``,
+the Claude Code shape. Sibling ``../<repo>-<task>`` is ``worktree.root: sibling``
+for machines that want it. An existing directory that is *not* a registered
+worktree is still an error rather than something to clear out of the way.
 
 **Paths hang off the main worktree, never the current one.** ``git worktree
 add`` works from inside any worktree, so a session that is already in
-``agentica-gateway`` would otherwise create ``agentica-gateway-docs``. The main
-checkout is found via ``--git-common-dir`` and every path is derived from it, so
-the layout stays flat no matter where the command runs.
+``.agentica/worktrees/gateway`` would otherwise nest another copy. The main
+checkout is found via ``--git-common-dir`` and every path is derived from it.
 
 **gitignored files do not travel.** A fresh worktree has no ``.env`` — the
 symptom is a session that starts and then cannot reach any model. Those files
@@ -52,25 +61,21 @@ BRANCH_PREFIX = "wt/"
 # exists in one place on disk. Override with `worktree.link` in config.yaml.
 LINKED_PATHS: Tuple[str, ...] = (".env",)
 
-# Where worktrees are created. Unset means "next to the main checkout"
-# (``../<repo>-<task>``), which is what a human types by hand and what they can
-# cd into. Two situations need something else, and both are the user's to
-# decide rather than ours to guess:
+# Where worktrees are created. Default is Claude Code's shape, inside the
+# repository: ``<repo>/.agentica/worktrees/<task>``. ``git clean -xdf`` (one
+# ``-f``) skips the nested checkout; ``git clean -xdff`` will remove it — that
+# is acceptable now that a finished task is merged and deleted, and an
+# in-progress one is ``git worktree lock``'d for the life of the session
+# (left locked if the session exits with unique work still in it). Opt out with:
 #
-#   * a parent directory holding twenty repositories, where five worktrees each
-#     is clutter — point this at one directory and get
-#     ``<root>/<repo>/<task>``;
-#   * a shared mount whose parent is not writable.
-#
-# A *relative* value resolves inside the main checkout (e.g.
-# ``.agentica/worktrees``, which is what Claude Code does). That works, but know
-# what it costs before choosing it: a worktree under an ignored directory is in
-# range of ``git clean -xdff`` run in the main checkout, which deletes it —
-# including whatever another session had not committed yet. Verified, not
-# theorised: git's own dry-run reports the whole tree as removable. These
-# worktrees are meant to outlive tasks, so that trade is off by default.
+#   * ``worktree.root: sibling`` → ``../<repo>-<task>`` (the old default);
+#   * an absolute path → ``<root>/<repo>/<task>`` (one farm, many repos);
+#   * any other relative path → ``<repo>/<that>/<task>``.
+DEFAULT_ROOT = ".agentica/worktrees"
+SIBLING_ROOT = "sibling"
 ROOT_SETTING = "worktree.root"
 LINK_SETTING = "worktree.link"
+LOCK_REASON_PREFIX = "agentica pid="
 
 DEFAULT_BRANCHES = ("main", "master")
 
@@ -96,6 +101,8 @@ class Worktree:
     exists: bool = True
     # Absolute paths that were symlinked in at creation time.
     linked: Tuple[str, ...] = ()
+    locked: bool = False
+    lock_reason: str = ""
 
     @property
     def branch_short(self) -> str:
@@ -174,13 +181,13 @@ def default_base(cwd: str) -> str:
 def worktree_path(cwd: str, name: str) -> str:
     """Where the worktree for ``name`` lives.
 
-    Default: a sibling of the main checkout, ``../<repo>-<task>``. With
-    ``worktree.root`` set, ``<root>/<repo>/<task>`` — absolute anywhere on the
-    machine, relative inside the main checkout (see ``ROOT_SETTING``).
+    Default: ``<repo>/.agentica/worktrees/<task>``. ``sibling`` restores
+    ``../<repo>-<task>``. An absolute ``worktree.root`` namespaces by repository
+    (``<root>/<repo>/<task>``); any other relative value is inside the checkout.
     """
     root = Path(main_root(cwd))
     configured = _configured_root()
-    if not configured:
+    if configured == SIBLING_ROOT:
         return str(root.parent / f"{root.name}-{slug(name)}")
     base = Path(os.path.expanduser(configured))
     if not base.is_absolute():
@@ -192,15 +199,32 @@ def worktree_path(cwd: str, name: str) -> str:
     return str(base / root.name / slug(name))
 
 
-def _configured_root() -> str:
-    """``worktree.root`` from config.yaml, or "" when unset."""
+def _worktree_setting(name: str, default: Optional[str] = None):
+    """``settings.worktree.<name>``, also accepting the flat ``worktree.<name>`` key."""
     try:
-        from agentica.global_config import get_setting
+        from agentica.global_config import get_setting, load_global_config
 
-        return str(get_setting(ROOT_SETTING, "") or "").strip()
+        flat = get_setting(f"worktree.{name}", None)
+        if flat is not None:
+            return flat
+        data = load_global_config()
+        settings = data.get("settings")
+        if isinstance(settings, dict):
+            block = settings.get("worktree")
+            if isinstance(block, dict) and name in block:
+                return block[name]
     except Exception:
         # Worktrees must keep working when config.yaml is missing or broken.
-        return ""
+        return default
+    return default
+
+
+def _configured_root() -> str:
+    """``worktree.root`` from config.yaml, or ``DEFAULT_ROOT`` when unset."""
+    configured = _worktree_setting("root", None)
+    if configured is None or not str(configured).strip():
+        return DEFAULT_ROOT
+    return str(configured).strip()
 
 
 # Nested-worktree lookups happen on every glob/grep, so they are cached for a
@@ -248,9 +272,7 @@ def nested_worktrees(cwd: str, *, ttl: float = NESTED_CACHE_TTL) -> Tuple[str, .
 def configured_links() -> Tuple[str, ...]:
     """``worktree.link`` from config.yaml, or the default (``.env``)."""
     try:
-        from agentica.global_config import get_setting
-
-        configured = get_setting(LINK_SETTING, None)
+        configured = _worktree_setting("link", None)
     except Exception:
         configured = None
     if isinstance(configured, str):
@@ -273,9 +295,11 @@ def list_worktrees(cwd: str) -> List[Worktree]:
     entries: List[Worktree] = []
     path = head = branch = ""
     detached = False
+    locked = False
+    lock_reason = ""
 
     def flush() -> None:
-        nonlocal path, head, branch, detached
+        nonlocal path, head, branch, detached, locked, lock_reason
         if path:
             resolved = os.path.realpath(path)
             is_main = resolved == os.path.realpath(main)
@@ -285,9 +309,13 @@ def list_worktrees(cwd: str) -> List[Worktree]:
                 branch="" if detached else branch,
                 head=head,
                 is_main=is_main,
+                locked=locked,
+                lock_reason=lock_reason,
             ))
         path = head = branch = ""
         detached = False
+        locked = False
+        lock_reason = ""
 
     for line in out.splitlines():
         if line.startswith("worktree "):
@@ -299,6 +327,9 @@ def list_worktrees(cwd: str) -> List[Worktree]:
             branch = line[len("branch "):].strip()
         elif line.strip() == "detached":
             detached = True
+        elif line == "locked" or line.startswith("locked "):
+            locked = True
+            lock_reason = line[len("locked "):].strip() if line.startswith("locked ") else ""
     flush()
     entries.sort(key=lambda w: (not w.is_main, w.name))
     return entries
@@ -314,6 +345,194 @@ def find(cwd: str, name: str) -> Optional[Worktree]:
         if entry.branch_short == want_branch:
             return entry
     return None
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # pid 1 (and other processes we do not own): exists, just not ours.
+        return True
+    return True
+
+
+def lock_reason_for_pid(pid: Optional[int] = None) -> str:
+    return f"{LOCK_REASON_PREFIX}{pid if pid is not None else os.getpid()}"
+
+
+def _pid_from_reason(reason: str) -> Optional[int]:
+    if not (reason or "").startswith(LOCK_REASON_PREFIX):
+        return None
+    token = reason[len(LOCK_REASON_PREFIX):].strip().split()[0]
+    try:
+        return int(token)
+    except ValueError:
+        return None
+
+
+def _is_our_lock(reason: str) -> bool:
+    return _pid_from_reason(reason) == os.getpid()
+
+
+def _entry_for_path(path: str) -> Optional[Worktree]:
+    want = os.path.realpath(path)
+    probe = path if is_git_repo(path) else str(Path(path).parent)
+    if not is_git_repo(probe):
+        return None
+    for entry in list_worktrees(probe):
+        if os.path.realpath(entry.path) == want:
+            return entry
+    return None
+
+
+def _invalidate_nested(cwd: str) -> None:
+    _nested_cache.pop(os.path.realpath(cwd), None)
+    try:
+        _nested_cache.pop(os.path.realpath(main_root(cwd)), None)
+    except (WorktreeError, OSError):
+        pass
+
+
+def lock(path: str, *, reason: Optional[str] = None) -> None:
+    """``git worktree lock`` this checkout so prune/remove cannot take it."""
+    target = os.path.realpath(path)
+    why = reason if reason is not None else lock_reason_for_pid()
+    _git(["worktree", "lock", "--reason", why, target], main_root(target))
+
+
+def unlock(path: str) -> None:
+    """``git worktree unlock``. Idempotent: already-unlocked is not an error."""
+    target = os.path.realpath(path)
+    _git(["worktree", "unlock", target], main_root(target), check=False)
+
+
+def claim_lock(path: str) -> bool:
+    """Hold the agentica lock for this process.
+
+    True if we hold it. False if a live foreign holder (another agentica pid,
+    or a lock the user set by hand) owns it — sharing the directory is still
+    allowed; ``remove`` will refuse. A lock whose agentica pid is dead is stolen.
+    """
+    entry = _entry_for_path(path)
+    if entry is None:
+        raise WorktreeError(f"{path} is not a registered worktree")
+    if not entry.locked:
+        lock(path)
+        return True
+    if _is_our_lock(entry.lock_reason):
+        return True
+    foreign_pid = _pid_from_reason(entry.lock_reason)
+    if foreign_pid is not None and not _pid_alive(foreign_pid):
+        unlock(path)
+        lock(path)
+        return True
+    return False
+
+
+def release_lock(path: str) -> None:
+    """Drop the lock only if we hold it, or if the holder pid is dead."""
+    entry = _entry_for_path(path)
+    if entry is None or not entry.locked:
+        return
+    if _is_our_lock(entry.lock_reason):
+        unlock(path)
+        return
+    pid = _pid_from_reason(entry.lock_reason)
+    if pid is not None and not _pid_alive(pid):
+        unlock(path)
+
+
+def is_managed(entry: Worktree) -> bool:
+    """True when this checkout is one agentica created (branch ``wt/<name>``)."""
+    return entry.branch_short.startswith(BRANCH_PREFIX)
+
+
+def lock_holder_description(path: str) -> str:
+    """How to name whoever holds the lock, for a human-facing warning."""
+    entry = _entry_for_path(path)
+    if entry is None or not entry.locked:
+        return "unknown"
+    pid = _pid_from_reason(entry.lock_reason)
+    if pid is not None:
+        return f"pid {pid}"
+    return entry.lock_reason or "locked"
+
+
+def resolve_entry(cwd: str) -> Worktree:
+    """The worktree record for ``cwd`` (a worktree root or a path inside one)."""
+    entry = _entry_for_path(cwd)
+    if entry is None and is_git_repo(cwd):
+        entry = _entry_for_path(current_root(cwd))
+    if entry is None:
+        raise WorktreeError(f"{cwd} is not a registered worktree")
+    return entry
+
+
+def check_removable(cwd: str) -> Worktree:
+    """Raise if deleting this worktree would lose work or delete someone else's.
+
+    Does not unlock or delete anything. ``remove()`` calls this, then acts.
+    """
+    entry = resolve_entry(cwd)
+    if entry.is_main:
+        raise WorktreeError("this is the main checkout, not a worktree")
+    if not is_managed(entry):
+        label = entry.branch_short or "detached"
+        raise WorktreeError(
+            f"{entry.path} is not an agentica worktree (branch {label}); "
+            "only wt/* checkouts are removed — use git worktree remove yourself"
+        )
+    if _git(["status", "--porcelain"], entry.path).strip():
+        raise WorktreeError(
+            "this worktree has uncommitted changes; commit, stash, or discard "
+            "them before removing it"
+        )
+    base = default_base(entry.path)
+    ahead = _git(
+        ["rev-list", "--count", f"{base}..{entry.branch_short}"], entry.path
+    ).strip()
+    commits = int(ahead) if ahead.isdigit() else 0
+    if commits:
+        raise WorktreeError(
+            f"{entry.branch_short} has {commits} commit(s) not merged into the "
+            f"local base ({base}); merge them first (worktree action=merge)"
+        )
+    if entry.locked and not _is_our_lock(entry.lock_reason):
+        pid = _pid_from_reason(entry.lock_reason)
+        if pid is None or _pid_alive(pid):
+            why = entry.lock_reason or "no reason"
+            raise WorktreeError(
+                f"{entry.path} is locked ({why}); another session is using "
+                "it, or unlock it by hand"
+            )
+    return entry
+
+
+def remove(cwd: str) -> Worktree:
+    """Delete this worktree and its branch, if that would not lose work.
+
+    Safe means: an agentica ``wt/`` checkout, not the main tree, no uncommitted
+    changes, no commits the local base does not already have, a local base
+    exists to compare against, and not locked by a live foreign holder.
+    A lock we hold (or a dead agentica pid) is released first.
+    After a successful ``merge_back`` this is always safe. Must be called
+    from outside the worktree (typically after moving back to the main
+    checkout) so the process cwd is not deleted out from under it.
+    """
+    entry = check_removable(cwd)
+    main = main_root(entry.path)
+    if entry.locked:
+        unlock(entry.path)
+
+    _invalidate_nested(main)
+    _git(["worktree", "remove", entry.path], main)
+    if entry.branch_short:
+        _git(["branch", "-d", entry.branch_short], main, check=False)
+    return entry
 
 
 def link_ignored(src_root: str, dst_root: str, names: Optional[Sequence[str]] = None) -> List[str]:
@@ -351,9 +570,10 @@ def _self_ignore(parent: Path, repo_root: str) -> None:
 
     Note what this does not fix: an ignored tree is in range of
     ``git clean -xdff`` run in the main checkout. Single ``-f`` skips nested
-    checkouts ("Skipping repository"), double ``-ff`` removes them along with
-    whatever another session had not committed. That is the price of the
-    in-repo layout, and it is why it is not the default.
+    checkouts ("Skipping repository"), double ``-ff`` removes them. That is
+    why an in-progress worktree is ``git worktree lock``'d while the session
+    is alive, and left locked if the session exits with unique work still in
+    it (a later claim steals the lock once the pid is dead).
     """
     try:
         # realpath both sides: /tmp is a symlink to /private/tmp on macOS, and a
@@ -431,6 +651,7 @@ def ensure(
     created = find(cwd, name)
     if created is None:
         raise WorktreeError(f"git created {path} but does not list it as a worktree")
+    _invalidate_nested(cwd)
     return Worktree(**{**created.__dict__, "linked": tuple(linked)})
 
 
@@ -479,9 +700,10 @@ class MergeResult:
 
 
 def merge_back(cwd: str, *, base: Optional[str] = None) -> MergeResult:
-    """Land this worktree's branch on the base branch, keeping the worktree.
+    """Land this worktree's branch on the local base branch.
 
-    The order is what makes it safe, and it is not the obvious one:
+    Does not delete the checkout — ``remove()`` does that, and the binder
+    calls it after this returns clean. The order is what makes it safe:
 
     1. **Base into the branch, inside the worktree.** A conflict then belongs to
        the session that wrote the code, in the directory it was written in, with
@@ -492,9 +714,8 @@ def merge_back(cwd: str, *, base: Optional[str] = None) -> MergeResult:
        Git's own index lock is the mutex against another session doing the same
        thing; ``_git_patient`` waits it out rather than adding a second lock.
 
-    A worktree left behind at an old base is the thing that makes these go stale,
-    so step 1 is not an optimisation: it is why the worktree is still usable
-    afterwards (it ends level with the base). Nothing is ever deleted.
+    After step 1 the worktree is level with the base, which is the safety
+    standard ``remove()`` uses ("no commits the local base does not have").
 
     Refuses — rather than guessing — when there is uncommitted work on either
     side, or when the main checkout is not on the base branch.

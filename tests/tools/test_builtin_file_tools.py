@@ -263,8 +263,10 @@ class TestBuiltinFileToolGlob:
         assert all(f.endswith(".py") for f in files)
 
     def test_glob_manages_own_timeout(self, file_tool):
+        from agentica.tools.builtin.file_tool import _GLOB_TIMEOUT
         fn = file_tool.functions["glob"]
         assert fn.manages_own_timeout is True
+        assert _GLOB_TIMEOUT == 20
 
     def test_glob_default_timeout_still_bounds(self, tmp_dir):
         """When the walk hangs, the hardcoded default still bounds it."""
@@ -459,8 +461,10 @@ class TestBuiltinFileToolGrep:
 
     def test_grep_manages_own_timeout(self, file_tool):
         """grep must self-limit so the outer 120s executor wrapper is skipped."""
+        from agentica.tools.builtin.file_tool import _GREP_TIMEOUT
         fn = file_tool.functions["grep"]
         assert fn.manages_own_timeout is True
+        assert _GREP_TIMEOUT == 20
 
     def test_grep_fallback_times_out(self, tmp_dir):
         """When rg is unavailable, the pure-Python fallback still hard-times-out

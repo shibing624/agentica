@@ -32,7 +32,15 @@ class FakeBinder:
 
     def merge(self):
         self.calls.append(("merge", None))
+        if self._fail:
+            raise WorktreeError(self._fail)
         return "MERGED"
+
+    def remove(self):
+        self.calls.append(("remove", None))
+        if self._fail:
+            raise WorktreeError(self._fail)
+        return "REMOVED"
 
 
 def _run(tool, **kwargs):
@@ -65,9 +73,16 @@ class TestDispatch:
             binder = FakeBinder()
             assert _run(WorktreeTool(binder), action=action) == "MERGED"
 
+    def test_remove_spellings(self):
+        for action in ("remove", "delete", "drop"):
+            binder = FakeBinder()
+            assert _run(WorktreeTool(binder), action=action) == "REMOVED"
+            assert binder.calls == [("remove", None)]
+
     def test_an_unknown_action_lists_the_real_ones(self):
-        out = _run(WorktreeTool(FakeBinder()), action="delete")
+        out = _run(WorktreeTool(FakeBinder()), action="explode")
         assert "status" in out and "use" in out and "merge" in out
+        assert "remove" in out
 
 
 class TestRefusals:
@@ -93,3 +108,5 @@ class TestInstructions:
         prompt = WorktreeTool(FakeBinder()).get_system_prompt()
         assert "worktree" in prompt
         assert "list_agents" in prompt
+        assert "never deleted" not in prompt
+        assert "remove" in prompt

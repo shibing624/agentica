@@ -23,7 +23,8 @@ from agentica.worktrees import WorktreeError
 WORKTREE_POLICY = """<worktrees>
 Several sessions sharing one checkout overwrite each other's edits and fight
 over git's index. A worktree is one directory + one branch per *task*, sharing
-the repository — created on first use, reused forever after, never deleted.
+the repository — created on first use, reused while that task is still in
+progress, removed after the work lands on the local base (or when unused).
 
 Use `worktree(action="use", name="<task>")` when you are about to make changes
 and another live session is working in the same directory (`list_agents` shows
@@ -32,10 +33,12 @@ does not restart anything: this conversation, its todo list and its goal
 continue, and the transcript keeps being written where it already was.
 
 Name the *task*, not yourself: a name is a place two sessions can hand work over
-in ("gateway-peers", "wechat-fix"), and reusing it is the point.
+in ("gateway-peers", "wechat-fix") while it is unfinished. After merge the
+directory is gone; the next feature with a new name starts from current main.
 
-`worktree(action="merge")` puts the work on the base branch and leaves the
-worktree in place, caught up with the base so it stays usable.
+`worktree(action="merge")` puts the work on the local base branch (usually
+main) and removes the worktree. `worktree(action="remove")` drops one that has
+no unique work (no uncommitted files, no commits not already on the local base).
 </worktrees>"""
 
 
@@ -62,12 +65,13 @@ class WorktreeTool(Tool):
         Args:
             action: ``status`` (default) lists every worktree and says which one
                 this session is in. ``use`` moves this session into the worktree
-                for ``name``, creating it the first time and reusing it after.
-                ``merge`` merges this worktree's branch into the base branch
-                (see the worktree tool's instructions) and keeps the worktree.
+                for ``name``, creating it the first time and reusing it while
+                the task is in progress. ``merge`` lands this worktree's branch
+                on the local base and removes the checkout. ``remove`` drops an
+                unused worktree (refused if it still has unique work).
             name: The task the worktree is for, e.g. "gateway-peers". Required
-                for ``use``. Normalised to a directory name next to the main
-                checkout and a ``wt/<name>`` branch.
+                for ``use``. Normalised to a directory under
+                ``.agentica/worktrees/`` and a ``wt/<name>`` branch.
             base: Branch new worktrees fork from. Defaults to the repository's
                 local ``main`` (or ``master``).
 
@@ -87,8 +91,11 @@ class WorktreeTool(Tool):
                 return self._binder.switch(name, base=base.strip() or None)
             if chosen in ("merge", "merge-back", "land"):
                 return self._binder.merge()
+            if chosen in ("remove", "delete", "drop"):
+                return self._binder.remove()
             return (
-                f"Unknown action '{action}'. Use status, use (with name=...), or merge."
+                f"Unknown action '{action}'. Use status, use (with name=...), "
+                "merge, or remove."
             )
         except WorktreeError as e:
             # The message is written for a human ("move it aside or pick another

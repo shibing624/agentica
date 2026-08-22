@@ -324,7 +324,7 @@ def run_interactive(
     # same files as three other sessions.
     requested_worktree = agent_config.pop("worktree", None)
     if requested_worktree:
-        from agentica.worktrees import WorktreeError, ensure as ensure_worktree
+        from agentica.worktrees import WorktreeError, claim_lock, ensure as ensure_worktree
 
         try:
             bound = ensure_worktree(agent_config.get("work_dir") or os.getcwd(), requested_worktree)
@@ -334,6 +334,7 @@ def run_interactive(
         if not enter_work_dir(bound.path):
             get_console().print(f"[bold red]Cannot enter {bound.path}[/bold red]")
             return
+        claim_lock(bound.path)
         agent_config["work_dir"] = bound.path
         get_console().print(
             f"[dim]Worktree {bound.branch_short}: {bound.path}[/dim]"
@@ -1068,6 +1069,10 @@ def run_interactive(
             pass
         _stop_cron(state)
         state.background_processes.stop()
+        if worktree_binder is not None:
+            removed = worktree_binder.release()
+            if removed:
+                get_console().print(f"[dim]Removed unused worktree {removed}[/dim]")
         if state.peer_session is not None:
             state.peer_session.unpublish()
         set_active_console(None)

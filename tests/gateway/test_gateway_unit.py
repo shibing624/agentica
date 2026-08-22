@@ -485,6 +485,7 @@ class TestAgentServiceRunCron:
             sessions = svc.list_sessions()
 
         assert [s["session_id"] for s in sessions] == ["chat123"]
+        assert sessions[0]["running"] is False
 
     def test_list_sessions_includes_every_project(self, tmp_path):
         """The web sidebar is grouped by work dir; listing only settings.base_dir
@@ -505,6 +506,49 @@ class TestAgentServiceRunCron:
         assert set(by_id) >= {"sess-a", "sess-b"}
         assert by_id["sess-a"]["work_dir"] == str(dir_a)
         assert by_id["sess-b"]["work_dir"] == str(dir_b)
+
+    def test_list_sessions_orders_by_creation_time(self, tmp_path):
+        """Sidebar order = creation time (first request), newest on top; a
+        later message must not reshuffle it."""
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        with patch.object(SessionLog, "list_sessions", return_value=[
+            {"session_id": "old", "path": "a",
+             "first_timestamp": "2026-01-01T00:00:00.000Z", "last_timestamp": "2026-03-01T00:00:00.000Z"},
+            {"session_id": "new", "path": "b",
+             "first_timestamp": "2026-01-03T00:00:00.000Z", "last_timestamp": "2026-01-02T00:00:00.000Z"},
+        ]), patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
+            svc = AgentService(workspace_path=str(tmp_path))
+            sessions = svc.list_sessions()
+
+        assert [s["session_id"] for s in sessions] == ["new", "old"]
+
+    def test_list_sessions_real_files_keep_creation_order(self, tmp_path):
+        """jsonl mtime follows the last write; web order must follow the first line."""
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        d = tmp_path / "repo"
+        d.mkdir()
+        SessionLog("older", work_dir=str(d), user_id="default").append(
+            "user", "first", timestamp="2026-01-01T00:00:00.000Z",
+        )
+        SessionLog("newer", work_dir=str(d), user_id="default").append(
+            "user", "second", timestamp="2026-01-02T00:00:00.000Z",
+        )
+        SessionLog("older", work_dir=str(d), user_id="default").append(
+            "user", "later on older", timestamp="2026-01-03T00:00:00.000Z",
+        )
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        sessions = [
+            s for s in svc.list_sessions(owner="default")
+            if s["session_id"] in {"older", "newer"}
+        ]
+        assert [s["session_id"] for s in sessions] == ["newer", "older"]
+        assert sessions[0]["first_timestamp"] == "2026-01-02T00:00:00.000Z"
+        assert sessions[1]["first_timestamp"] == "2026-01-01T00:00:00.000Z"
 
     def test_session_log_for_finds_other_project_after_restart(self, tmp_path, monkeypatch):
         """View trace used settings.base_dir after a restart, so a chat that

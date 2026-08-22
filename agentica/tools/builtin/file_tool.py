@@ -29,8 +29,10 @@ from agentica.utils.string import truncate_if_too_long
 # manages_own_timeout=True. Not exposed to the model: an unbounded override
 # would defeat fail-fast, and a silent clamp is the same class of bug wait()
 # already deleted. On timeout the error tells the model to narrow path.
-_GLOB_TIMEOUT = 3
-_GREP_TIMEOUT = 3
+# 20s matches kimi-cli / Claude Code. glob keeps a timeout too: pathlib.glob
+# walks the whole tree before returning, so a match cap cannot bound NFS hangs.
+_GLOB_TIMEOUT = 20
+_GREP_TIMEOUT = 20
 
 # Directories every search skips. ``.agentica`` earns its place for a specific
 # reason: with ``settings.worktree.root`` pointing inside the repository

@@ -1,10 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtDurationMs } from "../lib/format";
 import { workSummary, type MsgPart } from "../lib/msgParts";
+import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
 import { IconCheck, IconChevronDown, IconSpinner, IconUser } from "../icons";
+import { getState } from "../store";
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
 import { HIGHLIGHT_LIMIT } from "../lib/highlight";
+
+function thinkLabel(
+  streaming: boolean,
+  S: { chat: { thinking: string; thinkingNow: string; stopping: string; reconnecting: string; preparingAttachments: string } },
+): string {
+  if (!streaming) return S.chat.thinking;
+  const st = getState();
+  const live = st.streams[st.curSess || ""];
+  if (live?.cancelling) return S.chat.stopping;
+  if (live?.reconnecting) return S.chat.reconnecting;
+  if (live?.preparing) return S.chat.preparingAttachments;
+  return S.chat.thinkingNow;
+}
 
 export function WorkGroup({
   items,
@@ -80,7 +95,7 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
 
   const duration = part.ms != null
     ? part.ms
-    : (part.t0 != null ? Date.now() - part.t0 : 0);
+    : (streaming && part.t0 != null ? Date.now() - part.t0 : 0);
 
   return (
     <div ref={rootRef} className={"work-step" + (streaming ? " running" : "")}>
@@ -97,7 +112,7 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
         }}
       >
         <span className="work-icon">{streaming ? <IconSpinner /> : <IconCheck />}</span>
-        <span className="work-step-name">{S.chat.thinking}</span>
+        <span className="work-step-name">{thinkLabel(streaming, S)}</span>
         {duration > 0 && <span className="work-meta">{fmtDurationMs(duration)}</span>}
         <span className="work-spacer" />
         <span className={"work-chevron" + (open ? " open" : "")}><IconChevronDown /></span>
@@ -109,68 +124,46 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
   );
 }
 
-/** Local file-read tools: call line is enough. Writes / search / memory show input + result. */
+/** Local file-read tools: call line is enough. write_todos success is the list. */
 const HIDE_RESULT_TOOLS = new Set(["read_file", "glob", "grep"]);
 
-function prettyArgs(argsStr: string): string {
-  try {
-    return JSON.stringify(JSON.parse(argsStr), null, 2);
-  } catch {
-    return argsStr;
-  }
-}
-
-function toolArgPreview(name: string, argsStr: string): string {
-  try {
-    const o = JSON.parse(argsStr);
-    if (name === "write_file" && typeof o.file_path === "string") return o.file_path;
-    if (name === "apply_patch") return "";
-    return argsStr;
-  } catch {
-    return argsStr;
-  }
+function sessionCwd(): string {
+  const st = getState();
+  const cur = st.curSess ? st.sessions[st.curSess] : null;
+  return (cur && cur.dir) || st.serverDir || "";
 }
 
 function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
-  const S = useStrings();
   const running = part.result == null;
   const resultText = part.result != null ? String(part.result) : "";
   const isError = resultText.startsWith("Error: ");
   const diff = part.diff || "";
   const showDiff = Boolean(diff) && !isError;
-  const showBody = isError || showDiff || !HIDE_RESULT_TOOLS.has(part.name);
-  const showResult = Boolean(resultText) && showBody && !showDiff;
-  const showInput = showBody && !showDiff;
+  const hideResult = HIDE_RESULT_TOOLS.has(part.name) || (part.name === "write_todos" && !isError);
+  const display = formatToolDisplay(part.name, parseToolArgs(part.argsStr), sessionCwd());
+  const displayLayout = layoutToolDisplay(part.name, display);
+  const showArgsBody = displayLayout.body.trim().length > 0;
+  const showResult = Boolean(resultText) && !showDiff && (isError || !hideResult);
   const duration = part.ms != null
     ? part.ms
     : (running && part.t0 != null ? Date.now() - part.t0 : 0);
-  const argsText = part.argsStr ? prettyArgs(part.argsStr) : "";
-  const headerArgs = toolArgPreview(part.name, part.argsStr);
   return (
-    <details className={"work-step work-tool" + (running ? " running" : "")} open={running || showBody}>
+    <details className={"work-step work-tool" + (running ? " running" : "")} open={running || showArgsBody || showResult || showDiff}>
       <summary className="work-step-head">
         <span className="work-icon">{running ? <IconSpinner /> : <IconCheck />}</span>
         <span className="work-step-name">{part.name}</span>
-        {headerArgs ? <span className="step-tool-args">{headerArgs}</span> : null}
+        {displayLayout.header ? <span className="step-tool-args" title={display}>{displayLayout.header}</span> : null}
         {duration > 0 && <span className="work-tool-ms">{fmtDurationMs(duration)}</span>}
       </summary>
-      {showInput && argsText ? (
-        <>
-          <div className="step-pre-lbl">{S.chat.toolInput}</div>
-          <pre className="step-pre">{argsText}</pre>
-        </>
+      {showArgsBody ? (
+        <pre className={displayLayout.bodyKind === "call" ? "step-tool-call" : "step-pre"}>{displayLayout.body}</pre>
       ) : null}
       {showDiff ? (
         <div className="work-tool-diff">
           <CodeFrame code={diff} language="diff" highlight={diff.length <= HIGHLIGHT_LIMIT} />
         </div>
       ) : null}
-      {showResult ? (
-        <>
-          <div className="step-pre-lbl">{S.chat.toolOutput}</div>
-          <pre className="step-pre out">{resultText}</pre>
-        </>
-      ) : null}
+      {showResult ? <pre className="step-pre out">{resultText}</pre> : null}
     </details>
   );
 }

@@ -343,21 +343,21 @@ tools = get_builtin_tools(work_dir="./")
 
 `web_search` 是一个薄分发器：模型看到的工具名、参数、docstring 始终不变，背后的搜索引擎可换。所以换引擎**不会**影响 prompt、`RunConfig(enabled_tools=["web_search"])` 或权限规则。
 
-引擎选择优先级：`provider=` 参数 > `AGENTICA_WEB_SEARCH` 环境变量 > 默认 `baidu`。
+引擎选择优先级：`provider=` 参数 > `AGENTICA_WEB_SEARCH` 环境变量 > 默认 `exa`。
 
 **引擎不会根据 API key 自动推断** —— 你为别处设的 key 不应该悄悄改变 agent 的搜索行为。要换引擎就显式说。
 
 | provider | 引擎 | API key | 说明 |
 |----------|------|---------|------|
-| `baidu` | 百度 | 不需要 | 默认，中文可用 |
+| `exa` | Exa（MCP） | 可选 `EXA_API_KEY` | 默认。不设 key 走共享免费池（有限流）；设了走自己的额度 |
+| `baidu` | 百度 | 不需要 | 中文可用 |
 | `duckduckgo` | DuckDuckGo | 不需要 | 直连 HTML 端点，无额外依赖 |
-| `exa` | Exa（MCP） | 可选 `EXA_API_KEY` | 不设 key 走共享免费池（有限流）；设了走自己的额度 |
 | `bocha` | 博查 | `BOCHA_API_KEY` | 中文效果好 |
 | `serper` | Google/Serper | `SERPER_API_KEY` | |
 | `zhipu` | 智谱 Web Search | `ZAI_API_KEY` | 4 档引擎，见下 |
 | `mcp` | 任意 MCP 搜索服务 | 可选 | 见「自定义引擎」 |
 
-指定了需要 key 的引擎却没提供 key 时会**直接报错**，而不是静默退回百度 —— 否则你会以为在用 Bocha，实际在用百度。
+指定了需要 key 的引擎却没提供 key 时会**直接报错**，而不是静默退回默认引擎 —— 否则你会以为在用 Bocha，实际在用 Exa。环境变量配错 / 缺 key 才会降级到 `exa` 并 warn。
 
 ```python
 # SDK：显式指定

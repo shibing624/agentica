@@ -20,6 +20,7 @@ from ..channels.base import InboundMedia
 from ..config import settings
 from ..models import ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest, RenameRequest, GoalRequest, SteerRequest
 from ..services.agent_service import AgentService
+from ..services import live_turn
 
 try:
     from agentica.run_response import AgentCancelledError
@@ -29,25 +30,84 @@ except ImportError:
 router = APIRouter()
 
 
-def _sse_stream_hooks(queue: "asyncio.Queue[dict | None]"):
+def _sse_stream_hooks(publish):
     """Same content/tool/thinking events for chat and /goal."""
 
-    async def on_content(delta: str):
-        await queue.put({"event": "content", "data": delta})
+    def on_content(delta: str):
+        publish({"event": "content", "data": delta})
 
-    async def on_tool_call(name: str, args: dict):
-        await queue.put({"event": "tool_call", "data": {"name": name, "args": args}})
+    def on_tool_call(name: str, args: dict):
+        publish({"event": "tool_call", "data": {"name": name, "args": args}})
 
-    async def on_tool_result(name: str, result: str, extra: dict | None = None):
+    def on_tool_result(name: str, result: str, extra: dict | None = None):
         data = {"name": name, "result": result}
         if extra:
             data.update(extra)
-        await queue.put({"event": "tool_result", "data": data})
+        publish({"event": "tool_result", "data": data})
 
-    async def on_thinking(delta: str):
-        await queue.put({"event": "thinking", "data": delta})
+    def on_thinking(delta: str):
+        publish({"event": "thinking", "data": delta})
 
     return on_content, on_tool_call, on_tool_result, on_thinking
+
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _conflict_if_live(session_id: str) -> None:
+    if live_turn.active(session_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Session '{session_id}' already has an active run. "
+                "Wait for it to complete or cancel it first."
+            ),
+        )
+
+
+async def _sse_from_turn(turn: live_turn.LiveTurn, after: int = 0):
+    """Yield SSE bytes. Client disconnect unsubscribes; the agent keeps running."""
+    q = turn.subscribe(after=after)
+    try:
+        yield ": keepalive\n\n"
+        while True:
+            item = await q.get()
+            if item is None:
+                yield "data: [DONE]\n\n"
+                break
+            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+    except asyncio.CancelledError:
+        return
+    finally:
+        turn.unsubscribe(q)
+
+
+def _spawn_live(session_id: str, run_coro, owner: str, kind: str = "chat"):
+    """Run ``run_coro(turn)`` in the background. Disconnect does not cancel it."""
+    _conflict_if_live(session_id)
+    turn = live_turn.start(session_id, owner, kind)
+
+    async def runner():
+        try:
+            await run_coro(turn)
+            turn.finish("completed")
+        except asyncio.CancelledError:
+            turn.publish({"event": "aborted", "data": {}})
+            turn.finish("cancelled")
+        except Exception as e:
+            if AgentCancelledError and isinstance(e, AgentCancelledError):
+                turn.publish({"event": "aborted", "data": {}})
+                turn.finish("cancelled")
+            else:
+                turn.publish({"event": "error", "data": str(e)})
+                turn.finish("failed")
+
+    turn.task = asyncio.create_task(runner())
+    return turn
 
 # Inline image payloads in JSON; keep well under typical provider inline caps.
 _MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024
@@ -160,67 +220,34 @@ async def run_goal(
     session_id = body.session_id
     account = _account(request)
 
-    async def event_generator():
-        queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(queue)
+    async def run_goal_turn(turn: live_turn.LiveTurn):
+        on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
 
         def on_event(data: dict):
-            queue.put_nowait({"event": "status", "data": data})
+            turn.publish({"event": "status", "data": data})
 
-        async def run_agent():
-            try:
-                result = await svc.run_goal(
-                    body.objective, session_id, user_id=account, owner=account,
-                    token_budget=body.token_budget,
-                    on_event=on_event,
-                    on_content=on_content,
-                    on_tool_call=on_tool_call,
-                    on_tool_result=on_tool_result,
-                    on_thinking=on_thinking,
-                )
-                await queue.put({"event": "done", "data": result})
-            except RuntimeError as e:
-                await queue.put({"event": "error", "data": str(e)})
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                await queue.put({"event": "error", "data": str(e)})
-            finally:
-                await queue.put(None)
+        result = await svc.run_goal(
+            body.objective, session_id, user_id=account, owner=account,
+            token_budget=body.token_budget,
+            on_event=on_event,
+            on_content=on_content,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_thinking=on_thinking,
+        )
+        turn.publish({"event": "done", "data": result})
 
-        task = asyncio.create_task(run_agent())
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    yield "data: [DONE]\n\n"
-                    break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-        except asyncio.CancelledError:
-            svc.cancel_session(session_id)
-            task.cancel()
-            raise
-
+    turn = _spawn_live(session_id, run_goal_turn, owner=account, kind="goal")
     return StreamingResponse(
-        event_generator(),
+        _sse_from_turn(turn),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 
 # ============== SSE streaming chat ==============
 
-@router.post("/api/chat/stream")
-async def chat_stream(
-    body: ChatRequest,
-    request: Request,
-    svc: AgentService = Depends(deps.get_agent_service),
-):
-    """Send a message and stream the response via Server-Sent Events."""
+async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService) -> live_turn.LiveTurn:
     if body.work_dir:
         await _apply_session_work_dir(svc, body.session_id, body.work_dir)
     svc.set_session_approval_mode(body.session_id, body.approval_mode)
@@ -228,133 +255,198 @@ async def chat_stream(
     session_id = body.session_id
     account = _account(request)
 
-    async def event_generator():
-        queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(queue)
+    async def run_chat_turn(turn: live_turn.LiveTurn):
+        on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
+        t0 = time.time()
+        result = await svc.chat_stream(
+            message=body.message,
+            session_id=session_id,
+            user_id=account,
+            owner=account,
+            on_content=on_content,
+            on_tool_call=on_tool_call,
+            on_tool_result=on_tool_result,
+            on_thinking=on_thinking,
+            media=_images_to_media(body.images) if body.images else None,
+        )
+        elapsed = round(time.time() - t0, 2)
 
-        async def run_agent():
-            t0 = time.time()
-            try:
-                result = await svc.chat_stream(
-                    message=body.message,
-                    session_id=session_id,
-                    user_id=account,
-                    owner=account,
-                    on_content=on_content,
-                    on_tool_call=on_tool_call,
-                    on_tool_result=on_tool_result,
-                    on_thinking=on_thinking,
-                    media=_images_to_media(body.images) if body.images else None,
-                )
-                elapsed = round(time.time() - t0, 2)
+        raw_metrics = result.metrics or {}
 
-                # Build token usage from metrics
-                raw_metrics = result.metrics or {}
+        def _sum(key):
+            v = raw_metrics.get(key, 0)
+            if isinstance(v, list):
+                return sum(x for x in v if isinstance(x, (int, float)))
+            return v if isinstance(v, (int, float)) else 0
 
-                def _sum(key):
-                    v = raw_metrics.get(key, 0)
-                    if isinstance(v, list):
-                        return sum(x for x in v if isinstance(x, (int, float)))
-                    return v if isinstance(v, (int, float)) else 0
+        def _list(key):
+            v = raw_metrics.get(key, [])
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, (int, float))]
+            return [v] if isinstance(v, (int, float)) else []
 
-                def _list(key):
-                    v = raw_metrics.get(key, [])
-                    if isinstance(v, list):
-                        return [x for x in v if isinstance(x, (int, float))]
-                    return [v] if isinstance(v, (int, float)) else []
+        input_tokens = _sum("input_tokens")
+        output_tokens = _sum("output_tokens")
+        total_tokens = _sum("total_tokens")
 
-                input_tokens = _sum("input_tokens")
-                output_tokens = _sum("output_tokens")
-                total_tokens = _sum("total_tokens")
+        in_list = _list("input_tokens")
+        out_list = _list("output_tokens")
+        tot_list = _list("total_tokens")
+        time_list = _list("time")
+        n_requests = max(len(in_list), len(out_list), 1)
+        request_entries = []
+        for i in range(n_requests):
+            entry = {
+                "request_index": i + 1,
+                "input_tokens": in_list[i] if i < len(in_list) else 0,
+                "output_tokens": out_list[i] if i < len(out_list) else 0,
+                "total_tokens": tot_list[i] if i < len(tot_list) else 0,
+            }
+            if i < len(time_list):
+                entry["response_time"] = round(time_list[i], 3)
+            request_entries.append(entry)
 
-                in_list = _list("input_tokens")
-                out_list = _list("output_tokens")
-                tot_list = _list("total_tokens")
-                time_list = _list("time")
-                n_requests = max(len(in_list), len(out_list), 1)
-                request_entries = []
-                for i in range(n_requests):
-                    entry = {
-                        "request_index": i + 1,
-                        "input_tokens": in_list[i] if i < len(in_list) else 0,
-                        "output_tokens": out_list[i] if i < len(out_list) else 0,
-                        "total_tokens": tot_list[i] if i < len(tot_list) else 0,
-                    }
-                    if i < len(time_list):
-                        entry["response_time"] = round(time_list[i], 3)
-                    request_entries.append(entry)
+        ctx_window = 128000
+        if deps.agent_service:
+            ctx_window = deps.agent_service.get_context_window(session_id)
 
-                ctx_window = 128000
-                if deps.agent_service:
-                    ctx_window = deps.agent_service.get_context_window(session_id)
+        done = {
+            "session_id": result.session_id,
+            "tool_calls": result.tool_calls,
+            "tools_used": result.tools_used,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "requests": n_requests,
+            "response_time": elapsed,
+            "request_entries": request_entries,
+            "context_window": ctx_window,
+        }
+        if result.usage:
+            done["usage"] = result.usage
+            if result.usage.get("window"):
+                done["context_window"] = result.usage["window"]
+        if result.turn_usage:
+            done["turn_usage"] = result.turn_usage
+            done["cache_read_tokens"] = result.turn_usage["cache_read_tokens"]
+            done["cache_hit_percent"] = result.turn_usage["cache_hit_percent"]
+            if result.turn_usage.get("cost_usd") is not None:
+                done["cost_usd"] = result.turn_usage["cost_usd"]
+        log = svc.session_log_for(session_id, owner=account)
+        if log.path.exists():
+            rd = last_completed_round(log.iter_raw_entries())
+            if rd is not None:
+                done["duration_ms"] = rd["durationMs"]
+                done["llm_ms"] = rd["llmMs"]
+                done["tps"] = rd["tps"]
+        if result.media_notes:
+            done["media_notes"] = result.media_notes
+        turn.publish({"event": "done", "data": done})
 
-                done = {
-                    "session_id": result.session_id,
-                    "tool_calls": result.tool_calls,
-                    "tools_used": result.tools_used,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "total_tokens": total_tokens,
-                    "requests": n_requests,
-                    "response_time": elapsed,
-                    "request_entries": request_entries,
-                    "context_window": ctx_window,
-                }
-                if result.usage:
-                    done["usage"] = result.usage
-                    if result.usage.get("window"):
-                        done["context_window"] = result.usage["window"]
-                if result.turn_usage:
-                    done["turn_usage"] = result.turn_usage
-                    done["cache_read_tokens"] = result.turn_usage["cache_read_tokens"]
-                    done["cache_hit_percent"] = result.turn_usage["cache_hit_percent"]
-                    if result.turn_usage.get("cost_usd") is not None:
-                        done["cost_usd"] = result.turn_usage["cost_usd"]
-                log = svc.session_log_for(session_id, owner=account)
-                if log.path.exists():
-                    rd = last_completed_round(log.iter_raw_entries())
-                    if rd is not None:
-                        done["duration_ms"] = rd["durationMs"]
-                        done["llm_ms"] = rd["llmMs"]
-                        done["tps"] = rd["tps"]
-                if result.media_notes:
-                    done["media_notes"] = result.media_notes
-                await queue.put({"event": "done", "data": done})
+    return _spawn_live(session_id, run_chat_turn, owner=account, kind="chat")
 
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                if AgentCancelledError and isinstance(e, AgentCancelledError):
-                    pass
-                else:
-                    await queue.put({"event": "error", "data": str(e)})
-            finally:
-                await queue.put(None)
 
-        task = asyncio.create_task(run_agent())
-
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    yield "data: [DONE]\n\n"
-                    break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-        except asyncio.CancelledError:
-            # User disconnected — cancel the specific session's agent
-            svc.cancel_session(session_id)
-            task.cancel()
-            raise
-
+@router.post("/api/chat/stream")
+async def chat_stream(
+    body: ChatRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Create a background run and subscribe to it (one-shot convenience)."""
+    turn = await _start_chat_run(body, request, svc)
     return StreamingResponse(
-        event_generator(),
+        _sse_from_turn(turn),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
+
+
+@router.post("/api/chat/runs")
+async def create_chat_run(
+    body: ChatRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Start a background run and return ``run_id`` immediately."""
+    turn = await _start_chat_run(body, request, svc)
+    return turn.public()
+
+
+@router.get("/api/chat/runs/active")
+async def active_chat_run(
+    request: Request,
+    session_id: str,
+):
+    """The in-flight run for this session, if any (refresh / other tab)."""
+    turn = live_turn.active(session_id)
+    if turn is None or not live_turn.owned(turn, _account(request)):
+        return {"run": None}
+    return {"run": turn.public()}
+
+
+@router.get("/api/chat/runs/{run_id}/events")
+async def chat_run_events(
+    run_id: str,
+    request: Request,
+    after: int = 0,
+):
+    """Subscribe or reconnect. Disconnect does not cancel the run."""
+    turn = live_turn.get_run(run_id)
+    if turn is None or not live_turn.owned(turn, _account(request)):
+        raise HTTPException(status_code=404, detail="Run not found")
+    return StreamingResponse(
+        _sse_from_turn(turn, after=after),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.post("/api/chat/runs/{run_id}/cancel")
+async def cancel_chat_run(
+    run_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Stop this run and wait until the session lock is free. Idempotent."""
+    try:
+        return await live_turn.cancel_and_wait(svc, run_id=run_id, owner=_account(request))
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+
+@router.get("/api/chat/stream/{session_id}")
+async def attach_chat_stream(
+    session_id: str,
+    request: Request,
+    after: int = 0,
+):
+    """Reattach by session id (replay ``seq > after``, then live)."""
+    turn = live_turn.active(session_id)
+    if turn is None or not live_turn.owned(turn, _account(request)):
+        async def empty():
+            yield ": keepalive\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(empty(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(
+        _sse_from_turn(turn, after=after),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.post("/api/chat/cancel")
+async def cancel_chat(
+    body: SteerRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Stop the session's in-flight run (alias of ``POST /api/chat/runs/{id}/cancel``)."""
+    try:
+        return await live_turn.cancel_and_wait(
+            svc, session_id=body.session_id, owner=_account(request),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Run not found")
 
 
 # ============== Sessions ==============

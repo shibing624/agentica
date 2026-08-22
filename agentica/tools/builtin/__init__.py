@@ -89,10 +89,10 @@ def get_builtin_tools(
         diagnostics_errors_only: When True (default), only severity "error"
             diagnostics are surfaced to the model.
         web_search_provider: Engine behind the ``web_search`` tool, e.g.
-            "baidu", "bocha", "serper", "exa", "duckduckgo", "zhipu", "mcp".
+            "exa", "baidu", "bocha", "serper", "duckduckgo", "zhipu", "mcp".
             Defaults to the ``AGENTICA_WEB_SEARCH`` env var, then to
-            ``DEFAULT_WEB_SEARCH_PROVIDER``. The tool name stays ``web_search``
-            whichever engine is used.
+            ``DEFAULT_WEB_SEARCH_PROVIDER`` (``exa``). The tool name stays
+            ``web_search`` whichever engine is used.
 
     Returns:
         List of tools

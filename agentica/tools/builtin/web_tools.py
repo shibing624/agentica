@@ -26,7 +26,7 @@ from agentica.tools.base import Tool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 from agentica.utils.log import logger
 
-DEFAULT_WEB_SEARCH_PROVIDER = "baidu"
+DEFAULT_WEB_SEARCH_PROVIDER = "exa"
 WEB_SEARCH_PROVIDER_ENV = "AGENTICA_WEB_SEARCH"
 
 # A backend search callable: async (queries, max_results) -> str
@@ -173,11 +173,11 @@ class BuiltinWebSearchTool(Tool):
         Initialize BuiltinWebSearchTool.
 
         Args:
-            provider: Engine name, e.g. "baidu", "bocha", "serper", "exa",
+            provider: Engine name, e.g. "exa", "baidu", "bocha", "serper",
                 "duckduckgo", "zhipu", "mcp", or any name passed to
                 ``register_web_search_backend``. Defaults to the
                 ``AGENTICA_WEB_SEARCH`` env var, then to
-                ``DEFAULT_WEB_SEARCH_PROVIDER``.
+                ``DEFAULT_WEB_SEARCH_PROVIDER`` (``exa``).
             api_key: Engine API key. Defaults to the engine's own key env var.
             search_fn: Escape hatch — an async ``(queries, max_results) -> str``
                 callable used verbatim, for engines that are easier to express

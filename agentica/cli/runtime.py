@@ -427,9 +427,9 @@ def parse_args():
         type=str,
         default=None,
         help=(
-            "Work in a per-task git worktree of this repository, created on first "
-            "use and reused after (sibling directory, branch wt/<name>). Lets "
-            "several sessions edit one repo without overwriting each other."
+            "Work in a per-task git worktree of this repository "
+            "(.agentica/worktrees/<name>, branch wt/<name>). Created on first "
+            "use; merge lands on local main and removes it."
         ),
     )
     parser.add_argument(

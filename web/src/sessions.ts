@@ -26,19 +26,28 @@ export async function loadSessions() {
     merged[id] = {
       title: sv.name || lc.title || "Chat",
       msgs: lc.msgs || [],
-      ts: sv.last_timestamp ? new Date(sv.last_timestamp).getTime() : (lc.ts || Date.now()),
+      ts: Date.parse(sv.first_timestamp) || lc.ts || Date.now(),
       tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
       requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
       contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,
       dir,
       projectId: projectIdForDir(dir),
       archived: !!sv.archived,
+      running: !!sv.running,
     };
   }
   setState({ sessions: merged });
   saveSessions();
   const last = readLastSessionId();
-  if (last && merged[last]) switchTo(last);
+  if (last && merged[last]) {
+    switchTo(last);
+    const sess = merged[last];
+    if (sess.running) {
+      setState({ pendingResume: last });
+    } else if (shouldHydrateFromServer(sess, last)) {
+      void hydrateSession(last, true);
+    }
+  }
 }
 
 export function switchTo(id: string) {
@@ -48,16 +57,17 @@ export function switchTo(id: string) {
   if (sess) sess.unread = false;
   writeLastSessionId(id);
   bump();
-  if (sess && !sess.msgs.length) void hydrateSession(id);
+  if (sess?.running && !getState().streams[id]) setState({ pendingResume: id });
+  else if (sess && shouldHydrateFromServer(sess, id)) void hydrateSession(id, !!sess.msgs.length);
 }
 
 /** Replay a session's transcript from the server log so a reload (or another
  *  machine) still shows history localStorage never had. */
-export async function hydrateSession(id: string) {
+export async function hydrateSession(id: string, force = false) {
   const { ok, data } = await api.fetchTraceEvents(id, 0, 1000);
   if (!ok || !data?.events) return;
   const sess = getState().sessions[id];
-  if (!sess || sess.msgs.length) return;
+  if (!sess || (sess.msgs.length && !force)) return;
   const msgs: ChatMsg[] = [];
   for (const e of data.events) {
     if (e.type === "user" || e.type === "assistant") {
@@ -73,6 +83,29 @@ export async function hydrateSession(id: string) {
   saveSessions();
   bump();
   void syncSessionRoundStats(id);
+}
+
+function looksLikeDisconnectCasualty(sess: Session): boolean {
+  const last = sess.msgs[sess.msgs.length - 1];
+  if (!last || last.role !== "assistant" || !last.error) return false;
+  const err = last.error.toLowerCase();
+  return err.includes("network") || err.includes("failed to fetch") || err.includes("load failed");
+}
+
+function looksIncompleteAssistant(sess: Session): boolean {
+  const last = sess.msgs[sess.msgs.length - 1];
+  if (!last || last.role !== "assistant") return false;
+  if (last.aborted || last.tokIn != null) return false;
+  if (last.error) return looksLikeDisconnectCasualty(sess);
+  const parts = last.parts || [];
+  if (!last.content && !parts.length) return true;
+  return parts.length > 0;
+}
+
+function shouldHydrateFromServer(sess: Session, id: string): boolean {
+  if (getState().streams[id]) return false;
+  if (!sess.msgs.length) return true;
+  return looksLikeDisconnectCasualty(sess) || looksIncompleteAssistant(sess);
 }
 
 /** Stamp each assistant footer with the same round the Trace page draws. */

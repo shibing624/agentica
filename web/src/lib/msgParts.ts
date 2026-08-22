@@ -65,11 +65,16 @@ export function appendThink(m: ChatMsg, delta: string) {
   const parts = ensureParts(m);
   const last = parts[parts.length - 1];
   const t0 = Date.now();
-  if (last?.kind === "think") last.text += delta;
-  else parts.push({ kind: "think", text: delta, t0 });
-  const step = m.steps![m.steps!.length - 1];
-  if (step && step.type === "thinking") step.text = (step.text || "") + delta;
-  else m.steps!.push({ type: "thinking", text: delta, t0 });
+  if (last?.kind === "think") {
+    last.text += delta;
+    const step = m.steps![m.steps!.length - 1];
+    if (step && step.type === "thinking") step.text = (step.text || "") + delta;
+    else m.steps!.push({ type: "thinking", text: delta, t0 });
+    return;
+  }
+  finishThink(m, t0);
+  parts.push({ kind: "think", text: delta, t0 });
+  m.steps!.push({ type: "thinking", text: delta, t0 });
 }
 
 export function appendTool(m: ChatMsg, name: string, argsStr: string) {
@@ -112,6 +117,7 @@ export function appendText(m: ChatMsg, delta: string) {
 }
 
 export function appendSteerPart(m: ChatMsg, text: string) {
+  finishThink(m);
   ensureParts(m).push({ kind: "steer", text, ts: Date.now() });
 }
 

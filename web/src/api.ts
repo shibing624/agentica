@@ -159,6 +159,38 @@ export function streamChat(payload: unknown, signal?: AbortSignal) {
   });
 }
 
+export const createChatRunApi = (body: unknown) =>
+  postJson<{ run_id: string; session_id: string; status: string; kind: string; seq: number }>(
+    "/api/chat/runs", body,
+  );
+
+export function runEvents(runId: string, after = 0, signal?: AbortSignal) {
+  return fetch(
+    `/api/chat/runs/${encodeURIComponent(runId)}/events?after=${after}`,
+    { signal },
+  );
+}
+
+export const fetchActiveRun = (sessionId: string) =>
+  request<{ run: { run_id: string; session_id: string; status: string; kind: string; seq: number } | null }>(
+    `/api/chat/runs/active?session_id=${encodeURIComponent(sessionId)}`,
+  );
+
+export const cancelRunApi = (runId: string) =>
+  postJson<{ status: string; cancelled: boolean; run_id?: string }>(
+    `/api/chat/runs/${encodeURIComponent(runId)}/cancel`, {},
+  );
+
+export function attachChatStream(sessionId: string, signal?: AbortSignal, after = 0) {
+  return fetch(
+    `/api/chat/stream/${encodeURIComponent(sessionId)}?after=${after}`,
+    { signal },
+  );
+}
+
+export const cancelChatApi = (session_id: string) =>
+  postJson<{ status?: string; cancelled: boolean }>("/api/chat/cancel", { session_id, message: "" });
+
 export const steerChatApi = (session_id: string, message: string) =>
   postJson<{ accepted: boolean }>("/api/chat/steer", { session_id, message });
 

@@ -37,8 +37,8 @@ def test_get_builtin_tools_still_returns_expected_tool_types():
     assert "BuiltinTaskTool" in tool_names
 
 class TestBuiltinWebSearchTool:
-    def test_web_search_delegates_to_baidu(self):
-        """Verify web_search calls BaiduSearchTool.baidu_search under the hood."""
+    def test_web_search_delegates_to_backend(self):
+        """Verify web_search calls the selected backend under the hood."""
         tool = BuiltinWebSearchTool()
 
         mock_result = json.dumps([{"title": "test", "url": "http://example.com", "content": "result"}])
@@ -71,10 +71,13 @@ class TestBuiltinWebSearchTool:
 class TestWebSearchProviderSelection:
     """The engine behind `web_search` is swappable; the tool name is not."""
 
-    def test_default_provider_is_baidu_and_binds_baidu_method(self):
-        tool = BuiltinWebSearchTool()
-        assert tool.provider == "baidu"
-        assert tool._search_fn.__name__ == "baidu_search"
+    def test_default_provider_is_exa_and_binds_mcp_search(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGENTICA_WEB_SEARCH", None)
+            os.environ.pop("EXA_API_KEY", None)
+            tool = BuiltinWebSearchTool()
+        assert tool.provider == "exa"
+        assert tool._search_fn.__name__ == "mcp_search"
 
     def test_tool_name_stays_web_search_across_providers(self):
         """RunConfig whitelists and prompts key off the function name."""
@@ -98,7 +101,7 @@ class TestWebSearchProviderSelection:
         with patch.dict(os.environ, {"BOCHA_API_KEY": "k", "SERPER_API_KEY": "k"}, clear=False):
             os.environ.pop("AGENTICA_WEB_SEARCH", None)
             tool = BuiltinWebSearchTool()
-        assert tool.provider == "baidu"
+        assert tool.provider == "exa"
 
     def test_keyed_provider_reads_key_from_env(self):
         with patch.dict(os.environ, {"BOCHA_API_KEY": "bocha-key"}):
@@ -139,13 +142,13 @@ class TestWebSearchProviderSelection:
         with patch.dict(os.environ, {"AGENTICA_WEB_SEARCH": "serper"}, clear=False):
             os.environ.pop("SERPER_API_KEY", None)
             tool = BuiltinWebSearchTool()
-        assert tool.provider == "baidu"
+        assert tool.provider == "exa"
         assert "web_search" in tool.functions
 
     def test_unknown_env_provider_degrades_too(self):
         with patch.dict(os.environ, {"AGENTICA_WEB_SEARCH": "nope"}, clear=False):
             tool = BuiltinWebSearchTool()
-        assert tool.provider == "baidu"
+        assert tool.provider == "exa"
 
     def test_a_deep_agent_still_builds_under_a_dirty_env(self):
         with patch.dict(os.environ, {"AGENTICA_WEB_SEARCH": "serper"}, clear=False):
@@ -154,7 +157,7 @@ class TestWebSearchProviderSelection:
                 include_file_tools=False, include_execute=False,
                 include_fetch_url=False, include_todos=False, include_task=False,
             )
-        assert [t.provider for t in tools] == ["baidu"]
+        assert [t.provider for t in tools] == ["exa"]
 
     def test_get_builtin_tools_passes_provider_through(self):
         tools = get_builtin_tools(

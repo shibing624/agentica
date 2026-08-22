@@ -354,7 +354,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .msg-stack{display:flex;flex-direction:column;max-width:min(760px,88%);align-items:flex-start}
 .m-u .msg-stack{align-items:flex-end}
 .m-u .bub{background:var(--user-bg);color:var(--user-fg);padding:9px 14px;border-radius:16px 16px 4px 16px;max-width:100%;font-size:13px;line-height:1.55;word-break:break-word;white-space:pre-wrap}
-.m-a .msg-stack{width:100%}
+.m-a .msg-stack{width:100%;max-width:100%}
 .m-meta{font-size:10px;color:var(--fg3);font-family:var(--mono);margin-top:3px}
 .m-u .m-meta{text-align:right}
 .msg-footer{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:6px;font-size:11px;color:var(--fg3);opacity:0;pointer-events:none;transition:opacity .15s;min-height:20px}
@@ -479,7 +479,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 /* width:100% (not just max-width) so short answers still occupy the full
    column — otherwise the bubble shrink-wraps to its text and no longer
    lines up with the full-width thinking card above it */
-.m-a .bub{padding:2px 0;width:100%;max-width:100%;box-sizing:border-box;font-size:13px;line-height:1.6;color:var(--fg);word-break:break-word}
+.m-a .bub{padding:2px 0;width:100%;max-width:100%;box-sizing:border-box;font-size:14px;line-height:1.7;color:var(--fg);word-break:break-word}
 /* streaming indicator — only the last text bubble, never every prior turn */
 .stream-caret{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--fg2);margin-left:3px;vertical-align:middle;animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
@@ -523,8 +523,8 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .steer-chip:hover .steer-chip-meta,.m:hover .steer-chip-meta{opacity:1}
 .m-steer-wrap{margin-bottom:8px}
 
-/* markdown — compact Claude Code style */
-.bub p{margin:0 0 4px}.bub p:last-child{margin:0}
+/* markdown — readable web layout (not compact terminal density) */
+.bub p{margin:0 0 8px}.bub p:last-child{margin:0}
 .bub strong{font-weight:600}
 .bub em{font-style:italic}
 .bub code{font-family:var(--mono);font-size:12px;background:var(--code-bg);padding:1px 4px;border-radius:3px}
@@ -533,18 +533,18 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .bub pre code.hljs{background:transparent;padding:0;white-space:pre;word-break:normal;overflow-wrap:normal}
 .stream-pre{font-family:var(--mono);font-size:12px;line-height:1.45;white-space:pre-wrap;word-break:break-word;background:var(--code-bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin:4px 0}
 .bub ul,.bub ol{padding-left:18px;margin:2px 0}
-.bub li{margin:0;font-size:13px;line-height:1.4;padding:0}
-.bub li+li{margin-top:0}
+.bub li{margin:0;font-size:14px;line-height:1.65;padding:0}
+.bub li+li{margin-top:2px}
 .bub li p{margin:0;display:inline}
 .bub ul br,.bub ol br{display:none}
-.bub blockquote{border-left:2px solid var(--border);padding-left:10px;color:var(--fg2);margin:4px 0;font-size:13px}
+.bub blockquote{border-left:2px solid var(--border);padding-left:10px;color:var(--fg2);margin:4px 0;font-size:14px}
 .bub a{color:var(--fg);text-decoration:underline;text-underline-offset:2px}
 .bub a:hover{opacity:.7}
-.bub table{border-collapse:collapse;margin:4px 0;width:100%;font-size:12px}
-.bub th,.bub td{border:1px solid var(--border);padding:4px 8px;text-align:left}
+.bub table{border-collapse:collapse;margin:4px 0;width:100%;font-size:13px}
+.bub th,.bub td{border:1px solid var(--border);padding:6px 10px;text-align:left}
 .bub th{background:var(--bg2);font-weight:500}
-.bub h1,.bub h2,.bub h3,.bub h4,.bub h5,.bub h6{font-weight:600;margin:8px 0 3px;line-height:1.35}
-.bub h1{font-size:16px}.bub h2{font-size:14px}.bub h3{font-size:13px}.bub h4{font-size:13px;font-weight:500}.bub h5{font-size:12px;font-weight:500}.bub h6{font-size:12px;font-weight:400;color:var(--fg2)}
+.bub h1,.bub h2,.bub h3,.bub h4,.bub h5,.bub h6{font-weight:600;margin:12px 0 4px;line-height:1.35}
+.bub h1{font-size:16px}.bub h2{font-size:15px}.bub h3{font-size:14px}.bub h4{font-size:14px;font-weight:500}.bub h5{font-size:13px;font-weight:500}.bub h6{font-size:12px;font-weight:400;color:var(--fg2)}
 .bub .katex-display{margin:6px 0;overflow-x:auto}
 .bub .katex{font-size:14px}
 .bub hr{border:none;border-top:1px solid var(--border);margin:6px 0}
@@ -597,7 +597,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 
 /* ===== INPUT ===== */
 .input-area{padding:8px 20px 4px;background:var(--bg);transition:background .2s;flex-shrink:0}
-.input-box{margin:0 auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-input);transition:all var(--t);position:relative}
+.input-box{margin:0 auto;max-width:980px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-input);transition:all var(--t);position:relative}
 .input-box:focus-within{border-color:var(--fg3);box-shadow:0 0 0 2px var(--accent-soft)}
 .input-box.dragover{border-color:var(--fg);background:var(--accent-soft)}
 /* file preview */
@@ -937,9 +937,9 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .step-tool summary::-webkit-details-marker{display:none}
 .step-tool-name{font-weight:600;color:var(--fg2);flex-shrink:0}
 .step-tool-args{color:var(--fg3);opacity:.75;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step-tool-call{font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--fg3);white-space:pre-wrap;overflow-wrap:anywhere;margin:2px 8px 5px 32px}
 .step-pre{font-family:var(--mono);font-size:10px;color:var(--fg3);white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin:4px 8px 8px 32px;max-height:min(40vh, 360px);overflow:auto}
 .step-pre.out{color:var(--fg2);max-height:min(60vh, 480px)}
-.step-pre-lbl{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--fg3);padding:6px 8px 0 32px}
 .work-tool-diff{margin:4px 8px 8px 32px}
 .work-tool-diff .code-frame{margin:0;max-height:min(60vh, 520px)}
 
