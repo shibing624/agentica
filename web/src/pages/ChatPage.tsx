@@ -44,6 +44,9 @@ export function ChatPage() {
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const modelWrapRef = useRef<HTMLDivElement>(null);
+  const approvalWrapRef = useRef<HTMLDivElement>(null);
+  const skillsWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (s.goalCompose && !hadGoalCompose.current) {
@@ -68,6 +71,30 @@ export function ChatPage() {
 
   useEffect(() => { void loadPlugins(); }, []);
   useEffect(() => { if (slashOpen) setSkillsOpen(false); }, [slashOpen]);
+  useEffect(() => {
+    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      const patch: { modelDDOpen?: false; approvalMenuOpen?: false } = {};
+      if (!modelWrapRef.current?.contains(t)) patch.modelDDOpen = false;
+      if (!approvalWrapRef.current?.contains(t)) patch.approvalMenuOpen = false;
+      if (patch.modelDDOpen !== undefined || patch.approvalMenuOpen !== undefined) setState(patch);
+      if (!skillsWrapRef.current?.contains(t)) setSkillsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSkillsOpen(false);
+      setState({ modelDDOpen: false, approvalMenuOpen: false });
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen]);
   useEffect(() => {
     const onHide = () => { pageUnloading = true; };
     const onShow = () => { pageUnloading = false; };
@@ -325,10 +352,10 @@ export function ChatPage() {
                   e.currentTarget.value = "";
                 }} />
                 <button className="foot-btn plus-btn" title={S.chat.attach} onClick={() => document.getElementById("fileInput")?.click()}><IconPlus /></button>
-                <div className="skills-wrap">
+                <div className="skills-wrap" ref={skillsWrapRef}>
                   <button type="button" className="foot-btn skills-btn" title={S.chat.slashSkill}
                           onClick={() => {
-                            setState({ approvalMenuOpen: false });
+                            setState({ approvalMenuOpen: false, modelDDOpen: false });
                             setSkillsOpen(!skillsOpen);
                           }}>
                     <IconBook />
@@ -347,11 +374,11 @@ export function ChatPage() {
                   )}
                 </div>
                 <ComposerDir />
-                <div className="approval-wrap">
+                <div className="approval-wrap" ref={approvalWrapRef}>
                   <button className="foot-btn approval-btn" title={S.chat.permTip(s.selectedApprovalMode)}
                           onClick={() => {
                             setSkillsOpen(false);
-                            setState({ approvalMenuOpen: !s.approvalMenuOpen });
+                            setState({ approvalMenuOpen: !s.approvalMenuOpen, modelDDOpen: false });
                           }}>
                     <span className="quick-icon">{permIcon(s.selectedApprovalMode)}</span>
                     <span className="approval-label">{S.chat.permLabel(s.selectedApprovalMode)}</span>
@@ -388,8 +415,11 @@ export function ChatPage() {
                     <ContextUsageTip sessionId={s.curSess} fallback={cur} />
                   )}
                 </div>
-                <div className="input-model-wrap">
-                  <button className="foot-btn model-sel" onClick={() => setState({ modelDDOpen: !s.modelDDOpen })}>
+                <div className="input-model-wrap" ref={modelWrapRef}>
+                  <button className="foot-btn model-sel" onClick={() => {
+                    setSkillsOpen(false);
+                    setState({ modelDDOpen: !s.modelDDOpen, approvalMenuOpen: false });
+                  }}>
                     {s.serverModelName || s.serverModel}
                   </button>
                   {s.modelDDOpen && (

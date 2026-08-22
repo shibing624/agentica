@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **工具泳道按工具名合并，图例五项**：原先每个工具调用各占一条泳道，一轮里调 20 次 `read_file` 就是 20 条几乎一样的线；现在同名工具收进一条泳道（并发调用才在道内错开分层，道尾标调用次数），并且图例五个阶段常驻（思考 / 模型回复 / 工具参数生成 / 审批等待 / 工具执行）——只画本轮出现过的颜色，会让两轮之间的同一个颜色对应不同阶段。不再画「其它」：那是墙钟减去各段之后的残差，时间线上本来就没有对应的条。
 
 #### fixes
+- **输入栏弹出层点外面或 Esc 就关掉**：模型 profile、权限档、Skills 打开后只能再点一次按钮才关。现在点对话区、输入框或其它按钮会立刻收起，Esc 也先关菜单（有菜单开着时不拿去停止生成）。
 - **Web 生成中空 Enter 会停止，Stop 按钮一直在**：placeholder 写着「空输入为停止」，但空 Enter 直接 return；输入框有草稿时按钮还会变成发送。busy 期间按钮恒为 Stop，空 Enter / Esc 都停止。
 - **创建 run 途中点 Stop 不再留下孤儿任务**：`POST /api/chat/runs` 返回后若用户已停止，立刻 `cancelRunApi`，避免 UI 已 aborted、后端仍占 session lock。
 - **SSE 空闲 15s 发 keepalive；干净 EOF 且未见 `done`/`error`/`aborted` 则按断线重连**：前置代理闲置掐流不会再被当成回合完成。
