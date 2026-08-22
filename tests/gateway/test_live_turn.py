@@ -9,6 +9,8 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 import pytest
 
+pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+
 from agentica.gateway.services import live_turn
 from agentica.gateway.services.live_turn import cancel_and_wait
 
