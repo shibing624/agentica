@@ -79,6 +79,9 @@ jobs:
           pip install -e .
           pip install pytest pytest-cov pytest-asyncio
 
+      - name: Guard extra-only test imports
+        run: python scripts/check_bare_ci_imports.py
+
       - name: Run tests
         run: |
           python -m pytest tests/ evaluation/code_benchmark/tests/ -v --tb=short
