@@ -10,8 +10,10 @@ Two levels of hooks:
 - ConversationArchiveHooks: auto-archives conversations to workspace after each run
 """
 import asyncio
+import inspect
 import json
 import re
+from pathlib import Path
 from typing import Any, Optional, List, Dict, Tuple
 
 from agentica.experience import extract_state
@@ -511,11 +513,14 @@ class MemoryExtractHooks(RunHooks):
             return
 
         parts: List[str] = []
+        archive_messages: List[Dict[str, str]] = []
         for user_msg, assistant_msg, _ in buf:
             if user_msg:
                 parts.append(f"User: {user_msg}")
+                archive_messages.append({"role": "user", "content": user_msg})
             if assistant_msg:
                 parts.append(f"Assistant: {assistant_msg}")
+                archive_messages.append({"role": "assistant", "content": assistant_msg})
         conversation_text = "\n\n".join(parts)
 
         # Cheap floor: a single trivial turn ("hi" / "ok") still rolls up to
@@ -532,7 +537,37 @@ class MemoryExtractHooks(RunHooks):
         # extraction fails closed with a truncated recent slice instead of a
         # silent context_length_exceeded on the side call.
         conversation_text = self._fit_text_to_model(model, conversation_text)
-        await self._extract_and_save(model, workspace, conversation_text)
+        evidence_refs = await self._archive_extract_evidence(
+            workspace, archive_messages, session_key[1],
+        )
+        await self._extract_and_save(
+            model, workspace, conversation_text, evidence_refs=evidence_refs,
+        )
+
+    async def _archive_extract_evidence(
+        self,
+        workspace: Any,
+        archive_messages: List[Dict[str, str]],
+        session_id: str,
+    ) -> List[str]:
+        """Persist the extraction window so auto_extract candidates keep a trail.
+
+        ``Workspace.archive_conversation`` is always defined; tests that pass a
+        MagicMock workspace skip this because that mock is not a coroutine.
+        """
+        if not archive_messages:
+            return []
+        if not inspect.iscoroutinefunction(workspace.archive_conversation):
+            return []
+        try:
+            archive_path = await workspace.archive_conversation(
+                archive_messages,
+                session_id=f"{session_id}:memory_extract",
+            )
+            return [str(Path(archive_path).relative_to(workspace.path))]
+        except (OSError, ValueError) as e:
+            logger.warning("Memory extraction evidence archive failed: %s", e)
+            return []
 
     # Rough chars/token, and the share of the aux window the transcript may
     # occupy (the rest pays for the extract prompt and the reply).
@@ -557,7 +592,13 @@ class MemoryExtractHooks(RunHooks):
         # Indexed from the front: text[-0:] would return the whole string.
         return text[len(text) - max_chars:]
 
-    async def _extract_and_save(self, model: Any, workspace: Any, conversation_text: str) -> None:
+    async def _extract_and_save(
+        self,
+        model: Any,
+        workspace: Any,
+        conversation_text: str,
+        evidence_refs: Optional[List[str]] = None,
+    ) -> None:
         """Run the LLM extraction call and persist results.
 
         Stamps the idle gate only after the LLM call returns successfully.
@@ -602,6 +643,7 @@ class MemoryExtractHooks(RunHooks):
                     memory_type=mem_type,
                     description=title,
                     source="auto_extract",
+                    evidence_refs=evidence_refs or None,
                 )
                 logger.debug(f"Auto-extracted memory: {title} (type: {mem_type})")
 

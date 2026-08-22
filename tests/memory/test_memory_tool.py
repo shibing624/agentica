@@ -21,6 +21,7 @@ from agentica.workspace import Workspace
 from agentica.tools.builtin import BuiltinMemoryTool
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool as CanonicalBuiltinMemoryTool
 from agentica.hooks import MemoryExtractHooks, ConversationArchiveHooks
+from agentica.model.response import ModelResponse
 
 
 def test_memory_tool_legacy_export_points_to_canonical_class():
@@ -198,6 +199,38 @@ class TestBuiltinMemoryTool:
         sources = {item["source"] for item in parsed}
         assert {"memory", "memory_candidate", "conversation"}.issubset(sources)
         assert all("score" in item for item in parsed)
+
+    def test_search_memory_returns_provenance_and_evidence_refs(self):
+        """Verified, candidate, and conversation hits expose frontmatter provenance."""
+        asyncio.run(self.workspace.write_memory_entry(
+            title="verified_budget",
+            content="Budget is 8000.",
+            memory_type="project",
+            source="verified",
+            evidence_refs=["conversations/2026-06-16.md#block=0"],
+        ))
+        asyncio.run(self.workspace.write_memory_entry(
+            title="candidate_budget",
+            content="Budget might be 3000.",
+            memory_type="project",
+            source="auto_extract",
+            evidence_refs=["conversations/2026-06-16.md#block=1"],
+        ))
+        asyncio.run(self.workspace.archive_conversation(
+            [{"role": "user", "content": "Set budget to 8000."}],
+            session_id="run-1",
+        ))
+
+        parsed = json.loads(self.tool.search_memory("budget 8000", limit=10))
+        by_source = {item["source"]: item for item in parsed}
+
+        assert "memory" in by_source
+        assert "memory_candidate" in by_source
+        assert "conversation" in by_source
+        assert by_source["memory"]["memory_source"] == "verified"
+        assert by_source["memory"]["evidence_refs"] == ["conversations/2026-06-16.md#block=0"]
+        assert by_source["memory_candidate"]["memory_source"] == "auto_extract"
+        assert by_source["conversation"]["evidence_refs"]
 
     def test_search_memory_limits_conversations_to_recent_seven_days(self):
         """Conversation search should ignore older daily archive files by default."""
@@ -497,6 +530,41 @@ class TestMemoryExtractHooks:
         asyncio.run(hooks.on_agent_end(agent=agent, output="y" * 600))
 
         agent.model.response.assert_awaited_once()
+
+    def test_extract_candidates_keep_evidence_refs(self):
+        """auto_extract writes quarantine files with the extraction-window trail."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            workspace = Workspace(temp_dir)
+            workspace.initialize()
+            hooks = MemoryExtractHooks()
+
+            class FakeExtractModel:
+                async def response(self, messages):
+                    return ModelResponse(
+                        content=json.dumps([
+                            {
+                                "title": "budget_pref",
+                                "content": "User budget might be 3000.",
+                                "type": "project",
+                            }
+                        ])
+                    )
+
+            asyncio.run(hooks._extract_and_save(
+                FakeExtractModel(),
+                workspace,
+                "User: Set budget to 3000. Assistant: noted. " * 10,
+                evidence_refs=["conversations/2026-06-16.md#block=2"],
+            ))
+
+            candidates = workspace.list_memory_candidates()
+            assert len(candidates) == 1
+            assert candidates[0]["source"] == "auto_extract"
+            assert candidates[0]["evidence_refs"] == ["conversations/2026-06-16.md#block=2"]
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 class TestWorkspaceMemoryConfig:
     """Test that auto_archive and auto_extract_memory are separate configs."""

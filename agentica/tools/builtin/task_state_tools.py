@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from agentica.tools.base import Tool
+from agentica.utils.async_file import extract_frontmatter_list, extract_frontmatter_value, strip_frontmatter
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
@@ -270,10 +271,12 @@ class BuiltinMemoryTool(Tool):
 
         All three sources are scored against the query in one shared pool. Each
         result carries a `source` field ("memory" | "memory_candidate" |
-        "conversation") so the agent can judge provenance. Returns JSON of the
-        top matches, capped by `limit` and total `max_chars`. The aggregated
-        ``MEMORY.md`` is excluded because it is already injected into the
-        system prompt.
+        "conversation") so the agent can judge provenance, plus `title`,
+        `memory_type`, `memory_source`, and `evidence_refs` from the file
+        frontmatter (conversation blocks point at `{file}#block=N`). Returns
+        JSON of the top matches, capped by `limit` and total `max_chars`. The
+        aggregated ``MEMORY.md`` is excluded because it is already injected
+        into the system prompt.
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")
@@ -337,17 +340,21 @@ class BuiltinMemoryTool(Tool):
         if not file_path.exists():
             return None
         try:
-            content = file_path.read_text(encoding="utf-8").strip()
+            raw_content = file_path.read_text(encoding="utf-8").strip()
         except OSError as e:
             logger.warning(f"unable to read memory search file {file_path}: {e}")
             return None
-        content = self._strip_frontmatter(content)
+        content = strip_frontmatter(raw_content)
         if not content:
             return None
         return file_path.stat().st_mtime, {
             "content": content,
             "file_path": str(file_path.relative_to(self._workspace.path)),
             "source": source,
+            "title": extract_frontmatter_value(raw_content, "name") or file_path.stem,
+            "memory_type": extract_frontmatter_value(raw_content, "type") or "",
+            "memory_source": extract_frontmatter_value(raw_content, "source") or "",
+            "evidence_refs": extract_frontmatter_list(raw_content, "evidence_refs"),
         }
 
     def _get_recent_conversation_files(self, conversation_days: int) -> List[Path]:
@@ -382,20 +389,18 @@ class BuiltinMemoryTool(Tool):
         mtime = file_path.stat().st_mtime
         rel_path = str(file_path.relative_to(self._workspace.path))
         entries: List[Tuple[float, Dict]] = []
-        for block in reversed(re.split(r"\n\n---\n\n", content)):
-            block = block.strip()
-            if not block:
-                continue
+        blocks = [block.strip() for block in re.split(r"\n\n---\n\n", content) if block.strip()]
+        for block_index, block in reversed(list(enumerate(blocks))):
             entries.append((mtime, {
                 "content": block,
                 "file_path": rel_path,
                 "source": "conversation",
+                "title": file_path.stem,
+                "memory_type": "conversation",
+                "memory_source": "conversation_archive",
+                "evidence_refs": [f"{rel_path}#block={block_index}"],
             }))
         return entries
-
-    @staticmethod
-    def _strip_frontmatter(content: str) -> str:
-        return re.sub(r"^---\n[\s\S]*?\n---\n", "", content, count=1).strip()
 
     @staticmethod
     def _limit_search_results(results: List[Dict], limit: int, max_chars: int) -> List[Dict]:
