@@ -75,6 +75,7 @@ class TestOpenAIChatEmptyChoices(unittest.TestCase):
                     Message(role="user", content="hello"),
                 ]))
                 self.assertIsNotNone(result)
+                self.assertIsNone(result.reasoning_content)
             except ValueError as e:
                 self.fail(f"ValueError raised for valid choices: {e}")
 
@@ -178,6 +179,7 @@ class TestStructuredOutputFallback(unittest.TestCase):
                 ]))
                 # Should not crash even if parsed is None
                 self.assertIsNotNone(result)
+                self.assertIsNone(result.reasoning_content)
             except Exception as e:
                 self.fail(f"response() raised unexpectedly with parsed=None: {e}")
 

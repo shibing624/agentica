@@ -886,6 +886,19 @@ class OpenAIChat(Model):
 
     # handle_tool_calls and handle_stream_tool_calls are inherited from Model base class.
 
+    @staticmethod
+    def _provider_reasoning(obj: Any) -> Optional[str]:
+        """DeepSeek uses ``reasoning_content``; NVIDIA uses ``reasoning``.
+
+        ``Message.reasoning_content`` is ``Optional[str]`` — skip anything else.
+        """
+        for name in ("reasoning_content", "reasoning"):
+            if hasattr(obj, name):
+                value = getattr(obj, name)
+                if isinstance(value, str):
+                    return value
+        return None
+
     def create_assistant_message(
         self,
         response_message: ChatCompletionMessage,
@@ -912,10 +925,9 @@ class OpenAIChat(Model):
             except Exception as e:
                 logger.warning(f"Error processing audio: {e}")
 
-        if hasattr(response_message, "reasoning_content") and response_message.reasoning_content is not None:
-            assistant_message.reasoning_content = response_message.reasoning_content
-        elif hasattr(response_message, "reasoning") and response_message.reasoning is not None:
-            assistant_message.reasoning_content = response_message.reasoning
+        reasoning = self._provider_reasoning(response_message)
+        if reasoning is not None:
+            assistant_message.reasoning_content = reasoning
 
         self.update_usage_metrics(assistant_message, metrics, response_usage)
         return assistant_message
@@ -1044,11 +1056,7 @@ class OpenAIChat(Model):
 
                 response_delta: ChoiceDelta = response.choices[0].delta
 
-                reasoning_delta = None
-                if hasattr(response_delta, "reasoning_content") and response_delta.reasoning_content:
-                    reasoning_delta = response_delta.reasoning_content
-                elif hasattr(response_delta, "reasoning") and response_delta.reasoning:
-                    reasoning_delta = response_delta.reasoning
+                reasoning_delta = self._provider_reasoning(response_delta)
                 if reasoning_delta:
                     stream_data.response_reasoning_content += reasoning_delta
                     yield ModelResponse(reasoning_content=reasoning_delta)

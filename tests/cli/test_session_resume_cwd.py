@@ -78,7 +78,7 @@ class TestProjectMarker(unittest.TestCase):
         (Path(log.base_dir) / "project.json").unlink()
 
         # No marker: the cwd stamped on the first entry is the next best source.
-        self.assertEqual(SessionLog.project_work_dir(log.base_dir), os.getcwd())
+        self.assertEqual(SessionLog.project_work_dir(log.base_dir), work_dir)
 
     def test_explicit_base_dir_writes_no_marker(self):
         with tempfile.TemporaryDirectory() as directory:
