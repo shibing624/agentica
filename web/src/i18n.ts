@@ -15,7 +15,8 @@ import { getState, pushPrefs, setState, useAppState } from "./store";
  * Not translated on purpose: log event kinds (`tool_call`, `request_begin`),
  * config field names (`base_url`, `max_tokens`), and profile names. Approval
  * mode *ids* (`ask` / `auto` / `allow-all`) stay in parentheses so they stay
- * greppable; the surrounding label follows the UI language.
+ * greppable; the surrounding label is Codex's three-tier copy (Ask for
+ * approval / Approve for me / Full access).
  */
 
 export type Lang = "en" | "zh";
@@ -108,13 +109,28 @@ const en = {
     slashEmpty: "No matching command",
     skillSearch: "Search skills",
     skillNone: "No matching skill",
-    permLabel: (mode: string): string => mode === "ask" ? "Read-only" : mode === "allow-all" ? "Full access" : "Auto",
+    permLabel: (mode: string): string => mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me",
     permHint: (mode: string): string => mode === "ask"
-      ? "Only read-only tools; writes and shell are hidden"
+      ? "Workspace files run without asking. Shell, network, and files outside the workspace need confirmation."
       : mode === "allow-all"
-        ? "Every tool, no work-dir sandbox"
-        : "Every tool; file writes stay inside the work directory",
-    permTip: (mode: string): string => `${mode === "ask" ? "Read-only" : mode === "allow-all" ? "Full access" : "Auto"} (${mode})`,
+        ? "Never asks. Hard refusals for /etc and ~/.ssh still apply."
+        : "Asks only when an action may be unsafe: paths outside the workspace, or a shell command that is not read-only.",
+    permTip: (mode: string): string => `${mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me"} (${mode})`,
+    approvalDeny: "Deny",
+    approvalAllowOnce: "Allow once",
+    approvalAllowSimilar: (name: string): string => {
+      if (name === "execute" || name === "bash" || name === "shell" || name === "run_command") {
+        return "Allow similar commands";
+      }
+      if (name === "read_file" || name === "write_file" || name === "apply_patch" || name === "glob" || name === "grep") {
+        return "Allow similar paths";
+      }
+      if (name === "web_search" || name === "fetch_url") return "Always allow this tool";
+      return "Allow similar calls";
+    },
+    approvalWaiting: "Waiting for approval",
+    approvalFailed: "Could not submit that decision",
+    approvalQueue: (i: number, n: number) => `${i} of ${n}`,
     goalNeedObjective: "Type the goal objective",
     queueNeedPrompt: "Usage: /queue <prompt>",
     goalBudgetInvalid: "Invalid token budget — positive number with optional k/m, or empty for unlimited",
@@ -618,13 +634,28 @@ const zh: Strings = {
     slashEmpty: "没有匹配的命令",
     skillSearch: "搜索技能",
     skillNone: "没有匹配的技能",
-    permLabel: (mode: string): string => mode === "ask" ? "只读" : mode === "allow-all" ? "全部放行" : "自动",
+    permLabel: (mode: string): string => mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准",
     permHint: (mode: string): string => mode === "ask"
-      ? "只暴露只读工具，写入和终端命令不可用"
+      ? "工作区内读写自动放行；网络、工作区外文件和所有命令需确认。"
       : mode === "allow-all"
-        ? "全部工具，不限制工作目录"
-        : "全部工具；写入限制在工作目录内",
-    permTip: (mode: string): string => `${mode === "ask" ? "只读" : mode === "allow-all" ? "全部放行" : "自动"} (${mode})`,
+        ? "不询问。对 /etc、~/.ssh 等敏感路径的硬拒绝仍然生效。"
+        : "只询问可能不安全的动作：工作区外路径，以及非只读命令。",
+    permTip: (mode: string): string => `${mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准"} (${mode})`,
+    approvalDeny: "拒绝",
+    approvalAllowOnce: "允许一次",
+    approvalAllowSimilar: (name: string): string => {
+      if (name === "execute" || name === "bash" || name === "shell" || name === "run_command") {
+        return "允许类似命令";
+      }
+      if (name === "read_file" || name === "write_file" || name === "apply_patch" || name === "glob" || name === "grep") {
+        return "允许类似路径";
+      }
+      if (name === "web_search" || name === "fetch_url") return "始终允许此工具";
+      return "允许类似调用";
+    },
+    approvalWaiting: "等待批准",
+    approvalFailed: "提交决定失败",
+    approvalQueue: (i: number, n: number) => `${i} / ${n}`,
     goalNeedObjective: "请输入目标内容",
     queueNeedPrompt: "用法：/queue <下一轮要说的话>",
     goalBudgetInvalid: "token 预算无效：正数，可带 k/m，留空表示不限",

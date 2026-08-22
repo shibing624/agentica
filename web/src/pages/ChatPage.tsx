@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import * as api from "../api";
 import { ComposerDir } from "../components/ComposerDir";
 import { ChatMarkdown } from "../components/ChatMarkdown";
-import { SteerChip, WorkGroup } from "../components/WorkGroup";
+import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { promptRename } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
 import { getStrings, useStrings } from "../i18n";
@@ -17,11 +17,11 @@ import {
   IconChevronDown,
 } from "../icons";
 import {
-  bump, getState, pushPrefs, saveSessions, setState,
-  showToast, useAppState, type ChatMsg, type QueuedMessage,
+  bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, setState,
+  showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip } from "../components/ContextUsageTip";
-import { appendSteerPart, appendText, appendThink, appendTool, finishThink, finishTool, groupParts, partsOf } from "../lib/msgParts";
+import { appendSteerPart, appendText, appendThink, appendTool, finishThink, finishTool, groupParts, partsOf, unfinishedToolCallId } from "../lib/msgParts";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
@@ -68,6 +68,10 @@ export function ChatPage() {
     : [];
   const slashOpen = q != null;
   const pendingImages = s.pendingFiles.filter((f) => f.type.startsWith("image/"));
+  const pendingApprovals = s.curSess ? (s.streams[s.curSess]?.pendingApprovals || []) : [];
+  const pendingReq = pendingApprovals[0];
+  const pendingToolCallId = pendingReq?.toolCallId;
+  const decidingApproval = !!(s.curSess && s.streams[s.curSess]?.decidingApproval);
 
   useEffect(() => { void loadPlugins(); }, []);
   useEffect(() => { if (slashOpen) setSkillsOpen(false); }, [slashOpen]);
@@ -95,6 +99,29 @@ export function ChatPage() {
       document.removeEventListener("keydown", onKey, true);
     };
   }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen]);
+  useEffect(() => {
+    if (!pendingReq) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (s.modelDDOpen || s.approvalMenuOpen || skillsOpen) return;
+      if (slashOpen) return;
+      if (e.isComposing || e.keyCode === 229) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        void decideCurrentApproval("deny");
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        if (tag === "INPUT") return;
+        e.preventDefault();
+        e.stopPropagation();
+        void decideCurrentApproval("allow");
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, skillsOpen, slashOpen]);
   useEffect(() => {
     const onHide = () => { pageUnloading = true; };
     const onShow = () => { pageUnloading = false; };
@@ -196,7 +223,8 @@ export function ChatPage() {
                 </div>
               ) : cur.msgs.map((m, i) => (
                 <MessageView key={i} m={m} workspace={workspace} onOpenFile={files.browsePath}
-                  live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)} />
+                  live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
+                  pendingToolCallId={pendingToolCallId} />
               ))}
             </div>
           </div>
@@ -213,6 +241,15 @@ export function ChatPage() {
           )}
         </div>
         <div className="input-area">
+          {pendingReq && (
+            <ApprovalCard
+              req={pendingReq}
+              queueIndex={0}
+              queueTotal={pendingApprovals.length}
+              busy={decidingApproval}
+              onDecide={(d) => void decideCurrentApproval(d)}
+            />
+          )}
           {goalRun && (
             <div className="goal-bar" title={goalRun.progress}>
               <span className="goal-bar-status">{S.chat.goalBar(goalRun.status, goalRun.objective)}</span>
@@ -460,8 +497,8 @@ export function ChatPage() {
   );
 }
 
-function MessageView({ m, workspace, onOpenFile, live }: {
-  m: ChatMsg; workspace: string; onOpenFile: (path: string) => void; live?: boolean;
+function MessageView({ m, workspace, onOpenFile, live, pendingToolCallId }: {
+  m: ChatMsg; workspace: string; onOpenFile: (path: string) => void; live?: boolean; pendingToolCallId?: string;
 }) {
   const S = useStrings();
   if (m.role === "user" && m.steer) {
@@ -478,7 +515,7 @@ function MessageView({ m, workspace, onOpenFile, live }: {
         {segs ? segs.map((seg, i) => {
           const isLast = !!live && i === segs.length - 1;
           if (seg.type === "work") {
-            return <WorkGroup key={i} items={seg.items} isLast={isLast} />;
+            return <WorkGroup key={i} items={seg.items} isLast={isLast} pendingToolCallId={pendingToolCallId} />;
           }
           if (seg.part.kind === "steer") {
             return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} />;
@@ -554,6 +591,47 @@ function MessageFooter({ m, live }: { m: ChatMsg; live?: boolean }) {
       </button>
     </div>
   );
+}
+
+function parseApprovalRequest(data: any): ApprovalRequest | null {
+  const toolCallId = String(data?.tool_call_id || "");
+  if (!toolCallId) return null;
+  const rawOpts = Array.isArray(data.options) ? data.options : ["allow", "allow_prefix", "deny"];
+  const options = rawOpts.filter(
+    (x: unknown): x is ApprovalDecision => x === "allow" || x === "allow_prefix" || x === "deny",
+  );
+  const args = (data.args && typeof data.args === "object" && !Array.isArray(data.args))
+    ? data.args
+    : ((data.arguments && typeof data.arguments === "object" && !Array.isArray(data.arguments))
+      ? data.arguments
+      : {});
+  return {
+    toolCallId,
+    name: String(data.name || ""),
+    args,
+    question: String(data.question || ""),
+    preview: String(data.preview || ""),
+    options: options.length ? options : ["allow", "allow_prefix", "deny"],
+  };
+}
+
+async function decideCurrentApproval(decision: ApprovalDecision) {
+  const st = getState();
+  const sessId = st.curSess || "";
+  const live = st.streams[sessId];
+  const req = live?.pendingApprovals?.[0];
+  if (!sessId || !live || !req || live.decidingApproval) return;
+  live.decidingApproval = true;
+  bump();
+  const res = await api.postSessionApproval(sessId, req.toolCallId, decision);
+  const again = getState().streams[sessId];
+  if (again) again.decidingApproval = false;
+  if (res.ok || res.status === 404) {
+    dequeueApproval(sessId, req.toolCallId);
+  } else {
+    bump();
+    showToast(getStrings().chat.approvalFailed);
+  }
 }
 
 async function stopGen() {
@@ -791,19 +869,27 @@ async function drainQueue(sessId: string) {
   await sendMessage(sessId, next.text, next.files);
 }
 
-function applyLiveSseEvent(aiMsg: ChatMsg, evt: any): boolean {
+function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
   if (evt.event === "thinking") {
     appendThink(aiMsg, evt.data);
     bumpStream();
     return true;
   }
   if (evt.event === "tool_call") {
-    appendTool(aiMsg, evt.data.name, JSON.stringify(evt.data.args || {}));
+    appendTool(aiMsg, evt.data.name, JSON.stringify(evt.data.args || {}), evt.data.tool_call_id);
     flushStream();
     return true;
   }
   if (evt.event === "tool_result") {
-    finishTool(aiMsg, evt.data.result, evt.data.diff);
+    const callId = unfinishedToolCallId(aiMsg, evt.data.tool_call_id);
+    finishTool(aiMsg, evt.data.result, evt.data.diff, evt.data.tool_call_id);
+    if (sessId && callId) dequeueApproval(sessId, callId);
+    flushStream();
+    return true;
+  }
+  if (evt.event === "approval_request" && sessId) {
+    const req = parseApprovalRequest(evt.data);
+    if (req) enqueueApproval(sessId, req);
     flushStream();
     return true;
   }
@@ -896,7 +982,7 @@ async function consumeSse(
       if (evt.event === "done" || evt.event === "error" || evt.event === "aborted") {
         terminal = true;
       }
-      if (applyLiveSseEvent(aiMsg, evt)) continue;
+      if (applyLiveSseEvent(aiMsg, evt, sessId)) continue;
       if (evt.event === "status" && evt.data && onStatus) onStatus(evt.data);
       if (evt.event === "done" && evt.data) {
         const prevCost = sess.costUsd || 0;

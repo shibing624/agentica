@@ -29,6 +29,12 @@ from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.styles import Style as PTStyle
 from prompt_toolkit.widgets import TextArea
 
+from agentica.cli.approvals import (
+    approval_decision_from_key,
+    complete_approval,
+    interrupt_approvals,
+    is_approval_request,
+)
 from agentica.cli.commands.context import CONCURRENT_CMDS, PendingQueue
 from agentica.cli.commands.registry import COMMAND_REGISTRY
 from agentica.cli.display import (
@@ -182,6 +188,8 @@ def _ask_prompt_lines(req) -> list[str]:
     Both the fragment builder and the widget height derive from this, so the
     reserved height can't drift from what is actually drawn.
     """
+    if req.kind == "approval":
+        return [req.prompt.rstrip("\n")]
     lines = [f"  ? {req.prompt}"]
     if req.options:
         lines.extend(f"    {i}. {opt}" for i, opt in enumerate(req.options, 1))
@@ -238,6 +246,43 @@ def _setup_tui(
                     yield Completion(comp, start_position=-len(partial), display=comp)
 
     kb = KeyBindings()
+    is_approval = Condition(lambda: is_approval_request(state.input_request))
+    not_approval = Condition(lambda: not is_approval_request(state.input_request))
+
+    def _finish_approval(event, decision):
+        complete_approval(state, decision, app=event.app)
+        event.app.current_buffer.reset()
+        tui_state["spinner_text"] = (
+            "Denied" if decision == "deny" else "Approved"
+        )
+
+    @kb.add("y", filter=is_approval, eager=True)
+    def _approval_yes(event):
+        _finish_approval(event, "allow")
+
+    @kb.add("1", filter=is_approval, eager=True)
+    def _approval_yes_1(event):
+        _finish_approval(event, "allow")
+
+    @kb.add("p", filter=is_approval, eager=True)
+    def _approval_prefix(event):
+        _finish_approval(event, "allow_prefix")
+
+    @kb.add("2", filter=is_approval, eager=True)
+    def _approval_prefix_2(event):
+        _finish_approval(event, "allow_prefix")
+
+    @kb.add("escape", filter=is_approval, eager=True)
+    def _approval_deny(event):
+        _finish_approval(event, "deny")
+
+    @kb.add("3", filter=is_approval, eager=True)
+    def _approval_deny_3(event):
+        _finish_approval(event, "deny")
+
+    @kb.add("n", filter=is_approval, eager=True)
+    def _approval_deny_n(event):
+        _finish_approval(event, "deny")
 
     @kb.add("escape", "enter")
     def _newline(event):
@@ -271,7 +316,11 @@ def _setup_tui(
             # putting a sentinel on the queue; the tool callback raises
             # AgentCancelledError, which the agent runtime unwinds cleanly.
             pending_req = state.input_request
-            if pending_req is not None:
+            if is_approval_request(pending_req):
+                interrupt_approvals(state)
+                tui_state["spinner_text"] = "Denied pending approval"
+                event.app.current_buffer.reset()
+            elif pending_req is not None:
                 cancelled = pending_req.cancel()
                 logger.info(f"[ask] ctrl-c cancel: cancelled={cancelled}")
                 if state.input_request is pending_req:
@@ -305,7 +354,7 @@ def _setup_tui(
                 tui_state["spinner_text"] = "Press Ctrl+C again to exit"
                 event.app.invalidate()
 
-    @kb.add("escape", "p")
+    @kb.add("escape", "p", filter=not_approval)
     def _toggle_transcript_pause(event):
         paused, buffered_lines = _toggle_output_pause()
         tui_state["output_paused"] = paused
@@ -319,7 +368,7 @@ def _setup_tui(
             )
         event.app.invalidate()
 
-    @kb.add("escape", "escape")
+    @kb.add("escape", "escape", filter=not_approval)
     def _rewind_shortcut(event):
         """Esc-Esc -> run ``/rewind list`` (Claude-Code-style rewind entry)."""
         if dispatch_cmd is not None:
@@ -338,6 +387,12 @@ def _setup_tui(
         # the user can accept a default/blank answer.
         if state.input_request is not None:
             req = state.input_request
+            if req.kind == "approval":
+                decision = approval_decision_from_key(text)
+                if decision is None:
+                    return
+                _finish_approval(event, decision)
+                return
             submitted = req.submit(raw_text)
             logger.info(
                 f"[ask] enter submit: submitted={submitted} text={raw_text[:60]!r}"
@@ -569,6 +624,8 @@ def _setup_tui(
 
     def _get_placeholder():
         if state.input_request is not None:
+            if state.input_request.kind == "approval":
+                return "y proceed · p don't ask again · esc deny · Ctrl+C to deny"
             return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
             return "Enter to steer · Tab to queue next · Ctrl+C to cancel"

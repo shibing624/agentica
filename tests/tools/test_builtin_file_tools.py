@@ -575,14 +575,11 @@ class TestFileToolRegistrationGuard:
         assert "multiline" not in by_name["grep"]
         assert "timeout" not in by_name["glob"]
 
-    def test_auto_mode_schema_includes_request_path_access(self):
+    def test_auto_mode_schema_does_not_include_request_path_access(self):
         from agentica.agent import Agent
         from agentica.agent.config import ToolConfig
         from agentica.model.openai import OpenAIChat
 
-        # The tool is built with the default tier; the agent's tier is what
-        # decides, so an "auto" agent must never end up sandboxed with no way
-        # to ask for an exception.
         file_tool = BuiltinFileTool(work_dir="/tmp")
         agent = Agent(
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
@@ -591,12 +588,8 @@ class TestFileToolRegistrationGuard:
         )
         agent.update_model()
         api_names = {t["function"]["name"] for t in agent.model.get_tools_for_api()}
-        assert "request_path_access" in api_names
+        assert "request_path_access" not in api_names
         assert "ls" not in api_names
         assert "edit_file" not in api_names
-
-        agent.set_permission_mode("allow-all")
-        agent.update_model()
-        api_names = {t["function"]["name"] for t in agent.model.get_tools_for_api()}
-        assert "request_path_access" not in api_names
+        assert "write_file" in api_names
 

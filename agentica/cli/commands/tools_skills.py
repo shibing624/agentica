@@ -710,15 +710,14 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     if ctx.current_agent:
         con.print(f"[bold cyan]Permission Mode: {ctx.current_agent.tool_config.permission_mode}[/bold cyan]")
         con.print()
-        con.print("  [dim]ask[/dim]        - only read-only tools are exposed; no writes at all")
-        con.print("  [dim]auto[/dim]       - all tools exposed; writes restricted to work_dir")
-        con.print("  [dim]allow-all[/dim]  - all tools exposed, no restriction (default)")
+        con.print("  [dim]ask[/dim]        - Ask for approval: workspace files run; network, paths outside the workspace, and every execute need confirmation")
+        con.print("  [dim]auto[/dim]       - Approve for me: only ask about possibly unsafe actions")
+        con.print("  [dim]allow-all[/dim]  - Full Access: never ask (hard refusals like ~/.ssh still apply)")
         con.print()
         con.print(
-            "In auto mode, if a write/read is blocked (outside work_dir, or a "
-            "sensitive path like ~/.ssh), the agent can call request_path_access(path, "
-            "reason) to ask you for a one-time yes/no approval, which then whitelists that "
-            "path for the rest of the session. ask and allow-all do not expose that tool.",
+            "Tools stay in the schema in every tier. ask does not hide write tools. "
+            "There is no OS sandbox, so execute always parks under ask. "
+            "Allow-similar grants last for this session only.",
             style="dim",
         )
         con.print()

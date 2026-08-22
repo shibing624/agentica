@@ -46,8 +46,8 @@ Usage:
     print(response.cost_tracker.total_cost_usd)
 
     # Unified 3-tier tool permission (see agentica.agent.permissions):
-    # "ask" (read-only tools only), "auto" (writes restricted to work_dir),
-    # "allow-all" (no restriction — default, matches historical behavior).
+    # "ask" (park for confirmation), "auto" (park only unsafe actions),
+    # "allow-all" (never park — default, matches historical SDK behavior).
     agent = DeepAgent(permission_mode="auto")
     agent.set_permission_mode("allow-all")  # switch at runtime, no rebuild
 
@@ -190,6 +190,7 @@ class DeepAgent(Agent):
         working_memory: Optional[WorkingMemory] = None,
         context: Optional[Dict[str, Any]] = None,
         environment_context: Optional[str] = None,
+        approve: Optional[Callable] = None,
     ):
         if model is None:
             from agentica.model.defaults import create_default_model
@@ -388,4 +389,5 @@ class DeepAgent(Agent):
             working_memory=working_memory,
             context=context,
             environment_context=environment_context,
+            approve=approve,
         )

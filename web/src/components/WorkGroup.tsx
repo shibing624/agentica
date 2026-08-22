@@ -3,7 +3,7 @@ import { fmtDurationMs } from "../lib/format";
 import { workSummary, type MsgPart } from "../lib/msgParts";
 import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
 import { IconCheck, IconChevronDown, IconSpinner, IconUser } from "../icons";
-import { getState } from "../store";
+import { getState, type ApprovalDecision, type ApprovalRequest } from "../store";
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
 import { HIGHLIGHT_LIMIT } from "../lib/highlight";
@@ -24,20 +24,25 @@ function thinkLabel(
 export function WorkGroup({
   items,
   isLast,
+  pendingToolCallId,
 }: {
   items: MsgPart[];
   isLast: boolean;
+  pendingToolCallId?: string;
 }) {
   const S = useStrings();
   const { steps, ms, running } = workSummary(items);
-  const [open, setOpen] = useState(isLast);
+  const containsPending = !!pendingToolCallId && items.some(
+    (p) => p.kind === "tool" && p.toolCallId === pendingToolCallId,
+  );
+  const [open, setOpen] = useState(isLast || containsPending);
   const userToggled = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
 
   useEffect(() => {
-    if (!userToggled.current) setOpen(isLast);
-  }, [isLast]);
+    if (!userToggled.current) setOpen(isLast || containsPending);
+  }, [isLast, containsPending]);
 
   useEffect(() => {
     if (!running) return;
@@ -74,7 +79,13 @@ export function WorkGroup({
               return <ThinkRow key={i} part={p} streaming={p.ms == null && running} />;
             }
             if (p.kind === "tool") {
-              return <ToolRow key={i} part={p} />;
+              return (
+                <ToolRow
+                  key={p.toolCallId || i}
+                  part={p}
+                  awaitingApproval={!!pendingToolCallId && p.toolCallId === pendingToolCallId}
+                />
+              );
             }
             return null;
           })}
@@ -133,7 +144,14 @@ function sessionCwd(): string {
   return (cur && cur.dir) || st.serverDir || "";
 }
 
-function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
+function ToolRow({
+  part,
+  awaitingApproval,
+}: {
+  part: Extract<MsgPart, { kind: "tool" }>;
+  awaitingApproval: boolean;
+}) {
+  const S = useStrings();
   const running = part.result == null;
   const resultText = part.result != null ? String(part.result) : "";
   const isError = resultText.startsWith("Error: ");
@@ -144,7 +162,7 @@ function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
   const displayLayout = layoutToolDisplay(part.name, display);
   const showArgsBody = displayLayout.body.trim().length > 0;
   const showResult = Boolean(resultText) && !showDiff && (isError || !hideResult);
-  const autoOpen = running || showArgsBody || showResult || showDiff;
+  const autoOpen = running || showArgsBody || showResult || showDiff || awaitingApproval;
   const userToggled = useRef(false);
   const [open, setOpen] = useState(autoOpen);
   useEffect(() => {
@@ -154,7 +172,11 @@ function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
     ? part.ms
     : (running && part.t0 != null ? Date.now() - part.t0 : 0);
   return (
-    <details className={"work-step work-tool" + (running ? " running" : "")} open={open}>
+    <details
+      className={"work-step work-tool" + (running ? " running" : "") + (awaitingApproval ? " awaiting-approval" : "")}
+      open={open}
+      data-tool-call-id={part.toolCallId || undefined}
+    >
       <summary
         className="work-step-head"
         onClick={(e) => {
@@ -166,6 +188,7 @@ function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
         <span className="work-icon">{running ? <IconSpinner /> : <IconCheck />}</span>
         <span className="work-step-name">{part.name}</span>
         {displayLayout.header ? <span className="step-tool-args" title={display}>{displayLayout.header}</span> : null}
+        {awaitingApproval ? <span className="work-awaiting">{S.chat.approvalWaiting}</span> : null}
         {duration > 0 && <span className="work-tool-ms">{fmtDurationMs(duration)}</span>}
       </summary>
       {showArgsBody ? (
@@ -178,6 +201,94 @@ function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
       ) : null}
       {showResult ? <pre className="step-pre out">{resultText}</pre> : null}
     </details>
+  );
+}
+
+export function ApprovalCard({
+  req,
+  queueIndex,
+  queueTotal,
+  busy,
+  onDecide,
+}: {
+  req: ApprovalRequest;
+  queueIndex: number;
+  queueTotal: number;
+  busy: boolean;
+  onDecide: (decision: ApprovalDecision) => void;
+}) {
+  const S = useStrings();
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const allowPrefix = req.options.includes("allow_prefix");
+
+  useEffect(() => {
+    if (!similarOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setSimilarOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [similarOpen]);
+
+  return (
+    <div className="approval-card" ref={wrapRef} role="dialog" aria-label={req.question || req.name}>
+      <div className="approval-card-head">
+        <div className="approval-card-q">{req.question || S.chat.approvalWaiting}</div>
+        {queueTotal > 1 && (
+          <div className="approval-card-n">{S.chat.approvalQueue(queueIndex + 1, queueTotal)}</div>
+        )}
+      </div>
+      {req.preview ? <pre className="approval-card-preview">{req.preview}</pre> : null}
+      <div className="approval-card-acts">
+        <button
+          type="button"
+          className="approval-deny"
+          disabled={busy}
+          onClick={() => onDecide("deny")}
+        >
+          {S.chat.approvalDeny} <kbd>Esc</kbd>
+        </button>
+        <div className={"approval-allow-split" + (allowPrefix ? "" : " solo")}>
+          <button
+            type="button"
+            className="approval-allow"
+            disabled={busy}
+            onClick={() => onDecide("allow")}
+          >
+            {S.chat.approvalAllowOnce} <kbd>⏎</kbd>
+          </button>
+          {allowPrefix && (
+            <>
+              <button
+                type="button"
+                className="approval-allow-more"
+                disabled={busy}
+                aria-label={S.chat.approvalAllowSimilar(req.name)}
+                aria-expanded={similarOpen}
+                onClick={() => setSimilarOpen((v) => !v)}
+              >
+                <IconChevronDown />
+              </button>
+              {similarOpen && (
+                <div className="approval-similar-dd">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setSimilarOpen(false);
+                      onDecide("allow_prefix");
+                    }}
+                  >
+                    {S.chat.approvalAllowSimilar(req.name)}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

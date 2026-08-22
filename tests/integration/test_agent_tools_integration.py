@@ -203,7 +203,10 @@ class TestParallelToolExecution:
             tool_input_guardrails = []
             tool_output_guardrails = []
             context = None
+            _run_hooks = None
             _cancelled = False
+            approve = None
+            _session_log = None
 
             def __init__(self):
                 self._hook_recorder = HookRecorder()

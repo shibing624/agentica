@@ -321,6 +321,7 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
         worktree_binder=ctx.worktree_binder,
+        approve=ctx.approve,
     )
     if current_agent.session_id == source_session_id:
         con.print("  [red]Fork failed — the session log could not be branched.[/red]")

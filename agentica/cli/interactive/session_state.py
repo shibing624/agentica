@@ -11,6 +11,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional
 
+from agentica.agent.approvals import ApprovalRegistry, SessionGrants
 from agentica.goals import GoalManager
 from agentica.tools.background_processes import BackgroundProcessRegistry
 
@@ -77,6 +78,13 @@ class _InputRequest:
     options: Optional[List[str]] = None
     result: "queue.Queue" = field(default_factory=lambda: queue.Queue(maxsize=1))
     resolved: bool = False
+    # "ask" is ask_user_question (typed line + Enter). "approval" is the
+    # Codex y/p/esc tool-approval prompt; the agent thread waits on the
+    # ApprovalRegistry future, not on ``result``.
+    kind: str = "ask"
+    approval_id: Optional[str] = None
+    approval_loop: Any = None
+    approval_registry: Any = None
 
     def submit(self, answer: str) -> bool:
         """Deliver the user's answer exactly once.
@@ -142,7 +150,13 @@ class SessionState:
     # process_loop thread) calls the ask_user_question tool, it parks on a result queue
     # and sets this field so the main prompt_toolkit thread routes the next typed
     # line into the queue instead of pending_queue. None when no request pending.
+    # ``kind="approval"`` is the same slot used for Codex y/p/esc tool approval.
     input_request: Optional["_InputRequest"] = None
+    # Session-scoped tool-approval memory (not persisted). Shared across
+    # /model rebuilds so "don't ask again" survives a profile switch.
+    approval_registry: ApprovalRegistry = field(default_factory=ApprovalRegistry)
+    approval_grants: SessionGrants = field(default_factory=SessionGrants)
+    approval_loop: Any = None
     # Cron scheduler daemon thread (started when settings cron.enabled is true).
     cron_thread: Optional[threading.Thread] = None
     cron_stop_event: Optional[threading.Event] = None

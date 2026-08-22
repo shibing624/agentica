@@ -18,7 +18,10 @@ from agentica.memory.trace import last_completed_round
 from .. import deps
 from ..channels.base import InboundMedia
 from ..config import settings
-from ..models import ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest, RenameRequest, GoalRequest, SteerRequest
+from ..models import (
+    ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest,
+    RenameRequest, GoalRequest, SteerRequest, ApprovalDecisionRequest,
+)
 from ..services.agent_service import AgentService
 from ..services import live_turn
 
@@ -36,8 +39,11 @@ def _sse_stream_hooks(publish):
     def on_content(delta: str):
         publish({"event": "content", "data": delta})
 
-    def on_tool_call(name: str, args: dict):
-        publish({"event": "tool_call", "data": {"name": name, "args": args}})
+    def on_tool_call(name: str, args: dict, tool_call_id: str = ""):
+        publish({
+            "event": "tool_call",
+            "data": {"name": name, "args": args, "tool_call_id": tool_call_id},
+        })
 
     def on_tool_result(name: str, result: str, extra: dict | None = None):
         data = {"name": name, "result": result}
@@ -81,6 +87,8 @@ async def _sse_from_turn(turn: live_turn.LiveTurn, after: int = 0):
         for ev in turn.replay(after):
             last_seq = ev["seq"]
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        if not turn.done:
+            turn.republish_pending_approvals()
         if turn.done:
             yield "data: [DONE]\n\n"
             return
@@ -550,6 +558,21 @@ async def session_usage(
 ):
     """Session-level context occupancy and billing, same shape as CLI ``/usage``."""
     return await svc.session_usage(session_id, owner=_account(request))
+
+
+@router.post("/api/sessions/{session_id}/approvals/{tool_call_id}")
+async def decide_session_approval(
+    session_id: str,
+    tool_call_id: str,
+    body: ApprovalDecisionRequest,
+    request: Request,
+):
+    """Resolve a parked tool call. Unknown id or another account's turn → 404."""
+    owner = _account(request)
+    turn = live_turn.active(session_id, owner)
+    if turn is None or not turn.approvals.decide(tool_call_id, body.decision):
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return {"status": "ok", "tool_call_id": tool_call_id, "decision": body.decision}
 
 
 @router.post("/api/sessions/{session_id}/compact")

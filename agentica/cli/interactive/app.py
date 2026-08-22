@@ -43,6 +43,7 @@ from agentica.cli.runtime import (
     get_console,
     set_active_console,
 )
+from agentica.cli.approvals import build_interactive_approve, interrupt_approvals
 from agentica import config
 from agentica import git_state
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
@@ -290,6 +291,7 @@ def run_interactive(
     # the first agent is built because ExecuteTool receives this shared
     # instance during create_agent().
     state = SessionState()
+    cli_approve = build_interactive_approve(state, _ui_holder)
     # Publish this terminal in the peer directory before the first agent exists:
     # the messaging tools are built from this object, and the identity must
     # survive agent rebuilds (/resume, /model) so in-flight messages still land.
@@ -384,6 +386,7 @@ def run_interactive(
         permission_mode=perm_mode,
         peer_session=state.peer_session,
         worktree_binder=worktree_binder,
+        approve=cli_approve,
     )
     # create_agent assigns a session_id when the config did not; publish it so
     # other terminals can address / resume this conversation by that id.
@@ -530,6 +533,7 @@ def run_interactive(
             worktree_binder=worktree_binder,
             ask_user_question_callback=_cli_ask_user_question_callback,
             open_pager_callback=_open_history_pager,
+            approve=cli_approve,
         )
 
     def _dispatch_concurrent_cmd(cmd: str, cmd_args: str):
@@ -839,6 +843,7 @@ def run_interactive(
                 except Exception:
                     pass
                 state.input_request = None
+            interrupt_approvals(state)
 
             # Steering typed during the run's final inference never reached the
             # model — the window closed before the next drain. Promote it to a

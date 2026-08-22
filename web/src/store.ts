@@ -4,9 +4,21 @@ import * as api from "./api";
 /** Ordered stream of one assistant turn (text interleaves with tool groups). */
 export type MsgPart =
   | { kind: "think"; text: string; t0?: number; ms?: number }
-  | { kind: "tool"; name: string; argsStr: string; result?: string; diff?: string; t0?: number; ms?: number }
+  | { kind: "tool"; name: string; argsStr: string; result?: string; diff?: string; t0?: number; ms?: number; toolCallId?: string }
   | { kind: "text"; text: string }
   | { kind: "steer"; text: string; ts?: number };
+
+export type ApprovalDecision = "allow" | "allow_prefix" | "deny";
+
+/** SSE `approval_request` payload, keyed by the matching tool row. */
+export type ApprovalRequest = {
+  toolCallId: string;
+  name: string;
+  args: Record<string, unknown>;
+  question: string;
+  preview: string;
+  options: ApprovalDecision[];
+};
 
 export type ChatMsg = {
   role: "user" | "assistant";
@@ -117,6 +129,8 @@ export type AppState = {
     reconnecting?: boolean;
     runId?: string;
     lastSeq?: number;
+    pendingApprovals?: ApprovalRequest[];
+    decidingApproval?: boolean;
   }>;
   goalRuns: Record<string, { status: string; objective: string; progress: string }>;
   /** Blocking slash commands (``/compact``) that hold the session lock. */
@@ -398,4 +412,21 @@ export function projectNameForDir(dir: string) {
   if (!d) return "Unfiled";
   const parts = d.split("/").filter(Boolean);
   return parts[parts.length - 1] || d;
+}
+
+export function enqueueApproval(sessId: string, req: ApprovalRequest) {
+  const live = state.streams[sessId];
+  if (!live) return;
+  const list = live.pendingApprovals || (live.pendingApprovals = []);
+  const i = list.findIndex((x) => x.toolCallId === req.toolCallId);
+  if (i >= 0) list[i] = req;
+  else list.push(req);
+  bump();
+}
+
+export function dequeueApproval(sessId: string, toolCallId: string) {
+  const live = state.streams[sessId];
+  if (!live?.pendingApprovals) return;
+  live.pendingApprovals = live.pendingApprovals.filter((x) => x.toolCallId !== toolCallId);
+  bump();
 }

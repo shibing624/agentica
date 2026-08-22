@@ -533,6 +533,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | GET | `/api/chat/runs/active?session_id=` | 该 session 进行中的 run（刷新后重连用） |
 | GET | `/api/chat/runs/{run_id}/events?after=` | 订阅或重连 SSE（`after` 为已消费的 seq；空闲 15s keepalive；断开不取消 run） |
 | POST | `/api/chat/runs/{run_id}/cancel` | 显式取消并等待 session lock 释放；已结束则幂等返回终态 |
+| POST | `/api/sessions/{session_id}/approvals/{tool_call_id}` | 提交工具审批：body `decision` 为 `allow` / `allow_prefix` / `deny`。按账号找 LiveTurn，未知 id / 别人的卡 404。审批走 chat SSE，不走 `/ws` |
 | WS | `/ws` | 流式事件订阅 |
 | GET | `/api/channels` | 列出已注册渠道 + 连接状态，以及网页「个人助理」用的完整 catalog（含未配置的 IM、`web_url`、监听地址） |
 | POST | `/api/channels/wechat/qr` | 个人助理「配置」：生成微信登录二维码（`png` base64 + `qrcode` id + `expires_in`） |
@@ -555,6 +556,37 @@ curl -X POST http://localhost:8881/api/send \
 ```
 
 `channel` 可选值：`feishu` / `telegram` / `discord` / `qq` / `wecom` / `dingtalk` / `slack` / `wechat` / `web`。
+
+## 工具审批（Ask for approval）
+
+权限档 `ask` / `auto` / `allow-all` 的工具都在 schema 里。**破坏性变化**：以前 `ask` 会藏掉 `write_file` / `execute`；现在三个档都能发出这些调用，差别只在真正执行前要不要停车等人。Web 默认仍是 `auto`。
+
+| 档 | 自动放行 | 停车 |
+|---|---|---|
+| `ask` | 工作区内文件读写（含 `apply_patch`） | 工作区外/敏感路径、**所有 `execute`**、`web_search` / `fetch_url`、未标注的第三方工具 |
+| `auto` | 上面这些，外加只读命令和网络 | 工作区外/敏感路径；非只读的 `execute` |
+| `allow-all` | 全部 | 无（`/etc`、`~/.ssh` 等硬拒绝仍直接 `PermissionError`，不弹卡） |
+
+### Registry 挂在 LiveTurn 上
+
+`ApprovalRegistry` **只住在** [`live_turn.py`](https://github.com/shibing624/agentica/blob/main/agentica/gateway/services/live_turn.py) 的当前 `LiveTurn` 上，不是 Agent LRU、也不是一份 Service 级 session map。构建 Agent 时注入的 `approve` 是闭包：每次 `wait` 查 `live_turn.active(session_id, owner)`。
+
+- **没有 LiveTurn → 立即 `"deny"`**，工具结果是 `Tool call denied by user.`，对话不 500。IM、cron、非流式 `POST /chat` 都走这条。
+- **不要用「当前 SSE 订阅者数量」当闸**：刷新瞬间订阅者是 0，误 deny。有 LiveTurn 就可以 park；断线靠 seq 回放把未决的 `approval_request` 再推一遍。LiveTurn 结束 / cancel 才 `deny_all`。
+- 有未决审批的 LiveTurn **不会被 LRU 清掉**。
+
+审批 **不走 `/ws`**，只走 chat SSE / `live_turn`。
+
+### SSE 与 POST
+
+流式回合里：
+
+1. `tool_call` 事件带上 `tool_call_id`（以及 `name` / `args`），前端才能把卡挂到那一行。
+2. 需要确认时再发 `approval_request`：`{tool_call_id, name, args, question, preview, options}`。`question` 是模板（「是否允许运行以下命令？」），不另调 LLM。
+3. 用户点卡：`POST /api/sessions/{session_id}/approvals/{tool_call_id}`，body `{decision: "allow"|"allow_prefix"|"deny"}`。鉴权跟 chat 一样走 cookie 账号（`_account(request)`），按 `(owner, session_id)` 找 LiveTurn——不能点别人的卡。未知 id → 404。
+4. 刷新 / 重连：`GET /api/chat/runs/{run_id}/events?after=` 先按 seq 回放已有事件（含 `tool_call`），再 `republish_pending_approvals()` 把仍未决的卡推一遍。
+
+`allow` 只放行这一次；`allow_prefix` 把本会话后续同类调用自动放行（命令按 argv token 前缀，敏感路径只 grant 该文件本身）。Deny 变成工具结果回给模型，同批其它工具不会 sibling-abort。人停在卡上超过 120s 也不会变成工具 TimeoutError——审批等待在 `wait_for` 之外。
 
 ## 消息路由
 

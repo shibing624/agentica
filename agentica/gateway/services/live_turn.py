@@ -16,6 +16,8 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
+from agentica.agent.approvals import ApprovalRegistry, PendingApproval
+
 if TYPE_CHECKING:
     from .agent_service import AgentService
 
@@ -63,6 +65,7 @@ class LiveTurn:
         self.finished_at = 0.0
         self._subs: list[asyncio.Queue] = []
         self._buffer_chars = 0
+        self.approvals = ApprovalRegistry()
 
     def public(self) -> Dict[str, Any]:
         return {
@@ -117,6 +120,7 @@ class LiveTurn:
     def finish(self, status: str) -> None:
         if self.done:
             return
+        self.approvals.deny_all()
         self.status = status
         self.done = True
         self.finished_at = time.monotonic()
@@ -147,6 +151,11 @@ class LiveTurn:
         except ValueError:
             pass
 
+    def republish_pending_approvals(self) -> None:
+        """Re-push still-pending cards so a refresh/reconnect sees them."""
+        for pending in self.approvals.list():
+            self.publish(approval_event(pending))
+
 
 _by_run: Dict[str, LiveTurn] = {}
 _by_session: Dict[_SessionKey, str] = {}
@@ -156,10 +165,31 @@ def _skey(session_id: str, owner: str) -> _SessionKey:
     return (owner, session_id)
 
 
+def approval_event(pending: PendingApproval) -> Dict[str, Any]:
+    """SSE envelope for one parked tool call (no ``seq``; ``publish`` adds it)."""
+    return {
+        "event": "approval_request",
+        "data": {
+            "tool_call_id": pending.tool_call_id,
+            "name": pending.name,
+            "args": pending.arguments,
+            "question": pending.question,
+            "preview": pending.preview,
+            "options": list(pending.options),
+        },
+    }
+
+
 def gc() -> None:
-    """Drop finished runs whose reconnect window has expired."""
+    """Drop finished runs whose reconnect window has expired.
+
+    A turn with pending approvals is never dropped: the card is still
+    waiting, even if ``done`` was set somehow without ``deny_all``.
+    """
     now = time.monotonic()
     for rid, turn in list(_by_run.items()):
+        if turn.approvals.size:
+            continue
         if turn.done and turn.finished_at and now - turn.finished_at >= RETAIN_AFTER_DONE_S:
             _drop_run(rid)
 
@@ -260,6 +290,7 @@ async def cancel_and_wait(
         return {"status": turn.status, "cancelled": False, "run_id": turn.run_id}
 
     turn.status = "cancelling"
+    turn.approvals.deny_all()
     svc.cancel_session(turn.session_id, owner=turn.owner)
     if (
         turn.task is not None

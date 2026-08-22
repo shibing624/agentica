@@ -4,7 +4,7 @@
 @description: 
 Pydantic request/response models shared across routes.
 """
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel
 
 
@@ -41,6 +41,11 @@ class SteerRequest(BaseModel):
     """
     session_id: str
     message: str = ""
+
+
+class ApprovalDecisionRequest(BaseModel):
+    """Web approval card: allow once, allow similar, or deny."""
+    decision: Literal["allow", "allow_prefix", "deny"]
 
 
 class CompactRequest(BaseModel):

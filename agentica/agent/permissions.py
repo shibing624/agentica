@@ -4,30 +4,24 @@
 @description: Unified 3-tier tool permission model.
 
 Shared by the SDK (Agent/DeepAgent), the CLI, and the Gateway so all three
-surfaces expose the exact same vocabulary and behavior:
+surfaces expose the exact same vocabulary and behavior. Tools stay in the
+schema in every tier; the difference is whether the runner parks before
+``fc.execute()`` (see ``agentica.agent.approvals``).
 
-  - "ask"       : only read-only tools are exposed to the LLM (write_file,
-                  apply_patch, and execute are hidden).
-  - "auto"      : every tool is exposed. File writes are
-                  restricted to the agent's work_dir via SandboxConfig; reads
-                  outside work_dir are also blocked for sensitive path
-                  components (.ssh, .env, etc. — see SandboxConfig.blocked_paths).
-                  Neither is a dead end: the model can call
-                  ``request_path_access(path, reason)`` to ask the user for a
-                  one-time yes/no approval, which then whitelists that path for
-                  the rest of the session (see
-                  ``BuiltinFileTool.request_path_access``). This tool is in the
-                  schema only in ``auto``. ``execute`` (shell)
-                  has NO path restriction here — a shell command can `cd`/
-                  redirect anywhere, so true path scoping would require
-                  OS-level sandboxing (Docker/seccomp), which is out of scope.
-                  Only the existing SandboxConfig.blocked_commands safety net
-                  (best-effort dangerous-command blocklist) applies.
-  - "allow-all" : every tool is exposed, no sandbox path restriction. The CLI's
-                  actual default (see agentica.cli.runtime.parse_args). Note
-                  that a small set of always-sensitive write targets (/etc,
-                  ~/.ssh, ~/.aws/credentials, etc.) are still refused. There is
-                  no ``request_path_access`` in this mode.
+  - "ask"       : Ask for approval. Workspace file reads/writes (including
+                  apply_patch) run without prompting. Parking: paths outside
+                  the work directory, sensitive paths, every ``execute``
+                  (no OS sandbox, so a command cannot be promised to stay
+                  inside the workspace), ``web_search`` / ``fetch_url``, and
+                  third-party tools with neither ``is_read_only`` nor
+                  ``is_destructive``.
+  - "auto"      : Approve for me. Auto-runs workspace files, read-only
+                  shell commands (``is_read_only_command``), and network
+                  tools. Parks for paths outside the workspace / sensitive
+                  paths, and for ``execute`` that is not read-only.
+  - "allow-all" : Full Access. Never parks. Hard refusals for ``/etc``,
+                  ``~/.ssh`` and similar write targets still apply; they
+                  raise ``PermissionError`` rather than showing a card.
 
 Callers should not construct their own mode strings — always compare against
 ``PERMISSION_MODES`` / use ``validate_permission_mode`` so a typo fails loud
@@ -37,15 +31,13 @@ from typing import List, Optional, Set
 
 PERMISSION_MODES = ("ask", "auto", "allow-all")
 
-# Tools that only read — always safe to expose in "ask" mode.
+# Historically the tools "ask" exposed by hiding the rest. The classifier
+# no longer uses this set (tools stay visible); kept as a named list of
+# tools that are safe to auto-allow inside the workspace.
 READ_ONLY_TOOLS: Set[str] = frozenset({
     "read_file", "glob", "grep", "web_search", "fetch_url",
     "write_todos", "task",
-    # Listing the user's other live sessions reads a directory and changes
-    # nothing. `send_message` is deliberately NOT here: it writes into another
-    # session's mailbox and acts on its behalf.
     "list_agents",
-    # Recall is a read. `save_memory` writes and stays out of ask.
     "search_memory",
 })
 
@@ -57,8 +49,9 @@ def validate_permission_mode(mode: str) -> None:
 
 
 def read_only_whitelist(mode: str) -> Optional[List[str]]:
-    """Query-level tool whitelist for `mode`. None means no restriction."""
-    return list(READ_ONLY_TOOLS) if mode == "ask" else None
+    """Query-level tool whitelist for `mode`. Always None: every tier exposes all tools."""
+    validate_permission_mode(mode)
+    return None
 
 
 def sandbox_should_be_enabled(mode: str) -> bool:

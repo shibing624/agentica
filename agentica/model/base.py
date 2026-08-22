@@ -851,6 +851,8 @@ class Model(ABC):
         else:
             _has_guardrails = False
 
+        from agentica.agent.approvals import DENIED_TOOL_RESULT
+
         def _cancelled_before_start(fc: FunctionCall) -> bool:
             """The user cancelled before this call got to start.
 
@@ -871,6 +873,40 @@ class Model(ABC):
             timers[idx].start()
             timers[idx].stop()
 
+        async def _denied_by_user(idx: int, fc: FunctionCall) -> bool:
+            """Park for approval. True means skip execute (deny template applied).
+
+            Must run outside ``timers.start()`` and ``asyncio.wait_for`` so a
+            human waiting on a card cannot become a 120s TimeoutError. Deny
+            copies the guardrail template: result+error, ``exceptions[idx]``
+            stays None, no raise, no sibling abort.
+            """
+            if _agent is None:
+                return False
+            approve_fn = _agent.approve
+            if approve_fn is None:
+                return False
+            try:
+                decision = await approve_fn(fc)
+            except Exception:
+                decision = "deny"
+            if decision not in ("allow", "allow_prefix", "deny"):
+                decision = "deny"
+            session_log = _agent._session_log
+            if session_log is not None:
+                session_log.append_event(
+                    "approval_decision",
+                    tool_call_id=fc.call_id or "",
+                    decision=decision,
+                )
+            if decision in ("allow", "allow_prefix"):
+                return False
+            fc.result = DENIED_TOOL_RESULT
+            fc.error = DENIED_TOOL_RESULT
+            results[idx] = False
+            exceptions[idx] = None
+            return True
+
         # Phase 2a: run safe tools in parallel
         async def _execute_safe(idx: int, fc: FunctionCall) -> None:
             # Parallel tools all start at once, so this is their only chance to
@@ -878,6 +914,8 @@ class Model(ABC):
             # every subagent in the batch.
             if _cancelled_before_start(fc):
                 _mark_cancelled(idx)
+                return
+            if await _denied_by_user(idx, fc):
                 return
             # Input guardrail check
             if _has_guardrails:
@@ -965,6 +1003,8 @@ class Model(ABC):
             # Cancellation check before each unsafe tool.
             if _cancelled_before_start(fc):
                 _mark_cancelled(idx)
+                continue
+            if await _denied_by_user(idx, fc):
                 continue
             # Input guardrail check (before execution)
             if _has_guardrails:

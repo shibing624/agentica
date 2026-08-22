@@ -921,6 +921,35 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .goal-bar-status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .goal-bar-progress{font-family:var(--mono);font-size:11px;color:var(--fg3);flex-shrink:0}
 
+/* ===== TOOL APPROVAL CARD (Codex App) ===== */
+.approval-card{max-width:980px;margin:0 auto 8px;border:1px solid var(--border);border-radius:12px;background:var(--bg);box-shadow:0 8px 24px rgba(0,0,0,.08);padding:12px 14px 10px}
+.approval-card-head{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+.approval-card-q{font-size:13px;font-weight:600;line-height:1.4;min-width:0}
+.approval-card-n{margin-left:auto;font-size:11px;color:var(--fg3);font-variant-numeric:tabular-nums;flex-shrink:0}
+.approval-card-preview{font-family:var(--mono);font-size:12px;line-height:1.5;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto;margin:0 0 10px;color:var(--fg)}
+.approval-card-acts{display:flex;justify-content:flex-end;align-items:center;gap:8px}
+.approval-deny{height:32px;border:1px solid var(--border);background:transparent;border-radius:8px;padding:0 12px;cursor:pointer;color:var(--fg);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-family:var(--sans)}
+.approval-deny:hover{background:var(--bg3)}
+.approval-deny:disabled,.approval-allow:disabled,.approval-allow-more:disabled{opacity:.55;cursor:default}
+.approval-allow-split{display:inline-flex;position:relative}
+.approval-allow{height:32px;border:none;background:var(--accent);color:var(--bg);border-radius:8px 0 0 8px;padding:0 12px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:8px;font-family:var(--sans)}
+.approval-allow-split.solo .approval-allow{border-radius:8px}
+.approval-allow-more{height:32px;width:28px;border:none;border-left:1px solid rgba(255,255,255,.25);background:var(--accent);color:var(--bg);border-radius:0 8px 8px 0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.approval-allow-more svg{width:12px;height:12px}
+.approval-similar-dd{position:absolute;bottom:calc(100% + 6px);right:0;min-width:220px;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.16);padding:4px;z-index:240}
+.approval-similar-dd button{width:100%;border:none;background:transparent;text-align:left;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--fg);font-family:var(--sans)}
+.approval-similar-dd button:hover{background:var(--bg3)}
+.approval-card kbd{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--fg3);border:1px solid var(--border);border-radius:4px;padding:0 4px;line-height:1.6}
+.approval-allow kbd{color:inherit;border-color:rgba(255,255,255,.35);opacity:.85}
+[data-theme="dark"] .approval-allow-more{border-left-color:rgba(0,0,0,.2)}
+[data-theme="dark"] .approval-allow kbd{border-color:rgba(0,0,0,.25)}
+.work-tool.awaiting-approval{background:rgba(245,158,11,.07)}
+.work-tool.awaiting-approval .work-step-name{color:#b45309}
+.work-awaiting{font-size:10px;font-weight:650;color:#b45309;letter-spacing:.02em;white-space:nowrap}
+[data-theme="dark"] .work-tool.awaiting-approval{background:rgba(245,158,11,.12)}
+[data-theme="dark"] .work-tool.awaiting-approval .work-step-name,
+[data-theme="dark"] .work-awaiting{color:#fbbf24}
+
 /* ===== MESSAGE EXTRAS ===== */
 .msg-files{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
 .msg-note{font-size:11px;color:var(--fg3);font-style:italic;margin-top:4px}

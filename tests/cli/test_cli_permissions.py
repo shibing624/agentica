@@ -13,6 +13,8 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
+os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.cost_tracker import CostTracker
@@ -73,6 +75,12 @@ class TestCmdPermissions(unittest.TestCase):
             cli_tools_skills._cmd_permissions(ctx, "")
 
         self.assertTrue(console.print.called)
+        printed = " ".join(str(c) for c in console.print.call_args_list)
+        self.assertIn("Ask for approval", printed)
+        self.assertIn("Approve for me", printed)
+        self.assertIn("Full Access", printed)
+        self.assertNotIn("only read-only tools", printed)
+        self.assertNotIn("request_path_access", printed)
 
     def test_yolo_command_removed_from_registry(self):
         self.assertNotIn("/yolo", COMMAND_REGISTRY)

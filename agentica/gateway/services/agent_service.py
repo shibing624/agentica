@@ -47,6 +47,12 @@ from .model_factory import (
     create_model, get_cron_tools, get_cron_instructions,
     get_self_manage_tools, get_self_manage_instructions,
 )
+from agentica.agent.approvals import (
+    SessionGrants,
+    apply_path_grant_on_agent,
+    make_approve,
+)
+
 from .response_formatter import extract_metrics, format_tool_call_args, format_tool_result
 from .session_usage import turn_usage_payload, usage_payload
 from . import live_turn
@@ -67,6 +73,15 @@ CRON_SESSION_PREFIX = "scheduled_"
 # owner. ``session_id`` is client-supplied; a bare key lets one account
 # evict another's cached Agent / lock / live run.
 _OWNER_SEP = "\x1f"
+
+
+def _cache_key_is_pinned(key: str) -> bool:
+    """True when this cache entry has a LiveTurn waiting on an approval."""
+    owner, sep, session_id = key.partition(_OWNER_SEP)
+    if not sep:
+        owner, session_id = settings.default_user_id, key
+    turn = live_turn.active(session_id, owner)
+    return turn is not None and turn.approvals.size > 0
 
 
 async def dispatch_stream_chunk(
@@ -94,7 +109,9 @@ async def dispatch_stream_chunk(
         if tool_info:
             tool_name = tool_info.tool_name or "unknown"
             display_args = format_tool_call_args(tool_name, tool_info.tool_args)
-            await _emit(on_tool_call, tool_name, display_args)
+            await _emit(
+                on_tool_call, tool_name, display_args, tool_info.tool_call_id or "",
+            )
         return
 
     if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
@@ -133,25 +150,20 @@ def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "message": payload.get("message") or "",
     }
 
-# Web sessions default to "auto" approval mode (writes restricted to work_dir).
-# "ask" is opt-in via the approval selector. The agent's static tool
-# instructions still describe the full toolset for prompt-cache reasons.
-# Without this, a model that tries a stripped tool anyway gets back an
-# opaque "Function not found" instead of understanding why. Baked in once
-# as a standing agent instruction (not per-message) so it doesn't bloat
-# session history and stays part of the cache-friendly static prompt zone.
+# Web sessions default to "auto" approval mode. Baked in once as a standing
+# agent instruction (not per-message) so it stays in the cache-friendly
+# static prompt zone. Tools are always in schema; the mode only decides
+# whether execute waits for a human.
 _APPROVAL_MODE_INSTRUCTION = (
-    "This session's approval mode can restrict tool access at runtime: in "
-    "\"ask\" mode, only read-only tools are enabled "
-    "(read_file/glob/grep/web_search/fetch_url/task/search_memory/list_agents) — write_file, "
-    "apply_patch, and execute are disabled. In \"auto\" mode, writes are "
-    "restricted to the session's work_dir and request_path_access can "
-    "escalate a blocked path. If a tool call unexpectedly "
-    "fails with \"Function ... not found\", it almost certainly means the "
-    "current approval mode disabled it — do not retry the call. Instead, "
-    "tell the user the current mode is read-only and that they need to "
-    "switch to \"auto\" or \"allow-all\" mode (in the approval selector "
-    "next to the send button) to edit files or run commands."
+    "This session's approval mode can pause a tool call until the user "
+    "confirms it. In \"ask\" mode, in-workspace file reads and writes run "
+    "immediately; paths outside the work directory, sensitive paths, every "
+    "execute, and web_search/fetch_url wait for approval. In \"auto\" mode, "
+    "in-workspace files, read-only commands, and network tools run; "
+    "out-of-workspace or sensitive paths and non-read-only execute wait. "
+    "\"allow-all\" never asks. If a tool result is "
+    "\"Tool call denied by user.\", do not retry the same call — tell the "
+    "user what you needed and wait for guidance or a mode change."
 )
 
 
@@ -194,9 +206,17 @@ class LRUAgentCache:
             self._cache[session_id] = agent
             return
         self._cache[session_id] = agent
-        if len(self._cache) > self.max_size:
-            evicted_id, _ = self._cache.popitem(last=False)
-            logger.debug(f"LRU evicted agent for session: {evicted_id}")
+        while len(self._cache) > self.max_size:
+            evicted = False
+            for key in list(self._cache.keys()):
+                if _cache_key_is_pinned(key):
+                    continue
+                del self._cache[key]
+                logger.debug(f"LRU evicted agent for session: {key}")
+                evicted = True
+                break
+            if not evicted:
+                break
 
     def delete(self, session_id: str) -> bool:
         if session_id in self._cache:
@@ -249,6 +269,7 @@ class AgentService:
         # Per-session work_dir overrides; falls back to settings.base_dir
         self._session_work_dirs: Dict[str, str] = {}
         self._session_approval_modes: Dict[str, str] = {}
+        self._session_grants: Dict[str, SessionGrants] = {}
         # Per-session run locks: prevents concurrent runs (chat or stream) on the same session.
         # The underlying Agent instance is NOT thread-safe for concurrent reuse.
         self._session_locks: Dict[str, asyncio.Lock] = {}
@@ -542,6 +563,8 @@ class AgentService:
         # Lets the Runner drain replies from other sessions between tool
         # batches (agent.peer_session), exactly as it does in the CLI.
         agent.peer_session = peer_session
+        agent.approve = self._make_session_approve(session_id, owner)
+        self._restore_path_grants(agent, session_id, owner)
 
         tool_count = len(agent.tools) if agent.tools else 0
         logger.info(
@@ -647,6 +670,56 @@ class AgentService:
     def get_session_approval_mode(self, session_id: str, owner: Optional[str] = None) -> str:
         return self._session_approval_modes.get(
             self._sk(session_id, owner), self._DEFAULT_APPROVAL_MODE,
+        )
+
+    def _grants_for(self, session_id: str, owner: Optional[str] = None) -> SessionGrants:
+        key = self._sk(session_id, owner)
+        grants = self._session_grants.get(key)
+        if grants is None:
+            grants = SessionGrants()
+            self._session_grants[key] = grants
+        return grants
+
+    def _restore_path_grants(
+        self, agent: DeepAgent, session_id: str, owner: Optional[str] = None,
+    ) -> None:
+        """Re-apply in-session path grants after an Agent rebuild."""
+        grants = self._grants_for(session_id, owner)
+        for path in grants.path_exact:
+            apply_path_grant_on_agent(agent, path, prefix=False)
+        for path in grants.path_prefixes:
+            apply_path_grant_on_agent(agent, path, prefix=True)
+
+    def _make_session_approve(self, session_id: str, owner: Optional[str] = None):
+        """``Agent.approve``: look up the current LiveTurn on every wait.
+
+        No LiveTurn (IM, cron, non-streaming POST /chat) is an immediate deny.
+        Subscriber count is not a gate — a refresh with 0 SSE clients still parks.
+        """
+        owner_id = self._owner(owner)
+
+        def get_registry():
+            turn = live_turn.active(session_id, owner_id)
+            return None if turn is None else turn.approvals
+
+        def publish(pending):
+            turn = live_turn.active(session_id, owner_id)
+            if turn is None:
+                return
+            turn.publish(live_turn.approval_event(pending))
+
+        def apply_path_grant(path: str, prefix: bool) -> None:
+            agent = self._cache.get(self._sk(session_id, owner))
+            if agent is not None:
+                apply_path_grant_on_agent(agent, path, prefix=prefix)
+
+        return make_approve(
+            get_mode=lambda: self.get_session_approval_mode(session_id, owner),
+            get_grants=lambda: self._grants_for(session_id, owner),
+            get_registry=get_registry,
+            get_work_dir=lambda: self.get_session_work_dir(session_id, owner),
+            publish=publish,
+            apply_path_grant=apply_path_grant,
         )
 
     def _run_config_for_session(
@@ -1293,6 +1366,7 @@ class AgentService:
         live_turn.drop(session_id, owner=self._owner(owner))
         self._session_work_dirs.pop(key, None)
         self._session_approval_modes.pop(key, None)
+        self._session_grants.pop(key, None)
         if self.agent_peers is not None:
             # A deleted session must stop being addressable at once, not on the
             # peer loop's next liveness sweep: until it is unpublished its name

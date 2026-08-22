@@ -1,151 +1,88 @@
 # -*- coding: utf-8 -*-
-"""Tests for BuiltinFileTool edit / apply_patch / request_path_access."""
+"""Tests for BuiltinFileTool edit / apply_patch / grant_path_access."""
 import asyncio
-import json
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 from agentica.tools.builtin import BuiltinFileTool
 
 
-class TestBuiltinFileToolRequestPathAccess:
-    """Sandbox / sensitive-path escalation: request_path_access(path, reason)."""
+class TestBuiltinFileToolGrantPathAccess:
+    """Sandbox / sensitive-path escalation via the public grant API."""
 
-    def _sandboxed_tool(self, tmp_dir, consent_callback=None):
+    def _sandboxed_tool(self, tmp_dir):
         from agentica.agent.config import SandboxConfig
 
         sandbox = SandboxConfig(enabled=True, writable_dirs=[tmp_dir])
-        return BuiltinFileTool(
-            work_dir=tmp_dir,
-            sandbox_config=sandbox,
-            consent_callback=consent_callback,
-            permission_mode="auto",
-        )
-
-    # -- sandboxed ("auto"/"ask") writable_dirs escalation --------------
+        return BuiltinFileTool(work_dir=tmp_dir, sandbox_config=sandbox)
 
     def test_write_outside_writable_dirs_is_blocked(self, tmp_dir):
         with tempfile.TemporaryDirectory() as other_dir:
             tool = self._sandboxed_tool(tmp_dir)
             fp = os.path.join(other_dir, "outside.txt")
-            with pytest.raises(PermissionError, match="request_path_access"):
+            with pytest.raises(PermissionError, match="blocked"):
                 asyncio.run(tool.write_file(fp, "content"))
 
-    def test_request_path_access_denied_without_consent_callback(self, tmp_dir):
+    def test_grant_exact_unblocks_that_file_only(self, tmp_dir):
         with tempfile.TemporaryDirectory() as other_dir:
-            tool = self._sandboxed_tool(tmp_dir, consent_callback=None)
-            result = tool.request_path_access(other_dir, reason="need to edit a config file there")
-            data = json.loads(result)
-            assert data["granted"] is False
-
-    def test_request_path_access_granted_extends_whitelist_and_unblocks_write(self, tmp_dir):
-        with tempfile.TemporaryDirectory() as other_dir:
-            consent = MagicMock(return_value="yes")
-            tool = self._sandboxed_tool(tmp_dir, consent_callback=consent)
-
-            result = tool.request_path_access(other_dir, reason="need to edit a config file there")
-            data = json.loads(result)
-            assert data["granted"] is True
-            consent.assert_called_once()
-
-            fp = os.path.join(other_dir, "now_allowed.txt")
-            write_result = asyncio.run(tool.write_file(fp, "content"))
+            tool = self._sandboxed_tool(tmp_dir)
+            allowed = os.path.join(other_dir, "now_allowed.txt")
+            sibling = os.path.join(other_dir, "still_blocked.txt")
+            tool.grant_path_access(allowed, prefix=False)
+            write_result = asyncio.run(tool.write_file(allowed, "content"))
             assert "Created" in write_result
-            assert Path(fp).read_text() == "content"
-
-    def test_request_path_access_denied_by_user(self, tmp_dir):
-        with tempfile.TemporaryDirectory() as other_dir:
-            consent = MagicMock(return_value="no")
-            tool = self._sandboxed_tool(tmp_dir, consent_callback=consent)
-
-            result = tool.request_path_access(other_dir, reason="need to edit a config file there")
-            data = json.loads(result)
-            assert data["granted"] is False
-
-            fp = os.path.join(other_dir, "still_blocked.txt")
+            assert Path(allowed).read_text() == "content"
             with pytest.raises(PermissionError):
-                asyncio.run(tool.write_file(fp, "content"))
+                asyncio.run(tool.write_file(sibling, "nope"))
 
-    def test_request_path_access_noop_when_sandbox_disabled(self, tmp_dir):
-        tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None)
-        result = tool.request_path_access("/some/other/path", reason="anything")
-        data = json.loads(result)
-        assert data["granted"] is True
-
-    def test_request_path_access_noop_when_already_writable(self, tmp_dir):
-        tool = self._sandboxed_tool(tmp_dir)
-        result = tool.request_path_access(tmp_dir, reason="already inside work_dir")
-        data = json.loads(result)
-        assert data["granted"] is True
-
-    # -- sensitive-path guard (always on; schema escalation only in auto) --
+    def test_grant_prefix_unblocks_parent_directory(self, tmp_dir):
+        with tempfile.TemporaryDirectory() as other_dir:
+            tool = self._sandboxed_tool(tmp_dir)
+            allowed = os.path.join(other_dir, "a.txt")
+            sibling = os.path.join(other_dir, "b.txt")
+            tool.grant_path_access(allowed, prefix=True)
+            asyncio.run(tool.write_file(allowed, "a"))
+            asyncio.run(tool.write_file(sibling, "b"))
+            assert Path(allowed).read_text() == "a"
+            assert Path(sibling).read_text() == "b"
 
     def test_sensitive_write_blocked_even_in_allow_all_mode(self, tmp_dir):
-        """allow-all disables sandbox scoping, but sensitive system/credentials
-        paths still refuse the write. The model cannot escalate: request_path_access
-        is not in the schema outside auto."""
         tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None)
         with pytest.raises(PermissionError, match="sensitive"):
             asyncio.run(tool.write_file("/etc/hosts", "content"))
         assert "request_path_access" not in tool.functions
 
-    def test_sensitive_write_granted_after_user_approval(self, tmp_dir):
-        home = str(Path.home())
-        ssh_dir = os.path.join(home, ".ssh")
-        target = os.path.join(ssh_dir, "authorized_keys")
-        consent = MagicMock(return_value="yes")
-        tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None, consent_callback=consent)
+    def test_sensitive_grant_is_exact_file_even_when_prefix_requested(self, tmp_dir):
+        tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None)
+        tool.grant_path_access("/etc/hosts", prefix=True)
+        assert tool._sensitive_write_guard("/etc/hosts") is None
+        assert tool._sensitive_write_guard("/etc/passwd") is not None
 
-        result = tool.request_path_access(target, reason="user asked to add a public key")
-        data = json.loads(result)
-        assert data["granted"] is True
-        consent.assert_called_once()
-        assert tool._sensitive_write_guard(target) is None
-
-    def test_sensitive_write_stays_blocked_when_denied(self, tmp_dir):
-        consent = MagicMock(return_value="no")
-        tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None, consent_callback=consent)
-        result = tool.request_path_access("/etc/hosts", reason="testing")
-        data = json.loads(result)
-        assert data["granted"] is False
-        with pytest.raises(PermissionError):
-            asyncio.run(tool.write_file("/etc/hosts", "content"))
-
-    # -- read-side blocked_paths escalation (sandboxed modes only) ------
-
-    def test_read_blocked_path_component_is_escalatable(self, tmp_dir):
+    def test_read_blocked_path_component_is_grantable(self, tmp_dir):
         blocked_dir = os.path.join(tmp_dir, ".ssh")
         os.makedirs(blocked_dir, exist_ok=True)
         target = os.path.join(blocked_dir, "id_rsa")
         Path(target).write_text("fake-key")
 
-        consent = MagicMock(return_value="yes")
-        tool = self._sandboxed_tool(tmp_dir, consent_callback=consent)
-
-        with pytest.raises(PermissionError, match="request_path_access"):
+        tool = self._sandboxed_tool(tmp_dir)
+        with pytest.raises(PermissionError, match="blocked"):
             asyncio.run(tool.read_file(target))
 
-        result = tool.request_path_access(target, reason="user asked to inspect this key")
-        assert json.loads(result)["granted"] is True
-
+        tool.grant_path_access(target, prefix=False)
         content = asyncio.run(tool.read_file(target))
         assert "fake-key" in content
 
-    def test_request_path_access_in_schema_only_for_auto(self, tmp_dir):
+    def test_request_path_access_not_in_schema(self, tmp_dir):
         allow = BuiltinFileTool(work_dir=tmp_dir, permission_mode="allow-all")
         ask = BuiltinFileTool(work_dir=tmp_dir, permission_mode="ask")
         auto = BuiltinFileTool(work_dir=tmp_dir, permission_mode="auto")
         assert "request_path_access" not in allow.functions
         assert "request_path_access" not in ask.functions
-        assert "request_path_access" in auto.functions
-
+        assert "request_path_access" not in auto.functions
         allow.set_permission_mode("auto")
-        assert "request_path_access" in allow.functions
-        allow.set_permission_mode("ask")
         assert "request_path_access" not in allow.functions
 
 

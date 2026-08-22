@@ -878,6 +878,7 @@ def create_agent(
     permission_mode: Optional[str] = None,
     peer_session=None,
     worktree_binder=None,
+    approve=None,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
@@ -902,6 +903,10 @@ def create_agent(
         When given, the agent gets the ``worktree`` tool and can move this
         session into a per-task checkout on its own — including when the
         instruction arrived from another session as a peer message.
+    approve: optional ``Agent.approve`` callback. Interactive CLI passes the
+        Codex y/p/esc TUI closer. When omitted (``--print``, cron, ``/bg``),
+        a deny-on-park callback is installed so a call that would wait for a
+        human cannot hang.
     """
     if permission_mode is None:
         configured_permission_mode = agent_config.get("permissions")
@@ -1088,6 +1093,7 @@ def create_agent(
         # Tell the model when another live session already has the file it just
         # wrote uncommitted, instead of letting both find out at merge time.
         peer_conflict_checker=build_peer_conflict_checker(peer_session),
+        approve=approve,
     )
 
     # A one-shot `--query` run and a cron-spawned agent have no process
@@ -1126,4 +1132,8 @@ def create_agent(
             agent_config["profile_name"], agent_config.get("profile_source") or ""
         )
     new_agent.peer_session = peer_session
+    if approve is None:
+        from agentica.cli.approvals import build_noninteractive_approve
+
+        new_agent.approve = build_noninteractive_approve(new_agent)
     return new_agent

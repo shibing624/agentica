@@ -188,6 +188,16 @@ export function attachChatStream(sessionId: string, signal?: AbortSignal, after 
   );
 }
 
+export const postSessionApproval = (
+  sessionId: string,
+  toolCallId: string,
+  decision: "allow" | "allow_prefix" | "deny",
+) =>
+  postJson<{ ok?: boolean; tool_call_id?: string; decision?: string }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(toolCallId)}`,
+    { decision },
+  );
+
 export const cancelChatApi = (session_id: string) =>
   postJson<{ status?: string; cancelled: boolean }>("/api/chat/cancel", { session_id, message: "" });
 

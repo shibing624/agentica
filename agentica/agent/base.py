@@ -67,7 +67,6 @@ from agentica.agent.config import (
 )
 from agentica.agent.history_filter import HistoryFilter
 from agentica.agent.permissions import (
-    read_only_whitelist,
     sandbox_should_be_enabled,
     validate_permission_mode,
 )
@@ -284,6 +283,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # tools do I have". Set by the CLI after construction; None for plain SDK
     # agents. Not reset by _init_runtime so Agent.clone() preserves it.
     environment_context: Optional[str] = None
+    # Per-tool-call approval hook. None (SDK default) skips parking. Gateway /
+    # CLI inject a closure from ``make_approve``. Not reset by _init_runtime
+    # so Agent.clone() keeps the same callback.
+    approve: Optional[Callable] = None
 
     def __init__(
         self,
@@ -335,6 +338,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         working_memory: Optional[WorkingMemory] = None,
         context: Optional[Dict[str, Any]] = None,
         environment_context: Optional[str] = None,
+        approve: Optional[Callable] = None,
     ):
         self._init_definition(
             model=model,
@@ -386,8 +390,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         )
 
         # Set after the _init_* helpers so Agent.clone()'s copy.copy + _init_runtime
-        # path preserves it (clone does not call _init_definition / _init_execution).
+        # path preserves them (clone does not call _init_definition / _init_execution).
         self.environment_context = environment_context
+        self.approve = approve
 
         # Create Runner instance
         self._runner = Runner(self)
@@ -776,9 +781,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 tool.set_agent_model(self.model)
             if isinstance(tool, BuiltinFileTool):
                 # The agent's tier is the only authority: a tool built by hand
-                # or by get_builtin_tools() defaults to "allow-all", and an
-                # "auto" agent holding it would sandbox writes while hiding
-                # request_path_access — a dead end with no way to escalate.
+                # or by get_builtin_tools() defaults to "allow-all".
                 tool.set_permission_mode(self.tool_config.permission_mode)
             if isinstance(tool, BuiltinTodoTool):
                 tool.set_agent(self)
@@ -1186,7 +1189,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """Check if a tool function is enabled.
 
         Priority: query-level (enabled_tools) > agent-level (runtime_configs)
-        > permission_mode whitelist (e.g. "ask" hides write tools) > default (True).
+        > default (True). Permission mode never hides tools; it only decides
+        whether the runner parks before execute (see ``Agent.approve``).
         """
         # Query-level whitelist: if set, only listed tools are allowed
         if self._enabled_tools is not None:
@@ -1195,9 +1199,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         cfg = self._tool_runtime_configs.get(func_name)
         if cfg is not None:
             return cfg.enabled
-        mode_whitelist = read_only_whitelist(self.tool_config.permission_mode)
-        if mode_whitelist is not None:
-            return func_name in mode_whitelist
         return True
 
     def set_permission_mode(self, mode: str) -> None:
@@ -1207,10 +1208,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         ``sandbox_config.enabled`` flag in place. Already-constructed tool
         instances (write_file/apply_patch/execute) hold a reference to this
         same ``sandbox_config`` object, so they observe the new mode on
-        their very next call. File tools also sync ``request_path_access``
-        into or out of the schema (only ``auto`` exposes it). See
-        ``agentica.agent.permissions`` for the exact semantics of
-        "ask" / "auto" / "allow-all".
+        their very next call. See ``agentica.agent.permissions`` for the
+        exact semantics of "ask" / "auto" / "allow-all".
         """
         validate_permission_mode(mode)
         self.tool_config.permission_mode = mode
@@ -1378,6 +1377,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         clone._skill_runtime_configs = dict(self._skill_runtime_configs)
         # Fresh Runner bound to the clone
         clone._runner = Runner(clone)
+        clone.approve = self.approve
         # Tool isolation: stateful tools (todos, parent_agent, workspace, skill
         # filtering) are cloned per-agent and rewired so the clone does not
         # share or overwrite the source agent's tool state slots.

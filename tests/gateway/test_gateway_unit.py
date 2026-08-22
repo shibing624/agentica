@@ -268,8 +268,8 @@ class TestAgentServiceStreamToolDispatch:
 
         started, results = [], []
 
-        async def on_tool_call(name, args):
-            started.append(name)
+        async def on_tool_call(name, args, tool_call_id=""):
+            started.append((name, tool_call_id))
 
         async def on_tool_result(name, result, extra=None):
             results.append((name, result))
@@ -286,7 +286,7 @@ class TestAgentServiceStreamToolDispatch:
 
     def test_each_tool_reports_once_in_call_order(self, tmp_path):
         started, results, chat_result = self._run(tmp_path)
-        assert started == ["read_file", "execute", "grep"]
+        assert started == [("read_file", "c1"), ("execute", "c2"), ("grep", "c3")]
         assert [n for n, _ in results] == ["read_file", "execute", "grep"]
         assert chat_result.tool_calls == 3
 
@@ -824,6 +824,28 @@ class TestLRUAgentCache:
         cache.put("s1", MagicMock())
         cache.put("s2", MagicMock())
         assert set(cache.keys()) == {"s1", "s2"}
+
+    def test_pending_approval_pins_entry_against_eviction(self):
+        """A LiveTurn with pending approvals is not LRU-evicted."""
+        from agentica.agent.approvals import PendingApproval
+        from agentica.gateway.services import live_turn
+        from agentica.gateway.services.agent_service import AgentService, LRUAgentCache
+
+        async def _run():
+            live_turn.reset()
+            turn = live_turn.start("s1", owner="alice")
+            turn.approvals.wait(PendingApproval(
+                tool_call_id="t1", name="execute", arguments={},
+                question="q", preview="",
+            ))
+            cache = LRUAgentCache(max_size=1)
+            pinned = MagicMock()
+            cache.put(AgentService._sk("s1", "alice"), pinned)
+            cache.put(AgentService._sk("s2", "alice"), MagicMock())
+            assert cache.get(AgentService._sk("s1", "alice")) is pinned
+            live_turn.reset()
+
+        asyncio.run(_run())
 
 
 # ============== TestMessageRouter ==============

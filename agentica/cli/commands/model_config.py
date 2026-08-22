@@ -590,6 +590,7 @@ def _apply_profile(
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
         worktree_binder=ctx.worktree_binder,
+        approve=ctx.approve,
     )
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
     return {"current_agent": current_agent}

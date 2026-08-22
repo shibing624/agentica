@@ -57,6 +57,9 @@ class CommandContext:
     # instead of a blocking input(). Must be preserved across agent rebuilds
     # (/model, /newchat, /reload, …) or those paths reintroduce the deadlock.
     ask_user_question_callback: Any = None
+    # Interactive tool-approval callback (``Agent.approve``). Same rebuild rule
+    # as ask_user_question_callback: a /model switch must keep the TUI closer.
+    approve: Any = None
     # TUI-owned callback for opening large, read-only content outside terminal
     # scrollback. Commands return compact inline output and send full history
     # through this callback when the interactive application is available.

@@ -11,7 +11,7 @@ export function partsOf(m: ChatMsg): MsgPart[] {
   const out: MsgPart[] = [];
   for (const st of m.steps || []) {
     if (st.type === "thinking") out.push({ kind: "think", text: st.text || "", t0: st.t0, ms: st.ms });
-    else out.push({ kind: "tool", name: st.name || "", argsStr: st.argsStr || "", result: st.result, t0: st.t0, ms: st.ms });
+    else out.push({ kind: "tool", name: st.name || "", argsStr: st.argsStr || "", result: st.result, t0: st.t0, ms: st.ms, toolCallId: st.toolCallId });
   }
   if (m.content) out.push({ kind: "text", text: m.content });
   return out;
@@ -77,34 +77,63 @@ export function appendThink(m: ChatMsg, delta: string) {
   m.steps!.push({ type: "thinking", text: delta, t0 });
 }
 
-export function appendTool(m: ChatMsg, name: string, argsStr: string) {
+export function appendTool(m: ChatMsg, name: string, argsStr: string, toolCallId?: string) {
   const t0 = Date.now();
   finishThink(m, t0);
-  ensureParts(m).push({ kind: "tool", name, argsStr, t0 });
-  m.steps!.push({ type: "tool", name, argsStr, t0 });
+  ensureParts(m).push({ kind: "tool", name, argsStr, t0, toolCallId });
+  m.steps!.push({ type: "tool", name, argsStr, t0, toolCallId });
 }
 
-export function finishTool(m: ChatMsg, result: string, diff?: string) {
+export function finishTool(m: ChatMsg, result: string, diff?: string, toolCallId?: string) {
   const now = Date.now();
+  const parts = m.parts || [];
+  let partHit: Extract<MsgPart, { kind: "tool" }> | undefined;
+  if (toolCallId) {
+    const found = parts.find((p) => p.kind === "tool" && p.toolCallId === toolCallId && p.result == null);
+    if (found?.kind === "tool") partHit = found;
+  }
+  if (!partHit) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p.kind === "tool" && p.result == null) {
+        partHit = p;
+        break;
+      }
+    }
+  }
+  if (partHit) {
+    partHit.result = result;
+    if (diff) partHit.diff = diff;
+    if (partHit.t0) partHit.ms = now - partHit.t0;
+  }
+  const steps = m.steps || [];
+  let stepHit = -1;
+  if (toolCallId) {
+    stepHit = steps.findIndex((s) => s.type === "tool" && s.toolCallId === toolCallId && s.result == null);
+  }
+  if (stepHit < 0) {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (steps[i].type === "tool" && steps[i].result == null) {
+        stepHit = i;
+        break;
+      }
+    }
+  }
+  if (stepHit >= 0) {
+    steps[stepHit].result = result;
+    if (diff) steps[stepHit].diff = diff;
+    if (steps[stepHit].t0) steps[stepHit].ms = now - steps[stepHit].t0;
+  }
+}
+
+export function unfinishedToolCallId(m: ChatMsg, toolCallId?: string): string | undefined {
+  if (toolCallId) return toolCallId;
   const parts = m.parts || [];
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
-    if (p.kind === "tool" && p.result == null) {
-      p.result = result;
-      if (diff) p.diff = diff;
-      if (p.t0) p.ms = now - p.t0;
-      break;
-    }
+    if (p.kind === "tool" && p.result == null) return p.toolCallId;
   }
-  const steps = m.steps || [];
-  for (let i = steps.length - 1; i >= 0; i--) {
-    if (steps[i].type === "tool" && steps[i].result == null) {
-      steps[i].result = result;
-      if (diff) steps[i].diff = diff;
-      if (steps[i].t0) steps[i].ms = now - steps[i].t0;
-      break;
-    }
-  }
+  return undefined;
 }
 
 export function appendText(m: ChatMsg, delta: string) {

@@ -292,6 +292,8 @@ class TestRunFunctionCalls:
             context = None
             _run_hooks = None
             _cancelled = True
+            approve = None
+            _session_log = None
 
         agent = _CancelledAgent()
         model._agent_ref = weakref.ref(agent)
@@ -330,6 +332,8 @@ class TestRunFunctionCalls:
             context = None
             _run_hooks = None
             _cancelled = True
+            approve = None
+            _session_log = None
 
         agent = _CancelledAgent()
         model._agent_ref = weakref.ref(agent)
