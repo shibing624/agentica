@@ -123,10 +123,63 @@ class TestClassifyAndGrants(unittest.TestCase):
         fc = _file_fc("write_file", path)
         self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
 
-    def test_ask_parks_outside_workspace(self):
+    def test_ask_parks_outside_workspace_write(self):
         fc = _file_fc("write_file", "/tmp/agentica-outside-approval.txt")
         self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
         self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "ask")
+
+    def test_ask_allows_outside_workspace_read(self):
+        fc = _file_fc("read_file", "/tmp/agentica-outside-approval.txt")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
+
+    def test_auto_allows_builtins_and_skills_regardless_of_action(self):
+        calls = [
+            ("self_manage", {"action": "show"}),
+            ("self_manage", {"action": "set_config", "key": "model_name", "value": "x"}),
+            ("self_manage", {"action": "set_env", "key": "X", "value": "1"}),
+            ("self_manage", {"action": "upgrade", "confirm": True}),
+            ("self_manage", {"action": "install_skill", "value": "https://example.com/skill.git"}),
+            ("cronjob", {"action": "create"}),
+            ("cronjob", {"action": "delete", "job_id": "j1"}),
+            ("get_skill_info", {"skill_name": "brainstorm"}),
+            ("list_skills", {}),
+            ("worktree", {"action": "merge"}),
+        ]
+        for name, args in calls:
+            fc = _fc(name, args, is_destructive=True)
+            self.assertEqual(
+                classify("auto", fc, self.grants, work_dir=self.work),
+                "allow",
+                f"{name} {args}",
+            )
+
+    def test_ask_allows_builtins_skills_network_and_memory(self):
+        calls = [
+            ("self_manage", {"action": "show"}),
+            ("self_manage", {"action": "set_config", "key": "model_name", "value": "x"}),
+            ("self_manage", {"action": "upgrade", "confirm": True}),
+            ("self_manage", {"action": "install_skill", "value": "https://example.com/skill.git"}),
+            ("get_skill_info", {"skill_name": "brainstorm"}),
+            ("list_skills", {}),
+            ("web_search", {"queries": "news"}),
+            ("fetch_url", {"url": "https://example.com"}),
+            ("save_memory", {"title": "t", "content": "c"}),
+            ("search_memory", {"query": "t"}),
+            ("task", {"prompt": "look around"}),
+            ("delegate", {"task": "do it"}),
+            ("wait", {"pid": 1}),
+            ("cronjob", {"action": "create"}),
+            ("worktree", {"action": "merge"}),
+            ("send_message", {"target": "a", "text": "hi"}),
+        ]
+        for name, args in calls:
+            fc = _fc(name, args, is_destructive=True)
+            self.assertEqual(
+                classify("ask", fc, self.grants, work_dir=self.work),
+                "allow",
+                f"{name} {args}",
+            )
 
     def test_ask_allows_read_only_execute_including_wrappers(self):
         ro = _fc("execute", {"command": "ls"}, is_destructive=True)
@@ -160,27 +213,30 @@ class TestClassifyAndGrants(unittest.TestCase):
                 command,
             )
 
-    def test_network_ask_parks_auto_allows(self):
+    def test_network_allows_in_ask_and_auto(self):
         fc = _fc("web_search", {"queries": "news"}, is_read_only=True)
-        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
         self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
+        fetch = _fc("fetch_url", {"url": "https://example.com"}, is_read_only=True)
+        self.assertEqual(classify("ask", fetch, self.grants, work_dir=self.work), "allow")
 
-    def test_unlabeled_tool_ask_parks_auto_allows(self):
+    def test_unlabeled_tool_allows_in_ask_and_auto(self):
         fc = _fc("custom_tool", {"x": 1})
-        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
         self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
 
-    def test_destructive_unlabeled_tool_parks_in_ask_and_auto(self):
+    def test_destructive_builtin_allows_in_ask_and_auto(self):
         fc = _fc("cronjob", {"action": "create"}, is_destructive=True)
-        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
-        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
 
     def test_benign_tools_never_park(self):
         for name in (
             "write_todos", "ask_user_question", "save_memory",
-            "search_memory", "list_skills", "list_agents", "task",
+            "search_memory", "list_skills", "get_skill_info",
+            "self_manage", "list_agents", "task", "delegate",
         ):
-            fc = _fc(name, {}, is_destructive=(name == "write_todos"))
+            fc = _fc(name, {}, is_destructive=(name in ("write_todos", "self_manage")))
             self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow", name)
             self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow", name)
 

@@ -284,6 +284,16 @@ class TestSessionEndpoints:
         assert resp.json()["status"] == "unarchived"
         mock_svc.archive_session.assert_called_with("s1", archived=False, owner="default")
 
+    def test_mark_session_read(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.mark_session_read = MagicMock(return_value="2026-01-01T00:00:00.000Z")
+        resp = client.post("/api/sessions/s1/read")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "read"
+        assert data["last_read_at"] == "2026-01-01T00:00:00.000Z"
+        mock_svc.mark_session_read.assert_called_with("s1", owner="default")
+
     def test_session_usage(self, mock_app):
         client, mock_svc = mock_app
         mock_svc.session_usage = AsyncMock(return_value={

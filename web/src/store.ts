@@ -46,8 +46,10 @@ export type ChatMsg = {
 export type Session = {
   title: string;
   msgs: ChatMsg[];
-  /** First request time. Sidebar order and agoStr both use this. */
+  /** First request time. Project group order uses this, not last activity. */
   ts: number;
+  /** Last query (or last log event if the transcript is not hydrated). */
+  lastTs: number;
   tokIn: number;
   tokOut: number;
   tokTotal: number;

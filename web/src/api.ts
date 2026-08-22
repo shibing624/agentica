@@ -60,6 +60,7 @@ export const deleteSessionApi = (id: string) => request(`/api/sessions/${id}`, {
 export const archiveSessionApi = (id: string) => request(`/api/sessions/${id}/archive`, { method: "POST" });
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
+export const markSessionReadApi = (id: string) => request(`/api/sessions/${id}/read`, { method: "POST" });
 
 export async function uploadFileApi(file: File, targetDir?: string) {
   const fd = new FormData();

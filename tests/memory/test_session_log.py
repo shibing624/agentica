@@ -847,9 +847,44 @@ class TestSidecarSessionName:
 
     def test_rename_session_classmethod(self, tmp_path):
         """``rename_session`` lets non-CLI callers update a name by id
-        without instantiating ``SessionLog`` themselves."""
+        without constructing a SessionLog first."""
         SessionLog.rename_session("s-by-cls", "via-classmethod", base_dir=str(tmp_path))
-        assert SessionLog("s-by-cls", base_dir=str(tmp_path)).get_name() == "via-classmethod"
+        log = SessionLog("s-by-cls", base_dir=str(tmp_path))
+        assert log.get_name() == "via-classmethod"
+
+
+class TestSessionLastRead:
+    """Web sidebar unread dot: last_read_at vs last jsonl event."""
+
+    def test_missing_last_read_is_not_unread(self):
+        from agentica.memory.session_log import is_session_unread
+        assert is_session_unread("2026-01-02T00:00:00.000Z", None) is False
+        assert is_session_unread(None, "2026-01-01T00:00:00.000Z") is False
+
+    def test_later_event_is_unread(self):
+        from agentica.memory.session_log import is_session_unread
+        assert is_session_unread(
+            "2026-01-01T00:01:00.000Z", "2026-01-01T00:00:00.000Z",
+        ) is True
+        assert is_session_unread(
+            "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z",
+        ) is False
+
+    def test_sidecar_round_trip_and_listing(self, tmp_path):
+        log = SessionLog("s-read", base_dir=str(tmp_path))
+        log.append("user", "hello", timestamp="2026-01-01T00:00:00.000Z")
+        log.set_last_read_at("2026-01-01T00:00:00.000Z")
+        assert log.get_last_read_at() == "2026-01-01T00:00:00.000Z"
+        log.append("assistant", "hi", timestamp="2026-01-01T00:01:00.000Z")
+        sessions = SessionLog.list_sessions(base_dir=str(tmp_path))
+        assert sessions[0]["last_read_at"] == "2026-01-01T00:00:00.000Z"
+        assert sessions[0]["last_timestamp"] == "2026-01-01T00:01:00.000Z"
+
+    def test_mark_session_read_classmethod(self, tmp_path):
+        ts = SessionLog.mark_session_read("s-mark", base_dir=str(tmp_path), when="2026-04-01T12:00:00.000Z")
+        assert ts == "2026-04-01T12:00:00.000Z"
+        log = SessionLog("s-mark", base_dir=str(tmp_path))
+        assert log.get_last_read_at() == ts
 
 
 class TestProjectionLineage:

@@ -28,6 +28,9 @@ export type StreamFollow = {
   touchEnd(): void;
   scrolled(m: ScrollMetrics): void;
   resume(): void;
+  /** Park at a historical position (chat-nav jump), so layout stick-to-bottom
+   *  does not snap the viewport back to the live tail. */
+  leave(): void;
 };
 
 export function createStreamFollow(): StreamFollow {
@@ -63,6 +66,7 @@ export function createStreamFollow(): StreamFollow {
       stick = true;
       lastTop = null;
     },
+    leave() { stick = false; },
   };
 }
 

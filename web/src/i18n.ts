@@ -111,10 +111,10 @@ const en = {
     skillNone: "No matching skill",
     permLabel: (mode: string): string => mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me",
     permHint: (mode: string): string => mode === "ask"
-      ? "Workspace reads and read-only shell run without asking. Writes, mutating shell, network, and files outside the workspace need confirmation."
+      ? "Reads, read-only shell, network, memory, task/delegate, and builtins run without asking. File writes and mutating shell need confirmation."
       : mode === "allow-all"
         ? "Never asks. Hard refusals for /etc and ~/.ssh still apply."
-        : "Asks only for paths outside the workspace, or a destructive third-party tool.",
+        : "Asks only for file writes outside the workspace.",
     permTip: (mode: string): string => `${mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me"} (${mode})`,
     approvalDeny: "Deny",
     approvalAllowOnce: "Allow once",
@@ -155,6 +155,14 @@ const en = {
     tokPerSecTip: "Output tokens per second",
     msgTimeTip: "Time",
     jumpLatest: "Jump to latest",
+    navEmpty: "(empty)",
+    navAria: "User messages",
+    agoJustNow: "just now",
+    agoMinutes: (n: number) => `${n} min ago`,
+    agoHours: (n: number) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
+    agoDays: (n: number) => (n === 1 ? "1 day ago" : `${n} days ago`),
+    sessionBusy: "Replying",
+    sessionUnread: "Unread reply",
     placeholder: "Message or / for commands · Shift+Enter newline · paste images",
     visionFallback: (mediaModel: string, configPath: string) =>
       mediaModel
@@ -639,10 +647,10 @@ const zh: Strings = {
     skillNone: "没有匹配的技能",
     permLabel: (mode: string): string => mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准",
     permHint: (mode: string): string => mode === "ask"
-      ? "工作区内读和只读命令自动放行；写、会改状态的命令、网络、工作区外文件需确认。"
+      ? "读、只读命令、网络、记忆、task/delegate 和内置工具自动放行；写文件和会改状态的命令需确认。"
       : mode === "allow-all"
         ? "不询问。对 /etc、~/.ssh 等敏感路径的硬拒绝仍然生效。"
-        : "只询问工作区外路径，以及带破坏性标注的第三方工具。",
+        : "只询问工作区外的文件写入。",
     permTip: (mode: string): string => `${mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准"} (${mode})`,
     approvalDeny: "拒绝",
     approvalAllowOnce: "允许一次",
@@ -683,6 +691,14 @@ const zh: Strings = {
     tokPerSecTip: "每秒输出 tokens",
     msgTimeTip: "时间",
     jumpLatest: "跳到最新",
+    navEmpty: "（空）",
+    navAria: "用户提问",
+    agoJustNow: "刚刚",
+    agoMinutes: (n: number) => `${n}分钟前`,
+    agoHours: (n: number) => `${n}小时前`,
+    agoDays: (n: number) => `${n}天前`,
+    sessionBusy: "正在回复",
+    sessionUnread: "未读回复",
     placeholder: "输入 / 使用命令 · Shift+Enter 换行 · 可粘贴图片",
     visionFallback: (mediaModel: string, configPath: string) =>
       mediaModel

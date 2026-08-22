@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import * as api from "../api";
+import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
 import { ChatMarkdown } from "../components/ChatMarkdown";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
@@ -9,7 +10,7 @@ import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, t
 import { getStrings, useStrings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtN, fmtTps, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
-import { createSession, hydrateSession, syncSessionRoundStats } from "../sessions";
+import { createSession, hydrateSession, markSessionRead, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
@@ -21,7 +22,7 @@ import {
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip } from "../components/ContextUsageTip";
-import { appendSteerPart, appendText, appendThink, appendTool, finishThink, finishTool, groupParts, partsOf, unfinishedToolCallId } from "../lib/msgParts";
+import { appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts, partsOf, settleWork, unfinishedToolCallId } from "../lib/msgParts";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
@@ -140,6 +141,14 @@ export function ChatPage() {
   }, [s.pendingResume]);
   useEffect(() => {
     if (!s.curSess || streaming) return;
+    const sess = s.sessions[s.curSess];
+    if (sess) {
+      let healed = false;
+      for (const m of sess.msgs) {
+        if (settleWork(m)) healed = true;
+      }
+      if (healed) saveSessions();
+    }
     void syncSessionRoundStats(s.curSess);
   }, [s.curSess, streaming]);
 
@@ -222,12 +231,17 @@ export function ChatPage() {
                   <p>{S.chat.welcome}</p>
                 </div>
               ) : cur.msgs.map((m, i) => (
-                <MessageView key={i} m={m} workspace={workspace} onOpenFile={files.browsePath}
+                <MessageView key={i} idx={i} m={m} workspace={workspace} onOpenFile={files.browsePath}
                   live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
                   pendingToolCallId={pendingToolCallId} />
               ))}
             </div>
           </div>
+          <ChatNav
+            msgs={cur?.msgs || []}
+            areaRef={msgsRef}
+            onLeaveFollow={() => followRef.current.leave()}
+          />
           {showJump && (
             <button type="button" className="scroll-bottom-btn visible" title={S.chat.jumpLatest}
                     onClick={() => {
@@ -497,25 +511,26 @@ export function ChatPage() {
   );
 }
 
-function MessageView({ m, workspace, onOpenFile, live, pendingToolCallId }: {
-  m: ChatMsg; workspace: string; onOpenFile: (path: string) => void; live?: boolean; pendingToolCallId?: string;
+function MessageView({ idx, m, workspace, onOpenFile, live, pendingToolCallId }: {
+  idx: number; m: ChatMsg; workspace: string; onOpenFile: (path: string) => void; live?: boolean; pendingToolCallId?: string;
 }) {
   const S = useStrings();
   if (m.role === "user" && m.steer) {
     return (
-      <div className="m m-steer-wrap">
+      <div id={"msg-" + idx} className="m m-steer-wrap">
         <SteerChip text={m.content} ts={m.ts} />
       </div>
     );
   }
+  if (!live) settleWork(m);
   const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
   return (
-    <div className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "")}>
+    <div id={"msg-" + idx} className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "")}>
       <div className="msg-stack">
         {segs ? segs.map((seg, i) => {
           const isLast = !!live && i === segs.length - 1;
           if (seg.type === "work") {
-            return <WorkGroup key={i} items={seg.items} isLast={isLast} pendingToolCallId={pendingToolCallId} />;
+            return <WorkGroup key={i} items={seg.items} isLast={isLast} live={!!live} pendingToolCallId={pendingToolCallId} />;
           }
           if (seg.part.kind === "steer") {
             return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} />;
@@ -900,13 +915,13 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     return true;
   }
   if (evt.event === "error") {
-    finishThink(aiMsg);
+    settleWork(aiMsg, Date.now());
     aiMsg.error = String(evt.data);
     flushStream();
     return true;
   }
   if (evt.event === "aborted") {
-    finishThink(aiMsg);
+    settleWork(aiMsg, Date.now());
     aiMsg.aborted = true;
     flushStream();
     return true;
@@ -1022,12 +1037,15 @@ async function consumeSse(
 
 async function finishLive(sessId: string, aiMsg: ChatMsg, t0: number, disconnected: boolean) {
   flushStream();
-  finishThink(aiMsg);
+  settleWork(aiMsg, Date.now());
   if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - t0) / 1000;
   delete getState().streams[sessId];
+  const sess = getState().sessions[sessId];
+  if (sess) sess.running = false;
   if (getState().curSess !== sessId) {
-    const other = getState().sessions[sessId];
-    if (other) other.unread = true;
+    if (sess) sess.unread = true;
+  } else {
+    markSessionRead(sessId);
   }
   saveSessions();
   bump();
@@ -1096,9 +1114,13 @@ async function resumeLiveStream(sessId: string) {
   const { ok, data } = await api.fetchActiveRun(sessId);
   const run = (ok && data?.run) ? data.run : null;
   if (!run) {
+    if (sess) sess.running = false;
     if (looksDisconnectedMsg(sess.msgs[sess.msgs.length - 1])) {
       await hydrateSession(sessId, true);
     }
+    if (getState().curSess === sessId) markSessionRead(sessId);
+    else saveSessions();
+    bump();
     return;
   }
   const aiMsg = takeLiveAssistant(sess);
@@ -1184,6 +1206,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
       return;
     }
     if (live) live.runId = created.data.run_id;
+    markSessionRead(sessId);
     if (getState().streams[sessId]?.userStopped || abortCtrl.signal.aborted) {
       await api.cancelRunApi(created.data.run_id);
       aiMsg.aborted = true;
@@ -1254,18 +1277,22 @@ function beginCommand(sessId: string, userText: string) {
   sess.msgs.push({ role: "user", content: userText, ts: Date.now() });
   setState({ commandRuns: { ...getState().commandRuns, [sessId]: { kind: "compact" } } });
   saveSessions();
+  markSessionRead(sessId);
   return sess;
 }
 
 function endCommand(sessId: string) {
   const next = { ...getState().commandRuns };
   delete next[sessId];
-  setState({ commandRuns: next });
+  const sess = getState().sessions[sessId];
+  if (sess) sess.running = false;
   if (getState().curSess !== sessId) {
-    const other = getState().sessions[sessId];
-    if (other) other.unread = true;
+    if (sess) sess.unread = true;
+  } else {
+    markSessionRead(sessId);
   }
   saveSessions();
+  setState({ commandRuns: next });
 }
 
 async function runCompact(sessId: string, instructions: string) {
@@ -1311,6 +1338,7 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
   sess.msgs.push(aiMsg);
   saveSessions();
   setGoalRun(sessId, { status: "active", objective, progress: "" });
+  markSessionRead(sessId);
   bump();
   const t0 = performance.now();
   let disconnected = false;

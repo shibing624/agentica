@@ -611,6 +611,39 @@ class TestAgentServiceOwnerPartition:
         assert by_id["brand-new-live"]["running"] is True
         live_turn.reset()
 
+    def test_list_sessions_unread_when_activity_is_after_last_read(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        work = tmp_path / "repo"
+        work.mkdir()
+        log = SessionLog("s-unread", work_dir=str(work), user_id="default")
+        log.append("user", "hello", timestamp="2026-01-01T00:00:00.000Z")
+        log.set_last_read_at("2026-01-01T00:00:00.000Z")
+        log.append("assistant", "world", timestamp="2026-01-01T00:01:00.000Z")
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        by_id = {s["session_id"]: s for s in svc.list_sessions(owner="default")}
+        assert by_id["s-unread"]["unread"] is True
+        assert by_id["s-unread"]["running"] is False
+
+        svc.mark_session_read("s-unread", owner="default")
+        by_id = {s["session_id"]: s for s in svc.list_sessions(owner="default")}
+        assert by_id["s-unread"]["unread"] is False
+
+    def test_list_sessions_legacy_without_last_read_is_not_unread(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        work = tmp_path / "repo"
+        work.mkdir()
+        SessionLog("s-old", work_dir=str(work), user_id="default").append(
+            "user", "hello", timestamp="2026-01-01T00:00:00.000Z",
+        )
+        svc = AgentService(workspace_path=str(tmp_path))
+        by_id = {s["session_id"]: s for s in svc.list_sessions(owner="default")}
+        assert by_id["s-old"]["unread"] is False
+
     def test_same_session_id_locks_do_not_collide_across_owners(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
 

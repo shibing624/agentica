@@ -9,7 +9,7 @@ import { ChatMarkdown } from "../components/ChatMarkdown";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import { IconClose, IconExpand } from "../icons";
-import { agoStr, shortenPath } from "../lib/format";
+import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession } from "../sessions";
 import {
   askConfirm, emptyProfileForm, getState, saveSessions, setState, setTheme,
@@ -243,7 +243,7 @@ export function SettingsModal() {
                       <button className="cron-act danger" onClick={() => deleteSession(id)}>{S.common.delete}</button>
                     </div>
                   </div>
-                  <div className="settings-item-meta">{shortenPath(sess.dir)} · {agoStr(sess.ts)}</div>
+                  <div className="settings-item-meta">{shortenPath(sess.dir)} · {agoStr(lastQueryTs(sess), S.chat)}</div>
                 </div>
               ))}
             </div>

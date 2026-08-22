@@ -8,19 +8,20 @@ surfaces expose the exact same vocabulary and behavior. Tools stay in the
 schema in every tier; the difference is whether the runner parks before
 ``fc.execute()`` (see ``agentica.agent.approvals``).
 
-  - "ask"       : Ask for approval. Workspace file *reads* (``read_file`` /
-                  ``glob`` / ``grep``) and read-only ``execute`` (including
-                  wrappers such as ``cd . && git diff | head``) run without
+  - "ask"       : Ask for approval. Reads (including outside the work
+                  directory), read-only ``execute``, network tools
+                  (``web_search`` / ``fetch_url``), memory, ``task`` /
+                  ``delegate``, skills, and other builtins run without
                   prompting. Parking: every ``write_file`` / ``apply_patch``
-                  (even inside the work directory), paths outside the work
-                  directory, sensitive paths, non-read-only ``execute``,
-                  ``web_search`` / ``fetch_url``, ``is_destructive``
-                  third-party tools, and unlabeled third-party tools.
-  - "auto"      : Approve for me. Auto-runs workspace files, every
-                  ``execute`` (the machine is treated as the sandbox until
-                  an OS sandbox exists), and network tools. Parks for paths
-                  outside the workspace / sensitive paths, and
-                  ``is_destructive`` third-party tools.
+                  (even inside the work directory) and non-read-only
+                  ``execute``.
+  - "auto"      : Approve for me. Reads (including outside the work
+                  directory), in-workspace writes, every ``execute``,
+                  network tools, and every builtin / skill / third-party
+                  tool (``self_manage``, ``cronjob``, ``get_skill_info``, …
+                  regardless of ``action``) run without prompting. Parks
+                  only for file *writes* outside the work directory or to
+                  sensitive paths.
   - "allow-all" : Full Access. Never parks. Hard refusals for ``/etc``,
                   ``~/.ssh`` and similar write targets still apply; they
                   raise ``PermissionError`` rather than showing a card.

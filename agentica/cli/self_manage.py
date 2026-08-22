@@ -29,20 +29,29 @@ from agentica.global_config import (
 )
 from agentica.cli.setup import _validate_profile
 
-# Keys whose values must never be echoed back in clear text.
-_SECRET_KEY_PATTERN = re.compile(r"(api_key|token|secret|password|passwd)", re.IGNORECASE)
+# Keys whose leaf values must never be echoed back in clear text.
+# Match the whole key (or a `_api_key` / `_token` suffix), not a substring —
+# otherwise `compact_token_limit` is masked because it contains `token`.
+_SECRET_KEY_PATTERN = re.compile(
+    r"(?:^|_)(api_key|token|secret|password|passwd)$",
+    re.IGNORECASE,
+)
 
 
 def mask_secret(key: str, value: Any) -> Any:
-    """Mask a value if its key looks secret. Returns value unchanged otherwise."""
+    """Mask a secret leaf; walk dicts/lists so nested ``api_key`` fields are masked too."""
+    if isinstance(value, dict):
+        return {k: mask_secret(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [mask_secret(key, item) for item in value]
     if value is None:
         return value
-    if _SECRET_KEY_PATTERN.search(str(key)):
-        s = str(value)
-        if len(s) <= 8:
-            return "****"
-        return f"{s[:4]}...{s[-4:]}"
-    return value
+    if not _SECRET_KEY_PATTERN.search(str(key)):
+        return value
+    s = str(value)
+    if len(s) <= 8:
+        return "****"
+    return f"{s[:4]}...{s[-4:]}"
 
 
 # ==================== Self-upgrade ====================

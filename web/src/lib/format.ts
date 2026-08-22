@@ -63,12 +63,54 @@ export function shortenPath(p: string) {
   return "…/" + parts.slice(-2).join("/");
 }
 
-export function agoStr(ts: number) {
-  const d = Date.now() - ts;
-  if (d < 60_000) return "now";
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h`;
-  return `${Math.floor(d / 86_400_000)}d`;
+export type AgoLabels = {
+  agoJustNow: string;
+  agoMinutes: (n: number) => string;
+  agoHours: (n: number) => string;
+  agoDays: (n: number) => string;
+};
+
+/** Last real user query (steer chips are mid-run). Falls back to lastTs then ts. */
+export function lastQueryTs(sess: {
+  ts: number;
+  lastTs?: number;
+  msgs?: Array<{ role: string; steer?: boolean; ts?: number }>;
+}): number {
+  const msgs = sess.msgs || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === "user" && !m.steer) return m.ts || sess.lastTs || sess.ts;
+  }
+  return sess.lastTs || sess.ts;
+}
+
+export type SessionSideStatus = "busy" | "unread" | "idle";
+
+/** Sidebar slot to the right of the title: spinner, unread dot, or idle time. */
+export function sessionSideStatus(opts: {
+  id: string;
+  curSess: string | null;
+  unread?: boolean;
+  running?: boolean;
+}): SessionSideStatus {
+  if (opts.running) return "busy";
+  if (opts.unread && opts.id !== opts.curSess) return "unread";
+  return "idle";
+}
+
+/**
+ * Coarse idle label: just now / 5-min steps / hours / days.
+ * Exact minutes like ``7m`` made the sidebar feel twitchy.
+ */
+export function agoStr(ts: number, labels: AgoLabels, now = Date.now()): string {
+  const d = Math.max(0, now - ts);
+  if (d < 5 * 60_000) return labels.agoJustNow;
+  if (d < 60 * 60_000) {
+    const mins = Math.floor(d / 60_000);
+    return labels.agoMinutes(Math.max(5, Math.floor(mins / 5) * 5));
+  }
+  if (d < 24 * 60 * 60_000) return labels.agoHours(Math.floor(d / 3_600_000));
+  return labels.agoDays(Math.floor(d / 86_400_000));
 }
 
 export function fmtFileSize(n: number) {

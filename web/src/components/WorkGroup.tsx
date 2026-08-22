@@ -24,14 +24,17 @@ function thinkLabel(
 export function WorkGroup({
   items,
   isLast,
+  live = false,
   pendingToolCallId,
 }: {
   items: MsgPart[];
   isLast: boolean;
+  live?: boolean;
   pendingToolCallId?: string;
 }) {
   const S = useStrings();
-  const { steps, ms, running } = workSummary(items);
+  const { steps, ms, running: unfinished } = workSummary(items, Date.now(), live);
+  const running = live && unfinished;
   const containsPending = !!pendingToolCallId && items.some(
     (p) => p.kind === "tool" && p.toolCallId === pendingToolCallId,
   );
@@ -83,6 +86,7 @@ export function WorkGroup({
                 <ToolRow
                   key={p.toolCallId || i}
                   part={p}
+                  live={live}
                   awaitingApproval={!!pendingToolCallId && p.toolCallId === pendingToolCallId}
                 />
               );
@@ -146,13 +150,15 @@ function sessionCwd(): string {
 
 function ToolRow({
   part,
+  live,
   awaitingApproval,
 }: {
   part: Extract<MsgPart, { kind: "tool" }>;
+  live: boolean;
   awaitingApproval: boolean;
 }) {
   const S = useStrings();
-  const running = part.result == null;
+  const running = live && part.result == null;
   const resultText = part.result != null ? String(part.result) : "";
   const isError = resultText.startsWith("Error: ");
   const diff = part.diff || "";

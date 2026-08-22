@@ -43,29 +43,77 @@ export function ensureParts(m: ChatMsg): MsgPart[] {
   return m.parts;
 }
 
+type TimedItem = { kind?: string; type?: string; t0?: number; ms?: number; result?: string };
+
+function isThinkItem(p: TimedItem): boolean {
+  return p.kind === "think" || p.type === "thinking";
+}
+
+function isToolItem(p: TimedItem): boolean {
+  return p.kind === "tool" || p.type === "tool";
+}
+
+function nextSliceT0(items: TimedItem[], i: number): number | undefined {
+  for (let j = i + 1; j < items.length; j++) {
+    const n = items[j];
+    if ((isThinkItem(n) || isToolItem(n)) && n.t0 != null) return n.t0;
+  }
+}
+
+function freezeSlice(p: TimedItem, items: TimedItem[], i: number, now?: number): boolean {
+  if (p.t0 == null || p.ms != null) return false;
+  const end = nextSliceT0(items, i) ?? now;
+  p.ms = end != null ? Math.max(0, end - p.t0) : 0;
+  return true;
+}
+
+function freezeOpenThinks(m: ChatMsg, now?: number): boolean {
+  let changed = false;
+  const freeze = (items: TimedItem[]) => {
+    for (let i = 0; i < items.length; i++) {
+      const p = items[i];
+      if (!isThinkItem(p) || p.ms != null) continue;
+      if (freezeSlice(p, items, i, now)) changed = true;
+    }
+  };
+  freeze(m.parts || []);
+  freeze(m.steps || []);
+  return changed;
+}
+
+function freezeOpenTools(m: ChatMsg, now?: number): boolean {
+  let changed = false;
+  const freeze = (items: TimedItem[]) => {
+    for (let i = 0; i < items.length; i++) {
+      const p = items[i];
+      if (!isToolItem(p) || p.result != null || p.ms != null) continue;
+      if (freezeSlice(p, items, i, now)) changed = true;
+    }
+  };
+  freeze(m.parts || []);
+  freeze(m.steps || []);
+  return changed;
+}
+
+/** Freeze the current think slice at `now`. Also closes leftover earlier slices
+ *  (their end is the next think/tool `t0`, not wall-clock). */
 export function finishThink(m: ChatMsg, now = Date.now()) {
-  const parts = m.parts || [];
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const p = parts[i];
-    if (p.kind === "think" && p.ms == null && p.t0 != null) {
-      p.ms = Math.max(0, now - p.t0);
-      break;
-    }
-  }
-  const steps = m.steps || [];
-  for (let i = steps.length - 1; i >= 0; i--) {
-    if (steps[i].type === "thinking" && steps[i].ms == null && steps[i].t0 != null) {
-      steps[i].ms = Math.max(0, now - steps[i].t0);
-      break;
-    }
-  }
+  freezeOpenThinks(m, now);
+}
+
+/** Close leftover think/tool timers after the turn is no longer live.
+ *  Omit `now` for historical cards so a trailing slice does not become 45h. */
+export function settleWork(m: ChatMsg, now?: number): boolean {
+  const thinks = freezeOpenThinks(m, now);
+  const tools = freezeOpenTools(m, now);
+  return thinks || tools;
 }
 
 export function appendThink(m: ChatMsg, delta: string) {
   const parts = ensureParts(m);
   const last = parts[parts.length - 1];
   const t0 = Date.now();
-  if (last?.kind === "think") {
+  if (last?.kind === "think" && last.ms == null) {
     last.text += delta;
     const step = m.steps![m.steps!.length - 1];
     if (step && step.type === "thinking") step.text = (step.text || "") + delta;
@@ -150,20 +198,26 @@ export function appendSteerPart(m: ChatMsg, text: string) {
   ensureParts(m).push({ kind: "steer", text, ts: Date.now() });
 }
 
-function sliceMs(p: MsgPart, now: number): number {
+function sliceMs(p: MsgPart, now: number, live: boolean): number {
   if (p.kind === "think") {
     if (p.ms != null) return p.ms;
+    if (!live) return 0;
     return p.t0 != null ? Math.max(0, now - p.t0) : 0;
   }
   if (p.kind === "tool") {
     if (p.ms != null) return p.ms;
-    return p.result == null && p.t0 != null ? Math.max(0, now - p.t0) : 0;
+    if (!live || p.result != null) return 0;
+    return p.t0 != null ? Math.max(0, now - p.t0) : 0;
   }
   return 0;
 }
 
-/** Sum of think slices + tool slices. Unfinished steps use `now - t0`. */
-export function workSummary(items: MsgPart[], now = Date.now()): { steps: number; ms: number; running: boolean; t0?: number } {
+/** Sum of think slices + tool slices. Unfinished steps use `now - t0` only while live. */
+export function workSummary(
+  items: MsgPart[],
+  now = Date.now(),
+  live = true,
+): { steps: number; ms: number; running: boolean; t0?: number } {
   let steps = 0;
   let ms = 0;
   let running = false;
@@ -171,14 +225,14 @@ export function workSummary(items: MsgPart[], now = Date.now()): { steps: number
   for (const p of items) {
     if (p.kind === "tool") {
       steps += 1;
-      if (p.result == null) running = true;
-    } else if (p.kind === "think" && p.ms == null && p.t0 != null) {
+      if (live && p.result == null) running = true;
+    } else if (live && p.kind === "think" && p.ms == null && p.t0 != null) {
       running = true;
     }
     if ((p.kind === "think" || p.kind === "tool") && p.t0 != null) {
       if (t0 === undefined || p.t0 < t0) t0 = p.t0;
     }
-    ms += sliceMs(p, now);
+    ms += sliceMs(p, now, live);
   }
   return { steps, ms, running, t0 };
 }

@@ -105,6 +105,19 @@ def _parse_iso_timestamp(value: Any) -> Optional[float]:
         return None
 
 
+def is_session_unread(last_timestamp: Any, last_read_at: Any) -> bool:
+    """True when the log has a later event than the last time the user opened it.
+
+    Missing either stamp is *not* unread: older sessions have no ``last_read_at``
+    and must not all light up a green dot after upgrade.
+    """
+    last = _parse_iso_timestamp(last_timestamp)
+    read = _parse_iso_timestamp(last_read_at)
+    if last is None or read is None:
+        return False
+    return last > read
+
+
 # ----------------------------------------------------------------------
 # Trajectory equivalence (canonical log vs what was really sent)
 # ----------------------------------------------------------------------
@@ -1225,6 +1238,7 @@ class SessionLog:
             "archived": cls._meta_archived(meta),
             "profile_name": cls._meta_profile_name(meta),
             "profile_source": cls._meta_profile_source(meta),
+            "last_read_at": cls._meta_last_read_at(meta),
         }
 
     @classmethod
@@ -1444,6 +1458,13 @@ class SessionLog:
             return source.strip()
         return None
 
+    @staticmethod
+    def _meta_last_read_at(data: Dict[str, Any]) -> Optional[str]:
+        value = data.get("last_read_at")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
     def _write_meta(self, updates: Dict[str, Any]) -> None:
         """Merge sidecar metadata updates and persist atomically."""
         from datetime import datetime, timezone
@@ -1514,6 +1535,16 @@ class SessionLog:
         """Set the archived flag in sidecar metadata."""
         self._write_meta({"archived": bool(archived)})
 
+    def get_last_read_at(self) -> Optional[str]:
+        """When the web UI last opened this session, or None if never marked."""
+        return self._meta_last_read_at(self._read_meta(self.meta_path))
+
+    def set_last_read_at(self, when: Optional[str] = None) -> str:
+        """Stamp the session as read. ``when`` defaults to now (ISO-8601)."""
+        ts = when.strip() if isinstance(when, str) and when.strip() else iso_timestamp()
+        self._write_meta({"last_read_at": ts})
+        return ts
+
     def clear_name(self) -> bool:
         """Delete the sidecar file. Returns ``True`` if a file was removed,
         ``False`` if there was nothing to clear. Never raises on a missing
@@ -1580,6 +1611,23 @@ class SessionLog:
         log = cls(session_id=session_id, base_dir=str(base))
         log.set_archived(archived)
         return True
+
+    @classmethod
+    def mark_session_read(
+        cls,
+        session_id: str,
+        base_dir: Optional[str] = None,
+        work_dir: Optional[str] = None,
+        user_id: Optional[str] = None,
+        when: Optional[str] = None,
+    ) -> str:
+        """Record that the owner opened this session. Returns ``last_read_at``."""
+        base = (
+            Path(base_dir) if base_dir
+            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
+        )
+        log = cls(session_id=session_id, base_dir=str(base))
+        return log.set_last_read_at(when)
 
     # ------------------------------------------------------------------
     # Fork: create a new session branching from a specific message

@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
-import { agoStr } from "../lib/format";
-import { archiveSession, deleteSession, newChatInDir, renameSession, switchTo } from "../sessions";
-import { IconArchive, IconClose, IconFolder, IconPencil, IconPlus } from "../icons";
+import { agoStr, lastQueryTs, sessionSideStatus } from "../lib/format";
+import { archiveSession, deleteSession, newChatInDir, renameSession, switchTo, syncSessionStatus } from "../sessions";
+import { IconArchive, IconClose, IconFolder, IconPencil, IconPlus, IconSpinner } from "../icons";
 import {
   getState, projectIdForDir, projectNameForDir, useAppState, type Session,
 } from "../store";
@@ -34,17 +34,26 @@ export function SessionTree() {
     }
     const grouped = Object.values(by);
     for (const g of grouped) {
-      g.sessions.sort((a, b) => b.session.ts - a.session.ts);
+      g.sessions.sort((a, b) => lastQueryTs(b.session) - lastQueryTs(a.session));
     }
     // Project order is when that directory first got a chat, not the newest
     // session — otherwise an old project jumps to the top on "new chat".
     grouped.sort((a, b) => {
-      const aFirst = a.sessions[a.sessions.length - 1]?.session.ts || 0;
-      const bFirst = b.sessions[b.sessions.length - 1]?.session.ts || 0;
+      const aFirst = Math.min(...a.sessions.map((x) => x.session.ts));
+      const bFirst = Math.min(...b.sessions.map((x) => x.session.ts));
       return bFirst - aFirst;
     });
     return grouped;
   }, [s.rev, s.sidebarSearch]);
+
+  useEffect(() => {
+    const remoteBusy = Object.entries(s.sessions).some(
+      ([id, sess]) => sess.running && !s.streams[id] && !s.goalRuns[id] && !s.commandRuns[id],
+    );
+    if (!remoteBusy) return;
+    const timer = window.setInterval(() => { void syncSessionStatus(); }, 2500);
+    return () => window.clearInterval(timer);
+  }, [s.rev]);
 
   const pick = (id: string) => {
     switchTo(id);
@@ -80,19 +89,31 @@ export function SessionTree() {
                 <IconPlus />
               </button>
             </div>
-            {!shut && g.sessions.map(({ id, session }) => (
+            {!shut && g.sessions.map(({ id, session }) => {
+              const live = !!(s.streams[id] || s.goalRuns[id] || s.commandRuns[id] || session.running);
+              const side = sessionSideStatus({
+                id, curSess: s.curSess, unread: session.unread, running: live,
+              });
+              return (
               <div key={id} className={"s-item" + (id === s.curSess ? " active" : "")} onClick={() => pick(id)}>
                 <div className="s-main">
                   <span className="ti">{session.title}</span>
                 </div>
-                <span className="mt">{agoStr(session.ts)}</span>
+                {side === "busy" ? (
+                  <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>
+                ) : side === "unread" ? (
+                  <span className="mt unread" title={S.chat.sessionUnread} />
+                ) : (
+                  <span className="mt">{agoStr(lastQueryTs(session), S.chat)}</span>
+                )}
                 <div className="s-actions">
                   <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); promptRename(id); }}><IconPencil /></button>
                   <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
                   <button className="db" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}

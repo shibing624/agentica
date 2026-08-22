@@ -32,6 +32,17 @@ class TestSelfManagePrimitives(unittest.TestCase):
         self.assertEqual(self.sm.mask_secret("api_key", "sk-1234567890abcdef"), "sk-1...cdef")
         self.assertEqual(self.sm.mask_secret("model_name", "gpt-4o"), "gpt-4o")
         self.assertEqual(self.sm.mask_secret("token", "abc"), "****")
+        self.assertEqual(self.sm.mask_secret("compact_token_limit", 300000), 300000)
+        nested = self.sm.mask_secret("fallback_models", [
+            {"model_name": "gpt-4o-mini", "api_key": "sk-abcdefghijklmnop"},
+        ])
+        self.assertEqual(nested[0]["model_name"], "gpt-4o-mini")
+        self.assertEqual(nested[0]["api_key"], "sk-a...mnop")
+        aux = self.sm.mask_secret("auxiliary_model", {
+            "model_name": "hy3", "api_key": "sk-abcdefghijklmnop",
+        })
+        self.assertEqual(aux["model_name"], "hy3")
+        self.assertEqual(aux["api_key"], "sk-a...mnop")
 
     def test_version_comparison(self):
         self.assertTrue(self.sm.is_upgrade_available("1.0.0", "1.0.1"))

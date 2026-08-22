@@ -30,15 +30,25 @@ FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep"
 WRITE_FILE_TOOLS = frozenset({"write_file", "apply_patch"})
 EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_command"})
 NETWORK_TOOLS = frozenset({"web_search", "fetch_url"})
-# Session-local / human-prompt tools: never worth a confirmation card.
+# Session-local / product builtins Codex Ask would not prompt on as
+# "file writes". Never inspect ``action``. Ask still parks ``write_file`` /
+# ``apply_patch`` and mutating ``execute``.
 BENIGN_ALWAYS_ALLOW = frozenset({
     "write_todos",
     "ask_user_question",
     "save_memory",
     "search_memory",
     "list_skills",
+    "get_skill_info",
+    "self_manage",
     "list_agents",
+    "send_message",
     "task",
+    "delegate",
+    "wait",
+    "cronjob",
+    "worktree",
+    "use_capability",
 })
 
 _BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")
@@ -283,7 +293,15 @@ def classify(
     *,
     work_dir: Optional[str],
 ) -> ApprovalRoute:
-    """Return ``allow`` (run now) or ``ask`` (park for a human)."""
+    """Return ``allow`` (run now) or ``ask`` (park for a human).
+
+    Neither tier inspects ``action``. Treated as in-sandbox even though
+    this product has no OS sandbox. ``auto`` parks only file *writes*
+    outside the work directory or to a sensitive path. ``ask`` parks
+    ``write_file`` / ``apply_patch`` and mutating ``execute``; reads
+    (including outside the work directory), network, memory, task /
+    delegate / skills / other builtins all run.
+    """
     if mode == "allow-all":
         return "allow"
     if grants.covers(fc, work_dir=work_dir):
@@ -293,31 +311,23 @@ def classify(
     if name in BENIGN_ALWAYS_ALLOW:
         return "allow"
 
-    if name in FILE_TOOLS:
+    if mode == "auto":
+        if name not in WRITE_FILE_TOOLS:
+            return "allow"
         paths = call_paths(fc, work_dir=work_dir)
-        if not paths:
-            return "ask"
-        if mode == "ask" and name in WRITE_FILE_TOOLS:
-            return "ask"
-        if any(_file_needs_approval(p, work_dir=work_dir) for p in paths):
+        if not paths or any(_file_needs_approval(p, work_dir=work_dir) for p in paths):
             return "ask"
         return "allow"
 
+    if name in WRITE_FILE_TOOLS:
+        return "ask"
+    if name in FILE_TOOLS:
+        return "allow"
     if name in EXECUTE_TOOLS:
-        if mode == "auto":
-            return "allow"
         command = _call_command(fc) or ""
         ok, _reason = is_read_only_command(command)
         return "allow" if ok else "ask"
-
-    if name in NETWORK_TOOLS:
-        return "ask" if mode == "ask" else "allow"
-
-    if fc.function.is_destructive:
-        return "ask"
-    if fc.function.is_read_only:
-        return "allow"
-    return "ask" if mode == "ask" else "allow"
+    return "allow"
 
 
 def command_allows_prefix(command: str) -> bool:

@@ -37,7 +37,7 @@ from agentica.global_config import (
     set_active_profile,
     provider_api_key_env,
 )
-from agentica.memory.session_log import SessionLog, iso_timestamp
+from agentica.memory.session_log import SessionLog, iso_timestamp, is_session_unread
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.compression.manager import parse_compact_token_limit
 
@@ -157,12 +157,15 @@ def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 # whether execute waits for a human.
 _APPROVAL_MODE_INSTRUCTION = (
     "This session's approval mode can pause a tool call until the user "
-    "confirms it. In \"ask\" mode, in-workspace file reads and read-only "
-    "shell commands (including wrappers such as cd && git diff | head) run "
-    "immediately; writes (write_file / apply_patch), paths outside the work "
-    "directory, sensitive paths, mutating execute, and web_search/fetch_url "
-    "wait for approval. In \"auto\" mode, in-workspace files, every execute, "
-    "and network tools run; out-of-workspace or sensitive paths wait. "
+    "confirms it. In \"ask\" mode, file reads (including outside the work "
+    "directory), read-only shell commands (including wrappers such as "
+    "cd && git diff | head), web_search/fetch_url, memory, task/delegate, "
+    "skills, and other builtins run immediately; write_file / apply_patch "
+    "and mutating execute wait for approval. In \"auto\" mode, reads "
+    "(including outside the work directory), in-workspace writes, every "
+    "execute, network tools, and every builtin/skill/third-party tool "
+    "run; only file writes outside the work directory or to sensitive "
+    "paths wait. "
     "\"allow-all\" never asks. If a tool result is "
     "\"Tool call denied by user.\", do not retry the same call — tell the "
     "user what you needed and wait for guidance or a mode change."
@@ -1282,20 +1285,25 @@ class AgentService:
                 first_ts = s.get("first_timestamp")
                 if not first_ts and s.get("mtime"):
                     first_ts = iso_timestamp(s["mtime"])
+                running = (
+                    self.is_session_active(sid, owner=uid)
+                    or live_turn.active(sid, owner=uid) is not None
+                )
+                last_ts = s.get("last_timestamp")
+                last_read_at = s.get("last_read_at")
                 out.append({
                     "session_id": sid,
                     "name": name,
                     "preview": first_user,
                     "user_count": (preview or {}).get("user_count", 0),
                     "first_timestamp": first_ts,
-                    "last_timestamp": s.get("last_timestamp"),
+                    "last_timestamp": last_ts,
+                    "last_read_at": last_read_at,
+                    "unread": (not running) and is_session_unread(last_ts, last_read_at),
                     "size_bytes": s.get("size_bytes", 0),
                     "archived": bool(s.get("archived")),
                     "work_dir": s.get("work_dir") or work_dir,
-                    "running": (
-                        self.is_session_active(sid, owner=uid)
-                        or live_turn.active(sid, owner=uid) is not None
-                    ),
+                    "running": running,
                 })
         seen = {row["session_id"] for row in out}
         for turn in live_turn.iter_owner(uid):
@@ -1311,6 +1319,8 @@ class AgentService:
                 "user_count": 0,
                 "first_timestamp": iso_timestamp(),
                 "last_timestamp": None,
+                "last_read_at": None,
+                "unread": False,
                 "size_bytes": 0,
                 "archived": False,
                 "work_dir": work,
@@ -1406,6 +1416,11 @@ class AgentService:
         """Archive/unarchive a session by writing SessionLog sidecar metadata."""
         base_dir, _work_dir = self._locate_session(session_id, owner)
         SessionLog.archive_session(session_id, archived=archived, base_dir=base_dir)
+
+    def mark_session_read(self, session_id: str, owner: Optional[str] = None) -> str:
+        """Stamp ``last_read_at`` so the sidebar drops the unread dot."""
+        base_dir, _work_dir = self._locate_session(session_id, owner)
+        return SessionLog.mark_session_read(session_id, base_dir=base_dir)
 
     def clear_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Alias for delete_session (for compatibility)."""

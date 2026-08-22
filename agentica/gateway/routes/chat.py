@@ -550,6 +550,16 @@ async def unarchive_session(
     return {"status": "unarchived", "session_id": session_id}
 
 
+@router.post("/api/sessions/{session_id}/read")
+async def mark_session_read(
+    session_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    last_read_at = svc.mark_session_read(session_id, owner=_account(request))
+    return {"status": "read", "session_id": session_id, "last_read_at": last_read_at}
+
+
 @router.get("/api/sessions/{session_id}/usage")
 async def session_usage(
     session_id: str,

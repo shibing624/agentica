@@ -563,11 +563,11 @@ curl -X POST http://localhost:8881/api/send \
 
 | 档 | 自动放行 | 停车 |
 |---|---|---|
-| `ask` | 工作区内**读**（`read_file` / `glob` / `grep`）和只读 `execute`（含 `cd . && git diff \| head` 这类包装） | 工作区内**写**（`write_file` / `apply_patch`）、工作区外/敏感路径、会改状态的 `execute`、`web_search` / `fetch_url`、`is_destructive` 第三方工具、未标注的第三方工具 |
-| `auto` | 上面这些，外加工作区内写、**全部 `execute`**（本地先当沙箱）、网络 | 工作区外/敏感路径；`is_destructive` 第三方工具 |
+| `ask` | **读**（含工作区外）、只读 `execute`、`web_search` / `fetch_url`、记忆、`task` / `delegate`、skill、其它内置工具 | **写文件**（`write_file` / `apply_patch`，含工作区内）和会改状态的 `execute` |
+| `auto` | 读（含工作区外）、工作区内写、**全部 `execute`**、网络、内置 / skill / 第三方工具（不看 `action`） | 工作区外/敏感路径的**文件写** |
 | `allow-all` | 全部 | 无（`/etc`、`~/.ssh` 等硬拒绝仍直接 `PermissionError`，不弹卡） |
 
-### Registry 挂在 LiveTurn 上
+### Registry 挂在 LiveTurn 上 
 
 `ApprovalRegistry` **只住在** [`live_turn.py`](https://github.com/shibing624/agentica/blob/main/agentica/gateway/services/live_turn.py) 的当前 `LiveTurn` 上，不是 Agent LRU、也不是一份 Service 级 session map。构建 Agent 时注入的 `approve` 是闭包：每次 `wait` 查 `live_turn.active(session_id, owner)`。
 

@@ -92,14 +92,17 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .s-item.archived{opacity:.62}
 .s-main{min-width:0;flex:1}
 .s-item .ti{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500}
-.unread-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:6px;flex-shrink:0;vertical-align:middle}
-/* Sits absolutely over the (invisible-until-hover) .s-actions slot, so the
-   title gets the full row width instead of sharing it with the meta text. */
-.s-item .mt{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--fg3);white-space:nowrap;background:var(--bg2);pointer-events:none}
-.s-item:hover .mt{display:none}
-.s-item.active .mt{background:var(--accent-soft)}
-.s-actions{display:flex;align-items:center;gap:2px;opacity:0;transform:translateX(3px);transition:opacity var(--t),transform var(--t);flex-shrink:0}
-.s-item:hover .s-actions{opacity:1;transform:none}
+/* In-flow so the title ellipsizes before the idle label. No fill — a
+   background here becomes a dark chip on the selected row. Hover hides
+   the label (keeps its width) and shows the action buttons over it.
+   Busy spinner / unread dot occupy this same slot. */
+.s-item .mt{flex-shrink:0;font-size:11px;color:var(--fg3);white-space:nowrap;pointer-events:none}
+.s-item .mt.busy{display:flex;align-items:center;color:var(--fg3)}
+.s-item .mt.busy svg{width:12px;height:12px;display:block}
+.s-item .mt.unread{width:8px;height:8px;border-radius:50%;background:#22c55e}
+.s-item:hover .mt{visibility:hidden}
+.s-actions{display:flex;align-items:center;gap:2px;opacity:0;position:absolute;right:8px;top:50%;transform:translateY(-50%) translateX(3px);transition:opacity var(--t),transform var(--t)}
+.s-item:hover .s-actions{opacity:1;transform:translateY(-50%)}
 .s-item .db{width:22px;height:22px;border:none;background:transparent;color:var(--fg3);border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all var(--t)}
 .s-item .db:hover{background:var(--fg);color:var(--bg)}
 .s-item .db.danger:hover{background:#dc2626;color:#fff}
@@ -277,21 +280,29 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .scroll-bottom-btn.visible{display:flex}
 .scroll-bottom-btn svg{width:12px;height:12px}
 
-/* chat navigator: dense per-turn tick stack on the left edge of the chat
-   area (see chat-nav.js) — the right edge stays clear for the native
-   scrollbar. Ticks are packed tightly in a centered flex stack rather than
-   spread across the full scroll height, so jumping between many turns stays
-   a small mouse move. Hidden until there are at least two user turns. */
-.chat-nav{position:absolute;top:0;left:2px;bottom:0;width:20px;z-index:45;display:none;flex-direction:column;align-items:flex-start;justify-content:center;gap:5px;pointer-events:none}
-.chat-nav.visible{display:flex}
-.chat-nav-tick{position:relative;width:20px;height:8px;display:flex;align-items:center;justify-content:flex-start;cursor:pointer;pointer-events:auto}
-.chat-nav-dash{display:block;width:9px;height:2px;border-radius:1px;background:var(--border2);transition:background var(--t),width var(--t)}
-.chat-nav-tick:hover .chat-nav-dash{width:14px;background:var(--fg2)}
-.chat-nav-tick.active .chat-nav-dash{width:14px;background:var(--fg)}
-.chat-nav-tip{position:absolute;left:22px;top:50%;transform:translateY(-50%) translateX(-4px);min-width:160px;max-width:260px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;box-shadow:0 6px 20px rgba(0,0,0,.18);opacity:0;visibility:hidden;pointer-events:none;transition:opacity var(--t),transform var(--t);z-index:46}
-.chat-nav-tick:hover .chat-nav-tip{opacity:1;visibility:visible;transform:translateY(-50%) translateX(0)}
-.chat-nav-tip-q{font-size:12px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.chat-nav-tip-a{margin-top:3px;font-size:11.5px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Codex-style conversation query navigator:
+   - Extremely narrow gutter rail on the left, does not affect main chat area.
+   - Shows only subtle dashes by default.
+   - Hover reveals the truncated query text directly below the dash (no answers, no shadows).
+   - Naturally hidden on narrow viewports. */
+.chat-nav{position:absolute;top:50%;left:8px;z-index:40;transform:translateY(-50%);display:flex;flex-direction:column;pointer-events:none;overflow:visible}
+.chat-nav-list{display:flex;flex-direction:column;gap:4px;max-height:min(70vh,36rem);overflow-y:auto;padding:4px 2px 22px;scrollbar-width:none;-ms-overflow-style:none;pointer-events:none;width:22em}
+.chat-nav-list::-webkit-scrollbar{display:none}
+.chat-nav-tick{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;width:20px;height:12px;padding:0;border:none;background:transparent;cursor:pointer;outline:none;box-shadow:none;pointer-events:auto;overflow:visible}
+.chat-nav-tick:is(:hover,:focus-visible){z-index:2}
+.chat-nav-dash{display:block;width:10px;height:2px;border-radius:1px;background:var(--fg3);opacity:.4;transition:width .15s ease,background .15s ease,opacity .15s ease}
+.chat-nav-tick[aria-current="true"] .chat-nav-dash{width:16px;background:var(--fg);opacity:.85}
+.chat-nav-tick:is(:hover,:focus-visible) .chat-nav-dash{width:16px;background:var(--fg);opacity:1}
+.chat-nav-label{position:absolute;top:100%;left:0;margin-top:2px;z-index:50;display:none;width:max-content;max-width:22em;padding:3px 0;background:transparent;border:none;font-size:11px;line-height:14px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:none;pointer-events:none}
+.chat-nav-tick:is(:hover,:focus-visible) .chat-nav-label{display:block}
+.m.chat-nav-flash .bub{animation:chat-nav-flash 1s cubic-bezier(.23,1,.32,1)}
+@keyframes chat-nav-flash{
+  0%,40%{outline:2px solid var(--accent);outline-offset:2px}
+  100%{outline:2px solid transparent;outline-offset:2px}
+}
+@media(max-width:1024px){
+  .chat-nav{display:none !important}
+}
 
 /* plugins panel: tools (read-only) + skills (CRUD) */
 .plugins-overlay{position:fixed;inset:0;background:rgba(0,0,0,.36);display:none;align-items:center;justify-content:center;z-index:200}
