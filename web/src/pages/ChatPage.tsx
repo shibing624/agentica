@@ -139,7 +139,7 @@ export function ChatPage() {
     void resumeLiveStream(id);
   }, [s.pendingResume]);
   useEffect(() => {
-    if (!s.curSess) return;
+    if (!s.curSess || streaming) return;
     void syncSessionRoundStats(s.curSess);
   }, [s.curSess, streaming]);
 

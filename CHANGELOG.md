@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **工具泳道按工具名合并，图例五项**：原先每个工具调用各占一条泳道，一轮里调 20 次 `read_file` 就是 20 条几乎一样的线；现在同名工具收进一条泳道（并发调用才在道内错开分层，道尾标调用次数），并且图例五个阶段常驻（思考 / 模型回复 / 工具参数生成 / 审批等待 / 工具执行）——只画本轮出现过的颜色，会让两轮之间的同一个颜色对应不同阶段。不再画「其它」：那是墙钟减去各段之后的残差，时间线上本来就没有对应的条。
 
 #### fixes
+- **Web 新建空对话不再 404 `/trace/analysis`**：对话页会预拉轨迹分析来对齐 footer 的 tok/s，但 New Chat 当时还没有 jsonl。没有 assistant 消息、或正在流式时不再请求；点「查看轨迹」仍走原接口，缺文件继续 404。
 - **沙箱 `blocked_commands` 不再把 `rm -rf /` 当成所有绝对路径删除的前缀**：以前只卡左侧边界，`rm -rf /Users/.../__pycache__` 和 `rm -rf /tmp/x` 都被当成删根目录拦掉（测试还把这个漏洞写成预期）。现在按操作数匹配：`/` 是完整路径，后面不能再接 `Users`；`rm -rf /`、`rm -rf /*`、`echo x; rm -rf /` 仍拦。对齐 Codex / OpenCode / Penguin：工作区内删除走审批或 OS 围栏，不用字符串前缀当禁令。
 - **工具审批分类器与「允许类似」**：`is_destructive` 第三方工具（如 `cronjob`）在 ask/auto 下都会停车，不再误落到兜底 `allow`。命令「允许类似」按命令类（`rm -f`，不含路径/文件名），`rm -f a` 批过之后 `rm -f b` 不再问、`git add` 不会放行 `git push`；类短于 2 个 token 时不提供「允许类似」（`bash deploy.sh` 不能永久放行任意 `bash -c`）；`echo hi && rm` 这类复合命令不能用首段越权，只提供允许一次。已写入 `project.json` 的单 token 前缀（`["bash"]`）读取时忽略。`ask` 下工作区 `write_file` / `apply_patch` 也会弹卡。todo / memory / skills / `ask_user_question` 不弹卡。Web 输入框 Enter 不再误批。`tool_result` SSE 带 `tool_call_id`。真正停过车才写 `approval_decision`。
 - **输入栏弹出层点外面或 Esc 就关掉**：模型 profile、权限档、Skills 打开后只能再点一次按钮才关。现在点对话区、输入框或其它按钮会立刻收起，Esc 也先关菜单（有菜单开着时不拿去停止生成）。

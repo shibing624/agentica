@@ -110,6 +110,11 @@ function shouldHydrateFromServer(sess: Session, id: string): boolean {
 
 /** Stamp each assistant footer with the same round the Trace page draws. */
 export async function syncSessionRoundStats(id: string) {
+  // New Chat has a client id and no jsonl yet; the analysis route 404s.
+  // A live round is not in the log either — `done` already stamped that footer.
+  if (getState().streams[id]) return;
+  const existing = getState().sessions[id];
+  if (!existing?.msgs.some((m) => m.role === "assistant")) return;
   const { ok, data } = await api.fetchTraceAnalysis(id);
   if (!ok || !data?.rounds) return;
   const sess = getState().sessions[id];
@@ -126,9 +131,8 @@ export async function syncSessionRoundStats(id: string) {
     };
     costUsd: number | null;
   }>).filter((r) => !r.compaction);
-  const streaming = !!getState().streams[id];
   const assistants = sess.msgs.filter((m) => m.role === "assistant");
-  const n = streaming ? Math.max(0, assistants.length - 1) : assistants.length;
+  const n = assistants.length;
   let changed = false;
   for (let i = 0; i < n && i < rounds.length; i++) {
     const m = assistants[i];
