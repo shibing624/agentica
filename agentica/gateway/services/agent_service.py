@@ -1305,6 +1305,17 @@ class AgentService:
                     "work_dir": s.get("work_dir") or work_dir,
                     "running": running,
                 })
+        # Same session_id can exist in two project dirs: a 0-byte touch stub
+        # under settings.base_dir plus the real transcript under the session's
+        # work_dir. Keep the one with content so the sidebar title and trace
+        # survive a restart.
+        collapsed: Dict[str, Dict[str, Any]] = {}
+        for row in out:
+            sid = row["session_id"]
+            prev = collapsed.get(sid)
+            if prev is None or int(row.get("size_bytes") or 0) > int(prev.get("size_bytes") or 0):
+                collapsed[sid] = row
+        out = list(collapsed.values())
         seen = {row["session_id"] for row in out}
         for turn in live_turn.iter_owner(uid):
             if turn.session_id.startswith(CRON_SESSION_PREFIX):
@@ -1334,34 +1345,56 @@ class AgentService:
         base_dir, work_dir = self._locate_session(session_id, owner)
         return SessionLog(session_id=session_id, base_dir=base_dir, work_dir=work_dir or None)
 
+    @staticmethod
+    def _jsonl_has_content(path: Path) -> bool:
+        """True when ``path`` is a real transcript, not a 0-byte touch stub."""
+        try:
+            return path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
+
     def _locate_session(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
         """Find the project directory that actually holds this session's jsonl.
 
         ``_session_work_dirs`` is process memory. After a gateway restart it is
         empty, and guessing ``settings.base_dir`` is how View trace 404'd a log
         that had been written under another project. Search the owner's tree.
+
+        A 0-byte ``.jsonl`` is only the pre-append touch stub. Treating it as
+        a hit under ``settings.base_dir`` hid the real transcript (title
+        became ``Chat``, trace empty) whenever the session's work_dir was a
+        different project.
         """
-        jsonl = f"{session_id}.jsonl"
         remembered = self._session_work_dirs.get(self._sk(session_id, owner))
         if remembered:
-            base = self._session_base_dir(remembered, owner)
-            if (Path(base) / jsonl).is_file():
-                return base, remembered
+            # Brand-new chats touch an empty file here before the first
+            # append. Do not fall through to settings.base_dir just because
+            # the file is still missing or 0 bytes.
+            return self._session_base_dir(remembered, owner), remembered
+
         fallback_work = str(settings.base_dir)
         fallback = self._session_base_dir(fallback_work, owner)
-        if (Path(fallback) / jsonl).is_file():
-            return fallback, fallback_work
         hits = [
             h for h in SessionLog.find_sessions(session_id, user_id=self._owner(owner))
             if h.get("session_id") == session_id
         ]
-        if hits:
-            hit = hits[0]
+        contentful = [h for h in hits if (h.get("size_bytes") or 0) > 0]
+        chosen = contentful or hits
+        if chosen:
+            hit = max(chosen, key=lambda h: int(h.get("size_bytes") or 0))
             work_dir = hit.get("work_dir") or fallback_work
             if work_dir:
                 self._session_work_dirs[self._sk(session_id, owner)] = work_dir
+            keep = Path(hit["path"])
+            for shadow in hits:
+                path = Path(shadow["path"])
+                if path != keep and not self._jsonl_has_content(path):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
             return str(hit["base_dir"]), work_dir
-        return fallback, remembered or fallback_work
+        return fallback, fallback_work
 
     def has_active_runs(self) -> bool:
         """Return True if any session currently has an in-flight run.

@@ -576,6 +576,87 @@ class TestAgentServiceRunCron:
         assert found.path == log.path
         assert svc.get_session_work_dir("s_trace1") == str(other)
 
+    def test_session_log_for_skips_empty_stub_in_default_dir(self, tmp_path, monkeypatch):
+        """A 0-byte jsonl in settings.base_dir is the pre-append touch stub, not
+        the transcript. After restart, _locate_session used to return that stub
+        (is_file() is True) and never search other projects — title became
+        Chat and View trace was empty while localStorage still had the chat."""
+        from agentica.gateway.config import settings
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        default_dir = tmp_path / "default-cwd"
+        other = tmp_path / "other-repo"
+        default_dir.mkdir()
+        other.mkdir()
+        real = SessionLog("s_xk47", work_dir=str(other), user_id="default")
+        real.append("user", "写个v1版本的纠错代码，用pycorrector")
+        real.append("assistant", "ok")
+
+        monkeypatch.setattr(settings, "base_dir", default_dir)
+        stub = SessionLog("s_xk47", work_dir=str(default_dir), user_id="default")
+        stub.path.parent.mkdir(parents=True, exist_ok=True)
+        stub.path.touch()
+        assert stub.path.stat().st_size == 0
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        found = svc.session_log_for("s_xk47", owner="default")
+        assert found.path == real.path
+        assert found.path.stat().st_size > 0
+        assert svc.get_session_work_dir("s_xk47") == str(other)
+        assert not stub.path.exists()
+
+    def test_new_session_log_lands_in_remembered_work_dir(self, tmp_path, monkeypatch):
+        """Touch-before-append must create the jsonl under the session's work
+        dir, not settings.base_dir. Otherwise the Agent writes the real log
+        next to Temp/ and the sidebar lists an empty stub next to agentica/."""
+        from agentica.gateway.config import settings
+        from agentica.gateway.routes.chat import _touch_session_log
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.project_store import project_base_dir
+
+        default_dir = tmp_path / "agentica-checkout"
+        other = tmp_path / "Temp"
+        default_dir.mkdir()
+        other.mkdir()
+        monkeypatch.setattr(settings, "base_dir", default_dir)
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.set_session_work_dir("s_new1", str(other), owner="default")
+        _touch_session_log(svc, "s_new1", "default")
+
+        expected = Path(project_base_dir(str(other), user_id="default")) / "s_new1.jsonl"
+        shadow = Path(project_base_dir(str(default_dir), user_id="default")) / "s_new1.jsonl"
+        assert expected.is_file()
+        assert expected.stat().st_size == 0
+        assert not shadow.exists()
+
+    def test_list_sessions_prefers_real_log_over_empty_stub(self, tmp_path, monkeypatch):
+        """Same session_id in two project dirs: the empty default-cwd stub
+        must not overwrite the real transcript's title with Chat."""
+        from agentica.gateway.config import settings
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        default_dir = tmp_path / "default-cwd"
+        other = tmp_path / "other-repo"
+        default_dir.mkdir()
+        other.mkdir()
+        SessionLog("s_dup", work_dir=str(other), user_id="default").append(
+            "user", "写个v1版本的纠错代码，用pycorrector",
+        )
+        stub = SessionLog("s_dup", work_dir=str(default_dir), user_id="default")
+        stub.path.parent.mkdir(parents=True, exist_ok=True)
+        stub.path.touch()
+
+        monkeypatch.setattr(settings, "base_dir", default_dir)
+        svc = AgentService(workspace_path=str(tmp_path))
+        rows = [s for s in svc.list_sessions(owner="default") if s["session_id"] == "s_dup"]
+        assert len(rows) == 1
+        assert rows[0]["name"].startswith("写个v1版本")
+        assert rows[0]["work_dir"] == str(other)
+        assert rows[0]["size_bytes"] > 0
+
 
 class TestAgentServiceOwnerPartition:
     """Cache, lock, live_turn and list_sessions are per-account, not bare session_id."""
