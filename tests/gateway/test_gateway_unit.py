@@ -42,7 +42,7 @@ class TestAgentServiceApprovalMode:
 
         svc = AgentService(workspace_path=str(tmp_path))
         agent = MagicMock()
-        svc._cache.put("s1", agent)
+        svc._cache.put(svc._sk("s1"), agent)
 
         svc.set_session_approval_mode("s1", "ask")
 
@@ -70,7 +70,7 @@ class TestAgentServiceSteer:
         agent = MagicMock()
         agent.user_id = svc._owner(None)
         agent.steer.return_value = True
-        svc._cache.put("s1", agent)
+        svc._cache.put(svc._sk("s1"), agent)
         assert svc.steer_session("s1", "don't rewrite tests") is True
         agent.steer.assert_called_once_with("don't rewrite tests")
 
@@ -83,7 +83,7 @@ class TestAgentServiceSteer:
         agent = MagicMock()
         agent.user_id = "alice"
         agent.steer.return_value = True
-        svc._cache.put("s1", agent)
+        svc._cache.put(svc._sk("s1", "alice"), agent)
         assert svc.steer_session("s1", "x", owner="bob") is False
         agent.steer.assert_not_called()
 
@@ -92,7 +92,7 @@ class TestAgentServiceSteer:
         agent = MagicMock()
         agent.user_id = svc._owner(None)
         agent.pop_undelivered_steer.return_value = [("late", False), ("also", True)]
-        svc._cache.put("s1", agent)
+        svc._cache.put(svc._sk("s1"), agent)
         assert svc.take_undelivered_steer("s1") == ["late", "also"]
         agent.pop_undelivered_steer.assert_called_once()
 
@@ -475,8 +475,10 @@ class TestAgentServiceRunCron:
 
     def test_list_sessions_excludes_scheduled_job_sessions(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.services import live_turn
         from agentica.memory.session_log import SessionLog
 
+        live_turn.reset()
         with patch.object(SessionLog, "list_sessions", return_value=[
             {"session_id": "scheduled_job1", "path": "x", "last_timestamp": 1},
             {"session_id": "chat123", "path": "y", "last_timestamp": 2},
@@ -511,8 +513,10 @@ class TestAgentServiceRunCron:
         """Sidebar order = creation time (first request), newest on top; a
         later message must not reshuffle it."""
         from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.services import live_turn
         from agentica.memory.session_log import SessionLog
 
+        live_turn.reset()
         with patch.object(SessionLog, "list_sessions", return_value=[
             {"session_id": "old", "path": "a",
              "first_timestamp": "2026-01-01T00:00:00.000Z", "last_timestamp": "2026-03-01T00:00:00.000Z"},
@@ -571,6 +575,49 @@ class TestAgentServiceRunCron:
         assert found.path.exists()
         assert found.path == log.path
         assert svc.get_session_work_dir("s_trace1") == str(other)
+
+
+class TestAgentServiceOwnerPartition:
+    """Cache, lock, live_turn and list_sessions are per-account, not bare session_id."""
+
+    def test_delete_does_not_drop_another_owners_run(self, tmp_path):
+        from agentica.gateway.services import live_turn
+        from agentica.gateway.services.agent_service import AgentService
+
+        live_turn.reset()
+        live_turn.start("s1", owner="alice")
+        svc = AgentService(workspace_path=str(tmp_path))
+        alice_agent = MagicMock()
+        alice_agent.user_id = "alice"
+        svc._cache.put(svc._sk("s1", "alice"), alice_agent)
+        lock = svc._get_session_lock("s1", "alice")
+
+        assert svc.delete_session("s1", owner="bob") is False
+        assert live_turn.active("s1", owner="alice") is not None
+        assert svc._cache.contains(svc._sk("s1", "alice"))
+        assert svc._session_locks.get(svc._sk("s1", "alice")) is lock
+        live_turn.reset()
+
+    def test_list_sessions_includes_live_run_before_jsonl(self, tmp_path):
+        from agentica.gateway.services import live_turn
+        from agentica.gateway.services.agent_service import AgentService
+
+        live_turn.reset()
+        live_turn.start("brand-new-live", owner="default")
+        svc = AgentService(workspace_path=str(tmp_path))
+        sessions = svc.list_sessions(owner="default")
+        by_id = {s["session_id"]: s for s in sessions}
+        assert "brand-new-live" in by_id
+        assert by_id["brand-new-live"]["running"] is True
+        live_turn.reset()
+
+    def test_same_session_id_locks_do_not_collide_across_owners(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        a = svc._get_session_lock("s1", "alice")
+        b = svc._get_session_lock("s1", "bob")
+        assert a is not b
 
 
 # ============== TestSettings ==============

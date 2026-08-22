@@ -522,6 +522,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | GET | `/api/sessions/{id}/trace/analysis` | 整份轨迹分析（重启后按 session id 跨 project 定位 jsonl） |
 | GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话 / `auto_extract_memory`），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
 | GET / PUT | `/api/memory` | 当前账号的用户级 `AGENTS.md`（常驻说明，进 system prompt）。PUT body：`{content}` |
+| GET | `/api/sessions` | 当前账号的会话列表（含尚未写出 jsonl 的进行中 run） |
 | GET | `/api/sessions/{id}/usage` | 本会话 Context Window 拆分（与 CLI `/usage` 同一套 `measure_context`：system prompt / 规则 / 技能 / 工具定义 / 对话的 token 数）以及消息数、API 调用、费用 |
 | POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套 native + Layer 2 摘要 |
 | POST | `/api/goal` | Web `/goal`：standing-goal 循环。body：`objective`、`session_id`、`token_budget`（默认 `-1` = 不限；不传 turns / wall） |

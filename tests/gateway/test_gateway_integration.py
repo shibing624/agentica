@@ -219,9 +219,13 @@ class TestGoalEndpoint:
                 if line.startswith("data: "):
                     events.append(json.loads(line[6:]))
         kinds = [e["event"] for e in events]
-        assert kinds == ["tool_call", "tool_result", "content", "content", "status", "done"]
+        assert kinds[0] == "tool_call"
+        assert kinds[1] == "tool_result"
+        assert kinds[-2] == "status"
+        assert kinds[-1] == "done"
+        contents = [e["data"] for e in events if e["event"] == "content"]
+        assert "".join(contents) == "hello world"
         assert events[0]["data"]["name"] == "read_file"
-        assert events[2]["data"] == "hello "
         assert events[-1]["data"]["status"] == "complete"
 
 
@@ -992,7 +996,7 @@ class TestChatRunRegistry:
         created = client.post("/api/chat/runs", json={"message": "hi", "session_id": "keep"})
         assert created.status_code == 200
         run_id = created.json()["run_id"]
-        assert live_turn.active("keep") is not None
+        assert live_turn.active("keep", owner="default") is not None
         active = client.get("/api/chat/runs/active", params={"session_id": "keep"})
         assert active.status_code == 200
         assert active.json()["run"]["run_id"] == run_id
@@ -1000,4 +1004,3 @@ class TestChatRunRegistry:
         assert missing.status_code == 404
         gate["release"] = True
         client.post(f"/api/chat/runs/{run_id}/cancel")
-

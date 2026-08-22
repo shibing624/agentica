@@ -37,7 +37,7 @@ from agentica.global_config import (
     set_active_profile,
     provider_api_key_env,
 )
-from agentica.memory.session_log import SessionLog
+from agentica.memory.session_log import SessionLog, iso_timestamp
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.compression.manager import parse_compact_token_limit
 
@@ -62,6 +62,11 @@ _AGENT_BUILD_TIMEOUT_S = 30
 # history lives in the dedicated TaskRun store (agentica.cron.jobs), not the
 # chat session log. See AgentService.run_cron().
 CRON_SESSION_PREFIX = "scheduled_"
+
+# Agent cache, run lock, work_dir and approval mode are partitioned by
+# owner. ``session_id`` is client-supplied; a bare key lets one account
+# evict another's cached Agent / lock / live run.
+_OWNER_SEP = "\x1f"
 
 
 async def dispatch_stream_chunk(
@@ -447,7 +452,7 @@ class AgentService:
         # Per-session project dir (set via routes/chat.py::_apply_session_work_dir
         # from the frontend's session.dir) takes precedence — falls back to the
         # global settings.base_dir only when the session has none set.
-        work_dir = self.get_session_work_dir(session_id)
+        work_dir = self.get_session_work_dir(session_id, owner)
 
         # Extra tools: user-provided + cron + self-management (self-awareness)
         extra = list(self.extra_tools)
@@ -482,7 +487,7 @@ class AgentService:
             instructions = []
         instructions.append(_APPROVAL_MODE_INSTRUCTION)
 
-        permission_mode = self.get_session_approval_mode(session_id)
+        permission_mode = self.get_session_approval_mode(session_id, owner)
         enable_evict = get_setting("enable_evict", True)
         enable_auto_compact = get_setting("enable_auto_compact", True)
         profile = get_profile(get_active_profile_name()) or {}
@@ -552,12 +557,12 @@ class AgentService:
         Times out after _AGENT_BUILD_TIMEOUT_S seconds.
 
         A cached agent is only reused for the owner it was built for. The cache
-        is keyed by session id alone, and the id comes from the browser — so
-        without this check one account presenting another's id would run against
-        the agent already built for that partition, which is the one thing the
-        partition exists to prevent.
+        is keyed by ``(owner, session_id)``; ``session_id`` comes from the
+        browser, so a bare key would let one account run against (or evict)
+        another's Agent.
         """
-        agent = self._cache.get(session_id)
+        key = self._sk(session_id, owner)
+        agent = self._cache.get(key)
         if agent is not None and agent.user_id == self._owner(owner):
             return agent
 
@@ -572,28 +577,36 @@ class AgentService:
                 f"for session {session_id}. Check MCP server connectivity."
             )
 
-        self._cache.put(session_id, agent)
+        self._cache.put(key, agent)
         logger.info(f"Agent created for session: {session_id} (cache size: {len(self._cache)})")
         return agent
 
-    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+    def _get_session_lock(self, session_id: str, owner: Optional[str] = None) -> asyncio.Lock:
         """Return (or create) the per-session run lock.
 
         Both chat() and chat_stream() acquire this lock to prevent concurrent
         runs on the same Agent instance, which is not thread-safe.
         """
-        if session_id not in self._session_locks:
-            self._session_locks[session_id] = asyncio.Lock()
-        return self._session_locks[session_id]
+        key = self._sk(session_id, owner)
+        if key not in self._session_locks:
+            self._session_locks[key] = asyncio.Lock()
+        return self._session_locks[key]
 
-    def has_cached_session(self, session_id: str) -> bool:
-        """Whether a built Agent is still cached for this session."""
-        return self._cache.contains(session_id)
+    def has_cached_session(self, session_id: str, owner: Optional[str] = None) -> bool:
+        """Whether a built Agent is still cached for this session.
 
-    def is_session_active(self, session_id: str) -> bool:
+        ``owner=None`` (peer liveness probe) matches any account holding
+        this session id. Named lookups stay inside that account's partition.
+        """
+        return any(self._cache.contains(k) for k in self._map_keys(session_id, owner))
+
+    def is_session_active(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Whether a run is in flight on this session (its lock is held)."""
-        lock = self._session_locks.get(session_id)
-        return lock is not None and lock.locked()
+        for key in self._map_keys(session_id, owner):
+            lock = self._session_locks.get(key)
+            if lock is not None and lock.locked():
+                return True
+        return False
 
     def _note_peer_turn(self, session_id: str, message: str) -> None:
         """Publish "what this session is working on" for other sessions to read.
@@ -612,7 +625,9 @@ class AgentService:
     # for the exact semantics of each of the 3 tiers ("ask"/"auto"/"allow-all").
     _DEFAULT_APPROVAL_MODE = "auto"
 
-    def set_session_approval_mode(self, session_id: str, mode: str) -> None:
+    def set_session_approval_mode(
+        self, session_id: str, mode: str, owner: Optional[str] = None,
+    ) -> None:
         """Persist the selected approval mode for a session.
 
         If an Agent is already cached for this session, its permission mode
@@ -623,14 +638,16 @@ class AgentService:
         normalized = (mode or self._DEFAULT_APPROVAL_MODE).strip().lower()
         if normalized not in PERMISSION_MODES:
             normalized = self._DEFAULT_APPROVAL_MODE
-        self._session_approval_modes[session_id] = normalized
+        self._session_approval_modes[self._sk(session_id, owner)] = normalized
 
-        cached_agent = self._cache.get(session_id)
+        cached_agent = self._cache.get(self._sk(session_id, owner))
         if cached_agent is not None:
             cached_agent.set_permission_mode(normalized)
 
-    def get_session_approval_mode(self, session_id: str) -> str:
-        return self._session_approval_modes.get(session_id, self._DEFAULT_APPROVAL_MODE)
+    def get_session_approval_mode(self, session_id: str, owner: Optional[str] = None) -> str:
+        return self._session_approval_modes.get(
+            self._sk(session_id, owner), self._DEFAULT_APPROVAL_MODE,
+        )
 
     def _run_config_for_session(
         self,
@@ -662,7 +679,9 @@ class AgentService:
         agent = await self._get_agent(session_id, owner)
         return await usage_payload(agent, model_provider=self.model_provider)
 
-    def get_context_window(self, session_id: Optional[str] = None) -> int:
+    def get_context_window(
+        self, session_id: Optional[str] = None, owner: Optional[str] = None,
+    ) -> int:
         """Return the context window size for the model used by a session.
 
         When ``session_id`` is omitted, returns the context window of an
@@ -672,9 +691,17 @@ class AgentService:
         Model, defaulting to 128000, so no per-call fallback is needed once
         an agent exists).
         """
+        agent = None
         if session_id is None:
-            session_id = next(iter(self._cache.keys()), None)
-        agent = self._cache.get(session_id) if session_id else None
+            keys = self._cache.keys()
+            agent = self._cache.get(keys[0]) if keys else None
+        else:
+            agent = self._cache.get(self._sk(session_id, owner))
+            if agent is None and owner is None:
+                for key in self._map_keys(session_id, None):
+                    agent = self._cache.get(key)
+                    if agent is not None:
+                        break
         if agent and agent.model:
             return agent.model.context_window
         return 128000
@@ -743,7 +770,7 @@ class AgentService:
         """
         await self._ensure_initialized()
 
-        lock = self._get_session_lock(session_id)
+        lock = self._get_session_lock(session_id, owner)
         if lock.locked():
             raise RuntimeError(
                 f"Session '{session_id}' already has an active run. "
@@ -819,7 +846,7 @@ class AgentService:
         await self._ensure_initialized()
         session_id = f"{CRON_SESSION_PREFIX}{job_id}"
 
-        lock = self._get_session_lock(session_id)
+        lock = self._get_session_lock(session_id, user_id)
         if lock.locked():
             raise RuntimeError(f"Job '{job_id}' already has an active run.")
 
@@ -877,7 +904,7 @@ class AgentService:
         """
         await self._ensure_initialized()
 
-        lock = self._get_session_lock(session_id)
+        lock = self._get_session_lock(session_id, owner)
         if lock.locked():
             raise RuntimeError(
                 f"Session '{session_id}' already has an active run. "
@@ -929,7 +956,7 @@ class AgentService:
         leaves the transcript unchanged.
         """
         await self._ensure_initialized()
-        lock = self._get_session_lock(session_id)
+        lock = self._get_session_lock(session_id, owner)
         if lock.locked():
             raise RuntimeError(
                 f"Session '{session_id}' already has an active run. "
@@ -1030,7 +1057,7 @@ class AgentService:
         Raises:
             RuntimeError: If another run is already active on this session.
         """
-        lock = self._get_session_lock(session_id)
+        lock = self._get_session_lock(session_id, owner)
         if lock.locked():
             raise RuntimeError(
                 f"Session '{session_id}' already has an active run. "
@@ -1171,18 +1198,43 @@ class AgentService:
                 preview = SessionLog.session_preview(s["path"])
                 first_user = (preview or {}).get("first_user", "")
                 name = s.get("name") or (first_user[:40] if first_user else "Chat")
+                first_ts = s.get("first_timestamp")
+                if not first_ts and s.get("mtime"):
+                    first_ts = iso_timestamp(s["mtime"])
                 out.append({
                     "session_id": sid,
                     "name": name,
                     "preview": first_user,
                     "user_count": (preview or {}).get("user_count", 0),
-                    "first_timestamp": s.get("first_timestamp"),
+                    "first_timestamp": first_ts,
                     "last_timestamp": s.get("last_timestamp"),
                     "size_bytes": s.get("size_bytes", 0),
                     "archived": bool(s.get("archived")),
                     "work_dir": s.get("work_dir") or work_dir,
-                    "running": self.is_session_active(sid) or live_turn.active(sid) is not None,
+                    "running": (
+                        self.is_session_active(sid, owner=uid)
+                        or live_turn.active(sid, owner=uid) is not None
+                    ),
                 })
+        seen = {row["session_id"] for row in out}
+        for turn in live_turn.iter_owner(uid):
+            if turn.session_id.startswith(CRON_SESSION_PREFIX):
+                continue
+            if turn.session_id in seen:
+                continue
+            work = self.get_session_work_dir(turn.session_id, owner=uid)
+            out.append({
+                "session_id": turn.session_id,
+                "name": "Chat",
+                "preview": "",
+                "user_count": 0,
+                "first_timestamp": iso_timestamp(),
+                "last_timestamp": None,
+                "size_bytes": 0,
+                "archived": False,
+                "work_dir": work,
+                "running": not turn.done,
+            })
         out.sort(key=lambda row: str(row.get("first_timestamp") or ""), reverse=True)
         return out
 
@@ -1199,7 +1251,7 @@ class AgentService:
         that had been written under another project. Search the owner's tree.
         """
         jsonl = f"{session_id}.jsonl"
-        remembered = self._session_work_dirs.get(session_id)
+        remembered = self._session_work_dirs.get(self._sk(session_id, owner))
         if remembered:
             base = self._session_base_dir(remembered, owner)
             if (Path(base) / jsonl).is_file():
@@ -1216,7 +1268,7 @@ class AgentService:
             hit = hits[0]
             work_dir = hit.get("work_dir") or fallback_work
             if work_dir:
-                self._session_work_dirs[session_id] = work_dir
+                self._session_work_dirs[self._sk(session_id, owner)] = work_dir
             return str(hit["base_dir"]), work_dir
         return fallback, remembered or fallback_work
 
@@ -1236,15 +1288,17 @@ class AgentService:
         Returns True if either the cache or the on-disk log existed.
         """
         base_dir, _work_dir = self._locate_session(session_id, owner)
-        removed = self._cache.delete(session_id)
-        live_turn.drop(session_id)
-        self._session_work_dirs.pop(session_id, None)
+        key = self._sk(session_id, owner)
+        removed = self._cache.delete(key)
+        live_turn.drop(session_id, owner=self._owner(owner))
+        self._session_work_dirs.pop(key, None)
+        self._session_approval_modes.pop(key, None)
         if self.agent_peers is not None:
             # A deleted session must stop being addressable at once, not on the
             # peer loop's next liveness sweep: until it is unpublished its name
             # is still in every other session's list_agents.
             self.agent_peers.forget(session_id)
-        self._session_locks.pop(session_id, None)
+        self._session_locks.pop(key, None)
         log_existed = False
         try:
             log = SessionLog(session_id=session_id, base_dir=base_dir)
@@ -1275,12 +1329,16 @@ class AgentService:
         """Alias for delete_session (for compatibility)."""
         return self.delete_session(session_id, owner)
 
-    def cancel_session(self, session_id: str) -> bool:
+    def cancel_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Cancel the in-flight run for a specific session.
 
         Returns True if the session has an agent to cancel, False otherwise.
         """
-        agent = self._cache.get(session_id)
+        agent = None
+        for key in self._map_keys(session_id, owner):
+            agent = self._cache.get(key)
+            if agent is not None:
+                break
         if agent is None:
             return False
         try:
@@ -1297,7 +1355,7 @@ class AgentService:
         Does not build a new agent: steering a session that is not running
         (or not this account's) must return False so the caller can queue.
         """
-        agent = self._cache.get(session_id)
+        agent = self._cache.get(self._sk(session_id, owner))
         if agent is None or agent.user_id != self._owner(owner):
             return None
         return agent
@@ -1328,17 +1386,21 @@ class AgentService:
 
     # ============== Work directory ==============
 
-    def set_session_work_dir(self, session_id: str, work_dir: str) -> None:
+    def set_session_work_dir(
+        self, session_id: str, work_dir: str, owner: Optional[str] = None,
+    ) -> None:
         """Set the working directory for a specific session.
 
         Per-session work_dirs override the global settings.base_dir.
         Does NOT clear other sessions' agents.
         """
-        self._session_work_dirs[session_id] = work_dir
+        self._session_work_dirs[self._sk(session_id, owner)] = work_dir
 
-    def get_session_work_dir(self, session_id: str) -> str:
+    def get_session_work_dir(self, session_id: str, owner: Optional[str] = None) -> str:
         """Get the working directory for a session (falls back to global base_dir)."""
-        return self._session_work_dirs.get(session_id, str(settings.base_dir))
+        return self._session_work_dirs.get(
+            self._sk(session_id, owner), str(settings.base_dir),
+        )
 
     # ============== Session storage scoping ==============
 
@@ -1365,6 +1427,28 @@ class AgentService:
         cookie, never from the request body.
         """
         return owner or settings.default_user_id
+
+    @classmethod
+    def _sk(cls, session_id: str, owner: Optional[str] = None) -> str:
+        return f"{cls._owner(owner)}{_OWNER_SEP}{session_id}"
+
+    def _map_keys(self, session_id: str, owner: Optional[str] = None) -> List[str]:
+        """Keys in the owner-partitioned maps that refer to ``session_id``.
+
+        A named owner is one key. Peer probes pass ``owner=None`` and match
+        every account that has this id (and a leftover unpartitioned key).
+        """
+        if owner is not None:
+            return [self._sk(session_id, owner)]
+        suffix = f"{_OWNER_SEP}{session_id}"
+        keys = {self._sk(session_id, None)}
+        for k in self._cache.keys():
+            if k == session_id or k.endswith(suffix):
+                keys.add(k)
+        for k in self._session_locks:
+            if k == session_id or k.endswith(suffix):
+                keys.add(k)
+        return list(keys)
 
     def update_work_dir(self, new_dir: str) -> None:
         """Update the global work_dir and clear ALL cached agents.

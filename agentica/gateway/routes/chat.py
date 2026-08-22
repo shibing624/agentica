@@ -58,8 +58,8 @@ _SSE_HEADERS = {
 }
 
 
-def _conflict_if_live(session_id: str) -> None:
-    if live_turn.active(session_id) is not None:
+def _conflict_if_live(session_id: str, owner: str) -> None:
+    if live_turn.active(session_id, owner) is not None:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -75,17 +75,46 @@ _SSE_KEEPALIVE_S = 15.0
 async def _sse_from_turn(turn: live_turn.LiveTurn, after: int = 0):
     """Yield SSE bytes. Client disconnect unsubscribes; the agent keeps running."""
     q = turn.subscribe(after=after)
+    last_seq = after
     try:
         yield ": keepalive\n\n"
+        for ev in turn.replay(after):
+            last_seq = ev["seq"]
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        if turn.done:
+            yield "data: [DONE]\n\n"
+            return
+        dropped = getattr(q, "_dropped", None)
         while True:
-            try:
-                item = await asyncio.wait_for(q.get(), timeout=_SSE_KEEPALIVE_S)
-            except asyncio.TimeoutError:
+            get_task = asyncio.create_task(q.get())
+            waiters = {get_task}
+            drop_task = None
+            if dropped is not None:
+                drop_task = asyncio.create_task(dropped.wait())
+                waiters.add(drop_task)
+            done, pending = await asyncio.wait(
+                waiters, timeout=_SSE_KEEPALIVE_S, return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if not done:
                 yield ": keepalive\n\n"
                 continue
+            if get_task in done:
+                item = get_task.result()
+            else:
+                return
             if item is None:
                 yield "data: [DONE]\n\n"
                 break
+            if item["seq"] <= last_seq:
+                continue
+            last_seq = item["seq"]
             yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
     except asyncio.CancelledError:
         return
@@ -95,7 +124,7 @@ async def _sse_from_turn(turn: live_turn.LiveTurn, after: int = 0):
 
 def _spawn_live(session_id: str, run_coro, owner: str, kind: str = "chat"):
     """Run ``run_coro(turn)`` in the background. Disconnect does not cancel it."""
-    _conflict_if_live(session_id)
+    _conflict_if_live(session_id, owner)
     turn = live_turn.start(session_id, owner, kind)
 
     async def runner():
@@ -157,11 +186,11 @@ async def chat(
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     """Send a message to the agent (non-streaming)."""
-    if body.work_dir:
-        await _apply_session_work_dir(svc, body.session_id, body.work_dir)
-    svc.set_session_approval_mode(body.session_id, body.approval_mode)
-
     account = _account(request)
+    if body.work_dir:
+        await _apply_session_work_dir(svc, body.session_id, body.work_dir, account)
+    svc.set_session_approval_mode(body.session_id, body.approval_mode, owner=account)
+
     result = await svc.chat(
         message=body.message,
         session_id=body.session_id,
@@ -244,6 +273,7 @@ async def run_goal(
         )
         turn.publish({"event": "done", "data": result})
 
+    _touch_session_log(svc, session_id, account)
     turn = _spawn_live(session_id, run_goal_turn, owner=account, kind="goal")
     return StreamingResponse(
         _sse_from_turn(turn),
@@ -255,12 +285,12 @@ async def run_goal(
 # ============== SSE streaming chat ==============
 
 async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService) -> live_turn.LiveTurn:
-    if body.work_dir:
-        await _apply_session_work_dir(svc, body.session_id, body.work_dir)
-    svc.set_session_approval_mode(body.session_id, body.approval_mode)
-
-    session_id = body.session_id
     account = _account(request)
+    session_id = body.session_id
+    if body.work_dir:
+        await _apply_session_work_dir(svc, session_id, body.work_dir, account)
+    svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
+    _touch_session_log(svc, session_id, account)
 
     async def run_chat_turn(turn: live_turn.LiveTurn):
         on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
@@ -315,7 +345,7 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
 
         ctx_window = 128000
         if deps.agent_service:
-            ctx_window = deps.agent_service.get_context_window(session_id)
+            ctx_window = deps.agent_service.get_context_window(session_id, owner=account)
 
         done = {
             "session_id": result.session_id,
@@ -385,8 +415,8 @@ async def active_chat_run(
     session_id: str,
 ):
     """The in-flight run for this session, if any (refresh / other tab)."""
-    turn = live_turn.active(session_id)
-    if turn is None or not live_turn.owned(turn, _account(request)):
+    turn = live_turn.active(session_id, owner=_account(request))
+    if turn is None:
         return {"run": None}
     return {"run": turn.public()}
 
@@ -428,8 +458,8 @@ async def attach_chat_stream(
     after: int = 0,
 ):
     """Reattach by session id (replay ``seq > after``, then live)."""
-    turn = live_turn.active(session_id)
-    if turn is None or not live_turn.owned(turn, _account(request)):
+    turn = live_turn.active(session_id, owner=_account(request))
+    if turn is None:
         async def empty():
             yield ": keepalive\n\n"
             yield "data: [DONE]\n\n"
@@ -629,13 +659,24 @@ async def upload_file(
 _work_dir_lock = asyncio.Lock()
 
 
-async def _apply_session_work_dir(svc: AgentService, session_id: str, work_dir: str) -> None:
+async def _apply_session_work_dir(
+    svc: AgentService, session_id: str, work_dir: str, owner: str,
+) -> None:
     """Set per-session work_dir.  Acquires lock to avoid concurrent races."""
     p = Path(work_dir).expanduser()
     if not p.is_dir():
         return
     async with _work_dir_lock:
-        current = svc.get_session_work_dir(session_id)
+        current = svc.get_session_work_dir(session_id, owner)
         if str(p) == current:
             return
-        svc.set_session_work_dir(session_id, str(p))
+        svc.set_session_work_dir(session_id, str(p), owner)
+
+
+def _touch_session_log(svc: AgentService, session_id: str, owner: str) -> None:
+    """Create an empty jsonl so the sidebar can list a run before the first append."""
+    log = svc.session_log_for(session_id, owner=owner)
+    path = log.path
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()

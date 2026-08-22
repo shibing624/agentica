@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
-- **Web 对话 run 与 SSE 连接拆开**：刷新 / 断网只断开订阅，后端继续跑。`POST /api/chat/runs` 立刻返回 `run_id`；`GET /api/chat/runs/{id}/events?after=` 按序号重连去重；`GET /api/chat/runs/active` 找回当前 session 的 run；`POST /api/chat/runs/{id}/cancel` 显式取消并等到 session lock 释放（已结束则幂等返回终态）。Stop 在 lock 释放前不允许发下一轮（新输入排队）。发送后立刻出现 WorkGroup「正在思考」转圈（有附件时是「正在准备附件」），不再空白等到首字。
+- **Web 对话 run 与 SSE 连接拆开**：刷新 / 断网只断开订阅，后端继续跑。`POST /api/chat/runs` 立刻返回 `run_id`；`GET /api/chat/runs/{id}/events?after=` 按序号重连去重；`GET /api/chat/runs/active` 找回当前 session 的 run；`POST /api/chat/runs/{id}/cancel` 显式取消并等到 session lock 释放（已结束则幂等返回终态）。Stop 在 lock 释放前不允许发下一轮（新输入排队）。发送后立刻出现 WorkGroup「正在思考」转圈（有附件时是「正在准备附件」），不再空白等到首字。live_turn / Agent 缓存 / session lock / work_dir / 审批档都按 `(账号, session_id)` 分区，`session_id` 是客户端可控字段，不能让 B 账号的 409 或删除碰到 A 的 run。`list_sessions` 会并上该账号尚未落盘的 live run，刷新不会让刚发出的新对话从侧栏消失。
 - **Web 工具调用入参跟 CLI 同一套展示**：对话里不再 `json.dumps` 原始参数。`read_file` / `glob` / `grep` 一行路径；`write_file` / `apply_patch` 文件名或文件数（结果仍是 diff）；`execute` 命令；`write_todos` 清单；`web_search` / `fetch_url` 查询或 URL；`task` / `delegate` / `send_message` 全文；`list_agents` 只显示名字；其余 `key=value` 摘要。轨迹页仍是原始 JSON。
 - **Worktree 默认短命、落在仓库内**：默认路径改为 `<repo>/.agentica/worktrees/<任务>`（不再是兄弟目录 `../<repo>-<任务>`；`settings.worktree.root: sibling` 可回到旧布局）。`worktree(action="merge")` 合入**本地** base 后删除 checkout 和 `wt/<任务>` 分支，会话回到主目录；进行中的同名 `use` 仍复用。新增 `remove`。会话绑定期间 `git worktree lock`（`agentica pid=<pid>`），活着的别人的锁和用户手加的锁都不抢；pid 已死才偷锁。删除前的安全标准是「agentica 的 `wt/` 分支 + 没有独有工作」（干净且不 ahead 本地 main），不是「是否已 push」；detached / 手建 / Claude Code 的树一律不删。退出 CLI 时，没有独有工作的 `wt/` worktree 自动清掉，有独有工作的保持 lock。`.env` 仍是 symlink。`use` 发现别人持锁时会点名 pid。工具 `remove` 先校验再搬家。
 - **`web_search` 默认引擎从 `baidu` 换成 `exa`**：走 Exa 公开 MCP（`https://mcp.exa.ai/mcp`），不设 `EXA_API_KEY` 用共享免费池（有限流），设了走自己的额度。和 OpenCode 同一条免费接入；`AGENTICA_WEB_SEARCH=baidu` 或 `provider="baidu"` 仍可选。环境变量配了需要 key 却没给 key 时，降级目标也跟着改成 Exa。
@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **创建 run 途中点 Stop 不再留下孤儿任务**：`POST /api/chat/runs` 返回后若用户已停止，立刻 `cancelRunApi`，避免 UI 已 aborted、后端仍占 session lock。
 - **SSE 空闲 15s 发 keepalive；干净 EOF 且未见 `done`/`error`/`aborted` 则按断线重连**：前置代理闲置掐流不会再被当成回合完成。
 - **已结束的 live_turn 10 分钟后从注册表丢掉**：完成/取消后仍可重连回放，超时释放事件缓冲，删会话立刻清掉。
+- **live_turn 事件缓冲和订阅队列有上限**：运行中不再按 token 数无限 append；连续 `content`/`thinking` delta 在缓冲里合并；慢订阅者队列满则断开，让客户端按 `after=seq` 重连，避免长 `/goal` + 多标签页把网关打到 OOM。
 - **Steer 打断思考时上一张思考卡片停止计时**：插话把思考切到下一张卡，但上一张 `ms` 没冻住，墙钟还在涨。现在插入 steer 或开新思考切片都会 `finishThink`。
 - **Web 侧栏按会话创建时间排序**：jsonl 首行 `first_timestamp` 是第一次请求。`GET /api/sessions` 和侧栏都按它倒序（新在上），发消息不再把老会话顶上去；「3d」小字也是创建时间，不是最后活动。Project 分组按该目录**第一次**出现会话的时间排，给旧项目加 New Chat 不会把它顶到最上面。CLI `/resume` 仍按 mtime 倒序。
 - **Web 对话不再狂打 `/api/workspace/stat`**：消息底部的文件卡片原先跟着流式正文每一帧重抽路径，数组换了引用就 POST 一次，长回答会打满日志。现在流式期间不查；路径集合没变也不查；同一帧里多条消息合并成一次请求。
