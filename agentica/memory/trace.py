@@ -238,12 +238,15 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                     decision = entry.get("decision")
                     if isinstance(decision, str):
                         span["decision"] = decision
-                    if open_request is not None:
+                    recorded = entry.get("wait_s")
+                    if isinstance(recorded, (int, float)) and recorded > 0:
+                        wait = int(round(recorded * 1000))
+                    else:
                         wait = _ms_between(span["callTs"], ts)
-                        if wait is not None and wait > 0:
-                            open_request["approvalWaitMs"] = (
-                                open_request.get("approvalWaitMs") or 0
-                            ) + wait
+                    if wait is not None and wait > 0 and open_request is not None:
+                        open_request["approvalWaitMs"] = (
+                            open_request.get("approvalWaitMs") or 0
+                        ) + wait
             continue
 
         if event_name == "request_end":
@@ -519,7 +522,32 @@ def _entry_row(
             row["summary"] = " ".join(f"{k}={v}" for k, v in request.items())
             row["detail"] = _pretty_json(request)
         elif name == "approval_decision":
-            row["summary"] = f"{entry.get('decision') or ''} {entry.get('tool_call_id') or ''}".strip()
+            decision = entry.get("decision") or ""
+            tool = entry.get("tool") or ""
+            wait_s = entry.get("wait_s")
+            grant = entry.get("grant") if isinstance(entry.get("grant"), dict) else None
+            parts = [str(decision), str(tool)]
+            if isinstance(wait_s, (int, float)):
+                parts.append(f"{wait_s:.2f}s")
+            if grant and grant.get("scope") == "similar":
+                label = (
+                    grant.get("command_class")
+                    or grant.get("tool")
+                    or (grant.get("paths") or [None])[0]
+                )
+                if label:
+                    parts.append(f"similar={label}")
+            row["summary"] = " ".join(p for p in parts if p).strip()
+            detail = {
+                k: entry[k]
+                for k in (
+                    "tool", "tool_call_id", "decision", "wait_s", "mode",
+                    "question", "preview", "options", "similar_label",
+                    "arguments", "grant",
+                )
+                if k in entry and entry[k] is not None
+            }
+            row["detail"] = _pretty_json(detail) if detail else ""
         elif name == "tool_call":
             call_id = str(entry.get("tool_call_id") or "")
             tool_name, raw_args = args_by_id.get(call_id, ("", ""))

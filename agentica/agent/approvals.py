@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
@@ -489,21 +490,35 @@ def make_approve(
             options=options,
         )
         fc.approval_waited = True
+        started = time.monotonic()
         waiter = registry.wait(pending)
         publish(pending)
         decision = await waiter
+        wait_s = round(time.monotonic() - started, 2)
         if decision not in ("allow", "allow_prefix", "deny"):
-            return "deny"
-        if decision == "deny":
-            return "deny"
-        prefix = decision == "allow_prefix"
-        _record_grant(fc, grants, work_dir=work_dir, prefix=prefix)
-        if prefix:
-            persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
-        if fc.function.name in FILE_TOOLS:
-            for path in call_paths(fc, work_dir=work_dir):
-                sensitive = _is_sensitive_path(path)
-                apply_path_grant(path, prefix and not sensitive)
+            decision = "deny"
+        grant: Optional[Dict[str, Any]] = None
+        if decision != "deny":
+            prefix = decision == "allow_prefix"
+            grant = _record_grant(fc, grants, work_dir=work_dir, prefix=prefix)
+            if prefix:
+                persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
+            if fc.function.name in FILE_TOOLS:
+                for path in call_paths(fc, work_dir=work_dir):
+                    sensitive = _is_sensitive_path(path)
+                    apply_path_grant(path, prefix and not sensitive)
+        fc.approval_trace = {
+            "tool": fc.function.name,
+            "arguments": _clip_trace_args(fc.arguments or {}),
+            "question": question,
+            "preview": preview,
+            "options": list(options),
+            "similar_label": similar_label or None,
+            "mode": mode,
+            "decision": decision,
+            "wait_s": wait_s,
+            "grant": grant,
+        }
         return decision
 
     return approve
@@ -515,26 +530,64 @@ def _record_grant(
     *,
     work_dir: Optional[str],
     prefix: bool,
-) -> None:
+) -> Dict[str, Any]:
+    """Apply the session/project grant and return what was stored for the trace."""
     name = fc.function.name
     if name in FILE_TOOLS:
+        paths: List[str] = []
+        similar = False
         for path in call_paths(fc, work_dir=work_dir):
             sensitive = _is_sensitive_path(path)
             granted = path
-            if prefix and not sensitive:
+            store_prefix = prefix and not sensitive
+            if store_prefix:
                 granted = path if Path(path).is_dir() else str(Path(path).parent)
-            grants.add_path(granted, prefix=prefix and not sensitive)
-        return
+                similar = True
+            grants.add_path(granted, prefix=store_prefix)
+            paths.append(granted)
+        return {
+            "scope": "similar" if similar else "once",
+            "persisted": similar,
+            "kind": "path",
+            "paths": paths,
+        }
     if name in EXECUTE_TOOLS:
         command = _call_command(fc) or ""
-        if prefix and command_allows_prefix(command):
+        stored = prefix and command_allows_prefix(command)
+        if stored:
             grants.add_command_prefix(command)
-        return
+        return {
+            "scope": "similar" if stored else "once",
+            "persisted": stored,
+            "kind": "command",
+            "command_class": command_class_display(command) if stored else "",
+            "command": command,
+        }
     if name in NETWORK_TOOLS:
         grants.add_network(fc, prefix=prefix)
-        return
+        return {
+            "scope": "similar" if prefix else "once",
+            "persisted": prefix,
+            "kind": "network",
+            "tool": name,
+        }
     if prefix:
         grants.add_tool_name(name)
+        return {"scope": "similar", "persisted": True, "kind": "tool", "tool": name}
+    return {"scope": "once", "persisted": False, "kind": "tool", "tool": name}
+
+
+_TRACE_ARG_CHARS = 2000
+
+
+def _clip_trace_args(args: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in args.items():
+        if isinstance(value, str) and len(value) > _TRACE_ARG_CHARS:
+            out[key] = f"{value[:_TRACE_ARG_CHARS]}… ({len(value)} chars)"
+        else:
+            out[key] = value
+    return out
 
 
 def _file_needs_approval(resolved: str, *, work_dir: Optional[str]) -> bool:

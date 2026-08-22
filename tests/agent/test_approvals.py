@@ -330,6 +330,16 @@ class TestMakeApprove(unittest.TestCase):
             again = _fc("execute", {"command": "rm -f /tmp/b.ini"}, is_destructive=True, call_id="x2")
             self.assertEqual(classify("ask", again, grants, work_dir="/tmp"), "allow")
             self.assertTrue(fc.approval_waited)
+            trace = fc.approval_trace
+            self.assertEqual(trace["decision"], "allow_prefix")
+            self.assertEqual(trace["tool"], "execute")
+            self.assertEqual(trace["similar_label"], "rm -f")
+            self.assertGreaterEqual(trace["wait_s"], 0)
+            self.assertEqual(trace["grant"]["scope"], "similar")
+            self.assertTrue(trace["grant"]["persisted"])
+            self.assertEqual(trace["grant"]["command_class"], "rm -f")
+            self.assertIn("Allow running", trace["question"])
+            self.assertEqual(trace["preview"], "rm -f /tmp/a.ini")
 
         asyncio.run(_run())
 
@@ -639,7 +649,10 @@ class TestRunnerApprovalHook:
         fc, _ex = _exec_fc("tid")
         async for _ in model.run_function_calls([fc], []):
             pass
-        assert logged == [("approval_decision", {"tool_call_id": "tid", "decision": "deny"})]
+        assert logged[0][0] == "approval_decision"
+        assert logged[0][1]["tool_call_id"] == "tid"
+        assert logged[0][1]["decision"] == "deny"
+        assert logged[0][1]["tool"] == "execute"
 
     @pytest.mark.asyncio
     async def test_skips_approval_decision_when_not_parked(self):

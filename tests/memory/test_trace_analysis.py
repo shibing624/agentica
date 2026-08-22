@@ -112,6 +112,36 @@ def test_tool_approval_wait_is_subtracted_from_llm_ms():
     assert span["outputTs"] == "2026-01-01T00:00:14.000Z"
 
 
+def test_approval_decision_row_includes_request_wait_and_similar_grant():
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="rm"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="execute"),
+        _e(
+            "2026-01-01T00:00:05.000Z", type="event", name="approval_decision",
+            tool_call_id="c1", decision="allow_prefix", tool="execute",
+            wait_s=2.8, mode="ask",
+            question="Allow running the following command?",
+            preview="rm -f /tmp/a.ini", similar_label="rm -f",
+            options=["allow", "allow_prefix", "deny"],
+            arguments={"command": "rm -f /tmp/a.ini"},
+            grant={
+                "scope": "similar", "persisted": True,
+                "kind": "command", "command_class": "rm -f",
+            },
+        ),
+        _e("2026-01-01T00:00:06.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:07.000Z", type="tool", tool_call_id="c1", content="ok"),
+    ]
+    out = analyze_entries(entries)
+    assert out["requests"][0]["approvalWaitMs"] == 2800
+    row = next(e for e in out["rounds"][0]["entries"] if e["kind"] == "approval_decision")
+    assert "allow_prefix execute 2.80s similar=rm -f" == row["summary"]
+    assert "Allow running the following command?" in row["detail"]
+    assert "command_class" in row["detail"]
+    assert "rm -f" in row["detail"]
+
+
 def test_plain_text_turn_then_next_user_starts_a_new_task():
     entries = [
         _e("2026-01-01T00:00:00.000Z", type="user", content="one"),

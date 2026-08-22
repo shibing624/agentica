@@ -894,11 +894,17 @@ class Model(ABC):
                 decision = "deny"
             session_log = _agent._session_log
             if session_log is not None and fc.approval_waited:
-                session_log.append_event(
-                    "approval_decision",
-                    tool_call_id=fc.call_id or "",
-                    decision=decision,
-                )
+                payload: Dict[str, Any] = {
+                    "tool_call_id": fc.call_id or "",
+                    "decision": decision,
+                    "tool": fc.function.name,
+                }
+                if fc.approval_trace:
+                    payload.update(
+                        {k: v for k, v in fc.approval_trace.items() if v is not None}
+                    )
+                    payload["decision"] = decision
+                session_log.append_event("approval_decision", **payload)
             if decision in ("allow", "allow_prefix"):
                 return False
             fc.result = DENIED_TOOL_RESULT

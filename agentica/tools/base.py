@@ -437,6 +437,10 @@ class FunctionCall(BaseModel):
     # Auto-allow and unattended deny stay False so session logs / traces are
     # not flooded with a decision for every read_file.
     approval_waited: bool = False
+    # Filled by ``make_approve`` after a human decision: request card, wait
+    # duration, and any similar-grant that was recorded. Logged onto the
+    # ``approval_decision`` session event.
+    approval_trace: Optional[Dict[str, Any]] = None
 
     def is_concurrency_safe(self) -> bool:
         """Whether this call may overlap with the rest of its batch.
