@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 _CANCEL_WAIT_S = 30.0
 _CANCEL_FORCE_S = 2.0
+# Finished runs stay long enough for a refresh to replay, then go away.
+RETAIN_AFTER_DONE_S = 600.0
 
 # starting | running | cancelling | completed | cancelled | failed
 _TERMINAL = frozenset({"completed", "cancelled", "failed"})
@@ -35,6 +37,7 @@ class LiveTurn:
         self.events: list[dict] = []
         self.task: Optional[asyncio.Task] = None
         self.done = False
+        self.finished_at = 0.0
         self._subs: list[asyncio.Queue] = []
 
     def public(self) -> Dict[str, Any]:
@@ -60,6 +63,7 @@ class LiveTurn:
             return
         self.status = status
         self.done = True
+        self.finished_at = time.monotonic()
         for q in list(self._subs):
             q.put_nowait(None)
 
@@ -85,11 +89,21 @@ _by_run: Dict[str, LiveTurn] = {}
 _by_session: Dict[str, str] = {}
 
 
+def gc() -> None:
+    """Drop finished runs whose reconnect window has expired."""
+    now = time.monotonic()
+    for rid, turn in list(_by_run.items()):
+        if turn.done and turn.finished_at and now - turn.finished_at >= RETAIN_AFTER_DONE_S:
+            _drop_run(rid)
+
+
 def get_run(run_id: str) -> Optional[LiveTurn]:
+    gc()
     return _by_run.get(run_id)
 
 
 def get(session_id: str) -> Optional[LiveTurn]:
+    gc()
     rid = _by_session.get(session_id)
     return _by_run.get(rid) if rid else None
 
@@ -102,16 +116,28 @@ def active(session_id: str) -> Optional[LiveTurn]:
 
 
 def start(session_id: str, owner: str, kind: str = "chat") -> LiveTurn:
+    gc()
     turn = LiveTurn(session_id, owner, kind)
     _by_run[turn.run_id] = turn
     _by_session[session_id] = turn.run_id
     return turn
 
 
+def _drop_run(run_id: str) -> None:
+    turn = _by_run.pop(run_id, None)
+    if turn is None:
+        return
+    if _by_session.get(turn.session_id) == run_id:
+        _by_session.pop(turn.session_id, None)
+
+
 def drop(session_id: str) -> None:
     rid = _by_session.pop(session_id, None)
     if rid:
         _by_run.pop(rid, None)
+    for r, t in list(_by_run.items()):
+        if t.session_id == session_id:
+            _by_run.pop(r, None)
 
 
 def reset() -> None:

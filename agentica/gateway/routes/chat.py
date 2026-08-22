@@ -69,13 +69,20 @@ def _conflict_if_live(session_id: str) -> None:
         )
 
 
+_SSE_KEEPALIVE_S = 15.0
+
+
 async def _sse_from_turn(turn: live_turn.LiveTurn, after: int = 0):
     """Yield SSE bytes. Client disconnect unsubscribes; the agent keeps running."""
     q = turn.subscribe(after=after)
     try:
         yield ": keepalive\n\n"
         while True:
-            item = await q.get()
+            try:
+                item = await asyncio.wait_for(q.get(), timeout=_SSE_KEEPALIVE_S)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
             if item is None:
                 yield "data: [DONE]\n\n"
                 break

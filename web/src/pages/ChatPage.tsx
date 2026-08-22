@@ -56,8 +56,7 @@ export function ChatPage() {
   const goalRun = s.curSess ? s.goalRuns[s.curSess] : undefined;
   const compacting = !!(s.curSess && s.commandRuns[s.curSess]);
   const busy = streaming || !!goalRun || compacting;
-  const hasDraft = !!(s.inputText.trim() || s.pendingFiles.length);
-  const showStop = busy && !compacting && !hasDraft;
+  const showStop = busy && !compacting;
   const cur = s.curSess ? s.sessions[s.curSess] : null;
   const queued = s.messageQueue.filter((q) => q.sessionId === s.curSess);
   const q = slashQuery(s.inputText);
@@ -71,8 +70,13 @@ export function ChatPage() {
   useEffect(() => { if (slashOpen) setSkillsOpen(false); }, [slashOpen]);
   useEffect(() => {
     const onHide = () => { pageUnloading = true; };
+    const onShow = () => { pageUnloading = false; };
     window.addEventListener("pagehide", onHide);
-    return () => window.removeEventListener("pagehide", onHide);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
+    };
   }, []);
   useEffect(() => {
     const id = s.pendingResume;
@@ -297,6 +301,11 @@ export function ChatPage() {
                     setState({ inputText: "" });
                     return;
                   }
+                }
+                if (e.key === "Escape" && busy && !compacting) {
+                  e.preventDefault();
+                  void stopGen();
+                  return;
                 }
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
@@ -684,7 +693,11 @@ async function submit() {
     return;
   }
 
-  if (!text && !files.length) return;
+  if (!text && !files.length) {
+    const sessId = st.curSess;
+    if (sessId && isBusy(sessId) && !isCompacting(sessId)) await stopGen();
+    return;
+  }
   const cmd = parseWebCommand(text);
   if (cmd?.kind === "goal") {
     setState({ inputText: cmd.arg, pendingFiles: [], goalCompose: { budgetText: "" } });
@@ -796,8 +809,12 @@ function takeLiveAssistant(sess: { msgs: ChatMsg[] }): ChatMsg {
   if (last?.role === "assistant") {
     const err = (last.error || "").toLowerCase();
     const disconnected = err.includes("network") || err.includes("failed to fetch") || err.includes("load failed");
-    const incomplete = last.tokIn == null && !last.aborted;
-    if (disconnected || incomplete) {
+    const parts = last.parts || [];
+    const unfinished = parts.some(
+      (p) => (p.kind === "think" && p.ms == null) || (p.kind === "tool" && p.result == null),
+    );
+    const blank = !last.content && !parts.length && !last.aborted && last.tokIn == null;
+    if (disconnected || unfinished || blank) {
       last.content = "";
       last.parts = [];
       last.steps = [];
@@ -819,11 +836,12 @@ async function consumeSse(
   t0: number,
   onStatus?: (d: any) => void,
   afterSeq = 0,
-): Promise<number> {
+): Promise<{ lastSeq: number; terminal: boolean }> {
   const reader = resp.body!.getReader();
   const dec = new TextDecoder();
   let buf = "";
   let lastSeq = afterSeq;
+  let terminal = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -833,7 +851,10 @@ async function consumeSse(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       const raw = line.slice(6);
-      if (raw === "[DONE]") continue;
+      if (raw === "[DONE]") {
+        terminal = true;
+        continue;
+      }
       let evt: any;
       try { evt = JSON.parse(raw); } catch { continue; }
       if (typeof evt.seq === "number") {
@@ -841,6 +862,9 @@ async function consumeSse(
         lastSeq = evt.seq;
         const live = getState().streams[sessId];
         if (live) live.lastSeq = lastSeq;
+      }
+      if (evt.event === "done" || evt.event === "error" || evt.event === "aborted") {
+        terminal = true;
       }
       if (applyLiveSseEvent(aiMsg, evt)) continue;
       if (evt.event === "status" && evt.data && onStatus) onStatus(evt.data);
@@ -876,7 +900,7 @@ async function consumeSse(
       }
     }
   }
-  return lastSeq;
+  return { lastSeq, terminal };
 }
 
 async function finishLive(sessId: string, aiMsg: ChatMsg, t0: number, disconnected: boolean) {
@@ -922,8 +946,15 @@ async function watchRun(
         return false;
       }
       if (live) live.reconnecting = false;
-      lastSeq = await consumeSse(resp, sessId, sess, aiMsg, t0, onStatus, lastSeq);
-      return false;
+      const got = await consumeSse(resp, sessId, sess, aiMsg, t0, onStatus, lastSeq);
+      lastSeq = got.lastSeq;
+      if (got.terminal) return false;
+      if (getState().streams[sessId]?.userStopped || abortCtrl.signal.aborted) {
+        aiMsg.aborted = !!getState().streams[sessId]?.userStopped;
+        return false;
+      }
+      if (pageUnloading) return true;
+      await new Promise((r) => setTimeout(r, Math.min(4000, 300 * (attempt + 1))));
     } catch (e: any) {
       const stopped = getState().streams[sessId]?.userStopped;
       if (stopped) {
@@ -1036,6 +1067,11 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
       return;
     }
     if (live) live.runId = created.data.run_id;
+    if (getState().streams[sessId]?.userStopped || abortCtrl.signal.aborted) {
+      await api.cancelRunApi(created.data.run_id);
+      aiMsg.aborted = true;
+      return;
+    }
     disconnected = await watchRun(sessId, sess, aiMsg, t0, created.data.run_id, abortCtrl);
   } catch (e: any) {
     const stopped = getState().streams[sessId]?.userStopped;
@@ -1179,6 +1215,13 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
     const found = await api.fetchActiveRun(sessId);
     const live = getState().streams[sessId];
     if (live && found.ok && found.data?.run) live.runId = found.data.run.run_id;
+    if (getState().streams[sessId]?.userStopped || abortCtrl.signal.aborted) {
+      const runId = getState().streams[sessId]?.runId;
+      if (runId) await api.cancelRunApi(runId);
+      else await api.cancelChatApi(sessId);
+      aiMsg.aborted = true;
+      return;
+    }
     const onStatus = (d: any) => {
       setGoalRun(sessId, {
         status: d.status || "active",
@@ -1186,10 +1229,21 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
         progress: d.progress || "",
       });
     };
-    await consumeSse(resp, sessId, sess, aiMsg, t0, onStatus);
+    const got = await consumeSse(resp, sessId, sess, aiMsg, t0, onStatus);
+    if (!got.terminal) {
+      const runId = getState().streams[sessId]?.runId;
+      if (runId) {
+        disconnected = await watchRun(sessId, sess, aiMsg, t0, runId, abortCtrl, onStatus);
+      }
+    }
   } catch (e: any) {
     const stopped = getState().streams[sessId]?.userStopped;
-    if (stopped) aiMsg.aborted = true;
+    if (stopped) {
+      aiMsg.aborted = true;
+      const runId = getState().streams[sessId]?.runId;
+      if (runId) await api.cancelRunApi(runId);
+      else await api.cancelChatApi(sessId);
+    }
     else if (pageUnloading) disconnected = true;
     else if (isDisconnectErr(e)) {
       const runId = getState().streams[sessId]?.runId;

@@ -130,7 +130,7 @@ function formatHandoff(args: Record<string, unknown>, bodyKey: string, metaKeys:
     meta.push(typeof value === "string" ? `${key}=${reprStr(value)}` : `${key}=${value}`);
   }
   if (body) {
-    const indented = (body.split("\n").length ? body.split("\n") : [""]).join("\n    ");
+    const indented = body.split("\n").join("\n    ");
     return meta.length ? meta.join(", ") + "\n    " + indented : indented;
   }
   return meta.join(", ");

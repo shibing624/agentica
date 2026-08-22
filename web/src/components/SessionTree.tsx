@@ -36,7 +36,13 @@ export function SessionTree() {
     for (const g of grouped) {
       g.sessions.sort((a, b) => b.session.ts - a.session.ts);
     }
-    grouped.sort((a, b) => (b.sessions[0]?.session.ts || 0) - (a.sessions[0]?.session.ts || 0));
+    // Project order is when that directory first got a chat, not the newest
+    // session — otherwise an old project jumps to the top on "new chat".
+    grouped.sort((a, b) => {
+      const aFirst = a.sessions[a.sessions.length - 1]?.session.ts || 0;
+      const bFirst = b.sessions[b.sessions.length - 1]?.session.ts || 0;
+      return bFirst - aFirst;
+    });
     return grouped;
   }, [s.rev, s.sidebarSearch]);
 

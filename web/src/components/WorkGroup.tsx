@@ -144,12 +144,25 @@ function ToolRow({ part }: { part: Extract<MsgPart, { kind: "tool" }> }) {
   const displayLayout = layoutToolDisplay(part.name, display);
   const showArgsBody = displayLayout.body.trim().length > 0;
   const showResult = Boolean(resultText) && !showDiff && (isError || !hideResult);
+  const autoOpen = running || showArgsBody || showResult || showDiff;
+  const userToggled = useRef(false);
+  const [open, setOpen] = useState(autoOpen);
+  useEffect(() => {
+    if (!userToggled.current) setOpen(autoOpen);
+  }, [autoOpen]);
   const duration = part.ms != null
     ? part.ms
     : (running && part.t0 != null ? Date.now() - part.t0 : 0);
   return (
-    <details className={"work-step work-tool" + (running ? " running" : "")} open={running || showArgsBody || showResult || showDiff}>
-      <summary className="work-step-head">
+    <details className={"work-step work-tool" + (running ? " running" : "")} open={open}>
+      <summary
+        className="work-step-head"
+        onClick={(e) => {
+          e.preventDefault();
+          userToggled.current = true;
+          setOpen((v) => !v);
+        }}
+      >
         <span className="work-icon">{running ? <IconSpinner /> : <IconCheck />}</span>
         <span className="work-step-name">{part.name}</span>
         {displayLayout.header ? <span className="step-tool-args" title={display}>{displayLayout.header}</span> : null}

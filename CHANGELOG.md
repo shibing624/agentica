@@ -59,8 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **工具泳道按工具名合并，图例五项**：原先每个工具调用各占一条泳道，一轮里调 20 次 `read_file` 就是 20 条几乎一样的线；现在同名工具收进一条泳道（并发调用才在道内错开分层，道尾标调用次数），并且图例五个阶段常驻（思考 / 模型回复 / 工具参数生成 / 审批等待 / 工具执行）——只画本轮出现过的颜色，会让两轮之间的同一个颜色对应不同阶段。不再画「其它」：那是墙钟减去各段之后的残差，时间线上本来就没有对应的条。
 
 #### fixes
+- **Web 生成中空 Enter 会停止，Stop 按钮一直在**：placeholder 写着「空输入为停止」，但空 Enter 直接 return；输入框有草稿时按钮还会变成发送。busy 期间按钮恒为 Stop，空 Enter / Esc 都停止。
+- **创建 run 途中点 Stop 不再留下孤儿任务**：`POST /api/chat/runs` 返回后若用户已停止，立刻 `cancelRunApi`，避免 UI 已 aborted、后端仍占 session lock。
+- **SSE 空闲 15s 发 keepalive；干净 EOF 且未见 `done`/`error`/`aborted` 则按断线重连**：前置代理闲置掐流不会再被当成回合完成。
+- **已结束的 live_turn 10 分钟后从注册表丢掉**：完成/取消后仍可重连回放，超时释放事件缓冲，删会话立刻清掉。
 - **Steer 打断思考时上一张思考卡片停止计时**：插话把思考切到下一张卡，但上一张 `ms` 没冻住，墙钟还在涨。现在插入 steer 或开新思考切片都会 `finishThink`。
-- **Web 侧栏按会话创建时间排序**：jsonl 首行 `first_timestamp` 是第一次请求。`GET /api/sessions` 和侧栏都按它倒序（新在上），发消息不再把老会话顶上去；「3d」小字也是创建时间，不是最后活动。CLI `/resume` 仍按 mtime 倒序。
+- **Web 侧栏按会话创建时间排序**：jsonl 首行 `first_timestamp` 是第一次请求。`GET /api/sessions` 和侧栏都按它倒序（新在上），发消息不再把老会话顶上去；「3d」小字也是创建时间，不是最后活动。Project 分组按该目录**第一次**出现会话的时间排，给旧项目加 New Chat 不会把它顶到最上面。CLI `/resume` 仍按 mtime 倒序。
 - **Web 对话不再狂打 `/api/workspace/stat`**：消息底部的文件卡片原先跟着流式正文每一帧重抽路径，数组换了引用就 POST 一次，长回答会打满日志。现在流式期间不查；路径集合没变也不查；同一帧里多条消息合并成一次请求。
 - **Web 工具调用一开始就上屏**：思考是流式的，但 `execute` 这类要跑一会儿的工具要等完成才出现——`flushStream()` 以前只在有挂起的 rAF 时才 `bump()`，思考停了之后那条 `tool_call` SSE 改了数据却不重绘。现在结构事件立刻绘制。
 - **Web 回答过程闪屏**：每 token 整段 Markdown 重挂载（`components={{}}` 每次新对象）、`.bub pre{transition:all .2s}` 让代码块从 0 高度动画出来。改成 120ms 节流、冻结的 `ChatMarkdown`（流式跳过高亮/KaTeX，结束后高亮一次）、光标改成独立 caret，去掉 pre 的全属性 transition。

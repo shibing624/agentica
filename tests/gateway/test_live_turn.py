@@ -2,6 +2,7 @@
 """Web chat run registry: reconnect, seq replay, cancel waits for the lock."""
 import asyncio
 import os
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
@@ -123,3 +124,46 @@ def test_cancel_and_wait_releases_lock_and_finishes_task():
         assert not lock.locked()
 
     asyncio.run(scenario())
+
+
+def test_gc_keeps_finished_run_inside_retain_window():
+    turn = live_turn.start("s1", owner="default")
+    rid = turn.run_id
+    turn.finish("completed")
+    live_turn.gc()
+    assert live_turn.get_run(rid) is turn
+
+
+def test_gc_drops_finished_run_after_retain_window():
+    turn = live_turn.start("s1", owner="default")
+    rid = turn.run_id
+    turn.finish("completed")
+    turn.finished_at = time.monotonic() - live_turn.RETAIN_AFTER_DONE_S - 1
+    live_turn.gc()
+    assert live_turn.get_run(rid) is None
+    assert live_turn.get("s1") is None
+
+
+def test_drop_session_removes_retained_runs():
+    turn = live_turn.start("s1", owner="default")
+    turn.finish("completed")
+    live_turn.drop("s1")
+    assert live_turn.get_run(turn.run_id) is None
+
+
+def test_sse_keepalive_when_queue_is_idle(monkeypatch):
+    from agentica.gateway.routes import chat as chat_mod
+
+    monkeypatch.setattr(chat_mod, "_SSE_KEEPALIVE_S", 0.05)
+    turn = live_turn.start("k", owner="default")
+
+    async def take_two():
+        gen = chat_mod._sse_from_turn(turn)
+        first = await gen.__anext__()
+        second = await gen.__anext__()
+        await gen.aclose()
+        return first, second
+
+    first, second = asyncio.run(take_two())
+    assert first.startswith(": keepalive")
+    assert second.startswith(": keepalive")
