@@ -39,6 +39,28 @@ class TestIsReadOnlyCommand(unittest.TestCase):
             "git status",
             "git blame agentica/subagent.py",
             "git -C /tmp/repo status",
+            "git branch",
+            "git branch --show-current",
+            "git branch -a",
+        ]:
+            self.assert_allowed(command)
+
+    def test_read_only_wrappers_allowed(self):
+        """cd / env / pager / bash -c wrappers around a read-only command."""
+        long_diff = (
+            "cd . && git diff HEAD -- agentica/gateway/services/agent_service.py "
+            "agentica/cli/approvals.py | head -400"
+        )
+        for command in [
+            long_diff,
+            "cd . && git diff HEAD -- a.py",
+            "GIT_PAGER=cat git diff",
+            "git diff | head -400",
+            "git diff | less",
+            "find . -name '*.py'",
+            "sed -n '1,10p' a.py",
+            "bash -lc 'git diff'",
+            "bash -lc 'cd . && git diff | head -400'",
         ]:
             self.assert_allowed(command)
 
@@ -50,6 +72,12 @@ class TestIsReadOnlyCommand(unittest.TestCase):
             "git reset --hard",
             "git stash",
             "git fetch origin",
+            "git branch -d old",
+            "git branch new-feature",
+            "find . -delete",
+            "find . -exec rm {} +",
+            "sed -i 's/a/b/' a.py",
+            "bash -lc 'git commit -m x'",
         ]:
             self.assert_refused(command)
 
@@ -87,7 +115,7 @@ class TestIsReadOnlyCommand(unittest.TestCase):
             "python script.py",
             "python3 -c 'import shutil'",
             "bash deploy.sh",
-            "sh -c ls",
+            "sh -c 'git commit -m x'",
         ]:
             self.assert_refused(command)
 

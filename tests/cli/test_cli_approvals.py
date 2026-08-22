@@ -34,6 +34,7 @@ def _agent(*, mode="ask", work_dir="/tmp/work", cancelled=False):
         tool_config=SimpleNamespace(permission_mode=mode),
         work_dir=work_dir,
         tools=[],
+        user_id="default",
         _cancelled=cancelled,
     )
 
@@ -74,7 +75,7 @@ class TestApprovalPromptCopy:
         assert "Environment: local" in text
         assert "$ rm -f /Users/xuming/Documents/temp/1.ini" in text
         assert "1. Yes, proceed (y)" in text
-        assert "don't ask again for commands that start with `rm -f ...`" in text
+        assert "don't ask again for `rm -f` commands (p)" in text
         assert "No, and tell the agent what to do differently (esc)" in text
 
     def test_file_and_network_option_two(self):
@@ -98,6 +99,20 @@ class TestApprovalPromptCopy:
         assert "don't ask again for this class of network tool" in net_text
         assert "Would you like to allow this file operation?" in file_text
         assert "Would you like to allow this network request?" in net_text
+
+    def test_compound_execute_hides_prefix_option(self):
+        pending = PendingApproval(
+            tool_call_id="t4",
+            name="execute",
+            arguments={"command": "echo hi && rm -f /tmp/x"},
+            question="q",
+            preview="echo hi && rm -f /tmp/x",
+            options=("allow", "deny"),
+        )
+        text = format_approval_prompt(pending)
+        assert "Yes, proceed (y)" in text
+        assert "(p)" not in text
+        assert "don't ask again" not in text
 
     def test_ask_prompt_lines_skip_typed_answer_hint(self):
         req = _InputRequest(

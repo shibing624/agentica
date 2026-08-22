@@ -152,11 +152,14 @@ class SessionState:
     # line into the queue instead of pending_queue. None when no request pending.
     # ``kind="approval"`` is the same slot used for Codex y/p/esc tool approval.
     input_request: Optional["_InputRequest"] = None
-    # Session-scoped tool-approval memory (not persisted). Shared across
-    # /model rebuilds so "don't ask again" survives a profile switch.
+    # Session-scoped tool-approval memory. Prefix ("allow similar") grants
+    # load from / save to this project's ``project.json``; allow-once stays
+    # in process. Shared across /model rebuilds.
     approval_registry: ApprovalRegistry = field(default_factory=ApprovalRegistry)
     approval_grants: SessionGrants = field(default_factory=SessionGrants)
     approval_loop: Any = None
+    # Serialises parked CLI cards. Created on the running loop.
+    approval_prompt_lock: Any = None
     # Cron scheduler daemon thread (started when settings cron.enabled is true).
     cron_thread: Optional[threading.Thread] = None
     cron_stop_event: Optional[threading.Event] = None

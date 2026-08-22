@@ -177,6 +177,7 @@ class TestApprovalReplay:
             assert found["name"] == "execute"
             assert found["preview"] == "rm -f /tmp/x"
             assert found["options"] == ["allow", "allow_prefix", "deny"]
+            assert found["similar_label"] == ""
             assert "question" in found
             assert found["args"]["command"] == "rm -f /tmp/x"
 

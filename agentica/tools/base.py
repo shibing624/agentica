@@ -433,6 +433,10 @@ class FunctionCall(BaseModel):
 
     # Error while parsing arguments or running the function.
     error: Optional[str] = None
+    # Set by ``make_approve`` only after the call actually parked on a human.
+    # Auto-allow and unattended deny stay False so session logs / traces are
+    # not flooded with a decision for every read_file.
+    approval_waited: bool = False
 
     def is_concurrency_safe(self) -> bool:
         """Whether this call may overlap with the rest of its batch.

@@ -9,7 +9,6 @@ sessions resolve that wait through ``_InputRequest`` + prompt_toolkit keys
 from __future__ import annotations
 
 import asyncio
-import shlex
 from typing import Any, Callable, Dict, Optional
 
 from agentica.agent.approvals import (
@@ -20,9 +19,9 @@ from agentica.agent.approvals import (
     PendingApproval,
     SessionGrants,
     apply_path_grant_on_agent,
+    command_class_display,
     make_approve,
 )
-from agentica.tools.safety import split_compound_command
 
 _KEY_TO_DECISION: Dict[str, ApprovalDecision] = {
     "y": "allow",
@@ -51,12 +50,13 @@ def format_approval_prompt(pending: PendingApproval) -> str:
     """Codex CLI three-option copy for the TUI prompt widget."""
     name = pending.name
     preview = (pending.preview or "").strip() or _preview_from_arguments(name, pending.arguments)
+    allow_prefix = "allow_prefix" in pending.options
     if name in EXECUTE_TOOLS:
         question = "Would you like to run the following command?"
         body = f"$ {preview}" if preview else "$"
-        option2 = (
-            "Yes, and don't ask again for commands that start with "
-            f"`{_command_prefix_display(preview)}` (p)"
+        label = pending.similar_label or command_class_display(preview)
+        option2 = f"Yes, and don't ask again for `{label}` commands (p)" if label else (
+            "Yes, and don't ask again for this class of command (p)"
         )
     elif name in FILE_TOOLS:
         question = "Would you like to allow this file operation?"
@@ -70,15 +70,17 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         question = f"Would you like to allow this {name} call?"
         body = preview
         option2 = f"Yes, and don't ask again for this {name} tool (p)"
-    return (
-        f"{question}\n"
-        f"Environment: local\n"
-        f"{body}\n"
-        f"\n"
-        f"1. Yes, proceed (y)\n"
-        f"2. {option2}\n"
-        f"3. No, and tell the agent what to do differently (esc)"
-    )
+    lines = [
+        question,
+        "Environment: local",
+        body,
+        "",
+        "1. Yes, proceed (y)",
+    ]
+    if allow_prefix:
+        lines.append(f"2. {option2}")
+    lines.append("3. No, and tell the agent what to do differently (esc)")
+    return "\n".join(lines)
 
 
 def submit_approval_decision(req: Any, decision: ApprovalDecision) -> bool:
@@ -152,6 +154,7 @@ def build_noninteractive_approve(agent: Any) -> Callable:
         apply_path_grant=lambda path, prefix: apply_path_grant_on_agent(
             agent, path, prefix=prefix
         ),
+        get_user_id=lambda: agent.user_id,
     )
 
 
@@ -159,8 +162,6 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
     """Park on ``_InputRequest``; y/p/esc on the prompt_toolkit thread decide."""
     from agentica.cli.interactive.console_io import _ask_active, _ask_state_lock
     from agentica.cli.interactive.session_state import _InputRequest
-
-    lock_box: Dict[str, Any] = {"lock": None, "loop": None}
 
     def _agent():
         return state.current_agent
@@ -191,6 +192,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         apply_path_grant=lambda path, prefix: apply_path_grant_on_agent(
             _agent(), path, prefix=prefix
         ),
+        get_user_id=lambda: _agent().user_id if _agent() is not None else None,
     )
 
     async def approve(fc) -> ApprovalDecision:
@@ -198,10 +200,10 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         if agent is not None and agent._cancelled:
             return "deny"
         loop = asyncio.get_running_loop()
-        if lock_box["loop"] is not loop:
-            lock_box["lock"] = asyncio.Lock()
-            lock_box["loop"] = loop
-        async with lock_box["lock"]:
+        if state.approval_prompt_lock is None or state.approval_loop is not loop:
+            state.approval_prompt_lock = asyncio.Lock()
+        state.approval_loop = loop
+        async with state.approval_prompt_lock:
             agent = _agent()
             if agent is not None and agent._cancelled:
                 return "deny"
@@ -231,18 +233,3 @@ def _preview_from_arguments(name: str, arguments: Dict[str, Any]) -> str:
     if name == "web_search":
         return str(arguments.get("queries") or "")
     return str(arguments or "")
-
-
-def _command_prefix_display(command: str) -> str:
-    segments = split_compound_command(command) or [command]
-    if not segments:
-        return "..."
-    try:
-        tokens = shlex.split(segments[0])
-    except ValueError:
-        tokens = segments[0].split()
-    if not tokens:
-        return "..."
-    if len(tokens) > 2:
-        return f"{tokens[0]} {tokens[1]} ..."
-    return " ".join(tokens)

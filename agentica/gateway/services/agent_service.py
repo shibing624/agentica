@@ -51,6 +51,7 @@ from agentica.agent.approvals import (
     SessionGrants,
     apply_path_grant_on_agent,
     make_approve,
+    sync_grants_from_project,
 )
 
 from .response_formatter import extract_metrics, format_tool_call_args, format_tool_result
@@ -156,11 +157,12 @@ def goal_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 # whether execute waits for a human.
 _APPROVAL_MODE_INSTRUCTION = (
     "This session's approval mode can pause a tool call until the user "
-    "confirms it. In \"ask\" mode, in-workspace file reads and writes run "
-    "immediately; paths outside the work directory, sensitive paths, every "
-    "execute, and web_search/fetch_url wait for approval. In \"auto\" mode, "
-    "in-workspace files, read-only commands, and network tools run; "
-    "out-of-workspace or sensitive paths and non-read-only execute wait. "
+    "confirms it. In \"ask\" mode, in-workspace file reads and read-only "
+    "shell commands (including wrappers such as cd && git diff | head) run "
+    "immediately; writes (write_file / apply_patch), paths outside the work "
+    "directory, sensitive paths, mutating execute, and web_search/fetch_url "
+    "wait for approval. In \"auto\" mode, in-workspace files, every execute, "
+    "and network tools run; out-of-workspace or sensitive paths wait. "
     "\"allow-all\" never asks. If a tool result is "
     "\"Tool call denied by user.\", do not retry the same call — tell the "
     "user what you needed and wait for guidance or a mode change."
@@ -678,6 +680,11 @@ class AgentService:
         if grants is None:
             grants = SessionGrants()
             self._session_grants[key] = grants
+            sync_grants_from_project(
+                grants,
+                work_dir=self.get_session_work_dir(session_id, owner),
+                user_id=self._owner(owner),
+            )
         return grants
 
     def _restore_path_grants(
@@ -720,6 +727,7 @@ class AgentService:
             get_work_dir=lambda: self.get_session_work_dir(session_id, owner),
             publish=publish,
             apply_path_grant=apply_path_grant,
+            get_user_id=lambda: owner_id,
         )
 
     def _run_config_for_session(

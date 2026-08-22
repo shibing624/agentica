@@ -175,6 +175,7 @@ def approval_event(pending: PendingApproval) -> Dict[str, Any]:
             "args": pending.arguments,
             "question": pending.question,
             "preview": pending.preview,
+            "similar_label": pending.similar_label,
             "options": list(pending.options),
         },
     }

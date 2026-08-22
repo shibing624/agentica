@@ -17,6 +17,7 @@ export type ApprovalRequest = {
   args: Record<string, unknown>;
   question: string;
   preview: string;
+  similarLabel?: string;
   options: ApprovalDecision[];
 };
 

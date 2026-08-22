@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tupl
 
 from agentica.tools.base import FunctionCall
 from agentica.tools.safety import is_read_only_command, split_compound_command
+from agentica.utils.log import logger
 
 ApprovalDecision = Literal["allow", "allow_prefix", "deny"]
 ApprovalRoute = Literal["allow", "ask"]
@@ -26,8 +27,19 @@ ApprovalRoute = Literal["allow", "ask"]
 DENIED_TOOL_RESULT = "Tool call denied by user."
 
 FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep"})
+WRITE_FILE_TOOLS = frozenset({"write_file", "apply_patch"})
 EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_command"})
 NETWORK_TOOLS = frozenset({"web_search", "fetch_url"})
+# Session-local / human-prompt tools: never worth a confirmation card.
+BENIGN_ALWAYS_ALLOW = frozenset({
+    "write_todos",
+    "ask_user_question",
+    "save_memory",
+    "search_memory",
+    "list_skills",
+    "list_agents",
+    "task",
+})
 
 _BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")
 
@@ -41,6 +53,7 @@ class PendingApproval:
     arguments: Dict[str, Any]
     question: str
     preview: str
+    similar_label: str = ""
     options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny")
 
 
@@ -89,7 +102,13 @@ class ApprovalRegistry:
 
 @dataclass
 class SessionGrants:
-    """In-session allow-once / allow-similar memory. Not persisted."""
+    """Allow-once (ephemeral) plus allow-similar (project.json) memory.
+
+    ``path_exact`` / ``network_keys`` last for this process only. Prefix
+    fields are the project approval table: loaded from and saved to
+    ``project.json`` ``approvals`` (same file as ``work_dir`` /
+    ``active_profile``).
+    """
 
     path_exact: set = field(default_factory=set)
     path_prefixes: set = field(default_factory=set)
@@ -97,6 +116,47 @@ class SessionGrants:
     network_keys: set = field(default_factory=set)
     network_tools: set = field(default_factory=set)
     tool_names: set = field(default_factory=set)
+
+    def durable_payload(self) -> Dict[str, Any]:
+        """JSON object for ``project.json`` ``approvals``. Empty keys omitted."""
+        payload: Dict[str, Any] = {}
+        if self.command_prefixes:
+            cmds = [list(t) for t in self.command_prefixes if len(t) >= 2]
+            if cmds:
+                payload["command_prefixes"] = cmds
+        if self.path_prefixes:
+            payload["path_prefixes"] = sorted(self.path_prefixes)
+        if self.network_tools:
+            payload["network_tools"] = sorted(self.network_tools)
+        if self.tool_names:
+            payload["tool_names"] = sorted(self.tool_names)
+        return payload
+
+    def absorb_durable(self, data: Any) -> None:
+        """Union prefix grants from a ``project.json`` ``approvals`` object."""
+        if not isinstance(data, dict):
+            return
+        raw_cmds = data.get("command_prefixes")
+        if isinstance(raw_cmds, list):
+            for item in raw_cmds:
+                tokens = _coerce_command_prefix(item)
+                if tokens and tokens not in self.command_prefixes:
+                    self.command_prefixes.append(tokens)
+        raw_paths = data.get("path_prefixes")
+        if isinstance(raw_paths, list):
+            for path in raw_paths:
+                if isinstance(path, str) and path:
+                    self.path_prefixes.add(path)
+        raw_net = data.get("network_tools")
+        if isinstance(raw_net, list):
+            for name in raw_net:
+                if isinstance(name, str) and name:
+                    self.network_tools.add(name)
+        raw_tools = data.get("tool_names")
+        if isinstance(raw_tools, list):
+            for name in raw_tools:
+                if isinstance(name, str) and name:
+                    self.tool_names.add(name)
 
     def covers(self, fc: FunctionCall, *, work_dir: Optional[str]) -> bool:
         name = fc.function.name
@@ -124,7 +184,7 @@ class SessionGrants:
             self.path_exact.add(resolved)
 
     def add_command_prefix(self, command: str) -> None:
-        tokens = _first_segment_tokens(command)
+        tokens = command_class_tokens(command)
         if tokens and tokens not in self.command_prefixes:
             self.command_prefixes.append(tokens)
 
@@ -149,13 +209,71 @@ class SessionGrants:
         return False
 
     def _command_covered(self, command: str) -> bool:
-        tokens = _first_segment_tokens(command)
+        tokens = command_class_tokens(command)
         if tokens is None:
             return False
         for prefix in self.command_prefixes:
+            if len(prefix) < 2:
+                continue
             if len(tokens) >= len(prefix) and tokens[: len(prefix)] == prefix:
                 return True
         return False
+
+
+def sync_grants_from_project(
+    grants: SessionGrants,
+    *,
+    work_dir: Optional[str],
+    user_id: Optional[str],
+) -> None:
+    """Pull this project's durable approval table into ``grants``."""
+    if not work_dir:
+        return
+    from agentica.project_store import project_base_dir, read_project_file
+
+    grants.absorb_durable(read_project_file(project_base_dir(work_dir, user_id)).get("approvals"))
+
+
+def persist_grants_to_project(
+    grants: SessionGrants,
+    *,
+    work_dir: Optional[str],
+    user_id: Optional[str],
+) -> None:
+    """Union ``grants`` prefix fields into ``project.json`` ``approvals``."""
+    if not work_dir:
+        return
+    from agentica.project_store import (
+        ensure_project_work_dir,
+        project_base_dir,
+        read_project_file,
+        write_project_file,
+    )
+
+    base = project_base_dir(work_dir, user_id)
+    try:
+        ensure_project_work_dir(base, work_dir)
+        data = read_project_file(base)
+        merged = SessionGrants()
+        merged.absorb_durable(data.get("approvals"))
+        merged.absorb_durable(grants.durable_payload())
+        payload = merged.durable_payload()
+        if payload:
+            data["approvals"] = payload
+        else:
+            data.pop("approvals", None)
+        write_project_file(base, data)
+    except OSError as e:
+        logger.debug(f"Could not persist project approvals: {e}")
+
+
+def _coerce_command_prefix(item: Any) -> Optional[Tuple[str, ...]]:
+    if not isinstance(item, (list, tuple)) or not item:
+        return None
+    tokens = tuple(part for part in item if isinstance(part, str) and part)
+    if len(tokens) < 2:
+        return None
+    return tokens
 
 
 def classify(
@@ -172,17 +290,22 @@ def classify(
         return "allow"
 
     name = fc.function.name
+    if name in BENIGN_ALWAYS_ALLOW:
+        return "allow"
+
     if name in FILE_TOOLS:
         paths = call_paths(fc, work_dir=work_dir)
         if not paths:
+            return "ask"
+        if mode == "ask" and name in WRITE_FILE_TOOLS:
             return "ask"
         if any(_file_needs_approval(p, work_dir=work_dir) for p in paths):
             return "ask"
         return "allow"
 
     if name in EXECUTE_TOOLS:
-        if mode == "ask":
-            return "ask"
+        if mode == "auto":
+            return "allow"
         command = _call_command(fc) or ""
         ok, _reason = is_read_only_command(command)
         return "allow" if ok else "ask"
@@ -190,18 +313,65 @@ def classify(
     if name in NETWORK_TOOLS:
         return "ask" if mode == "ask" else "allow"
 
-    flagged = fc.function.is_read_only or fc.function.is_destructive
-    if not flagged:
-        return "ask" if mode == "ask" else "allow"
-    return "allow"
+    if fc.function.is_destructive:
+        return "ask"
+    if fc.function.is_read_only:
+        return "allow"
+    return "ask" if mode == "ask" else "allow"
 
 
 def command_allows_prefix(command: str) -> bool:
-    """Redirects, command substitution, and heredocs are allow-once only."""
+    """Compound commands, redirects, substitutions, and heredocs are allow-once only."""
+    segments = split_compound_command(command) or [command]
+    if len(segments) != 1:
+        return False
     if "$(" in command or "`" in command or "<<" in command:
         return False
     stripped = _BENIGN_REDIRECT.sub("", command)
-    return ">" not in stripped
+    if ">" in stripped:
+        return False
+    return command_class_tokens(command) is not None
+
+
+def command_class_tokens(command: str) -> Optional[Tuple[str, ...]]:
+    """Argv class for allow-similar: command + flags (+ one subcommand), never filenames.
+
+    ``rm -f /tmp/a.ini`` → ``("rm", "-f")``. Returns None (allow-once only) for
+    compound commands and for a class shorter than 2 tokens — otherwise
+    ``bash deploy.sh`` would grant every later ``bash -c`` / ``python -c`` /
+    ``sudo …``. Flags that appear after the first positional (``find . -name``)
+    stay in the class; that is a known argv-class blind spot, not a second
+    matcher.
+    """
+    segments = split_compound_command(command) or [command]
+    if len(segments) != 1:
+        return None
+    try:
+        tokens = tuple(shlex.split(segments[0]))
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+    out: List[str] = [tokens[0]]
+    saw_positional = False
+    for tok in tokens[1:]:
+        if _is_flag_token(tok):
+            out.append(tok)
+            continue
+        if _looks_like_path_or_file(tok):
+            break
+        if saw_positional:
+            break
+        out.append(tok)
+        saw_positional = True
+    if len(out) < 2:
+        return None
+    return tuple(out)
+
+
+def command_class_display(command: str) -> str:
+    tokens = command_class_tokens(command)
+    return " ".join(tokens) if tokens else ""
 
 
 def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
@@ -232,7 +402,7 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
     return [_resolve_tool_path(p, work_dir) for p in raw]
 
 
-def describe_approval(fc: FunctionCall) -> Tuple[str, str]:
+def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tuple[str, str]:
     """``(question, preview)`` for an approval card. No extra LLM call."""
     name = fc.function.name
     args = fc.arguments or {}
@@ -240,7 +410,7 @@ def describe_approval(fc: FunctionCall) -> Tuple[str, str]:
         preview = str(args.get("command") or "")
         return "Allow running the following command?", preview
     if name in FILE_TOOLS:
-        preview = "; ".join(call_paths(fc, work_dir=None) or [str(args)])
+        preview = "; ".join(call_paths(fc, work_dir=work_dir) or [str(args)])
         return f"Allow this {name} call?", preview
     if name == "web_search":
         preview = str(args.get("queries") or "")
@@ -269,30 +439,46 @@ def make_approve(
     get_work_dir: Callable[[], Optional[str]],
     publish: Callable[[PendingApproval], None],
     apply_path_grant: Callable[[str, bool], None],
+    get_user_id: Optional[Callable[[], Optional[str]]] = None,
 ) -> Callable[[FunctionCall], Awaitable[ApprovalDecision]]:
     """Build the ``Agent.approve`` callback.
 
     ``get_registry`` returning None is an immediate deny on the manual path
     (no LiveTurn, IM, cron, non-streaming POST, SDK without a TUI).
+    Allow-similar grants are stored in this project's ``project.json``.
     """
 
     async def approve(fc: FunctionCall) -> ApprovalDecision:
         mode = get_mode()
         grants = get_grants()
         work_dir = get_work_dir()
+        user_id = get_user_id() if get_user_id is not None else None
+        sync_grants_from_project(grants, work_dir=work_dir, user_id=user_id)
+        for path in list(grants.path_prefixes):
+            apply_path_grant(path, True)
         if classify(mode, fc, grants, work_dir=work_dir) == "allow":
             return "allow"
         registry = get_registry()
         if registry is None:
             return "deny"
-        question, preview = describe_approval(fc)
+        question, preview = describe_approval(fc, work_dir=work_dir)
+        similar_label = ""
+        options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny")
+        if fc.function.name in EXECUTE_TOOLS:
+            command = _call_command(fc) or ""
+            similar_label = command_class_display(command)
+            if not command_allows_prefix(command) or not similar_label:
+                options = ("allow", "deny")
         pending = PendingApproval(
             tool_call_id=fc.call_id or "",
             name=fc.function.name,
             arguments=dict(fc.arguments or {}),
             question=question,
             preview=preview,
+            similar_label=similar_label,
+            options=options,
         )
+        fc.approval_waited = True
         waiter = registry.wait(pending)
         publish(pending)
         decision = await waiter
@@ -300,11 +486,14 @@ def make_approve(
             return "deny"
         if decision == "deny":
             return "deny"
-        _record_grant(fc, grants, work_dir=work_dir, prefix=decision == "allow_prefix")
+        prefix = decision == "allow_prefix"
+        _record_grant(fc, grants, work_dir=work_dir, prefix=prefix)
+        if prefix:
+            persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
         if fc.function.name in FILE_TOOLS:
             for path in call_paths(fc, work_dir=work_dir):
                 sensitive = _is_sensitive_path(path)
-                apply_path_grant(path, (decision == "allow_prefix") and not sensitive)
+                apply_path_grant(path, prefix and not sensitive)
         return decision
 
     return approve
@@ -370,6 +559,17 @@ def _path_is_under(resolved: str, root: str) -> bool:
     return resolved.startswith(prefix + "/") or resolved.startswith(prefix + os.sep)
 
 
+def _is_flag_token(tok: str) -> bool:
+    return tok.startswith("-") and tok != "-"
+
+
+def _looks_like_path_or_file(tok: str) -> bool:
+    if tok.startswith(("/", "~", "./", "../")) or "/" in tok or "\\" in tok:
+        return True
+    name = Path(tok).name
+    return "." in name and not name.startswith(".")
+
+
 def _call_command(fc: FunctionCall) -> Optional[str]:
     command = (fc.arguments or {}).get("command")
     return command if isinstance(command, str) else None
@@ -386,14 +586,3 @@ def _network_key(fc: FunctionCall) -> Optional[str]:
         url = args.get("url")
         return url if isinstance(url, str) else None
     return None
-
-
-def _first_segment_tokens(command: str) -> Optional[Tuple[str, ...]]:
-    segments = split_compound_command(command) or [command]
-    if not segments:
-        return None
-    try:
-        tokens = tuple(shlex.split(segments[0]))
-    except ValueError:
-        return None
-    return tokens or None

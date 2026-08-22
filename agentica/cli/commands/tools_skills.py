@@ -710,14 +710,13 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     if ctx.current_agent:
         con.print(f"[bold cyan]Permission Mode: {ctx.current_agent.tool_config.permission_mode}[/bold cyan]")
         con.print()
-        con.print("  [dim]ask[/dim]        - Ask for approval: workspace files run; network, paths outside the workspace, and every execute need confirmation")
-        con.print("  [dim]auto[/dim]       - Approve for me: only ask about possibly unsafe actions")
+        con.print("  [dim]ask[/dim]        - Ask for approval: workspace reads and read-only shell run; writes, mutating shell, network, and paths outside the workspace need confirmation")
+        con.print("  [dim]auto[/dim]       - Approve for me: only ask about paths outside the workspace or destructive third-party tools")
         con.print("  [dim]allow-all[/dim]  - Full Access: never ask (hard refusals like ~/.ssh still apply)")
         con.print()
         con.print(
             "Tools stay in the schema in every tier. ask does not hide write tools. "
-            "There is no OS sandbox, so execute always parks under ask. "
-            "Allow-similar grants last for this session only.",
+            "Allow-similar grants are stored in this project's project.json.",
             style="dim",
         )
         con.print()

@@ -5,8 +5,9 @@
 
 Owns the ``<projects>/<user>/<sanitize(work_dir)>/`` layout used by sessions,
 tool-result spill, and per-project metadata. One ``project.json`` in that
-directory holds directory-level fields (``work_dir``, ``active_profile``).
-Session-level sidecars (``<id>.meta.json``) stay next to their ``.jsonl``.
+directory holds directory-level fields (``work_dir``, ``active_profile``,
+``approvals``). Session-level sidecars (``<id>.meta.json``) stay next to
+their ``.jsonl``.
 """
 
 from __future__ import annotations

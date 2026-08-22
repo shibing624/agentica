@@ -111,14 +111,17 @@ const en = {
     skillNone: "No matching skill",
     permLabel: (mode: string): string => mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me",
     permHint: (mode: string): string => mode === "ask"
-      ? "Workspace files run without asking. Shell, network, and files outside the workspace need confirmation."
+      ? "Workspace reads and read-only shell run without asking. Writes, mutating shell, network, and files outside the workspace need confirmation."
       : mode === "allow-all"
         ? "Never asks. Hard refusals for /etc and ~/.ssh still apply."
-        : "Asks only when an action may be unsafe: paths outside the workspace, or a shell command that is not read-only.",
+        : "Asks only for paths outside the workspace, or a destructive third-party tool.",
     permTip: (mode: string): string => `${mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me"} (${mode})`,
     approvalDeny: "Deny",
     approvalAllowOnce: "Allow once",
-    approvalAllowSimilar: (name: string): string => {
+    approvalAllowSimilar: (name: string, similarLabel?: string): string => {
+      if (similarLabel) {
+        return `Allow similar \`${similarLabel}\` commands`;
+      }
       if (name === "execute" || name === "bash" || name === "shell" || name === "run_command") {
         return "Allow similar commands";
       }
@@ -636,14 +639,17 @@ const zh: Strings = {
     skillNone: "没有匹配的技能",
     permLabel: (mode: string): string => mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准",
     permHint: (mode: string): string => mode === "ask"
-      ? "工作区内读写自动放行；网络、工作区外文件和所有命令需确认。"
+      ? "工作区内读和只读命令自动放行；写、会改状态的命令、网络、工作区外文件需确认。"
       : mode === "allow-all"
         ? "不询问。对 /etc、~/.ssh 等敏感路径的硬拒绝仍然生效。"
-        : "只询问可能不安全的动作：工作区外路径，以及非只读命令。",
+        : "只询问工作区外路径，以及带破坏性标注的第三方工具。",
     permTip: (mode: string): string => `${mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准"} (${mode})`,
     approvalDeny: "拒绝",
     approvalAllowOnce: "允许一次",
-    approvalAllowSimilar: (name: string): string => {
+    approvalAllowSimilar: (name: string, similarLabel?: string): string => {
+      if (similarLabel) {
+        return `允许类似 \`${similarLabel}\` 命令`;
+      }
       if (name === "execute" || name === "bash" || name === "shell" || name === "run_command") {
         return "允许类似命令";
       }

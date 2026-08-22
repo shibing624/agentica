@@ -563,8 +563,8 @@ curl -X POST http://localhost:8881/api/send \
 
 | 档 | 自动放行 | 停车 |
 |---|---|---|
-| `ask` | 工作区内文件读写（含 `apply_patch`） | 工作区外/敏感路径、**所有 `execute`**、`web_search` / `fetch_url`、未标注的第三方工具 |
-| `auto` | 上面这些，外加只读命令和网络 | 工作区外/敏感路径；非只读的 `execute` |
+| `ask` | 工作区内**读**（`read_file` / `glob` / `grep`）和只读 `execute`（含 `cd . && git diff \| head` 这类包装） | 工作区内**写**（`write_file` / `apply_patch`）、工作区外/敏感路径、会改状态的 `execute`、`web_search` / `fetch_url`、`is_destructive` 第三方工具、未标注的第三方工具 |
+| `auto` | 上面这些，外加工作区内写、**全部 `execute`**（本地先当沙箱）、网络 | 工作区外/敏感路径；`is_destructive` 第三方工具 |
 | `allow-all` | 全部 | 无（`/etc`、`~/.ssh` 等硬拒绝仍直接 `PermissionError`，不弹卡） |
 
 ### Registry 挂在 LiveTurn 上
@@ -582,11 +582,11 @@ curl -X POST http://localhost:8881/api/send \
 流式回合里：
 
 1. `tool_call` 事件带上 `tool_call_id`（以及 `name` / `args`），前端才能把卡挂到那一行。
-2. 需要确认时再发 `approval_request`：`{tool_call_id, name, args, question, preview, options}`。`question` 是模板（「是否允许运行以下命令？」），不另调 LLM。
+2. 需要确认时再发 `approval_request`：`{tool_call_id, name, args, question, preview, similar_label, options}`。`question` 是模板（「是否允许运行以下命令？」），不另调 LLM。`similar_label` 是命令类（`rm -f`），不是文件名。复合命令、以及类短于 2 个 token 的 wrapper（`bash deploy.sh` / `python script.py`）的 `options` 只有 `allow` / `deny`。
 3. 用户点卡：`POST /api/sessions/{session_id}/approvals/{tool_call_id}`，body `{decision: "allow"|"allow_prefix"|"deny"}`。鉴权跟 chat 一样走 cookie 账号（`_account(request)`），按 `(owner, session_id)` 找 LiveTurn——不能点别人的卡。未知 id → 404。
 4. 刷新 / 重连：`GET /api/chat/runs/{run_id}/events?after=` 先按 seq 回放已有事件（含 `tool_call`），再 `republish_pending_approvals()` 把仍未决的卡推一遍。
 
-`allow` 只放行这一次；`allow_prefix` 把本会话后续同类调用自动放行（命令按 argv token 前缀，敏感路径只 grant 该文件本身）。Deny 变成工具结果回给模型，同批其它工具不会 sibling-abort。人停在卡上超过 120s 也不会变成工具 TimeoutError——审批等待在 `wait_for` 之外。
+`allow` 只放行这一次（不落盘）；`allow_prefix` 把本项目后续**同类**调用自动放行，写入该 work_dir 的 `project.json` `approvals`（和 `work_dir` / `active_profile` 同一文件，按账号分区在 `~/.agentica/projects/<user>/<slug>/`）。命令按「可执行文件 + flags + 至多一个 subcommand」成类（`rm -f /tmp/a.ini` 批的是 `rm -f`，下一发 `rm -f /tmp/b.ini` 不再问；`git add` 不会放行 `git push`）。类短于 2 个 token 时不提供「允许类似」：`bash deploy.sh` / `python script.py` 不能永久放行任意 `bash -c` / `python -c`。复合命令也不能用前缀概括，只提供允许一次。argv 类在第一个像文件名的 token 处截断，因此 `find . -name x -exec …` 会被已批的 `find . -name` 覆盖——这是类授权的固有盲区。敏感路径只 grant 该文件本身，且不写入审批表。Deny 变成工具结果回给模型，同批其它工具不会 sibling-abort。人停在卡上超过 120s 也不会变成工具 TimeoutError——审批等待在 `wait_for` 之外。`tool_result` SSE 带 `tool_call_id`，并行工具不会把结果挂错行。`approval_decision` 只在真正停过车的调用上写入 session log。
 
 ## 消息路由
 

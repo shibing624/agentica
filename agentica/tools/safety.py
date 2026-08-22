@@ -11,7 +11,7 @@ import logging
 import os
 import re
 import shlex
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from agentica.security.redact import redact_sensitive_text
 
@@ -158,6 +158,7 @@ _READ_ONLY_COMMANDS = frozenset({
     "which", "type", "env", "printenv", "cat", "head", "tail", "wc",
     "diff", "stat", "file", "du", "df", "tree", "basename", "dirname",
     "sort", "uniq", "cut", "grep", "rg", "jq", "ps", "true", "false",
+    "cd", "less", "more",
 })
 
 # Commands whose read-only-ness depends on the subcommand.
@@ -166,7 +167,7 @@ _GUARDED_SUBCOMMANDS = {
         "diff", "diff-tree", "diff-index", "log", "show", "status", "blame",
         "rev-parse", "rev-list", "describe", "ls-files", "ls-tree", "shortlog",
         "cat-file", "show-ref", "name-rev", "merge-base", "count-objects",
-        "whatchanged", "reflog", "grep",
+        "whatchanged", "reflog", "grep", "branch",
     }),
     "npm": frozenset({"run", "run-script", "test", "t", "ls", "list", "outdated", "view", "why"}),
     "yarn": frozenset({"run", "test", "list", "why", "outdated", "info"}),
@@ -199,6 +200,17 @@ _WRITE_SUBCOMMANDS = frozenset({"fmt", "format"})
 # `git -C path diff` — global options that consume the following token.
 _GIT_GLOBAL_OPTS_WITH_VALUE = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
 
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_UNSAFE_FIND_OPTIONS = frozenset({
+    "-exec", "-execdir", "-ok", "-okdir", "-delete",
+    "-fls", "-fprint", "-fprint0", "-fprintf",
+})
+_GIT_BRANCH_READ_FLAGS = frozenset({
+    "--list", "-l", "--show-current", "-a", "--all", "-r", "--remotes",
+    "-v", "-vv", "--verbose",
+})
+
 # Redirections that do not write to a file: `2>&1`, `>&2`, `>/dev/null`.
 _BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")
 
@@ -218,16 +230,90 @@ def _git_subcommand(tokens: List[str]) -> str:
     return ""
 
 
+def _strip_env_assignments(tokens: List[str]) -> List[str]:
+    """Drop leading ``VAR=value`` tokens so ``GIT_PAGER=cat git diff`` classifies as git."""
+    i = 0
+    while i < len(tokens) and _ENV_ASSIGNMENT.match(tokens[i]):
+        i += 1
+    return tokens[i:]
+
+
+def _shell_c_script(tokens: List[str]) -> Optional[str]:
+    """Return the script after ``bash -c`` / ``-lc``, or None if this is not a -c invocation."""
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            return None
+        if tok.startswith("--"):
+            i += 1
+            continue
+        if tok.startswith("-") and "c" in tok[1:]:
+            if i + 1 < len(tokens):
+                return tokens[i + 1]
+            return None
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return None
+    return None
+
+
+def _git_branch_is_read_only(branch_args: List[str]) -> bool:
+    """``git branch`` with no args lists branches; mutating flags/names are not read-only."""
+    if not branch_args:
+        return True
+    for arg in branch_args:
+        if arg.startswith("--format="):
+            continue
+        if arg in _GIT_BRANCH_READ_FLAGS:
+            continue
+        return False
+    return True
+
+
+def _git_args_after_subcommand(tokens: List[str]) -> List[str]:
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in _GIT_GLOBAL_OPTS_WITH_VALUE:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return tokens[i + 1:]
+    return []
+
+
 def _segment_is_read_only(segment: str) -> Tuple[bool, str]:
     """Classify one already-split command segment."""
     try:
         tokens = shlex.split(segment)
     except ValueError:
         return False, f"cannot parse command: {segment!r}"
+    tokens = _strip_env_assignments(tokens)
     if not tokens:
         return True, ""
 
     name = os.path.basename(tokens[0]).lower()
+
+    if name in _SHELLS:
+        script = _shell_c_script(tokens)
+        if script is None:
+            return False, f"`{name}` can run arbitrary code; only `-c`/`-lc` with a read-only script is allowed"
+        return is_read_only_command(script)
+
+    if name == "find":
+        if any(tok in _UNSAFE_FIND_OPTIONS for tok in tokens[1:]):
+            return False, "`find` with exec/delete/print-to-file is not read-only"
+        return True, ""
+
+    if name == "sed":
+        for tok in tokens[1:]:
+            if tok in ("-i", "--in-place") or (tok.startswith("-i") and tok != "-i"):
+                return False, "`sed -i` rewrites files"
+        return True, ""
 
     if name in _READ_ONLY_COMMANDS:
         return True, ""
@@ -238,6 +324,10 @@ def _segment_is_read_only(segment: str) -> Tuple[bool, str]:
             return False, f"`{name}` needs a read-only subcommand"
         if sub not in _GUARDED_SUBCOMMANDS[name]:
             return False, f"`{name} {sub}` is not a read-only subcommand"
+        if name == "git" and sub == "branch":
+            if not _git_branch_is_read_only(_git_args_after_subcommand(tokens)):
+                return False, "`git branch` with a name or mutating flag is not read-only"
+            return True, ""
         return _check_write_flags(name, tokens)
 
     if name in _RUNNER_COMMANDS:

@@ -893,7 +893,7 @@ class Model(ABC):
             if decision not in ("allow", "allow_prefix", "deny"):
                 decision = "deny"
             session_log = _agent._session_log
-            if session_log is not None:
+            if session_log is not None and fc.approval_waited:
                 session_log.append_event(
                     "approval_decision",
                     tool_call_id=fc.call_id or "",

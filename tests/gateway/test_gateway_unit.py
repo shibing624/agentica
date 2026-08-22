@@ -1077,6 +1077,14 @@ class TestResponseFormatter:
         assert result_str == ""
         assert extra == {}
 
+    def test_format_tool_result_includes_tool_call_id(self):
+        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
+        _, _, extra = format_tool_result(
+            ToolCallInfo(tool_name="execute", content="ok", tool_call_id="c9")
+        )
+        assert extra["tool_call_id"] == "c9"
+
     def test_format_tool_result_keeps_write_and_search(self):
         from agentica.gateway.services.response_formatter import format_tool_result
         from agentica.run_response import ToolCallInfo

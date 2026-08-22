@@ -163,12 +163,15 @@ def format_tool_result(tool_call: ToolCallInfo) -> tuple[str, str, dict]:
 
     Returns:
         ``(tool_name, result_string, extra)``. ``extra`` may contain
+        ``tool_call_id`` (so the web row can match a parallel batch) and
         ``diff`` (unified text for the web row).
     """
     t_name = tool_call.tool_name or "unknown"
     t_content = tool_call.content or ""
     is_error = tool_call.is_error
     extra: Dict[str, Any] = {}
+    if tool_call.tool_call_id:
+        extra["tool_call_id"] = tool_call.tool_call_id
 
     meta = tool_call.tool_display_meta or {}
     files = meta.get("files") if isinstance(meta, dict) else None

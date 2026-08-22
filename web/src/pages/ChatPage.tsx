@@ -113,7 +113,7 @@ export function ChatPage() {
         return;
       }
       if (e.key === "Enter" && !e.shiftKey) {
-        if (tag === "INPUT") return;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
         e.preventDefault();
         e.stopPropagation();
         void decideCurrentApproval("allow");
@@ -611,6 +611,7 @@ function parseApprovalRequest(data: any): ApprovalRequest | null {
     args,
     question: String(data.question || ""),
     preview: String(data.preview || ""),
+    similarLabel: String(data.similar_label || ""),
     options: options.length ? options : ["allow", "allow_prefix", "deny"],
   };
 }

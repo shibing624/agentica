@@ -264,7 +264,7 @@ export function ApprovalCard({
                 type="button"
                 className="approval-allow-more"
                 disabled={busy}
-                aria-label={S.chat.approvalAllowSimilar(req.name)}
+                aria-label={S.chat.approvalAllowSimilar(req.name, req.similarLabel)}
                 aria-expanded={similarOpen}
                 onClick={() => setSimilarOpen((v) => !v)}
               >
@@ -280,7 +280,7 @@ export function ApprovalCard({
                       onDecide("allow_prefix");
                     }}
                   >
-                    {S.chat.approvalAllowSimilar(req.name)}
+                    {S.chat.approvalAllowSimilar(req.name, req.similarLabel)}
                   </button>
                 </div>
               )}
