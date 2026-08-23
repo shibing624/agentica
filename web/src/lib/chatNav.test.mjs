@@ -28,9 +28,10 @@ test("each tick carries the truncated query and skips steer chips", () => {
   assert.equal(ticks[1].query, "second question");
 });
 
-test("preview collapses whitespace and truncates to 30 by default", () => {
+test("preview collapses whitespace and truncates to 50 by default", () => {
   assert.equal(previewText("  hello   world  ", 8), "hello wo");
-  const long = "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十多余";
-  assert.equal(previewText(long).length, 30);
-  assert.equal(buildChatNavTicks([{ role: "user", content: long }])[0].query, long.slice(0, 30));
+  const long = "一二三四五六七八九十".repeat(6);
+  assert.equal(long.length, 60);
+  assert.equal(previewText(long).length, 50);
+  assert.equal(buildChatNavTicks([{ role: "user", content: long }])[0].query, long.slice(0, 50));
 });

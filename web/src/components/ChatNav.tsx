@@ -14,7 +14,7 @@ import type { ChatMsg } from "../store";
  * Codex-style chat navigation minimap:
  * - Positioned in the left gutter of the chat area.
  * - Shows only subtle dashes by default.
- * - Hovering reveals the truncated query text directly below the dash (transparent background).
+ * - Hovering a dash opens a compact opaque popover to its right with the truncated query.
  * - Clicking jumps directly to that turn with a smooth scroll & subtle flash.
  * - Naturally hidden on narrower screens to avoid overlapping main conversation.
  */
@@ -102,7 +102,7 @@ export function ChatNav({
             }}
           >
             <span className="chat-nav-dash" />
-            <span className="chat-nav-label">{t.query || S.chat.navEmpty}</span>
+            <span className="chat-nav-label"><span className="chat-nav-label-text">{t.query || S.chat.navEmpty}</span></span>
           </button>
         ))}
       </div>

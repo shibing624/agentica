@@ -8,7 +8,7 @@ export type ChatNavTick = {
   query: string;
 };
 
-export function previewText(text: string, n = 30): string {
+export function previewText(text: string, n = 50): string {
   return text.trim().replace(/\s+/g, " ").slice(0, n);
 }
 
