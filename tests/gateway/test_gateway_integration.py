@@ -69,14 +69,18 @@ def mock_app():
         "content": "# User Instructions\n",
         "path": "/tmp/AGENTS.md",
         "empty_template": True,
-        "auto_extract": True,
         "user_id": "default",
     })
     mock_svc.write_user_agents_md = AsyncMock(return_value={
         "content": "be brief\n",
         "path": "/tmp/AGENTS.md",
         "empty_template": False,
+        "user_id": "default",
+    })
+    mock_svc.read_memory_index = AsyncMock(return_value={
         "auto_extract": True,
+        "index_path": "/tmp/MEMORY.md",
+        "entries": [{"title": "Tea shop", "filename": "user_tea.md", "hook": "wechat tea"}],
         "user_id": "default",
     })
     mock_svc._cache = MagicMock()
@@ -522,19 +526,33 @@ class TestWebPrefs:
 
 
 class TestMemoryEndpoints:
-    def test_get_memory(self, mock_app):
+    def test_get_user_agents_md(self, mock_app):
         client, mock_svc = mock_app
-        resp = client.get("/api/memory")
+        resp = client.get("/api/user_agents_md")
         assert resp.status_code == 200
         assert resp.json()["path"] == "/tmp/AGENTS.md"
         mock_svc.read_user_agents_md.assert_awaited_once()
 
-    def test_put_memory(self, mock_app):
+    def test_put_user_agents_md(self, mock_app):
         client, mock_svc = mock_app
-        resp = client.put("/api/memory", json={"content": "be brief\n"})
+        resp = client.put("/api/user_agents_md", json={"content": "be brief\n"})
         assert resp.status_code == 200
         assert resp.json()["content"] == "be brief\n"
         mock_svc.write_user_agents_md.assert_awaited_once()
+
+    def test_get_memory_lists_index_entries(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.get("/api/memory")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["index_path"] == "/tmp/MEMORY.md"
+        assert body["entries"][0]["title"] == "Tea shop"
+        mock_svc.read_memory_index.assert_awaited_once()
+
+    def test_put_memory_is_not_allowed(self, mock_app):
+        client, _ = mock_app
+        resp = client.put("/api/memory", json={"content": "be brief\n"})
+        assert resp.status_code == 405
 
 
 class TestOpenUrlAndWechatQr:

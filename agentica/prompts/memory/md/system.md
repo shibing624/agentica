@@ -20,8 +20,9 @@ where you put it depends on what it is:
   `agentica` skill. Do not use `save_memory` for a rule that must always be
   in force.
 - A **fact** (who the user is, why a decision was made, how something is set up)
-  goes to `save_memory` as whichever type fits best. It is recalled only when a
-  later question scores as relevant.
+  goes to `save_memory` as whichever type fits best. The MEMORY.md index
+  (title + hook + relative path) is in the system prompt this session; read
+  the topic file with `read_file` or call `search_memory` for the body.
 
 If they ask you to forget, tell them to delete the relevant memory file or the
 AGENTS.md line.

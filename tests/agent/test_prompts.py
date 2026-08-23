@@ -426,6 +426,42 @@ class TestSessionSnapshotsKeepThePromptByteStable:
         )
 
     @pytest.mark.asyncio
+    async def test_memory_index_is_frozen_and_names_its_path(self, tmp_path):
+        from agentica.workspace import Workspace
+
+        workspace = Workspace(tmp_path)
+        workspace.initialize()
+        await workspace.write_memory_entry(
+            title="Tea shop",
+            content="BODY_MUST_NOT_APPEAR",
+            memory_type="user",
+            description="user runs a wechat tea shop",
+        )
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            workspace=workspace,
+            enable_long_term_memory=True,
+        )
+        await workspace.freeze_snapshots()
+        before = (await agent.get_system_message()).content
+
+        await workspace.write_memory_entry(
+            title="Mid-session fact",
+            content="learned later",
+            memory_type="user",
+            description="should not rewrite the prompt",
+        )
+        after = (await agent.get_system_message()).content
+
+        assert before == after
+        assert "Tea shop" in before
+        assert "user runs a wechat tea shop" in before
+        assert "BODY_MUST_NOT_APPEAR" not in before
+        assert "Mid-session fact" not in after
+        assert str(workspace.memory_index_path().resolve()) in before
+
+    @pytest.mark.asyncio
     async def test_skill_catalogue_survives_a_mid_session_refresh(self):
         agent = Agent(
             name="A",

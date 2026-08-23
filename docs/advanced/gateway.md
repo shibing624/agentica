@@ -521,7 +521,8 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
 | GET | `/api/sessions/{id}/trace/analysis` | 整份轨迹分析（重启后按 session id 跨 project 定位 jsonl） |
 | GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话 / `auto_extract_memory`），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
-| GET / PUT | `/api/memory` | 当前账号的用户级 `AGENTS.md`（常驻说明，进 system prompt）。PUT body：`{content}` |
+| GET / PUT | `/api/user_agents_md` | 当前账号的用户级 `AGENTS.md`（常驻规则，进 system prompt）。PUT body：`{content}` |
+| GET | `/api/memory` | 当前账号的 `MEMORY.md` 索引条目（只读）。没有 PUT——旧前端往这里写 AGENTS.md 会拿到 405 |
 | GET | `/api/sessions` | 当前账号的会话列表（含尚未写出 jsonl 的进行中 run） |
 | GET | `/api/sessions/{id}/usage` | 本会话 Context Window 拆分（与 CLI `/usage` 同一套 `measure_context`：system prompt / 规则 / 技能 / 工具定义 / 对话的 token 数）以及消息数、API 调用、费用 |
 | POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套 native + Layer 2 摘要 |

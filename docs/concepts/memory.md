@@ -124,61 +124,27 @@ User prefers concise, typed Python. Avoid unnecessary comments.
 | | 常驻规则 | 一个事实 |
 |---|---|---|
 | 落盘位置 | 用户级：`~/.agentica/workspace/users/{user_id}/AGENTS.md`（CLI 的 user_id 是 `default`，也可通过 symlink `~/.agentica/AGENTS.md` 改同一份文件）；项目级：`<repo 根>/AGENTS.md` | `memory/*.md` + `MEMORY.md` 索引 |
-| 何时进 system prompt | **下个会话起**全量注入（见下）；本会话靠对话历史 | 只在后续提问与它相关时被召回 |
+| 何时进 system prompt | **下个会话起**全量注入（见下）；本会话靠对话历史 | **下个会话起**注入 MEMORY.md 索引（标题 + hook + 相对路径，最多 60 行 / 4KB）；正文 `search_memory` / `read_file` |
 | 谁来写 | 人手写，或 agent 用 `apply_patch` / `write_file` | `save_memory` |
 | 适合 | "always ..." / "never ..." / "从现在开始 ..." | 用户是谁、某个决定为什么这么定、环境怎么搭的 |
 
-规则这一侧**没有专门的工具**，也不需要固定格式：`AGENTS.md` 就是一个 markdown 文件，人和 agent 用同一种方式改它。Web 设置 › 记忆编辑的就是这份用户级文件。写法说明在 bundled `agentica` skill 里（`self_manage` 只管 `config.yaml` / `.env` / 升级，不管常驻规则）。
+规则这一侧**没有专门的工具**，也不需要固定格式：`AGENTS.md` 就是一个 markdown 文件，人和 agent 用同一种方式改它。Web 设置 › 记忆的上半块编辑的就是这份用户级文件；下半块列出 `MEMORY.md` 抽出来的条目。写法说明在 bundled `agentica` skill 里（`self_manage` 只管 `config.yaml` / `.env` / 升级，不管常驻规则）。
 
-外部 workflow（如 `learn-from-experience`）要把确认偏好写成常驻规则时，直接往 `~/.agentica/workspace/users/{user_id}/AGENTS.md` 追加普通行即可；默认 CLI 用户也可以写 `~/.agentica/AGENTS.md`，它是指向同一份文件的 symlink。经验卡片若进 prompt，是直接从 EXPERIENCE 相关性召回注入（`## Learned Experiences`），**只保留用户纠正类**（`correction`）；`tool_error` / `success_pattern` 不进 system prompt。事实记忆同理，走 `get_relevant_memories`，也不写进 AGENTS.md。
+外部 workflow（如 `learn-from-experience`）要把确认偏好写成常驻规则时，直接往 `~/.agentica/workspace/users/{user_id}/AGENTS.md` 追加普通行即可；默认 CLI 用户也可以写 `~/.agentica/AGENTS.md`，它是指向同一份文件的 symlink。经验卡片若进 prompt，是直接从 EXPERIENCE 相关性召回注入（`## Learned Experiences`），**只保留用户纠正类**（`correction`）；`tool_error` / `success_pattern` 不进 system prompt。事实记忆走 MEMORY.md 索引注入 + `search_memory`，也不写进 AGENTS.md。
 
 ---
 
-## 记忆召回：get_relevant_memories()
+## 记忆注入：MEMORY.md 索引
 
-记忆注入采用**相关性召回**，而非全量 dump。
+CLI / SDK / Gateway 同一条路径：`freeze_snapshots()` 把 **MEMORY.md 索引**（不是 topic 正文）冻进 system prompt。每条是 `- [Title](memory/x.md) — hook`；正文按需 `read_file` 或 `search_memory`。注入副本有更紧的预算（60 行 / 4KB），超出截断并点名完整索引的绝对路径。磁盘上的索引仍是 200 行 / 25KB。
 
-```python
-# 根据当前 query 返回最相关的 ≤5 条记忆
-memory = await workspace.get_relevant_memories(
-    query="how should I write python code",
-    limit=5,
-    already_surfaced=set(),   # 去重：本 session 已展示过的文件名
-)
-```
-
-召回机制：
-1. 解析 `MEMORY.md` 索引，获取所有条目的 title + description hook
-2. 用 **混合关键词 scoring**（word-level + character 2-gram）对每条打分，支持中英文
-3. 只加载 top-k 个文件内容，拼接后注入 system prompt
-4. 自动 strip frontmatter，追加 drift-defense 提示
-
-`MEMORY.md` 的大小有硬限制（200 行 / 25KB），超出时 FIFO 淘汰最旧条目，防止无限增长。
-
-### Agent 自动召回
-
-Agent 使用 workspace 时，每次 `run()` 会自动以当前 query 为输入执行记忆召回：
-
-```python
-from agentica import Agent, Workspace
-from agentica.agent.config import WorkspaceMemoryConfig
-
-agent = Agent(
-    workspace=Workspace("./workspace"),
-    long_term_memory_config=WorkspaceMemoryConfig(
-        load_workspace_memory=True,
-        max_memory_entries=5,   # 最多注入 5 条相关记忆
-    ),
-)
-```
-
-`_surfaced_memories` 跨 turn 追踪已展示的记忆文件，避免同一 session 内重复注入相同条目。
+`get_relevant_memories()` 仍可按 query 拉 topic 正文，给脚本和调试用，**不再**进生产 system prompt。
 
 ---
 
 ## 记忆漂移防御
 
-记忆注入时自动追加一条提示，防止过时引用造成幻觉：
+`get_relevant_memories()` / 读到的 topic 正文会追加一条提示，防止过时引用造成幻觉：
 
 ```
 Note: memories reflect the state at write time. If a memory references a specific

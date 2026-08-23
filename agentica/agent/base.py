@@ -626,10 +626,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # the same "never interrupt a running tool" boundary as steering.
         self.peer_session: Optional[Any] = None
 
-        # Session-level set of memory filenames already surfaced (dedup across turns).
-        # Prevents the same memory entry from occupying system prompt slots every turn.
-        self._surfaced_memories: set = set()
-
     def _post_init(self):
         """Post-initialization setup."""
         if self.debug:
@@ -827,31 +823,22 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         return context if context else None
 
     async def get_workspace_memory_prompt(self, query: str = "") -> Optional[str]:
-        """Dynamically load relevant workspace memory for system prompt.
+        """Load the MEMORY.md index for the system prompt.
 
-        Prefers frozen snapshot (if freeze_snapshots() was called) to keep
-        system prompt prefix stable across turns for prompt cache hits.
-        Falls back to live relevance-based recall if no snapshot exists.
-
-        Args:
-            query: Current user query string for relevance scoring.
-
-        Returns:
-            Formatted memory string, or None if workspace/memory not configured.
+        Prefers the session-start snapshot (if freeze_snapshots() was called)
+        so mid-session writes do not move the prefix-cache. Falls back to a
+        live index read when nothing was frozen (no Runner). Topic-file
+        bodies are never injected; ``query`` is unused (kept so callers
+        that still pass the current user turn do not break).
         """
         if not self.enable_long_term_memory:
             return None
         if not self.workspace or not self.long_term_memory_config.load_workspace_memory:
             return None
-        # Prefer frozen snapshot for prompt cache stability
         frozen = self.workspace.get_frozen_memory()
         if frozen is not None:
-            return frozen
-        memory = await self.workspace.get_relevant_memories(
-            query=query,
-            limit=self.long_term_memory_config.max_memory_entries,
-            already_surfaced=self._surfaced_memories,
-        )
+            return frozen or None
+        memory = await self.workspace.get_memory_index_prompt()
         return memory if memory else None
 
     async def get_experience_prompt(self, query: str = "") -> Optional[str]:

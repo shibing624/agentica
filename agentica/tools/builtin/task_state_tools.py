@@ -275,8 +275,8 @@ class BuiltinMemoryTool(Tool):
         `memory_type`, `memory_source`, and `evidence_refs` from the file
         frontmatter (conversation blocks point at `{file}#block=N`). Returns
         JSON of the top matches, capped by `limit` and total `max_chars`. The
-        aggregated ``MEMORY.md`` is excluded because it is already injected
-        into the system prompt.
+        aggregated ``MEMORY.md`` is excluded because the index is already
+        injected into the system prompt (title + hook + path).
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")

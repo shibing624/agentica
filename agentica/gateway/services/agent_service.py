@@ -438,8 +438,8 @@ class AgentService:
 
         DeepAgent auto-includes: builtin tools, skills, agentic prompt,
         two-layer compression (eviction then LLM summarisation),
-        workspace memory (auto_archive +
-        auto_extract_memory + relevance recall), experience capture (tool
+        workspace memory (MEMORY.md index +
+        auto_extract_memory), experience capture (tool
         errors / user corrections / success patterns), memory tools.
 
         auxiliary_model / task_model default to the main model (DeepAgent
@@ -1602,7 +1602,7 @@ class AgentService:
         self._workspace.set_user(self._owner(owner))
         return self._workspace
 
-    # ============== Memory (user AGENTS.md) ==============
+    # ============== User AGENTS.md / MEMORY.md ==============
 
     async def read_user_agents_md(self, owner: str) -> dict:
         """Return this account's user-level AGENTS.md for the settings page."""
@@ -1613,7 +1613,6 @@ class AgentService:
             "content": content,
             "path": str(ws.user_agent_md_path()),
             "empty_template": Workspace._is_empty_template(content),
-            "auto_extract": self._auto_extract_for(owner),
             "user_id": self._owner(owner),
         }
 
@@ -1626,6 +1625,18 @@ class AgentService:
         except ValueError as e:
             raise RuntimeError(str(e)) from e
         return await self.read_user_agents_md(owner)
+
+    async def read_memory_index(self, owner: str) -> dict:
+        """Return this account's MEMORY.md index entries for the settings page."""
+        await self._ensure_initialized()
+        ws = await asyncio.to_thread(self._switch_workspace_user, owner)
+        entries = await asyncio.to_thread(ws.list_memory_index_entries)
+        return {
+            "auto_extract": self._auto_extract_for(owner),
+            "index_path": str(ws.memory_index_path()),
+            "entries": entries,
+            "user_id": self._owner(owner),
+        }
 
     async def get_workspace_context(self, user_id: str = "default") -> str:
         """Retrieve workspace context prompt for a user."""

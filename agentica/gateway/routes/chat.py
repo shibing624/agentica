@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Chat routes: /api/chat, /api/chat/stream, /api/sessions, /api/upload, /api/memory."""
+@description: Chat routes: /api/chat, /api/chat/stream, /api/sessions, /api/upload, /api/user_agents_md, /api/memory."""
 import asyncio
 import base64
 import json
@@ -606,10 +606,10 @@ async def compact_session(
     return result
 
 
-# ============== Memory (user-level AGENTS.md) ==============
+# ============== User AGENTS.md / MEMORY.md ==============
 
-@router.get("/api/memory")
-async def get_memory(
+@router.get("/api/user_agents_md")
+async def get_user_agents_md(
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
@@ -617,8 +617,8 @@ async def get_memory(
     return await svc.read_user_agents_md(_account(request))
 
 
-@router.put("/api/memory")
-async def put_memory(
+@router.put("/api/user_agents_md")
+async def put_user_agents_md(
     body: MemoryRequest,
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
@@ -627,6 +627,17 @@ async def put_memory(
         return await svc.write_user_agents_md(_account(request), body.content)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/api/memory")
+async def get_memory(
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """This account's MEMORY.md index (read-only). There is no PUT — do not
+    write AGENTS.md through this path.
+    """
+    return await svc.read_memory_index(_account(request))
 
 
 # ============== File upload ==============

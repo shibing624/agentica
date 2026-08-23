@@ -409,10 +409,11 @@ class Workspace:
 
         Call once at session start. Memory / experience writes update the live
         files on disk but do NOT mutate the frozen snapshot — the next session
-        will pick up changes.
+        will pick up changes. ``query`` is only used for experience recall;
+        the memory snapshot is the MEMORY.md index (hooks), not topic bodies.
         """
         self._context_snapshot = await self.get_context_prompt()
-        self._memory_snapshot = await self.get_relevant_memories(query=query)
+        self._memory_snapshot = await self.get_memory_index_prompt()
         self._experience_snapshot = await self.get_relevant_experiences(query=query)
 
     def get_frozen_context(self) -> Optional[str]:
@@ -579,6 +580,9 @@ class Workspace:
     # =========================================================================
     _MEMORY_INDEX_MAX_LINES: int = 200
     _MEMORY_INDEX_MAX_BYTES: int = 25_000
+    # Prompt copy is tighter than the on-disk index. Full file: memory_index_path().
+    _MEMORY_INJECT_MAX_LINES: int = 60
+    _MEMORY_INJECT_MAX_BYTES: int = 4_000
 
     # Injected after memory content to guard against stale references.
     _MEMORY_DRIFT_DEFENSE: str = (
@@ -604,6 +608,21 @@ class Workspace:
         path = user_dir / self.config.agent_md
         self._ensure_home_agent_md_symlink(path)
         return path
+
+    def memory_index_path(self) -> Path:
+        """Return this user's MEMORY.md index — ``users/{user_id}/MEMORY.md``."""
+        self._initialize_user_dir()
+        return self._get_user_memory_md()
+
+    def list_memory_index_entries(self) -> List[Dict]:
+        """Parse MEMORY.md into ``{title, filename, hook}`` dicts (settings page)."""
+        path = self.memory_index_path()
+        if not path.is_file():
+            return []
+        content = path.read_text(encoding="utf-8").strip()
+        if not content:
+            return []
+        return self._parse_memory_index(content)
 
     def read_user_agents_md(self) -> str:
         """Return this user's AGENTS.md body (empty string if the file is missing)."""
@@ -697,6 +716,51 @@ class Workspace:
             key, value = line.split(":", 1)
             metadata[key.strip()] = value.strip()
         return metadata
+
+    async def get_memory_index_prompt(self) -> str:
+        """MEMORY.md index for the system prompt: title, hook, relative path.
+
+        Topic-file bodies stay on disk. The prompt copy is capped well below
+        the on-disk 200-line / 25KB index so a large store cannot dominate
+        every turn; the absolute path of the full file is always named.
+        Newest entries are kept when truncating.
+        """
+        self._initialize_user_dir()
+        index_path = self.memory_index_path()
+        if not index_path.is_file():
+            return ""
+        content = (await async_read_text(index_path)).strip()
+        if not content:
+            return ""
+
+        lines = [line for line in content.splitlines() if line.strip()]
+        truncated = False
+        if len(lines) > self._MEMORY_INJECT_MAX_LINES:
+            lines = lines[-self._MEMORY_INJECT_MAX_LINES:]
+            truncated = True
+        body = "\n".join(lines)
+        while len(body.encode("utf-8")) > self._MEMORY_INJECT_MAX_BYTES:
+            if not lines:
+                break
+            lines.pop(0)
+            truncated = True
+            body = "\n".join(lines)
+        if not body:
+            return ""
+
+        abs_path = str(index_path.resolve())
+        note = (
+            "Note: This MEMORY.md index is a session-start snapshot for "
+            "prompt-cache stability. Topic files are not injected — use "
+            "read_file or search_memory when a hook matches. "
+            f"Full index: {abs_path}"
+        )
+        if truncated:
+            note += (
+                f" Index truncated to {self._MEMORY_INJECT_MAX_LINES} lines / "
+                f"{self._MEMORY_INJECT_MAX_BYTES} bytes for the system prompt."
+            )
+        return f"{note}\n\n{body}"
 
     async def get_relevant_memories(
         self,

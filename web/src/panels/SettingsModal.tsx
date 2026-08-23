@@ -262,22 +262,30 @@ function MemoryTab() {
   const [path, setPath] = useState("");
   const [emptyTemplate, setEmptyTemplate] = useState(true);
   const [autoExtract, setAutoExtract] = useState(true);
+  const [entries, setEntries] = useState<api.MemoryEntry[]>([]);
+  const [indexPath, setIndexPath] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const apply = (data: api.MemoryDoc) => {
+  const applyAgents = (data: api.AgentsMdDoc) => {
     setContent(data.content || "");
     setPath(data.path || "");
     setEmptyTemplate(!!data.empty_template);
+  };
+
+  const applyIndex = (data: api.MemoryIndexDoc) => {
     setAutoExtract(data.auto_extract !== false);
+    setEntries(Array.isArray(data.entries) ? data.entries : []);
+    setIndexPath(data.index_path || "");
   };
 
   useEffect(() => {
     let cancelled = false;
-    void api.fetchMemory().then(({ ok, data }) => {
+    void Promise.all([api.fetchUserAgentsMd(), api.fetchMemoryIndex()]).then(([agents, mem]) => {
       if (cancelled) return;
-      if (!ok || !data) { showToast(M.loadFailed, 2500); return; }
-      apply(data);
+      if (!agents.ok || !agents.data) { showToast(M.loadFailed, 2500); return; }
+      applyAgents(agents.data);
+      if (mem.ok && mem.data) applyIndex(mem.data);
     });
     return () => { cancelled = true; };
   }, [M.loadFailed]);
@@ -289,13 +297,13 @@ function MemoryTab() {
 
   const save = async () => {
     setBusy(true);
-    const { ok, data } = await api.saveMemoryApi(draft);
+    const { ok, data } = await api.saveUserAgentsMd(draft);
     setBusy(false);
     if (!ok || !data) {
       showToast((data as any)?.detail || M.loadFailed, 3000);
       return;
     }
-    apply(data);
+    applyAgents(data);
     setEditing(false);
     showToast(M.saved, 2500);
   };
@@ -330,14 +338,8 @@ function MemoryTab() {
       <p className="mem-intro">{M.intro}</p>
 
       <div className="mem-section">
-        <div className="mem-section-head">
-          <div className="settings-block-title" style={{ marginBottom: 0 }}>{M.extractTitle}</div>
-          <button type="button" className={"mem-switch" + (autoExtract ? " on" : "")}
-                  role="switch" aria-checked={autoExtract} onClick={() => void toggleExtract()}>
-            <i />
-          </button>
-        </div>
-        <p className="mem-hint">{M.extractHint}</p>
+        <div className="settings-block-title">{M.rulesTitle}</div>
+        <p className="mem-hint">{M.rulesHint}</p>
         <div className="mem-preview" role="button" tabIndex={0}
              onClick={openEdit}
              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEdit(); } }}>
@@ -349,6 +351,30 @@ function MemoryTab() {
           <span className="mem-preview-expand" title={M.previewLabel}><IconExpand /></span>
         </div>
         <div className="mem-preview-label">{M.previewLabel}</div>
+      </div>
+
+      <div className="mem-section">
+        <div className="mem-section-head">
+          <div className="settings-block-title" style={{ marginBottom: 0 }}>{M.extractTitle}</div>
+          <button type="button" className={"mem-switch" + (autoExtract ? " on" : "")}
+                  role="switch" aria-checked={autoExtract} onClick={() => void toggleExtract()}>
+            <i />
+          </button>
+        </div>
+        <p className="mem-hint">{M.extractHint}</p>
+        {entries.length === 0 ? (
+          <div className="mem-preview-empty">{M.extractEmpty}</div>
+        ) : (
+          <div className="mem-list">
+            {entries.map((entry) => (
+              <div className="mem-entry" key={entry.filename}>
+                <div className="mem-entry-title">{entry.title}</div>
+                {entry.hook ? <div className="mem-entry-hook">{entry.hook}</div> : null}
+              </div>
+            ))}
+          </div>
+        )}
+        {indexPath ? <div className="mem-preview-label">{indexPath}</div> : null}
       </div>
     </div>
   );

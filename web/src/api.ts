@@ -208,13 +208,27 @@ export const steerChatApi = (session_id: string, message: string) =>
 export const takeSteerApi = (session_id: string) =>
   postJson<{ messages: string[] }>("/api/chat/steer/take", { session_id, message: "" });
 
-export type MemoryDoc = {
+export type AgentsMdDoc = {
   content: string;
   path: string;
   empty_template: boolean;
-  auto_extract: boolean;
   user_id: string;
 };
 
-export const fetchMemory = () => request<MemoryDoc>("/api/memory");
-export const saveMemoryApi = (content: string) => putJson<MemoryDoc>("/api/memory", { content });
+export type MemoryEntry = {
+  title: string;
+  filename: string;
+  hook: string;
+};
+
+export type MemoryIndexDoc = {
+  auto_extract: boolean;
+  index_path: string;
+  entries: MemoryEntry[];
+  user_id: string;
+};
+
+export const fetchUserAgentsMd = () => request<AgentsMdDoc>("/api/user_agents_md");
+export const saveUserAgentsMd = (content: string) =>
+  putJson<AgentsMdDoc>("/api/user_agents_md", { content });
+export const fetchMemoryIndex = () => request<MemoryIndexDoc>("/api/memory");

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### breaking
+- **`GET /api/memory` 不再返回用户级 AGENTS.md**：payload 改为 `{auto_extract, index_path, entries}`（MEMORY.md 索引）。常驻规则改走 `GET/PUT /api/user_agents_md`。`PUT /api/memory` 删除（405），避免旧前端把 AGENTS.md 正文写进记忆结构。
 - **权限档 `ask` 改为 Codex「Ask for approval」**：以前 `ask` 会从 schema 里藏掉写工具（`write_file` / `execute` / `apply_patch` 等，模型看到 Function not found）；现在三个档工具都在，差别只在真正 `execute` 之前要不要停车等人。`ask`：读（含工作区外）、只读 shell、`web_search` / `fetch_url`、记忆、`task` / `delegate`、skill 和其它内置工具直接过；只拦 **写文件**（`write_file` / `apply_patch`，含工作区内）和会改状态的 `execute`。`auto`：读（含工作区外）、工作区内写、全部 `execute`、网络、第三方工具直接过；只对工作区外/敏感路径的**文件写**停车。`allow-all` 仍不询问（`/etc`、`~/.ssh` 等硬拒绝仍保留）。删掉模型可见的 `request_path_access`，改由公开 `grant_path_access` 写入沙箱白名单。默认不变：CLI / SDK 仍是 `allow-all`，Web 仍是 `auto`。无人值守（无 LiveTurn：IM / cron / 非流式 `POST /chat` / `--print`）立即把工具结果写成 `Tool call denied by user.`，不 500、不 sibling-abort。
 
 #### features
@@ -29,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`glob` / `grep` 硬超时从 3s 调到 20s**（`_GLOB_TIMEOUT` / `_GREP_TIMEOUT`）：3s 会误杀本地大仓、冷盘和没有 `rg` 时的 Python fallback；仍不暴露给模型。对齐 kimi-cli / Claude Code 的 ripgrep 20s 上限。glob 继续留超时：当前实现是 `pathlib.glob` 整树走完才返回，结果上限挡不住 NFS hang。
 - **设置 › 模型配置顶部只留 `config.yaml` 路径**：去掉当前 profile / 模型 / effort / context / compact 那一行摘要，列表里本身就能看到谁在用。
 - **`compact_token_limit`：压缩工作阈值，不改模型 `context_window`**。1M 窗口可以配 `300000`，Layer 2 在 `min(该值, 窗口×0.95)` 触发摘要；Layer 1 的 0.8/0.5 相对 `min(该值, 窗口)`。不配则和现在一样（约 95% 窗口才摘要）。写在 config.yaml 的 profile 上，也可写 `settings.compact_token_limit` 做全局默认。CLI：`/config set compact_token_limit 300000`、`--compact-token-limit`。Web 模型配置有填才显示。SDK：`ToolConfig(compact_token_limit=300000)`。
-- **设置 › 记忆**：新 tab 编辑本账号的用户级 `AGENTS.md`（`workspace/users/<账号>/AGENTS.md`，进 system prompt 的常驻说明），可预览和编辑。账号菜单也有「记忆」入口。对话抽取开关接到已有的 `auto_extract_memory`（事实仍进 `memory/*.md` 召回，不写进 AGENTS.md）。改完会清掉冻结的 context 快照，下一轮对话读到新内容。
+- **设置 › 记忆拆成两层**：上半编辑用户级 `AGENTS.md`（常驻规则，进 system prompt）；下半「生成对话记忆」开关仍接 `auto_extract_memory`，列出的是 `MEMORY.md` 索引条目，不再把 AGENTS.md 预览假装成抽取结果。CLI / SDK / Gateway 同一套注入：会话开头把 MEMORY.md 索引（标题+hook+相对路径，最多 60 行 / 4KB）冻进 prompt 并点名绝对路径，`memory/*.md` 正文按需 `search_memory` / `read_file`。抽取仍大约每 10 轮。已知限制：`write_user_agents_md` 会清掉共享 Workspace 上的 `_context_snapshot`，Gateway 下一轮所有会话会重建 AGENTS.md 前缀（快照应按会话持有，v1 不改）。
 - **「Profile」中文改叫「模型配置」**。
 - **个人助理的 Web 地址可点**：和 `config.yaml` 一样走 `POST /api/open`，用系统默认浏览器打开 `http://127.0.0.1:8881/chat`。
 - **个人微信默认就能扫码**：`WECHAT_TOKEN_FILE` 默认 `~/.agentica/cache/wxbot_token.json`，`WECHAT_ALLOWED_USERS` 默认空。gateway 启动不再弹码；网页点「配置」才生成二维码（过期约 120 秒）。没扫或过期显示「失败」；离开再进个人助理页，码是空的，要再点配置。

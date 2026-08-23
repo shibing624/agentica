@@ -122,7 +122,8 @@ without waiting for the system prompt to change.
 system prompt, so the new line is there automatically.
 
 Facts ("I am a data scientist", "the deploy target is X") still go to
-`save_memory` — they are recalled by relevance, not injected every turn.
+`save_memory`. The MEMORY.md index (title + hook) is in the system prompt;
+read the topic file or call `search_memory` for the body.
 
 ## Answering well
 

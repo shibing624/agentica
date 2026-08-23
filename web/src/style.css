@@ -851,6 +851,10 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .mem-preview-expand{position:absolute;right:8px;bottom:8px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--fg3);background:var(--bg2)}
 .mem-preview-expand svg{width:14px;height:14px}
 .mem-preview-label{font-size:11px;color:var(--fg3)}
+.mem-list{display:flex;flex-direction:column;gap:8px}
+.mem-entry{border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--bg)}
+.mem-entry-title{font-size:13px;font-weight:600;color:var(--fg)}
+.mem-entry-hook{font-size:12px;color:var(--fg3);margin-top:2px;line-height:1.4}
 .mem-editor{min-height:240px;margin-bottom:8px;font-family:var(--mono);font-size:12px}
 .pf-check{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--fg2);line-height:1.5;cursor:pointer;margin-bottom:8px}
 .pf-check input{margin-top:3px}

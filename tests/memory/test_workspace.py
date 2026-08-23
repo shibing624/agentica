@@ -231,6 +231,54 @@ class TestWorkspace:
         memory_prompt_python = asyncio.run(workspace.get_relevant_memories(query="python coding"))
         assert "Python preference" in memory_prompt_python or len(memory_prompt_python) > 0
 
+    def test_freeze_snapshots_injects_memory_index_not_bodies(self, temp_workspace_path):
+        """Session prompt gets MEMORY.md hooks, not topic-file bodies."""
+        workspace = Workspace(temp_workspace_path)
+        workspace.initialize()
+        asyncio.run(workspace.write_memory_entry(
+            title="Python preference",
+            content="THIS_BODY_MUST_NOT_APPEAR_IN_THE_SNAPSHOT",
+            memory_type="feedback",
+            description="python concise coding style",
+        ))
+        asyncio.run(workspace.freeze_snapshots(query="python"))
+        frozen = workspace.get_frozen_memory() or ""
+        assert "Python preference" in frozen
+        assert "python concise coding style" in frozen
+        assert "THIS_BODY_MUST_NOT_APPEAR_IN_THE_SNAPSHOT" not in frozen
+        assert str(workspace.memory_index_path().resolve()) in frozen
+
+    def test_frozen_memory_index_ignores_mid_session_writes(self, temp_workspace_path):
+        workspace = Workspace(temp_workspace_path)
+        workspace.initialize()
+        asyncio.run(workspace.write_memory_entry(
+            title="First",
+            content="alpha",
+            memory_type="user",
+            description="first hook",
+        ))
+        asyncio.run(workspace.freeze_snapshots())
+        before = workspace.get_frozen_memory()
+        asyncio.run(workspace.write_memory_entry(
+            title="Second",
+            content="beta",
+            memory_type="user",
+            description="second hook",
+        ))
+        assert workspace.get_frozen_memory() == before
+        assert "Second" not in (before or "")
+
+    def test_memory_index_prompt_truncates_to_inject_budget(self, temp_workspace_path):
+        workspace = Workspace(temp_workspace_path)
+        workspace.initialize()
+        lines = [f"- [T{i}](memory/t{i}.md) — hook {i}" for i in range(80)]
+        workspace.memory_index_path().write_text("\n".join(lines), encoding="utf-8")
+        prompt = asyncio.run(workspace.get_memory_index_prompt())
+        injected = [line for line in prompt.splitlines() if line.startswith("- [")]
+        assert len(injected) <= Workspace._MEMORY_INJECT_MAX_LINES
+        assert "truncated" in prompt.lower()
+        assert str(workspace.memory_index_path().resolve()) in prompt
+
     def test_get_context_prompt_prioritizes_user_agents_with_budget(self, temp_workspace_path):
         """User AGENTS is first in budget; workspace-root leftovers are ignored."""
         ws_root = temp_workspace_path / "ws"

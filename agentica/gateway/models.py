@@ -62,7 +62,7 @@ class ChatResponse(BaseModel):
 
 
 class MemoryRequest(BaseModel):
-    """Replace this account's user-level AGENTS.md."""
+    """Replace this account's user-level AGENTS.md (PUT /api/user_agents_md)."""
     content: str
 
 

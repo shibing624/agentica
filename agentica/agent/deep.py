@@ -13,7 +13,7 @@ DeepAgent enables the product defaults users expect from an unattended assistant
   native/LLM summarise; reactive compact on prompt_too_long)
 - Death spiral detection + cost tracking + cost budget
 - Repeated tool-call detection (inject "change strategy" at 3 repeats)
-- Workspace memory (AGENTS.md, MEMORY.md, daily memory, relevance recall)
+- Workspace memory (AGENTS.md standing rules, MEMORY.md index, topic files on demand)
 - Conversation archive (auto_archive for search_conversations)
 - Agentic prompt (heartbeat, tools guide, self-verification)
 - Sandbox isolation (optional, off by default)
@@ -89,7 +89,7 @@ class DeepAgent(Agent):
     Enabled by default:
     - Two-layer compression pipeline (eviction + LLM summarisation)
     - MCP auto-loading from local mcp_config.json/yaml when available
-    - Workspace memory with relevance recall (max_memory_entries=10)
+    - Workspace memory: MEMORY.md index in the system prompt, topic files on demand
     - Conversation auto-archive (auto_archive=True)
     - Memory auto-extract after each run (auto_extract_memory=True) —
       falls back to auxiliary_model to extract memories when the LLM did
