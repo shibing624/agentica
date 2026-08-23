@@ -123,6 +123,12 @@ class TestRenameCommand(unittest.TestCase):
         )
         self.assertNotIn("/session", COMMAND_REGISTRY)
 
+    def test_sessions_alias_routes_to_resume(self):
+        self.assertIs(
+            COMMAND_REGISTRY["/sessions"][0],
+            cli_session._cmd_resume,
+        )
+
 
 class TestStatusSessionIdentity(unittest.TestCase):
     def test_status_shows_current_session_name_and_id(self):

@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from agentica.cli.runtime import (
     get_console,
+    active_tool_names,
     BUILTIN_TOOLS,
     create_agent,
     get_model,
@@ -207,7 +208,13 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
 
     con.print()
     con.print("  [bold]-- Agent --[/bold]")
-    all_active = list(BUILTIN_TOOLS)
+    # Prefer the live agent's actual toolset — it reflects /tools load/remove,
+    # conditional tools (peer, worktree, self_manage, cron) and any runtime
+    # stripping, none of which the static list can know. Fall back to the
+    # static list + session extras when no agent is built yet.
+    all_active = active_tool_names(ctx.current_agent)
+    if not all_active:
+        all_active = list(BUILTIN_TOOLS)
     if ctx.extra_tool_names:
         all_active.extend(ctx.extra_tool_names)
     con.print(f"  Tools:       {', '.join(all_active)}")

@@ -67,6 +67,13 @@ def _generate_session_id() -> str:
 
 
 # Builtin tools — single source of truth for all CLI display/listing.
+# Mirrors the default DeepAgent toolset assembled by get_builtin_tools()
+# (file/execute/web/todos/task/skills) plus the CLI conditionals: delegate
+# (model + process registry, agent/deep.py), save_memory/search_memory
+# (enable_long_term_memory, agent/base.py), ask_user_question (CLI turns it
+# on explicitly), and wait (registered with the background process registry).
+# Keep in sync — tests/cli/test_builtin_tools_listing.py fails if the factory
+# grows a function this list misses.
 BUILTIN_TOOLS = [
     "read_file",
     "write_file",
@@ -74,10 +81,33 @@ BUILTIN_TOOLS = [
     "glob",
     "grep",
     "execute",
+    "wait",
     "web_search",
     "fetch_url",
+    "write_todos",
     "task",
+    "delegate",
+    "save_memory",
+    "search_memory",
+    "get_skill_info",
+    "list_skills",
+    "ask_user_question",
 ]
+
+
+def active_tool_names(agent) -> List[str]:
+    """Names of every function the agent's live toolset exposes, sorted.
+
+    Reads ``agent.tools`` (not ``model.functions``) so the answer holds before
+    the first model call. Used by /config and the handoff summary to show what
+    the agent actually has — conditional tools (peer, worktree, self_manage,
+    cron, skills) included — instead of the static BUILTIN_TOOLS list.
+    """
+    names = set()
+    for t in (getattr(agent, "tools", None) or []):
+        if isinstance(t, Tool) and t.functions:
+            names.update(t.functions.keys())
+    return sorted(names)
 
 # Tool icons for CLI display
 TOOL_ICONS = {
@@ -829,9 +859,7 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
         if fb_ids:
             lines.append(f"- Fallback models: {fb_ids}")
 
-    tool_names = sorted(
-        name for t in (agent.tools or []) if isinstance(t, Tool) and t.functions for name in t.functions.keys()
-    )
+    tool_names = active_tool_names(agent)
     lines.append(f"- Active tools: {', '.join(tool_names) if tool_names else 'none'}")
 
     skill_names = _get_active_skill_names(agent)
