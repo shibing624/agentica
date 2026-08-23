@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### breaking
+- **`SkillRegistry.get_skill_instruction()` / `generate_skills_prompt()` 删除**：生产 catalog 一直是 `SkillTool.get_system_prompt()`（自进化 spawn 也是写盘后再走这条）。两条是死 API，catalog 预算改挂在活路径上，不再维护第二套按注册序截断的 XML 列表。
 - **`GET /api/memory` 不再返回用户级 AGENTS.md**：payload 改为 `{auto_extract, index_path, entries}`（MEMORY.md 索引）。常驻规则改走 `GET/PUT /api/user_agents_md`。`PUT /api/memory` 删除（405），避免旧前端把 AGENTS.md 正文写进记忆结构。
 - **权限档 `ask` 改为 Codex「Ask for approval」**：以前 `ask` 会从 schema 里藏掉写工具（`write_file` / `execute` / `apply_patch` 等，模型看到 Function not found）；现在三个档工具都在，差别只在真正 `execute` 之前要不要停车等人。`ask`：工作区内**读**（文件工具 + 只读 shell，含 `cd && git diff | head` 包装）自动放行；工作区内**写**（`write_file` / `apply_patch`）、工作区外/敏感路径、会改状态的 `execute`、`web_search` / `fetch_url`、`is_destructive` 第三方工具、未标注的第三方工具停车。`auto`：再放行工作区内写、普通 `execute` 和网络。`allow-all` 不询问、不拒绝（含硬不安全；项目「拒绝类似」只约束 ask/auto）。删掉模型可见的 `request_path_access`，改由公开 `grant_path_access` 写入沙箱白名单。默认不变：CLI / SDK 仍是 `allow-all`，Web 仍是 `auto`。无人值守（无 LiveTurn：IM / cron / 非流式 `POST /chat` / `--print`）立即把工具结果写成 `Tool call denied by user.`，不 500、不 sibling-abort。
 - **审批增加 `deny` 路由和「拒绝类似」**：`classify` 返回 `allow | ask | deny`。三档权限嵌套：`auto` ⊃ `ask`，`allow-all` 是 root。`ask` 下 `web_search` / `fetch_url` 和工作区内写文件弹卡；`auto` 放行网络和工作区内写，硬不安全仍弹卡。新增 `deny_prefix`（CLI `x` / `4`，Web 拒绝按钮下拉「拒绝类似」），写入 `project.json` `approvals.deny_command_prefixes` 等，下次同类在 **ask/auto** 下不弹卡直接拒。**`allow-all` 忽略项目拒绝**，只 warning + 记 `approval_decision`（`allow_all_ignore_deny` / `allow_all_hard_unsafe`），命令照跑；进程用当前 OS 用户的权限，能 sudo 就能 sudo。用户在 ask/auto 点允许之后，执行时的 `check_command_safety` block / sandbox `blocked_commands` 不再跟卡打架。
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web 侧栏会话状态与对话页被误删**：`deny_prefix` 那次提交冲掉了 `sessions.ts` 的 `lastTs` / `unread` / `syncSessionStatus`，以及 `ChatPage` 的左侧 query 导航（`ChatNav`）、`settleWork`、已读 `markSessionRead`、以及 `running` 清位。已从上一版补回，审批卡仍带 `deny_prefix`。
 
 #### features
+- **Skills catalog 按模型上下文窗口的 2% 做 token 预算**（无窗口时退回 8000 字符）。单条 description 硬帽 1024 字符（从前截）。超预算先从列表尾部丢掉 description（保留名字），仍超才 omit 并注明条数。卫生规则写进 prompt：匹配才用、当轮读完 `get_skill_info`、不跨轮携带、不深追 references。`freeze_session_guidance()` 仍然冻住整块，不每轮重排。
 - **粘贴/输入里的非法 UTF-8 不再打崩 CLI、Web、SDK**：孤立 surrogate（例如 `U+DCE5`）以前在 `.encode("utf-8")` 上炸掉 Enter 写历史、agent 落盘和 Langfuse OTLP。CLI 入口、`Agent.run` / `steer`、Web `ChatRequest` / `SteerRequest` / `GoalRequest` 都换成 U+FFFD，相邻汉字不动。
 - **Web 侧栏会话时间改为「多久没发起 query」**：原先 `agoStr` 用的是 `first_timestamp`（会话第一次请求），所以一直聊的对话也会显示 `7h`。现在用 `last_timestamp`，有本地 transcript 时再取最后一条非 steer 用户消息；文案按界面语言粗粒度显示（刚刚 / 5 分钟一档 / x 小时前 / x 天前，英文 just now / 5 min ago / x hours ago / x days ago）。选中行的时间不再叠一层 `background`（原先 `--bg2` 盖在 `--accent-soft` 上会变成一块深色芯片）。组内会话按最近一次 query 排序；项目组顺序仍按该目录第一次对话。
 - **Web 侧栏会话状态：回复中转圈 / 未读绿点 / 空闲时间**：发完 query 切到别的会话时，原会话 title 右侧不再显示「刚刚」，AI 思考、tool call、压缩期间是转圈；回复结束后如果没打开过就是绿点，点进去看过才回到时间标签。`last_read_at` 写在 session sidecar，`GET /api/sessions` 带 `unread` / `running`，打开会话会 `POST /api/sessions/{id}/read`。旧会话没有 `last_read_at` 不当未读。

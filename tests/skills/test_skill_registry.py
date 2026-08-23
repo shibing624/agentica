@@ -337,33 +337,10 @@ class TestSkillRegistry(unittest.TestCase):
         self.registry.clear()
         self.assertEqual(len(self.registry), 0)
 
-    def test_generate_skills_prompt_empty(self):
-        self.assertEqual(self.registry.generate_skills_prompt(), "")
-
-    def test_generate_skills_prompt(self):
-        self.registry.register(self._make_skill("A"))
-        prompt = self.registry.generate_skills_prompt()
-        self.assertIn("<available_skills>", prompt)
-        self.assertIn("<skill>", prompt)
-        self.assertIn("A", prompt)
-
-    def test_generate_skills_prompt_budget(self):
-        for i in range(100):
-            self.registry.register(self._make_skill(f"Skill_{i}"))
-        prompt = self.registry.generate_skills_prompt(char_budget=200)
-        self.assertLessEqual(len(prompt), 500)  # Budget + wrapper
-
-    def test_get_skill_instruction(self):
-        self.registry.register(self._make_skill("A", trigger="/a"))
-        instr = self.registry.get_skill_instruction()
-        self.assertIn("Agent Skills", instr)
-        self.assertIn("A", instr)
-        self.assertIn("/a", instr)
-
     def test_get_skills_summary(self):
         self.registry.register(self._make_skill("A"))
         summary = self.registry.get_skills_summary()
-        self.assertIn("Available Skills", summary)
+        self.assertIn("Available skills", summary)
         self.assertIn("A", summary)
 
     def test_dunder_methods(self):

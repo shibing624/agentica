@@ -6,6 +6,7 @@
 import re
 from typing import Dict, Optional, List
 
+from agentica.skills.catalog import render_skills_catalog
 from agentica.skills.skill import Skill
 
 
@@ -189,95 +190,18 @@ class SkillRegistry:
         for location in self._skills_by_location:
             self._skills_by_location[location].clear()
 
-    def generate_skills_prompt(self, char_budget: int = 10000) -> str:
+    def get_skills_summary(self, context_window: Optional[int] = None) -> str:
+        """Render the skills catalog for session guidance (no SkillTool workflow).
+
+        The live agent path is ``SkillTool.get_system_prompt()``; this is the
+        CLI fallback when the agent has no SkillTool, and a listing helper
+        for examples. Same budget and description cap as the live catalog.
         """
-        Generate a prompt listing all available skills.
-
-        Limits output to character budget to manage context window.
-
-        Args:
-            char_budget: Maximum characters for skills list
-
-        Returns:
-            Formatted skills prompt
-        """
-        skills = self.list_all()
-
-        if not skills:
-            return ""
-
-        entries = []
-        total_chars = 0
-
-        for skill in skills:
-            entry = skill.to_xml()
-            if total_chars + len(entry) > char_budget:
-                break
-            entries.append(entry)
-            total_chars += len(entry)
-
-        if not entries:
-            return ""
-
-        skills_xml = "\n".join(entries)
-        return f"""<available_skills>
-{skills_xml}
-</available_skills>"""
-
-    def get_skill_instruction(self) -> str:
-        """
-        Get the instruction prompt for all registered skills.
-
-        Returns:
-            Formatted instruction string for skills
-        """
-        if not self._skills:
-            return ""
-
-        instruction = (
-            "# Agent Skills\n"
-            "The agent skills are a collection of folders of instructions, scripts, "
-            "and resources that you can load dynamically to improve performance "
-            "on specialized tasks. Each agent skill has a `SKILL.md` file in its "
-            "folder that describes how to use the skill. If you want to use a "
-            "skill, you MUST read its `SKILL.md` file carefully.\n\n"
+        return render_skills_catalog(
+            self.list_all(),
+            context_window=context_window,
+            include_workflow=False,
         )
-
-        skill_template = (
-            "## {name}{trigger_info}\n"
-            "{description}\n"
-            'Check "{dir}/SKILL.md" for how to use this skill\n\n'
-        )
-
-        for skill in self._skills.values():
-            trigger_info = f" (`{skill.trigger}`)" if skill.trigger else ""
-            instruction += skill_template.format(
-                name=skill.name,
-                description=skill.description,
-                dir=skill.path,
-                trigger_info=trigger_info,
-            )
-
-        return instruction
-
-    def get_skills_summary(self) -> str:
-        """
-        Get a brief summary of all available skills.
-
-        Useful for including in system prompts without full details.
-
-        Returns:
-            Formatted summary string
-        """
-        if not self._skills:
-            return ""
-
-        lines = ["## Available Skills\n"]
-        for name, skill in self._skills.items():
-            trigger = f" (`{skill.trigger}`)" if skill.trigger else ""
-            lines.append(f"- **{name}**{trigger}: {skill.description}")
-
-        return "\n".join(lines)
 
     def auto_commands(self) -> Dict[str, "Skill"]:
         """Build a mapping of auto-generated slash commands to skills.

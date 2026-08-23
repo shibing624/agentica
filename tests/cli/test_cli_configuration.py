@@ -680,7 +680,8 @@ class TestCLIConfiguration(unittest.TestCase):
 
         self.assertIsNone(agent.instructions)
         self.assertEqual(len(agent.session_guidance), 1)
-        self.assertIn("Available Skills", agent.session_guidance[0])
+        self.assertIn("learn-from-experience", agent.session_guidance[0])
+        self.assertIn("Available skills", agent.session_guidance[0])
 
     def test_create_agent_passes_experience_controls_to_deep_agent(self):
         """CLI flags should map to DeepAgent experience settings deterministically."""

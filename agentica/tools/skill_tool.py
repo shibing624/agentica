@@ -51,15 +51,10 @@ from agentica.skills import (
     load_skills,
     register_skill,
 )
+from agentica.skills.catalog import render_skills_catalog
 from agentica.skills.skill_loader import SkillLoader
 from agentica.utils.log import logger
 
-
-# When the registry holds more than this many skills, the system prompt
-# only includes the FULL description for the top-N most-used / most-recent
-# skills. The rest are listed as `name + trigger only`, and the agent
-# pulls full details on demand via `get_skill_info(name)`.
-_LAZY_THRESHOLD = 20
 
 # Per-call score components for ranking skills in the system prompt.
 # Recency wins over raw frequency to keep the visible set adaptive.
@@ -583,54 +578,16 @@ If a matching skill is later installed, load it with `get_skill_info(skill_name)
 """
 
         ranked = self._rank_skills_by_usage(skills)
-        total = len(ranked)
-
-        # Below the threshold, every skill gets a full description.
-        # At or above, only the top-N (by usage recency+frequency) keep their
-        # description in the system prompt. The rest are listed by name +
-        # optional trigger so the agent can `get_skill_info(name)` on demand.
-        if total <= _LAZY_THRESHOLD:
-            full_skills, lazy_skills = ranked, []
-        else:
-            full_skills = ranked[:_LAZY_THRESHOLD]
-            lazy_skills = ranked[_LAZY_THRESHOLD:]
-
-        full_lines = []
-        for skill in full_skills:
-            trigger_info = f" (trigger: `{skill.trigger}`)" if skill.trigger else ""
-            full_lines.append(f"- **{skill.name}**{trigger_info}: {skill.description}")
-
-        sections = [
-            "# Skills",
-            "",
-            "Use a skill only when it clearly matches the current task.",
-            "",
-            f"## Top Skills ({len(full_skills)} of {total}, ranked by recent usage)",
-            "\n".join(full_lines),
-        ]
-
-        if lazy_skills:
-            lazy_lines = []
-            for skill in lazy_skills:
-                trigger_info = f" (`{skill.trigger}`)" if skill.trigger else ""
-                lazy_lines.append(f"- {skill.name}{trigger_info}")
-            sections.extend([
-                "",
-                f"## Other Skills ({len(lazy_skills)}, name only — call `get_skill_info(name)` to load full description before use)",
-                "\n".join(lazy_lines),
-            ])
-
-        sections.extend([
-            "",
-            "## Skill Workflow",
-            "- Load the matching skill with `get_skill_info(skill_name)` before giving task guidance.",
-            "- Treat slash commands like `/<something>` as skill references and load the matching skill first.",
-            "- Skills provide instructions, not executable actions.",
-            "- Do not mention a skill without loading it.",
-            "- Do not reload the same skill within the current turn.",
-        ])
-
-        return "\n".join(sections) + "\n"
+        context_window = None
+        if self._agent is not None:
+            model = self._agent.model
+            if model is not None:
+                context_window = model.context_window
+        return render_skills_catalog(
+            ranked,
+            context_window=context_window,
+            include_workflow=True,
+        )
 
     def __repr__(self) -> str:
         self._ensure_initialized()

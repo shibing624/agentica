@@ -145,8 +145,9 @@ Use this skill for testing.
         prompt = skill_tool.get_system_prompt()
         self.assertIn("test-skill", prompt)
         self.assertIn("get_skill_info", prompt)
-        self.assertNotIn("specialized knowledge and workflows for specific tasks", prompt)
-        self.assertLess(len(prompt), 700)
+        self.assertIn("Do not carry skills across turns unless re-mentioned", prompt)
+        self.assertNotIn("Use this skill for testing", prompt)
+        self.assertNotIn(self.skill_dir, prompt)
 
     def test_custom_dir_nonexistent(self):
         """Test custom skill directory that doesn't exist."""
