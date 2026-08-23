@@ -74,6 +74,46 @@ class TestRunnerConcurrentWarning(unittest.TestCase):
         self.assertFalse(agent._running)
 
 
+class TestRunnerSanitizesInvalidUtf8(unittest.TestCase):
+    """SDK / Web / IM all enter through Agent.run; lone surrogates must not crash it."""
+
+    def test_run_replaces_lone_surrogate_in_user_message(self):
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.model.response import ModelResponseEvent
+
+        agent = Agent(
+            name="utf8",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            enable_session_log=False,
+        )
+        seen = []
+
+        async def fast_stream(messages=None, **_kw):
+            seen.extend(list(messages or []))
+            chunk = ModelResponse()
+            chunk.event = ModelResponseEvent.assistant_response.value
+            chunk.content = "ok"
+            yield chunk
+            if messages is not None:
+                messages.append(Message(role="assistant", content="ok"))
+
+        agent.model.response_stream = fast_stream
+
+        async def consume():
+            async for _ in agent.run_stream("本轮\udce5加回"):
+                pass
+
+        asyncio.run(consume())
+        users = [m for m in seen if getattr(m, "role", None) == "user"]
+        self.assertTrue(users)
+        content = users[0].content
+        content.encode("utf-8")
+        self.assertNotIn("\udce5", content)
+        self.assertIn("本轮", content)
+        self.assertIn("加回", content)
+
+
 class TestRunnerRunTimeout(unittest.TestCase):
     """run_timeout in RunConfig should return a timeout response."""
 

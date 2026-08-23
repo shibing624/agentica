@@ -58,6 +58,7 @@ from agentica.tools.ask_user_question_tool import (
 )
 from agentica.tools.background_processes import BackgroundProcessCompleted
 from agentica.utils.log import logger, restore_console_logging, suppress_console_logging
+from agentica.utils.string import replace_invalid_utf8
 from agentica.workspace import Workspace
 
 from .attachments import (
@@ -694,7 +695,7 @@ def run_interactive(
             already_shown = queued.is_relayed
             skill_to_invoke = None
 
-            user_input = user_input.strip()
+            user_input = replace_invalid_utf8(user_input).strip()
             if not user_input and not submit_images:
                 continue
 
@@ -776,7 +777,9 @@ def run_interactive(
                 def _expand_ref(m):
                     p = Path(m.group(1))
                     if p.exists():
-                        return p.read_text(encoding="utf-8")
+                        return replace_invalid_utf8(
+                            p.read_text(encoding="utf-8", errors="replace")
+                        )
                     return m.group(0)
 
                 expanded = _paste_ref_re.sub(_expand_ref, user_input)

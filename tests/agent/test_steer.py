@@ -36,6 +36,18 @@ class TestSteerBuffer(unittest.TestCase):
         self.assertFalse(agent.steer("   "))
         self.assertEqual(agent._drain_steer(), [])
 
+    def test_steer_sanitizes_lone_surrogate(self):
+        """Web/SDK interrupt text can carry unpaired surrogates, same as CLI paste."""
+        agent = Agent()
+        agent._begin_steer_window()
+        self.assertTrue(agent.steer("本轮\udce5加回"))
+        drained = agent._drain_steer()
+        self.assertEqual(len(drained), 1)
+        drained[0].encode("utf-8")
+        self.assertNotIn("\udce5", drained[0])
+        self.assertIn("本轮", drained[0])
+        self.assertIn("加回", drained[0])
+
     def test_steer_rejected_when_not_running(self):
         # Outside a run window steer() must return False (caller falls back to
         # queuing a fresh turn) and must NOT buffer anything.

@@ -8,7 +8,7 @@ export type MsgPart =
   | { kind: "text"; text: string }
   | { kind: "steer"; text: string; ts?: number };
 
-export type ApprovalDecision = "allow" | "allow_prefix" | "deny";
+export type ApprovalDecision = "allow" | "allow_prefix" | "deny" | "deny_prefix";
 
 /** SSE `approval_request` payload, keyed by the matching tool row. */
 export type ApprovalRequest = {

@@ -315,6 +315,143 @@ class TestCLIUserMessage(unittest.TestCase):
         peer_session.note_user_turn.assert_called_once()
         self.assertEqual(pending_queue.qsize(), 1)
 
+    def test_enter_with_lone_surrogate_does_not_crash_history(self):
+        """Invalid UTF-8 in a paste (lone surrogates) must still submit.
+
+        prompt_toolkit FileHistory encodes each line as utf-8; a leftover
+        ``\\udce5`` (surrogateescape of byte 0xE5) used to abort the event
+        loop on Enter and then the agent run.
+        """
+        from types import SimpleNamespace
+
+        from prompt_toolkit.keys import Keys
+
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.session_state import SessionState
+        from agentica.cli.interactive.tui import _setup_tui
+
+        dirty = "本轮\udce5加回 remember"
+
+        class _HistoryBuffer:
+            def __init__(self, text):
+                self.text = text
+
+            def reset(self, append_to_history=False):
+                if append_to_history:
+                    self.text.encode("utf-8")
+
+        state = SessionState()
+        pending_queue = PendingQueue()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "agentica.cli.interactive.tui.history_file",
+                os.path.join(tmp, "history"),
+            ):
+                app = _setup_tui(
+                    state,
+                    skills_registry=None,
+                    tui_state={},
+                    pending_queue=pending_queue,
+                    image_counter_ref=[0],
+                )
+        handler = next(
+            binding.handler
+            for binding in app.key_bindings.bindings
+            if binding.keys == (Keys.ControlM,)
+        )
+        buffer = _HistoryBuffer(dirty)
+        handler(SimpleNamespace(app=SimpleNamespace(
+            current_buffer=buffer, invalidate=Mock())))
+
+        self.assertEqual(pending_queue.qsize(), 1)
+        queued = pending_queue.get()
+        queued.encode("utf-8")
+        self.assertNotIn("\udce5", queued)
+        self.assertNotIn("\udce5", buffer.text)
+
+    def test_utf8_file_history_accepts_lone_surrogate(self):
+        from pathlib import Path
+
+        from agentica.cli.interactive.tui import Utf8FileHistory
+
+        dirty = "本轮\udce5加回 remember"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "cli_history.txt")
+            Utf8FileHistory(path).append_string(dirty)
+            stored = Path(path).read_text(encoding="utf-8")
+        self.assertNotIn("\udce5", stored)
+        self.assertIn("本轮", stored)
+        self.assertIn("加回", stored)
+
+    def test_bracketed_paste_with_lone_surrogate_writes_utf8_file(self):
+        """A long paste is spilled to a cache file; that write is utf-8 too."""
+        from types import SimpleNamespace
+
+        from prompt_toolkit.keys import Keys
+
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.session_state import SessionState
+        from agentica.cli.interactive.tui import _setup_tui
+
+        dirty = "a\nb\nc\nd\ne\n本轮\udce5加回\n"
+        state = SessionState()
+        pending_queue = PendingQueue()
+        inserted = []
+
+        class _PasteBuffer:
+            text = ""
+            cursor_position = 0
+
+            def insert_text(self, value):
+                inserted.append(value)
+                self.text += value
+                self.cursor_position = len(self.text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            history_path = os.path.join(tmp, "history")
+            cache_dir = os.path.join(tmp, "cache")
+            os.makedirs(cache_dir)
+            with (
+                patch("agentica.cli.interactive.tui.history_file", history_path),
+                patch("agentica.cli.interactive.tui._try_attach_clipboard_image", return_value=False),
+                patch("agentica.cli.runtime.CACHE_DIR", cache_dir),
+            ):
+                app = _setup_tui(
+                    state,
+                    skills_registry=None,
+                    tui_state={},
+                    pending_queue=pending_queue,
+                    image_counter_ref=[0],
+                )
+                handler = next(
+                    binding.handler
+                    for binding in app.key_bindings.bindings
+                    if binding.keys == (Keys.BracketedPaste,)
+                )
+                buf = _PasteBuffer()
+                handler(SimpleNamespace(
+                    data=dirty,
+                    current_buffer=buf,
+                    app=SimpleNamespace(invalidate=Mock()),
+                ))
+
+            self.assertEqual(len(state.pasted_files), 1)
+            paste_path, line_count = state.pasted_files[0]
+            written = paste_path.read_text(encoding="utf-8")
+            written.encode("utf-8")
+            self.assertNotIn("\udce5", written)
+            self.assertEqual(line_count, dirty.count("\n") + 1)
+            self.assertTrue(inserted)
+
+    def test_replace_invalid_utf8_keeps_neighbors(self):
+        from agentica.utils.string import replace_invalid_utf8
+
+        cleaned = replace_invalid_utf8("本轮\udce5加回")
+        cleaned.encode("utf-8")
+        self.assertEqual(cleaned, "本轮\ufffd加回")
+        self.assertEqual(replace_invalid_utf8("hello"), "hello")
+        self.assertEqual(replace_invalid_utf8(""), "")
+
     def test_deduplicate_image_attachments_preserves_first_path(self):
         """One pasted image represented by two temp paths stays one attachment."""
         from pathlib import Path

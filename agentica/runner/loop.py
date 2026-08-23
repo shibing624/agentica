@@ -24,6 +24,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from agentica.utils.log import logger, _run_id_var, _parent_run_id_var, _short
+from agentica.utils.string import replace_invalid_utf8
 from agentica.agent.history_filter import strip_tool_artifacts_from_memory
 from agentica.cost_tracker import CostTracker
 from agentica.hooks import RunHooks, _CompositeAgentHooks, _CompositeRunHooks
@@ -49,6 +50,33 @@ if TYPE_CHECKING:
     from agentica.agent import Agent
 
 from agentica.runner.types import LoopBreak, ToolHandlingResult
+
+
+def _sanitize_run_input(value: Any) -> Any:
+    """Replace lone surrogates in ``run()`` / ``run_stream()`` payloads.
+
+    CLI paste, browser JSON (``\\udce5``), and SDK Python strings can all
+    carry U+D800–U+DFFF. UTF-8 encoding then blows up history, session logs,
+    HTTP, and OTLP. Neighbors stay intact; each illegal code point becomes
+    U+FFFD. Walks str / Message / dict content-or-text / lists, leaves
+    everything else alone.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return replace_invalid_utf8(value)
+    if isinstance(value, Message):
+        value.content = _sanitize_run_input(value.content)
+        return value
+    if isinstance(value, dict):
+        if "content" in value:
+            value["content"] = _sanitize_run_input(value["content"])
+        if "text" in value and isinstance(value["text"], str):
+            value["text"] = replace_invalid_utf8(value["text"])
+        return value
+    if isinstance(value, list):
+        return [_sanitize_run_input(item) for item in value]
+    return value
 
 
 class LoopMixin:
@@ -350,6 +378,9 @@ class LoopMixin:
             * messages mode: [system_message] + [messages]
         """
         agent = self.agent
+        message = _sanitize_run_input(message)
+        if messages is not None:
+            messages = [_sanitize_run_input(m) for m in messages]
 
         # Pre-generate this run's id and bind it to the log ContextVar *before*
         # any log records are emitted. Every log line for this run (including

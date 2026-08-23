@@ -603,9 +603,10 @@ class BuiltinFileTool(Tool):
         path = self._resolve_path(file_path)
 
         # ── Sensitive path guard ──────────────────────────────────
-        sensitive_err = self._sensitive_write_guard(str(path))
-        if sensitive_err:
-            raise PermissionError(sensitive_err)
+        if self._sandbox_config is not None and self._sandbox_config.enabled:
+            sensitive_err = self._sensitive_write_guard(str(path))
+            if sensitive_err:
+                raise PermissionError(sensitive_err)
 
         # Ensure directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -715,9 +716,10 @@ class BuiltinFileTool(Tool):
                 )
             seen_paths.add(path_key)
 
-            sensitive_err = self._sensitive_write_guard(path_key)
-            if sensitive_err:
-                raise PermissionError(sensitive_err)
+            if self._sandbox_config is not None and self._sandbox_config.enabled:
+                sensitive_err = self._sensitive_write_guard(path_key)
+                if sensitive_err:
+                    raise PermissionError(sensitive_err)
             resolved.append((operation, path, path_key))
 
         # Acquire every target lock in stable order so no same-tool edit can

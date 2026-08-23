@@ -44,6 +44,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from agentica.utils.hook_recorder import HookRecorder
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
+from agentica.utils.string import replace_invalid_utf8
 from agentica.model.message import Message
 from agentica.tools.base import ModelTool, Tool, Function
 from agentica.tools.skill_tool import SkillTool
@@ -987,6 +988,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """
         if not guidance or not guidance.strip():
             return False
+        guidance = replace_invalid_utf8(guidance)
         with self._steer_lock:
             # Atomic gate: only accept steering while a run is active. Checking
             # _running under the same lock that _begin/_end_steer_window use to

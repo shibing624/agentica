@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Interactive CLI tool-approval prompts (Codex three-option UX).
+"""Interactive CLI tool-approval prompts (Codex-style y / p / esc / x).
 
 The runner parks on ``Agent.approve`` before ``fc.execute()``. Interactive
 sessions resolve that wait through ``_InputRequest`` + prompt_toolkit keys
-(y / p / esc). ``--print`` / non-interactive sessions pass
+(y / p / esc / x). ``--print`` / non-interactive sessions pass
 ``get_registry=None`` so anything that would park is denied immediately.
 """
 from __future__ import annotations
@@ -34,11 +34,13 @@ _KEY_TO_DECISION: Dict[str, ApprovalDecision] = {
     "3": "deny",
     "esc": "deny",
     "escape": "deny",
+    "x": "deny_prefix",
+    "4": "deny_prefix",
 }
 
 
 def approval_decision_from_key(key: str) -> Optional[ApprovalDecision]:
-    """Map a Codex-style key (y / p / esc / 1 / 2 / 3) to a decision."""
+    """Map a Codex-style key (y / p / esc / x / 1 / 2 / 3 / 4) to a decision."""
     return _KEY_TO_DECISION.get((key or "").strip().lower())
 
 
@@ -47,10 +49,11 @@ def is_approval_request(req: Any) -> bool:
 
 
 def format_approval_prompt(pending: PendingApproval) -> str:
-    """Codex CLI three-option copy for the TUI prompt widget."""
+    """Codex CLI copy for the TUI prompt widget."""
     name = pending.name
     preview = (pending.preview or "").strip() or _preview_from_arguments(name, pending.arguments)
     allow_prefix = "allow_prefix" in pending.options
+    deny_prefix = "deny_prefix" in pending.options
     if name in EXECUTE_TOOLS:
         question = "Would you like to run the following command?"
         body = f"$ {preview}" if preview else "$"
@@ -70,6 +73,20 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         question = f"Would you like to allow this {name} call?"
         body = preview
         option2 = f"Yes, and don't ask again for this {name} tool (p)"
+    deny_similar = ""
+    if deny_prefix:
+        if name in EXECUTE_TOOLS:
+            label = pending.similar_label or command_class_display(preview)
+            deny_similar = (
+                f"No, and don't ask again for `{label}` commands (x)"
+                if label else "No, and don't ask again for this class of command (x)"
+            )
+        elif name in FILE_TOOLS:
+            deny_similar = "No, and don't ask again for this class of path (x)"
+        elif name in NETWORK_TOOLS:
+            deny_similar = "No, and don't ask again for this class of network tool (x)"
+        else:
+            deny_similar = f"No, and don't ask again for this {name} tool (x)"
     lines = [
         question,
         "Environment: local",
@@ -80,6 +97,8 @@ def format_approval_prompt(pending: PendingApproval) -> str:
     if allow_prefix:
         lines.append(f"2. {option2}")
     lines.append("3. No, and tell the agent what to do differently (esc)")
+    if deny_prefix:
+        lines.append(f"4. {deny_similar}")
     return "\n".join(lines)
 
 

@@ -154,7 +154,7 @@ class TestClassifyAndGrants(unittest.TestCase):
                 f"{name} {args}",
             )
 
-    def test_ask_allows_builtins_skills_network_and_memory(self):
+    def test_ask_allows_builtins_skills_and_memory(self):
         calls = [
             ("self_manage", {"action": "show"}),
             ("self_manage", {"action": "set_config", "key": "model_name", "value": "x"}),
@@ -162,8 +162,6 @@ class TestClassifyAndGrants(unittest.TestCase):
             ("self_manage", {"action": "install_skill", "value": "https://example.com/skill.git"}),
             ("get_skill_info", {"skill_name": "brainstorm"}),
             ("list_skills", {}),
-            ("web_search", {"queries": "news"}),
-            ("fetch_url", {"url": "https://example.com"}),
             ("save_memory", {"title": "t", "content": "c"}),
             ("search_memory", {"query": "t"}),
             ("task", {"prompt": "look around"}),
@@ -213,12 +211,14 @@ class TestClassifyAndGrants(unittest.TestCase):
                 command,
             )
 
-    def test_network_allows_in_ask_and_auto(self):
+    def test_network_asks_in_ask_allows_in_auto(self):
         fc = _fc("web_search", {"queries": "news"}, is_read_only=True)
-        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
         self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
         fetch = _fc("fetch_url", {"url": "https://example.com"}, is_read_only=True)
-        self.assertEqual(classify("ask", fetch, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("ask", fetch, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("auto", fetch, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("allow-all", fc, self.grants, work_dir=self.work), "allow")
 
     def test_unlabeled_tool_allows_in_ask_and_auto(self):
         fc = _fc("custom_tool", {"x": 1})
@@ -288,6 +288,43 @@ class TestClassifyAndGrants(unittest.TestCase):
         self.assertEqual(classify("ask", add, self.grants, work_dir=self.work), "allow")
         self.assertEqual(classify("ask", push, self.grants, work_dir=self.work), "ask")
 
+    def test_hard_unsafe_asks_in_ask_and_auto_allows_in_allow_all(self):
+        root = _fc("execute", {"command": "rm -rf /"}, is_destructive=True)
+        fork = _fc("execute", {"command": ":(){ :|:& };:"}, is_destructive=True)
+        etc_write = _file_fc("write_file", "/etc/hosts")
+        ssh_write = _file_fc("write_file", os.path.expanduser("~/.ssh/config"))
+        etc_redirect = _fc(
+            "execute", {"command": "echo malicious > /etc/passwd"}, is_destructive=True,
+        )
+        for fc in (root, fork, etc_write, ssh_write, etc_redirect):
+            self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask", fc.arguments)
+            self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "ask", fc.arguments)
+            self.assertEqual(
+                classify("allow-all", fc, self.grants, work_dir=self.work), "allow", fc.arguments,
+            )
+        workspace_rm = _fc("execute", {"command": "rm -rf /tmp/x"}, is_destructive=True)
+        self.assertEqual(classify("auto", workspace_rm, self.grants, work_dir=self.work), "allow")
+
+    def test_deny_grant_applies_in_ask_and_auto_not_allow_all(self):
+        self.grants.add_deny_command_prefix("rm -rf /")
+        fc = _fc("execute", {"command": "rm -rf /"}, is_destructive=True)
+        similar = _fc("execute", {"command": "rm -rf /tmp/x"}, is_destructive=True)
+        other = _fc("execute", {"command": "rm -f /tmp/x"}, is_destructive=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "deny")
+        self.assertEqual(classify("auto", similar, self.grants, work_dir=self.work), "deny")
+        self.assertEqual(classify("allow-all", fc, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("allow-all", similar, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("allow-all", other, self.grants, work_dir=self.work), "allow")
+
+    def test_network_allow_prefix_then_ask_allows(self):
+        self.grants.add_network(
+            _fc("web_search", {"queries": "news"}), prefix=True,
+        )
+        again = _fc("web_search", {"queries": "other"}, is_read_only=True)
+        self.assertEqual(classify("ask", again, self.grants, work_dir=self.work), "allow")
+        fetch = _fc("fetch_url", {"url": "https://example.com"}, is_read_only=True)
+        self.assertEqual(classify("ask", fetch, self.grants, work_dir=self.work), "ask")
+
 
 class TestMakeApprove(unittest.TestCase):
     def test_no_registry_denies_manual_path(self):
@@ -324,7 +361,10 @@ class TestMakeApprove(unittest.TestCase):
             await asyncio.sleep(0)
             self.assertEqual(len(published), 1)
             self.assertEqual(published[0].similar_label, "rm -f")
-            self.assertEqual(published[0].options, ("allow", "allow_prefix", "deny"))
+            self.assertEqual(
+                published[0].options,
+                ("allow", "allow_prefix", "deny", "deny_prefix"),
+            )
             self.assertTrue(registry.decide("x1", "allow_prefix"))
             self.assertEqual(await waiter, "allow_prefix")
             again = _fc("execute", {"command": "rm -f /tmp/b.ini"}, is_destructive=True, call_id="x2")
@@ -366,6 +406,7 @@ class TestMakeApprove(unittest.TestCase):
             await asyncio.sleep(0)
             self.assertEqual(published[0].options, ("allow", "deny"))
             self.assertEqual(published[0].similar_label, "")
+            self.assertNotIn("deny_prefix", published[0].options)
             self.assertTrue(registry.decide("c1", "allow_prefix"))
             self.assertEqual(await waiter, "allow_prefix")
             again = _fc(
@@ -452,6 +493,77 @@ class TestProjectApprovalPersist(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_deny_prefix_writes_project_json_and_silently_denies(self):
+        async def _run():
+            work = tempfile.mkdtemp()
+            grants = SessionGrants()
+            registry = ApprovalRegistry()
+            published = []
+            approve = make_approve(
+                get_mode=lambda: "auto",
+                get_grants=lambda: grants,
+                get_registry=lambda: registry,
+                get_work_dir=lambda: work,
+                publish=published.append,
+                apply_path_grant=lambda path, prefix: None,
+                get_user_id=lambda: "default",
+            )
+            fc = _fc("execute", {"command": "rm -rf /"}, is_destructive=True, call_id="d1")
+            waiter = asyncio.create_task(approve(fc))
+            await asyncio.sleep(0)
+            self.assertEqual(len(published), 1)
+            self.assertIn("deny_prefix", published[0].options)
+            self.assertTrue(registry.decide("d1", "deny_prefix"))
+            self.assertEqual(await waiter, "deny_prefix")
+
+            from agentica.project_store import project_base_dir, read_project_file
+
+            data = read_project_file(project_base_dir(work, "default"))
+            self.assertEqual(data["approvals"]["deny_command_prefixes"], [["rm", "-rf"]])
+
+            fresh = SessionGrants()
+            sync_grants_from_project(fresh, work_dir=work, user_id="default")
+            similar = _fc("execute", {"command": "rm -rf /tmp/x"}, is_destructive=True, call_id="d2")
+            self.assertEqual(classify("auto", similar, fresh, work_dir=work), "deny")
+            self.assertEqual(classify("allow-all", similar, fresh, work_dir=work), "allow")
+
+            published.clear()
+            later_auto = make_approve(
+                get_mode=lambda: "auto",
+                get_grants=lambda: fresh,
+                get_registry=lambda: registry,
+                get_work_dir=lambda: work,
+                publish=published.append,
+                apply_path_grant=lambda path, prefix: None,
+                get_user_id=lambda: "default",
+            )
+            decision = await later_auto(similar)
+            self.assertEqual(decision, "deny")
+            self.assertEqual(published, [])
+            self.assertFalse(similar.approval_waited)
+            self.assertEqual(similar.approval_trace["reason"], "deny_grant")
+            self.assertEqual(similar.approval_trace["decision"], "deny")
+
+            published.clear()
+            rootish = _fc("execute", {"command": "rm -rf /"}, is_destructive=True, call_id="d3")
+            later_all = make_approve(
+                get_mode=lambda: "allow-all",
+                get_grants=lambda: fresh,
+                get_registry=lambda: registry,
+                get_work_dir=lambda: work,
+                publish=published.append,
+                apply_path_grant=lambda path, prefix: None,
+                get_user_id=lambda: "default",
+            )
+            decision = await later_all(rootish)
+            self.assertEqual(decision, "allow")
+            self.assertEqual(published, [])
+            self.assertFalse(rootish.approval_waited)
+            self.assertEqual(rootish.approval_trace["reason"], "allow_all_ignore_deny")
+            self.assertEqual(rootish.approval_trace["decision"], "allow")
+
+        asyncio.run(_run())
+
     def test_allow_once_does_not_write_command_prefix(self):
         async def _run():
             work = tempfile.mkdtemp()
@@ -521,6 +633,24 @@ class TestProjectApprovalPersist(unittest.TestCase):
         self.assertEqual(grants.path_prefixes, {"/ok"})
         self.assertEqual(grants.network_tools, {"web_search"})
         self.assertEqual(grants.tool_names, set())
+
+    def test_absorb_durable_deny_prefixes(self):
+        grants = SessionGrants()
+        grants.absorb_durable({
+            "deny_command_prefixes": [["rm", "-rf"], ["bash"]],
+            "deny_path_prefixes": ["/etc", 12, ""],
+            "deny_network_tools": ["web_search", None],
+            "deny_tool_names": ["cronjob"],
+        })
+        self.assertEqual(grants.deny_command_prefixes, [("rm", "-rf")])
+        self.assertEqual(grants.deny_path_prefixes, {"/etc"})
+        self.assertEqual(grants.deny_network_tools, {"web_search"})
+        self.assertEqual(grants.deny_tool_names, {"cronjob"})
+        payload = grants.durable_payload()
+        self.assertEqual(payload["deny_command_prefixes"], [["rm", "-rf"]])
+        self.assertEqual(payload["deny_path_prefixes"], ["/etc"])
+        self.assertEqual(payload["deny_network_tools"], ["web_search"])
+        self.assertEqual(payload["deny_tool_names"], ["cronjob"])
 
 
 class _HarnessAgent:
@@ -676,6 +806,55 @@ class TestRunnerApprovalHook:
         async for _ in model.run_function_calls([fc], []):
             pass
         assert logged == []
+
+    @pytest.mark.asyncio
+    async def test_deny_prefix_skips_execute_like_deny(self):
+        model = _model()
+        agent = _HarnessAgent()
+
+        async def approve(fc):
+            return "deny_prefix"
+
+        agent.approve = approve
+        model._agent_ref = weakref.ref(agent)
+        fc, ex = _exec_fc("c1", "rm -rf /")
+        async for _ in model.run_function_calls([fc], []):
+            pass
+        assert fc.result == DENIED_TOOL_RESULT
+        assert ex.calls == []
+
+    @pytest.mark.asyncio
+    async def test_silent_deny_grant_still_logs(self):
+        model = _model()
+        agent = _HarnessAgent()
+        logged = []
+
+        class _Log:
+            def append_event(self, name, **payload):
+                logged.append((name, payload))
+                return "u"
+
+        agent._session_log = _Log()
+
+        async def approve(fc):
+            fc.approval_trace = {
+                "tool": fc.function.name,
+                "decision": "deny",
+                "reason": "deny_grant",
+                "wait_s": 0,
+            }
+            return "deny"
+
+        agent.approve = approve
+        model._agent_ref = weakref.ref(agent)
+        fc, ex = _exec_fc("tid", "rm -rf /")
+        async for _ in model.run_function_calls([fc], []):
+            pass
+        assert fc.approval_waited is False
+        assert logged[0][0] == "approval_decision"
+        assert logged[0][1]["reason"] == "deny_grant"
+        assert logged[0][1]["decision"] == "deny"
+        assert ex.calls == []
 
 
 class TestGrantPathAccess(unittest.TestCase):

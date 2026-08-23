@@ -9,22 +9,24 @@ schema in every tier; the difference is whether the runner parks before
 ``fc.execute()`` (see ``agentica.agent.approvals``).
 
   - "ask"       : Ask for approval. Reads (including outside the work
-                  directory), read-only ``execute``, network tools
-                  (``web_search`` / ``fetch_url``), memory, ``task`` /
+                  directory), read-only ``execute``, memory, ``task`` /
                   ``delegate``, skills, and other builtins run without
-                  prompting. Parking: every ``write_file`` / ``apply_patch``
-                  (even inside the work directory) and non-read-only
-                  ``execute``.
+                  prompting. Parking: every ``write_file`` / ``apply_patch``,
+                  non-read-only ``execute``, network tools
+                  (``web_search`` / ``fetch_url``), and hard-unsafe
+                  commands/paths (``rm -rf /``, ``/etc``, ``~/.ssh``).
   - "auto"      : Approve for me. Reads (including outside the work
-                  directory), in-workspace writes, every ``execute``,
+                  directory), in-workspace writes, ordinary ``execute``,
                   network tools, and every builtin / skill / third-party
                   tool (``self_manage``, ``cronjob``, ``get_skill_info``, …
                   regardless of ``action``) run without prompting. Parks
-                  only for file *writes* outside the work directory or to
-                  sensitive paths.
-  - "allow-all" : Full Access. Never parks. Hard refusals for ``/etc``,
-                  ``~/.ssh`` and similar write targets still apply; they
-                  raise ``PermissionError`` rather than showing a card.
+                  file *writes* outside the work directory or to a
+                  sensitive path, and hard-unsafe execute.
+  - "allow-all" : Full Access. Never parks and never denies, including
+                  hard-unsafe commands/paths and project deny-similar
+                  grants (those apply only in ask/auto). Warns and records
+                  the override. The process runs with the OS user's own
+                  privileges — if that user can sudo/root, so can execute.
 
 Callers should not construct their own mode strings — always compare against
 ``PERMISSION_MODES`` / use ``validate_permission_mode`` so a typo fails loud

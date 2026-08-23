@@ -50,6 +50,9 @@ class TestApprovalKeyRouting:
         assert approval_decision_from_key("escape") == "deny"
         assert approval_decision_from_key("3") == "deny"
         assert approval_decision_from_key("n") == "deny"
+        assert approval_decision_from_key("4") == "deny_prefix"
+        assert approval_decision_from_key("x") == "deny_prefix"
+        assert approval_decision_from_key("X") == "deny_prefix"
         assert approval_decision_from_key("hello") is None
         assert approval_decision_from_key("") is None
 
@@ -77,6 +80,7 @@ class TestApprovalPromptCopy:
         assert "1. Yes, proceed (y)" in text
         assert "don't ask again for `rm -f` commands (p)" in text
         assert "No, and tell the agent what to do differently (esc)" in text
+        assert "don't ask again for `rm -f` commands (x)" in text
 
     def test_file_and_network_option_two(self):
         file_pending = PendingApproval(
@@ -112,6 +116,7 @@ class TestApprovalPromptCopy:
         text = format_approval_prompt(pending)
         assert "Yes, proceed (y)" in text
         assert "(p)" not in text
+        assert "(x)" not in text
         assert "don't ask again" not in text
 
     def test_ask_prompt_lines_skip_typed_answer_hint(self):

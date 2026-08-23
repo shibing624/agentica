@@ -9,6 +9,7 @@ LiveTurn / no TUI) is an immediate deny — never a hang. See
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import re
@@ -19,11 +20,24 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from agentica.tools.base import FunctionCall
-from agentica.tools.safety import is_read_only_command, split_compound_command
+from agentica.tools.safety import (
+    check_command_safety,
+    command_matches_blocked,
+    is_read_only_command,
+    split_compound_command,
+)
 from agentica.utils.log import logger
 
-ApprovalDecision = Literal["allow", "allow_prefix", "deny"]
-ApprovalRoute = Literal["allow", "ask"]
+ApprovalDecision = Literal["allow", "allow_prefix", "deny", "deny_prefix"]
+ApprovalRoute = Literal["allow", "ask", "deny"]
+
+# Set around ``fc.execute()`` after a human (or allow-all classify) allowed
+# the call, so execute-time ``check_command_safety`` / sandbox
+# ``blocked_commands`` do not contradict the card. Standalone
+# ``BuiltinExecuteTool.execute`` keeps the default False.
+approved_by_user: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "agentica_approved_by_user", default=False,
+)
 
 DENIED_TOOL_RESULT = "Tool call denied by user."
 
@@ -33,7 +47,7 @@ EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_command"})
 NETWORK_TOOLS = frozenset({"web_search", "fetch_url"})
 # Session-local / product builtins Codex Ask would not prompt on as
 # "file writes". Never inspect ``action``. Ask still parks ``write_file`` /
-# ``apply_patch`` and mutating ``execute``.
+# ``apply_patch``, mutating ``execute``, and network tools.
 BENIGN_ALWAYS_ALLOW = frozenset({
     "write_todos",
     "ask_user_question",
@@ -54,6 +68,19 @@ BENIGN_ALWAYS_ALLOW = frozenset({
 
 _BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")
 
+# ``check_command_safety`` warn hits that are still "ask" in ask/auto (the
+# block set already covers ``rm -rf /`` / fork bombs). Recursive ``rm`` of a
+# normal path stays a warn, not this list.
+_HARD_UNSAFE_WARN = frozenset({
+    "overwrite system config under /etc",
+    "overwrite SSH config",
+    "sudoers modification",
+    "sudoers edit",
+    "SSH authorized_keys modification",
+    "SSH key generation in system path",
+})
+_DEFAULT_BLOCKED_COMMANDS: Optional[List[str]] = None
+
 
 @dataclass(frozen=True)
 class PendingApproval:
@@ -65,7 +92,7 @@ class PendingApproval:
     question: str
     preview: str
     similar_label: str = ""
-    options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny")
+    options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny", "deny_prefix")
 
 
 @dataclass
@@ -113,12 +140,13 @@ class ApprovalRegistry:
 
 @dataclass
 class SessionGrants:
-    """Allow-once (ephemeral) plus allow-similar (project.json) memory.
+    """Allow-once (ephemeral) plus allow-similar / deny-similar (project.json).
 
     ``path_exact`` / ``network_keys`` last for this process only. Prefix
     fields are the project approval table: loaded from and saved to
     ``project.json`` ``approvals`` (same file as ``work_dir`` /
-    ``active_profile``).
+    ``active_profile``). Deny prefixes win over allow prefixes in
+    ``ask`` / ``auto``. ``allow-all`` ignores them (warn + record, still run).
     """
 
     path_exact: set = field(default_factory=set)
@@ -127,6 +155,10 @@ class SessionGrants:
     network_keys: set = field(default_factory=set)
     network_tools: set = field(default_factory=set)
     tool_names: set = field(default_factory=set)
+    deny_path_prefixes: set = field(default_factory=set)
+    deny_command_prefixes: List[Tuple[str, ...]] = field(default_factory=list)
+    deny_network_tools: set = field(default_factory=set)
+    deny_tool_names: set = field(default_factory=set)
 
     def durable_payload(self) -> Dict[str, Any]:
         """JSON object for ``project.json`` ``approvals``. Empty keys omitted."""
@@ -141,6 +173,16 @@ class SessionGrants:
             payload["network_tools"] = sorted(self.network_tools)
         if self.tool_names:
             payload["tool_names"] = sorted(self.tool_names)
+        if self.deny_command_prefixes:
+            deny_cmds = [list(t) for t in self.deny_command_prefixes if len(t) >= 2]
+            if deny_cmds:
+                payload["deny_command_prefixes"] = deny_cmds
+        if self.deny_path_prefixes:
+            payload["deny_path_prefixes"] = sorted(self.deny_path_prefixes)
+        if self.deny_network_tools:
+            payload["deny_network_tools"] = sorted(self.deny_network_tools)
+        if self.deny_tool_names:
+            payload["deny_tool_names"] = sorted(self.deny_tool_names)
         return payload
 
     def absorb_durable(self, data: Any) -> None:
@@ -168,6 +210,30 @@ class SessionGrants:
             for name in raw_tools:
                 if isinstance(name, str) and name:
                     self.tool_names.add(name)
+        self._absorb_deny_lists(data)
+
+    def _absorb_deny_lists(self, data: dict) -> None:
+        raw_cmds = data.get("deny_command_prefixes")
+        if isinstance(raw_cmds, list):
+            for item in raw_cmds:
+                tokens = _coerce_command_prefix(item)
+                if tokens and tokens not in self.deny_command_prefixes:
+                    self.deny_command_prefixes.append(tokens)
+        raw_paths = data.get("deny_path_prefixes")
+        if isinstance(raw_paths, list):
+            for path in raw_paths:
+                if isinstance(path, str) and path:
+                    self.deny_path_prefixes.add(path)
+        raw_net = data.get("deny_network_tools")
+        if isinstance(raw_net, list):
+            for name in raw_net:
+                if isinstance(name, str) and name:
+                    self.deny_network_tools.add(name)
+        raw_tools = data.get("deny_tool_names")
+        if isinstance(raw_tools, list):
+            for name in raw_tools:
+                if isinstance(name, str) and name:
+                    self.deny_tool_names.add(name)
 
     def covers(self, fc: FunctionCall, *, work_dir: Optional[str]) -> bool:
         name = fc.function.name
@@ -188,21 +254,42 @@ class SessionGrants:
             return key is not None and key in self.network_keys
         return False
 
+    def denies(self, fc: FunctionCall, *, work_dir: Optional[str]) -> bool:
+        name = fc.function.name
+        if name in self.deny_tool_names:
+            return True
+        if name in FILE_TOOLS:
+            paths = call_paths(fc, work_dir=work_dir)
+            if not paths:
+                return False
+            return all(self._path_denied(p) for p in paths)
+        if name in EXECUTE_TOOLS:
+            command = _call_command(fc)
+            return bool(command) and self._command_denied(command)
+        if name in NETWORK_TOOLS:
+            return name in self.deny_network_tools
+        return False
+
     def add_path(self, resolved: str, *, prefix: bool) -> None:
         if prefix:
             self.path_prefixes.add(resolved)
+            self.deny_path_prefixes.discard(resolved)
         else:
             self.path_exact.add(resolved)
+            self.deny_path_prefixes.discard(resolved)
 
     def add_command_prefix(self, command: str) -> None:
         tokens = command_class_tokens(command)
         if tokens and tokens not in self.command_prefixes:
             self.command_prefixes.append(tokens)
+        if tokens and tokens in self.deny_command_prefixes:
+            self.deny_command_prefixes.remove(tokens)
 
     def add_network(self, fc: FunctionCall, *, prefix: bool) -> None:
         name = fc.function.name
         if prefix:
             self.network_tools.add(name)
+            self.deny_network_tools.discard(name)
             return
         key = _network_key(fc)
         if key is not None:
@@ -210,6 +297,27 @@ class SessionGrants:
 
     def add_tool_name(self, name: str) -> None:
         self.tool_names.add(name)
+        self.deny_tool_names.discard(name)
+
+    def add_deny_path(self, resolved: str) -> None:
+        self.deny_path_prefixes.add(resolved)
+        self.path_prefixes.discard(resolved)
+        self.path_exact.discard(resolved)
+
+    def add_deny_command_prefix(self, command: str) -> None:
+        tokens = command_class_tokens(command)
+        if tokens and tokens not in self.deny_command_prefixes:
+            self.deny_command_prefixes.append(tokens)
+        if tokens and tokens in self.command_prefixes:
+            self.command_prefixes.remove(tokens)
+
+    def add_deny_network(self, name: str) -> None:
+        self.deny_network_tools.add(name)
+        self.network_tools.discard(name)
+
+    def add_deny_tool_name(self, name: str) -> None:
+        self.deny_tool_names.add(name)
+        self.tool_names.discard(name)
 
     def _path_covered(self, resolved: str) -> bool:
         if resolved in self.path_exact:
@@ -224,6 +332,23 @@ class SessionGrants:
         if tokens is None:
             return False
         for prefix in self.command_prefixes:
+            if len(prefix) < 2:
+                continue
+            if len(tokens) >= len(prefix) and tokens[: len(prefix)] == prefix:
+                return True
+        return False
+
+    def _path_denied(self, resolved: str) -> bool:
+        for prefix in self.deny_path_prefixes:
+            if _path_is_under(resolved, prefix):
+                return True
+        return False
+
+    def _command_denied(self, command: str) -> bool:
+        tokens = command_class_tokens(command)
+        if tokens is None:
+            return False
+        for prefix in self.deny_command_prefixes:
             if len(prefix) < 2:
                 continue
             if len(tokens) >= len(prefix) and tokens[: len(prefix)] == prefix:
@@ -268,6 +393,7 @@ def persist_grants_to_project(
         merged = SessionGrants()
         merged.absorb_durable(data.get("approvals"))
         merged.absorb_durable(grants.durable_payload())
+        _reconcile_allow_deny(merged, grants)
         payload = merged.durable_payload()
         if payload:
             data["approvals"] = payload
@@ -276,6 +402,29 @@ def persist_grants_to_project(
         write_project_file(base, data)
     except OSError as e:
         logger.debug(f"Could not persist project approvals: {e}")
+
+
+def _reconcile_allow_deny(merged: SessionGrants, grants: SessionGrants) -> None:
+    """Last write on this session wins when the same class is both allowed and denied."""
+    for tokens in grants.command_prefixes:
+        if tokens in merged.deny_command_prefixes:
+            merged.deny_command_prefixes.remove(tokens)
+    for tokens in grants.deny_command_prefixes:
+        if tokens in merged.command_prefixes:
+            merged.command_prefixes.remove(tokens)
+    for path in grants.path_prefixes:
+        merged.deny_path_prefixes.discard(path)
+    for path in grants.deny_path_prefixes:
+        merged.path_prefixes.discard(path)
+        merged.path_exact.discard(path)
+    for name in grants.network_tools:
+        merged.deny_network_tools.discard(name)
+    for name in grants.deny_network_tools:
+        merged.network_tools.discard(name)
+    for name in grants.tool_names:
+        merged.deny_tool_names.discard(name)
+    for name in grants.deny_tool_names:
+        merged.tool_names.discard(name)
 
 
 def _coerce_command_prefix(item: Any) -> Optional[Tuple[str, ...]]:
@@ -294,23 +443,24 @@ def classify(
     *,
     work_dir: Optional[str],
 ) -> ApprovalRoute:
-    """Return ``allow`` (run now) or ``ask`` (park for a human).
+    """Return ``allow`` (run now), ``ask`` (park), or ``deny`` (no card).
 
-    Neither tier inspects ``action``. Treated as in-sandbox even though
-    this product has no OS sandbox. ``auto`` parks only file *writes*
-    outside the work directory or to a sensitive path. ``ask`` parks
-    ``write_file`` / ``apply_patch`` and mutating ``execute``; reads
-    (including outside the work directory), network, memory, task /
-    delegate / skills / other builtins all run.
+    Modes nest: ``auto`` is a superset of ``ask``, ``allow-all`` is root.
+    Project deny grants apply only in ``ask`` / ``auto``. ``allow-all``
+    never parks and never denies. Neither tier inspects ``action``.
     """
     if mode == "allow-all":
         return "allow"
+    if grants.denies(fc, work_dir=work_dir):
+        return "deny"
     if grants.covers(fc, work_dir=work_dir):
         return "allow"
 
     name = fc.function.name
     if name in BENIGN_ALWAYS_ALLOW:
         return "allow"
+    if _is_hard_unsafe(fc, work_dir=work_dir):
+        return "ask"
 
     if mode == "auto":
         if name not in WRITE_FILE_TOOLS:
@@ -328,7 +478,39 @@ def classify(
         command = _call_command(fc) or ""
         ok, _reason = is_read_only_command(command)
         return "allow" if ok else "ask"
+    if name in NETWORK_TOOLS:
+        return "ask"
     return "allow"
+
+
+def _default_blocked_commands() -> List[str]:
+    global _DEFAULT_BLOCKED_COMMANDS
+    if _DEFAULT_BLOCKED_COMMANDS is None:
+        from agentica.agent.config import SandboxConfig
+
+        _DEFAULT_BLOCKED_COMMANDS = list(SandboxConfig().blocked_commands)
+    return _DEFAULT_BLOCKED_COMMANDS
+
+
+def _is_hard_unsafe(fc: FunctionCall, *, work_dir: Optional[str]) -> bool:
+    name = fc.function.name
+    if name in WRITE_FILE_TOOLS:
+        paths = call_paths(fc, work_dir=work_dir)
+        return bool(paths) and any(_is_sensitive_path(p) for p in paths)
+    if name not in EXECUTE_TOOLS:
+        return False
+    command = _call_command(fc) or ""
+    if not command:
+        return False
+    safety = check_command_safety(command)
+    if safety["action"] == "block":
+        return True
+    if safety["action"] == "warn" and safety["pattern"] in _HARD_UNSAFE_WARN:
+        return True
+    return any(
+        command_matches_blocked(command, blocked)
+        for blocked in _default_blocked_commands()
+    )
 
 
 def command_allows_prefix(command: str) -> bool:
@@ -467,19 +649,28 @@ def make_approve(
         sync_grants_from_project(grants, work_dir=work_dir, user_id=user_id)
         for path in list(grants.path_prefixes):
             apply_path_grant(path, True)
-        if classify(mode, fc, grants, work_dir=work_dir) == "allow":
+        route = classify(mode, fc, grants, work_dir=work_dir)
+        if route == "allow":
+            if mode == "allow-all":
+                _note_allow_all_passthrough(fc, grants, work_dir=work_dir)
             return "allow"
+        if route == "deny":
+            fc.approval_trace = {
+                "tool": fc.function.name,
+                "arguments": _clip_trace_args(fc.arguments or {}),
+                "mode": mode,
+                "decision": "deny",
+                "reason": "deny_grant",
+                "wait_s": 0,
+                "grant": None,
+            }
+            return "deny"
         registry = get_registry()
         if registry is None:
             return "deny"
         question, preview = describe_approval(fc, work_dir=work_dir)
-        similar_label = ""
-        options: Tuple[ApprovalDecision, ...] = ("allow", "allow_prefix", "deny")
-        if fc.function.name in EXECUTE_TOOLS:
-            command = _call_command(fc) or ""
-            similar_label = command_class_display(command)
-            if not command_allows_prefix(command) or not similar_label:
-                options = ("allow", "deny")
+        similar_label = _similar_label_for(fc)
+        options = _approval_options(fc)
         pending = PendingApproval(
             tool_call_id=fc.call_id or "",
             name=fc.function.name,
@@ -495,10 +686,13 @@ def make_approve(
         publish(pending)
         decision = await waiter
         wait_s = round(time.monotonic() - started, 2)
-        if decision not in ("allow", "allow_prefix", "deny"):
+        if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
             decision = "deny"
         grant: Optional[Dict[str, Any]] = None
-        if decision != "deny":
+        if decision == "deny_prefix":
+            grant = _record_deny_grant(fc, grants, work_dir=work_dir)
+            persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
+        elif decision != "deny":
             prefix = decision == "allow_prefix"
             grant = _record_grant(fc, grants, work_dir=work_dir, prefix=prefix)
             if prefix:
@@ -522,6 +716,51 @@ def make_approve(
         return decision
 
     return approve
+
+
+def _note_allow_all_passthrough(
+    fc: FunctionCall,
+    grants: SessionGrants,
+    work_dir: Optional[str],
+) -> None:
+    """Warn + record when allow-all runs a call ask/auto would deny or park as unsafe."""
+    if grants.denies(fc, work_dir=work_dir):
+        reason = "allow_all_ignore_deny"
+        logger.warning(
+            "allow-all: ignoring project deny for %s", fc.function.name,
+        )
+    elif _is_hard_unsafe(fc, work_dir=work_dir):
+        reason = "allow_all_hard_unsafe"
+        logger.warning(
+            "allow-all: running hard-unsafe %s", fc.function.name,
+        )
+    else:
+        return
+    fc.approval_trace = {
+        "tool": fc.function.name,
+        "arguments": _clip_trace_args(fc.arguments or {}),
+        "mode": "allow-all",
+        "decision": "allow",
+        "reason": reason,
+        "wait_s": 0,
+        "grant": None,
+    }
+
+
+def _similar_label_for(fc: FunctionCall) -> str:
+    if fc.function.name in EXECUTE_TOOLS:
+        return command_class_display(_call_command(fc) or "")
+    if fc.function.name in NETWORK_TOOLS:
+        return fc.function.name
+    return ""
+
+
+def _approval_options(fc: FunctionCall) -> Tuple[ApprovalDecision, ...]:
+    if fc.function.name in EXECUTE_TOOLS:
+        command = _call_command(fc) or ""
+        if not command_allows_prefix(command) or not command_class_display(command):
+            return ("allow", "deny")
+    return ("allow", "allow_prefix", "deny", "deny_prefix")
 
 
 def _record_grant(
@@ -575,6 +814,50 @@ def _record_grant(
         grants.add_tool_name(name)
         return {"scope": "similar", "persisted": True, "kind": "tool", "tool": name}
     return {"scope": "once", "persisted": False, "kind": "tool", "tool": name}
+
+
+def _record_deny_grant(
+    fc: FunctionCall,
+    grants: SessionGrants,
+    *,
+    work_dir: Optional[str],
+) -> Dict[str, Any]:
+    """Persist a similar-deny and return what was stored for the trace."""
+    name = fc.function.name
+    if name in FILE_TOOLS:
+        paths: List[str] = []
+        for path in call_paths(fc, work_dir=work_dir):
+            stored = path if _is_sensitive_path(path) or Path(path).is_dir() else str(Path(path).parent)
+            grants.add_deny_path(stored)
+            paths.append(stored)
+        return {
+            "scope": "similar",
+            "persisted": True,
+            "kind": "path",
+            "paths": paths,
+        }
+    if name in EXECUTE_TOOLS:
+        command = _call_command(fc) or ""
+        stored = command_allows_prefix(command)
+        if stored:
+            grants.add_deny_command_prefix(command)
+        return {
+            "scope": "similar" if stored else "once",
+            "persisted": stored,
+            "kind": "command",
+            "command_class": command_class_display(command) if stored else "",
+            "command": command,
+        }
+    if name in NETWORK_TOOLS:
+        grants.add_deny_network(name)
+        return {
+            "scope": "similar",
+            "persisted": True,
+            "kind": "network",
+            "tool": name,
+        }
+    grants.add_deny_tool_name(name)
+    return {"scope": "similar", "persisted": True, "kind": "tool", "tool": name}
 
 
 _TRACE_ARG_CHARS = 2000

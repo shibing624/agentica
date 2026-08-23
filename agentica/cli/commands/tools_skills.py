@@ -710,13 +710,13 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     if ctx.current_agent:
         con.print(f"[bold cyan]Permission Mode: {ctx.current_agent.tool_config.permission_mode}[/bold cyan]")
         con.print()
-        con.print("  [dim]ask[/dim]        - Ask for approval: reads, read-only shell, network, memory, task/delegate, and builtins run; file writes and mutating shell need confirmation")
-        con.print("  [dim]auto[/dim]       - Approve for me: only ask about file writes outside the workspace")
-        con.print("  [dim]allow-all[/dim]  - Full Access: never ask (hard refusals like ~/.ssh still apply)")
+        con.print("  [dim]ask[/dim]        - Ask for approval: reads, read-only shell, memory, task/delegate, and builtins run; file writes, mutating shell, and network need confirmation")
+        con.print("  [dim]auto[/dim]       - Approve for me: ask about file writes outside the workspace, sensitive paths, and hard-unsafe commands")
+        con.print("  [dim]allow-all[/dim]  - Full Access: never ask, never deny (project deny-similar applies only in ask/auto; hard-unsafe is logged and still run)")
         con.print()
         con.print(
             "Tools stay in the schema in every tier. ask does not hide write tools. "
-            "Allow-similar grants are stored in this project's project.json.",
+            "Allow-similar and deny-similar grants are stored in this project's project.json.",
             style="dim",
         )
         con.print()

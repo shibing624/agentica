@@ -111,10 +111,10 @@ const en = {
     skillNone: "No matching skill",
     permLabel: (mode: string): string => mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me",
     permHint: (mode: string): string => mode === "ask"
-      ? "Reads, read-only shell, network, memory, task/delegate, and builtins run without asking. File writes and mutating shell need confirmation."
+      ? "Reads, read-only shell, memory, task/delegate, and builtins run without asking. File writes, mutating shell, and network (web_search / fetch_url) need confirmation. Hard-unsafe commands are asked, not auto-denied."
       : mode === "allow-all"
-        ? "Never asks. Hard refusals for /etc and ~/.ssh still apply."
-        : "Asks only for file writes outside the workspace.",
+        ? "Never asks and never denies. Project deny-similar applies only in ask/auto; hard-unsafe is logged and still run."
+        : "Asks for file writes outside the workspace, sensitive paths, and hard-unsafe commands (rm -rf /, /etc, ~/.ssh).",
     permTip: (mode: string): string => `${mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me"} (${mode})`,
     approvalDeny: "Deny",
     approvalAllowOnce: "Allow once",
@@ -130,6 +130,19 @@ const en = {
       }
       if (name === "web_search" || name === "fetch_url") return "Always allow this tool";
       return "Allow similar calls";
+    },
+    approvalDenySimilar: (name: string, similarLabel?: string): string => {
+      if (similarLabel) {
+        return `Deny similar \`${similarLabel}\` commands`;
+      }
+      if (name === "execute" || name === "bash" || name === "shell" || name === "run_command") {
+        return "Deny similar commands";
+      }
+      if (name === "read_file" || name === "write_file" || name === "apply_patch" || name === "glob" || name === "grep") {
+        return "Deny similar paths";
+      }
+      if (name === "web_search" || name === "fetch_url") return "Always deny this tool";
+      return "Deny similar calls";
     },
     approvalWaiting: "Waiting for approval",
     approvalFailed: "Could not submit that decision",
@@ -650,10 +663,10 @@ const zh: Strings = {
     skillNone: "没有匹配的技能",
     permLabel: (mode: string): string => mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准",
     permHint: (mode: string): string => mode === "ask"
-      ? "读、只读命令、网络、记忆、task/delegate 和内置工具自动放行；写文件和会改状态的命令需确认。"
+      ? "读、只读命令、记忆、task/delegate 和内置工具自动放行；写文件、会改状态的命令、以及联网（web_search / fetch_url）需确认。硬不安全命令会弹卡，不会直接拒。"
       : mode === "allow-all"
-        ? "不询问。对 /etc、~/.ssh 等敏感路径的硬拒绝仍然生效。"
-        : "只询问工作区外的文件写入。",
+        ? "不询问、不拒绝。项目里「拒绝类似」只约束 ask/auto；硬不安全会记 warning 并照跑。"
+        : "询问工作区外/敏感路径的文件写入，以及硬不安全命令（rm -rf /、/etc、~/.ssh）。",
     permTip: (mode: string): string => `${mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准"} (${mode})`,
     approvalDeny: "拒绝",
     approvalAllowOnce: "允许一次",
@@ -669,6 +682,19 @@ const zh: Strings = {
       }
       if (name === "web_search" || name === "fetch_url") return "始终允许此工具";
       return "允许类似调用";
+    },
+    approvalDenySimilar: (name: string, similarLabel?: string): string => {
+      if (similarLabel) {
+        return `拒绝类似 \`${similarLabel}\` 命令`;
+      }
+      if (name === "execute" || name === "bash" || name === "shell" || name === "run_command") {
+        return "拒绝类似命令";
+      }
+      if (name === "read_file" || name === "write_file" || name === "apply_patch" || name === "glob" || name === "grep") {
+        return "拒绝类似路径";
+      }
+      if (name === "web_search" || name === "fetch_url") return "始终拒绝此工具";
+      return "拒绝类似调用";
     },
     approvalWaiting: "等待批准",
     approvalFailed: "提交决定失败",

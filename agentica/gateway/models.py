@@ -5,7 +5,13 @@
 Pydantic request/response models shared across routes.
 """
 from typing import List, Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from agentica.utils.string import replace_invalid_utf8
+
+
+def _utf8_text(v: str) -> str:
+    return replace_invalid_utf8(v)
 
 
 class ChatImage(BaseModel):
@@ -31,6 +37,11 @@ class ChatRequest(BaseModel):
     approval_mode: str = "auto"
     images: List[ChatImage] = []
 
+    @field_validator("message", "goal", "skill")
+    @classmethod
+    def _sanitize_utf8(cls, v: str) -> str:
+        return _utf8_text(v)
+
 
 class SteerRequest(BaseModel):
     """Mid-run interrupt: inject guidance at the next tool-batch boundary.
@@ -42,10 +53,15 @@ class SteerRequest(BaseModel):
     session_id: str
     message: str = ""
 
+    @field_validator("message")
+    @classmethod
+    def _sanitize_utf8(cls, v: str) -> str:
+        return _utf8_text(v)
+
 
 class ApprovalDecisionRequest(BaseModel):
-    """Web approval card: allow once, allow similar, or deny."""
-    decision: Literal["allow", "allow_prefix", "deny"]
+    """Web approval card: allow once, allow similar, deny once, or deny similar."""
+    decision: Literal["allow", "allow_prefix", "deny", "deny_prefix"]
 
 
 class CompactRequest(BaseModel):
@@ -70,6 +86,11 @@ class SendRequest(BaseModel):
     channel: str
     channel_id: str
     message: str
+
+    @field_validator("message")
+    @classmethod
+    def _sanitize_utf8(cls, v: str) -> str:
+        return _utf8_text(v)
 
 
 class CronJobCreateRequest(BaseModel):
@@ -98,6 +119,11 @@ class GoalRequest(BaseModel):
     # ``-1`` = unlimited (web default). A positive int is a hard cap.
     # Turns and wall-clock are not web knobs — CLI ``/goal --turns/--wall`` still has them.
     token_budget: int = -1
+
+    @field_validator("objective")
+    @classmethod
+    def _sanitize_utf8(cls, v: str) -> str:
+        return _utf8_text(v)
 
 
 class SkillCreateRequest(BaseModel):

@@ -945,7 +945,13 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .approval-card-acts{display:flex;justify-content:flex-end;align-items:center;gap:8px}
 .approval-deny{height:32px;border:1px solid var(--border);background:transparent;border-radius:8px;padding:0 12px;cursor:pointer;color:var(--fg);font-size:13px;display:inline-flex;align-items:center;gap:8px;font-family:var(--sans)}
 .approval-deny:hover{background:var(--bg3)}
-.approval-deny:disabled,.approval-allow:disabled,.approval-allow-more:disabled{opacity:.55;cursor:default}
+.approval-deny:disabled,.approval-allow:disabled,.approval-allow-more:disabled,.approval-deny-more:disabled{opacity:.55;cursor:default}
+.approval-deny-split{display:inline-flex;position:relative}
+.approval-deny-split .approval-deny{border-radius:8px 0 0 8px}
+.approval-deny-split.solo .approval-deny{border-radius:8px}
+.approval-deny-more{height:32px;width:28px;border:1px solid var(--border);border-left:none;background:transparent;color:var(--fg);border-radius:0 8px 8px 0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.approval-deny-more:hover{background:var(--bg3)}
+.approval-deny-more svg{width:12px;height:12px}
 .approval-allow-split{display:inline-flex;position:relative}
 .approval-allow{height:32px;border:none;background:var(--accent);color:var(--bg);border-radius:8px 0 0 8px;padding:0 12px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:8px;font-family:var(--sans)}
 .approval-allow-split.solo .approval-allow{border-radius:8px}

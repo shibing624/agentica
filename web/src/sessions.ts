@@ -1,6 +1,6 @@
 import * as api from "./api";
 import { getStrings } from "./i18n";
-import { uid, lastQueryTs } from "./lib/format";
+import { uid } from "./lib/format";
 import {
   askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
   saveSessions, setState, showToast, writeLastSessionId,
@@ -23,13 +23,10 @@ export async function loadSessions() {
     const id = sv.session_id;
     const lc = local[id] || {};
     const dir = sv.work_dir || lc.dir || st.serverDir || "";
-    const firstTs = Date.parse(sv.first_timestamp) || lc.ts || Date.now();
-    const serverLast = Date.parse(sv.last_timestamp) || 0;
     merged[id] = {
       title: sv.name || lc.title || "Chat",
       msgs: lc.msgs || [],
-      ts: firstTs,
-      lastTs: Math.max(serverLast, lastQueryTs({ ts: firstTs, lastTs: lc.lastTs, msgs: lc.msgs }), firstTs),
+      ts: Date.parse(sv.first_timestamp) || lc.ts || Date.now(),
       tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
       requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
       contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,
@@ -37,7 +34,6 @@ export async function loadSessions() {
       projectId: projectIdForDir(dir),
       archived: !!sv.archived,
       running: !!sv.running,
-      unread: !!sv.unread,
     };
   }
   setState({ sessions: merged });
@@ -58,45 +54,11 @@ export function switchTo(id: string) {
   const st = getState();
   st.curSess = id;
   const sess = st.sessions[id];
-  if (sess) {
-    sess.unread = false;
-    markSessionRead(id);
-  }
+  if (sess) sess.unread = false;
   writeLastSessionId(id);
   bump();
   if (sess?.running && !getState().streams[id]) setState({ pendingResume: id });
   else if (sess && shouldHydrateFromServer(sess, id)) void hydrateSession(id, !!sess.msgs.length);
-}
-
-export function markSessionRead(id: string) {
-  const sess = getState().sessions[id];
-  if (sess) sess.unread = false;
-  void api.markSessionReadApi(id);
-}
-
-/** Patch running/unread from the server without replacing transcripts. */
-export async function syncSessionStatus() {
-  const { ok, data } = await api.fetchSessions();
-  if (!ok || !data?.sessions) return;
-  const st = getState();
-  let changed = false;
-  const byId: Record<string, { running?: boolean; unread?: boolean }> = {};
-  for (const sv of data.sessions) byId[sv.session_id] = sv;
-  for (const [id, sess] of Object.entries(st.sessions)) {
-    const sv = byId[id];
-    if (!sv) continue;
-    const live = !!(st.streams[id] || st.goalRuns[id] || st.commandRuns[id]);
-    const running = live || !!sv.running;
-    const unread = id === st.curSess ? false : !!sv.unread;
-    if (sess.running !== running || sess.unread !== unread) {
-      sess.running = running;
-      sess.unread = unread;
-      changed = true;
-    }
-  }
-  if (!changed) return;
-  saveSessions();
-  bump();
 }
 
 /** Replay a session's transcript from the server log so a reload (or another
@@ -118,7 +80,6 @@ export async function hydrateSession(id: string, force = false) {
   }
   if (!msgs.length) return;
   sess.msgs = msgs;
-  sess.lastTs = lastQueryTs(sess);
   saveSessions();
   bump();
   void syncSessionRoundStats(id);
@@ -200,7 +161,7 @@ export async function syncSessionRoundStats(id: string) {
 export function createSession(dir: string) {
   const id = uid();
   getState().sessions[id] = {
-    title: "New Chat", msgs: [], ts: Date.now(), lastTs: Date.now(), tokIn: 0, tokOut: 0, tokTotal: 0,
+    title: "New Chat", msgs: [], ts: Date.now(), tokIn: 0, tokOut: 0, tokTotal: 0,
     requests: 0, totalTime: 0, lastInputTokens: 0, contextTokens: 0, costUsd: 0,
     dir, projectId: projectIdForDir(dir),
   };

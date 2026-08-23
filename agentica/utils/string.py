@@ -11,6 +11,28 @@ from agentica.utils.log import logger
 
 TOOL_RESULT_TOKEN_LIMIT = 16000  # Same threshold as eviction
 TRUNCATION_GUIDANCE = "... [results truncated, try being more specific with your parameters]"
+_SURROGATE_START = 0xD800
+_SURROGATE_END = 0xDFFF
+
+
+def replace_invalid_utf8(text: str) -> str:
+    """Replace lone surrogates so ``text.encode("utf-8")`` cannot raise.
+
+    Python ``str`` can hold U+D800–U+DFFF (clipboard / POSIX surrogateescape
+    leftovers such as U+DCE5). UTF-8 forbids them: prompt_toolkit history,
+    session logs, HTTP JSON, and OTLP all crash on ``.encode("utf-8")``.
+    Neighbors stay intact; each illegal code point becomes U+FFFD.
+    """
+    if not text:
+        return text
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return "".join(
+            "\ufffd" if _SURROGATE_START <= ord(ch) <= _SURROGATE_END else ch
+            for ch in text
+        )
+    return text
 
 
 

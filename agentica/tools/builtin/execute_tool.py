@@ -359,7 +359,11 @@ class BuiltinExecuteTool(Tool):
         effective_timeout = self._timeout if timeout is None else max(1, timeout)
 
         # Sandbox: check blocked commands (best-effort, not a true security sandbox)
-        if self._sandbox_config and self._sandbox_config.enabled:
+        from agentica.agent.approvals import approved_by_user
+
+        sandbox_on = bool(self._sandbox_config and self._sandbox_config.enabled)
+        skip_hard_block = approved_by_user.get() or not sandbox_on
+        if sandbox_on and not skip_hard_block:
             cmd_lower = command.lower().strip()
             for blocked in self._sandbox_config.blocked_commands:
                 if command_matches_blocked(command, blocked):
@@ -389,11 +393,14 @@ class BuiltinExecuteTool(Tool):
                         f"in the allowed_commands list: {allowed}"
                     )
 
-        # Safety: check dangerous command patterns (always active, independent of sandbox)
+        # Safety: check dangerous command patterns (always active unless a
+        # human already allowed this call — otherwise allow-all / the card
+        # would still raise PermissionError).
         safety = check_command_safety(command)
         if safety["action"] == "block":
             logger.warning(f"Safety blocked command: {safety['reason']} — {command[:100]}")
-            raise PermissionError(f"{safety['reason']}. Use a safer alternative.")
+            if not skip_hard_block:
+                raise PermissionError(f"{safety['reason']}. Use a safer alternative.")
         if safety["action"] == "warn":
             logger.info(f"Safety warning: {safety['reason']} — {command[:100]}")
 

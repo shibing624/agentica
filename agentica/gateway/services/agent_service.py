@@ -22,6 +22,7 @@ from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
 import inspect
 
 from agentica.utils.log import logger
+from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
 from agentica.agent.config import ToolConfig, WorkspaceMemoryConfig
 from agentica.run_display import RunDisplayEventKind, classify_run_response
@@ -863,6 +864,7 @@ class AgentService:
 
         async with lock:
             agent = await self._get_agent(session_id, owner)
+            message = replace_invalid_utf8(message)
             self._note_peer_turn(session_id, message)
             message, run_images, run_audio, media_notes = await self._prepare_run_media(
                 agent, message, media,
@@ -1171,6 +1173,7 @@ class AgentService:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
         agent = await self._get_agent(session_id, owner)
+        message = replace_invalid_utf8(message)
         self._note_peer_turn(session_id, message)
         message, run_images, run_audio, media_notes = await self._prepare_run_media(
             agent, message, media,

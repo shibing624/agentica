@@ -177,6 +177,42 @@ class TestSandboxCommandBlocking:
             result = asyncio.run(tool.execute("rm -rf agentica/memory/__pycache__"))
         assert "gone" in result
 
+    def test_user_approved_root_rm_reaches_executor(self):
+        """After a human allow, execute-time hard blocks must not contradict the card."""
+        from agentica.agent.approvals import approved_by_user
+        from agentica.tools.builtin import BuiltinExecuteTool
+
+        config = SandboxConfig(enabled=True)
+        tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"gone\n", b""))
+        token = approved_by_user.set(True)
+        try:
+            with patch(
+                "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
+                new=AsyncMock(return_value=proc),
+            ):
+                result = asyncio.run(tool.execute("rm -rf /"))
+        finally:
+            approved_by_user.reset(token)
+        assert "gone" in result
+
+    def test_allow_all_sandbox_off_root_rm_warns_and_runs(self):
+        """allow-all disables sandbox: hard-unsafe is a warning, not PermissionError."""
+        from agentica.tools.builtin import BuiltinExecuteTool
+
+        tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=SandboxConfig(enabled=False))
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"gone\n", b""))
+        with patch(
+            "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
+            new=AsyncMock(return_value=proc),
+        ):
+            result = asyncio.run(tool.execute("rm -rf /"))
+        assert "gone" in result
+
 
 # =========================================================================
 # C2: Swarm race condition fixes

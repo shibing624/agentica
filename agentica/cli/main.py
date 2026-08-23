@@ -13,6 +13,7 @@ from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.cost_tracker import refresh_model_catalog_in_background
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import suppress_console_logging, enable_process_file_logging
+from agentica.utils.string import replace_invalid_utf8
 from agentica.workspace import Workspace
 from agentica.skills import load_system_skills, get_skill_registry
 
@@ -208,13 +209,14 @@ def main():
     if args.query:
         # Non-interactive mode
         con = get_console()
+        query = replace_invalid_utf8(args.query)
         # --print means the caller wants the answer and nothing else: another
         # agentica session delegating work, or a shell pipeline. Anything on
         # stdout that is not the answer is noise there, including log lines.
         if args.print_only:
             suppress_console_logging()
         else:
-            con.print(f"Running query: {args.query}", style="cyan")
+            con.print(f"Running query: {query}", style="cyan")
             tools_info = f", Extra Tools: {', '.join(extra_tool_names)}" if extra_tool_names else ""
             con.print(
                 f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}",
@@ -225,7 +227,7 @@ def main():
         agent_instance = create_agent(agent_config, extra_tools, workspace, skills_registry)
         started_at = time.monotonic()
         try:
-            response = agent_instance.run_stream_sync(args.query)
+            response = agent_instance.run_stream_sync(query)
             for chunk in response:
                 if chunk and chunk.content:
                     if args.print_only:

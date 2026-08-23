@@ -45,6 +45,7 @@ from agentica.cli.display import (
 )
 from agentica.cli.runtime import get_console, history_file
 from agentica.utils.log import logger
+from agentica.utils.string import replace_invalid_utf8
 
 from .attachments import (
     _deduplicate_image_attachments,
@@ -59,6 +60,22 @@ from .console_io import (
     _tty_write_lock,
 )
 from .session_state import SessionState
+
+
+class Utf8FileHistory(FileHistory):
+    """FileHistory that will not crash the event loop on illegal UTF-8 input."""
+
+    def store_string(self, string: str) -> None:
+        super().store_string(replace_invalid_utf8(string))
+
+
+def _take_buffer_text(buf) -> str:
+    """Read the input buffer, replacing code points that cannot be UTF-8."""
+    text = replace_invalid_utf8(buf.text)
+    if text != buf.text:
+        buf.text = text
+    return text
+
 
 # ==================== TUI setup ====================
 
@@ -253,7 +270,7 @@ def _setup_tui(
         complete_approval(state, decision, app=event.app)
         event.app.current_buffer.reset()
         tui_state["spinner_text"] = (
-            "Denied" if decision == "deny" else "Approved"
+            "Denied" if decision in ("deny", "deny_prefix") else "Approved"
         )
 
     @kb.add("y", filter=is_approval, eager=True)
@@ -283,6 +300,14 @@ def _setup_tui(
     @kb.add("n", filter=is_approval, eager=True)
     def _approval_deny_n(event):
         _finish_approval(event, "deny")
+
+    @kb.add("x", filter=is_approval, eager=True)
+    def _approval_deny_prefix(event):
+        _finish_approval(event, "deny_prefix")
+
+    @kb.add("4", filter=is_approval, eager=True)
+    def _approval_deny_prefix_4(event):
+        _finish_approval(event, "deny_prefix")
 
     @kb.add("escape", "enter")
     def _newline(event):
@@ -377,7 +402,7 @@ def _setup_tui(
 
     @kb.add("enter")
     def _handle_enter(event):
-        raw_text = event.app.current_buffer.text
+        raw_text = _take_buffer_text(event.app.current_buffer)
         text = raw_text.strip()
         has_images = bool(state.attached_images)
 
@@ -495,7 +520,7 @@ def _setup_tui(
         if buf.complete_state or (buf.suggestion and buf.suggestion.text):
             _accept_or_complete(event)
             return
-        raw_text = buf.text
+        raw_text = _take_buffer_text(buf)
         text = raw_text.strip()
         if not state.agent_running or state.input_request is not None or not text:
             _accept_or_complete(event)
@@ -540,7 +565,9 @@ def _setup_tui(
 
     @kb.add(Keys.BracketedPaste, eager=True)
     def _handle_paste(event):
-        pasted = (event.data or "").replace("\r\n", "\n").replace("\r", "\n")
+        pasted = replace_invalid_utf8(
+            (event.data or "").replace("\r\n", "\n").replace("\r", "\n")
+        )
         if _try_attach_clipboard_image(state.attached_images, _image_counter_ref):
             event.app.invalidate()
         if pasted:
@@ -721,7 +748,7 @@ def _setup_tui(
         style="class:input-area",
         multiline=True,
         wrap_lines=True,
-        history=FileHistory(history_file),
+        history=Utf8FileHistory(history_file),
         completer=AgenticaCompleter(),
         complete_while_typing=True,
         auto_suggest=AutoSuggestFromHistory(),

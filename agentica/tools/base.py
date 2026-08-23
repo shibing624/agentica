@@ -441,6 +441,10 @@ class FunctionCall(BaseModel):
     # duration, and any similar-grant that was recorded. Logged onto the
     # ``approval_decision`` session event.
     approval_trace: Optional[Dict[str, Any]] = None
+    # Runner sets this after allow / allow_prefix so execute-time hard
+    # blocks (``rm -rf /``, sandbox ``blocked_commands``) do not contradict
+    # the card. Direct ``tool.execute`` keeps the default False.
+    skip_hard_safety: bool = False
 
     def is_concurrency_safe(self) -> bool:
         """Whether this call may overlap with the rest of its batch.

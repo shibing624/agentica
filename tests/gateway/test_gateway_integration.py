@@ -133,6 +133,24 @@ class TestChatEndpoint:
         assert data["tool_calls"] == 1
         mock_svc.chat.assert_awaited_once()
 
+    def test_chat_accepts_lone_surrogate(self, mock_app):
+        """Browser JSON can carry \\udce5; FastAPI must accept it and pass clean text."""
+        client, mock_svc = mock_app
+        # httpx json= cannot encode a Python lone surrogate; a browser sends the
+        # JSON escape, which is how unpaired surrogates actually arrive.
+        resp = client.post(
+            "/api/chat",
+            content='{"message":"本轮\\udce5加回","session_id":"test-session"}',
+            headers={"content-type": "application/json"},
+        )
+        assert resp.status_code == 200
+        mock_svc.chat.assert_awaited_once()
+        passed = mock_svc.chat.await_args.kwargs["message"]
+        passed.encode("utf-8")
+        assert "\udce5" not in passed
+        assert "本轮" in passed
+        assert "加回" in passed
+
     def test_chat_missing_message(self, mock_app):
         client, _ = mock_app
         resp = client.post("/api/chat", json={})

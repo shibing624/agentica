@@ -851,7 +851,17 @@ class Model(ABC):
         else:
             _has_guardrails = False
 
-        from agentica.agent.approvals import DENIED_TOOL_RESULT
+        from agentica.agent.approvals import DENIED_TOOL_RESULT, approved_by_user
+
+        async def _call_execute(fc: FunctionCall):
+            token = approved_by_user.set(fc.skip_hard_safety)
+            try:
+                if fc.function.manages_own_timeout:
+                    return await fc.execute()
+                _timeout = fc.function.timeout or _DEFAULT_TOOL_TIMEOUT
+                return await asyncio.wait_for(fc.execute(), timeout=_timeout)
+            finally:
+                approved_by_user.reset(token)
 
         def _cancelled_before_start(fc: FunctionCall) -> bool:
             """The user cancelled before this call got to start.
@@ -890,10 +900,10 @@ class Model(ABC):
                 decision = await approve_fn(fc)
             except Exception:
                 decision = "deny"
-            if decision not in ("allow", "allow_prefix", "deny"):
+            if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
                 decision = "deny"
             session_log = _agent._session_log
-            if session_log is not None and fc.approval_waited:
+            if session_log is not None and (fc.approval_waited or fc.approval_trace):
                 payload: Dict[str, Any] = {
                     "tool_call_id": fc.call_id or "",
                     "decision": decision,
@@ -906,6 +916,7 @@ class Model(ABC):
                     payload["decision"] = decision
                 session_log.append_event("approval_decision", **payload)
             if decision in ("allow", "allow_prefix"):
+                fc.skip_hard_safety = True
                 return False
             fc.result = DENIED_TOOL_RESULT
             fc.error = DENIED_TOOL_RESULT
@@ -938,11 +949,7 @@ class Model(ABC):
                     return
             timers[idx].start()
             try:
-                if fc.function.manages_own_timeout:
-                    results[idx] = await fc.execute()
-                else:
-                    _timeout = fc.function.timeout or _DEFAULT_TOOL_TIMEOUT
-                    results[idx] = await asyncio.wait_for(fc.execute(), timeout=_timeout)
+                results[idx] = await _call_execute(fc)
                 # Output guardrail check
                 if _has_guardrails:
                     _fc_args = json.dumps(fc.arguments) if fc.arguments else None
@@ -1027,11 +1034,7 @@ class Model(ABC):
                     continue
             timers[idx].start()
             try:
-                if fc.function.manages_own_timeout:
-                    results[idx] = await fc.execute()
-                else:
-                    _timeout = fc.function.timeout or _DEFAULT_TOOL_TIMEOUT
-                    results[idx] = await asyncio.wait_for(fc.execute(), timeout=_timeout)
+                results[idx] = await _call_execute(fc)
                 # Output guardrail check (after execution)
                 if _has_guardrails:
                     _fc_args = json.dumps(fc.arguments) if fc.arguments else None

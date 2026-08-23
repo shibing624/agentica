@@ -225,17 +225,22 @@ export function ApprovalCard({
 }) {
   const S = useStrings();
   const [similarOpen, setSimilarOpen] = useState(false);
+  const [denyOpen, setDenyOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const allowPrefix = req.options.includes("allow_prefix");
+  const denyPrefix = req.options.includes("deny_prefix");
 
   useEffect(() => {
-    if (!similarOpen) return;
+    if (!similarOpen && !denyOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setSimilarOpen(false);
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setSimilarOpen(false);
+        setDenyOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [similarOpen]);
+  }, [similarOpen, denyOpen]);
 
   return (
     <div className="approval-card" ref={wrapRef} role="dialog" aria-label={req.question || req.name}>
@@ -247,14 +252,47 @@ export function ApprovalCard({
       </div>
       {req.preview ? <pre className="approval-card-preview">{req.preview}</pre> : null}
       <div className="approval-card-acts">
-        <button
-          type="button"
-          className="approval-deny"
-          disabled={busy}
-          onClick={() => onDecide("deny")}
-        >
-          {S.chat.approvalDeny} <kbd>Esc</kbd>
-        </button>
+        <div className={"approval-deny-split" + (denyPrefix ? "" : " solo")}>
+          <button
+            type="button"
+            className="approval-deny"
+            disabled={busy}
+            onClick={() => onDecide("deny")}
+          >
+            {S.chat.approvalDeny} <kbd>Esc</kbd>
+          </button>
+          {denyPrefix && (
+            <>
+              <button
+                type="button"
+                className="approval-deny-more"
+                disabled={busy}
+                aria-label={S.chat.approvalDenySimilar(req.name, req.similarLabel)}
+                aria-expanded={denyOpen}
+                onClick={() => {
+                  setDenyOpen((v) => !v);
+                  setSimilarOpen(false);
+                }}
+              >
+                <IconChevronDown />
+              </button>
+              {denyOpen && (
+                <div className="approval-similar-dd left">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setDenyOpen(false);
+                      onDecide("deny_prefix");
+                    }}
+                  >
+                    {S.chat.approvalDenySimilar(req.name, req.similarLabel)}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
         <div className={"approval-allow-split" + (allowPrefix ? "" : " solo")}>
           <button
             type="button"
@@ -272,7 +310,10 @@ export function ApprovalCard({
                 disabled={busy}
                 aria-label={S.chat.approvalAllowSimilar(req.name, req.similarLabel)}
                 aria-expanded={similarOpen}
-                onClick={() => setSimilarOpen((v) => !v)}
+                onClick={() => {
+                  setSimilarOpen((v) => !v);
+                  setDenyOpen(false);
+                }}
               >
                 <IconChevronDown />
               </button>

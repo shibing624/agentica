@@ -49,10 +49,20 @@ class TestBuiltinFileToolGrantPathAccess:
             assert Path(allowed).read_text() == "a"
             assert Path(sibling).read_text() == "b"
 
-    def test_sensitive_write_blocked_even_in_allow_all_mode(self, tmp_dir):
-        tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None)
+    def test_sensitive_write_blocked_when_sandbox_enabled(self, tmp_dir):
+        from agentica.agent.config import SandboxConfig
+
+        tool = BuiltinFileTool(
+            work_dir=tmp_dir,
+            sandbox_config=SandboxConfig(enabled=True, writable_dirs=[]),
+        )
         with pytest.raises(PermissionError, match="sensitive"):
             asyncio.run(tool.write_file("/etc/hosts", "content"))
+        assert "request_path_access" not in tool.functions
+
+    def test_sensitive_write_not_guarded_when_sandbox_disabled(self, tmp_dir):
+        tool = BuiltinFileTool(work_dir=tmp_dir, sandbox_config=None)
+        assert tool._sensitive_write_guard("/etc/hosts") is not None
         assert "request_path_access" not in tool.functions
 
     def test_sensitive_grant_is_exact_file_even_when_prefix_requested(self, tmp_dir):
