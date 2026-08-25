@@ -13,13 +13,28 @@ import pytest
 from agentica.tools.builtin import BuiltinFileTool
 
 
+class _BlockingStream:
+    def __init__(self, started: asyncio.Event):
+        self._started = started
+
+    async def readline(self):
+        self._started.set()
+        await asyncio.Future()
+
+    async def read(self):
+        self._started.set()
+        await asyncio.Future()
+
+
 class BlockingSubprocess:
-    """Minimal subprocess double whose first communicate call blocks."""
+    """Minimal subprocess double whose stdout readline blocks until cancelled."""
 
     def __init__(self):
         self.started = asyncio.Event()
         self.returncode = None
         self._transport = None
+        self.stdout = _BlockingStream(self.started)
+        self.stderr = _BlockingStream(self.started)
 
     async def communicate(self):
         self.started.set()
@@ -255,8 +270,22 @@ class TestBuiltinFileToolReadCorrectness:
         assert f"row{n}" in result and f"row{n - 2}" in result
 
         # front-paged reads on the same file still hit the guard
-        with pytest.raises(ValueError, match="File too large"):
+        with pytest.raises(ValueError, match="Use tail to read the end") as exc:
             asyncio.run(file_tool.read_file(str(p)))
+        assert "offset/limit" not in str(exc.value)
+
+    def test_read_file_tail_times_out_on_slow_scan(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "slow.log")
+        p.write_text("x\n")
+
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(1)
+            return "", 0, 1, 0
+
+        with patch.object(file_tool, "_read_from_end", hang), \
+             patch("agentica.tools.builtin.file_tool._READ_TIMEOUT", 0.05):
+            with pytest.raises(TimeoutError, match="from the end"):
+                asyncio.run(file_tool.read_file(str(p), tail=1))
 
 
 class TestBuiltinFileToolWriteFile:
@@ -494,6 +523,54 @@ class TestBuiltinFileToolGrep:
         )
         hits = [ln for ln in result.splitlines() if "HIT" in ln]
         assert len(hits) == 3
+
+    def test_collect_rg_output_kills_process_at_limit(self):
+        """limit is an I/O bound: stop reading and reap rg, don't buffer the rest."""
+        from agentica.tools.builtin.file_tool import _collect_rg_output
+
+        class _Stdout:
+            def __init__(self, lines):
+                self._lines = list(lines)
+                self.reads = 0
+
+            async def readline(self):
+                self.reads += 1
+                if not self._lines:
+                    return b""
+                return self._lines.pop(0)
+
+        class _Proc:
+            def __init__(self):
+                self.stdout = _Stdout([b"a\n", b"b\n", b"c\n", b"d\n", b"e\n"])
+                self.stderr = None
+                self.returncode = None
+                self.waited = False
+
+            async def wait(self):
+                self.waited = True
+                self.returncode = 0
+
+        proc = _Proc()
+        killed = []
+
+        async def fake_term(p, **kwargs):
+            killed.append(p)
+            p.returncode = -9
+
+        async def run():
+            with patch(
+                "agentica.tools.builtin.file_tool.terminate_subprocess",
+                fake_term,
+            ):
+                return await _collect_rg_output(proc, 2)
+
+        stdout, stderr, hit_cap = asyncio.run(run())
+        assert hit_cap is True
+        assert stdout == b"a\nb\n"
+        assert stderr == b""
+        assert killed == [proc]
+        assert proc.stdout.reads == 2
+        assert proc.waited is False
 
     def test_grep_timeout_does_not_forbid_execute(self, file_tool):
         doc = BuiltinFileTool.grep.__doc__ or ""

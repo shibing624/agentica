@@ -34,6 +34,10 @@ from agentica.utils.string import truncate_if_too_long
 # walks the whole tree before returning, so a match cap cannot bound NFS hangs.
 _GLOB_TIMEOUT = 20
 _GREP_TIMEOUT = 20
+# Tail / negative-offset reads scan the file from the start (deque of N lines).
+# A multi-GB log must not pin the turn; 20s matches grep/glob. Not exposed.
+_READ_TIMEOUT = 20
+_FURTHER_TRUNCATED = "... (further results truncated)"
 
 # Directories every search skips. ``.agentica`` earns its place for a specific
 # reason: with ``settings.worktree.root`` pointing inside the repository
@@ -118,6 +122,36 @@ def _cap_output_lines(output: str, limit: int) -> str:
         return output
     omitted = len(lines) - limit
     return "\n".join(lines[:limit]) + f"\n... ({omitted} more results truncated)"
+
+
+async def _collect_rg_output(
+    proc: asyncio.subprocess.Process,
+    max_lines: Optional[int],
+) -> Tuple[bytes, bytes, bool]:
+    """Read rg stdout until EOF or ``max_lines``, then reap the process.
+
+    A global cap that only ran after ``communicate()`` still let rg walk the
+    whole tree and buffer every match. Stopping the read and killing rg is
+    what makes ``limit`` bound I/O, not just the string we return.
+    Returns ``(stdout, stderr, hit_cap)``.
+    """
+    chunks: List[bytes] = []
+    hit_cap = False
+    while True:
+        line = await proc.stdout.readline()
+        if not line:
+            break
+        chunks.append(line)
+        if max_lines is not None and len(chunks) >= max_lines:
+            hit_cap = True
+            break
+    stdout = b"".join(chunks)
+    if hit_cap:
+        await terminate_subprocess(proc)
+        return stdout, b"", True
+    stderr = await proc.stderr.read()
+    await proc.wait()
+    return stdout, stderr, False
 
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
@@ -518,7 +552,8 @@ class BuiltinFileTool(Tool):
           (0-based). A negative `offset` opens a window on the end of the
           file: offset=-50 is the last 50 lines, and `limit` then keeps the
           oldest lines of that window (offset=-50, limit=10 → lines N-49..N-40).
-        - `tail=N` reads the last N lines (shorthand for offset=-N).
+        - `tail=N` reads the last N lines (shorthand for offset=-N). A tail
+          scan of a huge file times out after 20 seconds.
         - Any line longer than 2000 characters is truncated
         - Results are returned with line-number prefixes (metadata only)
         - An empty file returns a system reminder in place of contents
@@ -574,14 +609,24 @@ class BuiltinFileTool(Tool):
                 )
                 raise ValueError(
                     f"File too large ({file_size:,} bytes, {total_lines:,} lines). "
-                    f"Use offset/limit, or tail, to read specific sections. "
-                    f"Example: read_file('{file_path}', tail=50)"
+                    f"Use tail to read the end, "
+                    f"e.g. read_file('{file_path}', tail=50)."
                 )
 
         if offset < 0:
-            result, total_lines, start_shown, actual_end = await self._read_from_end(
-                path, keep=abs(offset), take=limit, max_line_len=max_line_len,
-            )
+            try:
+                result, total_lines, start_shown, actual_end = await asyncio.wait_for(
+                    self._read_from_end(
+                        path, keep=abs(offset), take=limit, max_line_len=max_line_len,
+                    ),
+                    timeout=_READ_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(
+                    f"read_file timed out after {_READ_TIMEOUT} seconds while "
+                    f"reading from the end of {file_path}. Use execute with "
+                    f"tail/rg on a narrower path."
+                ) from None
         else:
             result, total_lines, start_shown, actual_end = await self._read_from_start(
                 path, offset=offset, limit=limit, max_line_len=max_line_len,
@@ -1042,8 +1087,9 @@ class BuiltinFileTool(Tool):
                 context_lines > 0)
             after_context: Lines after each match (content mode; ignored when
                 context_lines > 0)
-            limit: Maximum results to return (default: 100). In content mode this
-                is a global cap across the tree, not a per-file match count.
+            limit: Maximum results to return (default: 100). Global cap across
+                the tree, not a per-file match count. The rg process is killed
+                once this many output lines have been read.
 
         Returns:
             Search results as formatted string
@@ -1095,10 +1141,10 @@ class BuiltinFileTool(Tool):
         if include:
             cmd.extend(["--glob", include])
 
-        # No per-file --max-count: `limit` is a global cap applied to the
-        # assembled result by _cap_output_lines. A per-file ceiling makes rg
-        # scan the whole tree producing up to limit-per-file lines that the
-        # global cap then throws away.
+        # Global `limit` is enforced by stopping the stdout read and killing
+        # rg — not by --max-count (per-file) and not by buffering the whole
+        # tree then slicing. --max-count would still walk every file;
+        # communicate() + slice would still hold every match in memory.
 
         # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
         for d in sorted(_NOISE_DIRS - {'.git'}):
@@ -1116,13 +1162,18 @@ class BuiltinFileTool(Tool):
         # (pathological regex, huge binary files, or a stuck network mount).
         proc = None
         drained = False
+        hit_cap = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GREP_TIMEOUT)
+            max_lines = limit if limit >= 0 else None
+            stdout, stderr, hit_cap = await asyncio.wait_for(
+                _collect_rg_output(proc, max_lines),
+                timeout=_GREP_TIMEOUT,
+            )
             drained = True
         except asyncio.TimeoutError:
             raise TimeoutError(
@@ -1140,7 +1191,8 @@ class BuiltinFileTool(Tool):
                 await terminate_subprocess(proc)
             close_subprocess_transport(proc)
 
-        # rg exit codes: 0=matches found, 1=no matches, 2=error
+        # rg exit codes: 0=matches found, 1=no matches, 2=error.
+        # A cap-kill is SIGTERM/SIGKILL (negative returncode), not 2.
         if proc.returncode == 2:
             err = stderr.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"grep(rg) failed: {err}")
@@ -1149,12 +1201,8 @@ class BuiltinFileTool(Tool):
         if not output:
             return f"No matches found for '{pattern}'"
 
-        # Truncate result lines for files_with_matches / count
-        if output_mode in ("files_with_matches", "count"):
-            lines = output.split("\n")
-            if len(lines) > limit:
-                output = "\n".join(lines[:limit])
-                output += f"\n... ({len(lines) - limit} more results truncated)"
+        if hit_cap:
+            output = f"{output}\n{_FURTHER_TRUNCATED}"
         else:
             output = _cap_output_lines(output, limit)
 
