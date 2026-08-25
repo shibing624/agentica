@@ -77,6 +77,7 @@ class TestCmdPermissions(unittest.TestCase):
         self.assertTrue(console.print.called)
         printed = " ".join(str(c) for c in console.print.call_args_list)
         self.assertIn("Ask for approval", printed)
+        self.assertIn("including outside the workspace", printed)
         self.assertIn("Approve for me", printed)
         self.assertIn("Full Access", printed)
         self.assertNotIn("only read-only tools", printed)

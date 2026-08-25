@@ -111,7 +111,7 @@ const en = {
     skillNone: "No matching skill",
     permLabel: (mode: string): string => mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me",
     permHint: (mode: string): string => mode === "ask"
-      ? "Reads, read-only shell, memory, task/delegate, and builtins run without asking. File writes, mutating shell, and network (web_search / fetch_url) need confirmation. Hard-unsafe commands are asked, not auto-denied."
+      ? "Reads (including outside the workspace), read-only shell, memory, task/delegate, and builtins run without asking. File writes, mutating shell, and network (web_search / fetch_url) need confirmation. Hard-unsafe commands are asked, not auto-denied."
       : mode === "allow-all"
         ? "Never asks and never denies. Project deny-similar applies only in ask/auto; hard-unsafe is logged and still run."
         : "Asks for file writes outside the workspace, sensitive paths, and hard-unsafe commands (rm -rf /, /etc, ~/.ssh).",
@@ -664,7 +664,7 @@ const zh: Strings = {
     skillNone: "没有匹配的技能",
     permLabel: (mode: string): string => mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准",
     permHint: (mode: string): string => mode === "ask"
-      ? "读、只读命令、记忆、task/delegate 和内置工具自动放行；写文件、会改状态的命令、以及联网（web_search / fetch_url）需确认。硬不安全命令会弹卡，不会直接拒。"
+      ? "读（含工作区外）、只读命令、记忆、task/delegate 和内置工具自动放行；写文件、会改状态的命令、以及联网（web_search / fetch_url）需确认。硬不安全命令会弹卡，不会直接拒。"
       : mode === "allow-all"
         ? "不询问、不拒绝。项目里「拒绝类似」只约束 ask/auto；硬不安全会记 warning 并照跑。"
         : "询问工作区外/敏感路径的文件写入，以及硬不安全命令（rm -rf /、/etc、~/.ssh）。",

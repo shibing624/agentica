@@ -521,8 +521,9 @@ def parse_args():
         type=str,
         default="allow-all",
         choices=["ask", "auto", "allow-all"],
-        help="Permission mode: ask (read-only tools only), auto (writes restricted to work_dir), "
-        "allow-all (no restriction; default — the CLI is a single-user tool)",
+        help="Permission mode: ask (reads anywhere; confirm writes/network), "
+        "auto (also writes inside work_dir), "
+        "allow-all (never ask; default — the CLI is a single-user tool)",
     )
     parser.add_argument(
         "command",

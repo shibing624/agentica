@@ -37,8 +37,8 @@ from typing import List, Optional, Set
 PERMISSION_MODES = ("ask", "auto", "allow-all")
 
 # Historically the tools "ask" exposed by hiding the rest. The classifier
-# no longer uses this set (tools stay visible); kept as a named list of
-# tools that are safe to auto-allow inside the workspace.
+# no longer uses this set (tools stay visible). Reads are auto-allowed
+# everywhere, not only inside the workspace.
 READ_ONLY_TOOLS: Set[str] = frozenset({
     "read_file", "glob", "grep", "web_search", "fetch_url",
     "write_todos", "task",
