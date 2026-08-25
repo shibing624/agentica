@@ -182,6 +182,7 @@ const en = {
         ? `This model cannot view images directly. On send, ${mediaModel} will describe them and pass the description to the base model.`
         : `This model cannot view images directly. Configure settings.media_model in ${configPath || "config.yaml"} (model_name, plus model_provider or base_url).`,
     placeholderStreaming: "Enter sends to the current turn · /queue for the next · empty input stops",
+    placeholderApproval: "Enter allows once · Esc denies",
     ctxTitle: "Context",
     ctxUsage: "Context usage",
     ctxWindowTitle: "Context Window",
@@ -734,6 +735,7 @@ const zh: Strings = {
         ? `当前模型不支持直接查看图片：发送时将由 ${mediaModel} 描述后转交底模`
         : `当前模型不支持直接查看图片：请在 ${configPath || "config.yaml"} 的 settings.media_model 配置一个能看图的模型（需要 model_name，以及 model_provider 或 base_url）`,
     placeholderStreaming: "有内容则发送到当前轮 · /queue 排到下一轮 · 空输入为停止",
+    placeholderApproval: "Enter 允许一次 · Esc 拒绝",
     ctxTitle: "上下文",
     ctxUsage: "上下文占用",
     ctxWindowTitle: "上下文窗口",

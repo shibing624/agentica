@@ -85,6 +85,7 @@ class _InputRequest:
     approval_id: Optional[str] = None
     approval_loop: Any = None
     approval_registry: Any = None
+    approval_pending: Any = None
 
     def submit(self, answer: str) -> bool:
         """Deliver the user's answer exactly once.

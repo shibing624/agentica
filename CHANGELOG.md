@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **审批增加 `deny` 路由和「拒绝类似」**：`classify` 返回 `allow | ask | deny`。三档权限嵌套：`auto` ⊃ `ask`，`allow-all` 是 root。`ask` 下 `web_search` / `fetch_url` 和工作区内写文件弹卡；`auto` 放行网络和工作区内写，硬不安全仍弹卡。新增 `deny_prefix`（CLI `x` / `4`，Web 拒绝按钮下拉「拒绝类似」），写入 `project.json` `approvals.deny_command_prefixes` 等，下次同类在 **ask/auto** 下不弹卡直接拒。**`allow-all` 忽略项目拒绝**，只 warning + 记 `approval_decision`（`allow_all_ignore_deny` / `allow_all_hard_unsafe`），命令照跑；进程用当前 OS 用户的权限，能 sudo 就能 sudo。用户在 ask/auto 点允许之后，执行时的 `check_command_safety` block / sandbox `blocked_commands` 不再跟卡打架。
 
 #### fixes
+- **CLI 审批卡裁掉「拒绝」、两项时跳号**：`rm /path` 这类不能「允许类似」的命令本来就只有允许/拒绝，但 TUI 把整段卡当成一行再多塞一个换行，高度少算一行，拒绝被裁掉，屏幕上只剩 `1. Yes, proceed (y)`。同时拒绝还写死成 `3.`，`2` 仍绑「允许类似」。现在按可见选项连续编号（两项就是 1 允许 / 2 拒绝；四项仍是允许、允许类似、拒绝、拒绝类似），数字键跟着走；长命令按终端宽度预留折行高度，不再把选项挤出屏幕。SDK / Web 同一套 `options`，没有类似可批时本来就不渲染那两个按钮。
+- **CLI 拒绝文案不再催用户写原因，审批后命令留在 transcript**：拒绝从 `No, and tell the agent what to do differently (esc)` 改成 `No, deny (esc/n)`（`esc` / `n` 都是直接拒，不追问理由）。审批卡画在输入区 layout 里，决定后整段卸掉，`$ rm …` 会跟着消失。现在卸卡之后把命令和 `✓ allowed` / `✗ denied` 打进 scrollback。
+- **Web 审批卡按 Enter 会整轮「已中止」**：卡上「允许一次」标了 ⏎，但焦点在输入框时 Enter 被当成「空输入为停止」。有未决审批时输入框禁用（附件 / slash / 粘贴也停），只留停止；Enter 允许一次、Esc 拒绝。残留草稿不再插入当前轮。
 - **Web 侧栏会话状态与对话页被误删**：`deny_prefix` 那次提交冲掉了 `sessions.ts` 的 `lastTs` / `unread` / `syncSessionStatus`，以及 `ChatPage` 的左侧 query 导航（`ChatNav`）、`settleWork`、已读 `markSessionRead`、以及 `running` 清位。已从上一版补回，审批卡仍带 `deny_prefix`。
 
 #### features

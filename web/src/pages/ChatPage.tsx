@@ -23,6 +23,7 @@ import {
 } from "../store";
 import { applySessionUsage, ContextUsageTip } from "../components/ContextUsageTip";
 import { appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts, partsOf, settleWork, unfinishedToolCallId } from "../lib/msgParts";
+import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
@@ -63,19 +64,25 @@ export function ChatPage() {
   const showStop = busy && !compacting;
   const cur = s.curSess ? s.sessions[s.curSess] : null;
   const queued = s.messageQueue.filter((q) => q.sessionId === s.curSess);
-  const q = slashQuery(s.inputText);
-  const slashItems = q != null
-    ? filterSlashItems(webSlashItems(s.pluginsData.skills || [], S.chat), q)
-    : [];
-  const slashOpen = q != null;
   const pendingImages = s.pendingFiles.filter((f) => f.type.startsWith("image/"));
   const pendingApprovals = s.curSess ? (s.streams[s.curSess]?.pendingApprovals || []) : [];
   const pendingReq = pendingApprovals[0];
+  const q = slashQuery(s.inputText);
+  const slashItems = q != null && !pendingReq
+    ? filterSlashItems(webSlashItems(s.pluginsData.skills || [], S.chat), q)
+    : [];
+  const slashOpen = q != null && !pendingReq;
   const pendingToolCallId = pendingReq?.toolCallId;
   const decidingApproval = !!(s.curSess && s.streams[s.curSess]?.decidingApproval);
 
   useEffect(() => { void loadPlugins(); }, []);
-  useEffect(() => { if (slashOpen) setSkillsOpen(false); }, [slashOpen]);
+  useEffect(() => {
+    if (slashOpen) setSkillsOpen(false);
+    if (pendingReq) {
+      setSkillsOpen(false);
+      setState({ approvalMenuOpen: false });
+    }
+  }, [slashOpen, pendingReq?.toolCallId]);
   useEffect(() => {
     if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -104,25 +111,16 @@ export function ChatPage() {
     if (!pendingReq) return;
     const onKey = (e: KeyboardEvent) => {
       if (s.modelDDOpen || s.approvalMenuOpen || skillsOpen) return;
-      if (slashOpen) return;
       if (e.isComposing || e.keyCode === 229) return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        void decideCurrentApproval("deny");
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        if (tag === "INPUT" || tag === "TEXTAREA") return;
-        e.preventDefault();
-        e.stopPropagation();
-        void decideCurrentApproval("allow");
-      }
+      const action = approvalKeyAction(e.key, { shiftKey: e.shiftKey });
+      if (!action) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void decideCurrentApproval(action);
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, skillsOpen, slashOpen]);
+  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, skillsOpen]);
   useEffect(() => {
     const onHide = () => { pageUnloading = true; };
     const onShow = () => { pageUnloading = false; };
@@ -290,16 +288,22 @@ export function ChatPage() {
               ))}
             </div>
           )}
-          <div className="input-box" onPaste={(e) => {
+          <div className={"input-box" + (pendingReq ? " approval-locked" : "")} onPaste={(e) => {
+            if (pendingReq) return;
             const files = imageFilesFromClipboard(e.clipboardData);
             if (!files.length) return;
             e.preventDefault();
             setState({ pendingFiles: [...getState().pendingFiles, ...files] });
-          }} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("dragover"); }}
+          }} onDragOver={(e) => {
+            if (pendingReq) return;
+            e.preventDefault();
+            e.currentTarget.classList.add("dragover");
+          }}
              onDragLeave={(e) => e.currentTarget.classList.remove("dragover")}
              onDrop={(e) => {
                e.preventDefault();
                e.currentTarget.classList.remove("dragover");
+               if (pendingReq) return;
                const files = Array.from(e.dataTransfer.files || []);
                if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
              }}>
@@ -307,7 +311,7 @@ export function ChatPage() {
               <SlashMenu items={slashItems} active={slashActive} onPick={(it) => pickSlash(it, taRef)} />
             )}
             {s.goalCompose && (
-              <div className="goal-chip-row">
+              <div className="goal-chip-row" inert={pendingReq ? true : undefined}>
                 <span className="goal-chip">
                   <span className="goal-chip-label">{S.chat.goalMode}</span>
                   <label className="goal-chip-budget">
@@ -341,7 +345,7 @@ export function ChatPage() {
               </div>
             )}
             {s.pendingFiles.length > 0 && (
-              <div className="file-list">
+              <div className="file-list" inert={pendingReq ? true : undefined}>
                 {s.pendingFiles.map((f, i) => (
                   <PendingFileChip key={i} file={f} onRemove={() => setState({ pendingFiles: s.pendingFiles.filter((_, j) => j !== i) })} />
                 ))}
@@ -354,7 +358,8 @@ export function ChatPage() {
               ref={taRef}
               className="input-ta"
               rows={1}
-              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
+              disabled={!!pendingReq}
+              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : pendingReq ? S.chat.placeholderApproval : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
               value={s.inputText}
               onChange={(e) => setState({ inputText: e.target.value })}
               onKeyDown={(e) => {
@@ -396,7 +401,7 @@ export function ChatPage() {
               }}
             />
             <div className="input-foot">
-              <div className="input-foot-l">
+              <div className="input-foot-l" inert={pendingReq ? true : undefined}>
                 <input type="file" multiple accept="image/*,*/*" style={{ display: "none" }} id="fileInput" onChange={(e) => {
                   const files = Array.from(e.target.files || []);
                   if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
@@ -789,6 +794,7 @@ function ensureSession(): string | null {
 
 async function submit() {
   const st = getState();
+  if (st.curSess && st.streams[st.curSess]?.pendingApprovals?.[0]) return;
   const text = st.inputText.trim();
   const files = st.pendingFiles.slice();
   const S = getStrings();
@@ -820,7 +826,9 @@ async function submit() {
 
   if (!text && !files.length) {
     const sessId = st.curSess;
-    if (sessId && isBusy(sessId) && !isCompacting(sessId)) await stopGen();
+    if (sessId && isBusy(sessId) && !isCompacting(sessId)) {
+      await stopGen();
+    }
     return;
   }
   const cmd = parseWebCommand(text);

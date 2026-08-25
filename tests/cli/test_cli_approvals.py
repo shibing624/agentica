@@ -14,11 +14,17 @@ from agentica.cli.approvals import (
     build_interactive_approve,
     build_noninteractive_approve,
     format_approval_prompt,
+    format_approval_record,
     interrupt_approvals,
     is_approval_request,
 )
 from agentica.cli.interactive.session_state import SessionState, _InputRequest
-from agentica.cli.interactive.tui import _ASK_KEY_HINT, _ask_prompt_lines
+from agentica.cli.interactive.tui import (
+    _ASK_KEY_HINT,
+    _ask_prompt_lines,
+    _input_prompt_fragments,
+    _input_prompt_height,
+)
 from agentica.tools.base import Function, FunctionCall
 
 
@@ -56,6 +62,16 @@ class TestApprovalKeyRouting:
         assert approval_decision_from_key("hello") is None
         assert approval_decision_from_key("") is None
 
+    def test_number_keys_follow_visible_options(self):
+        two = ("allow", "deny")
+        assert approval_decision_from_key("1", two) == "allow"
+        assert approval_decision_from_key("2", two) == "deny"
+        assert approval_decision_from_key("3", two) is None
+        assert approval_decision_from_key("p", two) is None
+        assert approval_decision_from_key("x", two) is None
+        assert approval_decision_from_key("n", two) == "deny"
+        assert approval_decision_from_key("esc", two) == "deny"
+
     def test_kind_distinguishes_approval_from_ask(self):
         ask = _InputRequest(prompt="?")
         card = _InputRequest(prompt="Would you like", kind="approval")
@@ -79,7 +95,7 @@ class TestApprovalPromptCopy:
         assert "$ rm -f /Users/xuming/Documents/temp/1.ini" in text
         assert "1. Yes, proceed (y)" in text
         assert "don't ask again for `rm -f` commands (p)" in text
-        assert "No, and tell the agent what to do differently (esc)" in text
+        assert "No, deny (esc/n)" in text
         assert "don't ask again for `rm -f` commands (x)" in text
 
     def test_file_and_network_option_two(self):
@@ -114,10 +130,83 @@ class TestApprovalPromptCopy:
             options=("allow", "deny"),
         )
         text = format_approval_prompt(pending)
-        assert "Yes, proceed (y)" in text
+        assert "1. Yes, proceed (y)" in text
+        assert "2. No, deny (esc/n)" in text
         assert "(p)" not in text
         assert "(x)" not in text
         assert "don't ask again" not in text
+        assert "3." not in text
+
+    def test_bare_rm_path_is_allow_and_deny_only(self):
+        pending = PendingApproval(
+            tool_call_id="t5",
+            name="execute",
+            arguments={
+                "command": "rm /Users/xuming/Documents/Codes/SimpleMem/tests/test_vector_store.py",
+            },
+            question="q",
+            preview="rm /Users/xuming/Documents/Codes/SimpleMem/tests/test_vector_store.py",
+            options=("allow", "deny"),
+        )
+        text = format_approval_prompt(pending)
+        assert "1. Yes, proceed (y)" in text
+        assert "2. No, deny (esc/n)" in text
+        assert "don't ask again" not in text
+
+    def test_ask_prompt_lines_keep_deny_on_two_option_card(self):
+        req = _InputRequest(
+            prompt=format_approval_prompt(
+                PendingApproval(
+                    tool_call_id="t6",
+                    name="execute",
+                    arguments={"command": "rm /tmp/x"},
+                    question="q",
+                    preview="rm /tmp/x",
+                    options=("allow", "deny"),
+                )
+            ),
+            kind="approval",
+        )
+        lines = _ask_prompt_lines(req)
+        assert any(line.startswith("2. No, deny") for line in lines)
+        blob = "".join(text for _, text in _input_prompt_fragments(req))
+        assert blob.startswith("Would you like to run the following command?")
+        assert "2. No, deny (esc/n)" in blob
+        assert _input_prompt_height(req, width=200) == len(lines)
+
+    def test_approval_record_keeps_execute_command(self):
+        pending = PendingApproval(
+            tool_call_id="t8",
+            name="execute",
+            arguments={"command": "rm /tmp/x"},
+            question="q",
+            preview="rm /tmp/x",
+            options=("allow", "deny"),
+        )
+        allowed = format_approval_record(pending, "allow")
+        denied = format_approval_record(pending, "deny")
+        assert "$ rm /tmp/x" in allowed
+        assert "✓ allowed" in allowed
+        assert "$ rm /tmp/x" in denied
+        assert "✗ denied" in denied
+        assert "tell the agent" not in denied
+
+    def test_wrapped_command_reserves_extra_rows(self):
+        req = _InputRequest(
+            prompt=format_approval_prompt(
+                PendingApproval(
+                    tool_call_id="t7",
+                    name="execute",
+                    arguments={"command": "rm " + "x" * 80},
+                    question="q",
+                    preview="rm " + "x" * 80,
+                    options=("allow", "deny"),
+                )
+            ),
+            kind="approval",
+        )
+        lines = _ask_prompt_lines(req)
+        assert _input_prompt_height(req, width=40) > len(lines)
 
     def test_ask_prompt_lines_skip_typed_answer_hint(self):
         req = _InputRequest(
@@ -189,6 +278,48 @@ class TestInteractiveApprove:
         await self._wait_for_prompt(state)
         complete_approval(state, "deny")
         assert await asyncio.wait_for(task, 2.0) == "deny"
+
+    @pytest.mark.asyncio
+    async def test_bare_rm_prompt_numbers_deny_second(self):
+        from agentica.cli.approvals import complete_approval
+
+        state = SessionState()
+        state.current_agent = _agent()
+        approve = build_interactive_approve(state, {})
+        fc = _fc(
+            "execute",
+            {"command": "rm /Users/xuming/Documents/Codes/SimpleMem/tests/test_vector_store.py"},
+            call_id="a5",
+        )
+        task = asyncio.create_task(approve(fc))
+        req = await self._wait_for_prompt(state)
+        assert "1. Yes, proceed (y)" in req.prompt
+        assert "2. No, deny (esc/n)" in req.prompt
+        assert "(p)" not in req.prompt
+        assert req.options == ["allow", "deny"]
+        complete_approval(state, "deny")
+        assert await asyncio.wait_for(task, 2.0) == "deny"
+
+    @pytest.mark.asyncio
+    async def test_decision_prints_command_into_transcript(self, monkeypatch):
+        printed: list[str] = []
+        monkeypatch.setattr(
+            "agentica.cli.interactive.console_io._cprint",
+            lambda text: printed.append(text),
+        )
+        from agentica.cli.approvals import complete_approval
+
+        state = SessionState()
+        state.current_agent = _agent()
+        approve = build_interactive_approve(state, {})
+        fc = _fc("execute", {"command": "rm /tmp/x"}, call_id="a6")
+        task = asyncio.create_task(approve(fc))
+        await self._wait_for_prompt(state)
+        complete_approval(state, "allow")
+        assert await asyncio.wait_for(task, 2.0) == "allow"
+        blob = "\n".join(printed)
+        assert "$ rm /tmp/x" in blob
+        assert "✓ allowed" in blob
 
     @pytest.mark.asyncio
     async def test_ctrl_c_deny_all(self):

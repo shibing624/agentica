@@ -206,12 +206,47 @@ def _ask_prompt_lines(req) -> list[str]:
     reserved height can't drift from what is actually drawn.
     """
     if req.kind == "approval":
-        return [req.prompt.rstrip("\n")]
+        text = (req.prompt or "").rstrip("\n")
+        return text.split("\n") if text else [""]
     lines = [f"  ? {req.prompt}"]
     if req.options:
         lines.extend(f"    {i}. {opt}" for i, opt in enumerate(req.options, 1))
     lines.append(_ASK_KEY_HINT)
     return lines
+
+
+def _input_prompt_fragments(req) -> list[tuple[str, str]]:
+    """prompt_toolkit fragments for the inline ask/approval widget.
+
+    Approval cards are one FormattedText block so the last option (deny)
+    is not stolen as a hint line with an extra leading newline — that
+    extra row used to clip deny off the reserved height.
+    """
+    lines = _ask_prompt_lines(req)
+    if getattr(req, "kind", None) == "approval":
+        return [("class:input-prompt", "\n".join(lines))]
+    *question, hint = lines
+    return [
+        ("class:input-prompt", "\n".join(question)),
+        ("class:hint", f"\n{hint}"),
+    ]
+
+
+def _input_prompt_height(req, width: int | None = None) -> int:
+    """Rows reserved for the ask/approval widget, including wrapped lines."""
+    lines = _ask_prompt_lines(req)
+    if width is None:
+        try:
+            from prompt_toolkit.application.current import get_app
+
+            width = get_app().output.get_size().columns
+        except Exception:
+            width = shutil.get_terminal_size(fallback=(80, 24)).columns
+    width = max(1, int(width))
+    rows = 0
+    for line in lines:
+        rows += 1 if not line else (len(line) + width - 1) // width
+    return rows
 
 
 def _setup_tui(
@@ -273,41 +308,50 @@ def _setup_tui(
             "Denied" if decision in ("deny", "deny_prefix") else "Approved"
         )
 
+    def _approval_from_key(event, key: str) -> None:
+        req = state.input_request
+        if not is_approval_request(req):
+            return
+        decision = approval_decision_from_key(key, req.options)
+        if decision is None:
+            return
+        _finish_approval(event, decision)
+
     @kb.add("y", filter=is_approval, eager=True)
     def _approval_yes(event):
-        _finish_approval(event, "allow")
+        _approval_from_key(event, "y")
 
     @kb.add("1", filter=is_approval, eager=True)
     def _approval_yes_1(event):
-        _finish_approval(event, "allow")
+        _approval_from_key(event, "1")
 
     @kb.add("p", filter=is_approval, eager=True)
     def _approval_prefix(event):
-        _finish_approval(event, "allow_prefix")
+        _approval_from_key(event, "p")
 
     @kb.add("2", filter=is_approval, eager=True)
     def _approval_prefix_2(event):
-        _finish_approval(event, "allow_prefix")
+        _approval_from_key(event, "2")
 
     @kb.add("escape", filter=is_approval, eager=True)
     def _approval_deny(event):
-        _finish_approval(event, "deny")
+        _approval_from_key(event, "esc")
 
     @kb.add("3", filter=is_approval, eager=True)
     def _approval_deny_3(event):
-        _finish_approval(event, "deny")
+        _approval_from_key(event, "3")
 
     @kb.add("n", filter=is_approval, eager=True)
     def _approval_deny_n(event):
-        _finish_approval(event, "deny")
+        _approval_from_key(event, "n")
 
     @kb.add("x", filter=is_approval, eager=True)
     def _approval_deny_prefix(event):
-        _finish_approval(event, "deny_prefix")
+        _approval_from_key(event, "x")
 
     @kb.add("4", filter=is_approval, eager=True)
     def _approval_deny_prefix_4(event):
-        _finish_approval(event, "deny_prefix")
+        _approval_from_key(event, "4")
 
     @kb.add("escape", "enter")
     def _newline(event):
@@ -413,7 +457,7 @@ def _setup_tui(
         if state.input_request is not None:
             req = state.input_request
             if req.kind == "approval":
-                decision = approval_decision_from_key(text)
+                decision = approval_decision_from_key(text, req.options)
                 if decision is None:
                     return
                 _finish_approval(event, decision)
@@ -652,7 +696,14 @@ def _setup_tui(
     def _get_placeholder():
         if state.input_request is not None:
             if state.input_request.kind == "approval":
-                return "y proceed · p don't ask again · esc deny · Ctrl+C to deny"
+                opts = set(state.input_request.options or [])
+                parts = ["y proceed"]
+                if "allow_prefix" in opts:
+                    parts.append("p don't ask again")
+                parts.append("esc/n deny")
+                if "deny_prefix" in opts:
+                    parts.append("x deny similar")
+                return " · ".join(parts)
             return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
             return "Enter to steer · Tab to queue next · Ctrl+C to cancel"
@@ -793,17 +844,13 @@ def _setup_tui(
         req = state.input_request
         if req is None:
             return []
-        *question, hint = _ask_prompt_lines(req)
-        return [
-            ("class:input-prompt", "\n".join(question)),
-            ("class:hint", f"\n{hint}"),
-        ]
+        return _input_prompt_fragments(req)
 
     def _get_input_prompt_height() -> int:
         req = state.input_request
         if req is None:
             return 0
-        return sum(1 + line.count("\n") for line in _ask_prompt_lines(req))
+        return _input_prompt_height(req)
 
     input_prompt_widget = ConditionalContainer(
         Window(
@@ -910,4 +957,11 @@ def _setup_tui(
     return app
 
 
-__all__ = ['_CleanResizeApplication', '_ASK_KEY_HINT', '_ask_prompt_lines', '_setup_tui']
+__all__ = [
+    '_CleanResizeApplication',
+    '_ASK_KEY_HINT',
+    '_ask_prompt_lines',
+    '_input_prompt_fragments',
+    '_input_prompt_height',
+    '_setup_tui',
+]
