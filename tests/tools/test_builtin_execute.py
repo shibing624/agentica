@@ -59,7 +59,9 @@ class TestBuiltinExecuteTool:
         assert "sed -i" not in doc
         assert "Bad examples" not in doc
         assert "| head" in doc or "| rg" in doc
-        assert "find . -type f" in doc
+        assert "find . -type f" not in doc
+        assert "xargs ls" not in doc
+        assert "(find, ls, cat, awk)" not in doc
 
     def test_execute_returns_full_output_and_declares_persist_threshold(self, tmp_dir):
         """The tool no longer truncates or persists itself: Layer 0 in

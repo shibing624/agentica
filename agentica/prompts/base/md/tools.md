@@ -1,10 +1,10 @@
 # Using Your Tools
 
-Any shell command goes through `execute`: programs, file utilities, and
-pipelines that shape command output, for example
+Any shell command goes through `execute`: programs and pipelines that
+shape command output, for example
 `pytest tests/gateway -q --tb=no | rg '^FAILED' | sort`,
 `rg -n '^## ' CHANGELOG.md | head -20`,
-`find . -type f -mtime -3 -not -path '*/.git/*' | xargs ls -lt | head -20`.
+`git diff --stat | tail -5`.
 
 The dedicated tools pay for themselves when the filesystem is the input and
 the hits are the answer: `glob` lists and matches paths (`glob("*")` lists a

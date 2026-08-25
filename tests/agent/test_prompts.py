@@ -116,6 +116,8 @@ class TestPromptModules:
         assert "not cat" not in content
         assert "| rg" in content or "| head" in content
         assert "apply_patch" in content
+        assert "find . -type f" not in content
+        assert "xargs ls" not in content
 
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt

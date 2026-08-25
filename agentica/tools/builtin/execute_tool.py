@@ -281,9 +281,8 @@ class BuiltinExecuteTool(Tool):
         """Executes a shell command, capturing both stdout and stderr.
 
         Any shell command goes here: programs (git, python, pytest, pip, npm,
-        make, docker, curl), file utilities (find, ls, cat, awk), and
-        pipelines that shape command output — filter, sort, unique, count,
-        head, tail.
+        make, docker, curl) and pipelines that shape command output — filter,
+        sort, unique, count, head, tail.
 
         You own what comes back. Bound it with ``| head`` / ``| tail``;
         oversized output is persisted to a session file and the context keeps
@@ -333,7 +332,6 @@ class BuiltinExecuteTool(Tool):
             - execute(command="pytest /path/to/tests/ -q --tb=short")
             - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
             - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
-            - execute(command="find . -type f -mtime -3 -not -path '*/.git/*' | xargs ls -lt | head -20")
             - execute(command="git diff --stat | tail -5")
             - execute(command="git status")
             - execute(command="npm install && npm test", timeout=300)
