@@ -236,13 +236,14 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 
 ## 🔥 News
 
+- [2026/08/25] **v1.4.14**: Permissions match Codex (ask keeps write tools visible; deny-similar); true multi-account Web/Desktop; file tools narrowed to `apply_patch` + `write_file` with `read_file` tail; worktrees live inside the repo; bundled skills load in-place; desktop first-launch bootstraps a Python runtime. See [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
 - [2026/08/20] **v1.4.13**: The web UI is a Vite + React SPA with a new traces page; the UI ships in English with Simplified Chinese in settings; and there are now **desktop installers** (macOS dmg / Windows NSIS / Linux AppImage and deb). See [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
 - [2026/08/10] **v1.4.12**: Two-layer context compression (tool-result eviction → LLM/native summarise); fixes the read-and-reread loop and Anthropic paths where eviction never ran; compaction counts on `RunResponse`. Adds cross-terminal peer messaging (`list_agents` / `send_message`) and process-level `delegate` (full `agentica --query --print`, managed via `/ps` `/stop` `wait`) vs cheap in-process `task`. See [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
-- [2026/08/04] **v1.4.11**: Adds OpenAI Responses API (with provider-native compaction), Markdown-configurable subagents, and multi-file `apply_patch`; improves CLI resume/status/compaction feedback; trims prompt and grep/glob schema cost; fixes Learned Experiences corruption and `write_todos` full-list echo. See [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 
 <details>
 <summary>Older releases</summary>
 
+- [2026/08/04] **v1.4.11**: Adds OpenAI Responses API (with provider-native compaction), Markdown-configurable subagents, and multi-file `apply_patch`; improves CLI resume/status/compaction feedback; trims prompt and grep/glob schema cost; fixes Learned Experiences corruption and `write_todos` full-list echo. See [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**: Adds native image input with catalog-driven model capability routing; introduces `/rename` and name-based `/resume`; fixes Pillow core dependency metadata. See [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**: Unified 3-tier permission across SDK/CLI/Web (`ask`/`auto`/`allow-all`); built-in subagents are read-only; `edit_file` gives advisory tips instead of hard-rejecting; fixes `ask_user_question` CLI freeze. See [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**: Adds a cron runtime (`/cron` command + daemon) and self-management (`/upgrade`, `/config set|env`); unifies config into `~/.agentica/config.yaml`; `/resume` accepts full/prefix/ellipsis session ids. Also fixes stream-upload OOM and `/api/upload` path traversal (CWE-22). See [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)

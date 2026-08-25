@@ -49,7 +49,7 @@ agentica-gateway --port 0              # 让系统挑一个空闲端口，启动
 
 ```
 ==================================================
-  Agentica Gateway v1.4.13
+  Agentica Gateway v1.4.14
   Workspace: /Users/me/.agentica/workspace
   Work dir:  /Users/me/project
   Model:     openai/gpt-4o

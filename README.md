@@ -227,13 +227,14 @@ agent = DeepAgent()
 
 ## 🔥 News
 
+- [2026/08/25] **v1.4.14**：权限档对齐 Codex（ask 不再藏写工具，增加「拒绝类似」）；Web/桌面真正多账号；文件工具收成 `apply_patch` + `write_file`（`read_file` 支持 tail）；Worktree 默认进仓库内；系统 skill 包内加载；桌面版首次打开自动装 Python runtime。详见 [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
 - [2026/08/20] **v1.4.13**：Web 换成 Vite + React SPA 并新增轨迹页；网页界面默认英文、设置里可切简体中文；新增 **Desktop App 安装包**（macOS dmg / Windows NSIS / Linux AppImage·deb）。详见 [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
 - [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
-- [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 
 <details>
 <summary>更多版本</summary>
 
+- [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)

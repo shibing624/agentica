@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.14] - 2026-08-25
+
 #### breaking
 - **`agentica.subagent` / `agentica.subagent_loader` 挪到 `agentica.subagents`**：内置定义从 `agentica/agents/*.md` 改到 `agentica/subagents/bundled/*.md`（和 `skills/bundled` 同结构）。运行时 `from agentica.subagents import SubagentRegistry`；加载器是 `agentica.subagents.loader`。不留旧模块。用户/项目目录 `.agentica/agents/`、`$AGENTICA_HOME/agents/` 和 `/agents` 斜杠命令不变。
 - **`SkillRegistry.get_skill_instruction()` / `generate_skills_prompt()` 删除**：生产 catalog 一直是 `SkillTool.get_system_prompt()`（自进化 spawn 也是写盘后再走这条）。两条是死 API，catalog 预算改挂在活路径上，不再维护第二套按注册序截断的 XML 列表。

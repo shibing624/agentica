@@ -1,6 +1,6 @@
 {
   "name": "agentica-desktop",
-  "version": "1.4.13",
+  "version": "1.4.14",
   "private": true,
   "description": "Electron shell around the agentica gateway. Mechanism only: process lifecycle and one window.",
   "author": "XuMing <xuming624@qq.com>",
