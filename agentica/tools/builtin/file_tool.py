@@ -132,21 +132,25 @@ async def _collect_rg_output(
 
     A global cap that only ran after ``communicate()`` still let rg walk the
     whole tree and buffer every match. Stopping the read and killing rg is
-    what makes ``limit`` bound I/O, not just the string we return.
+    what makes ``limit`` bound I/O, not just the string we return. Reads one
+    line past ``max_lines`` so a result set that ends exactly at the cap is
+    not reported as truncated; the lookahead line is dropped.
     Returns ``(stdout, stderr, hit_cap)``.
     """
     chunks: List[bytes] = []
     hit_cap = False
+    max_chunks = max_lines + 1 if max_lines is not None else None
     while True:
         line = await proc.stdout.readline()
         if not line:
             break
         chunks.append(line)
-        if max_lines is not None and len(chunks) >= max_lines:
+        if max_chunks is not None and len(chunks) >= max_chunks:
             hit_cap = True
             break
     stdout = b"".join(chunks)
     if hit_cap:
+        stdout = stdout[: sum(len(c) for c in chunks[:max_lines])]
         await terminate_subprocess(proc)
         return stdout, b"", True
     stderr = await proc.stderr.read()

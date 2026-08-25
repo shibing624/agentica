@@ -569,8 +569,50 @@ class TestBuiltinFileToolGrep:
         assert stdout == b"a\nb\n"
         assert stderr == b""
         assert killed == [proc]
-        assert proc.stdout.reads == 2
+        # 2 payload lines + 1 lookahead line that proves the tree kept going
+        assert proc.stdout.reads == 3
         assert proc.waited is False
+
+    def test_collect_rg_output_exact_boundary_no_false_cap(self):
+        """A tree with exactly `limit` matches must not report truncation:
+        EOF arrives before the lookahead line, so hit_cap stays False and the
+        process is waited, not killed."""
+        from agentica.tools.builtin.file_tool import _collect_rg_output
+
+        class _Stdout:
+            def __init__(self, lines):
+                self._lines = list(lines)
+
+            async def readline(self):
+                if not self._lines:
+                    return b""
+                return self._lines.pop(0)
+
+        class _Proc:
+            class _Stderr:
+                async def read(self):
+                    return b""
+
+            def __init__(self):
+                self.stdout = _Stdout([b"a\n", b"b\n"])
+                self.stderr = self._Stderr()
+                self.returncode = None
+                self.waited = False
+
+            async def wait(self):
+                self.waited = True
+                self.returncode = 0
+
+        proc = _Proc()
+
+        async def run():
+            return await _collect_rg_output(proc, 2)
+
+        stdout, _stderr, hit_cap = asyncio.run(run())
+        assert hit_cap is False
+        assert stdout == b"a\nb\n"
+        assert proc.waited is True
+        assert proc.returncode == 0
 
     def test_grep_timeout_does_not_forbid_execute(self, file_tool):
         doc = BuiltinFileTool.grep.__doc__ or ""
