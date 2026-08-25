@@ -55,7 +55,7 @@ def _clone_agent_for_task(source: Any) -> Any:
     """
     from agentica.agent import Agent
     from agentica.memory import WorkingMemory
-    from agentica.subagent import SubagentRegistry
+    from agentica.subagents import SubagentRegistry
 
     # Reuse the canonical model-cloning logic from SubagentRegistry to keep a
     # single source of truth: shallow-copy + reset tools/functions/tool_choice/

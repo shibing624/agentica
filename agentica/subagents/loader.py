@@ -9,7 +9,7 @@ frontmatter for runtime fields. Effective precedence is:
 1. ``<cwd>/.agentica/agents/*.md``
 2. ``~/.agentica/agents/*.md`` (or ``$AGENTICA_HOME/agents``)
 3. ``$AGENTICA_AGENT_DIR/*.md``
-4. package defaults in ``agentica/agents/*.md``
+4. package defaults in ``agentica/subagents/bundled/*.md``
 
 Higher-priority files replace lower-priority definitions with the same stem.
 Package defaults are the shipped source of truth; user and project directories
@@ -25,8 +25,10 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import yaml
 
-from agentica.subagent import SubagentConfig, _replace_file_subagent_configs
+from agentica.subagents.runtime import SubagentConfig, _replace_file_subagent_configs
 from agentica.utils.log import logger
+
+BUNDLED_SUBAGENT_DIR = Path(__file__).resolve().parent / "bundled"
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -55,7 +57,7 @@ def get_search_locations() -> List[AgentSearchLocation]:
     env_dir = os.getenv("AGENTICA_AGENT_DIR")
     if env_dir:
         raw_locations.append(AgentSearchLocation(Path(env_dir).expanduser(), "environment"))
-    raw_locations.append(AgentSearchLocation(Path(__file__).with_name("agents"), "package", strict=True))
+    raw_locations.append(AgentSearchLocation(BUNDLED_SUBAGENT_DIR, "package", strict=True))
 
     locations: List[AgentSearchLocation] = []
     seen: set[str] = set()
@@ -240,7 +242,7 @@ def _discover_agents() -> Tuple[Dict[str, SubagentConfig], List[Dict[str, Any]]]
             if location.strict:
                 raise FileNotFoundError(
                     f"Missing packaged agent directory: {directory}. "
-                    "Reinstall agentica so agentica/agents/*.md are shipped."
+                    "Reinstall agentica so agentica/subagents/bundled/*.md are shipped."
                 )
             continue
         try:

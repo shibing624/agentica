@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for agentica.subagent registry execution helpers."""
+"""Tests for agentica.subagents registry execution helpers."""
 import asyncio
 import inspect
 import re
@@ -10,13 +10,13 @@ from unittest.mock import patch
 
 import pytest
 
-from agentica.subagent import (
+from agentica.subagents import (
     SubagentConfig,
     SubagentRegistry,
-    _RUNTIME_SUBAGENT_CONFIGS,
     get_subagent_config,
     get_subagent_configs,
 )
+from agentica.subagents.runtime import _RUNTIME_SUBAGENT_CONFIGS
 from agentica.tools.base import Function, Tool
 from agentica.tools.builtin import BuiltinFileTool
 
@@ -515,7 +515,7 @@ def test_builtin_task_tool_surfaces_partial_on_timeout():
     )
     tool._parent_agent = parent
 
-    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
         raw = asyncio.run(tool.task(description="d", subagent_type="code"))
     payload = json.loads(raw)
     assert payload["success"] is False
@@ -562,7 +562,7 @@ def test_spawn_timeout_override_wins_over_config_default():
 
     with patch("agentica.agent.Agent", _RecordingAgent), patch(
         "agentica.agent.config.ToolConfig", FakeToolConfig
-    ), patch("agentica.subagent.asyncio.wait_for", side_effect=_spy_wait_for):
+    ), patch("agentica.subagents.runtime.asyncio.wait_for", side_effect=_spy_wait_for):
         asyncio.run(
             registry.spawn(
                 parent_agent=parent, task="t", agent_type="overridable",
@@ -593,7 +593,7 @@ def test_spawn_resume_stitches_previous_partial_into_task():
 
     registry = SubagentRegistry()
     # Seed a fake prior run in the singleton registry with partial output.
-    from agentica.subagent import SubagentRun
+    from agentica.subagents import SubagentRun
     from datetime import datetime
     prior_run_id = "prior-run-id-xyz"
     registry._runs[prior_run_id] = SubagentRun(
@@ -639,7 +639,7 @@ def test_spawn_resume_stitches_previous_partial_into_task():
 
 def test_update_status_persists_partial_tool_calls_for_resume():
     registry = SubagentRegistry()
-    from agentica.subagent import SubagentRun
+    from agentica.subagents import SubagentRun
     from datetime import datetime
 
     run = SubagentRun(
@@ -755,7 +755,7 @@ def test_select_child_tools_strips_edit_tools_for_code_subagent():
     """Even if the parent has write_file, a ``code`` subagent must not
     inherit them — the cheap aux model must not be able to edit. ``execute`` is
     inherited but wrapped by the read-only policy."""
-    from agentica.subagent import SubagentRegistry, get_subagent_config
+    from agentica.subagents import SubagentRegistry, get_subagent_config
 
     parent = SimpleNamespace(
         name="parent",
@@ -914,7 +914,7 @@ def test_package_configs_are_auxiliary_tier():
 
 
 def test_custom_subagent_can_opt_into_main_tier():
-    from agentica.subagent import register_custom_subagent
+    from agentica.subagents import register_custom_subagent
 
     cfg = register_custom_subagent(
         name="arch-critic",
@@ -951,7 +951,7 @@ def test_task_tool_forwards_auxiliary_model_as_tier_hint_not_hard_override():
         captured.update(kwargs)
         return {"status": "completed", "content": "ok", "agent_type": "explore"}
 
-    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
         asyncio.run(tool.task("d", subagent_type="explore"))
 
     assert captured["auxiliary_model_override"] is aux
@@ -1000,7 +1000,7 @@ def test_two_tasks_in_one_batch_actually_overlap():
         async for _ in model.run_function_calls(calls, results):
             pass
 
-    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
         asyncio.run(_drive())
 
     assert peak == 3, f"tasks ran {peak}-at-a-time; they must all be in flight together"
@@ -1010,7 +1010,7 @@ def test_a_burst_of_tasks_is_capped_at_three_in_flight():
     """Parallel does not mean unbounded: each subagent is a whole Agent with
     its own model and tool loop. Extra calls wait for a slot instead of all
     starting at once, matching ``SubagentRegistry.MAX_CONCURRENT``."""
-    from agentica.subagent import SubagentRegistry
+    from agentica.subagents import SubagentRegistry
     from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
     tool = BuiltinTaskTool()
@@ -1035,7 +1035,7 @@ def test_a_burst_of_tasks_is_capped_at_three_in_flight():
             tool.task(description=f"d{i}", subagent_type="explore") for i in range(6)
         ])
 
-    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
         asyncio.run(_drive())
 
     assert peak == SubagentRegistry.MAX_CONCURRENT, f"{peak} subagents ran at once"

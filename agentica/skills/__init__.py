@@ -17,7 +17,7 @@ Search paths (in priority order):
 2. .agentica/skills (project-level)
 3. ~/.claude/skills (user-level)
 4. ~/.agentica/skills (user-level)
-5. $AGENTICA_HOME/skills/.system (CLI/gateway only; SDK omits)
+5. agentica/skills/bundled (package; CLI/gateway only; SDK omits)
 
 Usage:
     from agentica.skills import load_skills, load_system_skills, get_available_skills, register_skill
@@ -25,7 +25,7 @@ Usage:
     # SDK: user/project skills only
     registry = load_skills()
 
-    # CLI/gateway: also materialize and load system skills
+    # CLI/gateway: also load the package bundled skills
     registry = load_system_skills()
 
     # Get all available skills
@@ -47,7 +47,6 @@ from agentica.skills.skill_loader import (
     SkillLoader,
     load_skills,
     load_system_skills,
-    ensure_system_skills,
     get_available_skills,
     register_skill,
     register_skills,
@@ -72,7 +71,6 @@ __all__ = [
     "SkillLoader",
     "load_skills",
     "load_system_skills",
-    "ensure_system_skills",
     "get_available_skills",
     "register_skill",
     "register_skills",

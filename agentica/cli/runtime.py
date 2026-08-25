@@ -866,7 +866,7 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     if skill_names:
         lines.append(f"- Active skills: {', '.join(sorted(skill_names))}")
 
-    from agentica.subagent import get_subagent_configs
+    from agentica.subagents import get_subagent_configs
 
     subagent_types = sorted(get_subagent_configs())
     lines.append(f"- Subagent types: {', '.join(subagent_types)}")

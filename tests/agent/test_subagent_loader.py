@@ -2,9 +2,10 @@
 """
 @author: XuMing(xuming624@qq.com)
 @description: Unit tests for the opencode-style subagent loader
-(``agentica/subagent_loader.py``).
+(``agentica/subagents/loader.py``).
 
-The loader scans package, user, and project ``agents/*.md`` files. User-authored
+The loader scans package ``subagents/bundled/*.md`` plus user and project
+``agents/*.md`` files. User-authored
 files fail softly, while malformed package defaults fail loudly.
 """
 
@@ -17,8 +18,8 @@ from unittest.mock import patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import agentica.subagent_loader as loader
-from agentica.subagent import (
+import agentica.subagents.loader as loader
+from agentica.subagents import (
     get_custom_subagent_configs,
 )
 
@@ -31,7 +32,7 @@ class _LoaderTestCase(unittest.TestCase):
         self.agents_dir = Path(self._tmp.name) / "agents"
         self.agents_dir.mkdir(parents=True, exist_ok=True)
         self._search_patch = patch(
-            "agentica.subagent_loader.get_search_locations",
+            "agentica.subagents.loader.get_search_locations",
             return_value=[loader.AgentSearchLocation(self.agents_dir, "project")],
         )
         self._search_patch.start()
@@ -129,7 +130,7 @@ class TestParseValidFrontmatter(_LoaderTestCase):
             "---\ndescription: project version\n---\nProject prompt.\n",
         )
         with patch(
-            "agentica.subagent_loader.get_search_locations",
+            "agentica.subagents.loader.get_search_locations",
             return_value=[
                 loader.AgentSearchLocation(self.agents_dir, "project"),
                 loader.AgentSearchLocation(package_dir, "package", strict=True),
@@ -165,7 +166,7 @@ class TestSkipMalformed(_LoaderTestCase):
             "nobodyws",
             "---\ndescription: foo\n---\n   \n",
         )
-        with patch("agentica.subagent_loader.logger.warning") as warning:
+        with patch("agentica.subagents.loader.logger.warning") as warning:
             count = loader.load_all_agents()
         self.assertEqual(count, 0)
         self.assertNotIn("nobody", get_custom_subagent_configs())
@@ -179,7 +180,7 @@ class TestSkipMalformed(_LoaderTestCase):
             "---\ndescription: foo\nPrompt without closing delimiter\n",
         )
 
-        with patch("agentica.subagent_loader.logger.warning") as warning:
+        with patch("agentica.subagents.loader.logger.warning") as warning:
             count = loader.load_all_agents()
 
         self.assertEqual(count, 0)
@@ -191,7 +192,7 @@ class TestSkipMalformed(_LoaderTestCase):
             "---\ndescription: uppercase\n---\nPrompt.\n",
         )
 
-        with patch("agentica.subagent_loader.logger.warning") as warning:
+        with patch("agentica.subagents.loader.logger.warning") as warning:
             count = loader.load_all_agents()
 
         self.assertEqual(count, 0)
@@ -219,7 +220,7 @@ class TestCreateAgentFile(_LoaderTestCase):
     def test_create_agent_file_writes_and_registers(self):
         """create_agent_file writes a valid .md and registers the subagent."""
         with patch(
-            "agentica.subagent_loader._resolve_target_dir",
+            "agentica.subagents.loader._resolve_target_dir",
             return_value=self.agents_dir,
         ):
             path = loader.create_agent_file(
@@ -262,7 +263,7 @@ class TestCreateAgentFile(_LoaderTestCase):
     def test_create_agent_file_preserves_empty_tool_list(self):
         """An explicit empty list means no tools, not inherit all parent tools."""
         with patch(
-            "agentica.subagent_loader._resolve_target_dir",
+            "agentica.subagents.loader._resolve_target_dir",
             return_value=self.agents_dir,
         ):
             path = loader.create_agent_file(
@@ -282,7 +283,7 @@ class TestCreateAgentFile(_LoaderTestCase):
 
     def test_create_agent_file_writes_all_runtime_fields(self):
         with patch(
-            "agentica.subagent_loader._resolve_target_dir",
+            "agentica.subagents.loader._resolve_target_dir",
             return_value=self.agents_dir,
         ):
             path = loader.create_agent_file(
@@ -317,7 +318,7 @@ class TestCreateAgentFile(_LoaderTestCase):
 
     def test_create_agent_file_validates_runtime_fields_before_writing(self):
         with patch(
-            "agentica.subagent_loader._resolve_target_dir",
+            "agentica.subagents.loader._resolve_target_dir",
             return_value=self.agents_dir,
         ):
             with self.assertRaisesRegex(ValueError, "model_tier"):
@@ -332,7 +333,7 @@ class TestCreateAgentFile(_LoaderTestCase):
 
     def test_create_normalizes_filename_and_remove_is_case_insensitive(self):
         with patch(
-            "agentica.subagent_loader._resolve_target_dir",
+            "agentica.subagents.loader._resolve_target_dir",
             return_value=self.agents_dir,
         ):
             path = loader.create_agent_file(
@@ -360,7 +361,7 @@ class TestRemoveAgentFile(_LoaderTestCase):
         """remove_agent_file deletes the file and unregisters the subagent."""
         # Write into the patched search-path dir so remove_agent_file finds it.
         with patch(
-            "agentica.subagent_loader._resolve_target_dir",
+            "agentica.subagents.loader._resolve_target_dir",
             return_value=self.agents_dir,
         ):
             path = loader.create_agent_file(
@@ -384,7 +385,7 @@ class TestPackageFailures(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing-agents"
             with patch(
-                "agentica.subagent_loader.get_search_locations",
+                "agentica.subagents.loader.get_search_locations",
                 return_value=[loader.AgentSearchLocation(missing, "package", strict=True)],
             ):
                 with self.assertRaisesRegex(FileNotFoundError, "Reinstall agentica"):
@@ -392,7 +393,7 @@ class TestPackageFailures(unittest.TestCase):
 
     def test_unexpected_discovery_error_propagates(self):
         with patch(
-            "agentica.subagent_loader.get_search_locations",
+            "agentica.subagents.loader.get_search_locations",
             side_effect=RuntimeError("boom"),
         ):
             with self.assertRaisesRegex(RuntimeError, "boom"):
@@ -406,7 +407,7 @@ class TestPackageFailures(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch(
-                "agentica.subagent_loader.get_search_locations",
+                "agentica.subagents.loader.get_search_locations",
                 return_value=[loader.AgentSearchLocation(package_dir, "package", strict=True)],
             ):
                 with self.assertRaisesRegex(ValueError, "missing description"):
@@ -417,6 +418,11 @@ class TestPackageFailures(unittest.TestCase):
         configs = loader.list_defined_agents()
         package_ids = {descriptor["id"] for descriptor in configs if descriptor["source"] == "package"}
         self.assertEqual(package_ids, {"explore", "research", "code"})
+
+    def test_bundled_dir_lives_inside_the_package(self):
+        self.assertTrue(loader.BUNDLED_SUBAGENT_DIR.is_dir())
+        names = {p.stem for p in loader.BUNDLED_SUBAGENT_DIR.glob("*.md")}
+        self.assertEqual(names, {"explore", "research", "code"})
 
 
 if __name__ == "__main__":

@@ -78,10 +78,10 @@ class TestSubagentUsesMapper(unittest.TestCase):
     """Smoke test: SubagentRegistry.spawn() routes through default_handoff_mapper."""
 
     def test_spawn_calls_mapper_when_inherit_context(self):
-        from agentica.subagent import SubagentRegistry
+        from agentica.subagents import SubagentRegistry
         from unittest.mock import patch
 
-        with patch("agentica.subagent.default_handoff_mapper") as mock_mapper:
+        with patch("agentica.subagents.runtime.default_handoff_mapper") as mock_mapper:
             mock_mapper.return_value = HandoffContext(
                 parent_name="P", task="t", extra_context="ctx-mark"
             )

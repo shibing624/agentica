@@ -238,7 +238,7 @@ pip install agentica[tools-browser]     # browser + crawl
 
 ```python
 # 子 Agent（建议新代码用 @tool + Agent() 组合）
-from agentica.subagent import SubAgent
+from agentica.subagents import SubagentRegistry
 
 # 多 Agent 并行 / 自治（建议新代码用 asyncio.gather）
 from agentica.swarm import Swarm

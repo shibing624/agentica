@@ -546,8 +546,7 @@ class TestAgentFromParts:
 
 
 class TestPrintResponseStreamParallelToolResults:
-    """``print_response_stream(show_tool_calls=True)`` must attribute each result
-    to its own call.
+    """``print_response_stream`` must attribute each result to its own call.
 
     The runner announces a whole parallel batch first, then emits one
     ``tool_call_completed`` per tool IN CALL ORDER, each carrying the same
@@ -555,6 +554,9 @@ class TestPrintResponseStreamParallelToolResults:
     place. Reading ``tools[-1]`` therefore returns the last tool *called* — whose
     result usually does not exist yet — so early completions printed an empty
     result and the first tools' output was never shown at all.
+
+    ``read_file`` / ``grep`` hide the result body (call line is enough, same as
+    the web row). ``execute`` still prints its result, named on that line.
     """
 
     def _parallel_batch_stream(self):
@@ -583,34 +585,95 @@ class TestPrintResponseStreamParallelToolResults:
 
         return _stream
 
-    def _run(self, capsys):
+    def _run(self, capsys, **kwargs):
         agent = Agent(name="A", model=_make_model())
         agent.run_stream = self._parallel_batch_stream()
-        asyncio.run(agent.print_response_stream(
-            "go", show_message=False, show_tool_calls=True))
+        asyncio.run(agent.print_response_stream("go", show_message=False, **kwargs))
         return capsys.readouterr().out
 
-    def test_every_tool_result_is_printed(self, capsys):
+    def test_call_lines_use_format_tool_display(self, capsys):
         out = self._run(capsys)
-        for marker in ("ALPHA_CONTENT", "BETA_CONTENT", "GAMMA_CONTENT"):
-            assert marker in out, f"{marker} missing — its completion reported another tool"
+        assert "🔧 read_file" in out
+        assert "a.py" in out
+        assert "L1-" in out
+        assert "{'file_path'" not in out
+        assert "🔧 execute ls" in out or "🔧 execute" in out
+        assert "🔧 grep" in out
+
+    def test_read_only_results_are_hidden_execute_is_not(self, capsys):
+        """read_file / grep match the web row: call line is enough.
+        execute still prints its result, attributed to the right name."""
+        out = self._run(capsys)
+        assert "ALPHA_CONTENT" not in out
+        assert "GAMMA_CONTENT" not in out
+        assert "BETA_CONTENT" in out
+        result_lines = [ln for ln in out.splitlines() if "📤" in ln]
+        assert len(result_lines) == 1
+        assert "execute" in result_lines[0]
+        assert "BETA_CONTENT" in result_lines[0]
 
     def test_no_empty_result_line_is_printed(self, capsys):
         out = self._run(capsys)
         empty = [ln for ln in out.splitlines() if ln.strip() == "📤"]
         assert not empty, f"completion printed an empty result: {empty}"
 
-    def test_result_line_names_its_tool(self, capsys):
-        """Results are emitted after ALL call lines, so the result line must say
-        which tool it belongs to."""
+    def test_running_tool_content_does_not_leak_into_answer(self, capsys):
         out = self._run(capsys)
-        result_lines = [ln for ln in out.splitlines() if "📤" in ln]
-        assert len(result_lines) == 3
-        for name, marker in (("read_file", "ALPHA_CONTENT"),
-                             ("execute", "BETA_CONTENT"),
-                             ("grep", "GAMMA_CONTENT")):
-            line = next(ln for ln in result_lines if marker in ln)
-            assert name in line, f"result line for {name} does not name it: {line!r}"
+        assert "Running tool:" not in out
+        assert "Tool completed:" not in out
+        assert "all done" in out
+
+    def test_default_prints_tools(self, capsys):
+        out = self._run(capsys)
+        assert "🔧 read_file" in out
+        assert "🔧 execute" in out
+
+    def test_show_tool_calls_false_hides_tools_without_leaking(self, capsys):
+        out = self._run(capsys, show_tool_calls=False)
+        assert "🔧" not in out
+        assert "Running tool:" not in out
+        assert "Tool completed:" not in out
+        assert "all done" in out
+
+
+class TestPrintResponseStreamThinkingAndTools:
+    """Thinking deltas stay out of the answer; a later think block is labelled."""
+
+    def test_interleaved_thinking_after_tool_gets_a_header(self, capsys):
+        tool = {
+            "tool_call_id": "c1",
+            "tool_name": "execute",
+            "tool_args": {"command": "pytest"},
+        }
+
+        async def _stream(*args, **kwargs):
+            yield RunResponse(event=RunEvent.run_response.value, reasoning_content="first think")
+            yield RunResponse(
+                event=RunEvent.tool_call_started.value,
+                content="Running tool: execute",
+                tool_call=ToolCallInfo.from_dict(tool),
+            )
+            done = dict(tool, content="ok")
+            yield RunResponse(
+                event=RunEvent.tool_call_completed.value,
+                content="Tool completed: execute",
+                tool_call=ToolCallInfo.from_dict(done),
+            )
+            yield RunResponse(event=RunEvent.run_response.value, reasoning_content="second think")
+            yield RunResponse(event=RunEvent.run_response.value, content="final")
+
+        agent = Agent(name="A", model=_make_model())
+        agent.run_stream = _stream
+        asyncio.run(agent.print_response_stream("go", show_message=False))
+        out = capsys.readouterr().out
+        assert out.count("💭 THINKING") == 2
+        assert "first think" in out
+        assert "second think" in out
+        assert "🔧 execute pytest" in out
+        assert "📤 execute: ok" in out
+        assert "Running tool:" not in out
+        assert "💬 ANSWER" in out
+        assert "final" in out
 
 
 if __name__ == "__main__":

@@ -102,16 +102,13 @@ class TestBundledSkillsArePreemptable(unittest.TestCase):
         locations = [loc for _, loc in loader.get_search_paths()]
         self.assertNotIn("bundled", locations)
 
-    def test_product_search_paths_put_system_last(self):
-        from agentica.skills.skill_loader import ensure_system_skills, system_skills_dir
-
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
-                ensure_system_skills()
-                loader = SkillLoader(project_root=Path(tmp))
-                paths = loader.get_search_paths(include_system=True)
-                self.assertEqual(paths[-1][1], "bundled")
-                self.assertEqual(Path(paths[-1][0]).resolve(), system_skills_dir().resolve())
+    def test_product_search_paths_put_bundled_last(self):
+        loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
+        paths = loader.get_search_paths(include_system=True)
+        self.assertEqual(paths[-1][1], "bundled")
+        self.assertEqual(
+            Path(paths[-1][0]).resolve(), SkillLoader.BUNDLED_SKILL_DIR.resolve(),
+        )
 
 
 class TestSystemSkillsAreProductOnly(unittest.TestCase):
@@ -127,7 +124,7 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
         self.assertIsNone(registry.get("multi-agent"))
 
     def test_sdk_load_skips_leftover_system_dir(self):
-        """A previous CLI run left files in .system; SDK must not pick them up."""
+        """A stale ``.system`` dir from an older CLI must not be picked up."""
         with tempfile.TemporaryDirectory() as tmp:
             leftover = Path(tmp) / ".system" / "agentica"
             leftover.mkdir(parents=True)
@@ -141,23 +138,25 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
                 registry = loader.load_all(SkillRegistry())
         self.assertIsNone(registry.get("agentica"))
 
-    def test_load_system_skills_materializes_and_registers(self):
-        from agentica.skills.skill_loader import load_system_skills, system_skills_dir
+    def test_load_system_skills_registers_bundled_from_package(self):
+        from agentica.skills.skill_loader import load_system_skills
         from agentica.skills.skill_registry import reset_skill_registry
 
         with tempfile.TemporaryDirectory() as tmp:
             with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
                 reset_skill_registry()
                 registry = load_system_skills(project_root=Path(tmp))
-                dest = system_skills_dir()
-                self.assertTrue((dest / "agentica" / "SKILL.md").is_file())
-                self.assertTrue((dest / "multi-agent" / "SKILL.md").is_file())
                 skill = registry.get("agentica")
                 self.assertIsNotNone(skill)
                 self.assertEqual(skill.location, "bundled")
-                self.assertEqual(Path(skill.path).resolve(), (dest / "agentica").resolve())
+                self.assertEqual(
+                    Path(skill.path).resolve(),
+                    (SkillLoader.BUNDLED_SKILL_DIR / "agentica").resolve(),
+                )
+                # Nothing is materialized into $AGENTICA_HOME anymore.
+                self.assertFalse((Path(tmp) / ".system").exists())
 
-    def test_user_skill_of_the_same_name_still_wins_after_materialize(self):
+    def test_user_skill_of_the_same_name_still_wins_after_product_load(self):
         from agentica.skills.skill_loader import load_system_skills
         from agentica.skills.skill_registry import reset_skill_registry
 
@@ -208,19 +207,6 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
                 tool.initialize()
                 self.assertIsNotNone(tool.registry.get("agentica"))
                 self.assertEqual(tool.registry.get("agentica").location, "bundled")
-
-    def test_ensure_system_skills_is_idempotent_until_source_changes(self):
-        from agentica.skills.skill_loader import ensure_system_skills, system_skills_dir
-
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
-                first = ensure_system_skills()
-                stamp = first / ".sync-hash"
-                text = stamp.read_text(encoding="utf-8")
-                ensure_system_skills()
-                self.assertEqual(stamp.read_text(encoding="utf-8"), text)
-                self.assertEqual(system_skills_dir(), first)
-
 
 class TestBundledSkillContent(unittest.TestCase):
     """These bodies are prompt text. The point of them is to send the model to

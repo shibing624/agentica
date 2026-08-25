@@ -16,7 +16,7 @@ from agentica.cli.runtime import (
     get_console,
     create_agent,
 )
-from agentica.subagent import get_subagent_configs
+from agentica.subagents import get_subagent_configs
 from agentica.skills import (
     get_skill_registry,
     load_system_skills,
@@ -133,7 +133,7 @@ def _count_enabled_skills(agent) -> Optional[int]:
 
 def _get_subagent_loader():
     """Import the subagent loader lazily to keep CLI startup lightweight."""
-    import agentica.subagent_loader as loader  # noqa: PLC0415
+    import agentica.subagents.loader as loader  # noqa: PLC0415
 
     return loader
 

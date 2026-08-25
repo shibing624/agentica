@@ -5,7 +5,7 @@
 
 Between the two delegation mechanisms already here:
 
-- ``task`` (``agentica.subagent``) spawns an in-process subagent. Cheap, shares
+- ``task`` (``agentica.subagents``) spawns an in-process subagent. Cheap, shares
   this process, and its result comes straight back as the tool result.
 - ``delegate`` starts a *whole other* ``agentica`` run in its own OS process,
   with its own model, context window, session log and working directory.

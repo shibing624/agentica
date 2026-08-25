@@ -17,8 +17,40 @@ from typing import (
 from agentica.utils.log import logger
 from agentica.utils.async_utils import run_sync
 from agentica.model.message import Message
-from agentica.run_response import RunEvent
+from agentica.run_display import RunDisplayEventKind, classify_run_response
+from agentica.run_response import ToolCallInfo
 from agentica.utils.message import get_text_from_message
+
+# Same set as the web row: the call line is enough. CLI still prints a
+# one-liner count at completion; SDK stdout matches the web body policy.
+_HIDE_RESULT_TOOLS = frozenset({"read_file", "glob", "grep"})
+_RESULT_PREVIEW_CHARS = 200
+
+
+def _tool_call_line(tool_info) -> str:
+    """CLI ``format_tool_display`` copy on one stdout line."""
+    from agentica.cli.display.tool_format import format_tool_display
+
+    name = tool_info.tool_name or "unknown"
+    display = format_tool_display(name, tool_info.tool_args or {})
+    if display:
+        return f"  🔧 {name} {display}"
+    return f"  🔧 {name}"
+
+
+def _tool_result_line(tool_info) -> Optional[str]:
+    name = tool_info.tool_name or "unknown"
+    if name in _HIDE_RESULT_TOOLS and not tool_info.is_error:
+        return None
+    result = str(tool_info.content or "")
+    if not result:
+        return None
+    preview = (
+        result[:_RESULT_PREVIEW_CHARS] + "..."
+        if len(result) > _RESULT_PREVIEW_CHARS
+        else result
+    )
+    return f"     📤 {name}: {preview}"
 
 
 class PrinterMixin:
@@ -31,7 +63,7 @@ class PrinterMixin:
         messages: Optional[List[Union[Dict, Message]]] = None,
         show_message: bool = True,
         show_reasoning: bool = True,
-        show_tool_calls: bool = False,
+        show_tool_calls: bool = True,
         **kwargs: Any,
     ) -> None:
         """Print the response from the Agent (non-streaming, async).
@@ -61,25 +93,18 @@ class PrinterMixin:
             print("-" * 40)
             print(run_response.reasoning_content)
 
+        tools_shown = False
         if show_tool_calls and run_response.tools:
             print()
             for tool in run_response.tools:
-                tool_name = tool.get("tool_name", "unknown")
-                tool_args = tool.get("tool_args", {})
-                display_args = {}
-                for k, v in tool_args.items():
-                    if isinstance(v, str) and len(v) > 100:
-                        display_args[k] = v[:100] + "..."
-                    else:
-                        display_args[k] = v
-                print(f"  🔧 {tool_name}({display_args})")
-                tool_result = tool.get("content", "")
-                result_preview = (
-                    str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
-                )
-                print(f"     📤 {result_preview}")
+                info = tool if isinstance(tool, ToolCallInfo) else ToolCallInfo.from_dict(tool)
+                print(_tool_call_line(info))
+                result_line = _tool_result_line(info)
+                if result_line:
+                    print(result_line)
+                tools_shown = True
 
-        if has_reasoning or (show_tool_calls and run_response.tools):
+        if has_reasoning or tools_shown:
             print()
             print("-" * 40)
             print("💬 ANSWER")
@@ -95,7 +120,7 @@ class PrinterMixin:
         messages: Optional[List[Union[Dict, Message]]] = None,
         show_message: bool = True,
         show_reasoning: bool = True,
-        show_tool_calls: bool = False,
+        show_tool_calls: bool = True,
         stream_intermediate_steps: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -129,11 +154,11 @@ class PrinterMixin:
         print("🤖 RESPONSE")
         print("=" * 80)
 
-        _response_content = ""
-        _reasoning_content = ""
-        _reasoning_displayed = False
+        _last_content = ""
+        _last_reasoning = ""
+        _in_thinking = False
+        _need_answer_header = False
 
-        # Build RunConfig from kwargs that belong to it
         _save = kwargs.pop("save_response_to_file", None)
         _cfg = kwargs.pop("config", None) or RunConfig(
             stream_intermediate_steps=stream_intermediate_steps or show_tool_calls,
@@ -148,50 +173,55 @@ class PrinterMixin:
             config=_cfg,
             **kwargs,
         ):
-            event = run_response.event
+            display_event = classify_run_response(run_response)
+            kind = display_event.kind
 
-            if show_tool_calls and event == RunEvent.tool_call_started.value:
-                tool_info = run_response.tool_call
-                if tool_info:
-                    display_args = {}
-                    for k, v in tool_info.tool_args.items():
-                        if isinstance(v, str) and len(v) > 100:
-                            display_args[k] = v[:100] + "..."
-                        else:
-                            display_args[k] = v
-                    print(f"\n  🔧 {tool_info.tool_name}({display_args})", flush=True)
+            if kind in (
+                RunDisplayEventKind.METADATA_SKIP,
+                RunDisplayEventKind.TELEMETRY_ONLY,
+            ):
                 continue
 
-            if show_tool_calls and event == RunEvent.tool_call_completed.value:
-                # The name goes on the result line because a parallel batch prints
-                # all of its call lines before any of its results.
+            if kind in (
+                RunDisplayEventKind.TOOL_STARTED,
+                RunDisplayEventKind.TOOL_COMPLETED,
+            ):
+                _in_thinking = False
+                if not show_tool_calls:
+                    continue
                 tool_info = run_response.tool_call
-                if tool_info:
-                    tool_result = str(tool_info.content or "")
-                    result_preview = tool_result[:200] + "..." if len(tool_result) > 200 else tool_result
-                    print(f"     📤 {tool_info.tool_name}: {result_preview}", flush=True)
-                continue
-
-            if event in (RunEvent.run_started.value, RunEvent.run_completed.value, RunEvent.updating_memory.value):
+                if tool_info is None:
+                    continue
+                if kind == RunDisplayEventKind.TOOL_STARTED:
+                    print(f"\n{_tool_call_line(tool_info)}", flush=True)
+                    _need_answer_header = True
+                else:
+                    result_line = _tool_result_line(tool_info)
+                    if result_line:
+                        print(result_line, flush=True)
+                    _need_answer_header = True
                 continue
 
             if show_reasoning and run_response.reasoning_content:
-                if not _reasoning_displayed:
-                    print("💭 THINKING")
-                    print("-" * 40)
-                    _reasoning_displayed = True
-                if run_response.reasoning_content != _reasoning_content:
+                if run_response.reasoning_content != _last_reasoning:
+                    if not _in_thinking:
+                        print("💭 THINKING")
+                        print("-" * 40)
+                        _in_thinking = True
                     print(run_response.reasoning_content, end="", flush=True)
-                    _reasoning_content = run_response.reasoning_content
+                    _last_reasoning = run_response.reasoning_content
+                    _need_answer_header = True
 
-            if run_response.content and run_response.content != _response_content:
-                if _reasoning_displayed and _response_content == "":
+            if run_response.content and run_response.content != _last_content:
+                if _need_answer_header:
                     print()
                     print("-" * 40)
                     print("💬 ANSWER")
                     print("-" * 40)
+                    _need_answer_header = False
+                    _in_thinking = False
                 print(run_response.content, end="", flush=True)
-                _response_content = run_response.content
+                _last_content = run_response.content
 
         print()  # final newline
 
@@ -202,7 +232,7 @@ class PrinterMixin:
         messages: Optional[List[Union[Dict, Message]]] = None,
         show_message: bool = True,
         show_reasoning: bool = True,
-        show_tool_calls: bool = False,
+        show_tool_calls: bool = True,
         **kwargs: Any,
     ) -> None:
         """Synchronous wrapper for print_response() (non-streaming)."""
@@ -224,7 +254,7 @@ class PrinterMixin:
         messages: Optional[List[Union[Dict, Message]]] = None,
         show_message: bool = True,
         show_reasoning: bool = True,
-        show_tool_calls: bool = False,
+        show_tool_calls: bool = True,
         stream_intermediate_steps: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -240,9 +270,6 @@ class PrinterMixin:
                 **kwargs,
             )
         )
-
-    # Keep backward-compatible save_response_to_file in print_response_stream
-    # by extracting it from **kwargs and packing into RunConfig.
 
     def cli_app(
         self,

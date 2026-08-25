@@ -1170,7 +1170,7 @@ def _ensure_subagent_configs_loaded() -> None:
     """Lazy-load package, user, and project definitions for SDK callers."""
     if _SUBAGENT_CONFIGS_LOADED:
         return
-    from agentica.subagent_loader import load_all_agents
+    from agentica.subagents.loader import load_all_agents
 
     load_all_agents()
 

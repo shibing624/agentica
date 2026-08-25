@@ -5,7 +5,7 @@
 
 The real subagent runtime (model cloning, tool inheritance + filtering, depth
 limit, registry tracking, event streaming, usage merge, timeout) lives in
-``agentica.subagent.SubagentRegistry``. This tool only:
+``agentica.subagents.runtime.SubagentRegistry``. This tool only:
 
   1. Renders the user-facing system prompt (the available subagent table).
   2. Exposes a single ``task(description, subagent_type)`` LLM function that
@@ -107,7 +107,7 @@ class BuiltinTaskTool(Tool):
         awaited on, and one tool instance can outlive that loop (``run_sync``,
         tests calling ``asyncio.run`` more than once).
         """
-        from agentica.subagent import SubagentRegistry
+        from agentica.subagents import SubagentRegistry
 
         loop = asyncio.get_running_loop()
         if self._slots is None or self._slots_loop is not loop:
@@ -117,7 +117,7 @@ class BuiltinTaskTool(Tool):
 
     def _build_subagent_table(self) -> str:
         """Build a markdown table of available subagent types with their model tier."""
-        from agentica.subagent import get_available_subagent_types
+        from agentica.subagents import get_available_subagent_types
 
         lines = [
             "| Type | Name | Model | Description |",
@@ -189,7 +189,7 @@ class BuiltinTaskTool(Tool):
                 "error": "task tool is not bound to a parent agent.",
             }, ensure_ascii=False)
 
-        from agentica.subagent import SubagentRegistry
+        from agentica.subagents import SubagentRegistry
 
         async with self._free_slot():
             result = await SubagentRegistry().spawn(

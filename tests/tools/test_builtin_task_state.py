@@ -260,7 +260,7 @@ class TestBuiltinTaskTool:
             assert kwargs["agent_type"] == "code"
             return spawn_result
 
-        with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+        with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
             result = asyncio.run(tool.task("compute 6 * 7", subagent_type="code"))
 
         parsed = json.loads(result)
@@ -284,7 +284,7 @@ class TestBuiltinTaskTool:
                 "content": "",
             }
 
-        with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+        with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
             result = asyncio.run(tool.task("slow"))
 
         parsed = json.loads(result)
@@ -339,7 +339,7 @@ class TestBuiltinTaskTool:
             return {"status": "completed", "agent_type": "code", "content": "ok",
                     "tool_calls_summary": [], "tool_count": 0, "execution_time": 0}
 
-        with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+        with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
             asyncio.run(tool.task("test", subagent_type="code"))
 
         assert captured["auxiliary_model_override"] is custom_model

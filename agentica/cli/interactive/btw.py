@@ -210,7 +210,7 @@ def _run_btw_concurrent(agent, question: str, tui_state: dict):
         # Agent.clone() / SubagentRegistry.spawn().
         btw_model = None
         if agent and agent.model:
-            from agentica.subagent import SubagentRegistry
+            from agentica.subagents import SubagentRegistry
 
             btw_model = SubagentRegistry._clone_parent_model(agent.model)
 

@@ -79,9 +79,6 @@ metadata:
 ~/.agentica/skills/            # 用户级 skills（跨项目共用）
   git-commit/
     SKILL.md
-  .system/                     # CLI/gateway 写入，升级覆盖；SDK 不加载
-    agentica/SKILL.md
-    multi-agent/SKILL.md
 
 /opt/agent-skills/learn-from-experience/   # 外部托管 skill（可选）
   SKILL.md
@@ -94,11 +91,11 @@ metadata:
 3. `AGENTICA_EXTRA_SKILL_PATH` 指定的外部目录（支持用 `:` 分隔多个路径，也支持直接指向单个 skill 目录）
 4. `~/.claude/skills/`（用户级）
 5. `~/.agentica/skills/`（用户级）
-6. `$AGENTICA_HOME/skills/.system/`（**仅 CLI / gateway**，`load_system_skills()`；SDK 的 `load_skills()` 不扫这一层）
+6. 包内 `agentica/skills/bundled/`（**仅 CLI / gateway**，`load_system_skills()`；SDK 的 `load_skills()` 不扫这一层）
 
-同名 Skill，项目级覆盖用户级；用户级覆盖 `.system` 里的内置（`agentica` / `multi-agent`）。内置 skill 的源文件在包内 `agentica/skills/bundled/`，产品启动时按哈希同步到 `.system`。不要改 `.system`——覆盖方式是在 `~/.agentica/skills/<name>/` 写同名 skill。
+同名 Skill，项目级覆盖用户级；用户级覆盖包内内置（`agentica` / `multi-agent`）。内置 skill 直接从包内目录原位加载，不往 `$AGENTICA_HOME` 拷贝任何文件（升级即随包更新）。覆盖方式是在 `~/.agentica/skills/<name>/` 写同名 skill。
 
-`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这两个内置 skill，也不会往 home 写 `.system`。
+`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这两个内置 skill。
 
 ## 加载与使用
 

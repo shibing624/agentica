@@ -62,7 +62,7 @@ Do not create or modify files. Do not make product decisions for the caller.
 1. `<cwd>/.agentica/agents/*.md`：当前项目
 2. `~/.agentica/agents/*.md`：当前用户；设置 `AGENTICA_HOME` 后改为 `$AGENTICA_HOME/agents/*.md`
 3. `$AGENTICA_AGENT_DIR/*.md`：额外托管目录
-4. 安装包内的 `agentica/agents/*.md`：内置默认定义
+4. 安装包内的 `agentica/subagents/bundled/*.md`：内置默认定义
 
 高优先级文件会完整替换同名定义，不会与低优先级 frontmatter 或正文合并。
 
@@ -161,7 +161,7 @@ print(result.content)
 
 ```python
 from agentica import DeepAgent, OpenAIChat
-from agentica.subagent import SubagentRegistry
+from agentica.subagents import SubagentRegistry
 
 parent = DeepAgent(model=OpenAIChat(id="gpt-4o-mini"))
 result = await SubagentRegistry().spawn(

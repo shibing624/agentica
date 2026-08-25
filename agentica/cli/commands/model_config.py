@@ -33,7 +33,7 @@ from agentica.global_config import (
     clear_project_profile,
     get_project_profile,
 )
-from agentica.subagent import get_subagent_configs
+from agentica.subagents import get_subagent_configs
 from agentica.utils.log import (
     restore_console_logging,
     set_log_level_to_debug,

@@ -154,7 +154,7 @@ class TestSubagentRegistryToolFiltering(unittest.TestCase):
     def test_filtered_child_tool_does_not_mutate_parent_state(self):
         """write_todos invoked through the registry-filtered tool must mutate
         the *child* tool's bound agent, never the parent's todo list."""
-        from agentica.subagent import (
+        from agentica.subagents import (
             SubagentConfig,
             SubagentRegistry,
         )
@@ -271,7 +271,7 @@ class TestSubagentSpawnContextRobustness(unittest.TestCase):
     def test_build_inherited_context_handles_non_serializable_dict(self):
         from datetime import datetime
         from types import SimpleNamespace
-        from agentica.subagent import SubagentRegistry
+        from agentica.subagents import SubagentRegistry
 
         parent = SimpleNamespace(
             working_memory=SimpleNamespace(summary=None),
@@ -284,7 +284,7 @@ class TestSubagentSpawnContextRobustness(unittest.TestCase):
 
     def test_build_inherited_context_handles_string_context(self):
         from types import SimpleNamespace
-        from agentica.subagent import SubagentRegistry
+        from agentica.subagents import SubagentRegistry
 
         parent = SimpleNamespace(
             working_memory=SimpleNamespace(summary=None),

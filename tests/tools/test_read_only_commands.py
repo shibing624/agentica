@@ -12,7 +12,7 @@ All tests mock the OpenAI key — no real LLM calls.
 import asyncio
 import unittest
 
-from agentica.subagent import (
+from agentica.subagents import (
     SubagentConfig,
     SubagentRegistry,
     get_subagent_configs,
@@ -204,7 +204,7 @@ class TestSubagentLoaderExecutePolicy(unittest.TestCase):
         import tempfile
         from pathlib import Path
 
-        from agentica.subagent_loader import _parse_agent_file
+        from agentica.subagents.loader import _parse_agent_file
 
         body = (
             "---\n"

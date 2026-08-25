@@ -52,7 +52,7 @@ from agentica.global_config import get_setting, set_project_profile
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_system_skills
-from agentica.subagent_loader import load_all_agents
+from agentica.subagents.loader import load_all_agents
 from agentica.tools.ask_user_question_tool import (
     set_default_ask_user_question_callback,
 )

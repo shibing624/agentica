@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from agentica import Agent, OpenAIChat
 from agentica.tools.builtin import get_builtin_tools
-from agentica.subagent import (
+from agentica.subagents import (
     SubagentRegistry,
     get_available_subagent_types,
     get_subagent_config,

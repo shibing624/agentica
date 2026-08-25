@@ -86,8 +86,8 @@ def _isolate_gateway_accounts():
 
 @pytest.fixture(autouse=True)
 def _isolate_skill_dir(monkeypatch):
-    """create_agent / load_system_skills write ``skills/.system``. Keep that
-    off the user's real ``~/.agentica/skills``."""
+    """Keep skill loading and skill CRUD off the user's real
+    ``~/.agentica/skills``."""
     with tempfile.TemporaryDirectory() as tmpdir:
         monkeypatch.setenv("AGENTICA_SKILL_DIR", tmpdir)
         monkeypatch.setattr("agentica.config.AGENTICA_SKILL_DIR", tmpdir, raising=False)

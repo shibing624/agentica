@@ -1349,7 +1349,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # the bound HTTP client / sessions and (b) silently diverged from the
         # subagent path's reset semantics.
         if self.model is not None:
-            from agentica.subagent import SubagentRegistry
+            from agentica.subagents import SubagentRegistry
 
             clone.model = SubagentRegistry._clone_parent_model(self.model)
         clone.agent_id = str(uuid4())
