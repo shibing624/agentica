@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### fixes
 - **权限档文案与 `classify()` 对齐**：`ask` 的读（含工作区外）与 `auto` 相同，只拦写、会改状态的 shell 和联网。CLI `--permissions` / `/permissions`、Web Permission 提示不再写成「只有工作区内读才自动」或「ask 只有只读工具」。
+- **`execute` 超大输出改为落盘预览，不再静默丢掉中间段**：原先 `max_output_length`（默认 20k）先做 40/60 头尾截断，中间直接丢；`max_result_size_chars=50k` 的 Layer 0 落盘永远触发不了。现在超过 20k 写入会话 `tool-results/`，上下文只留路径 + 行数 + 头尾预览，后续用 `read_file`/`grep` 查。成功与非零退出（失败命令的巨型 traceback）都走这条路——Layer 0 钩子挪到结果内容组装之后（错误文本先脱敏再落盘，spill 文件不碰密钥），原先挂在「仅成功」分支上，报错路径仍然丢中间。
 - **SDK `print_response_stream` 不再把工具事件漏进回答**：`show_tool_calls=False` 时原先不跳过 `ToolCallStarted` / `ToolCallCompleted`，`Running tool: read_file` 会被当成正文打印。现在走和 CLI / Web 同一套 `classify_run_response`，工具事件无论显不显示都不会进答案。
 - **CLI 审批卡裁掉「拒绝」、两项时跳号**：`rm /path` 这类不能「允许类似」的命令本来就只有允许/拒绝，但 TUI 把整段卡当成一行再多塞一个换行，高度少算一行，拒绝被裁掉，屏幕上只剩 `1. Yes, proceed (y)`。同时拒绝还写死成 `3.`，`2` 仍绑「允许类似」。现在按可见选项连续编号（两项就是 1 允许 / 2 拒绝；四项仍是允许、允许类似、拒绝、拒绝类似），数字键跟着走；长命令按终端宽度预留折行高度，不再把选项挤出屏幕。SDK / Web 同一套 `options`，没有类似可批时本来就不渲染那两个按钮。
 - **CLI 拒绝文案不再催用户写原因，审批后命令留在 transcript**：拒绝从 `No, and tell the agent what to do differently (esc)` 改成 `No, deny (esc/n)`（`esc` / `n` 都是直接拒，不追问理由）。审批卡画在输入区 layout 里，决定后整段卸掉，`$ rm …` 会跟着消失。现在卸卡之后把命令和 `✓ allowed` / `✗ denied` 打进 scrollback。
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web 侧栏会话状态与对话页被误删**：`deny_prefix` 那次提交冲掉了 `sessions.ts` 的 `lastTs` / `unread` / `syncSessionStatus`，以及 `ChatPage` 的左侧 query 导航（`ChatNav`）、`settleWork`、已读 `markSessionRead`、以及 `running` 清位。已从上一版补回，审批卡仍带 `deny_prefix`。
 
 #### features
+- **工具说明去掉二进制黑名单，改为正面能力描述**：`execute` docstring、`tools.md`、`ShellTool` 不再写「not cat / not find / not sed -i / MUST avoid find」式禁令——实测这类禁令把强模型推向更差的绕行路径，且多处文案互相矛盾。管线（`pytest | rg '^FAILED' | sort`、`rg … | head`、`find … -mtime -3 | xargs ls -lt`）与文件工具各自正面展示。`grep` content 模式的 `limit` 是全局条数上限（rg 调用不再带每文件 `--max-count`，由结果侧统一截断）。`read_file` 支持 `tail` 和负 `offset`（`offset=-50` 即最后 50 行，配 `limit` 取窗口内最旧的若干行），且 `tail`/负 `offset` 不再被 256KB 大文件守卫拦住——守卫只作用于从头分页的读取，此前报错文案自己建议的 `tail=50` 照样失败。
 - **SDK `print_response` / `print_response_stream` 默认展示工具，调用行跟 CLI 同一套文案**：默认 `show_tool_calls=True`（仍可关掉）。工具行用 `format_tool_display`（`read_file foo.py (L1-80)`，不再打原始 dict）；`read_file` / `glob` / `grep` 成功时只留调用行，和 Web 一致。思考在工具之后再出现会再打一次 `💭 THINKING`，时间线是思考 → 工具 → 思考 → 回答。
 - **Skills catalog 按模型上下文窗口的 2% 做 token 预算**（无窗口时退回 8000 字符）。单条 description 硬帽 1024 字符（从前截）。超预算先从列表尾部丢掉 description（保留名字），仍超才 omit 并注明条数。卫生规则写进 prompt：匹配才用、当轮读完 `get_skill_info`、不跨轮携带、不深追 references。`freeze_session_guidance()` 仍然冻住整块，不每轮重排。
 - **粘贴/输入里的非法 UTF-8 不再打崩 CLI、Web、SDK**：孤立 surrogate（例如 `U+DCE5`）以前在 `.encode("utf-8")` 上炸掉 Enter 写历史、agent 落盘和 Langfuse OTLP。CLI 入口、`Agent.run` / `steer`、Web `ChatRequest` / `SteerRequest` / `GoalRequest` 都换成 U+FFFD，相邻汉字不动。

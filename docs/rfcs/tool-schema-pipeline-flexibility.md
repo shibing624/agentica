@@ -1,6 +1,10 @@
 # RFC: 工具 Schema 的管线灵活性(Pipeline Flexibility)
 
-Status: Draft
+Status: Implemented
+
+Skipped on purpose (see user follow-up): P3 whitelist-per-segment; explicit
+`cache_output` param (auto-persist on oversized execute is enough); no extra
+ask-mode design — product defaults are `auto` / `allow-all`.
 
 ## Problem
 

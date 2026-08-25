@@ -181,12 +181,21 @@ def _size_kb(content: str) -> float:
     return len(content.encode("utf-8", errors="ignore")) / 1024
 
 
+def _line_count(content: str) -> int:
+    if not content:
+        return 0
+    return content.count("\n") + (0 if content.endswith("\n") else 1)
+
+
 def _build_persisted_message(file_path: str, content: str) -> str:
     """Preview + the path holding the full copy, for a session that can read it."""
+    n_lines = _line_count(content)
     return (
         f"<persisted-output>\n"
-        f"Output too large ({_size_kb(content):.1f} KB). Full output saved to:\n"
+        f"Output too large ({_size_kb(content):.1f} KB, {n_lines} lines). "
+        f"Full output saved to:\n"
         f"{file_path}\n\n"
+        f"Use read_file (tail or offset/limit) or grep on that path for the rest.\n\n"
         f"Preview ({PREVIEW_CHARS} chars, 40%head+60%tail):\n"
         f"{_preview(content)}"
         f"\n</persisted-output>"

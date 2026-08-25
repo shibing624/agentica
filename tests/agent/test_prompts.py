@@ -108,6 +108,15 @@ class TestPromptModules:
         assert "common filenames like `base.py`" in content
         assert "empty `glob` result is" in content
 
+    def test_tools_module_allows_execute_pipelines(self):
+        from agentica.prompts.base.tools import get_tools_prompt
+        content = get_tools_prompt()
+        assert "grep (not grep/rg)" not in content
+        assert "(not find" not in content
+        assert "not cat" not in content
+        assert "| rg" in content or "| head" in content
+        assert "apply_patch" in content
+
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt
         content = get_heartbeat_prompt()

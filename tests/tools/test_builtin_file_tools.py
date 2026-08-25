@@ -209,6 +209,55 @@ class TestBuiltinFileToolReadCorrectness:
         assert r1 != r2
         assert "line6" in r2 and "line6" not in r1
 
+    def test_read_file_tail_last_lines(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "tail.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 11)))
+        result = asyncio.run(file_tool.read_file(str(p), tail=3))
+        assert "line8" in result and "line10" in result
+        assert "line7" not in result
+        assert "line1\t" not in result
+
+    def test_read_file_negative_offset_is_tail_window(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "neg.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 11)))
+        result = asyncio.run(file_tool.read_file(str(p), offset=-4, limit=4))
+        assert "line7" in result and "line10" in result
+        assert "line6" not in result
+
+    def test_read_file_negative_offset_limit_takes_oldest_of_window(self, file_tool, tmp_dir):
+        """offset=-4 opens a 4-line window on the end; limit=2 keeps its
+        oldest lines (7,8 of 10), matching positive-offset semantics."""
+        p = Path(tmp_dir, "win.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 11)))
+        result = asyncio.run(file_tool.read_file(str(p), offset=-4, limit=2))
+        assert "line7" in result and "line8" in result
+        assert "line9" not in result and "line10" not in result
+
+    def test_read_file_tail_zero_rejected(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "zero.txt")
+        p.write_text("a\nb\n")
+        with pytest.raises(ValueError, match="tail must be >= 1"):
+            asyncio.run(file_tool.read_file(str(p), tail=0))
+
+    def test_read_file_tail_beats_large_file_guard(self, file_tool, tmp_dir):
+        """tail holds a bounded number of lines on any file size — the 256KB
+        guard must not reject the call its own error message recommends."""
+        p = Path(tmp_dir, "big.log")
+        n = 5000
+        p.write_text("\n".join(f"row{i} {'x' * 80}" for i in range(1, n + 1)))
+        assert p.stat().st_size > file_tool.MAX_FILE_SIZE_BYTES
+
+        result = asyncio.run(file_tool.read_file(str(p), tail=5))
+        assert f"row{n}" in result and f"row{n - 4}" in result
+        assert f"row{n - 5}" not in result
+
+        result = asyncio.run(file_tool.read_file(str(p), offset=-3))
+        assert f"row{n}" in result and f"row{n - 2}" in result
+
+        # front-paged reads on the same file still hit the guard
+        with pytest.raises(ValueError, match="File too large"):
+            asyncio.run(file_tool.read_file(str(p)))
+
 
 class TestBuiltinFileToolWriteFile:
     def test_write_result_carries_actual_file_change(self, file_tool, tmp_dir):
@@ -425,6 +474,30 @@ class TestBuiltinFileToolGrep:
         result = asyncio.run(file_tool.grep("def", tmp_dir, output_mode="content"))
         assert "def foo" in result
         assert "def bar" in result
+
+    def test_grep_content_limit_is_global_across_files(self, file_tool, tmp_dir):
+        """content-mode limit is a total line cap, not per-file --max-count."""
+        for name in ("a.py", "b.py", "c.py"):
+            Path(tmp_dir, name).write_text("HIT one\nHIT two\nHIT three\n")
+        result = asyncio.run(
+            file_tool.grep("HIT", tmp_dir, output_mode="content", limit=4)
+        )
+        hits = [ln for ln in result.splitlines() if "HIT" in ln]
+        assert len(hits) == 4
+
+    def test_grep_content_limit_caps_within_one_file(self, file_tool, tmp_dir):
+        """The global cap binds within a single file too — exactly `limit`
+        lines, not limit-per-file."""
+        Path(tmp_dir, "many.py").write_text("HIT\n" * 10)
+        result = asyncio.run(
+            file_tool.grep("HIT", tmp_dir, output_mode="content", limit=3)
+        )
+        hits = [ln for ln in result.splitlines() if "HIT" in ln]
+        assert len(hits) == 3
+
+    def test_grep_timeout_does_not_forbid_execute(self, file_tool):
+        doc = BuiltinFileTool.grep.__doc__ or ""
+        assert "switch to execute" not in doc
 
     def test_grep_no_matches(self, file_tool, tmp_dir):
         Path(tmp_dir, "empty.txt").write_text("nothing\n")

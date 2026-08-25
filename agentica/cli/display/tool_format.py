@@ -22,6 +22,10 @@ def _extract_filename(file_path: str) -> str:
 
 def _format_line_range(offset: int, limit: int) -> str:
     """Format line range as L{start}-{end}."""
+    if offset < 0:
+        keep = abs(offset)
+        take = limit or keep
+        return f"last {keep}" if take >= keep else f"oldest {take} of last {keep}"
     start = offset + 1 if offset else 1
     end = start + (limit or 500) - 1
     return f"L{start}-{end}"
@@ -169,6 +173,8 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "read_file":
         file_path = tool_args.get("file_path", "")
         filename = _shorten_path(file_path)
+        if tool_args.get("tail") is not None:
+            return f"{filename} (tail {tool_args['tail']})"
         offset = tool_args.get("offset", 0)
         limit = tool_args.get("limit", 500)
         line_range = _format_line_range(offset, limit)

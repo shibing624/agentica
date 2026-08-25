@@ -5,7 +5,7 @@
 
 Core prompt components:
 - soul: Behavioral guidelines + tone and style
-- tools: Tool usage strategy (dedicated tools over `execute`, call batching)
+- tools: Tool usage strategy (file tools vs shell pipelines, call batching)
 - heartbeat: Iteration control and verification guidance
 """
 

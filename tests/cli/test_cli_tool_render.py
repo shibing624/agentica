@@ -674,6 +674,22 @@ class TestCLIToolRender(unittest.TestCase):
         rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list if call.args)
         self.assertIn(long_msg, rendered)
 
+    def test_read_file_negative_offset_display(self):
+        """offset=-50 alone reads the last 50 lines; with limit=10 it keeps
+        the OLDEST 10 of that window — the label must not read like tail=10."""
+        from agentica.cli.display.tool_format import format_tool_display
+
+        self.assertEqual(
+            format_tool_display("read_file", {"file_path": "a.log", "offset": -50}),
+            "a.log (last 50)",
+        )
+        self.assertEqual(
+            format_tool_display(
+                "read_file", {"file_path": "a.log", "offset": -50, "limit": 10}
+            ),
+            "a.log (oldest 10 of last 50)",
+        )
+
     def test_task_and_delegate_calls_show_full_brief(self):
         """task / delegate must not truncate the handoff instruction in the CLI."""
         from agentica.cli.display.tool_format import format_tool_display, _display_tool_impl

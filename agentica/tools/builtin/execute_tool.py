@@ -232,9 +232,10 @@ class BuiltinExecuteTool(Tool):
         self.register(self.execute, is_destructive=True)
 
         # Large bash outputs are persisted to disk (context gets preview only).
-        # read_file keeps max_result_size_chars=None (never persist — avoids
-        # reading its own persisted output file in a loop).
-        self.functions["execute"].max_result_size_chars = 50_000
+        # Threshold matches _max_output_length so persist actually fires —
+        # a higher max_result_size_chars used to sit above the in-tool truncate
+        # and never ran. read_file keeps max_result_size_chars=None.
+        self.functions["execute"].max_result_size_chars = self._max_output_length
         # Execute tool manages its own timeout internally via asyncio.wait_for
         # on the subprocess. Skip the outer timeout wrapper in Model.run_function_calls.
         self.functions["execute"].manages_own_timeout = True
@@ -279,15 +280,15 @@ class BuiltinExecuteTool(Tool):
     ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
-        IMPORTANT — Use dedicated tools instead of bash equivalents:
-        - File search:    Use glob tool    (NOT find, ls, ls -R, or locate)
-        - Content search: Use grep tool    (NOT grep, rg, or ag)
-        - Read files:     Use read_file    (NOT cat, head, tail, less, or more)
-        - Edit files:     Use apply_patch  (NOT sed, awk, or perl -i)
-        - Write files:    Use write_file   (NOT echo >, tee, or cat <<EOF)
+        Any shell command goes here: programs (git, python, pytest, pip, npm,
+        make, docker, curl), file utilities (find, ls, cat, awk), and
+        pipelines that shape command output — filter, sort, unique, count,
+        head, tail.
 
-        The execute tool is for commands that have NO dedicated tool equivalent:
-        git, python, pytest, pip, npm, make, docker, curl (POST), etc.
+        You own what comes back. Bound it with ``| head`` / ``| tail``;
+        oversized output is persisted to a session file and the context keeps
+        only a head/tail preview plus the path. Chain dependent commands with
+        ``&&``, not ``;``. Check state read-only before a write.
 
         Before executing:
         1. Verify target directory exists (use glob first if unsure)
@@ -315,9 +316,10 @@ class BuiltinExecuteTool(Tool):
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
         - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
-          Large output is explicitly marked as truncated. When output redaction
-          is enabled, detected secrets are replaced before the result reaches
-          you. Unterminated PEM private-key blocks are always redacted.
+          Oversized output is persisted to a session file with a head/tail
+          preview and path. When output redaction is enabled, detected secrets
+          are replaced before the result reaches you. Unterminated PEM
+          private-key blocks are always redacted.
 
         Git safety:
         - Prefer creating new commits over amending existing ones
@@ -326,19 +328,17 @@ class BuiltinExecuteTool(Tool):
         - Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign)
           unless the user explicitly requests it
 
-        Good examples:
+        Examples:
             - execute(command="python3 /path/to/script.py")
-            - execute(command="pytest /path/to/tests/ -v --tb=short")
+            - execute(command="pytest /path/to/tests/ -q --tb=short")
+            - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
+            - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
+            - execute(command="find . -type f -mtime -3 -not -path '*/.git/*' | xargs ls -lt | head -20")
+            - execute(command="git diff --stat | tail -5")
             - execute(command="git status")
             - execute(command="npm install && npm test", timeout=300)
             - execute(command="pytest tests/unit -q", parallel_safe=True)
               alongside execute(command="pytest tests/e2e -q", parallel_safe=True)
-
-        Bad examples (use dedicated tools instead):
-            - execute(command="find . -name '*.py'")   → use glob(pattern="**/*.py")
-            - execute(command="grep -r 'TODO' .")      → use grep(pattern="TODO")
-            - execute(command="cat file.txt")           → use read_file(file_path="file.txt")
-            - execute(command="sed -i 's/old/new/' f")  → use apply_patch(...)
 
         Args:
             command: Exact shell command to execute without normalization or repair
@@ -495,19 +495,6 @@ class BuiltinExecuteTool(Tool):
 
         output = "\n".join(output_parts).strip()
 
-        # Truncate if too long — 40% head + 60% tail strategy
-        # (head preserves early context/errors, tail preserves final results)
-        if len(output) > self._max_output_length:
-            head_chars = int(self._max_output_length * 0.4)
-            tail_chars = self._max_output_length - head_chars
-            omitted = len(output) - head_chars - tail_chars
-            output = (
-                output[:head_chars]
-                + f"\n\n... [OUTPUT TRUNCATED - {omitted} chars omitted"
-                  f" out of {len(output)} total] ...\n\n"
-                + output[-tail_chars:]
-            )
-
         # Add exit code info with semantic interpretation
         if proc.returncode and proc.returncode != 0:
             hint = _interpret_exit_code(command, proc.returncode)
@@ -547,10 +534,11 @@ class BuiltinExecuteTool(Tool):
                 f"process group.{hint}]"
             )
 
-        # A non-zero exit code that is NOT covered by _interpret_exit_code
-        # (i.e. no benign-hint returned) is a real failure — raise so the
-        # runtime records it via function_call.error, keeping a single source
-        # of truth for error state.
+        # Layer 0 in Model.run_function_calls persists oversized results —
+        # success and raised errors alike: the error string reaches it via
+        # function_call.error after the framework redacts secrets, so the
+        # spill file never holds raw credentials. The tool stays honest: full
+        # output, no private spill file without session/user ids.
         if (
             proc.returncode
             and proc.returncode != 0

@@ -50,6 +50,108 @@ class TestBuiltinExecuteTool:
         result = asyncio.run(execute_tool.execute("echo hello"))
         assert "hello" in result
 
+    def test_execute_docstring_allows_pipeline_rg(self):
+        doc = BuiltinExecuteTool.execute.__doc__ or ""
+        assert "NOT grep, rg, or ag" not in doc
+        assert "NOT cat, head, tail" not in doc
+        assert "not cat" not in doc
+        assert "not find" not in doc
+        assert "sed -i" not in doc
+        assert "Bad examples" not in doc
+        assert "| head" in doc or "| rg" in doc
+        assert "find . -type f" in doc
+
+    def test_execute_returns_full_output_and_declares_persist_threshold(self, tmp_dir):
+        """The tool no longer truncates or persists itself: Layer 0 in
+        Model.run_function_calls owns that, with real session/user ids and a
+        recoverability check. Direct calls return honest output; the
+        threshold the framework reads is max_output_length."""
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=400)
+        payload = "H" * 80 + "M" * 400 + "T" * 80
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(' + repr(payload) + ')')}"
+        result = asyncio.run(tool.execute(command))
+        assert "M" * 400 in result  # middle preserved — no silent truncation
+        assert "OUTPUT TRUNCATED" not in result
+        assert tool.functions["execute"].max_result_size_chars == 400
+
+    def test_execute_error_path_returns_full_output(self, tmp_dir):
+        """Failing commands raise with the honest full output — no silent
+        middle drop. Layer 0 persists it via function_call.error (see the
+        integration test below)."""
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=400)
+        payload = "M" * 2000
+        command = (
+            f"{shlex.quote(sys.executable)} -c "
+            f"{shlex.quote('print(' + repr(payload) + '); import sys; sys.exit(1)')}"
+        )
+        with pytest.raises(RuntimeError, match="exited with code 1"):
+            asyncio.run(tool.execute(command))
+
+    def test_failed_execute_persists_via_layer0(self, tmp_dir, monkeypatch):
+        """A failing command's oversized output reaches the model as a
+        persisted preview + path, not a truncation — the Layer 0 hook runs on
+        the assembled result content (function_call.error) as well."""
+        from agentica.model.base import Model
+        from agentica.tools.base import FunctionCall
+        from agentica.tools.builtin import BuiltinFileTool
+
+        projects = Path(tmp_dir) / "projects"
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(projects))
+
+        class _M(Model):
+            @property
+            def request_kwargs(self):
+                return {}
+
+            async def invoke(self, messages):
+                raise NotImplementedError
+
+            async def invoke_stream(self, messages):
+                if False:
+                    yield None
+
+            async def response(self, messages):
+                raise NotImplementedError
+
+            async def response_stream(self, messages):
+                if False:
+                    yield None
+
+        model = _M(id="fake-test")
+        execute_tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=400)
+        model.functions = dict(execute_tool.functions)
+        model.functions.update(BuiltinFileTool(work_dir=tmp_dir).functions)
+
+        payload = "M" * 2000
+        command = (
+            f"{shlex.quote(sys.executable)} -c "
+            f"{shlex.quote('print(' + repr(payload) + '); import sys; sys.exit(1)')}"
+        )
+        fc = FunctionCall(
+            function=model.functions["execute"],
+            arguments={"command": command},
+            call_id="call_err_1",
+        )
+
+        async def _run():
+            results = []
+            async for _ in model.run_function_calls(
+                function_calls=[fc], function_call_results=results,
+            ):
+                pass
+            return results
+
+        results = asyncio.run(_run())
+        content = results[0].content or ""
+        assert results[0].tool_call_error is True
+        assert "<persisted-output>" in content
+        assert "M" * 2000 not in content  # context keeps only the preview
+        path_line = next(
+            ln.strip() for ln in content.splitlines()
+            if ln.strip().endswith(".txt") and "tool-results" in ln.replace("\\", "/")
+        )
+        assert "M" * 100 in Path(path_line).read_text(encoding="utf-8")
+
     def test_execute_background_registers_process(self, tmp_dir, monkeypatch):
         agentica_home = Path(tmp_dir) / "agentica-home"
         monkeypatch.setenv("AGENTICA_HOME", str(agentica_home))

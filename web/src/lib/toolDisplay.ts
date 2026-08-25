@@ -35,6 +35,7 @@ export function layoutToolDisplay(name: string, display: string): ToolDisplayLay
 export function formatToolDisplay(name: string, args: Record<string, unknown>, cwd = ""): string {
   if (name === "read_file") {
     const filePath = String(args.file_path ?? "");
+    if (args.tail != null) return `${shortenPath(filePath, cwd)} (tail ${Number(args.tail)})`;
     const offset = Number(args.offset ?? 0) || 0;
     const limit = args.limit == null ? 500 : Number(args.limit) || 500;
     return `${shortenPath(filePath, cwd)} (${lineRange(offset, limit)})`;
@@ -147,6 +148,11 @@ function basename(filePath: string): string {
 }
 
 function lineRange(offset: number, limit: number): string {
+  if (offset < 0) {
+    const keep = Math.abs(offset);
+    const take = limit || keep;
+    return take >= keep ? `last ${keep}` : `oldest ${take} of last ${keep}`;
+  }
   const start = offset ? offset + 1 : 1;
   const end = start + (limit || 500) - 1;
   return `L${start}-${end}`;

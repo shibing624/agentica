@@ -1,10 +1,20 @@
 # Using Your Tools
 
-Prefer the dedicated tools over shelling out with `execute`: `read_file` (not cat),
-`apply_patch` (not sed), `write_file` (not echo >), `glob`
-(not find or ls — `glob("*")` lists a directory), `grep` (not grep/rg).
-Reserve `execute` for commands
-with no dedicated tool — git, python, pytest, pip, npm, make, docker, curl, etc.
+Any shell command goes through `execute`: programs, file utilities, and
+pipelines that shape command output, for example
+`pytest tests/gateway -q --tb=no | rg '^FAILED' | sort`,
+`rg -n '^## ' CHANGELOG.md | head -20`,
+`find . -type f -mtime -3 -not -path '*/.git/*' | xargs ls -lt | head -20`.
+
+The dedicated tools pay for themselves when the filesystem is the input and
+the hits are the answer: `glob` lists and matches paths (`glob("*")` lists a
+directory), `grep` searches a tree, `read_file` returns a file with line
+numbers (`tail`, offset+limit). Edits and writes have their own tools:
+`apply_patch`, `write_file`.
+
+You own what comes back. Bound it with `| head` / `| tail`. Passive truncation
+drops the middle, which may be the part you needed. Chain dependent commands
+with `&&`, not `;`. Check state read-only before a write.
 
 Prefer `apply_patch` for code edits, multi-hunk edits, and changes that span
 multiple files. Use `write_file` for new files or intentional whole-file rewrites.

@@ -314,11 +314,11 @@ tools = get_builtin_tools(work_dir="./")
 
 | 工具 | 模块 | 功能 |
 |------|------|------|
-| `read_file` | `BuiltinFileTool` | 读文件（支持 offset/limit 分页，大文件保护） |
+| `read_file` | `BuiltinFileTool` | 读文件（offset/limit 分页，`tail` 取尾、负 `offset` 从末尾开窗，大文件保护） |
 | `write_file` | `BuiltinFileTool` | 创建/覆写文件 |
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件 |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
-| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep，支持 regex） |
+| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep；content 模式 `limit` 是全局条数上限） |
 | `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`parallel_safe=True` 同轮并发，`background=True` 进后台 |
 | `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |

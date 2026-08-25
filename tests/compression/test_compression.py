@@ -409,6 +409,7 @@ class TestMaybePersistResult(unittest.TestCase):
                 )
             self.assertIn("<persisted-output>", result)
             self.assertIn("Preview", result)
+            self.assertIn("lines", result)
 
     def test_large_content_redacted_in_preview_and_disk(self):
         from agentica.compression.tool_result_storage import get_tool_result_path, maybe_persist_result

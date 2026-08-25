@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import tempfile
+from collections import deque
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Optional, List, Dict, Literal, Tuple
@@ -106,6 +107,17 @@ def _merged_grep_windows(
         else:
             windows.append((start, end))
     return windows
+
+
+def _cap_output_lines(output: str, limit: int) -> str:
+    """Keep the first ``limit`` lines of a grep payload (global, not per-file)."""
+    if not output or limit < 0:
+        return output
+    lines = output.split("\n")
+    if len(lines) <= limit:
+        return output
+    omitted = len(lines) - limit
+    return "\n".join(lines[:limit]) + f"\n... ({omitted} more results truncated)"
 
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
@@ -491,6 +503,8 @@ class BuiltinFileTool(Tool):
             file_path: str,
             offset: int = 0,
             limit: Optional[int] = 500,
+            *,
+            tail: Optional[int] = None,
     ) -> str:
         """Reads a file from the filesystem. Reading a file that does not exist returns an error.
 
@@ -500,7 +514,11 @@ class BuiltinFileTool(Tool):
           glob/grep/write_file/apply_patch result. If you only know a module,
           class, or function name, locate the file first; do not use speculative
           absolute paths from memory or stale summaries.
-        - Reads up to `limit` lines (default 500) starting from `offset` (0-based); use offset+limit to page through large files
+        - Reads up to `limit` lines (default 500) starting from `offset`
+          (0-based). A negative `offset` opens a window on the end of the
+          file: offset=-50 is the last 50 lines, and `limit` then keeps the
+          oldest lines of that window (offset=-50, limit=10 → lines N-49..N-40).
+        - `tail=N` reads the last N lines (shorthand for offset=-N).
         - Any line longer than 2000 characters is truncated
         - Results are returned with line-number prefixes (metadata only)
         - An empty file returns a system reminder in place of contents
@@ -508,8 +526,10 @@ class BuiltinFileTool(Tool):
 
         Args:
             file_path: File path for md/txt/py/etc. Supports absolute paths, relative paths, and `~`
-            offset: Starting line number (0-based)
+            offset: Starting line number (0-based). Negative counts from the
+                end and opens a window of that many lines.
             limit: Maximum number of lines to read, defaults to 500
+            tail: If set, read the last N lines (overrides offset/limit)
 
         Returns:
             File content with line numbers
@@ -529,42 +549,44 @@ class BuiltinFileTool(Tool):
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
-        # --- Large-file guard (mirrors CC's maxSizeBytes) ---
-        try:
-            file_size = path.stat().st_size
-        except OSError:
-            file_size = None
-        if file_size is not None and file_size > self.MAX_FILE_SIZE_BYTES:
-            loop = asyncio.get_running_loop()
-            total_lines = await loop.run_in_executor(
-                None, lambda: sum(1 for _ in open(path, errors='ignore'))
-            )
-            raise ValueError(
-                f"File too large ({file_size:,} bytes, {total_lines:,} lines). "
-                f"Use offset and limit to read specific sections. "
-                f"Example: read_file('{file_path}', offset=0, limit=100)"
-            )
+        if tail is not None:
+            if tail < 1:
+                raise ValueError("tail must be >= 1")
+            offset, limit = -tail, tail
 
         limit = limit if limit is not None else self.max_read_lines
         max_line_len = self.max_line_length
 
-        # Async streaming read — only read the lines we need
-        output_lines = []
-        total_lines = 0
-        end_line = offset + limit
-        async with aiofiles.open(path, 'r', encoding='utf-8', errors='ignore') as f:
-            async for line in f:
-                total_lines += 1
-                if total_lines > offset and total_lines <= end_line:
-                    line = line.rstrip('\n\r')
-                    if len(line) > max_line_len:
-                        line = line[:max_line_len] + "..."
-                    output_lines.append(f"{total_lines:6d}\t{line}")
+        # --- Large-file guard (mirrors CC's maxSizeBytes) ---
+        # Front-paged reads only: the guard keeps unbounded content out of the
+        # context. A tail read holds at most `keep` lines on any file size, so
+        # it is exempt — the guard used to fire first and reject the exact
+        # tail call its own error message recommends for large files.
+        if offset >= 0:
+            try:
+                file_size = path.stat().st_size
+            except OSError:
+                file_size = None
+            if file_size is not None and file_size > self.MAX_FILE_SIZE_BYTES:
+                loop = asyncio.get_running_loop()
+                total_lines = await loop.run_in_executor(
+                    None, lambda: sum(1 for _ in open(path, errors='ignore'))
+                )
+                raise ValueError(
+                    f"File too large ({file_size:,} bytes, {total_lines:,} lines). "
+                    f"Use offset/limit, or tail, to read specific sections. "
+                    f"Example: read_file('{file_path}', tail=50)"
+                )
 
-        result = "\n".join(output_lines)
+        if offset < 0:
+            result, total_lines, start_shown, actual_end = await self._read_from_end(
+                path, keep=abs(offset), take=limit, max_line_len=max_line_len,
+            )
+        else:
+            result, total_lines, start_shown, actual_end = await self._read_from_start(
+                path, offset=offset, limit=limit, max_line_len=max_line_len,
+            )
 
-        # Add file info if truncated
-        actual_end = min(offset + len(output_lines), total_lines)
         if total_lines == 0:
             result = (
                 "<system-reminder>\n"
@@ -572,11 +594,64 @@ class BuiltinFileTool(Tool):
                 "Use write_file to add content.\n"
                 "</system-reminder>"
             )
-        elif actual_end < total_lines:
-            result += f"\n\n[Showing lines {offset + 1}-{actual_end} of {total_lines} total lines]"
+        elif start_shown > 1 or actual_end < total_lines:
+            result += (
+                f"\n\n[Showing lines {start_shown}-{actual_end} of {total_lines} total lines]"
+            )
 
-        logger.debug(f"Read file {file_path}: lines {offset + 1}-{actual_end}, total {total_lines} lines")
+        logger.debug(
+            f"Read file {file_path}: lines {start_shown}-{actual_end}, "
+            f"total {total_lines} lines"
+        )
         return result
+
+    async def _read_from_start(
+            self,
+            path: Path,
+            *,
+            offset: int,
+            limit: int,
+            max_line_len: int,
+    ) -> Tuple[str, int, int, int]:
+        output_lines: List[str] = []
+        total_lines = 0
+        end_line = offset + limit
+        async with aiofiles.open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            async for line in f:
+                total_lines += 1
+                if total_lines > offset and total_lines <= end_line:
+                    text = line.rstrip('\n\r')
+                    if len(text) > max_line_len:
+                        text = text[:max_line_len] + "..."
+                    output_lines.append(f"{total_lines:6d}\t{text}")
+        if not output_lines:
+            return "", total_lines, offset + 1, offset
+        start_shown = offset + 1
+        actual_end = offset + len(output_lines)
+        return "\n".join(output_lines), total_lines, start_shown, actual_end
+
+    async def _read_from_end(
+            self,
+            path: Path,
+            *,
+            keep: int,
+            take: int,
+            max_line_len: int,
+    ) -> Tuple[str, int, int, int]:
+        buf: deque = deque(maxlen=keep)
+        total_lines = 0
+        async with aiofiles.open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            async for line in f:
+                total_lines += 1
+                text = line.rstrip('\n\r')
+                if len(text) > max_line_len:
+                    text = text[:max_line_len] + "..."
+                buf.append((total_lines, text))
+        window = list(buf)[:take]
+        if not window:
+            return "", total_lines, 1, 0
+        output_lines = [f"{n:6d}\t{text}" for n, text in window]
+        return "\n".join(output_lines), total_lines, window[0][0], window[-1][0]
 
     async def write_file(self, file_path: str, content: str) -> str:
         """Writes content to a file in the filesystem.
@@ -879,7 +954,7 @@ class BuiltinFileTool(Tool):
         unsure where a file lives, search from "." or another known existing
         directory; do not pass a speculative absolute path as `path`. Searches
         are bounded; if a call times out, narrow `path` or use a more specific
-        pattern — do not retry the same walk or switch to execute.
+        pattern — do not retry the same walk.
 
         Args:
             pattern: Glob pattern, e.g. "*.py", "**/*.md", "src/?*.js". May be
@@ -915,7 +990,7 @@ class BuiltinFileTool(Tool):
                 f"glob timed out after {_GLOB_TIMEOUT} seconds "
                 f"(pattern={pattern!r}, path={path!r}). "
                 f"Narrow `path` or use a more specific pattern; "
-                f"do not retry the same walk or switch to execute."
+                f"do not retry the same walk."
             )
 
         logger.debug(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
@@ -950,8 +1025,7 @@ class BuiltinFileTool(Tool):
         class, function, or filename fragment, search from "." or a known existing
         directory and let grep find the path; do not pass a speculative absolute
         path from memory or stale summaries. Searches are bounded; if a call
-        times out, narrow `path` or `include` — do not retry the same search or
-        switch to execute.
+        times out, narrow `path` or `include`.
 
         Args:
             pattern: Text/regex to search for
@@ -968,7 +1042,8 @@ class BuiltinFileTool(Tool):
                 context_lines > 0)
             after_context: Lines after each match (content mode; ignored when
                 context_lines > 0)
-            limit: Maximum results to return (default: 100)
+            limit: Maximum results to return (default: 100). In content mode this
+                is a global cap across the tree, not a per-file match count.
 
         Returns:
             Search results as formatted string
@@ -1020,9 +1095,10 @@ class BuiltinFileTool(Tool):
         if include:
             cmd.extend(["--glob", include])
 
-        # Result limit: for content mode, limit matches per file
-        if output_mode == "content":
-            cmd.extend(["--max-count", str(limit)])
+        # No per-file --max-count: `limit` is a global cap applied to the
+        # assembled result by _cap_output_lines. A per-file ceiling makes rg
+        # scan the whole tree producing up to limit-per-file lines that the
+        # global cap then throws away.
 
         # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
         for d in sorted(_NOISE_DIRS - {'.git'}):
@@ -1051,8 +1127,7 @@ class BuiltinFileTool(Tool):
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {_GREP_TIMEOUT} seconds. "
-                f"Narrow `path` or `include`; "
-                f"do not repeat the same search or switch to execute."
+                f"Narrow `path` or `include`; do not repeat the same search."
             ) from None
         except FileNotFoundError:
             return await self._run_grep_fallback(
@@ -1080,6 +1155,8 @@ class BuiltinFileTool(Tool):
             if len(lines) > limit:
                 output = "\n".join(lines[:limit])
                 output += f"\n... ({len(lines) - limit} more results truncated)"
+        else:
+            output = _cap_output_lines(output, limit)
 
         result = truncate_if_too_long(output)
         logger.debug(f"Grep(rg) for '{pattern}': result length {len(result)} chars")
@@ -1119,8 +1196,7 @@ class BuiltinFileTool(Tool):
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {timeout} seconds. "
-                f"Narrow `path` or `include`; "
-                f"do not repeat the same search or switch to execute."
+                f"Narrow `path` or `include`; do not repeat the same search."
             )
 
     def _grep_fallback(
@@ -1233,6 +1309,8 @@ class BuiltinFileTool(Tool):
             result = "\n".join(sorted(set(results))) if results else f"No matches found for '{pattern}'"
         else:  # content
             result = "\n".join(r for r in results if r) if results else f"No matches found for '{pattern}'"
+            if not result.startswith("No matches"):
+                result = _cap_output_lines(result, limit)
 
         result = truncate_if_too_long(result)
         logger.debug(f"Grep(fallback) for '{pattern}': found {len(file_counts)} files, result length: {len(result)} chars")

@@ -163,7 +163,7 @@ Layer 1 的 0.8 / 0.5 相对 min(compact_token_limit 或 ∞, window)
 
 | 规则 | 阈值 | 说明 |
 |------|------|------|
-| 单条结果 | `Function.max_result_size_chars`（`execute` 为 50,000 字符） | 单个 tool result 超过此值就收缩。`read_file` 为 `None`（不收缩），否则它会去读自己的落盘文件，形成循环 |
+| 单条结果 | `Function.max_result_size_chars`（`execute` 为 `max_output_length`，默认 20,000 字符） | 单个 tool result 超过此值就收缩。`read_file` 为 `None`（不收缩），否则它会去读自己的落盘文件，形成循环 |
 | 单轮批次 | `0.25 × model.context_window` | 本轮全部新结果加起来超过窗口的这个份额时，从最大的开始收缩。Layer 1 从不动尾部批次（模型还没看过），所以一轮并行 6 个大调用只有这里能兜 |
 
 批次预算按**窗口比例**而不是固定字符数：固定 200K 字符在 512K token 的窗口上会误伤，

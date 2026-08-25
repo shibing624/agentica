@@ -1161,31 +1161,6 @@ class Model(ABC):
             if function_call.function.show_result and not isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
                 yield ModelResponse(content=function_call_output)
 
-            # --- Layer 0: per-result size bound ---
-            # Spills to ~/.agentica/projects/<user>/<project-hash>/<session-id>/tool-results/
-            # when this session can read the file back, otherwise truncates.
-            if (
-                function_call_success
-                and isinstance(function_call_output, str)
-                and function_call.function.max_result_size_chars is not None
-            ):
-                try:
-                    from agentica.compression.tool_result_storage import (
-                        can_recover_spill, maybe_persist_result,
-                    )
-                    _agent = self._agent_ref() if self._agent_ref else None
-                    function_call_output = maybe_persist_result(
-                        tool_name=function_call.function.name,
-                        tool_use_id=function_call.call_id or f"call_{i}",
-                        content=function_call_output,
-                        session_id=self._spill_session_id(_agent),
-                        max_result_size_chars=function_call.function.max_result_size_chars,
-                        user_id=self._spill_user_id(_agent),
-                        recoverable=can_recover_spill(self.functions or {}),
-                    )
-                except Exception as persist_err:
-                    logger.debug(f"Tool result persistence skipped: {persist_err}")
-
             # Soft-error detection: builtin tools return error as prefixed
             # strings ("Error: File not found", "Error: Directory not found", ...)
             # rather than raising. Without this, ExperienceCaptureHooks and the
@@ -1225,6 +1200,36 @@ class Model(ABC):
                         f"\n\n[Notice: This exact call has failed {_n} times "
                         f"this run with the same error. Consider a different approach.]"
                     )
+
+            # --- Layer 0: per-result size bound ---
+            # Spills to ~/.agentica/projects/<user>/<project-hash>/<session-id>/tool-results/
+            # when this session can read the file back, otherwise truncates.
+            # Runs on the final content — success, soft error, and raised
+            # error alike: a failed command's 80k traceback can blow the
+            # context just as well as a successful one. Siting it after the
+            # error branch also means the spill copy holds the redacted text,
+            # and after soft-error detection so a huge "Error: ..." output
+            # still gets flagged (a pre-persist swap used to hide the prefix).
+            if (
+                isinstance(_result_content, str)
+                and function_call.function.max_result_size_chars is not None
+            ):
+                try:
+                    from agentica.compression.tool_result_storage import (
+                        can_recover_spill, maybe_persist_result,
+                    )
+                    _agent = self._agent_ref() if self._agent_ref else None
+                    _result_content = maybe_persist_result(
+                        tool_name=function_call.function.name,
+                        tool_use_id=function_call.call_id or f"call_{i}",
+                        content=_result_content,
+                        session_id=self._spill_session_id(_agent),
+                        max_result_size_chars=function_call.function.max_result_size_chars,
+                        user_id=self._spill_user_id(_agent),
+                        recoverable=can_recover_spill(self.functions or {}),
+                    )
+                except Exception as persist_err:
+                    logger.debug(f"Tool result persistence skipped: {persist_err}")
 
             function_call_result = Message(
                 role=tool_role,

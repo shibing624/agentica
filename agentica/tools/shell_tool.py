@@ -65,7 +65,6 @@ class ShellTool(Tool):
         - Returns combined stdout/stderr output with exit code
         - Invalid UTF-8 bytes are replaced while decoding. Output beyond
           max_output_length is explicitly marked as truncated.
-        - VERY IMPORTANT: You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. You MUST avoid read tools like cat, head, tail, and use read_file to read files.
         - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings)
             - Use '&&' when commands depend on each other (e.g., "mkdir dir && cd dir")
             - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
@@ -80,9 +79,6 @@ class ShellTool(Tool):
 
         Bad examples (avoid these):
             - execute(command="cd /foo/bar && pytest tests")  # Use absolute path instead
-            - execute(command="cat file.txt")  # Use read_file tool instead
-            - execute(command="find . -name '*.py'")  # Use glob tool instead
-            - execute(command="grep -r 'pattern' .")  # Use grep tool instead
 
         Args:
             command: command to execute
