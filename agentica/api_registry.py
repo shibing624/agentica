@@ -133,8 +133,7 @@ LAZY_IMPORTS = {
     # built-in tools — moved to eager imports in __init__.py.
     # Only the helper factory stays lazy (avoids importing all tool modules at startup).
     "get_builtin_tools": "agentica.tools.builtin",
-    # subagent system
-    # swarm system
+    # swarm / subagent
     "Swarm": "agentica.swarm",
     "SwarmResult": "agentica.swarm",
     "SubagentConfig": "agentica.subagents",
