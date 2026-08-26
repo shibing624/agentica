@@ -438,11 +438,14 @@ class Model(ABC):
         """Return a short, human-readable description of this model's thinking/reasoning
         configuration for logging.
 
-        Default is ``"off"``. Subclasses (OpenAIChat, Claude, ...) override this to
-        introspect their provider-specific knobs (``reasoning_effort``,
-        ``extra_body.thinking``, ``extra_body.enable_thinking``, Anthropic ``thinking``).
+        Default is ``"default"``: we are not sending a thinking-intensity
+        override, so the API uses whatever it ships with. ``"off"`` is only for
+        an explicit disable. Subclasses (OpenAIChat, Claude, ...) override this
+        to introspect their provider-specific knobs (``reasoning_effort``,
+        ``extra_body.thinking``, ``extra_body.enable_thinking``, Anthropic
+        ``thinking``).
         """
-        return "off"
+        return "default"
 
     def native_compaction_token_limit(self) -> int:
         """Largest estimated input that should be sent to native compaction.

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### fixes
+- **CLI 状态栏未配置的思考强度显示 `default` 而不是 `off`**：config.yaml 没写 `reasoning_effort` / `reasoning` 时请求里根本不带这个字段，API 用它自己的内置强度；以前 `describe_thinking_mode()` 把「没写」当成关，状态栏就打出 `opus-5-openoneapi openai/claude-opus-5 off`。现在未覆盖是 `default`，只有显式 `off`/`none`/`disabled` 才显示 `off`。
+
 ## [1.4.14] - 2026-08-25
 
 #### breaking

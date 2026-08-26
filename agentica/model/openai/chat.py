@@ -497,8 +497,11 @@ class OpenAIChat(Model):
         details: List[str] = []
         is_on: Optional[bool] = None
         if self.reasoning_effort:
-            details.append(f"reasoning_effort={self.reasoning_effort}")
-            is_on = True
+            if str(self.reasoning_effort).lower() in ("off", "none", "disabled"):
+                is_on = False
+            else:
+                details.append(f"reasoning_effort={self.reasoning_effort}")
+                is_on = True
         if isinstance(self.extra_body, dict):
             thinking = self.extra_body.get("thinking")
             if isinstance(thinking, dict):
@@ -524,7 +527,7 @@ class OpenAIChat(Model):
             if eb_display:
                 details.append(f"display={eb_display}")
         if is_on is None:
-            return "off"
+            return "default"
         status = "on" if is_on else "off"
         return f"{status}({', '.join(details)})" if details else status
 

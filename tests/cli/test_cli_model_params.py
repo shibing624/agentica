@@ -115,7 +115,9 @@ class TestCLIModelParams(unittest.TestCase):
 
         self.assertIsNone(model.reasoning_effort)
         self.assertIsNone(model.thinking)
-        self.assertEqual(model.describe_thinking_mode(), "off")
+        # "off" means we send no thinking field; the API then uses its own
+        # default. The status bar still shows `off` when config.yaml says so.
+        self.assertEqual(model.describe_thinking_mode(), "default")
 
     def test_claude_opus_5_supports_all_effort_levels(self):
         from agentica.cli.runtime import get_model
@@ -135,6 +137,35 @@ class TestCLIModelParams(unittest.TestCase):
                 model.request_kwargs.get("extra_body", {}).get("output_config"),
                 {"effort": effort},
             )
+
+    def test_openai_compatible_opus_5_unset_effort_is_default_not_off(self):
+        """OpenOneAPI / openai/claude-opus-5 with no config.yaml effort.
+
+        We send no reasoning_effort field; the gateway uses its own default.
+        The status-bar label must not claim thinking is off.
+        """
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "openai",
+            "openai/claude-opus-5",
+            api_key="k",
+        )
+        self.assertIsNone(model.reasoning_effort)
+        self.assertNotIn("reasoning_effort", model.request_kwargs)
+        self.assertEqual(model.describe_thinking_mode(), "default")
+
+    def test_openai_compatible_explicit_off_still_describes_as_off(self):
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "openai",
+            "openai/claude-opus-5",
+            api_key="k",
+            reasoning_effort="off",
+        )
+        self.assertEqual(model.reasoning_effort, "off")
+        self.assertEqual(model.describe_thinking_mode(), "off")
 
     def test_get_model_passes_extra_body_and_extra_headers(self):
         from agentica.cli.runtime import get_model

@@ -218,7 +218,12 @@ def _read_git_branch(work_dir: str) -> str:
 
 
 def _status_thinking_mode(agent, agent_config: dict) -> str:
-    """Return the concise effective thinking label shown in the status bar."""
+    """Return the concise effective thinking label shown in the status bar.
+
+    A value in config.yaml (including explicit ``off``) wins. When nothing is
+    set we did not send a thinking-intensity override, so the label is the
+    model's ``describe_thinking_mode()`` — ``default``, not ``off``.
+    """
     effort = agent_config.get("reasoning") or agent_config.get("reasoning_effort")
     if effort:
         return str(effort)

@@ -338,7 +338,7 @@ class Claude(Model):
                 return f"on(budget={budget})" if budget else "on"
         if self.reasoning_effort:
             return f"adaptive(effort={self.reasoning_effort})"
-        return "off"
+        return "default"
 
     async def format_messages(self, messages: List[Message]) -> Tuple[List[Dict[str, str]], str]:
         """

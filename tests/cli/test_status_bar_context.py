@@ -164,6 +164,17 @@ class TestStatusProjectIdentity(unittest.TestCase):
             "high",
         )
 
+    def test_unset_effort_is_default_not_off(self):
+        agent = _make_agent()
+        self.assertEqual(_status_thinking_mode(agent, {}), "default")
+
+    def test_explicit_off_in_config_still_shows_off(self):
+        agent = _make_agent()
+        self.assertEqual(
+            _status_thinking_mode(agent, {"reasoning_effort": "off"}),
+            "off",
+        )
+
     def test_git_branch_is_empty_outside_a_repository(self):
         import tempfile
 

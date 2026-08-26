@@ -46,7 +46,7 @@ class OpenAIResponses(OpenAIChat):
 
     def describe_thinking_mode(self) -> str:
         if self.reasoning is None:
-            return "off"
+            return "default"
         return f"on(reasoning={self.reasoning})"
 
     def to_dict(self) -> Dict[str, Any]:
