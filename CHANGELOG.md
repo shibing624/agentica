@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DeepAgent` / `get_builtin_tools` 去掉 `peer_conflict_checker`**：编辑成功后不再附「别的会话也改了这个文件」提醒。
 
 #### features
-- **`apply_patch` docstring 示例以 `+#` 插入注释开头**：`@@` 后第一行就是新增，避免模型先整文件空格拷贝造成空操作。空操作不再报 `Malformed patch`；缺信封且正文已是 `*** Update File:` 时错误里补一句去包信封。不自动改 patch、不收第二套语法。
+- **`apply_patch` docstring 示例以 `+#` 插入注释开头**：`@@` 后第一行就是新增，避免模型先整文件空格拷贝造成空操作。空操作不再报 `Malformed patch`。首行已是 `*** Update/Add/Delete File:` 时自动补 `Begin/End Patch`（正文语法不变）；markdown 围栏和其它缺信封仍拒绝。
 - **CLI 并行工具改成 Kimi 式整块 flush**：未完成的调用停在输入框上方的 live 窗口，按开始顺序等前缀都结束后才把「调用行 + 结果」一起打进 scrollback。以前 `execute` 一开始就打印调用行，并行的 `grep` / `write_file` 结果会插在调用和 `⎿` 之间，看起来像挂错工具；现在不再需要 `↳` 锚点。`--print` 不变。
 - **CLI / SDK 与 Web 共用同一套 session 轨迹出口**：一份 JSONL + `SessionLog.analyze()`。SDK：`agent.session_log`（公开句柄）、`.format_trace()`、`.export()`。CLI：`/trace` 打 rounds/tokens/工具（`/trace <n>` 展开一轮），`/status` 增加 **Session log** 路径（原 `Log file` 改名为 **Debug log**，避免和 jsonl 混淆）。Gateway `/trace/analysis` 改为调用 `log.analyze()`，不再手拼一份。公开 API 见 `docs/API.md`。
 - **`/goal` 默认 token 预算不限**：CLI `/goal xxx` 与 SDK `run_goal()` 不传 `token_budget` 时不再回落 500_000（`DEFAULT_TOKEN_BUDGET` 改为 `None`）。要限额度显式传 `--tokens N` / `token_budget=N`；`-1` 仍是不限。Web 目标芯片默认显示「预算不限」，点一下才打开 Token 预算输入（空=不限，支持 `500k`/`2m`），Escape 关掉输入框而不退出目标模式。

@@ -215,9 +215,16 @@ class TestParsePatchEnvelope(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must start"):
             parse_patch_envelope("prefix\n*** Begin Patch\n*** Delete File: a.py\n*** End Patch")
 
-    def test_missing_envelope_tells_to_wrap_update_file_body(self):
-        with self.assertRaisesRegex(ValueError, "Wrap the body"):
-            parse_patch_envelope("*** Update File: app.py\n@@\n-OLD = 1\n+NEW = 1")
+    def test_wraps_update_file_body_missing_envelope(self):
+        operations = parse_patch_envelope(
+            "*** Update File: app.py\n@@\n-OLD = 1\n+NEW = 1"
+        )
+        self.assertEqual([(op.action, op.path) for op in operations], [("update", "app.py")])
+        self.assertIn("-OLD = 1", operations[0].diff)
+
+    def test_rejects_markdown_fence(self):
+        with self.assertRaisesRegex(ValueError, "must start"):
+            parse_patch_envelope("```patch\n*** Update File: app.py\n@@\n-a\n+b\n```")
 
 if __name__ == '__main__':
     unittest.main()

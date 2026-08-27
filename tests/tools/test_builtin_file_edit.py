@@ -152,6 +152,14 @@ class TestBuiltinFileToolApplyPatch:
         assert "spaced copy of the file is a no-op" in description
         assert "MUST call read_file" not in description
 
+    def test_applies_update_when_envelope_markers_are_omitted(self, file_tool, tmp_dir):
+        Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")
+        result = asyncio.run(file_tool.apply_patch(
+            "*** Update File: app.py\n@@\n-VALUE = 1\n+VALUE = 2\n KEEP = True\n"
+        ))
+        assert "Successfully applied patch" in result
+        assert Path(tmp_dir, "app.py").read_text() == "VALUE = 2\nKEEP = True\n"
+
     def test_noop_keep_only_hunk_says_to_use_minus_not_malformed(self, file_tool, tmp_dir):
         Path(tmp_dir, "app.py").write_text("VALUE = 1\n# keep me\n")
         patch_text = """*** Begin Patch

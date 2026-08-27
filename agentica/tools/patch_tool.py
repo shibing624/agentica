@@ -108,22 +108,22 @@ _FILE_MARKER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 def parse_patch_envelope(patch: str) -> List[FilePatch]:
     """Parse a strict multi-file ``*** Begin Patch`` envelope.
 
-    The parser is intentionally format-specific: accepting one unambiguous
-    patch grammar is safer than guessing between V4A and unified diff input.
-    Per-file update bodies are validated later against current file content by
-    ``apply_diff`` before any filesystem mutation occurs.
+    If the first line is already ``*** Update/Add/Delete File:``, the
+    Begin/End markers are inserted. Other omitted-envelope shapes are
+    rejected. Per-file update bodies are validated later against current
+    file content by ``apply_diff`` before any filesystem mutation occurs.
     """
     normalized = patch.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
     lines = normalized.split("\n") if normalized else []
+    # Models often emit a valid body starting at "*** Update File:" and
+    # omit the envelope. That is the same grammar, not a second one.
+    if lines and _FILE_MARKER_RE.fullmatch(lines[0]):
+        if lines[-1] != END_PATCH:
+            lines.append(END_PATCH)
+        lines.insert(0, "*** Begin Patch")
     if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != END_PATCH:
-        hint = ""
-        if lines and _FILE_MARKER_RE.fullmatch(lines[0]):
-            hint = (
-                " Wrap the body with '*** Begin Patch' and '*** End Patch'."
-            )
         raise ValueError(
             "Patch must start with '*** Begin Patch' and end with '*** End Patch'."
-            + hint
         )
 
     operations: List[FilePatch] = []
