@@ -12,6 +12,7 @@ import shutil
 import tempfile
 from collections import deque
 from contextlib import AsyncExitStack
+from html import escape
 from pathlib import Path
 from typing import Optional, List, Dict, Literal, Tuple
 
@@ -209,10 +210,72 @@ def is_sensitive_write_path(filepath: str) -> bool:
     return _check_sensitive_write_path(filepath) is not None
 
 
+_HTML_REPORT_DIR = Path("tmp") / "reports"
+_MAX_HTML_CHARS = 2_000_000
+_REPORT_CSS = """
+:root { color-scheme: light dark; --bg:#f6f5f1; --fg:#1c1917; --muted:#57534e; --line:#e7e5e4; --card:#fff; --accent:#1d4ed8; --code:#ecebe6; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c; --card:#292524; --accent:#93c5fd; --code:#0c0a09; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
+main { max-width: 880px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+h1 { font-size: 1.75rem; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 0.35rem; }
+h2 { font-size: 1.2rem; font-weight: 650; margin: 2rem 0 0.6rem; padding-top: 0.4rem; border-top: 1px solid var(--line); }
+h3 { font-size: 1.05rem; font-weight: 600; margin: 1.4rem 0 0.4rem; }
+.muted { color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); }
+table { border-collapse: collapse; width: 100%; margin: 0.8rem 0 1.2rem; font-size: 0.95rem; }
+th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+code { background: var(--code); padding: 0.1em 0.35em; }
+pre { background: var(--code); padding: 0.9rem 1rem; overflow: auto; }
+pre code { background: none; padding: 0; }
+blockquote { margin: 0.8rem 0; padding: 0.2rem 0 0.2rem 0.9rem; border-left: 3px solid var(--accent); color: var(--muted); }
+@media print { body { background: #fff; color: #111; } }
+""".strip()
+
+
+def slugify_html_title(title: str) -> str:
+    text = (title or "").strip().replace("/", "-").replace("\\", "-")
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"[^\w.\-]+", "", text, flags=re.UNICODE)
+    text = re.sub(r"-{2,}", "-", text).strip(".-")
+    return text[:80] or "report"
+
+
+def is_full_html_document(html: str) -> bool:
+    head = html.lstrip()[:32].lower()
+    return head.startswith("<!doctype") or head.startswith("<html")
+
+
+def wrap_report_html(title: str, html: str) -> str:
+    """Wrap a fragment (or plaintext) in a self-contained report page."""
+    body = html.strip()
+    if not re.search(r"</?[A-Za-z]|<!", body):
+        body = f"<pre>{escape(body)}</pre>"
+    safe_title = escape(title.strip() or "Report")
+    return (
+        "<!DOCTYPE html>\n<html>\n<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        f"<title>{safe_title}</title>\n"
+        f"<style>{_REPORT_CSS}</style>\n"
+        "</head>\n<body>\n<main>\n"
+        f"<h1>{safe_title}</h1>\n"
+        f"{body}\n"
+        "</main>\n</body>\n</html>\n"
+    )
+
+
 class BuiltinFileTool(Tool):
     """
     Built-in file system tool providing read_file, write_file, apply_patch,
     glob, and grep. Session path grants go through ``grant_path_access``.
+    ``write_html`` is registered only when ``include_html_report`` is True
+    (DeepAgent / CLI / Web default; plain ``get_builtin_tools`` off).
     """
 
     def __init__(
@@ -224,6 +287,7 @@ class BuiltinFileTool(Tool):
             diagnostics_checker=None,
             peer_conflict_checker=None,
             permission_mode: str = "allow-all",
+            include_html_report: bool = False,
     ):
         """
         Initialize BuiltinFileTool.
@@ -240,6 +304,7 @@ class BuiltinFileTool(Tool):
             permission_mode: Current permission tier. An Agent holding this
                 tool overwrites it with its own tier at wiring time; this
                 argument only matters when the tool is used standalone.
+            include_html_report: Register ``write_html`` (DeepAgent default).
         """
         super().__init__(name="builtin_file_tool")
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
@@ -266,6 +331,8 @@ class BuiltinFileTool(Tool):
         self.register(self.apply_patch, is_destructive=True)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
+        if include_html_report:
+            self.register(self.write_html, is_destructive=True)
         # glob and grep enforce their own hardcoded timeouts on both fast
         # (rg / native pathlib.glob) and fallback paths, so skip the outer
         # 120s executor wrapper — otherwise a bare ``**/*.log`` walk from
@@ -778,6 +845,53 @@ class BuiltinFileTool(Tool):
                 )
             ]),
         )
+
+    async def write_html(self, title: str, html: str, file_path: str = "") -> str:
+        """Write a self-contained HTML report and return a file:// URL to open.
+
+        Use this instead of dumping a long product/tech report, comparison,
+        audit, or architecture review into the chat. After calling it, reply
+        with a one-line summary and the Open URL — do not paste the report
+        body. Application source HTML (an app's index.html, a fixture) stays
+        write_file / apply_patch.
+
+        Pass a body fragment (headings, tables, sections) or a full HTML
+        document. Fragments are wrapped in a single-file page with inline CSS.
+        Same title overwrites the previous file. Default path is
+        tmp/reports/<title>.html.
+
+        Args:
+            title: Short report title (browser tab and default filename).
+            html: Full HTML document or body fragment. Keep CSS/JS inline.
+            file_path: Optional destination. Relative paths resolve against
+                the working directory. Defaults to tmp/reports/<title>.html.
+
+        Returns:
+            Absolute path and a file:// URL the user can open.
+        """
+        heading = (title or "").strip()
+        if not heading:
+            return "Nothing written: title is empty."
+        body = html if isinstance(html, str) else str(html)
+        if not body.strip():
+            return "Nothing written: html is empty."
+        if len(body) > _MAX_HTML_CHARS:
+            return (
+                f"Nothing written: html is {len(body)} characters "
+                f"(max {_MAX_HTML_CHARS}). Split the report or drop assets."
+            )
+
+        document = body if is_full_html_document(body) else wrap_report_html(heading, body)
+        dest = (file_path or "").strip()
+        if dest:
+            if not dest.lower().endswith((".html", ".htm")):
+                dest = dest + ".html"
+        else:
+            dest = str(_HTML_REPORT_DIR / f"{slugify_html_title(heading)}.html")
+
+        await self.write_file(dest, document)
+        absolute = str(self._resolve_path(dest).resolve())
+        return f"Wrote HTML report: {absolute}\nOpen: {Path(absolute).as_uri()}"
 
     async def apply_patch(self, patch: str) -> str:
         """Apply one context patch across one or more text files.

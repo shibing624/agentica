@@ -77,6 +77,7 @@ def _generate_session_id() -> str:
 BUILTIN_TOOLS = [
     "read_file",
     "write_file",
+    "write_html",
     "apply_patch",
     "glob",
     "grep",
@@ -113,6 +114,7 @@ def active_tool_names(agent) -> List[str]:
 TOOL_ICONS = {
     "read_file": "📖",
     "write_file": "✏️",
+    "write_html": "📄",
     "apply_patch": "✎",
     "glob": "🔍",
     "grep": "🔎",

@@ -139,6 +139,7 @@ class DeepAgent(Agent):
         permission_mode: str = "allow-all",
         # Builtin tool toggles — mirror get_builtin_tools() params
         include_file_tools: bool = True,
+        include_html_report: bool = True,
         include_execute: bool = True,
         include_web_search: bool = True,
         include_fetch_url: bool = True,
@@ -236,6 +237,7 @@ class DeepAgent(Agent):
             get_builtin_tools(
                 work_dir=work_dir,
                 include_file_tools=include_file_tools,
+                include_html_report=include_html_report,
                 include_execute=include_execute,
                 include_web_search=include_web_search,
                 include_fetch_url=include_fetch_url,

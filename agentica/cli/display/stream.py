@@ -711,7 +711,7 @@ class StreamDisplayManager:
     # or the default 120-char ellipsis. ``task`` is NOT here — its result is
     # JSON with a live-stream dedup path (``_display_task_result``); call-side
     # briefs already share ``_format_handoff_display`` with delegate.
-    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate"})
+    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate", "write_html"})
 
     # Human-in-the-loop. Their result is the only durable record of the
     # exchange — the question widget lives in the prompt_toolkit layout and is
