@@ -247,7 +247,14 @@ def slugify_html_title(title: str) -> str:
 
 
 def is_full_html_document(html: str) -> bool:
-    head = html.lstrip()[:32].lower()
+    text = html.lstrip()
+    # Skip leading comments (build banners) before <!DOCTYPE>/<html>.
+    while text.startswith("<!--"):
+        end = text.find("-->")
+        if end == -1:
+            break
+        text = text[end + 3:].lstrip()
+    head = text[:32].lower()
     return head.startswith("<!doctype") or head.startswith("<html")
 
 
@@ -858,7 +865,9 @@ class BuiltinFileTool(Tool):
         Pass a body fragment (headings, tables, sections) or a full HTML
         document. Fragments are wrapped in a single-file page with inline CSS.
         Same title overwrites the previous file. Default path is
-        tmp/reports/<title>.html.
+        tmp/reports/<title>.html. Any user-specified destination is
+        honored; ask/auto approval modes gate targets outside the
+        working directory like write_file (agent/approvals.py).
 
         Args:
             title: Short report title (browser tab and default filename).
@@ -889,9 +898,9 @@ class BuiltinFileTool(Tool):
         else:
             dest = str(_HTML_REPORT_DIR / f"{slugify_html_title(heading)}.html")
 
+        resolved = self._resolve_path(dest).resolve()
         await self.write_file(dest, document)
-        absolute = str(self._resolve_path(dest).resolve())
-        return f"Wrote HTML report: {absolute}\nOpen: {Path(absolute).as_uri()}"
+        return f"Wrote HTML report: {resolved}\nOpen: {resolved.as_uri()}"
 
     async def apply_patch(self, patch: str) -> str:
         """Apply one context patch across one or more text files.

@@ -27,6 +27,13 @@ def test_is_full_html_document():
     assert not is_full_html_document("<h1>fragment</h1>")
 
 
+def test_is_full_html_document_skips_leading_comments():
+    banner = "<!-- built by the nightly report job, do not edit -->"
+    assert is_full_html_document(banner + "<!DOCTYPE html><html></html>")
+    assert is_full_html_document("<!-- b --><html lang='zh'>")
+    assert not is_full_html_document("<!-- b --><h1>fragment</h1>")
+
+
 def test_wrap_report_html_injects_title_and_css():
     page = wrap_report_html("竞品分析", "<h2>A</h2><p>body</p>")
     assert page.startswith("<!DOCTYPE html>")
@@ -93,6 +100,23 @@ def test_write_html_full_document_passthrough(tmp_path):
     asyncio.run(tool.write_html("Raw", raw, file_path="out/custom"))
     dest = tmp_path / "out" / "custom.html"
     assert dest.read_text(encoding="utf-8") == raw
+
+
+def test_write_html_comment_prefixed_document_passthrough(tmp_path):
+    tool = BuiltinFileTool(work_dir=str(tmp_path), include_html_report=True)
+    raw = "<!-- generated --><!DOCTYPE html><html><body><p>raw</p></body></html>"
+    asyncio.run(tool.write_html("Raw", raw, file_path="out/custom"))
+    assert (tmp_path / "out" / "custom.html").read_text(encoding="utf-8") == raw
+
+
+def test_write_html_honors_user_specified_outside_path(tmp_path):
+    tool = BuiltinFileTool(work_dir=str(tmp_path), include_html_report=True)
+    outside = tmp_path.parent / (tmp_path.name + "-escape.html")
+    result = asyncio.run(tool.write_html("T", "<p>x</p>", file_path=str(outside)))
+    # Approval gating (agent/approvals.py classify) handles outside targets;
+    # the tool itself writes wherever the caller asked.
+    assert outside.is_file()
+    assert str(outside.resolve()) in result
 
 
 def test_write_html_rejects_empty_and_oversized(tmp_path):

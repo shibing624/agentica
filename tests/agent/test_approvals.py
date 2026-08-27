@@ -241,6 +241,38 @@ class TestClassifyAndGrants(unittest.TestCase):
             self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow", name)
             self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow", name)
 
+    def test_write_html_in_workdir_never_parks(self):
+        # Default destination (no file_path) lives under tmp/reports.
+        fc = _fc("write_html", {}, is_destructive=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
+
+        inside = os.path.join(self.work, "out", "report.html")
+        fc = _fc("write_html", {"file_path": inside}, is_destructive=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow")
+
+    def test_write_html_outside_workdir_parks_like_write_file(self):
+        outside = "/tmp/agentica-write-html-outside.html"
+        fc = _fc("write_html", {"file_path": outside}, is_destructive=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("allow-all", fc, self.grants, work_dir=self.work), "allow")
+
+    def test_write_html_sensitive_target_parks(self):
+        fc = _fc("write_html", {"file_path": "~/.ssh/report.html"}, is_destructive=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
+        self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "ask")
+
+    def test_write_html_path_grant_covers_repeat(self):
+        outside = "/tmp/agentica-write-html-granted/report.html"
+        fc = _fc("write_html", {"file_path": outside}, is_destructive=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "ask")
+        # Grant the resolved parent dir — _record_grant stores resolved paths
+        # (macOS /tmp -> /private/tmp), so mirror that here.
+        self.grants.add_path(str(Path(outside).parent.resolve()), prefix=True)
+        self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow")
+
     def test_command_prefix_grant_covers_similar(self):
         self.grants.add_command_prefix("rm -f /tmp/a.ini")
         similar = _fc("execute", {"command": "rm -f /tmp/b.ini"}, is_destructive=True)

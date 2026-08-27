@@ -316,7 +316,7 @@ tools = get_builtin_tools(work_dir="./")
 |------|------|------|
 | `read_file` | `BuiltinFileTool` | 读文件（offset/limit 分页，`tail` 取尾、负 `offset` 从末尾开窗；大文件守卫只拦从头分页，从尾扫描 20s 超时） |
 | `write_file` | `BuiltinFileTool` | 创建/覆写文件 |
-| `write_html` | `BuiltinFileTool` | 写单文件 HTML 报告（inline CSS），返回 `file://` URL。**DeepAgent / CLI / Web 默认开**；`get_builtin_tools()` 默认关（`include_html_report=True` 打开） |
+| `write_html` | `BuiltinFileTool` | 写单文件 HTML 报告（inline CSS），返回 `file://` URL。工作目录内目标免审批；用户指定的目录外目标走与 `write_file` 相同的审批。**DeepAgent / CLI / Web 默认开**；`get_builtin_tools()` 默认关（`include_html_report=True` 打开） |
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件 |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep；`limit` 是全局条数上限，读满即停 rg） |
