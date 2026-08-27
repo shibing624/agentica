@@ -92,6 +92,60 @@ def _covered_prefix_hash(msgs: List["Message"]) -> str:
         h.update(b"\x00")
     return h.hexdigest()[:16]
 
+
+def _usable_summary(text: Any) -> Optional[str]:
+    """Non-empty stripped summary text, or None.
+
+    Layer 2 is irreversible: a whitespace string or ``str(resp)`` of an empty
+    object must not count as a successful compression.
+    """
+    if not isinstance(text, str):
+        return None
+    stripped = text.strip()
+    return stripped or None
+
+
+def _text_from_content(content: Any) -> Optional[str]:
+    """Flatten invoke ``content`` (string or text-block list) to a string."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    parts: List[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+            continue
+        if isinstance(block, dict):
+            text = block.get("text")
+        else:
+            try:
+                text = block.text
+            except AttributeError:
+                text = None
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts) if parts else None
+
+
+def _extract_summary_from_response(resp: Any) -> Optional[str]:
+    """Pull summary text from common invoke shapes. Never ``str(resp)``."""
+    if resp is None:
+        return None
+    if isinstance(resp, str):
+        return _usable_summary(resp)
+    choices = getattr(resp, "choices", None)
+    if choices:
+        try:
+            extracted = _text_from_content(choices[0].message.content)
+        except (AttributeError, IndexError):
+            extracted = None
+        usable = _usable_summary(extracted)
+        if usable is not None:
+            return usable
+    return _usable_summary(_text_from_content(getattr(resp, "content", None)))
+
+
 @dataclass
 class CompressionManager:
     """Summarise the conversation when the context approaches the window.
@@ -317,26 +371,13 @@ class CompressionManager:
             except Exception as stream_error:
                 logger.warning(f"Summarisation streaming LLM call failed: {stream_error}")
                 return None
-            if summary:
+            summary = _usable_summary(summary)
+            if summary is not None:
                 summary = redact_sensitive_text(summary)
                 self._conversation_previous_summary = summary
             return summary
-        # Extract text from common response shapes
-        summary: Optional[str] = None
-        if hasattr(resp, "choices") and resp.choices:
-            try:
-                summary = resp.choices[0].message.content
-            except (AttributeError, IndexError):
-                pass
-        if summary is None and hasattr(resp, "content") and isinstance(resp.content, str):
-            summary = resp.content
-        if summary is None and isinstance(resp, str):
-            summary = resp
-        if summary is None and resp:
-            summary = str(resp)
-
-        # Store for iterative updates on next compression
-        if summary:
+        summary = _extract_summary_from_response(resp)
+        if summary is not None:
             summary = redact_sensitive_text(summary)
             self._conversation_previous_summary = summary
         return summary
@@ -405,10 +446,11 @@ class CompressionManager:
         summary: Optional[str] = None
         if not custom_instructions and working_memory is not None and working_memory.summary is not None:
             sm = working_memory.summary
-            summary = sm.summary
-            if sm.topics:
-                summary += f"\n\nTopics covered: {', '.join(sm.topics)}"
-            logger.debug("Auto-compact: reusing WorkingMemory session summary (SM-compact)")
+            summary = _usable_summary(sm.summary)
+            if summary is not None:
+                if sm.topics:
+                    summary += f"\n\nTopics covered: {', '.join(sm.topics)}"
+                logger.debug("Auto-compact: reusing WorkingMemory session summary (SM-compact)")
 
         if summary is None:
             # Summarisation is a full LLM round-trip and routinely takes 10-20s
@@ -426,7 +468,8 @@ class CompressionManager:
                 if cb is not None:
                     cb({"type": "compact.end", "agent_name": agent_name, "stage": "auto"})
 
-        if not summary:
+        summary = _usable_summary(summary)
+        if summary is None:
             self._consecutive_auto_compact_failures += 1
             logger.warning(
                 f"Auto-compact: summarisation failed "

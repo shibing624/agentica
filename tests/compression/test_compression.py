@@ -811,6 +811,99 @@ class TestCompressionManagerAutoCompact(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(cm._consecutive_auto_compact_failures, 1)
 
+    def test_whitespace_summary_does_not_replace_messages(self):
+        from agentica.compression.manager import CompressionManager
+        cm = CompressionManager()
+        msgs = [
+            Message(role="user", content="old question"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current"),
+        ]
+        snapshot = [(m.role, m.content) for m in msgs]
+        with patch.object(
+            cm, "_summarise_conversation", new_callable=AsyncMock, return_value="  \n"
+        ):
+            result = asyncio.run(cm.auto_compact(msgs, force=True))
+        self.assertFalse(result)
+        self.assertEqual([(m.role, m.content) for m in msgs], snapshot)
+        self.assertEqual(cm._consecutive_auto_compact_failures, 1)
+
+    def test_whitespace_sm_summary_falls_through_to_llm(self):
+        from agentica.compression.manager import CompressionManager
+        cm = CompressionManager()
+        msgs = [
+            Message(role="user", content="old"),
+            Message(role="assistant", content="reply"),
+            Message(role="user", content="now"),
+        ]
+        wm = MagicMock()
+        wm.summary = MagicMock()
+        wm.summary.summary = "  \n"
+        wm.summary.topics = ["noise"]
+        with patch.object(
+            cm, "_summarise_conversation", new_callable=AsyncMock, return_value="real summary"
+        ) as mocked:
+            result = asyncio.run(cm.auto_compact(msgs, force=True, working_memory=wm))
+        mocked.assert_awaited_once()
+        self.assertTrue(result)
+        self.assertIn("real summary", msgs[0].content)
+        self.assertNotIn("noise", msgs[0].content)
+
+    def test_empty_invoke_object_is_not_used_as_summary(self):
+        from agentica.compression.manager import CompressionManager
+
+        class EmptyResp:
+            content = None
+            choices = []
+
+            def __str__(self):
+                return "ModelResponse(content=None)"
+
+        class FakeModel:
+            context_window = 200_000
+
+            async def invoke(self, messages):
+                return EmptyResp()
+
+        cm = CompressionManager()
+        summary = asyncio.run(cm._summarise_conversation(
+            [Message(role="user", content="hi")], FakeModel()
+        ))
+        self.assertIsNone(summary)
+        self.assertIsNone(cm._conversation_previous_summary)
+
+    def test_whitespace_invoke_content_is_rejected(self):
+        from agentica.compression.manager import CompressionManager
+
+        class FakeModel:
+            context_window = 200_000
+
+            async def invoke(self, messages):
+                return SimpleNamespace(content="  \n")
+
+        cm = CompressionManager()
+        summary = asyncio.run(cm._summarise_conversation(
+            [Message(role="user", content="hi")], FakeModel()
+        ))
+        self.assertIsNone(summary)
+
+    def test_text_block_list_content_is_accepted(self):
+        from agentica.compression.manager import CompressionManager
+
+        class FakeModel:
+            context_window = 200_000
+
+            async def invoke(self, messages):
+                return SimpleNamespace(content=[
+                    {"type": "text", "text": "  kept facts  "},
+                ])
+
+        cm = CompressionManager()
+        summary = asyncio.run(cm._summarise_conversation(
+            [Message(role="user", content="hi")], FakeModel()
+        ))
+        self.assertEqual(summary, "kept facts")
+
     def test_success_resets_counter(self):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
