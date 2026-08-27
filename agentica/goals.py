@@ -62,17 +62,18 @@ if TYPE_CHECKING:
 # Constants
 # ---------------------------------------------------------------------------
 
-# Primary cost gate for a standing goal (CLI + SDK). Token spend tracks
-# real work far better than turn count: one turn may be 100 tokens or
-# 50_000. Callers override via ``token_budget=`` / ``/goal --tokens N``.
-DEFAULT_TOKEN_BUDGET = 500_000
+# Primary cost gate for a standing goal (CLI + SDK + Web). Default is
+# unlimited (``None``): omit ``token_budget`` / ``/goal`` without ``--tokens``
+# and the loop runs until the model finishes or another cap fires. Callers
+# opt into a cap with ``token_budget=N`` / ``/goal --tokens N``.
+DEFAULT_TOKEN_BUDGET: Optional[int] = None
 # Optional turn cap — default None (disabled). Pass ``turn_budget=N`` or
 # ``/goal --turns N`` only when you want a hard turn ceiling on top of
 # the token budget.
 DEFAULT_TURN_BUDGET: Optional[int] = None
 # Explicit ``-1`` on token/turn/wall budgets means unlimited (stored as
-# ``None``). Distinguishes "caller omitted the arg → use default" from
-# "caller asked for no cap". ``0`` is rejected (ambiguous with a zero cap).
+# ``None``). Omitting ``token_budget`` uses ``DEFAULT_TOKEN_BUDGET``
+# (also ``None`` / unlimited). ``0`` is rejected (ambiguous with a zero cap).
 UNLIMITED_BUDGET_VALUE = -1
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 # Auto-pause after N consecutive turns where every tool call failed. Guards
@@ -104,7 +105,9 @@ def is_goal_generated_prompt(text: str) -> bool:
 def resolve_budget_int(value: Optional[int], *, default: Optional[int]) -> Optional[int]:
     """Normalize an optional int budget.
 
-    - ``None`` → ``default`` (for ``token_budget``, usually ``DEFAULT_TOKEN_BUDGET``)
+    - ``None`` → ``default`` (for ``token_budget``, ``DEFAULT_TOKEN_BUDGET``,
+      which is ``None`` / unlimited unless the manager was constructed with
+      another default)
     - ``-1`` → ``None`` (unlimited)
     - positive int → that cap
     - ``0`` / other negatives → ``ValueError``
@@ -144,7 +147,7 @@ class GoalState:
 
     Budgets (P1 S2):
         ``token_budget``      primary hard cap on accumulated input+output
-                              tokens (default ``DEFAULT_TOKEN_BUDGET``)
+                              tokens (default ``None`` / unlimited)
         ``turn_budget``       optional hard cap on continuation turns
                               (None = unlimited)
         ``wall_clock_budget_sec``  optional hard cap on agent wall-clock
@@ -609,7 +612,7 @@ class GoalManager:
         session_log: "SessionLog",
         *,
         default_turn_budget: Optional[int] = None,
-        default_token_budget: int = DEFAULT_TOKEN_BUDGET,
+        default_token_budget: Optional[int] = DEFAULT_TOKEN_BUDGET,
         judge_model: Optional["Model"] = None,
         event_callback: Optional[Callable[[RunEventType, Dict[str, Any]], None]] = None,
         verifier: Optional[GoalVerifier] = None,
@@ -707,8 +710,9 @@ class GoalManager:
     ) -> GoalState:
         """Create/replace the standing goal.
 
-        ``token_budget``: omit/``None`` → ``default_token_budget`` (500_000);
-        ``-1`` → unlimited; positive int → that cap.
+        ``token_budget``: omit/``None`` → ``default_token_budget`` (unlimited
+        unless the manager was given another default); ``-1`` → unlimited;
+        positive int → that cap.
         ``turn_budget`` / ``wall_clock_budget_sec``: omit → no cap (or manager
         default for turns); ``-1`` → unlimited; positive → that cap.
         """

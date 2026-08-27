@@ -931,13 +931,22 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .goal-chip-row{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 0}
 .goal-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--fg2);padding:4px 8px;font-size:12px}
 .goal-chip-label{font-weight:600;color:var(--fg)}
+.goal-chip-sep{width:1px;height:14px;background:var(--border);flex-shrink:0}
+.goal-chip-budget-btn{border:none;background:transparent;color:var(--fg2);cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:6px;font:inherit;font-size:12px;min-width:0}
+.goal-chip-budget-btn:hover{background:var(--bg);color:var(--fg)}
+.goal-chip-budget-btn svg{width:10px;height:10px;flex-shrink:0}
 .goal-chip-budget{display:inline-flex;align-items:center;gap:6px;min-width:0}
 .goal-chip-budget span{color:var(--fg3);white-space:nowrap}
 .goal-chip-budget input{width:7.5em;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-family:var(--mono);font-size:12px;padding:2px 6px}
 .goal-chip-budget input:focus{outline:none;border-color:var(--fg3)}
-.goal-chip button{border:none;background:transparent;color:var(--fg3);cursor:pointer;display:inline-flex;padding:0}
-.goal-chip button:hover{color:var(--fg)}
-.goal-chip button svg{width:10px;height:10px}
+.goal-chip-budget input.invalid{border-color:#c44;color:#c44}
+.goal-chip-budget-save{border:none;background:transparent;color:var(--fg3);cursor:pointer;display:inline-flex;padding:0}
+.goal-chip-budget-save:hover:not(:disabled){color:var(--fg)}
+.goal-chip-budget-save:disabled{opacity:.4;cursor:not-allowed}
+.goal-chip-budget-save svg{width:12px;height:12px}
+.goal-chip-close{border:none;background:transparent;color:var(--fg3);cursor:pointer;display:inline-flex;padding:0}
+.goal-chip-close:hover{color:var(--fg)}
+.goal-chip-close svg{width:10px;height:10px}
 .goal-bar{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;max-width:980px;margin:0 auto 6px;font-size:12px;color:var(--fg2);line-height:1.4}
 .goal-bar-status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .goal-bar-progress{font-family:var(--mono);font-size:11px;color:var(--fg3);flex-shrink:0}

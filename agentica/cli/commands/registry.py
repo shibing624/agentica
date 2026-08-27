@@ -69,7 +69,7 @@ COMMAND_REGISTRY = {
     "/rename": (_cmd_rename, "Rename the current session for easy resume"),
     "/resume": (_cmd_resume, "Resume by number, name, or id prefix"),
     "/sessions": (_cmd_resume, "List sessions and resume optionally (alias for /resume)"),
-    "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done; --tokens -1 = unlimited)"),
+    "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done; token budget unlimited unless --tokens N)"),
     "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
     "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),
     "/queue": (

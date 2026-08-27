@@ -53,9 +53,10 @@ def _fake_model(content: str = '{"done": false, "reason": "keep going"}'):
 
 
 def test_goalstate_defaults_token_budget_not_turn():
-    """CLI+SDK contract: token_budget defaults on; turn_budget defaults off."""
+    """CLI+SDK contract: token_budget and turn_budget both default unlimited."""
     s = GoalState(session_id="s", objective="o")
-    assert s.token_budget == DEFAULT_TOKEN_BUDGET == 500_000
+    assert s.token_budget is None
+    assert s.token_budget == DEFAULT_TOKEN_BUDGET
     assert s.turn_budget is None
     assert DEFAULT_TURN_BUDGET is None
 
@@ -64,6 +65,14 @@ def test_goal_manager_set_applies_default_token_budget(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path))
     state = mgr.set("ship it")
     assert state.token_budget == DEFAULT_TOKEN_BUDGET
+    assert state.token_budget is None
+    assert state.turn_budget is None
+
+
+def test_goal_manager_constructor_default_token_budget(tmp_path: Path):
+    mgr = GoalManager(_make_session_log(tmp_path), default_token_budget=500_000)
+    state = mgr.set("ship it")
+    assert state.token_budget == 500_000
     assert state.turn_budget is None
 
 
@@ -596,11 +605,12 @@ def test_status_line_shows_token_and_wall_budget(tmp_path: Path):
     assert "wall 92s/300s" in line
 
 
-def test_status_line_default_shows_token_cap_and_uncapped_turns(tmp_path: Path):
+def test_status_line_default_shows_uncapped_tokens_and_turns(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path))
     mgr.set("x")
     line = mgr.status_line()
-    assert f"Budget: tokens 0/{DEFAULT_TOKEN_BUDGET:,} · turns 0" in line
+    assert "Budget: tokens 0 · turns 0" in line
+    assert "tokens 0/" not in line  # no token cap → plain count, not a fraction
     assert "turns 0/" not in line  # no turn cap → plain count, not a fraction
     assert "wall" not in line  # no wall budget → segment omitted
 

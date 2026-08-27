@@ -41,21 +41,31 @@ export function ChatPage() {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const goalBudgetRef = useRef<HTMLInputElement>(null);
   const hadGoalCompose = useRef(false);
+  const goalBudgetSnapshot = useRef("");
   const msgsRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(createStreamFollow());
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [goalBudgetOpen, setGoalBudgetOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const approvalWrapRef = useRef<HTMLDivElement>(null);
   const skillsWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (s.goalCompose && !hadGoalCompose.current) {
-      goalBudgetRef.current?.focus();
+      requestAnimationFrame(() => taRef.current?.focus());
     }
+    if (!s.goalCompose) setGoalBudgetOpen(false);
     hadGoalCompose.current = !!s.goalCompose;
   }, [s.goalCompose]);
+
+  useEffect(() => {
+    if (goalBudgetOpen) {
+      goalBudgetRef.current?.focus();
+      goalBudgetRef.current?.select();
+    }
+  }, [goalBudgetOpen]);
 
   const streaming = !!s.streams[s.curSess || ""];
   const goalRun = s.curSess ? s.goalRuns[s.curSess] : undefined;
@@ -74,6 +84,27 @@ export function ChatPage() {
   const slashOpen = q != null && !pendingReq;
   const pendingToolCallId = pendingReq?.toolCallId;
   const decidingApproval = !!(s.curSess && s.streams[s.curSess]?.decidingApproval);
+  const goalBudgetText = s.goalCompose?.budgetText ?? "";
+  const goalBudgetParsed = parseTokenBudget(goalBudgetText);
+  const goalBudgetInvalid = goalBudgetParsed === null;
+  const goalBudgetSummary =
+    goalBudgetParsed === null || goalBudgetParsed === UNLIMITED_TOKEN_BUDGET
+      ? S.chat.goalBudgetUnlimited
+      : S.chat.goalBudgetValue(/[km]$/i.test(goalBudgetText.trim()) ? goalBudgetText.trim() : fmtN(goalBudgetParsed));
+  const openGoalBudget = () => {
+    goalBudgetSnapshot.current = goalBudgetText;
+    setGoalBudgetOpen(true);
+  };
+  const saveGoalBudget = () => {
+    if (goalBudgetInvalid) return;
+    setGoalBudgetOpen(false);
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
+  const cancelGoalBudget = () => {
+    if (s.goalCompose) setState({ goalCompose: { budgetText: goalBudgetSnapshot.current } });
+    setGoalBudgetOpen(false);
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
 
   useEffect(() => { void loadPlugins(); }, []);
   useEffect(() => {
@@ -314,28 +345,57 @@ export function ChatPage() {
               <div className="goal-chip-row" inert={pendingReq ? true : undefined}>
                 <span className="goal-chip">
                   <span className="goal-chip-label">{S.chat.goalMode}</span>
-                  <label className="goal-chip-budget">
-                    <span>{S.chat.goalBudgetLabel}</span>
-                    <input
-                      ref={goalBudgetRef}
-                      value={s.goalCompose.budgetText}
-                      placeholder={S.chat.goalBudgetPlaceholder}
+                  <span className="goal-chip-sep" aria-hidden />
+                  {goalBudgetOpen ? (
+                    <label className="goal-chip-budget">
+                      <span>{S.chat.goalBudgetLabel}</span>
+                      <input
+                        ref={goalBudgetRef}
+                        value={s.goalCompose.budgetText}
+                        placeholder={S.chat.goalBudgetPlaceholder}
+                        title={goalBudgetInvalid ? S.chat.goalBudgetInvalid : S.chat.goalBudgetHint}
+                        className={goalBudgetInvalid ? "invalid" : undefined}
+                        aria-invalid={goalBudgetInvalid}
+                        onChange={(e) => setState({ goalCompose: { budgetText: e.target.value } })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            saveGoalBudget();
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            cancelGoalBudget();
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="goal-chip-budget-save"
+                        title={S.chat.goalBudgetSave}
+                        aria-label={S.chat.goalBudgetSave}
+                        disabled={goalBudgetInvalid}
+                        onClick={saveGoalBudget}
+                      >
+                        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" aria-hidden>
+                          <path d="M3.5 8.5l3 3 6-6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </label>
+                  ) : (
+                    <button
+                      type="button"
+                      className="goal-chip-budget-btn"
+                      aria-label={goalBudgetSummary}
+                      aria-expanded={false}
                       title={S.chat.goalBudgetHint}
-                      onChange={(e) => setState({ goalCompose: { budgetText: e.target.value } })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          taRef.current?.focus();
-                        } else if (e.key === "Escape") {
-                          e.preventDefault();
-                          setState({ goalCompose: null });
-                          requestAnimationFrame(() => taRef.current?.focus());
-                        }
-                      }}
-                    />
-                  </label>
-                  <button type="button" title={S.chat.goalRemove} onClick={() => {
+                      onClick={openGoalBudget}
+                    >
+                      <span>{goalBudgetSummary}</span>
+                      <IconChevronDown />
+                    </button>
+                  )}
+                  <button type="button" className="goal-chip-close" title={S.chat.goalRemove} onClick={() => {
                     setState({ goalCompose: null });
                     taRef.current?.focus();
                   }}>

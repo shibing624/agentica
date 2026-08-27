@@ -10,10 +10,10 @@ Most users only need one call:
     print(result.response_content)
 
 Budget semantics (token / turn / wall-clock):
-    - ``token_budget`` is the primary cost gate and is always on: it defaults
-      to ``DEFAULT_TOKEN_BUDGET = 500_000`` for both the SDK and CLI ``/goal``.
-      Tokens track real work far better than turns — one turn can cost 100 or
-      50_000 tokens.
+    - ``token_budget`` is the primary cost gate and defaults to unlimited
+      (``None``) for the SDK, CLI ``/goal``, and Web. Pass a positive int to
+      cap spend. Tokens track real work far better than turns — one turn can
+      cost 100 or 50_000 tokens.
     - ``turn_budget`` and ``wall_clock_budget_sec`` default to ``None`` (off).
       Pass them only for an extra turn ceiling or an SLA deadline.
     - The caps are **independent** — whichever hits first stops the loop.
@@ -49,12 +49,13 @@ from agentica.run_events import RunEventType
 def _print_budget(result) -> None:
     """Show the budget line the CLI's ``/goal status`` would print."""
     goal = result.goal
-    print(f"  tokens = {goal.tokens_used:,} / {goal.token_budget:,}")
+    cap = f"{goal.token_budget:,}" if goal.token_budget is not None else "unlimited"
+    print(f"  tokens = {goal.tokens_used:,} / {cap}")
     print(f"  turns  = {goal.turns_used} (cap: {goal.turn_budget or 'none'})")
 
 
 async def example_1_one_liner() -> None:
-    """The 90% case: one line drives the entire loop, token budget on by default."""
+    """The 90% case: one line drives the entire loop, token budget unlimited by default."""
     print("=" * 60)
     print("Example 1: agent.run_goal()  — the one-liner")
     print("=" * 60)
@@ -68,7 +69,7 @@ async def example_1_one_liner() -> None:
         instructions="You are terse. One step per turn. State 'done' when finished.",
     )
 
-    # No budget arguments at all: token_budget falls back to 500_000 and there
+    # No budget arguments at all: token_budget stays unlimited and there
     # is no turn cap. This is exactly what CLI users get from `/goal <text>`.
     result = await agent.run_goal("Compute 17+9+16 and state the integer answer.")
 
@@ -94,7 +95,7 @@ async def example_2_token_budget() -> None:
     #
     #   result = await agent.run_goal(
     #       "Implement feature X and make pytest pass",
-    #       token_budget=200_000,        # tighter than the 500_000 default
+    #       token_budget=200_000,        # optional cap; omit for unlimited
     #       wall_clock_budget_sec=1800,  # optional 30 min SLA
     #   )
     #
@@ -124,9 +125,9 @@ async def example_2b_turn_budget_opt_in() -> None:
         instructions="Refine one small detail per turn. Do not rush to finish.",
     )
 
-    # token_budget stays at its 500_000 default; turn_budget=2 adds a second,
-    # independent ceiling. Whichever binds first wins — and the agent can still
-    # end earlier by calling verify_completion.
+    # token_budget stays unlimited; turn_budget=2 adds a second, independent
+    # ceiling. Whichever binds first wins — and the agent can still end earlier
+    # by calling verify_completion.
     result = await agent.run_goal(
         "Keep refining a one-line haiku about TCP.",
         turn_budget=2,

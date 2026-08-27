@@ -142,7 +142,7 @@ export type AppState = {
   messageQueue: QueuedMessage[];
   /** After reload, ChatPage reattaches to this in-flight session. */
   pendingResume: string | null;
-  /** Composer is in /goal mode: set a token budget, then type the objective. */
+  /** Composer is in /goal mode: type the objective; click the chip to set a token budget. */
   goalCompose: { budgetText: string } | null;
   serverModel: string;
   serverDir: string;

@@ -410,6 +410,14 @@ class TestCLIConfiguration(unittest.TestCase):
             _, _, err = _parse_goal_set_args(raw)
             self.assertIsNotNone(err, raw)
 
+    def test_parse_goal_without_tokens_omits_budget(self):
+        from agentica.cli.commands.goal import _parse_goal_set_args
+
+        objective, budgets, err = _parse_goal_set_args("修这个 bug")
+        self.assertIsNone(err)
+        self.assertEqual(objective, "修这个 bug")
+        self.assertNotIn("token_budget", budgets)
+
     def _steer_ctx(self, *, agent_running, steer_accepts, queue_items=()):
         agent = MagicMock()
         agent.steer.return_value = steer_accepts

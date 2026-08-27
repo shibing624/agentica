@@ -2,7 +2,7 @@
 
 让 Agent **持续向一个用户目标推进**，每轮结束自动判断是否完成，没完成就续跑——直到 judge 判 done、预算耗尽、或用户主动停下。CLI 用户用 `/goal xxx`，SDK 用户一行 `await agent.run_goal(...)`。
 
-> **主成本闸是 `token_budget`（默认 `DEFAULT_TOKEN_BUDGET = 500_000`，CLI 与 SDK 一致）。`turn_budget` 默认 `None`（不限轮数），仅在显式传入时生效。`wall_clock_budget_sec` 仍为可选 SLA 闸。**
+> **主成本闸是 `token_budget`（默认 `None` / 不限，CLI、SDK、Web 一致）。要限额度显式传正整数。`turn_budget` 默认 `None`（不限轮数），仅在显式传入时生效。`wall_clock_budget_sec` 仍为可选 SLA 闸。**
 
 > 本特性已包含 P0 基础环 + P1 S/A 档（Runner 锚点、token/wall-clock 预算、`update_goal` 受限工具、`goal.*` 事件）。设计文档：`docs/learn_cc/goal.md`（内部）。
 
@@ -26,7 +26,7 @@ agent = Agent(
     ),
 )
 
-# 最简：默认 token_budget=500_000，turn_budget=None
+# 最简：默认 token_budget=None（不限），turn_budget=None
 result = await agent.run_goal("compute 17+9+16 and state the integer answer")
 
 print(result.status)            # "complete" / "paused" / "budget_limited"
@@ -60,13 +60,13 @@ print(result.response_content)  # == result.run_response.content or ""
 
 | 参数 | 默认 | 不传时 | 含义 |
 |---|---|---|---|
-| `token_budget` | `DEFAULT_TOKEN_BUDGET = 500_000` | **fallback 到 500_000**（主成本闸） | 累计输入+输出 token 上限 |
+| `token_budget` | `DEFAULT_TOKEN_BUDGET = None` | **不限** | 累计输入+输出 token 上限（主成本闸，显式传入才生效） |
 | `turn_budget` | `None` | **不限**（不计轮数） | LLM 循环总轮数上限（可选） |
 | `wall_clock_budget_sec` | `None` | **不限**（不计时） | agent wall-clock 秒数上限 |
 
-> **无限预算**：显式传 `-1`（CLI：`/goal --tokens -1 ...`；SDK：`token_budget=-1`）会存成 `None`，关闭该闸。这与「不传参数」不同——不传 `token_budget` 仍回落默认 `500_000`。`turn` / `wall` 同样认 `-1`。`0` 会被拒绝（避免和「零额度」混淆）。
+> **无限预算**：不传 `token_budget`，或显式传 `-1`（CLI：`/goal --tokens -1 ...`；SDK：`token_budget=-1`），都会存成 `None`，关闭该闸。`turn` / `wall` 同样认 `-1`。`0` 会被拒绝（避免和「零额度」混淆）。
 
-> 想要更大但仍有限的预算就传正整数，例如 `token_budget=2_000_000` 或 `/goal --tokens 2000000 ...`。`turn_budget` 只有显式传入正整数时才生效。
+> 想要有限预算就传正整数，例如 `token_budget=500_000` 或 `/goal --tokens 500000 ...`。`turn_budget` 只有显式传入正整数时才生效。
 
 **判定优先级**（在 `evaluate_after_turn` 里固定为）：
 
@@ -89,11 +89,11 @@ turn accounting → budget check → tool short-circuit → judge
 - **因此最终会略微超出 cap**（多一轮）。这是诚实的代价，`Budget:` 那一行会如实显示，比如 `turns 6/5`。
 - **`resume()` 会重置这个标记**，所以加大额度后再次超预算能拿到新的收尾轮。
 
-CLI `/goal status` 用一行 `Budget:` 汇总三个预算（未设上限的只显示已用量）；状态栏在 goal 执行期间实时显示 `goal 12.3K/500K`：
+CLI `/goal status` 用一行 `Budget:` 汇总三个预算（未设上限的只显示已用量）；状态栏在 goal 执行期间、且设了 token 上限时实时显示 `goal 12.3K/500K`：
 
 ```
 Goal [active]: 实现 xxx 功能并跑通 pytest
-  Budget: tokens 42,100/500,000 · turns 6 · wall 310s/1800s
+  Budget: tokens 42,100 · turns 6 · wall 310s/1800s
 ```
 
 ### Best Practices：怎么设预算
@@ -101,16 +101,16 @@ Goal [active]: 实现 xxx 功能并跑通 pytest
 | 场景 | `token_budget` | `turn_budget` | `wall_clock_budget_sec` |
 |---|---|---|---|
 | 试玩 / 调试 | `50_000` | `5` | 不传 |
-| 一次性短任务（算个数、写一句话） | 不传 (默认 500k) | 不传 | 不传 |
+| 一次性短任务（算个数、写一句话） | 不传（默认不限） | 不传 | 不传 |
 | 修个 bug | `50_000`–`100_000` | 不传 | `600` (10 分钟) |
-| 实现完整功能 + 测试 | 不传 (默认 500k) | 不传 | `1800` (30 分钟) |
+| 实现完整功能 + 测试 | 不传（默认不限） | 不传 | `1800` (30 分钟) |
 | 长 refactor / migration | `1_000_000`+ | 不传 | `3600` (1 小时) |
 | 严控成本，定额执行 | 三个都传 | 按轮数兜底 | 按 SLA 算 |
 
 经验法则：
 
-- **默认就有 token 闸**——CLI `/goal xxx` 与 SDK `run_goal()` 未传时都是 500k
-- **需要更紧/更松就显式传 `token_budget`**——例如 `/goal --tokens 80000 ...`；不限则 `/goal --tokens -1 ...`
+- **默认不限 token**——CLI `/goal xxx` 与 SDK `run_goal()` 未传时都是 `None`
+- **需要成本闸就显式传 `token_budget`**——例如 `/goal --tokens 80000 ...`；不限也可 `/goal --tokens -1 ...`
 - **`turn_budget` 可选**——只在你想额外限制轮数时用 `--turns N`
 - **`wall_clock_budget_sec` 主要给 SLA 用**——例如"30 分钟内出个结果"
 
@@ -218,7 +218,7 @@ CLI 行为：
 
 ## Web 用法
 
-网页输入 `/goal`（或斜杠菜单选中）进入目标模式：先填 **一个 token 预算**（留空 = 不限，支持 `500k` / `2m`），再写目标内容后发送。网关只把 `token_budget` 传给 `run_goal`（默认 `-1`），不设 turns / wall，并传 `isolate=False`——loop 打在该会话缓存的 agent 上，插话 / 停止 / 下一轮聊天才能看见同一只实例。运行中状态条只显示 `tokens used` 或 `tokens used/budget`。每一轮的思考、工具调用和正文与普通对话同一套 SSE 流式画出，不再等整轮结束才出字。CLI `--turns` / `--wall` 仍只在终端生效。
+网页输入 `/goal`（或斜杠菜单选中）进入目标模式：默认显示「预算不限」，点芯片才打开 **Token 预算** 输入（留空 = 不限，支持 `500k` / `2m`），再写目标内容后发送。网关只把 `token_budget` 传给 `run_goal`（默认 `-1`），不设 turns / wall，并传 `isolate=False`——loop 打在该会话缓存的 agent 上，插话 / 停止 / 下一轮聊天才能看见同一只实例。运行中状态条只显示 `tokens used` 或 `tokens used/budget`。每一轮的思考、工具调用和正文与普通对话同一套 SSE 流式画出，不再等整轮结束才出字。CLI `--turns` / `--wall` 仍只在终端生效。
 
 ---
 

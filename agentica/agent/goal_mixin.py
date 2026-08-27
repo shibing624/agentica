@@ -58,8 +58,8 @@ class GoalMixin:
             default_turn_budget: Optional turn cap for newly set goals
                 (``None`` = no turn limit). Ignored if a manager already exists.
             default_token_budget: Default token cap for newly set goals
-                (see ``agentica.goals.DEFAULT_TOKEN_BUDGET``). Ignored if a
-                manager already exists.
+                (``None`` = unlimited, ``agentica.goals.DEFAULT_TOKEN_BUDGET``).
+                Ignored if a manager already exists.
             event_callback: ``(RunEventType, dict) -> None`` hook for
                 ``goal.set / continuing / completed / paused`` events.
 
@@ -164,11 +164,12 @@ class GoalMixin:
     ) -> "GoalRunResult":
         """Drive the standing-goal loop until completion / pause / budget.
 
-        Budget model: ``token_budget`` is the primary cost gate (default
-        ``DEFAULT_TOKEN_BUDGET = 500_000`` for both CLI and SDK).
-        ``turn_budget`` defaults to ``None`` (no turn cap); pass an int only
-        when you want an extra hard turn ceiling. ``wall_clock_budget_sec``
-        remains optional for SLA-style limits.
+        Budget model: ``token_budget`` is the primary cost gate and defaults
+        to unlimited (``None``) for CLI, SDK and Web. Pass a positive int to
+        cap spend, or ``-1`` for the same unlimited sentinel. ``turn_budget``
+        defaults to ``None`` (no turn cap); pass an int only when you want an
+        extra hard turn ceiling. ``wall_clock_budget_sec`` remains optional
+        for SLA-style limits.
 
         Ergonomic entry point: callers do NOT touch ``SessionLog``,
         ``GoalManager``, or ``GoalTool`` directly. The loop:
@@ -186,9 +187,8 @@ class GoalMixin:
         Args:
             objective: The standing goal text. Used as the first prompt.
             turn_budget: Optional max LLM turns. ``None`` = no turn limit.
-            token_budget: Max cumulative input+output tokens. ``None`` falls
-                back to ``DEFAULT_TOKEN_BUDGET`` (500_000). Pass a positive
-                int to override, or ``-1`` for unlimited.
+            token_budget: Max cumulative input+output tokens. ``None`` /
+                ``-1`` = unlimited. Pass a positive int to cap spend.
             wall_clock_budget_sec: Max agent wall-clock seconds. ``None`` /
                 ``-1`` = unlimited. Recommended ``1800``–``3600``
                 for long tasks.

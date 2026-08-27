@@ -183,7 +183,7 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
                 "  [dim]Usage: /goal [--turns N] [--tokens N] [--wall SECONDS] "
                 "<objective>  |  pause | resume | clear[/dim]"
             )
-            con.print("  [dim]Budgets: omit token → 500000 default; -1 → unlimited[/dim]")
+            con.print("  [dim]Budgets: omit token → unlimited; --tokens N to cap; -1 → unlimited[/dim]")
         return {"goal_manager": mgr}
 
     # ── pause / resume / clear are safe while agent is running ──
