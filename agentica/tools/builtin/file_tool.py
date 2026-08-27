@@ -19,7 +19,7 @@ import aiofiles
 
 from agentica.tools.base import Tool
 from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
-from agentica.tools.patch_tool import PatchContextError, apply_diff, parse_patch_envelope
+from agentica.tools.patch_tool import PatchContextError, PatchNoChangeError, apply_diff, parse_patch_envelope
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
@@ -737,29 +737,24 @@ class BuiltinFileTool(Tool):
         Use this for code edits, multi-hunk edits, and changes that span
         multiple files. Use write_file for new files or whole-file rewrites.
 
-        The patch must use exactly one envelope with one or more Add, Update, or
-        Delete sections. All paths and hunks are validated against current file
-        contents before any file is changed. If validation fails, no files are
-        written. Pass the entire patch as the ``patch`` string.
+        After ``@@``, the first character of each line is a space (keep an
+        existing line), ``-`` (delete), or ``+`` (insert). To add a comment,
+        emit a ``+`` line; a spaced copy of the file is a no-op.
 
-        Each line after ``@@`` must start with a space (keep), ``-`` (delete),
-        or ``+`` (add). Context must match the file exactly — no whitespace or
-        quote rewriting.
+        *** Begin Patch
+        *** Update File: app.py
+        @@
+        +# matching via BFS
+         def run():
+        -    timeout = 10
+        +    timeout = 30
+        *** End Patch
 
-        Example:
-            *** Begin Patch
-            *** Update File: app.py
-            @@
-             DEBUG = False
-            -TIMEOUT = 10
-            +TIMEOUT = 30
-            *** Add File: tests/test_timeout.py
-            +def test_timeout():
-            +    assert True
-            *** End Patch
+        Context must match the file exactly — no whitespace or quote
+        rewriting. All paths are validated before any file is changed.
 
         Args:
-            patch: Complete multi-file patch envelope.
+            patch: Begin/End Patch envelope. After @@: space keeps, '-' deletes, '+' inserts.
 
         Returns:
             Summary of files and line counts actually changed.
@@ -814,7 +809,12 @@ class BuiltinFileTool(Tool):
                         if operation.action == "update":
                             new_content = apply_diff(old_content, operation.diff, mode="default")
                             if new_content == old_content:
-                                raise ValueError("Update does not change the file.")
+                                raise PatchNoChangeError(
+                                    "Update does not change the file. "
+                                    "A leading space keeps the line; "
+                                    "to delete a line start it with '-'; "
+                                    "to add a line start it with '+'."
+                                )
                         else:
                             new_content = None
                 except (FileExistsError, FileNotFoundError, IsADirectoryError, PatchContextError, ValueError) as exc:
@@ -832,6 +832,8 @@ class BuiltinFileTool(Tool):
                 for _, error in preflight_errors:
                     if isinstance(error, PatchContextError):
                         kinds.add("context")
+                    elif isinstance(error, PatchNoChangeError):
+                        kinds.add("noop")
                     elif isinstance(error, (FileExistsError, FileNotFoundError, IsADirectoryError)):
                         kinds.add("fs")
                     else:
@@ -839,6 +841,11 @@ class BuiltinFileTool(Tool):
                 if kinds == {"grammar"}:
                     headline = (
                         f"Malformed patch for {len(preflight_errors)} {file_noun}; "
+                        "no files were changed."
+                    )
+                elif kinds == {"noop"}:
+                    headline = (
+                        f"Patch does not change {len(preflight_errors)} {file_noun}; "
                         "no files were changed."
                     )
                 elif kinds == {"context"}:

@@ -143,8 +143,30 @@ class TestBuiltinFileToolApplyPatch:
         function.process_entrypoint(strict=False)
         description = function.description
         assert "*** Begin Patch" in description
-        assert "space (keep)" in description
+        assert (
+            "+# matching via BFS\n"
+            " def run():\n"
+            "-    timeout = 10\n"
+            "+    timeout = 30"
+        ) in description
+        assert "spaced copy of the file is a no-op" in description
         assert "MUST call read_file" not in description
+
+    def test_noop_keep_only_hunk_says_to_use_minus_not_malformed(self, file_tool, tmp_dir):
+        Path(tmp_dir, "app.py").write_text("VALUE = 1\n# keep me\n")
+        patch_text = """*** Begin Patch
+*** Update File: app.py
+@@
+ VALUE = 1
+ # keep me
+*** End Patch"""
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.apply_patch(patch_text))
+        message = str(exc.value)
+        assert "does not change" in message
+        assert "Malformed patch" not in message
+        assert "start it with '-'" in message
+        assert Path(tmp_dir, "app.py").read_text() == "VALUE = 1\n# keep me\n"
 
     def test_applies_update_add_and_delete_in_one_call(self, file_tool, tmp_dir):
         Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")

@@ -74,6 +74,10 @@ class PatchContextError(ValueError):
         super().__init__("\n".join(failure.render() for failure in self.failures))
 
 
+class PatchNoChangeError(ValueError):
+    """An update hunk matched the file but would write the same bytes back."""
+
+
 PatchAction = Literal["add", "update", "delete"]
 
 
@@ -112,8 +116,14 @@ def parse_patch_envelope(patch: str) -> List[FilePatch]:
     normalized = patch.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
     lines = normalized.split("\n") if normalized else []
     if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != END_PATCH:
+        hint = ""
+        if lines and _FILE_MARKER_RE.fullmatch(lines[0]):
+            hint = (
+                " Wrap the body with '*** Begin Patch' and '*** End Patch'."
+            )
         raise ValueError(
             "Patch must start with '*** Begin Patch' and end with '*** End Patch'."
+            + hint
         )
 
     operations: List[FilePatch] = []
@@ -327,7 +337,8 @@ def _read_section(lines: List[str], start_index: int) -> ReadSectionResult:
         else:
             raise ValueError(
                 "Malformed patch: each line after @@ must start with "
-                f"' ' (keep), '-' (delete), or '+' (add); got {line!r}"
+                f"' ' (keep), '-' (delete), or '+' (add); got {line!r}. "
+                "Keep lines need a leading space."
             )
 
         line_content = line[1:]
