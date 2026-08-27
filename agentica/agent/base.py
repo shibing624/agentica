@@ -495,15 +495,16 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             self.hooks = hooks
 
         self.session_id = session_id
-        # A session_id normally implies a transcript on disk — the CLI needs it
-        # for /resume, /fork and /export. `enable_session_log=False` drops it,
-        # but "my service has its own conversation store" is not on its own a
-        # reason to: the runner also replays this file into working_memory on
-        # the process's first run (see `runner/loop.py`), so for a caller that
-        # relies on the agent's own history it is what carries a conversation
-        # across a restart. It is a genuinely dead second copy only for a caller
-        # that passes `messages=` every turn — that path neither writes it nor
-        # needs the replay.
+        # A session_id normally implies a transcript on disk — CLI /resume,
+        # /fork, /trace and /export, plus SDK ``agent.session_log``.
+        # `enable_session_log=False` drops it, but "my service has its own
+        # conversation store" is not on its own a reason to: the runner also
+        # replays this file into working_memory on the process's first run
+        # (see `runner/loop.py`), so for a caller that relies on the agent's
+        # own history it is what carries a conversation across a restart. It
+        # is a genuinely dead second copy only for a caller that passes
+        # `messages=` every turn — that path neither writes it nor needs the
+        # replay.
         self._session_log = None
         if session_id is not None and enable_session_log:
             # Scope session storage by project (work_dir) + user so the same
@@ -521,6 +522,15 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 work_dir=self.work_dir,
                 user_id=self.user_id,
             )
+
+    @property
+    def session_log(self) -> Optional[SessionLog]:
+        """Append-only JSONL transcript (same file Web ``/traces`` reads).
+
+        ``None`` when ``session_id`` is unset or ``enable_session_log=False``.
+        Use ``session_log.analyze()`` / ``.format_trace()`` / ``.export()``.
+        """
+        return self._session_log
 
     def _init_packed_config(
         self,

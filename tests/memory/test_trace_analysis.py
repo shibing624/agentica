@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """Trace analysis invariants — sequential scan, not timestamp slicing."""
+import json
+
 from agentica.memory.session_log import SessionLog
 from agentica.memory.trace import analyze_entries, last_completed_round
 
@@ -531,3 +533,34 @@ def test_last_completed_round_tps_uses_llm_ms_not_gateway_wall():
     assert f"{tps:.1f}" == "5.3"
     # The wrong denominator (gateway wall ~3.57s) is what printed 2.8 tok/s.
     assert f"{10 / 3.57:.1f}" == "2.8"
+
+
+def test_session_log_analyze_and_export(tmp_path):
+    log = SessionLog(session_id="s-export", base_dir=str(tmp_path))
+    log.append("user", "hello")
+    log.append_event("request_begin")
+    log.append_event("text")
+    log.append_event(
+        "token_usage",
+        request={"input": 10, "cache_read": 0, "cache_write": 0, "output": 4, "total": 14},
+    )
+    log.append_event("request_end", status="completed")
+    log.append("assistant", "hi")
+    analysis = log.analyze()
+    assert analysis["session_id"] == "s-export"
+    assert analysis["file"]["path"] == str(log.path)
+    assert analysis["file"]["sizeBytes"] > 0
+    assert analysis["hasTimeline"] is True
+    text = log.format_trace()
+    assert "Totals:" in text
+    assert "hello" in text
+    dest = tmp_path / "copy.jsonl"
+    out = log.export(dest)
+    assert out == dest
+    assert dest.read_text(encoding="utf-8") == log.path.read_text(encoding="utf-8")
+    analysis_path = log.export(tmp_path / "s.trace.json", kind="analysis")
+    payload = json.loads(analysis_path.read_text(encoding="utf-8"))
+    assert payload["session_id"] == "s-export"
+    round_text = log.format_trace(round_n=1)
+    assert "Round 1:" in round_text
+    assert "[user]" in round_text

@@ -60,6 +60,7 @@ def demo_basic_session():
     # Show session log contents
     print(f"\nSession log: {log.path}")
     print(f"Total entries: {log.entry_count()}")
+    print(agent.session_log.format_trace())
 
 
 def demo_resume_across_instances():

@@ -42,6 +42,7 @@ from agentica.cli.commands.session import (
     _cmd_rename,
     _cmd_resume,
     _cmd_retry,
+    _cmd_trace,
     _cmd_undo,
 )
 from agentica.cli.commands.tools_skills import (
@@ -61,8 +62,9 @@ COMMAND_REGISTRY = {
     "/clear": (_cmd_clear, "Clear screen and reset"),
     "/reset": (_cmd_clear, "Clear screen and reset (alias)"),
     "/history": (_cmd_history, "Show conversation history or full tool details"),
-    "/export": (_cmd_export, "Save conversation to JSON"),
-    "/save": (_cmd_export, "Save conversation to JSON (alias)"),
+    "/trace": (_cmd_trace, "Session trace: overview, /trace <n> round detail, /trace export"),
+    "/export": (_cmd_export, "Save session JSONL (jsonl | analysis | messages [path])"),
+    "/save": (_cmd_export, "Save session JSONL (alias for /export)"),
     "/retry": (_cmd_retry, "Retry the last message (resend to agent)"),
     "/undo": (_cmd_undo, "Deprecated — use /rewind (code + conversation rollback)"),
     "/compact": (_cmd_compact, "Compact context (summarize history)"),

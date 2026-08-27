@@ -23,10 +23,11 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Union, runtime_checkable
 from uuid import uuid4
 
 from agentica.utils.log import logger
@@ -1751,6 +1752,62 @@ class SessionLog:
     # ------------------------------------------------------------------
     # Utilities
     # ------------------------------------------------------------------
+
+    def analyze(self) -> Dict[str, Any]:
+        """Read-time Trace analysis over this JSONL (same payload as Web ``/traces``).
+
+        Does not write. Empty or missing files still return a valid analysis
+        dict with ``hasTimeline=False``.
+        """
+        from agentica.memory.trace import analyze_entries
+
+        analysis = analyze_entries(self.iter_raw_entries())
+        analysis["session_id"] = self.session_id
+        analysis["meta"]["cwd"] = self._cwd
+        analysis["meta"]["gitBranch"] = self._git_branch
+        size = 0
+        modified = ""
+        if self.path.exists():
+            stat = self.path.stat()
+            size = stat.st_size
+            modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+        analysis["file"] = {
+            "path": str(self.path),
+            "sizeBytes": size,
+            "modifiedAt": modified,
+            "name": self.get_name() or "",
+        }
+        return analysis
+
+    def format_trace(self, *, round_n: Optional[int] = None) -> str:
+        """Plain-text Trace report (overview, or 1-based ``round_n`` detail)."""
+        from agentica.memory.trace import format_trace_text
+
+        return format_trace_text(self.analyze(), round_n=round_n)
+
+    def export(self, dest: Union[str, Path], *, kind: str = "jsonl") -> Path:
+        """Write this session's trace to ``dest``.
+
+        ``kind="jsonl"`` copies the file (full transcript + events).
+        ``kind="analysis"`` writes the Web-identical analysis JSON.
+        """
+        dest_path = Path(dest)
+        if dest_path.exists() and dest_path.is_dir():
+            suffix = ".jsonl" if kind == "jsonl" else ".trace.json"
+            dest_path = dest_path / f"{self.session_id}{suffix}"
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "jsonl":
+            if not self.path.exists():
+                raise FileNotFoundError(f"session log not found: {self.path}")
+            shutil.copy2(self.path, dest_path)
+            return dest_path
+        if kind == "analysis":
+            dest_path.write_text(
+                json.dumps(self.analyze(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return dest_path
+        raise ValueError("kind must be 'jsonl' or 'analysis'")
 
     def exists(self) -> bool:
         """Check if the session log file exists."""

@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """Read-only Trace endpoints: paginated events + whole-file analysis."""
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .. import deps
 from ..services.agent_service import AgentService
-from agentica.memory.trace import analyze_entries
 
 router = APIRouter()
 
@@ -42,16 +39,5 @@ async def trace_analysis(
     log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
-    analysis = analyze_entries(log.iter_raw_entries())
-    analysis["session_id"] = session_id
-    # jsonl used to stamp the gateway process cwd; prefer the session's project.
-    analysis["meta"]["cwd"] = log._cwd
-    analysis["meta"]["gitBranch"] = log._git_branch
-    stat = log.path.stat()
-    analysis["file"] = {
-        "path": str(log.path),
-        "sizeBytes": stat.st_size,
-        "modifiedAt": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-        "name": log._read_meta_name(log.meta_path) or "",
-    }
+    analysis = log.analyze()
     return analysis

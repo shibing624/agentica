@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Session slash commands: history, resume, rename, compact, export
+@description: Session slash commands: history, resume, rename, compact, trace, export
 """
 
 from __future__ import annotations
@@ -872,6 +872,40 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_export(ctx: CommandContext, cmd_args: str = ""):
+    """Save the session trace.
+
+    /export                  copy JSONL to ./<session_id>.jsonl
+    /export <path>           copy JSONL to that path
+    /export jsonl [path]     same
+    /export analysis [path]  Web-identical analysis JSON
+    /export messages [path]  conversation-only JSON (no events / tool bodies)
+    """
+    con = get_console()
+    agent = ctx.current_agent
+    slog = agent._session_log if agent is not None else None
+    args = shlex.split(cmd_args or "")
+    kind = "jsonl"
+    dest: Optional[str] = None
+    if args and args[0] in {"jsonl", "analysis", "messages"}:
+        kind = args[0]
+        dest = args[1] if len(args) > 1 else None
+    elif args:
+        dest = args[0]
+
+    if kind == "messages":
+        _export_messages(ctx, dest)
+        return
+
+    if slog is None or not slog.exists():
+        con.print("[yellow]No session log on disk to export.[/yellow]")
+        return
+    suffix = ".jsonl" if kind == "jsonl" else ".trace.json"
+    target = Path(dest) if dest else Path(f"{agent.session_id}{suffix}")
+    out = slog.export(target, kind=kind)
+    con.print(f"  [green]Saved {kind} to {out}[/green]")
+
+
+def _export_messages(ctx: CommandContext, dest: Optional[str]) -> None:
     """Save conversation history to a JSON file (excludes system prompts)."""
     con = get_console()
     agent = ctx.current_agent
@@ -898,7 +932,7 @@ def _cmd_export(ctx: CommandContext, cmd_args: str = ""):
         con.print("[yellow]No messages to save.[/yellow]")
         return
 
-    filename = cmd_args.strip() if cmd_args.strip() else f"conversation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = dest if dest else f"conversation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     if not filename.endswith(".json"):
         filename += ".json"
 
@@ -912,6 +946,44 @@ def _cmd_export(ctx: CommandContext, cmd_args: str = ""):
     }
     Path(filename).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     con.print(f"  [green]Saved {len(export_msgs)} messages to {filename}[/green]")
+
+
+def _cmd_trace(ctx: CommandContext, cmd_args: str = ""):
+    """Show the session Trace (same analysis as Web ``/traces``).
+
+    /trace           overview (totals + rounds)
+    /trace <n>       round n detail (1-based)
+    /trace export [path]  copy JSONL (alias of /export jsonl)
+    """
+    con = get_console()
+    agent = ctx.current_agent
+    slog = agent._session_log if agent is not None else None
+    if slog is None or not slog.exists():
+        con.print("[yellow]No session log on disk. CLI always writes one; SDK needs session_id.[/yellow]")
+        return
+
+    args = shlex.split(cmd_args or "")
+    if args and args[0].lower() == "export":
+        rest = " ".join(args[1:])
+        return _cmd_export(ctx, f"jsonl {rest}".strip())
+
+    try:
+        if not args:
+            text = slog.format_trace()
+        else:
+            round_n = int(args[0])
+            text = slog.format_trace(round_n=round_n)
+    except ValueError:
+        con.print("[red]Usage: /trace [n] | /trace export [path][/red]")
+        return
+    except IndexError as exc:
+        con.print(f"[red]{exc}[/red]")
+        return
+
+    if args and ctx.open_pager_callback is not None and text.count("\n") > 24:
+        ctx.open_pager_callback(f"Trace round {args[0]}", text)
+        return
+    con.print(text)
 
 
 

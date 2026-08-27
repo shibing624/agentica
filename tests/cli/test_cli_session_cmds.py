@@ -4,6 +4,7 @@
 @description: Unit tests for CLI module.
 """
 
+import json
 import logging
 import os
 import sys
@@ -122,6 +123,8 @@ class TestRenameCommand(unittest.TestCase):
             cli_session._cmd_rename,
         )
         self.assertNotIn("/session", COMMAND_REGISTRY)
+        self.assertIs(COMMAND_REGISTRY["/trace"][0], cli_session._cmd_trace)
+        self.assertIs(COMMAND_REGISTRY["/export"][0], cli_session._cmd_export)
 
     def test_sessions_alias_routes_to_resume(self):
         self.assertIs(
@@ -188,8 +191,34 @@ class TestStatusSessionIdentity(unittest.TestCase):
             cli_model_config._cmd_status(context)
 
         printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
-        self.assertIn("Log file:", printed)
+        self.assertIn("Debug log:", printed)
         self.assertIn("20260813-99.log", printed)
+
+    def test_status_shows_session_jsonl_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session_log = SessionLog("sess-trace", base_dir=directory)
+            session_log.append("user", "hello")
+            agent = MagicMock()
+            agent.session_id = "sess-trace"
+            agent._session_log = session_log
+            agent.tools = []
+            agent.tool_config.permission_mode = "allow-all"
+            agent.run_response.cost_tracker = None
+            context = CommandContext(
+                agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+                current_agent=agent,
+                tui_state={},
+            )
+            console = MagicMock()
+            with (
+                patch("agentica.cli.commands.model_config.get_console", return_value=console),
+                patch("agentica.cli.commands.model_config.resolve_active_profile_name", return_value=("default", "default")),
+                patch("agentica.cli.commands.model_config.get_subagent_configs", return_value={}),
+            ):
+                cli_model_config._cmd_status(context)
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("Session log:", printed)
+            self.assertIn("sess-trace.jsonl", printed)
 
 
 class TestPeerRecordAdvertisesTheCliLog(unittest.TestCase):
@@ -391,6 +420,89 @@ class TestResumeArchivedFilter(unittest.TestCase):
 
         self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-archived-2222")
         self.assertIsNotNone(result)
+
+
+class TestTraceAndExportCommands(unittest.TestCase):
+    def _ctx(self, tmp_dir, session_id="sess-cli"):
+        session_log = SessionLog(session_id, base_dir=str(tmp_dir))
+        session_log.append("user", "ship the trace")
+        session_log.append_event("request_begin")
+        session_log.append_event("text")
+        session_log.append_event(
+            "token_usage",
+            request={"input": 20, "cache_read": 0, "cache_write": 0, "output": 5, "total": 25},
+        )
+        session_log.append_event("request_end", status="completed")
+        session_log.append("assistant", "done")
+        agent = MagicMock()
+        agent.session_id = session_id
+        agent._session_log = session_log
+        agent.working_memory.messages = []
+        context = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+            current_agent=agent,
+        )
+        return context, session_log
+
+    def test_trace_prints_totals_and_rounds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, _ = self._ctx(directory)
+            console = MagicMock()
+            with patch("agentica.cli.commands.session.get_console", return_value=console):
+                cli_session._cmd_trace(context, "")
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("Trace", printed)
+            self.assertIn("Totals:", printed)
+            self.assertIn("ship the trace", printed)
+
+    def test_trace_round_detail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, _ = self._ctx(directory)
+            console = MagicMock()
+            with patch("agentica.cli.commands.session.get_console", return_value=console):
+                cli_session._cmd_trace(context, "1")
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("Round 1:", printed)
+            self.assertIn("[user]", printed)
+
+    def test_export_jsonl_copies_the_session_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx(directory)
+            dest = Path(directory) / "out.jsonl"
+            console = MagicMock()
+            with patch("agentica.cli.commands.session.get_console", return_value=console):
+                cli_session._cmd_export(context, str(dest))
+            self.assertTrue(dest.is_file())
+            self.assertEqual(dest.read_text(encoding="utf-8"), session_log.path.read_text(encoding="utf-8"))
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("jsonl", printed)
+
+    def test_export_analysis_writes_web_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx(directory)
+            dest = Path(directory) / "out.trace.json"
+            console = MagicMock()
+            with patch("agentica.cli.commands.session.get_console", return_value=console):
+                cli_session._cmd_export(context, f"analysis {dest}")
+            payload = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(payload["session_id"], session_log.session_id)
+            self.assertTrue(payload["hasTimeline"])
+            self.assertEqual(payload["totals"]["rounds"], 1)
+
+    def test_export_messages_keeps_the_old_conversation_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, _ = self._ctx(directory)
+            msg = MagicMock()
+            msg.role = "user"
+            msg.content = "hi"
+            msg.tool_calls = None
+            context.current_agent.working_memory.messages = [msg]
+            dest = Path(directory) / "chat.json"
+            console = MagicMock()
+            with patch("agentica.cli.commands.session.get_console", return_value=console):
+                cli_session._cmd_export(context, f"messages {dest}")
+            payload = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(payload["messages"][0]["content"], "hi")
 
 
 if __name__ == "__main__":

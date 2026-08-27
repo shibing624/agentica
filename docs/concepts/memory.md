@@ -200,14 +200,21 @@ agent = Agent(
 
 ## Session Log（JSONL）
 
-基于追加写 JSONL 的会话日志，支持会话恢复和 fork：
+CLI、Web 轨迹、SDK **写的是同一份** append-only JSONL：
+
+`~/.agentica/projects/<user>/<project-slug>/<session_id>.jsonl`
+
+对话行（`user` / `assistant` / `tool`）给 `/resume` 回放；`type=event` 行只给观测，不进模型上下文。Web `/traces`、CLI `/trace`、SDK `agent.session_log.analyze()` 都是对这份文件的**读时分析**。
 
 ```python
 from agentica import Agent
 
-agent = Agent(session_id="my-session-001")
-# 消息自动写入 .sessions/my-session-001.jsonl
-# 下次以相同 session_id 创建 Agent 时自动恢复会话
+agent = Agent(session_id="my-session-001")  # 不传 session_id 则不落盘
+log = agent.session_log
+print(log.path)
+print(log.format_trace())          # 与 CLI /trace 同一份文本
+log.export("my-session-001.jsonl") # 完整轨迹
+log.export("trace.json", kind="analysis")  # 与 Web /traces 同一份 JSON
 ```
 
 支持 `compact_boundary`（压缩边界）：恢复时从最后一个边界之后开始加载，跳过历史数据。

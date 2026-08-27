@@ -24,6 +24,13 @@ from agentica.skills import (
 from agentica.skills.skill_registry import reset_skill_registry
 
 
+def format_path_for_display(path: str) -> str:
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        return "~" + path[len(home):]
+    return path
+
+
 def format_cli_log_location() -> Optional[str]:
     """Return ``~/…/logs/YYYYMMDD-<pid>.log (LEVEL)`` for this CLI process.
 
@@ -36,9 +43,7 @@ def format_cli_log_location() -> Optional[str]:
     path = config.AGENTICA_LOG_FILE
     if not path:
         return None
-    home = os.path.expanduser("~")
-    display = "~" + path[len(home):] if path.startswith(home) else path
-    return f"{display} ({config.AGENTICA_LOG_LEVEL})"
+    return f"{format_path_for_display(path)} ({config.AGENTICA_LOG_LEVEL})"
 
 
 

@@ -519,7 +519,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | POST | `/api/workspace/stat` | 批量确认相对路径是否存在 |
 | POST | `/api/workspace/upload` | 上传到当前目录（multipart，需 `X-Agentica-Client`） |
 | GET | `/api/sessions/{id}/trace/events` | 分页原始 JSONL 事件 |
-| GET | `/api/sessions/{id}/trace/analysis` | 整份轨迹分析（重启后按 session id 跨 project 定位 jsonl） |
+| GET | `/api/sessions/{id}/trace/analysis` | 整份轨迹分析（`SessionLog.analyze()`，与 CLI `/trace`、SDK `session_log.analyze()` 同一 payload；重启后按 session id 跨 project 定位 jsonl） |
 | GET / PUT | `/api/prefs` | 当前账号的 Web 偏好（主题 / 语言 / 审批档 / 上次会话 / `auto_extract_memory`），落在 `$AGENTICA_HOME/gateway/prefs/<账号>.json`；浏览器 localStorage 只是首屏缓存 |
 | GET / PUT | `/api/user_agents_md` | 当前账号的用户级 `AGENTS.md`（常驻规则，进 system prompt）。PUT body：`{content}` |
 | GET | `/api/memory` | 当前账号的 `MEMORY.md` 索引条目（只读）。没有 PUT——旧前端往这里写 AGENTS.md 会拿到 405 |

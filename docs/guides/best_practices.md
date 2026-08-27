@@ -923,11 +923,14 @@ agent = Agent(
     model=...,
     session_id=user_id,  # 多用户场景常用 user_id 作为 session_id
 )
+log = agent.session_log
+log.format_trace()
+log.export(f"{user_id}.jsonl")
 ```
 
-落盘路径：`~/.agentica/projects/<project-slug>/<session_id>.jsonl`，`<project-slug>` 由当前工作目录派生。
+落盘路径：`~/.agentica/projects/<user>/<project-slug>/<session_id>.jsonl`。CLI 总会生成 `session_id`；Web `/traces` 读的是同一份文件。`enable_session_log=False` 仍然关闭落盘（服务自有会话库时用）。
 
-源码位置：`agent/base.py::_init_execution`，`session_id is None` 时 `_session_log` 直接为 `None`。
+源码位置：`agent/base.py::_init_execution`，`session_id is None` 时 `_session_log` 直接为 `None`。`SessionLog.analyze()` 与 Gateway `GET /api/sessions/{id}/trace/analysis` 同一 payload。
 
 ### Q: 配了 `long_term_memory_config` / `Workspace`，但长期记忆和对话归档没生效？
 

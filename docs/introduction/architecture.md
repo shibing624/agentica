@@ -181,7 +181,9 @@ Layer 2 摘要（一次 LLM 调用，不可逆）:
 
 **恢复机制**：重新创建相同 `session_id` 的 Agent 时，从最后一个 `compact_boundary` 开始加载消息，跳过历史数据（大文件优化）。
 
-**存储路径**：`~/.agentica/projects/<sanitized-cwd>/<session-id>.jsonl`
+**存储路径**：`~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.jsonl`
+
+同一份文件的三个出口：Web `/traces`、CLI `/trace` / `/export`、SDK `agent.session_log.analyze()` / `.export()`。`type=event` 行只给观测，`load()` 不回放它们。
 
 ## 工具并发执行
 

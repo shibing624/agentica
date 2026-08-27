@@ -31,9 +31,10 @@ class TestSessionLogIsOptional(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             agent = _agent(session_id="s1", session_base_dir=tmpdir)
         self.assertIsNotNone(agent._session_log)
+        self.assertIs(agent.session_log, agent._session_log)
 
     def test_a_service_with_its_own_store_can_turn_it_off(self):
-        """The JSONL exists for /resume, /fork and /export. A service that has
+        """The JSONL exists for /resume, /fork, /trace and /export. A service that has
         none of those gets a second copy of every turn under the process's home
         directory that nothing ever reads back."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -46,6 +47,7 @@ class TestSessionLogIsOptional(unittest.TestCase):
     def test_the_session_id_itself_is_unaffected(self):
         agent = _agent(session_id="s1", enable_session_log=False)
         self.assertEqual(agent.session_id, "s1")
+        self.assertIsNone(agent.session_log)
 
 
 class TestCompactionIsReportedOnTheRun(unittest.TestCase):

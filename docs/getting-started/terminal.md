@@ -423,6 +423,37 @@ Session Log 里的 tool 轮次统一按 OpenAI 线格式存放，Anthropic 的 `
 
 完整工具记录只在 pager 中显示，不会重新灌入终端 scrollback。
 
+### `/trace [n]`
+
+Session JSONL 的读时分析，和 Web 对话标题旁「查看轨迹」同一套 `analyze_entries()`。
+
+```text
+> /trace
+  Trace  my-session (a8c3f217-…)
+    File: ~/.agentica/projects/…/a8c3f217-….jsonl  (48,102 B)
+    Totals: 4 rounds · 12.3K in / 2.1K out · $0.12 · 3 tools · 45.2s
+      1. 修复登录超时
+           12.1s  8.2K/1.1K  $0.04  3 tools
+
+> /trace 1
+  Round 1: 修复登录超时
+  [user] 修复登录超时
+  [tool_call] read_file app.py
+  …
+```
+
+`/trace export [path]` 等价于 `/export jsonl`。`/status` 的 **Session log** 行是这份 jsonl 的路径；**Debug log** 是进程 `~/.agentica/logs/*.log`，两回事。
+
+### `/export` / `/save`
+
+默认拷贝完整 session JSONL（对话 + event 轨迹）。旧的「只要对话、不要工具正文」瘦 JSON 改走 `/export messages`：
+
+```text
+> /export                         # ./<session_id>.jsonl
+> /export analysis out.json       # 与 Web /traces 同一份分析 JSON
+> /export messages chat.json      # 旧行为：role/content 列表
+```
+
 ### `/clear` / `/reset`
 清屏并重置当前会话（等同于 `/newchat` + 清除屏幕）。
 

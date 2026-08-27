@@ -764,3 +764,132 @@ def last_completed_round(entries: Iterable[Dict[str, Any]]) -> Optional[Dict[str
         if not r.get("compaction")
     ]
     return rounds[-1] if rounds else None
+
+
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        v = n / 1_000_000
+        return f"{int(v)}M" if v == int(v) else f"{v:.1f}M"
+    if n >= 1_000:
+        v = n / 1_000
+        return f"{int(v)}K" if v == int(v) else f"{v:.1f}K"
+    return str(int(n))
+
+
+def _fmt_ms(ms: int) -> str:
+    if ms < 1000:
+        return f"{ms}ms"
+    seconds = ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s:02d}s"
+
+
+def _fmt_cost(value: Optional[float]) -> str:
+    if value is None:
+        return "—"
+    if 0 < value < 0.00005:
+        return "<$0.0001"
+    if value < 0.00995:
+        return f"${value:.4f}"
+    return f"${value:.2f}"
+
+
+def format_trace_text(analysis: Dict[str, Any], *, round_n: Optional[int] = None) -> str:
+    """Plain-text Trace report shared by CLI ``/trace`` and SDK ``format_trace``.
+
+    ``round_n`` is 1-based into ``analysis["rounds"]``. ``None`` prints the
+    session overview (Web Trace header + round list).
+    """
+    lines: List[str] = []
+    file_info = analysis.get("file") or {}
+    name = file_info.get("name") or ""
+    sid = analysis.get("session_id") or ""
+    if name and sid:
+        lines.append(f"Trace  {name} ({sid})")
+    elif sid:
+        lines.append(f"Trace  {sid}")
+    else:
+        lines.append("Trace")
+    path = file_info.get("path") or ""
+    size = file_info.get("sizeBytes")
+    if path:
+        size_s = f"  ({size:,} B)" if isinstance(size, int) and size else ""
+        lines.append(f"  File: {path}{size_s}")
+    meta = analysis.get("meta") or {}
+    model = " / ".join(str(x) for x in (meta.get("provider"), meta.get("model")) if x)
+    loc = " · ".join(str(x) for x in (model, meta.get("cwd"), meta.get("gitBranch")) if x)
+    if loc:
+        lines.append(f"  {loc}")
+    totals = analysis.get("totals") or {}
+    tok = totals.get("tokens") or {}
+    err = totals.get("toolErrors") or 0
+    err_s = f" ({err} err)" if err else ""
+    lines.append(
+        f"  Totals: {totals.get('rounds', 0)} rounds · "
+        f"{_fmt_tokens(tok.get('prompt') or 0)} in / {_fmt_tokens(tok.get('output') or 0)} out · "
+        f"{_fmt_cost(totals.get('costUsd'))} · "
+        f"{totals.get('toolCalls', 0)} tools{err_s} · "
+        f"{_fmt_ms(totals.get('elapsedMs') or 0)}"
+    )
+    if not analysis.get("hasTimeline"):
+        lines.append("  (no event timeline — older session; rounds still listed)")
+    rounds = analysis.get("rounds") or []
+    if round_n is None:
+        if rounds:
+            lines.append("")
+        for i, round_row in enumerate(rounds, 1):
+            rtok = round_row.get("tokens") or {}
+            title = " ".join(str(round_row.get("title") or f"Round {i}").split())
+            if len(title) > 72:
+                title = title[:69] + "…"
+            mark = " [compact]" if round_row.get("compaction") else ""
+            lines.append(f"  {i:>3}.{mark} {title}")
+            lines.append(
+                f"       {_fmt_ms(round_row.get('durationMs') or 0)}  "
+                f"{_fmt_tokens(rtok.get('prompt') or 0)}/{_fmt_tokens(rtok.get('output') or 0)}  "
+                f"{_fmt_cost(round_row.get('costUsd'))}  "
+                f"{round_row.get('toolCalls') or 0} tools"
+            )
+        if rounds:
+            lines.append("")
+            lines.append("  /trace <n>  round detail · /export  copy jsonl")
+        return "\n".join(lines)
+
+    if round_n < 1 or round_n > len(rounds):
+        raise IndexError(f"round {round_n} is out of range (1–{len(rounds) or 0})")
+    round_row = rounds[round_n - 1]
+    rtok = round_row.get("tokens") or {}
+    title = " ".join(str(round_row.get("title") or f"Round {round_n}").split())
+    lines.append("")
+    lines.append(f"  Round {round_n}: {title}")
+    lines.append(
+        f"  {_fmt_ms(round_row.get('durationMs') or 0)}  "
+        f"llm {_fmt_ms(round_row.get('llmMs') or 0)}  "
+        f"{_fmt_tokens(rtok.get('prompt') or 0)} in / {_fmt_tokens(rtok.get('output') or 0)} out  "
+        f"{_fmt_cost(round_row.get('costUsd'))}  "
+        f"{round_row.get('toolCalls') or 0} tools"
+    )
+    phases = round_row.get("phases") or {}
+    phase_bits = [
+        f"{key} {_fmt_ms(int(ms))}"
+        for key, ms in phases.items()
+        if ms
+    ]
+    if phase_bits:
+        lines.append("  phases: " + " · ".join(phase_bits))
+    lines.append("")
+    for entry in round_row.get("entries") or []:
+        kind = entry.get("kind") or "entry"
+        summary = entry.get("summary") or ""
+        err_mark = " ERR" if entry.get("isError") else ""
+        lines.append(f"  [{kind}]{err_mark} {summary}")
+        detail = entry.get("detail") or ""
+        if detail and detail != summary:
+            for detail_line in detail.splitlines()[:40]:
+                lines.append(f"      {detail_line}")
+            extra = detail.count("\n") + 1 - 40
+            if extra > 0:
+                lines.append(f"      … [{extra} more lines]")
+    return "\n".join(lines)

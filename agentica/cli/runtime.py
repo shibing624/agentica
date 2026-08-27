@@ -871,7 +871,7 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
 
     subagent_types = sorted(get_subagent_configs())
     lines.append(f"- Subagent types: {', '.join(subagent_types)}")
-    lines.append("- Slash commands: /rename /resume /status /model /tools /skills /agents /config /usage /permissions /help /exit")
+    lines.append("- Slash commands: /rename /resume /status /trace /export /model /tools /skills /agents /config /usage /permissions /help /exit")
     lines.append("- To extend: /skills install <name>, /agents create <name>")
 
     return "\n".join(lines)

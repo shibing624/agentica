@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 from agentica.cli.runtime import (
@@ -52,6 +53,7 @@ from agentica.cli.commands.helpers import (
     _sanitize_history_for_model_switch,
     _update_task_tool_auxiliary_model,
     format_cli_log_location,
+    format_path_for_display,
 )
 from agentica.cli.commands.cron_cmd import _confirm_via_tui
 
@@ -135,6 +137,19 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
         forked_from = agent._session_log.get_forked_from() if agent._session_log is not None else None
         if forked_from:
             con.print(f"  Forked from: [dim]{forked_from}[/dim]")
+        slog = agent._session_log
+        if slog is not None:
+            path_str = str(slog.path)
+            size_bit = ""
+            try:
+                p = Path(path_str)
+                if p.is_file():
+                    size_bit = f"  [dim]({p.stat().st_size:,} B)[/dim]"
+            except (OSError, TypeError, ValueError):
+                pass
+            con.print(
+                f"  Session log: [cyan]{format_path_for_display(path_str)}[/cyan]{size_bit}"
+            )
     peers = ctx.peer_session
     if peers is not None:
         con.print(
@@ -144,7 +159,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
         )
     log_location = format_cli_log_location()
     if log_location:
-        con.print(f"  Log file:   [dim]{log_location}[/dim]")
+        con.print(f"  Debug log:  [dim]{log_location}[/dim]")
 
 
 

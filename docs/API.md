@@ -110,6 +110,23 @@ from agentica.hooks import RunHooks, AgentHooks
 from agentica.workspace import Workspace
 ```
 
+### Session Log（默认装，需显式 `session_id`）
+
+三端写的是同一份 JSONL。Web `/traces`、CLI `/trace` `/export`、SDK 下面这组方法都是对这份文件的读时分析，不是第二套存储。不传 `session_id` 不落盘；`enable_session_log=False` 关掉落盘。
+
+```python
+from agentica import Agent
+from agentica.memory.session_log import SessionLog  # 也可从已有文件打开
+
+agent = Agent(model=..., session_id="my-session-001")
+log = agent.session_log          # Optional[SessionLog]
+log.analyze()                    # 与 GET /api/sessions/{id}/trace/analysis 同一 payload
+log.format_trace()               # 与 CLI /trace 同一份文本；format_trace(round_n=1) 展开一轮
+log.export("out.jsonl")          # kind="jsonl"（默认）| "analysis"
+```
+
+CLI 对应：`/trace`、`/trace <n>`、`/export`（默认拷贝 jsonl）、`/status` 的 **Session log** 行。
+
 ---
 
 ## Product Presets（默认装，但有产品观点）
