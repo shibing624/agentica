@@ -18,50 +18,6 @@ from agentica.tools.background_processes import BackgroundProcessRegistry
 # ==================== SessionState ====================
 
 
-class _ToolResultSequencer:
-    """Align parallel tool results with their call lines.
-
-    The runner emits ``tool_call_started`` then ``tool_call_completed``
-    events. Each completed event carries the FULL accumulated tool list
-    (``chunk.tools``), so a naive handler that renders the first tool
-    with content mis-dispatches under parallelism — results get duplicated
-    or land under the wrong call line.
-
-    This sequencer keeps one ordered slot per started tool and flushes
-    results front-to-back in call order: a slow tool never blocks later
-    tools from being shown (they queue until the earlier slot is ready),
-    and every result renders exactly once, directly beneath its own call
-    line. Backend stays parallel; the frontend stays aligned.
-    """
-
-    def __init__(self) -> None:
-        self._slots: List[dict] = []
-        self._shown: set = set()
-
-    def on_start(self, tool_call_id: Optional[str], tool_name: str) -> str:
-        tc_id = tool_call_id or f"{tool_name}:{len(self._slots)}"
-        self._slots.append({"id": tc_id, "done": False, "result": None})
-        return tc_id
-
-    def on_complete(self, tool_call_id: Optional[str], tool_info: dict) -> None:
-        if not tool_call_id or tool_call_id in self._shown:
-            return
-        if "content" not in tool_info:
-            return
-        for slot in self._slots:
-            if slot["id"] == tool_call_id and not slot["done"]:
-                slot["done"] = True
-                slot["result"] = tool_info
-                return
-
-    def drain(self):
-        """Yield completed result infos in call order, popping done front slots."""
-        while self._slots and self._slots[0]["done"]:
-            slot = self._slots.pop(0)
-            self._shown.add(slot["id"])
-            yield slot["result"]
-
-
 @dataclass
 class _InputRequest:
     """A pending ask_user_question tool request awaiting a typed reply.
@@ -166,4 +122,4 @@ class SessionState:
     cron_stop_event: Optional[threading.Event] = None
 
 
-__all__ = ['_ToolResultSequencer', '_InputRequest', 'SessionState']
+__all__ = ['_InputRequest', 'SessionState']

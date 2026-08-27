@@ -14,10 +14,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .live_blocks import LiveToolBlock, LiveToolResult, LiveToolStore
+from .live_blocks import LIVE_MAX_ROWS, LiveToolBlock, LiveToolResult, LiveToolStore
 
+from rich.markup import escape as rich_escape
 from rich.markdown import Markdown
 from rich.syntax import Syntax
+from rich.text import Text
 
 from agentica.cli.runtime import TOOL_ICONS
 from agentica.cli.usage_display import (
@@ -42,8 +44,11 @@ _RICH_MARKUP = re.compile(r"\[/?[^\]]+\]")
 
 
 def _strip_rich_markup(text: str) -> str:
-    """Drop Rich markup tags for the plain-text live window."""
-    return _RICH_MARKUP.sub("", text).strip()
+    """Drop Rich style tags; keep literal ``[...]`` in the payload."""
+    try:
+        return Text.from_markup(text).plain.strip()
+    except Exception:
+        return _RICH_MARKUP.sub("", text).strip()
 
 
 def _parse_fence_line(line: str) -> Optional[Tuple[str, int, str]]:
@@ -399,8 +404,6 @@ class StreamDisplayManager:
         self._live.start(tc_id, tool_name, tool_args or {})
         self._notify_live()
 
-    LIVE_MAX_ROWS = 12
-
     def compose_live(self, spinner: str = "⠋") -> List[str]:
         """Plain-text rows for the prompt_toolkit live window (capped)."""
         lines: List[str] = []
@@ -421,10 +424,10 @@ class StreamDisplayManager:
                 if len(plain) > 80:
                     plain = plain[:77] + "..."
                 lines.append(f"     {plain}")
-        if len(lines) <= self.LIVE_MAX_ROWS:
+        if len(lines) <= LIVE_MAX_ROWS:
             return lines
-        hidden = len(lines) - (self.LIVE_MAX_ROWS - 1)
-        return lines[: self.LIVE_MAX_ROWS - 1] + [f"  … +{hidden} more"]
+        hidden = len(lines) - (LIVE_MAX_ROWS - 1)
+        return lines[: LIVE_MAX_ROWS - 1] + [f"  … +{hidden} more"]
 
     def _notify_live(self) -> None:
         if self.on_live_change is not None:
@@ -878,6 +881,25 @@ class StreamDisplayManager:
             )
             self._drain_live_prefix()
             return
+        if len(self._live) > 0:
+            # Result id did not match any live start. Print call+result now so
+            # the body cannot land before a later abandon_live call line.
+            self._flush_live_block(
+                LiveToolBlock(
+                    tool_call_id=tool_call_id or f"_orphan:{self.tool_count}",
+                    tool_name=tool_name,
+                    tool_args=dict(tool_args) if tool_args else {},
+                    finished=True,
+                    result=LiveToolResult(
+                        content="" if result_content is None else str(result_content),
+                        is_error=is_error,
+                        elapsed=elapsed,
+                        tool_args=tool_args,
+                        tool_display_meta=tool_display_meta,
+                    ),
+                )
+            )
+            return
         self._emit_tool_result(
             tool_name, result_content, is_error=is_error, elapsed=elapsed,
             tool_args=tool_args, tool_call_id=tool_call_id,
@@ -1207,7 +1229,10 @@ class StreamDisplayManager:
             run_id = event.get("run_id")
             parent_id = None
             if et == "subagent.start":
-                parent_id = self._live.bind_run(run_id) if run_id else None
+                parent_id = (
+                    self._live.bind_run(run_id, task=event.get("task"))
+                    if run_id else None
+                )
             else:
                 parent_id = self._live.parent_for_run(run_id)
             lines = self._subagent_event_lines(et, event)
@@ -1253,7 +1278,7 @@ class StreamDisplayManager:
             if verbosity == "off":
                 return lines
 
-            agent_name = event.get("agent_name", "Subagent")
+            agent_name = rich_escape(str(event.get("agent_name", "Subagent") or "Subagent"))
             # Full task text — truncating here hides the brief the parent wrote.
             task = str(event.get("task", "") or "").strip()
             max_turns = event.get("max_turns")
@@ -1263,11 +1288,14 @@ class StreamDisplayManager:
                 budget = f" [turns≤{max_turns}, calls≤{tool_call_limit}]"
             elif max_turns is not None:
                 budget = f" [turns≤{max_turns}]"
+            budget = rich_escape(budget)
             # Show which model is actually running the subagent: whether a task
             # went to the cheap auxiliary model or the main one is the single
             # most useful thing to know when judging its output.
             model_id = event.get("model_id")
-            model_note = f" [dim]({model_id})[/dim]" if model_id else ""
+            model_note = (
+                f" [dim]({rich_escape(str(model_id))})[/dim]" if model_id else ""
+            )
             prefix = (
                 f"{self._SUB_INDENT}{self._subagent_prefix(run_id)}"
                 f"[dim cyan]⮕ {agent_name}[/dim cyan]{model_note}"
@@ -1278,11 +1306,11 @@ class StreamDisplayManager:
                 lines.append(f"{prefix}[dim]{budget}[/dim]")
                 for line in task.splitlines():
                     lines.append(
-                        f"{self._SUB_INDENT}  [dim italic]{line}[/dim italic]"
+                        f"{self._SUB_INDENT}  [dim italic]{rich_escape(line)}[/dim italic]"
                     )
             else:
                 lines.append(
-                    f"{prefix} [dim italic]{task}[/dim italic][dim]{budget}[/dim]"
+                    f"{prefix} [dim italic]{rich_escape(task)}[/dim italic][dim]{budget}[/dim]"
                 )
 
         elif et == "subagent.tool_started":
@@ -1304,10 +1332,10 @@ class StreamDisplayManager:
                 info = info[:97] + "..."
             line = (
                 f"{self._SUB_INDENT}{self._subagent_prefix(run_id)}"
-                f"[dim magenta]{tool_name}[/dim magenta]"
+                f"[dim magenta]{rich_escape(str(tool_name))}[/dim magenta]"
             )
             if info:
-                line += f" [dim]{info}[/dim]"
+                line += f" [dim]{rich_escape(info)}[/dim]"
             lines.append(line)
 
         elif et == "subagent.tool_completed":
@@ -1329,15 +1357,16 @@ class StreamDisplayManager:
             if is_error:
                 lines.append(
                     f"{self._SUB_INDENT}{prefix}"
-                    f"[dim red]⚠ {tool_name}[/dim red] [dim]{info}[/dim]"
+                    f"[dim red]⚠ {rich_escape(str(tool_name))}[/dim red] "
+                    f"[dim]{rich_escape(info)}[/dim]"
                 )
                 return lines
             line = (
                 f"{self._SUB_INDENT}{prefix}"
-                f"[dim green]✓ {tool_name}[/dim green]"
+                f"[dim green]✓ {rich_escape(str(tool_name))}[/dim green]"
             )
             if info:
-                line += f" [dim]{info}[/dim]"
+                line += f" [dim]{rich_escape(info)}[/dim]"
             if elapsed_str:
                 line += f"[dim]{elapsed_str}[/dim]"
             lines.append(line)
@@ -1358,7 +1387,7 @@ class StreamDisplayManager:
                 # it's the actual answer the parent agent will consume.
                 lines.append(
                     f"{self._SUB_INDENT}[dim cyan]⤷[/dim cyan] "
-                    f"[dim italic]{preview}[/dim italic]"
+                    f"[dim italic]{rich_escape(preview)}[/dim italic]"
                 )
 
         return lines

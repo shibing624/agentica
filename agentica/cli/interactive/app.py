@@ -879,59 +879,63 @@ def run_interactive(
 
     def spinner_loop():
         while not state.should_exit:
-            if not (state.agent_running and app.is_running):
-                time.sleep(0.3)
-                continue
-            # Agent parked on a ask_user_question/confirm tool: stop churning
-            # invalidate() (it fights the input renderer and desyncs the
-            # cursor) and replace the stale "🔧 tool (Ns)" phase with a
-            # steady "waiting" line so the user knows it's their turn.
-            if state.input_request is not None:
-                changed = False
-                if tui_state.get("spinner_text") != _WAITING_FOR_INPUT_TEXT:
-                    tui_state["spinner_text"] = _WAITING_FOR_INPUT_TEXT
-                    changed = True
+            try:
+                if not (state.agent_running and app.is_running):
+                    time.sleep(0.3)
+                    continue
+                # Agent parked on a ask_user_question/confirm tool: stop churning
+                # invalidate() (it fights the input renderer and desyncs the
+                # cursor) and replace the stale "🔧 tool (Ns)" phase with a
+                # steady "waiting" line so the user knows it's their turn.
+                if state.input_request is not None:
+                    changed = False
+                    if tui_state.get("spinner_text") != _WAITING_FOR_INPUT_TEXT:
+                        tui_state["spinner_text"] = _WAITING_FOR_INPUT_TEXT
+                        changed = True
+                    live = tui_state.get("live_display")
+                    if live is not None:
+                        lines = live.compose_live("⏸")
+                        if tui_state.get("live_tool_lines") != lines:
+                            tui_state["live_tool_lines"] = lines
+                            changed = True
+                    if changed:
+                        app.invalidate()
+                    time.sleep(0.2)
+                    continue
+                phase = tui_state.get("_phase", "thinking")
+                base = tui_state.get("_spinner_base", "")
+                start = tui_state.get("_phase_start") or time.monotonic()
+                elapsed = time.monotonic() - start
+                tui_state["spinner_text"] = _render_spinner_text(
+                    _frame_idx[0], phase, base, elapsed
+                )
+                # Refresh live status-bar fields (tokens / cost / time) every tick.
+                # The cost_tracker is updated by the model layer on every LLM call,
+                # so this picks up new token/cost totals within ~120ms of any API
+                # call returning — including right after each tool completes and the
+                # next "decide what to do" call lands. Time fields tick smoothly.
+                # Guarded by ``_turn_request_start`` being set (only valid mid-turn);
+                # the stream loop clears it at turn end.
+                _req_start = tui_state.get("_turn_request_start")
+                if _req_start is not None:
+                    _refresh_live_status(
+                        tui_state, state.current_agent, _req_start,
+                        tui_state.get("_turn_cost_baseline", 0.0),
+                        tui_state.get("_turn_active_baseline", 0.0),
+                        tui_state.get("_turn_calls_baseline", 0),
+                        tui_state.get("_turn_goal_tokens_baseline", 0),
+                    )
+                frame = _BRAILLE_SPINNER[_frame_idx[0]]
+                tui_state["_live_spinner"] = frame
                 live = tui_state.get("live_display")
                 if live is not None:
-                    lines = live.compose_live("⏸")
-                    if tui_state.get("live_tool_lines") != lines:
-                        tui_state["live_tool_lines"] = lines
-                        changed = True
-                if changed:
-                    app.invalidate()
-                time.sleep(0.2)
-                continue
-            phase = tui_state.get("_phase", "thinking")
-            base = tui_state.get("_spinner_base", "")
-            start = tui_state.get("_phase_start") or time.monotonic()
-            elapsed = time.monotonic() - start
-            tui_state["spinner_text"] = _render_spinner_text(
-                _frame_idx[0], phase, base, elapsed
-            )
-            # Refresh live status-bar fields (tokens / cost / time) every tick.
-            # The cost_tracker is updated by the model layer on every LLM call,
-            # so this picks up new token/cost totals within ~120ms of any API
-            # call returning — including right after each tool completes and the
-            # next "decide what to do" call lands. Time fields tick smoothly.
-            # Guarded by ``_turn_request_start`` being set (only valid mid-turn);
-            # the stream loop clears it at turn end.
-            _req_start = tui_state.get("_turn_request_start")
-            if _req_start is not None:
-                _refresh_live_status(
-                    tui_state, state.current_agent, _req_start,
-                    tui_state.get("_turn_cost_baseline", 0.0),
-                    tui_state.get("_turn_active_baseline", 0.0),
-                    tui_state.get("_turn_calls_baseline", 0),
-                    tui_state.get("_turn_goal_tokens_baseline", 0),
-                )
-            frame = _BRAILLE_SPINNER[_frame_idx[0]]
-            tui_state["_live_spinner"] = frame
-            live = tui_state.get("live_display")
-            if live is not None:
-                tui_state["live_tool_lines"] = live.compose_live(frame)
-            _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
-            app.invalidate()
-            time.sleep(0.12)
+                    tui_state["live_tool_lines"] = live.compose_live(frame)
+                _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
+                app.invalidate()
+                time.sleep(0.12)
+            except Exception:
+                logger.warning("spinner refresh failed", exc_info=True)
+                time.sleep(0.12)
 
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()

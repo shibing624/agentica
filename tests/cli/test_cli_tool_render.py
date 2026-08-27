@@ -224,23 +224,6 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertEqual(str(syntax.code).count("pkg/created.py"), 1)
 
 
-    def test_tool_result_sequencer_flushes_parallel_results_in_call_order(self):
-        """Out-of-order completions must remain complete, call-ordered blocks."""
-        from agentica.cli.interactive.session_state import _ToolResultSequencer
-
-        sequencer = _ToolResultSequencer()
-        sequencer.on_start("call-a", "grep")
-        sequencer.on_start("call-b", "execute")
-        sequencer.on_complete("call-b", {"content": "result-b"})
-        self.assertEqual(list(sequencer.drain()), [])
-        sequencer.on_complete("call-a", {"content": "result-a"})
-
-        self.assertEqual(
-            [item["content"] for item in sequencer.drain()],
-            ["result-a", "result-b"],
-        )
-
-
     def test_completed_tool_payload_keeps_display_meta_from_event_subject(self):
         """chunk.tools strips snapshots; the CLI must read chunk.tool_call."""
         from agentica.run_response import RunEvent, RunResponse, ToolCallInfo

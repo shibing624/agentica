@@ -43,6 +43,7 @@ from agentica.cli.display import (
     get_file_completions,
     get_truncated_blocks,
 )
+from agentica.cli.display.live_blocks import LIVE_MAX_ROWS
 from agentica.cli.runtime import get_console, history_file
 from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
@@ -904,7 +905,7 @@ def _setup_tui(
         n = len(tui_state.get("live_tool_lines") or [])
         if n <= 0:
             return 0
-        return min(12, n)
+        return min(LIVE_MAX_ROWS, n)
 
     live_tool_window = ConditionalContainer(
         Window(

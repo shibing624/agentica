@@ -607,6 +607,8 @@ def _process_stream_response(
         )
     except Exception as e:
         _set_phase("idle")
+        if display is not None:
+            display.abandon_live()
         display_agent_execution_error(con, e)
     finally:
         # Finalize the per-turn rewind checkpoint so /rewind can roll this turn
