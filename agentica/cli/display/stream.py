@@ -636,8 +636,8 @@ class StreamDisplayManager:
                 # Clamp reads past EOF (range start > end) to 0.
                 n = max(0, int(m.group(2)) - int(m.group(1)) + 1)
                 return f"{n} lines"
-            # Empty file: the result is a system-reminder, not content lines.
-            if result_content.startswith("<system-reminder>"):
+            # Empty file: a one-line notice, not numbered content.
+            if str(result_content).startswith("File is empty:"):
                 return "0 lines"
             n = len(lines)
             return f"{n} lines" if n else ""
@@ -835,7 +835,7 @@ class StreamDisplayManager:
     # or the default 120-char ellipsis. ``task`` is NOT here — its result is
     # JSON with a live-stream dedup path (``_display_task_result``); call-side
     # briefs already share ``_format_handoff_display`` with delegate.
-    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate", "write_html"})
+    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate"})
 
     # Human-in-the-loop. Their result is the only durable record of the
     # exchange — the question widget lives in the prompt_toolkit layout and is

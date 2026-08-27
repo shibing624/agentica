@@ -23,12 +23,6 @@ def test_read_file_glob_grep():
 
 def test_writes_execute_todos_search():
     assert format_tool_display("write_file", {"file_path": "/x/y/z.py"}) == "z.py"
-    html_display = format_tool_display("write_html", {
-        "title": "竞品分析",
-        "html": "<h2>A</h2><p>long body that must not appear</p>",
-    })
-    assert html_display == "竞品分析"
-    assert "html=" not in html_display
     assert "2 files" in format_tool_display("apply_patch", {
         "patch": "*** Add File: a.py\n*** Update File: b.py\n",
     })

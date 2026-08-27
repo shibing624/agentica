@@ -4,8 +4,8 @@
 @description: File operations demo - Demonstrates file manipulation tools
 
 This example shows how to use file operation tools:
-1. ShellTool - File listing and basic operations
-2. PatchTool - File editing with diff patches
+1. BuiltinExecuteTool - File listing and basic operations
+2. BuiltinFileTool - File editing with apply_patch
 """
 import sys
 import os
@@ -13,14 +13,13 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, ShellTool
-from agentica.tools.patch_tool import PatchTool
+from agentica import Agent, OpenAIChat, BuiltinExecuteTool, BuiltinFileTool
 
 
 async def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
-        tools=[ShellTool(), PatchTool()],
+        tools=[BuiltinExecuteTool(), BuiltinFileTool()],
     )
 
     print("=" * 60)

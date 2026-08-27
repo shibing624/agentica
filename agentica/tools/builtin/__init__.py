@@ -46,7 +46,6 @@ def get_builtin_tools(
         include_task: bool = True,
         include_skills: bool = False,
         include_ask_user_question: bool = False,
-        include_html_report: bool = False,
         task_model: Optional["Model"] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback=None,
@@ -56,7 +55,6 @@ def get_builtin_tools(
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
         web_search_provider: Optional[str] = None,
-        peer_conflict_checker=None,
 ) -> List[Tool]:
     """
     Get the list of built-in tools for Agent.
@@ -64,9 +62,8 @@ def get_builtin_tools(
     Args:
         work_dir: Work directory for file operations
         include_file_tools: Whether to include file tools (read_file, write_file,
-            apply_patch, glob, grep)
-        include_html_report: Register write_html on the file tool. Default False;
-            DeepAgent (CLI / Web) passes True.
+            apply_patch, glob, grep). ``grep`` takes ``pattern``, ``path``,
+            ``include``, ``limit`` only. ``apply_patch`` matches context exactly.
         include_execute: Whether to include code execution tool
         include_web_search: Whether to include web search tool
         include_fetch_url: Whether to include URL fetching tool
@@ -116,8 +113,6 @@ def get_builtin_tools(
             work_dir=work_dir,
             sandbox_config=sandbox_config,
             diagnostics_checker=diagnostics_checker,
-            peer_conflict_checker=peer_conflict_checker,
-            include_html_report=include_html_report,
         ))
 
     if include_execute:

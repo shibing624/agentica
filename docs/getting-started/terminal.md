@@ -40,6 +40,7 @@ agentica [OPTIONS]
 | `--workspace` | str | `~/.agentica/workspace` | Workspace 持久化目录 |
 | `--no-workspace` | flag | -- | 禁用 Workspace（不注入长期记忆） |
 | `--tools` | list | -- | 额外启用的工具（追加到内置工具） |
+| `--enable-diagnostics` | flag | 开 | 编辑后把 LSP/Pyright 诊断附到 `write_file` / `apply_patch` 结果上（`--no-enable-diagnostics` 关掉） |
 | `--enable-skills` | flag | -- | 启用 Skills 系统 |
 | `--debug` | int | `0` | 调试级别（1=启用，显示内部日志） |
 
@@ -90,13 +91,12 @@ CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定�
 
 | 工具 | 功能 |
 |------|------|
-| `read_file` | 读取文件内容（支持分页，避免大文件撑爆上下文） |
-| `write_file` | 创建或完整覆写文件 |
-| `write_html` | 写单文件 HTML 报告并返回 `file://` URL（不自动打开浏览器） |
-| `apply_patch` | 一次补丁新增、更新或删除多个文件 |
+| `read_file` | 读取文件内容（支持分页 / `tail`；空文件返回 `File is empty: …`） |
+| `write_file` | 创建或完整覆写文件（长报告可写成 HTML，用户自己打开） |
+| `apply_patch` | 一次补丁新增、更新或删除多个文件（上下文精确匹配；编辑后可附 Pyright 诊断） |
 | `glob` | 文件模式匹配（`**/*.py`） |
-| `grep` | 内容搜索（基于 ripgrep） |
-| `execute` | 执行 Shell 命令（git、pytest、pip 等） |
+| `grep` | 内容搜索（`pattern` / `path` / `include` / `limit`，基于 ripgrep） |
+| `execute` | 执行 Shell 命令（git、pytest、pip 等）；非零退出只报 exit code |
 | `web_search` | 网页搜索 |
 | `fetch_url` | 抓取网页内容 |
 | `write_todos` | 创建任务清单（追踪多步骤工作） |
@@ -124,7 +124,7 @@ agentica --help
 cogvideo, cogview, dalle, image_analysis, ocr, video_analysis,
 arxiv, baidu_search, dblp, duckduckgo, search_bocha, search_exa, search_serper, wikipedia,
 browser, jina, newspaper, url_crawler,
-calculator, code, shell, sql, weather, yfinance,
+calculator, code, sql, weather, yfinance,
 mcp, skill, ...
 ```
 

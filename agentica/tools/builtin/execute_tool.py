@@ -8,7 +8,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple, TYPE_CHECKING
+from typing import Optional
 
 
 from agentica.tools.base import Tool
@@ -22,24 +22,29 @@ from agentica.security.redact import redact_tool_outputs_enabled
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 
-def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
-    """Return a human-readable note when a non-zero exit code is non-erroneous.
+# Unix conventions where a non-zero exit is the answer, not a crashed
+# command. Used only to decide whether to raise; the exit code is still
+# printed. No notes are appended to the result.
+_EXPECTED_NONZERO = {
+    "grep": {1}, "egrep": {1}, "fgrep": {1}, "rg": {1}, "ag": {1}, "ack": {1},
+    "diff": {1}, "colordiff": {1},
+    "find": {1},
+    "test": {1}, "[": {1},
+    "curl": {6, 7, 22, 28},
+    "git": {1},
+    "pytest": {1, 5},
+    "ruff": {1}, "mypy": {1}, "pyright": {1}, "basedpyright": {1},
+    "flake8": {1}, "pylint": {1}, "eslint": {1}, "tsc": {1},
+    "python": {1},
+}
 
-    Returns None when the exit code is 0 or genuinely signals an error.
-    The note is appended to the tool result so the model doesn't waste
-    turns investigating expected exit codes.
-    """
+
+def _expected_nonzero_exit(command: str, exit_code: int) -> bool:
+    """True when this command's non-zero exit is a normal result."""
     if exit_code == 0:
-        return None
-
-    # Extract the last command in a pipeline/chain — that determines the
-    # exit code. Handles `cmd1 && cmd2`, `cmd1 | cmd2`, `cmd1; cmd2`.
+        return False
     segments = re.split(r'\s*(?:\|\||&&|[|;])\s*', command)
     last_segment = (segments[-1] if segments else command).strip()
-
-    # Get the command whose exit code should be interpreted. Strip env var
-    # assignments like VAR=val cmd ..., and treat ``python -m ruff`` as the
-    # module command (``ruff``), not a generic Python script failure.
     words = last_segment.split()
     base_cmd = ""
     cmd_index = -1
@@ -51,110 +56,10 @@ def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
         base_cmd = w.split("/")[-1]
         cmd_index = i
         break
-
     if base_cmd in {"python", "python3"} and cmd_index >= 0:
         if len(words) > cmd_index + 2 and words[cmd_index + 1] == "-m":
             base_cmd = words[cmd_index + 2].split(".")[0].split("/")[-1]
-
-    if not base_cmd:
-        return None
-
-    # Command-specific semantics
-    semantics: Dict[str, Dict[int, str]] = {
-        # grep/rg/ag/ack: 1=no matches found (normal), 2+=real error
-        "grep": {1: "No matches found (not an error)"},
-        "egrep": {1: "No matches found (not an error)"},
-        "fgrep": {1: "No matches found (not an error)"},
-        "rg": {1: "No matches found (not an error)"},
-        "ag": {1: "No matches found (not an error)"},
-        "ack": {1: "No matches found (not an error)"},
-        # diff: 1=files differ (expected), 2+=real error
-        "diff": {1: "Files differ (expected, not an error)"},
-        "colordiff": {1: "Files differ (expected, not an error)"},
-        # find: 1=some dirs inaccessible but results may still be valid
-        "find": {1: "Some directories were inaccessible (partial results may still be valid)"},
-        # test/[: 1=condition is false (expected)
-        "test": {1: "Condition evaluated to false (expected, not an error)"},
-        "[": {1: "Condition evaluated to false (expected, not an error)"},
-        # curl: common non-error codes
-        "curl": {
-            6: "Could not resolve host",
-            7: "Failed to connect to host",
-            22: "HTTP response code indicated error (e.g. 404, 500)",
-            28: "Operation timed out",
-        },
-        # git: 1 is context-dependent but often normal
-        "git": {1: "Non-zero exit (often normal — e.g. 'git diff' returns 1 when files differ)"},
-        # pytest
-        "pytest": {1: "Tests failed", 5: "No tests collected"},
-        # linters/typecheckers: exit 1 means diagnostics were found. The command
-        # ran correctly; callers still need to inspect and fix the reported issues.
-        "ruff": {1: "Diagnostics found"},
-        "mypy": {1: "Diagnostics found"},
-        "pyright": {1: "Diagnostics found"},
-        "basedpyright": {1: "Diagnostics found"},
-        "flake8": {1: "Diagnostics found"},
-        "pylint": {1: "Diagnostics found"},
-        "eslint": {1: "Diagnostics found"},
-        "tsc": {1: "Diagnostics found"},
-        "python": {1: "Script exited with error"},
-    }
-
-    cmd_semantics = semantics.get(base_cmd)
-    if cmd_semantics and exit_code in cmd_semantics:
-        return cmd_semantics[exit_code]
-
-    return None
-
-
-# Patterns that signal the script source itself is broken (rather than the
-# logic under test), so the LLM should re-read / rewrite the source instead
-# of retrying the same command. The classic case: a model substitutes JSON
-# `null` / `true` / `false` for Python `None` / `True` / `False` when
-# generating an inline heredoc, producing NameError at runtime.
-_PYTHON_ERROR_HINTS: List[Tuple[re.Pattern, str]] = [
-    (
-        re.compile(r"NameError: name '(null|true|false)' is not defined"),
-        "Python source contains a JSON literal "
-        "(`null`/`true`/`false`). Rewrite using `None`/`True`/`False`.",
-    ),
-    (
-        re.compile(r"\bSyntaxError:\s*invalid syntax", re.IGNORECASE),
-        "Python source has a SyntaxError. Re-read the file and fix the "
-        "offending line — do not re-run the same command.",
-    ),
-    (
-        re.compile(r"\bIndentationError\b"),
-        "Python source has inconsistent indentation. Re-read the file and "
-        "fix the indentation before retrying.",
-    ),
-    (
-        re.compile(r"json\.decoder\.JSONDecodeError|json\.JSONDecodeError"),
-        "Input is not valid JSON. Inspect the raw payload before retrying.",
-    ),
-    (
-        re.compile(r"ModuleNotFoundError:\s*No module named ['\"]([^'\"]+)['\"]"),
-        "Missing Python dependency. Install it (pip install <pkg>) or "
-        "switch to a stdlib alternative — re-running won't help.",
-    ),
-]
-
-
-def _detect_python_error_hint(output: str) -> Optional[str]:
-    """Return a short remediation hint when the output shows a script-source
-    error (NameError, SyntaxError, ...) rather than a logic failure.
-
-    Empty when nothing matches — callers must treat ``None`` as no-op.
-    """
-    if not output:
-        return None
-    for pattern, hint in _PYTHON_ERROR_HINTS:
-        if pattern.search(output):
-            return hint
-    return None
-
-if TYPE_CHECKING:
-    pass
+    return exit_code in _EXPECTED_NONZERO.get(base_cmd, ())
 
 
 # ─── File safety guards ──────────────────────────────────────────────────────
@@ -420,21 +325,10 @@ class BuiltinExecuteTool(Tool):
                     "while the command is still running. Pass the plain command."
                 )
             item = self._background_process_registry.start(command, cwd=cwd)
-            # This text is the only guidance the model sees at the moment it has
-            # to decide what to do next, so it states the contract instead of
-            # describing the process: the exit goes to the user, so the only way
-            # back into this conversation is `wait`, and any hand-rolled wait
-            # (sleep, poll, blocking tail) is strictly worse than calling it.
             return (
-                f"Started background command #{item.num} (PID {item.pid}, id: {item.id}).\n"
-                f"Log: {item.log_path}\n"
-                f"It is detached: its exit is reported to the user, not to you. If a "
-                f"later step needs its result, call wait(id=\"{item.id}\") — it returns "
-                f"the moment the command exits. Otherwise say it started and continue "
-                f"with other work or end your turn. Do not improvise a wait — no sleep, "
-                f"no polling, no blocking tail.\n"
-                f"To stop it: the user runs /stop {item.id}; you run "
-                f"execute(command=\"kill -- -{item.pid}\")."
+                f"Started background command #{item.num} "
+                f"(PID {item.pid}, id: {item.id}).\n"
+                f"Log: {item.log_path}"
             )
 
         slept = _LEADING_SLEEP.match(command)
@@ -493,54 +387,26 @@ class BuiltinExecuteTool(Tool):
 
         output = "\n".join(output_parts).strip()
 
-        # Add exit code info with semantic interpretation
         if proc.returncode and proc.returncode != 0:
-            hint = _interpret_exit_code(command, proc.returncode)
-            exit_line = f"\n\n[Exit code: {proc.returncode}]"
-            if hint:
-                exit_line += f"\n(Note: {hint})"
-            output = f"{output}{exit_line}"
+            output = f"{output}\n\n[Exit code: {proc.returncode}]"
 
         logger.debug(f"Command exit code: {proc.returncode}")
         if not output:
             output = f"Command executed successfully (exit code: {proc.returncode})"
 
-        # Detect language-level errors in stderr (NameError, SyntaxError, ...)
-        # so the LLM doesn't mistake a malformed Python literal (e.g. `null`
-        # leaking from a JSON template into Python source) for a logic bug
-        # in the script under test. Append a short structured hint that
-        # nudges it to inspect the source rather than re-running blindly.
-        py_hint = _detect_python_error_hint(output)
-        if py_hint:
-            output = f"{output}\n\n[Heuristic: {py_hint}]"
-
-        # Redact sensitive text only when the operator opts in. Default is
-        # off because rewriting tool output corrupts byte-exact round-trips
-        # for downstream apply_patch calls.
         if redact_tool_outputs_enabled():
             output = redact_sensitive_text(output)
 
         if self_detaching:
-            hint = (
-                " Use background=True for anything worth reporting."
-                if self._background_process_registry is not None else ""
-            )
             output = (
-                f"{output}\n\n[Note: the trailing '&' detached this work from the "
-                "shell. It is untracked — nothing can see it or stop it, its exit is "
-                "never reported, and a cancelled or timed-out turn kills it with the "
-                f"process group.{hint}]"
+                f"{output}\n\n[Note: trailing '&' detached this work; "
+                "it is untracked.]"
             )
 
-        # Layer 0 in Model.run_function_calls persists oversized results —
-        # success and raised errors alike: the error string reaches it via
-        # function_call.error after the framework redacts secrets, so the
-        # spill file never holds raw credentials. The tool stays honest: full
-        # output, no private spill file without session/user ids.
         if (
             proc.returncode
             and proc.returncode != 0
-            and _interpret_exit_code(command, proc.returncode) is None
+            and not _expected_nonzero_exit(command, proc.returncode)
         ):
             raise RuntimeError(
                 f"Command exited with code {proc.returncode}.\n{output}"
@@ -619,16 +485,4 @@ class BuiltinExecuteTool(Tool):
             lines.append("")
             lines.append(tail)
         return "\n".join(lines)
-
-
-# BuiltinWebSearchTool / BuiltinFetchUrlTool now live in
-# ``agentica.tools.builtin.web_tools`` and are re-exported here for backwards
-# compatibility. Keep this module as the stable legacy import path while the
-# canonical implementation migrates into focused builtin modules.
-
-
-# BuiltinTodoTool / BuiltinMemoryTool now live in
-# ``agentica.tools.builtin.task_state_tools`` and are re-exported here for
-# backwards compatibility. Keep ``buildin_tools.py`` as the stable legacy import
-# path while the canonical implementations migrate into focused builtin modules.
 

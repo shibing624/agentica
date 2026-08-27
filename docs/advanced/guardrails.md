@@ -120,9 +120,19 @@ async def filter_sensitive_output(
 ## 组合使用
 
 ```python
+from agentica import (
+    Agent,
+    OpenAIChat,
+    BuiltinExecuteTool,
+    InputGuardrail,
+    OutputGuardrail,
+    ToolInputGuardrail,
+    ToolOutputGuardrail,
+)
+
 agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
-    tools=[ShellTool()],
+    tools=[BuiltinExecuteTool()],
     input_guardrails=[
         InputGuardrail(guardrail_function=block_sensitive_info),
     ],

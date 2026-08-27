@@ -185,9 +185,6 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         file_path = tool_args.get("file_path", "")
         return _extract_filename(file_path)
 
-    if tool_name == "write_html":
-        return str(tool_args.get("title", "") or "")
-
     if tool_name == "apply_patch":
         patch = str(tool_args.get("patch", ""))
         count = len(re.findall(r"^\*\*\* (?:Add|Update|Delete) File: ", patch, re.MULTILINE))

@@ -365,6 +365,57 @@ class TestAskPromptKeyHint(unittest.TestCase):
             rows = sum(1 + line.count("\n") for line in lines)
             self.assertEqual(rows, expected_rows, msg=f"prompt={req.prompt!r}")
 
+    def test_live_window_yields_its_rows_while_the_user_is_answering(self):
+        """LIVE_MAX_ROWS=12 used to stay reserved above the ask widget, so a
+        long option list was clipped to whatever was left of the terminal."""
+        from agentica.cli.display.live_blocks import LIVE_MAX_ROWS
+        from agentica.cli.interactive.tui import _live_tool_window_height
+
+        self.assertEqual(
+            _live_tool_window_height(LIVE_MAX_ROWS, asking=True), 0,
+        )
+        self.assertEqual(
+            _live_tool_window_height(LIVE_MAX_ROWS, asking=False), LIVE_MAX_ROWS,
+        )
+        self.assertEqual(_live_tool_window_height(3, asking=False), 3)
+        self.assertEqual(_live_tool_window_height(0, asking=False), 0)
+
+    def test_ask_prompt_height_is_not_capped_at_live_max_rows(self):
+        from agentica.cli.display.live_blocks import LIVE_MAX_ROWS
+        from agentica.cli.interactive.session_state import _InputRequest
+        from agentica.cli.interactive.tui import _ask_prompt_lines, _input_prompt_height
+
+        options = [f"option {i}: keep this whole label visible" for i in range(1, 16)]
+        req = _InputRequest(prompt="Pick one", options=options)
+        lines = _ask_prompt_lines(req)
+        height = _input_prompt_height(req, width=120)
+
+        self.assertGreater(len(lines), LIVE_MAX_ROWS)
+        self.assertEqual(height, len(lines))
+        for i, opt in enumerate(options, 1):
+            self.assertIn(f"    {i}. {opt}", lines)
+
+    def test_ask_prompt_height_uses_display_width_for_cjk(self):
+        from prompt_toolkit.utils import get_cwidth
+
+        from agentica.cli.interactive.session_state import _InputRequest
+        from agentica.cli.interactive.tui import _ask_prompt_lines, _input_prompt_height
+
+        option = "全量重跑（推荐）" * 8
+        req = _InputRequest(prompt="选哪个？", options=[option])
+        width = 20
+        lines = _ask_prompt_lines(req)
+        expected = sum(
+            1 if not line else (get_cwidth(line) + width - 1) // width
+            for line in lines
+        )
+        naive = sum(
+            1 if not line else (len(line) + width - 1) // width
+            for line in lines
+        )
+        self.assertGreater(expected, naive)
+        self.assertEqual(_input_prompt_height(req, width=width), expected)
+
     def test_ctrl_c_interrupt_notice_does_not_advertise_the_kill_key(self):
         import inspect
 

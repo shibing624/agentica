@@ -12,15 +12,14 @@ import shutil
 import tempfile
 from collections import deque
 from contextlib import AsyncExitStack
-from html import escape
 from pathlib import Path
-from typing import Optional, List, Dict, Literal, Tuple
+from typing import Optional, List, Dict, Tuple
 
 import aiofiles
 
 from agentica.tools.base import Tool
 from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
-from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
+from agentica.tools.patch_tool import PatchContextError, apply_diff, parse_patch_envelope
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
@@ -97,21 +96,6 @@ def _in_noise_dir(
         resolved = os.path.realpath(str(path))
         return any(resolved.startswith(root + os.sep) for root in nested)
     return False
-
-
-def _merged_grep_windows(
-    match_lines: List[int], before: int, after: int, n_lines: int,
-) -> List[Tuple[int, int]]:
-    """Inclusive 1-based [start, end] spans around matches; overlap/adjacent merge."""
-    windows: List[Tuple[int, int]] = []
-    for ln in match_lines:
-        start = max(1, ln - before)
-        end = min(n_lines, ln + after)
-        if windows and start <= windows[-1][1] + 1:
-            windows[-1] = (windows[-1][0], max(windows[-1][1], end))
-        else:
-            windows.append((start, end))
-    return windows
 
 
 def _cap_output_lines(output: str, limit: int) -> str:
@@ -210,79 +194,10 @@ def is_sensitive_write_path(filepath: str) -> bool:
     return _check_sensitive_write_path(filepath) is not None
 
 
-_HTML_REPORT_DIR = Path("tmp") / "reports"
-_MAX_HTML_CHARS = 2_000_000
-_REPORT_CSS = """
-:root { color-scheme: light dark; --bg:#f6f5f1; --fg:#1c1917; --muted:#57534e; --line:#e7e5e4; --card:#fff; --accent:#1d4ed8; --code:#ecebe6; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --line:#44403c; --card:#292524; --accent:#93c5fd; --code:#0c0a09; }
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-body { font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); }
-main { max-width: 880px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
-h1 { font-size: 1.75rem; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 0.35rem; }
-h2 { font-size: 1.2rem; font-weight: 650; margin: 2rem 0 0.6rem; padding-top: 0.4rem; border-top: 1px solid var(--line); }
-h3 { font-size: 1.05rem; font-weight: 600; margin: 1.4rem 0 0.4rem; }
-.muted { color: var(--muted); font-size: 0.85rem; }
-a { color: var(--accent); }
-table { border-collapse: collapse; width: 100%; margin: 0.8rem 0 1.2rem; font-size: 0.95rem; }
-th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-weight: 600; }
-code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
-code { background: var(--code); padding: 0.1em 0.35em; }
-pre { background: var(--code); padding: 0.9rem 1rem; overflow: auto; }
-pre code { background: none; padding: 0; }
-blockquote { margin: 0.8rem 0; padding: 0.2rem 0 0.2rem 0.9rem; border-left: 3px solid var(--accent); color: var(--muted); }
-@media print { body { background: #fff; color: #111; } }
-""".strip()
-
-
-def slugify_html_title(title: str) -> str:
-    text = (title or "").strip().replace("/", "-").replace("\\", "-")
-    text = re.sub(r"\s+", "-", text)
-    text = re.sub(r"[^\w.\-]+", "", text, flags=re.UNICODE)
-    text = re.sub(r"-{2,}", "-", text).strip(".-")
-    return text[:80] or "report"
-
-
-def is_full_html_document(html: str) -> bool:
-    text = html.lstrip()
-    # Skip leading comments (build banners) before <!DOCTYPE>/<html>.
-    while text.startswith("<!--"):
-        end = text.find("-->")
-        if end == -1:
-            break
-        text = text[end + 3:].lstrip()
-    head = text[:32].lower()
-    return head.startswith("<!doctype") or head.startswith("<html")
-
-
-def wrap_report_html(title: str, html: str) -> str:
-    """Wrap a fragment (or plaintext) in a self-contained report page."""
-    body = html.strip()
-    if not re.search(r"</?[A-Za-z]|<!", body):
-        body = f"<pre>{escape(body)}</pre>"
-    safe_title = escape(title.strip() or "Report")
-    return (
-        "<!DOCTYPE html>\n<html>\n<head>\n"
-        "<meta charset=\"utf-8\">\n"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        f"<title>{safe_title}</title>\n"
-        f"<style>{_REPORT_CSS}</style>\n"
-        "</head>\n<body>\n<main>\n"
-        f"<h1>{safe_title}</h1>\n"
-        f"{body}\n"
-        "</main>\n</body>\n</html>\n"
-    )
-
-
 class BuiltinFileTool(Tool):
     """
     Built-in file system tool providing read_file, write_file, apply_patch,
     glob, and grep. Session path grants go through ``grant_path_access``.
-    ``write_html`` is registered only when ``include_html_report`` is True
-    (DeepAgent / CLI / Web default; plain ``get_builtin_tools`` off).
     """
 
     def __init__(
@@ -292,9 +207,7 @@ class BuiltinFileTool(Tool):
             max_line_length: int = 2000,
             sandbox_config=None,
             diagnostics_checker=None,
-            peer_conflict_checker=None,
             permission_mode: str = "allow-all",
-            include_html_report: bool = False,
     ):
         """
         Initialize BuiltinFileTool.
@@ -306,12 +219,9 @@ class BuiltinFileTool(Tool):
             sandbox_config: SandboxConfig instance for path restriction enforcement
             diagnostics_checker: Optional LspDiagnosticsChecker. When set, file
                 edits append newly-introduced LSP diagnostics to the tool result.
-            peer_conflict_checker: Optional checker that warns when another live
-                session already has the file uncommitted.
             permission_mode: Current permission tier. An Agent holding this
                 tool overwrites it with its own tier at wiring time; this
                 argument only matters when the tool is used standalone.
-            include_html_report: Register ``write_html`` (DeepAgent default).
         """
         super().__init__(name="builtin_file_tool")
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
@@ -320,10 +230,6 @@ class BuiltinFileTool(Tool):
         self._file_locks: Dict[str, asyncio.Lock] = {}
         self._sandbox_config = sandbox_config
         self.diagnostics_checker = diagnostics_checker
-        # Tells the model when another live session already has the file it just
-        # wrote uncommitted (agentica/peer_conflicts.py). Advisory: the write has
-        # already happened, and two sessions on one file is sometimes correct.
-        self._peer_conflict_checker = peer_conflict_checker
         # Paths the user has explicitly approved via grant_path_access,
         # overriding sandbox writable_dirs / blocked_paths / sensitive-path
         # guards for the rest of this session. Not persisted across restarts.
@@ -338,8 +244,6 @@ class BuiltinFileTool(Tool):
         self.register(self.apply_patch, is_destructive=True)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
-        if include_html_report:
-            self.register(self.write_html, is_destructive=True)
         # glob and grep enforce their own hardcoded timeouts on both fast
         # (rg / native pathlib.glob) and fallback paths, so skip the outer
         # 120s executor wrapper — otherwise a bare ``**/*.log`` walk from
@@ -477,16 +381,6 @@ class BuiltinFileTool(Tool):
             logger.warning(f"Diagnostics check failed for {path}: {e}")
             return ""
 
-    def _peer_conflict_note(self, path: "Path") -> str:
-        """"Another session has this file dirty too", or "" — never raises."""
-        if self._peer_conflict_checker is None:
-            return ""
-        try:
-            return self._peer_conflict_checker.check(str(path))
-        except Exception as e:
-            logger.debug(f"Peer conflict check failed for {path}: {e}")
-            return ""
-
     def _is_escalated(self, resolved: str) -> bool:
         """Whether `resolved` was previously approved via grant_path_access."""
         for granted in self._escalated_paths:
@@ -618,14 +512,10 @@ class BuiltinFileTool(Tool):
             *,
             tail: Optional[int] = None,
     ) -> str:
-        """Reads a file from the filesystem. Reading a file that does not exist returns an error.
+        """Reads a file from the filesystem. A missing file returns an error.
 
         Usage:
         - file_path may be absolute, relative to the working directory, or `~`-prefixed
-        - Before calling, ground file_path in the user's exact input or a prior
-          glob/grep/write_file/apply_patch result. If you only know a module,
-          class, or function name, locate the file first; do not use speculative
-          absolute paths from memory or stale summaries.
         - Reads up to `limit` lines (default 500) starting from `offset`
           (0-based). A negative `offset` opens a window on the end of the
           file: offset=-50 is the last 50 lines, and `limit` then keeps the
@@ -634,7 +524,6 @@ class BuiltinFileTool(Tool):
           scan of a huge file times out after 20 seconds.
         - Any line longer than 2000 characters is truncated
         - Results are returned with line-number prefixes (metadata only)
-        - An empty file returns a system reminder in place of contents
         - Prefer one larger read over many small slices
 
         Args:
@@ -711,12 +600,7 @@ class BuiltinFileTool(Tool):
             )
 
         if total_lines == 0:
-            result = (
-                "<system-reminder>\n"
-                f"File exists but is empty: {path.resolve()} (0 bytes, 0 lines).\n"
-                "Use write_file to add content.\n"
-                "</system-reminder>"
-            )
+            result = f"File is empty: {path}"
         elif start_shown > 1 or actual_end < total_lines:
             result += (
                 f"\n\n[Showing lines {start_shown}-{actual_end} of {total_lines} total lines]"
@@ -779,16 +663,11 @@ class BuiltinFileTool(Tool):
     async def write_file(self, file_path: str, content: str) -> str:
         """Writes content to a file in the filesystem.
 
-        Usage:
-        - If this is an existing file, you MUST use read_file first to read the file's contents.
-          This tool will create a new file or OVERWRITE the existing file entirely.
-        - Prefer apply_patch for modifying existing files with context.
-          Only use write_file to create NEW files or for complete rewrites.
-        - The file_path can be relative (e.g., "tmp/script.py", "./outputs/data.txt") or absolute path.
-          Relative paths are resolved relative to the base working directory.
-        - The tool returns the actual absolute path of the created file — ALWAYS use this returned
-          path for subsequent operations (read_file, execute, etc.). Do NOT guess or construct paths.
-        - Parent directories will be created automatically if they don't exist.
+        Creates a new file or overwrites an existing one entirely. Prefer
+        apply_patch for modifying existing files. Use write_file for new files
+        or whole-file rewrites, including HTML reports the user can open in a
+        browser (inline CSS is fine). Parent directories are created if needed.
+        Relative paths resolve against the working directory.
 
         Args:
             file_path: File path (relative or absolute). Examples: "tmp/script.py", "outputs/result.txt", "./tmp/main.py", use './tmp/' prefix file path for temporary files
@@ -839,8 +718,7 @@ class BuiltinFileTool(Tool):
         absolute_path = str(path.resolve())
         logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
         diag_text = await self._diagnostics_after(path)
-        notes = [text for text in (diag_text, self._peer_conflict_note(path)) if text]
-        suffix = ("\n\n" + "\n\n".join(notes)) if notes else ""
+        suffix = ("\n\n" + diag_text) if diag_text else ""
         return ToolDisplayOutput(
             f"{action} file, absolute path: {absolute_path}{suffix}",
             file_display_meta([
@@ -853,83 +731,20 @@ class BuiltinFileTool(Tool):
             ]),
         )
 
-    async def write_html(self, title: str, html: str, file_path: str = "") -> str:
-        """Write a self-contained HTML report and return a file:// URL to open.
-
-        Use this instead of dumping a long product/tech report, comparison,
-        audit, or architecture review into the chat. After calling it, reply
-        with a one-line summary and the Open URL — do not paste the report
-        body. Application source HTML (an app's index.html, a fixture) stays
-        write_file / apply_patch.
-
-        Pass a body fragment (headings, tables, sections) or a full HTML
-        document. Fragments are wrapped in a single-file page with inline CSS.
-        Same title overwrites the previous file. Default path is
-        tmp/reports/<title>.html. Any user-specified destination is
-        honored; ask/auto approval modes gate targets outside the
-        working directory like write_file (agent/approvals.py).
-
-        Args:
-            title: Short report title (browser tab and default filename).
-            html: Full HTML document or body fragment. Keep CSS/JS inline.
-            file_path: Optional destination. Relative paths resolve against
-                the working directory. Defaults to tmp/reports/<title>.html.
-
-        Returns:
-            Absolute path and a file:// URL the user can open.
-        """
-        heading = (title or "").strip()
-        if not heading:
-            return "Nothing written: title is empty."
-        body = html if isinstance(html, str) else str(html)
-        if not body.strip():
-            return "Nothing written: html is empty."
-        if len(body) > _MAX_HTML_CHARS:
-            return (
-                f"Nothing written: html is {len(body)} characters "
-                f"(max {_MAX_HTML_CHARS}). Split the report or drop assets."
-            )
-
-        document = body if is_full_html_document(body) else wrap_report_html(heading, body)
-        dest = (file_path or "").strip()
-        if dest:
-            if not dest.lower().endswith((".html", ".htm")):
-                dest = dest + ".html"
-        else:
-            dest = str(_HTML_REPORT_DIR / f"{slugify_html_title(heading)}.html")
-
-        resolved = self._resolve_path(dest).resolve()
-        await self.write_file(dest, document)
-        return f"Wrote HTML report: {resolved}\nOpen: {resolved.as_uri()}"
-
     async def apply_patch(self, patch: str) -> str:
         """Apply one context patch across one or more text files.
 
-        You MUST call read_file before every Update or Delete in the patch.
-        Read the relevant current regions immediately before constructing the
-        patch; never guess context from memory or stale output. Add File
-        operations do not require a prior read.
-
-        Every Update/Delete path must be grounded in the user's exact input or a
-        prior tool result, preferably the read_file call you just used for that
-        file. Do not construct long absolute paths from module names or stale
-        summaries or speculative absolute paths.
-
         Use this for code edits, multi-hunk edits, and changes that span
-        multiple files. Use write_file only for new files or whole-file rewrites.
+        multiple files. Use write_file for new files or whole-file rewrites.
 
         The patch must use exactly one envelope with one or more Add, Update, or
         Delete sections. All paths and hunks are validated against current file
         contents before any file is changed. If validation fails, no files are
-        written. This is a JSON function tool, so pass the entire patch as the
-        ``patch`` string.
+        written. Pass the entire patch as the ``patch`` string.
 
-        Keep each ``@@`` hunk's unchanged context short, stable, and unique.
-        Read or re-read the relevant regions immediately before building the
-        patch. A failed preflight reports every file and every context hunk that
-        could be checked, showing the expected context and the actual current
-        content, so regenerate those hunks from the exact current text
-        instead of retrying the same patch.
+        Each line after ``@@`` must start with a space (keep), ``-`` (delete),
+        or ``+`` (add). Context must match the file exactly — no whitespace or
+        quote rewriting.
 
         Example:
             *** Begin Patch
@@ -1002,7 +817,7 @@ class BuiltinFileTool(Tool):
                                 raise ValueError("Update does not change the file.")
                         else:
                             new_content = None
-                except (FileExistsError, FileNotFoundError, IsADirectoryError, ValueError) as exc:
+                except (FileExistsError, FileNotFoundError, IsADirectoryError, PatchContextError, ValueError) as exc:
                     preflight_errors.append((result_path, exc))
                     continue
 
@@ -1013,10 +828,30 @@ class BuiltinFileTool(Tool):
 
             if preflight_errors:
                 file_noun = "file" if len(preflight_errors) == 1 else "files"
-                error_lines = [
-                    f"Patch preflight failed for {len(preflight_errors)} {file_noun}; "
-                    "no files were changed."
-                ]
+                kinds = set()
+                for _, error in preflight_errors:
+                    if isinstance(error, PatchContextError):
+                        kinds.add("context")
+                    elif isinstance(error, (FileExistsError, FileNotFoundError, IsADirectoryError)):
+                        kinds.add("fs")
+                    else:
+                        kinds.add("grammar")
+                if kinds == {"grammar"}:
+                    headline = (
+                        f"Malformed patch for {len(preflight_errors)} {file_noun}; "
+                        "no files were changed."
+                    )
+                elif kinds == {"context"}:
+                    headline = (
+                        f"Patch context not found for {len(preflight_errors)} {file_noun}; "
+                        "no files were changed."
+                    )
+                else:
+                    headline = (
+                        f"Patch not applied for {len(preflight_errors)} {file_noun}; "
+                        "no files were changed."
+                    )
+                error_lines = [headline]
                 for result_path, error in preflight_errors:
                     error_lines.append(f"- {result_path}:")
                     error_lines.extend(f"  {line}" for line in str(error).splitlines())
@@ -1081,9 +916,6 @@ class BuiltinFileTool(Tool):
                 diag_text = await self._diagnostics_after(path)
                 if diag_text:
                     diagnostics.append(f"{result_path}:\n{diag_text}")
-                conflict = self._peer_conflict_note(path)
-                if conflict:
-                    diagnostics.append(f"{result_path}: {conflict}")
         if diagnostics:
             result_lines.extend(("", "\n\n".join(diagnostics)))
         return ToolDisplayOutput(
@@ -1121,12 +953,6 @@ class BuiltinFileTool(Tool):
         (.git, __pycache__, node_modules, .venv, ...) are always excluded.
         Entries include subdirectories, so pattern "*" is how you list what a
         directory holds.
-
-        Use this to ground later read_file/grep/apply_patch calls. If you are
-        unsure where a file lives, search from "." or another known existing
-        directory; do not pass a speculative absolute path as `path`. Searches
-        are bounded; if a call times out, narrow `path` or use a more specific
-        pattern — do not retry the same walk.
 
         Args:
             pattern: Glob pattern, e.g. "*.py", "**/*.md", "src/?*.js". May be
@@ -1178,115 +1004,39 @@ class BuiltinFileTool(Tool):
             path: str = ".",
             *,
             include: Optional[str] = None,
-            output_mode: Literal["content", "files_with_matches", "count"] = "content",
-            case_insensitive: bool = False,
-            fixed_strings: bool = False,
-            context_lines: int = 0,
-            before_context: int = 0,
-            after_context: int = 0,
             limit: int = 100,
     ) -> str:
-        """Search file contents for a regex pattern across a whole tree.
+        """Search file contents for a regex pattern.
 
-        Default output is matching lines as `file:line_number:content`. Switch to
-        "files_with_matches" only when a path list is enough, or "count" when only
-        totals matter — both drop the code itself and usually force a follow-up
-        read_file.
-
-        Ground the `path` argument before calling. If you only know a module,
-        class, function, or filename fragment, search from "." or a known existing
-        directory and let grep find the path; do not pass a speculative absolute
-        path from memory or stale summaries. Searches are bounded; if a call
-        times out, narrow `path` or `include`.
+        Output is matching lines as `file:line_number:content`.
 
         Args:
-            pattern: Text/regex to search for
+            pattern: Regex to search for
             path: File or directory to search (default: ".")
-            include: File glob filter, e.g. "*.py", "*.{js,ts}"
-            output_mode: "content" (default), "files_with_matches", or "count".
-                Pass a plain string, never a dict.
-            case_insensitive: Ignore case when matching (default: False)
-            fixed_strings: Treat pattern as literal text, not regex (default: False)
-            context_lines: Symmetric lines before and after each match (content
-                mode). When > 0, before_context and after_context are ignored
-                (same precedence as rg -C).
-            before_context: Lines before each match (content mode; ignored when
-                context_lines > 0)
-            after_context: Lines after each match (content mode; ignored when
-                context_lines > 0)
-            limit: Maximum results to return (default: 100). Global cap across
-                the tree, not a per-file match count. The rg process is killed
-                once this many output lines have been read.
+            include: File glob filter, e.g. "*.py"
+            limit: Maximum matching lines (default: 100)
 
         Returns:
             Search results as formatted string
         """
-        # Resolve and validate path
         self._validate_path(path)
         base_path = self._resolve_path(path)
         if not base_path.exists():
             raise FileNotFoundError(self._missing_path_error("Path", path, base_path))
 
-        # Check if rg is available
         rg_path = shutil.which("rg")
         if rg_path is None:
-            return await self._run_grep_fallback(
-                pattern, path, include, output_mode, limit, fixed_strings,
-                case_insensitive, _GREP_TIMEOUT,
-                context_lines, before_context, after_context,
-            )
+            return await self._run_grep_fallback(pattern, path, include, limit)
 
-        # Build rg command arguments
-        cmd: List[str] = [rg_path]
-
-        # Output mode flags
-        if output_mode == "files_with_matches":
-            cmd.append("--files-with-matches")
-        elif output_mode == "count":
-            cmd.append("--count")
-        else:  # content
-            cmd.append("--line-number")
-
-        # Matching options
-        if fixed_strings:
-            cmd.append("--fixed-strings")
-        if case_insensitive:
-            cmd.append("--ignore-case")
-
-        # Context lines (content mode only). context_lines (-C) wins over
-        # before/after, matching rg: the three are not combined.
-        if output_mode == "content":
-            if context_lines > 0:
-                cmd.extend(["--context", str(context_lines)])
-            else:
-                if before_context > 0:
-                    cmd.extend(["--before-context", str(before_context)])
-                if after_context > 0:
-                    cmd.extend(["--after-context", str(after_context)])
-
-        # File filter
+        cmd: List[str] = [rg_path, "--line-number"]
         if include:
             cmd.extend(["--glob", include])
-
-        # Global `limit` is enforced by stopping the stdout read and killing
-        # rg — not by --max-count (per-file) and not by buffering the whole
-        # tree then slicing. --max-count would still walk every file;
-        # communicate() + slice would still hold every match in memory.
-
-        # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
         for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
-        # rg skips gitignored paths, but a nested worktree need not be ignored.
         for root in _nested_checkouts(base_path):
             cmd.extend(["--glob", f"!{os.path.relpath(root, str(base_path))}/"])
+        cmd.extend(["--", pattern, str(base_path)])
 
-        # Pattern and path
-        cmd.append("--")
-        cmd.append(pattern)
-        cmd.append(str(base_path))
-
-        # rg is normally millisecond-fast; a hard timeout catches hangs
-        # (pathological regex, huge binary files, or a stuck network mount).
         proc = None
         drained = False
         hit_cap = False
@@ -1305,35 +1055,27 @@ class BuiltinFileTool(Tool):
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {_GREP_TIMEOUT} seconds. "
-                f"Narrow `path` or `include`; do not repeat the same search."
+                f"Narrow `path` or `include`."
             ) from None
-        except FileNotFoundError:
-            return await self._run_grep_fallback(
-                pattern, path, include, output_mode, limit, fixed_strings,
-                case_insensitive, _GREP_TIMEOUT,
-                context_lines, before_context, after_context,
-            )
         finally:
             if proc is not None and not drained:
                 await terminate_subprocess(proc)
-            close_subprocess_transport(proc)
+            if proc is not None:
+                close_subprocess_transport(proc)
 
-        # rg exit codes: 0=matches found, 1=no matches, 2=error.
-        # A cap-kill is SIGTERM/SIGKILL (negative returncode), not 2.
-        if proc.returncode == 2:
-            err = stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(f"grep(rg) failed: {err}")
-
-        output = stdout.decode("utf-8", errors="replace").strip()
-        if not output:
-            return f"No matches found for '{pattern}'"
-
+        output = stdout.decode("utf-8", errors="replace")
+        err = stderr.decode("utf-8", errors="replace").strip() if stderr else ""
         if hit_cap:
-            output = f"{output}\n{_FURTHER_TRUNCATED}"
-        else:
             output = _cap_output_lines(output, limit)
-
-        result = truncate_if_too_long(output)
+        if not output.strip():
+            result = f"No matches found for '{pattern}'"
+            if err:
+                result = f"{result}\n{err}"
+        else:
+            result = output.rstrip("\n")
+            if hit_cap:
+                result = _cap_output_lines(result, limit)
+        result = truncate_if_too_long(result)
         logger.debug(f"Grep(rg) for '{pattern}': result length {len(result)} chars")
         return result
 
@@ -1342,36 +1084,21 @@ class BuiltinFileTool(Tool):
             pattern: str,
             path: str,
             include: Optional[str],
-            output_mode: str,
             limit: int,
-            fixed_strings: bool,
-            case_insensitive: bool = False,
-            timeout: int = _GREP_TIMEOUT,
-            context_lines: int = 0,
-            before_context: int = 0,
-            after_context: int = 0,
     ) -> str:
-        """Run the pure-Python fallback in an executor with a hard timeout.
-
-        The fallback walks the tree in a thread, so on timeout we can only
-        drop the result — the thread keeps running — but the tool returns a
-        clear timeout error at ``timeout`` instead of hanging to the outer
-        120s executor limit.
-        """
         loop = asyncio.get_event_loop()
+        timeout = _GREP_TIMEOUT
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, self._grep_fallback, pattern, path, include,
-                    output_mode, limit, fixed_strings, case_insensitive,
-                    context_lines, before_context, after_context,
+                    None, self._grep_fallback, pattern, path, include, limit,
                 ),
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {timeout} seconds. "
-                f"Narrow `path` or `include`; do not repeat the same search."
+                f"Narrow `path` or `include`."
             )
 
     def _grep_fallback(
@@ -1379,27 +1106,14 @@ class BuiltinFileTool(Tool):
             pattern: str,
             path: str,
             include: Optional[str],
-            output_mode: str,
             limit: int,
-            fixed_strings: bool,
-            case_insensitive: bool = False,
-            context_lines: int = 0,
-            before_context: int = 0,
-            after_context: int = 0,
     ) -> str:
-        """Fallback grep using pure Python when ripgrep is not available."""
         base_path = self._resolve_path(path)
+        try:
+            regex_pattern = re.compile(pattern)
+        except re.error as e:
+            raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
 
-        # Compile regex
-        regex_pattern = None
-        if not fixed_strings:
-            try:
-                flags = re.IGNORECASE if case_insensitive else 0
-                regex_pattern = re.compile(pattern, flags)
-            except re.error as e:
-                raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
-
-        # Determine files to search
         if base_path.is_file():
             files = [base_path] if not include or base_path.match(include) else []
         elif include:
@@ -1407,7 +1121,6 @@ class BuiltinFileTool(Tool):
         else:
             files = list(base_path.glob("**/*"))
 
-        # Exclude directories and ignored paths
         nested = _nested_checkouts(base_path)
         files = [
             f for f in files
@@ -1415,104 +1128,25 @@ class BuiltinFileTool(Tool):
         ]
 
         results = []
-        file_counts = {}
         n_emitted = 0
-
-        match_pattern = pattern.lower() if (case_insensitive and fixed_strings) else pattern
-        if context_lines > 0:
-            before, after = context_lines, context_lines
-        else:
-            before, after = max(0, before_context), max(0, after_context)
-        use_context = output_mode == "content" and (before > 0 or after > 0)
-
         for fp in files:
-            if output_mode != "count" and n_emitted >= limit:
+            if n_emitted >= limit:
                 break
-
             try:
-                with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-                    lines = f.readlines()
+                with open(fp, "r", encoding="utf-8", errors="ignore") as handle:
+                    lines_in = handle.readlines()
             except OSError:
-                # Per-file read failure shouldn't abort the whole grep —
-                # skip the unreadable file and continue.
                 continue
+            for line_num, line in enumerate(lines_in, 1):
+                if regex_pattern.search(line):
+                    body = line.rstrip("\n")[:200]
+                    results.append(f"{fp}:{line_num}: {body}")
+                    n_emitted += 1
+                    if n_emitted >= limit:
+                        break
 
-            file_matches = []
-            for line_num, line in enumerate(lines, 1):
-                if fixed_strings:
-                    check_line = line.lower() if case_insensitive else line
-                    matched = match_pattern in check_line
-                else:
-                    matched = regex_pattern.search(line)
-                if matched:
-                    file_matches.append(line_num)
-
-            if not file_matches:
-                continue
-            file_counts[str(fp)] = len(file_matches)
-            if output_mode == "files_with_matches":
-                results.append(str(fp))
-                n_emitted += 1
-                continue
-            if output_mode != "content":
-                continue
-
-            taken = file_matches[:limit - n_emitted]
-            n_emitted += len(taken)
-            match_set = set(taken)
-            if use_context:
-                windows = _merged_grep_windows(taken, before, after, len(lines))
-                chunks: List[str] = []
-                for start, end in windows:
-                    block = []
-                    for ln in range(start, end + 1):
-                        body = lines[ln - 1].rstrip("\n")[:200]
-                        sep = ":" if ln in match_set else "-"
-                        block.append(f"{fp}:{ln}{sep}{body}")
-                    chunks.append("\n".join(block))
-                results.append("\n--\n".join(chunks) if chunks else "")
-            else:
-                for ln in taken:
-                    body = lines[ln - 1].rstrip("\n")[:200]
-                    results.append(f"{fp}:{ln}: {body}")
-
-        # Format output
-        if output_mode == "count":
-            output_lines = [f"{p}:{c}" for p, c in file_counts.items()]
-            result = "\n".join(output_lines) if output_lines else f"No matches found for '{pattern}'"
-        elif output_mode == "files_with_matches":
-            result = "\n".join(sorted(set(results))) if results else f"No matches found for '{pattern}'"
-        else:  # content
-            result = "\n".join(r for r in results if r) if results else f"No matches found for '{pattern}'"
-            if not result.startswith("No matches"):
-                result = _cap_output_lines(result, limit)
-
+        result = "\n".join(results) if results else f"No matches found for '{pattern}'"
         result = truncate_if_too_long(result)
-        logger.debug(f"Grep(fallback) for '{pattern}': found {len(file_counts)} files, result length: {len(result)} chars")
+        logger.debug(f"Grep(fallback) for '{pattern}': result length {len(result)} chars")
         return result
 
-
-
-# A trailing `&` forks the real work off the shell this tool holds. Under
-# background=True that is broken rather than merely untracked: the registry
-# would watch a shell that exits at once and announce a completion while the
-# work runs on, so it is refused there. In the foreground it still runs — it is
-# a standard idiom and callers may genuinely want a raw orphan — but the result
-# says what was lost, because the forked child stays in the shell's process
-# group and a cancelled or timed-out turn kills it along with the group.
-#
-# A long leading `sleep` is not work at all, it is a poll that re-blocks the
-# very turn backgrounding just freed. The threshold matches the default
-# foreground timeout: a shorter sleep is a plausible wait-for-boot retry
-# (`sleep 2 && curl ...`), while reaching this one means the caller also had to
-# raise `timeout`, which only a deliberate poll does. Matching only a leading
-# `sleep` is deliberate: waiting on an external condition belongs in a loop that
-# exits on success (`until curl -sf ...; do sleep 5; done`), which is both the
-# better form and not a match.
-_SELF_DETACHING_COMMAND = re.compile(r"(?<!&)&\s*$")
-_LEADING_SLEEP = re.compile(r"^\s*sleep\s+(\d+(?:\.\d+)?)\b")
-_MAX_FOREGROUND_SLEEP_SECONDS = 120
-
-# Upper bound on a single `wait` call. The wait returns the instant the command
-# exits, so this only caps how long one tool call may hold the turn: the caller
-# comes back through the model loop periodically, which is what lets the user

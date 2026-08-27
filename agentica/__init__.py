@@ -18,7 +18,6 @@ Other LLM providers (lazy, avoid heavy SDK import at startup)::
     from agentica.model.anthropic.claude import Claude        # pip install anthropic
     from agentica.model.ollama.chat import Ollama
     from agentica.model.kimi.chat import KimiChat
-    from agentica.tools.shell_tool import ShellTool           # specific external tools
 
 Optional extras (need ``pip install agentica[xxx]``)::
 
@@ -552,7 +551,6 @@ if TYPE_CHECKING:
     )
     from agentica.tools.search_serper_tool import SearchSerperTool  # noqa: F401
     from agentica.tools.dalle_tool import DalleTool  # noqa: F401
-    from agentica.tools.shell_tool import ShellTool  # noqa: F401
     from agentica.tools.code_tool import CodeTool  # noqa: F401
     from agentica.tools.mcp_tool import McpTool, CompositeMultiMcpTool  # noqa: F401
     from agentica.mcp.config import MCPConfig  # noqa: F401

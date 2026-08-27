@@ -70,34 +70,17 @@ class TestDeepAgentDefaults(unittest.TestCase):
             agent.update_model()
 
         self.assertIn("read_file", agent.model.functions)
-        self.assertIn("write_html", agent.model.functions)
         self.assertIn("apply_patch", agent.model.functions)
+        self.assertNotIn("write_html", agent.model.functions)
         self.assertNotIn("ls", agent.model.functions)
         self.assertNotIn("edit_file", agent.model.functions)
         self.assertNotIn("undo_edit", agent.model.functions)
         self.assertNotIn("request_path_access", agent.model.functions)
         tool_names = {tool["function"]["name"] for tool in agent.model.tools}
         self.assertIn("read_file", tool_names)
-        self.assertIn("write_html", tool_names)
         self.assertIn("apply_patch", tool_names)
+        self.assertNotIn("write_html", tool_names)
         self.assertNotIn("ls", tool_names)
-
-    def test_deep_agent_can_disable_html_report(self):
-        from agentica.agent.deep import DeepAgent
-        from agentica.model.openai import OpenAIChat
-
-        with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "agentica.agent.base.Agent._load_mcp_tools"
-        ):
-            agent = DeepAgent(
-                model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
-                workspace=tmpdir,
-                include_skills=False,
-                include_html_report=False,
-            )
-            agent.update_model()
-
-        self.assertNotIn("write_html", agent.model.functions)
 
     def test_deep_agent_enables_experience_capture_by_default(self):
         """DeepAgent is the self-evolving flagship: experience + all capture_* on."""

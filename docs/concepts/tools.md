@@ -314,13 +314,12 @@ tools = get_builtin_tools(work_dir="./")
 
 | 工具 | 模块 | 功能 |
 |------|------|------|
-| `read_file` | `BuiltinFileTool` | 读文件（offset/limit 分页，`tail` 取尾、负 `offset` 从末尾开窗；大文件守卫只拦从头分页，从尾扫描 20s 超时） |
-| `write_file` | `BuiltinFileTool` | 创建/覆写文件 |
-| `write_html` | `BuiltinFileTool` | 写单文件 HTML 报告（inline CSS），返回 `file://` URL。工作目录内目标免审批；用户指定的目录外目标走与 `write_file` 相同的审批。**DeepAgent / CLI / Web 默认开**；`get_builtin_tools()` 默认关（`include_html_report=True` 打开） |
-| `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件 |
+| `read_file` | `BuiltinFileTool` | 读文件（offset/limit 分页，`tail` 取尾、负 `offset` 从末尾开窗；大文件守卫只拦从头分页，从尾扫描 20s 超时）。空文件返回 `File is empty: …` |
+| `write_file` | `BuiltinFileTool` | 创建/覆写文件。长报告可直接写成 HTML，方便用户在浏览器打开 |
+| `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。信封格式（`*** Begin Patch` … `*** End Patch`）；hunk 行以空格 / `-` / `+` 开头；**上下文精确匹配**，不对空白或引号做 fuzz。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
-| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep；`limit` 是全局条数上限，读满即停 rg） |
-| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`parallel_safe=True` 同轮并发，`background=True` 进后台 |
+| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `include` / `limit`；`limit` 是全局条数上限，读满即停 rg |
+| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`parallel_safe=True` 同轮并发，`background=True` 进后台。非零退出只报 exit code，不附启发式 Note |
 | `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |
@@ -493,10 +492,10 @@ agent = Agent(tools=[UrlCrawlerTool()])
 ### 代码与执行工具
 
 ```python
-from agentica.tools.shell_tool import ShellTool        # Shell 命令执行
+from agentica.tools.builtin import BuiltinExecuteTool  # Shell 命令执行
 from agentica.tools.code_tool import CodeTool          # Python 代码沙箱执行
 
-agent = Agent(tools=[ShellTool(timeout=30)])
+agent = Agent(tools=[BuiltinExecuteTool(timeout=30)])
 ```
 
 ### 知识与数据工具
@@ -586,6 +585,7 @@ agent = Agent(
 
 ```python
 from agentica.guardrails.tool import ToolInputGuardrail, ToolOutputGuardrail
+from agentica.tools.builtin import BuiltinExecuteTool
 
 def check_no_rm_rf(tool_name: str, args: dict) -> bool:
     """阻止危险的 rm -rf 命令"""
@@ -595,7 +595,7 @@ def check_no_rm_rf(tool_name: str, args: dict) -> bool:
 
 agent = Agent(
     model=ZhipuAI(),
-    tools=[ShellTool()],
+    tools=[BuiltinExecuteTool()],
     tool_input_guardrails=[ToolInputGuardrail(check_no_rm_rf)],
 )
 ```

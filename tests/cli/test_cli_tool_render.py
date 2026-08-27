@@ -584,10 +584,7 @@ class TestCLIToolRender(unittest.TestCase):
         )
         body = (
             f"Started background command #4 (PID 99, id: term_4).\n"
-            f"Log: {log_path}\n"
-            f"It is detached: its exit is reported to the user, not to you. If a "
-            f'later step needs its result, call wait(id="term_4") — it returns '
-            f"the moment the command exits."
+            f"Log: {log_path}"
         )
         fake = MagicMock()
         fake.width = 80
@@ -604,7 +601,7 @@ class TestCLIToolRender(unittest.TestCase):
             str(call.args[0]) for call in fake.print.call_args_list if call.args
         )
         self.assertIn(log_path, rendered)
-        self.assertIn('wait(id="term_4")', rendered)
+        self.assertIn("term_4", rendered)
         self.assertNotIn("hidden lines", rendered)
         self.assertNotIn("20260810-013023-...", rendered)
         self.assertEqual(get_truncated_blocks(), [])
@@ -961,14 +958,10 @@ class TestCLIToolRender(unittest.TestCase):
             root = Path(tmp)
             target = root / "pkg" / "app.py"
             error = "\n".join([
-                "Patch preflight failed for 1 file; no files were changed.",
+                "Patch context not found for 1 file; no files were changed.",
                 f"- {target}:",
-                "  Hunk 1: context not found from line 1.",
-                "  Expected context:",
-                "    STALE_FIRST = 1",
-                "  Hunk 2: context not found from line 1.",
-                "  Expected context:",
-                "    STALE_SECOND = 2",
+                "  Hunk 1: context not found.",
+                "  Hunk 2: context not found.",
             ])
             fake = MagicMock()
             fake.width = 100
@@ -989,7 +982,6 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("pkg/app.py", rendered)
         self.assertNotIn(str(root), rendered)
         self.assertIn("Hunk 1: context not found", rendered)
-        self.assertIn("STALE_FIRST = 1", rendered)
         self.assertIn("Hunk 2: context not found", rendered)
         # Full error renders inline — nothing is folded behind Ctrl+O anymore.
         self.assertNotIn("Ctrl+O to expand", rendered)
@@ -1005,7 +997,7 @@ class TestCLIToolRender(unittest.TestCase):
 
         manager.display_tool_result(
             "apply_patch",
-            "Patch preflight failed.\nExpected context: x = [/red] and [bold]",
+            "Malformed patch for 1 file.\nInvalid line: x = [/red] and [bold]",
             is_error=True,
             elapsed=0.003,
             tool_call_id="patch-markup-error",
@@ -1420,10 +1412,9 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("error: ...", rendered)
 
     def test_apply_patch_error_shows_full_message(self):
-        # apply_patch preflight reports can run a dozen lines of expected/actual
-        # context; the old 8-line tail window dropped the head, which is where
-        # the failing file and hunk are named.
-        error_lines = [f"preflight detail line {i}: context mismatch" for i in range(14)]
+        # apply_patch errors name the failing file and hunk at the top;
+        # the old 8-line tail window dropped that head.
+        error_lines = [f"patch error line {i}: context not found" for i in range(14)]
         dm, output = self._stream_console()
         dm.display_tool_result(
             "apply_patch",
@@ -1434,8 +1425,8 @@ class TestCLIToolRender(unittest.TestCase):
         )
         rendered = output.getvalue()
         self.assertIn("- error", rendered)
-        self.assertIn("preflight detail line 0", rendered)
-        self.assertIn("preflight detail line 13", rendered)
+        self.assertIn("patch error line 0", rendered)
+        self.assertIn("patch error line 13", rendered)
 
     def test_generic_tool_error_shows_full_message(self):
         # Non-execute tools (cronjob, self_manage, ...) previously

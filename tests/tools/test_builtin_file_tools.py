@@ -43,23 +43,12 @@ class BlockingSubprocess:
 
 
 class TestBuiltinFileToolReadFile:
-    def test_path_tool_descriptions_require_grounded_paths(self):
-        for fn in (
-            BuiltinFileTool.read_file,
-            BuiltinFileTool.grep,
-            BuiltinFileTool.glob,
-            BuiltinFileTool.apply_patch,
-        ):
-            description = " ".join((fn.__doc__ or "").split()).lower()
-            assert "ground" in description
-            assert "speculative absolute path" in description
-
-    def test_empty_file_returns_reminder(self, file_tool, tmp_dir):
+    def test_empty_file_returns_empty_notice(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "empty.txt")
         Path(fp).touch()
         result = asyncio.run(file_tool.read_file(fp))
-        assert "<system-reminder>" in result
-        assert "0 bytes" in result
+        assert "File is empty:" in result
+        assert "<system-reminder>" not in result
 
     def test_read_simple_file(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "test.txt")
@@ -394,92 +383,7 @@ class TestBuiltinFileToolGrep:
         assert "timeout" in wait_params
         assert "timeout" in execute_params
 
-    def test_grep_docstring_states_context_precedence(self):
-        doc = BuiltinFileTool.grep.__doc__ or ""
-        assert "ignored when" in doc
-        assert "before_context" in doc
-        assert "after_context" in doc
-
-    def test_grep_context_lines_wins_over_before_after(self, file_tool, tmp_dir):
-        import shutil
-        if shutil.which("rg") is None:
-            pytest.skip("rg not installed")
-        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
-        result = asyncio.run(
-            file_tool.grep(
-                "MATCH",
-                str(tmp_dir),
-                context_lines=1,
-                before_context=10,
-                after_context=10,
-            )
-        )
-        assert "LINE_B" in result
-        assert "LINE_C" in result
-        assert "LINE_A" not in result
-        assert "LINE_D" not in result
-
-    def test_grep_fallback_context_lines(self, file_tool, tmp_dir):
-        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
-        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            result = asyncio.run(file_tool.grep("MATCH", str(tmp_dir), context_lines=1))
-        assert "LINE_B" in result
-        assert "LINE_C" in result
-        assert "LINE_A" not in result
-        assert "LINE_D" not in result
-        assert "MATCH" in result
-
-    def test_grep_fallback_asymmetric_before_after(self, file_tool, tmp_dir):
-        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
-        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            before_only = asyncio.run(
-                file_tool.grep("MATCH", str(tmp_dir), before_context=1)
-            )
-            after_only = asyncio.run(
-                file_tool.grep("MATCH", str(tmp_dir), after_context=1)
-            )
-        assert "LINE_B" in before_only and "LINE_C" not in before_only
-        assert "LINE_C" in after_only and "LINE_B" not in after_only
-
-    def test_grep_fallback_context_lines_wins_over_before_after(self, file_tool, tmp_dir):
-        Path(tmp_dir, "f.py").write_text("LINE_A\nLINE_B\nMATCH\nLINE_C\nLINE_D\n")
-        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            result = asyncio.run(
-                file_tool.grep(
-                    "MATCH",
-                    str(tmp_dir),
-                    context_lines=1,
-                    before_context=10,
-                    after_context=10,
-                )
-            )
-        assert "LINE_B" in result
-        assert "LINE_C" in result
-        assert "LINE_A" not in result
-        assert "LINE_D" not in result
-
-    def test_grep_fallback_separated_matches_get_group_separator(self, file_tool, tmp_dir):
-        Path(tmp_dir, "f.py").write_text("M1\nX\nY\nZ\nM2\n")
-        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            grouped = asyncio.run(file_tool.grep("M[12]", str(tmp_dir), context_lines=1))
-        assert "M1" in grouped and "M2" in grouped
-        assert "X" in grouped and "Z" in grouped
-        assert "Y" not in grouped
-        assert "--" in grouped
-
-    def test_grep_fallback_overlapping_context_merges(self, file_tool, tmp_dir):
-        Path(tmp_dir, "f.py").write_text("A\nM1\nB\nM2\nC\n")
-        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            result = asyncio.run(file_tool.grep("M[12]", str(tmp_dir), context_lines=1))
-        assert "A" in result and "B" in result and "C" in result
-        assert result.count("B") == 1
-        assert "--" not in result
-
     def test_grep_default_returns_content_with_line_numbers(self, file_tool, tmp_dir):
-        # Default output_mode is "content" — must return matching lines with
-        # line numbers, not just a path list. A bare path-only response was the
-        # root cause of dumb-model retry loops where the model couldn't tell
-        # whether it had actually seen the code yet.
         Path(tmp_dir, "a.txt").write_text("hello world\n")
         Path(tmp_dir, "b.txt").write_text("goodbye world\n")
         Path(tmp_dir, "c.txt").write_text("nothing here\n")
@@ -488,28 +392,18 @@ class TestBuiltinFileToolGrep:
         assert "hello world" in result, "default mode must include matched line content"
         assert "c.txt" not in result
 
-    def test_grep_files_with_matches_mode_returns_paths_only(self, file_tool, tmp_dir):
-        Path(tmp_dir, "a.txt").write_text("hello world\n")
-        Path(tmp_dir, "c.txt").write_text("nothing here\n")
-        result = asyncio.run(
-            file_tool.grep("hello", tmp_dir, output_mode="files_with_matches")
-        )
-        assert "a.txt" in result
-        assert "hello world" not in result
-        assert "c.txt" not in result
-
     def test_grep_content_mode(self, file_tool, tmp_dir):
         Path(tmp_dir, "code.py").write_text("def foo():\n    pass\ndef bar():\n    pass\n")
-        result = asyncio.run(file_tool.grep("def", tmp_dir, output_mode="content"))
+        result = asyncio.run(file_tool.grep("def", tmp_dir))
         assert "def foo" in result
         assert "def bar" in result
 
     def test_grep_content_limit_is_global_across_files(self, file_tool, tmp_dir):
-        """content-mode limit is a total line cap, not per-file --max-count."""
+        """limit is a total line cap, not per-file --max-count."""
         for name in ("a.py", "b.py", "c.py"):
             Path(tmp_dir, name).write_text("HIT one\nHIT two\nHIT three\n")
         result = asyncio.run(
-            file_tool.grep("HIT", tmp_dir, output_mode="content", limit=4)
+            file_tool.grep("HIT", tmp_dir, limit=4)
         )
         hits = [ln for ln in result.splitlines() if "HIT" in ln]
         assert len(hits) == 4
@@ -519,7 +413,7 @@ class TestBuiltinFileToolGrep:
         lines, not limit-per-file."""
         Path(tmp_dir, "many.py").write_text("HIT\n" * 10)
         result = asyncio.run(
-            file_tool.grep("HIT", tmp_dir, output_mode="content", limit=3)
+            file_tool.grep("HIT", tmp_dir, limit=3)
         )
         hits = [ln for ln in result.splitlines() if "HIT" in ln]
         assert len(hits) == 3
@@ -639,17 +533,6 @@ class TestBuiltinFileToolGrep:
         with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
             result = asyncio.run(file_tool.grep("commit_pass", str(fp), include="*.py"))
         assert "commit_pass = True" in result
-
-    def test_grep_case_insensitive(self, file_tool, tmp_dir):
-        Path(tmp_dir, "mixed.txt").write_text("Hello WORLD\n")
-        result = asyncio.run(file_tool.grep("hello", tmp_dir, case_insensitive=True, output_mode="content"))
-        assert "Hello" in result
-
-    def test_grep_fixed_strings(self, file_tool, tmp_dir):
-        Path(tmp_dir, "regex.txt").write_text("price is $10.00\n")
-        # $ and . are special in regex; fixed_strings should match literally
-        result = asyncio.run(file_tool.grep("$10.00", tmp_dir, fixed_strings=True, output_mode="content"))
-        assert "$10.00" in result
 
     def test_grep_manages_own_timeout(self, file_tool):
         """grep must self-limit so the outer 120s executor wrapper is skipped."""

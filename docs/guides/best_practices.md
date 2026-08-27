@@ -181,7 +181,7 @@ agent = Agent(
     tools=[
         DuckDuckGoTool(),
         UrlCrawlerTool(),
-        FileTool(),
+        BuiltinFileTool(work_dir="./workspace"),
     ],
 )
 
@@ -856,11 +856,17 @@ async def chat(query: Query):
 ### 5. 安全考虑
 
 ```python
+from agentica import Agent, BuiltinExecuteTool, BuiltinFileTool
+from agentica.agent.config import SandboxConfig
+
 # 限制工具权限
 agent = Agent(
     tools=[
-        ShellTool(allowed_commands=["ls", "cat"]),  # 白名单
-        FileTool(base_dir="./safe_dir"),  # 限制目录
+        BuiltinExecuteTool(work_dir="./safe_dir"),
+        BuiltinFileTool(
+            work_dir="./safe_dir",
+            sandbox_config=SandboxConfig(enabled=True, writable_dirs=["./safe_dir"]),
+        ),
     ],
 )
 

@@ -47,7 +47,7 @@ class TestSearchSkipsNestedCheckouts:
         )
 
         out = asyncio.run(
-            _tool(root).grep("MARKER_TOKEN", path=".", output_mode="files_with_matches")
+            _tool(root).grep("MARKER_TOKEN", path=".")
         )
 
         assert out.count("code.py") == 1

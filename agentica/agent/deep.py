@@ -7,7 +7,7 @@ A pre-configured Agent preset for CLI, Gateway, and daily dogfood workflows.
 Use plain Agent for SDK integrations that need the smallest stable surface.
 
 DeepAgent enables the product defaults users expect from an unattended assistant:
-- built-in tools (file ops, web search, execute, subagent task, todos)
+- built-in tools (read_file / write_file / apply_patch / grep / glob, execute, web search, subagent task, todos; long HTML reports via write_file)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
 - Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
   native/LLM summarise; reactive compact on prompt_too_long)
@@ -139,7 +139,6 @@ class DeepAgent(Agent):
         permission_mode: str = "allow-all",
         # Builtin tool toggles — mirror get_builtin_tools() params
         include_file_tools: bool = True,
-        include_html_report: bool = True,
         include_execute: bool = True,
         include_web_search: bool = True,
         include_fetch_url: bool = True,
@@ -153,10 +152,6 @@ class DeepAgent(Agent):
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
         background_process_registry: Optional[Any] = None,
-        # Warns (never blocks) when another live session has the same file
-        # uncommitted; see agentica/peer_conflicts.py. Supplied by the CLI,
-        # which is where a session's presence identity lives.
-        peer_conflict_checker: Optional[Any] = None,
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback: Optional[Callable] = None,
@@ -237,7 +232,6 @@ class DeepAgent(Agent):
             get_builtin_tools(
                 work_dir=work_dir,
                 include_file_tools=include_file_tools,
-                include_html_report=include_html_report,
                 include_execute=include_execute,
                 include_web_search=include_web_search,
                 include_fetch_url=include_fetch_url,
@@ -254,7 +248,6 @@ class DeepAgent(Agent):
                 enable_diagnostics=enable_diagnostics,
                 diagnostics_servers=diagnostics_servers,
                 diagnostics_errors_only=diagnostics_errors_only,
-                peer_conflict_checker=peer_conflict_checker,
             )
         )
         if tools:

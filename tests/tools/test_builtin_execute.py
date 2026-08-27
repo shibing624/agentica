@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for BuiltinExecuteTool and ShellTool."""
+"""Tests for BuiltinExecuteTool."""
 import asyncio
 import json
 import os
@@ -19,7 +19,6 @@ from agentica.tools.background_processes import (
     read_log_tail,
 )
 from agentica.tools.builtin import BuiltinExecuteTool
-from agentica.tools.shell_tool import ShellTool
 
 
 class BlockingSubprocess:
@@ -172,9 +171,7 @@ class TestBuiltinExecuteTool:
             item = running[0]
             assert f"PID {item.pid}" in result
             assert f"id: {item.id}" in result
-            assert f"/stop {item.id}" in result
-            assert f"kill -- -{item.pid}" in result
-            assert "/stop" in result
+            assert "Log:" in result
             assert Path(item.log_path).exists()
             assert str(Path(tmp_dir) / ".agentica") not in item.log_path
             projects_dir = Path(
@@ -189,11 +186,7 @@ class TestBuiltinExecuteTool:
             registry.stop()
         assert registry.running_count() == 0
 
-    def test_execute_background_result_tells_the_model_not_to_wait(self, tmp_dir):
-        """The model followed the old "inspect progress by reading the log" text
-        with `execute("sleep 70; tail ...")`, which re-blocked the very turn
-        backgrounding had just freed. The result must state that the exit goes
-        to the user and that waiting is wrong."""
+    def test_execute_background_result_is_id_pid_and_log(self, tmp_dir):
         registry = BackgroundProcessRegistry()
         tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
@@ -203,27 +196,23 @@ class TestBuiltinExecuteTool:
         finally:
             registry.stop()
 
-        assert "reported to the user, not to you" in result
-        assert "no sleep, no polling, no blocking tail" in result
-        assert "Inspect progress" not in result
-        # The only sanctioned way back into this conversation.
-        assert 'wait(id="term_1")' in result
+        assert "Started background command #1" in result
+        assert "id: term_1" in result
+        assert "Log:" in result
+        assert "reported to the user" not in result
+        assert "wait(id=" not in result
 
     def test_execute_runs_self_detaching_command_but_flags_it(self, execute_tool):
-        """`nohup ... &` stays allowed — it is a standard idiom and a caller may
-        want a raw orphan — but the result has to say what it costs, since /ps,
-        /stop and the completion notice all miss an untracked child."""
         result = asyncio.run(execute_tool.execute("nohup echo started > /dev/null 2>&1 &"))
 
-        assert "It is untracked" in result
-        # No registry here, so background is not a thing to point at.
+        assert "untracked" in result
         assert "background=True" not in result
 
-    def test_self_detaching_command_points_at_background_when_it_exists(self, bg_execute_tool):
+    def test_self_detaching_command_stays_a_short_note(self, bg_execute_tool):
         result = asyncio.run(bg_execute_tool.execute("nohup echo started > /dev/null 2>&1 &"))
 
-        assert "It is untracked" in result
-        assert "background=True" in result
+        assert "untracked" in result
+        assert "It is untracked" not in result
 
     def test_execute_refuses_self_detaching_command_in_background_mode(self, bg_execute_tool):
         """Here the '&' is not merely untracked but wrong: the registry would
@@ -295,7 +284,7 @@ class TestBuiltinExecuteTool:
         async def scenario():
             started = await tool.execute(command, background=True)
             item_id = registry.list(include_finished=True)[0].id
-            assert f'wait(id="{item_id}")' in started
+            assert item_id in started
             return await tool.wait(item_id, timeout=120)
 
         began = time.monotonic()
@@ -567,7 +556,7 @@ class TestBuiltinExecuteTool:
 
         assert "UP009" in result
         assert "[Exit code: 1]" in result
-        assert "Diagnostics found" in result
+        assert "Diagnostics found" not in result
 
     def test_execute_still_raises_for_plain_python3_exit_one(self, execute_tool):
         with pytest.raises(RuntimeError, match="Command exited with code 1"):
@@ -705,36 +694,3 @@ print(f(21))"'''
         tool = BuiltinExecuteTool(work_dir=tmp_dir)
         result = asyncio.run(tool.execute("pwd"))
         assert tmp_dir in result
-
-
-class TestShellTool:
-    def test_execute_preserves_command(self, tmp_dir):
-        tool = ShellTool(work_dir=tmp_dir)
-        python = shlex.quote(sys.executable)
-        command = f'''{python} -c 'print("\\n".join(["a", "b"]))' '''.strip()
-
-        result = asyncio.run(tool.execute(command))
-
-        assert result == "a\nb"
-
-    def test_execute_cancellation_cleans_up_subprocess(self, tmp_dir):
-        async def cancel_running_command():
-            process = BlockingSubprocess()
-            cleanup = AsyncMock()
-            with patch(
-                "agentica.tools.shell_tool.asyncio.create_subprocess_shell",
-                new=AsyncMock(return_value=process),
-            ), patch(
-                "agentica.tools.shell_tool.terminate_subprocess",
-                cleanup,
-            ):
-                tool = ShellTool(work_dir=tmp_dir)
-                task = asyncio.create_task(tool.execute("sleep 60"))
-                await process.started.wait()
-                task.cancel()
-                with pytest.raises(asyncio.CancelledError):
-                    await task
-
-            cleanup.assert_awaited_once_with(process, process_group=True)
-
-        asyncio.run(cancel_running_command())

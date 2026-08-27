@@ -47,7 +47,6 @@ class TestBuiltinToolsListing(unittest.TestCase):
         agent/base.py) — the display list must carry them too."""
         for name in (
             "write_todos", "delegate", "save_memory", "search_memory", "wait",
-            "write_html",
         ):
             self.assertIn(name, BUILTIN_TOOLS)
 

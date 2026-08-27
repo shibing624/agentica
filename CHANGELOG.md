@@ -12,14 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### breaking
 - **CLI `/export` 默认导出 session JSONL，不再是对话瘦 JSON**：以前 `/export` / `/save` 把 `working_memory.messages` 存成一份没有 event、没有工具正文的 JSON。现在默认拷贝磁盘上那份 `<session_id>.jsonl`（与 Web 轨迹同一文件）。旧行为改为 `/export messages [path]`；`/export analysis [path]` 写出与 `GET /api/sessions/{id}/trace/analysis` 相同的 JSON。
+- **`apply_patch` 只精确匹配上下文**：不再对空白 / 引号做 fuzz。对不上就是 `Hunk N: context not found`。死的 SDK 类 `PatchTool`（双格式 unified/V4A）删除；补丁走 `BuiltinFileTool.apply_patch`，模块只留 `apply_diff` / `parse_patch_envelope`。
+- **删除 `write_html` 和 `ShellTool`**：长报告用 `write_file` 写 HTML；shell 用 `execute` / `BuiltinExecuteTool`。`get_builtin_tools` / `DeepAgent` 去掉 `include_html_report`。
+- **`grep` 只留 `pattern` / `path` / `include` / `limit`**：去掉 `output_mode`、`case_insensitive`、`fixed_strings`、`context_lines` / `before_context` / `after_context`。
+- **`DeepAgent` / `get_builtin_tools` 去掉 `peer_conflict_checker`**：编辑成功后不再附「别的会话也改了这个文件」提醒。
 
 #### features
 - **CLI 并行工具改成 Kimi 式整块 flush**：未完成的调用停在输入框上方的 live 窗口，按开始顺序等前缀都结束后才把「调用行 + 结果」一起打进 scrollback。以前 `execute` 一开始就打印调用行，并行的 `grep` / `write_file` 结果会插在调用和 `⎿` 之间，看起来像挂错工具；现在不再需要 `↳` 锚点。`--print` 不变。
-- **`write_html`：单文件 HTML 报告**：DeepAgent（CLI / Web）默认注册，内部走 `write_file`，把产品/技术报告写成带 inline CSS 的 `tmp/reports/<title>.html`，工具结果给 `file://` URL 让用户自己点开，不弹浏览器。工作目录内目标（含默认 `tmp/reports/`）在 ask/auto 下免审批；用户指定的目录外路径走与 `write_file` 相同的审批。普通 `get_builtin_tools()` / `Agent()` 默认没有；`include_html_report=True` 打开。应用源码 HTML 仍用 `write_file`。
 - **CLI / SDK 与 Web 共用同一套 session 轨迹出口**：一份 JSONL + `SessionLog.analyze()`。SDK：`agent.session_log`（公开句柄）、`.format_trace()`、`.export()`。CLI：`/trace` 打 rounds/tokens/工具（`/trace <n>` 展开一轮），`/status` 增加 **Session log** 路径（原 `Log file` 改名为 **Debug log**，避免和 jsonl 混淆）。Gateway `/trace/analysis` 改为调用 `log.analyze()`，不再手拼一份。公开 API 见 `docs/API.md`。
 - **`/goal` 默认 token 预算不限**：CLI `/goal xxx` 与 SDK `run_goal()` 不传 `token_budget` 时不再回落 500_000（`DEFAULT_TOKEN_BUDGET` 改为 `None`）。要限额度显式传 `--tokens N` / `token_budget=N`；`-1` 仍是不限。Web 目标芯片默认显示「预算不限」，点一下才打开 Token 预算输入（空=不限，支持 `500k`/`2m`），Escape 关掉输入框而不退出目标模式。
 
 #### fixes
+- **CLI 回答 `ask_user_question` 时能看到完整选项**：提问组件和 live 窗口抢同一块底部高度，live 的 `LIVE_MAX_ROWS=12` 把选项挤出屏幕。有未决提问/审批时收起 live；选项折行按显示宽度（`get_cwidth`）预留行数，中文不再按 `len` 少算导致后几项被裁。
+- **`apply_patch` 去掉误导性 Expected/Actual 预检预览**：上下文对不上只报 `Hunk N: context not found`；缺 `*** Begin Patch`、hunk 行没以空格/`-`/`+` 开头，报 `Malformed patch`，不再包装成「preflight + Actual from line N」。原子写入（失败不改任何文件）仍在。整函数重写用 `write_file`。
+- **工具结果不再塞启发式旁白**：`execute` 非零退出只报 exit code（仍按命令决定要不要 raise），不再附 Note；`write_todos` 不再 verification nudge；空文件返回 `File is empty: …` 而不是 `<system-reminder>`；`fetch_url` 去掉四条 IMPORTANT；`background=True` 成功结果只留 id / pid / log。路径 grounded 政策只写在 `tools.md`。**编辑后的 LSP/Pyright 诊断仍附在 `write_file` / `apply_patch` 结果上**（`--enable-diagnostics`），缩进对不上时能直接看到。
 - **CLI live 窗口跨线程读写加锁，provider 断流也会 flush 在飞工具块**：spinner 每 120ms `compose_live` 与 turn 线程同时改 `LiveToolStore` 的 OrderedDict，迭代中增删会让 spinner 线程静默死掉、状态栏冻结。store 加锁、读侧快照，spinner 循环包异常；泛化 `except Exception` 与取消路径一样调 `abandon_live()`。
 - **CLI live 窗口跟进**：并行 `task` 按 description 绑 subagent；结果 id 对不上时先打完整 call+result；剥 Rich 标签不再吃正文 `[...]`；删掉已无生产引用的 `_ToolResultSequencer`；行数上限 `LIVE_MAX_ROWS=12` 只定义一处。
 - **Layer 2 空摘要不再当成压缩成功**：`auto_compact` / `_summarise_conversation` 对摘要 `strip()`，空白或抽不出正文（含把空 `resp` `str()` 成对象 repr 的路径）整段放弃，不替换 `messages`、不写 `compact_boundary`。WorkingMemory 里的空白 session summary 不再走 SM-compact，回落到真正的摘要 LLM。

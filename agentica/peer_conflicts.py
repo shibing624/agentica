@@ -3,19 +3,21 @@
 @author:XuMing(xuming624@qq.com)
 @description: Warn when another live session already has this file dirty.
 
-The expensive part of several sessions on one repository is not the merge — it
-is finding out, an hour later, that someone else had the file open. Presence
-already carries each session's dirty paths (``agentica/git_state.py`` published
-through ``agentica/peers.py``), so the answer is a dictionary lookup at the
-moment it matters: the write.
+Presence already carries each session's dirty paths (``agentica/git_state.py``
+published through ``agentica/peers.py``), so ``list_agents`` can show the
+answer without asking. ``PeerConflictChecker`` is the same lookup as a
+callable, for callers who want a warning string at write time.
+
+It is **not** wired into ``BuiltinFileTool``. File writes return the write
+result (plus LSP diagnostics when enabled); they do not append a peer note.
 
 Three decisions, all in the direction of "say it, do not stop it":
 
 **It never blocks.** A peer's dirty file is information, not a lock. Two sessions
 editing one file is sometimes exactly right (one writes the fix, the other the
 test) and no heuristic here can tell that from a collision. Refusing the write
-would put an agent in a hole it cannot dig out of; a line in the tool result puts
-the choice where the judgement is.
+would put an agent in a hole it cannot dig out of; the warning string, if a
+caller attaches it, puts the choice where the judgement is.
 
 **Only the same repository counts.** Comparing bare relative paths across
 unrelated checkouts would warn about ``README.md`` forever. Peers publish the

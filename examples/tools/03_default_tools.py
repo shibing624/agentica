@@ -5,7 +5,7 @@
 
 This example shows how to use common built-in tools:
 1. WeatherTool - Get weather information
-2. ShellTool - Execute shell commands
+2. BuiltinExecuteTool - Execute shell commands
 3. JinaTool - Web content reading
 """
 import sys
@@ -15,7 +15,7 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
-from agentica import WeatherTool, ShellTool, JinaTool
+from agentica import WeatherTool, BuiltinExecuteTool, JinaTool
 from agentica.agent.config import PromptConfig
 
 
@@ -23,14 +23,14 @@ async def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         tools=[
-            ShellTool(),
+            BuiltinExecuteTool(),
             JinaTool(),
         ],
         prompt_config=PromptConfig(add_datetime_to_instructions=True),
     )
 
     print("\n" + "=" * 60)
-    print("Example: Shell Tool")
+    print("Example: Execute")
     print("=" * 60)
     await agent.print_response("列出当前目录下的文件")
 

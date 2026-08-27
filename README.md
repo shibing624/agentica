@@ -156,7 +156,7 @@ agent = DeepAgent()
 **核心引擎**
 
 - **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
-- **内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
+- **内置工具** — `read_file` / `write_file` / `apply_patch` / `grep` / `glob`、`execute`、网页搜索；长报告用 `write_file` 写 HTML
 - **多模型** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM 等
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **多模态** — 文本、图像、音频、视频理解

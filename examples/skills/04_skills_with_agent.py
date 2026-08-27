@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from agentica import Agent, ZhipuAIChat
 from agentica.tools.skill_tool import SkillTool
-from agentica.tools.shell_tool import ShellTool
+from agentica.tools.builtin import BuiltinExecuteTool
 from agentica.skills import (
     SkillLoader,
     load_skills,
@@ -42,7 +42,7 @@ def demo_skill_injection():
     agent = Agent(
         model=ZhipuAIChat(model="glm-4-flash"),
         instructions="You are a helpful coding assistant.",
-        tools=[ShellTool()],
+        tools=[BuiltinExecuteTool()],
     )
 
     # Simulate user input with trigger
@@ -118,7 +118,7 @@ def normalize_name(value: str) -> str:
         agent = Agent(
             model=ZhipuAIChat(model="glm-4-flash"),
             instructions="You are a Python coding assistant.",
-            tools=[skill_tool, ShellTool()],
+            tools=[skill_tool, BuiltinExecuteTool()],
         )
 
         print(f"Agent created: {agent.name or 'unnamed'}")
@@ -153,7 +153,7 @@ def demo_skill_based_agent():
             "Available skills:",
             skills_summary,
         ],
-        tools=[ShellTool()],
+        tools=[BuiltinExecuteTool()],
     )
 
     def process_with_skills(user_message: str):
@@ -217,7 +217,7 @@ def demo_custom_skill_with_agent():
                     "# Skill Instructions",
                     skill.get_prompt(),
                 ],
-                tools=[ShellTool()],
+                tools=[BuiltinExecuteTool()],
             )
             query = "What are the main modules in numpy ?"
             if os.environ.get("RUN_SKILL_AGENT_LLM") == "1":

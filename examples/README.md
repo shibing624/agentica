@@ -60,9 +60,9 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 |---|------|------|----------|
 | 01 | [custom_tool.py](tools/01_custom_tool.py) | 自定义函数工具 + 类工具 | `tools=[func]`, `Tool` 基类 |
 | 02 | [async_tool.py](tools/02_async_tool.py) | async 工具（原生 `await`，零阻塞） | `async def` 工具, `run_in_executor` 自动包装 |
-| 03 | [default_tools.py](tools/03_default_tools.py) | 内置工具概览（天气、Shell、Jina） | `WeatherTool`, `ShellTool`, `JinaTool` |
-| 04 | [code_execution.py](tools/04_code_execution.py) | 代码执行工具 | `ShellTool`, `CodeTool` |
-| 05 | [file_operations.py](tools/05_file_operations.py) | 文件操作工具 | `PatchTool`, `ShellTool` |
+| 03 | [default_tools.py](tools/03_default_tools.py) | 内置工具概览（天气、execute、Jina） | `WeatherTool`, `BuiltinExecuteTool`, `JinaTool` |
+| 04 | [code_execution.py](tools/04_code_execution.py) | 代码执行工具 | `BuiltinExecuteTool`, `CodeTool` |
+| 05 | [file_operations.py](tools/05_file_operations.py) | 文件操作工具 | `BuiltinFileTool`, `BuiltinExecuteTool` |
 | 06 | [browser.py](tools/06_browser.py) | 浏览器工具 | `BrowserTool` |
 | 07 | [parallel_tools.py](tools/07_parallel_tools.py) | 多工具并行执行 | `asyncio.gather()`, 并行 vs 串行对比 |
 | 08 | [concurrency_safe_tools.py](tools/08_concurrency_safe_tools.py) | 并发安全分流：读工具并行、写工具串行 | `concurrency_safe`, sibling-error 模式 |

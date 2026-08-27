@@ -2,10 +2,9 @@
 
 Available tools:
 - Base: Tool base class
-- Builtin tools: File, Execute, WebSearch, FetchUrl, Todo, Task (used by Agent)
+- Builtin tools: BuiltinFileTool, BuiltinExecuteTool, WebSearch, FetchUrl, Todo, Task
 - CodeTool: Code analysis, formatting, and linting
 - LspTool: LSP-based code navigation (goto definition, find references)
-- PatchTool: Apply diff/patch files (V4A and unified diff formats)
 - @tool decorator: Attach metadata to tool functions
 - Tool Registry: Global tool name -> callable registry
 """
@@ -22,7 +21,6 @@ from agentica.tools.builtin import (
 from agentica.tools.code_tool import CodeTool
 from agentica.tools.e2b_tool import E2BExecuteTool
 from agentica.tools.lsp_tool import LspTool
-from agentica.tools.patch_tool import PatchTool
 from agentica.tools.cron_tool import CronTool
 from agentica.tools.peer_tool import PeerMessagingTool
 from agentica.tools.use_capability_tool import UseCapabilityTool
@@ -53,7 +51,7 @@ __all__ = [
     "set_interrupt",
     "is_interrupted",
     # Builtin tools
-    "BuiltinFileTool",       # File read/write/search/list
+    "BuiltinFileTool",       # read_file / write_file / apply_patch / glob / grep
     "BuiltinExecuteTool",    # Shell command execution
     "BuiltinWebSearchTool",  # Web search
     "BuiltinFetchUrlTool",   # URL content fetching
@@ -63,7 +61,6 @@ __all__ = [
     "CodeTool",        # Code analysis, formatting, linting
     "E2BExecuteTool",  # Remote sandboxed Python / shell execution (E2B cloud)
     "LspTool",         # LSP-based code navigation
-    "PatchTool",       # Apply diff/patch files
     "CronTool",        # Cron job management
     "PeerMessagingTool",  # Message the user's other live CLI sessions
     "UseCapabilityTool",  # Stable proxy for discovering/calling deferred (optional) tools

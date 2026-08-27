@@ -125,11 +125,9 @@ LAZY_IMPORTS = {
     "DalleTool": "agentica.tools.dalle_tool",
     "HackerNewsTool": "agentica.tools.hackernews_tool",
     "JinaTool": "agentica.tools.jina_tool",
-    "ShellTool": "agentica.tools.shell_tool",
     "SkillTool": "agentica.tools.skill_tool",
     "WeatherTool": "agentica.tools.weather_tool",
     "CodeTool": "agentica.tools.code_tool",
-    "PatchTool": "agentica.tools.patch_tool",
     # built-in tools — moved to eager imports in __init__.py.
     # Only the helper factory stays lazy (avoids importing all tool modules at startup).
     "get_builtin_tools": "agentica.tools.builtin",

@@ -382,8 +382,8 @@ class TestInitLazyLoading(unittest.TestCase):
 
     def test_lazy_tool_import(self):
         """Tool classes should be accessible via lazy loading."""
-        from agentica import ShellTool
-        self.assertIsNotNone(ShellTool)
+        from agentica import BuiltinExecuteTool
+        self.assertIsNotNone(BuiltinExecuteTool)
 
     def test_provider_alias_functions(self):
         """Provider alias functions should be callable."""

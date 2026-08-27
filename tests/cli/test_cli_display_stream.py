@@ -693,6 +693,15 @@ class TestReadFileCountSummary(unittest.TestCase):
         res = "\n\n[Showing lines 601-504 of 504 total lines]"
         self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "0 lines")
 
+    def test_empty_file_notice_is_zero_lines(self):
+        from agentica.cli.display import StreamDisplayManager
+        self.assertEqual(
+            StreamDisplayManager._result_count_summary(
+                "read_file", "File is empty: /tmp/empty.txt"
+            ),
+            "0 lines",
+        )
+
     def test_fallback_when_no_footer(self):
         from agentica.cli.display import StreamDisplayManager
         self.assertEqual(StreamDisplayManager._result_count_summary("read_file", "a\nb\nc"), "3 lines")

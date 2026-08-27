@@ -295,7 +295,7 @@ from agentica.compression import CompressionManager
 
 - `Agent` / `RunResponse` / `RunEvent` / `Message` ...
 - `OpenAIChat` / `DeepSeek` / `Claude` / ... (所有 model provider 别名)
-- `ShellTool` / `CodeTool` / `McpTool` / ... (常用 tool 别名)
+- `BuiltinFileTool` / `BuiltinExecuteTool` / `CodeTool` / `McpTool` / ... (常用 tool)
 
 **推荐的新代码风格**（明确的 import 路径，对标 agno）：
 
@@ -303,10 +303,10 @@ from agentica.compression import CompressionManager
 # ✅ 推荐
 from agentica import Agent, tool
 from agentica.model.openai import OpenAIChat
-from agentica.tools.shell_tool import ShellTool
+from agentica.tools.builtin import BuiltinFileTool, BuiltinExecuteTool
 
 # ✅ 也可以（顶层快捷 import 作为 v1.x 稳定 API 长期支持）
-from agentica import Agent, OpenAIChat, ShellTool
+from agentica import Agent, OpenAIChat, BuiltinFileTool, BuiltinExecuteTool
 ```
 
 ---

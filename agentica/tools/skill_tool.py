@@ -13,26 +13,26 @@ its instructions are loaded into the conversation context.
 Usage:
     from agentica import Agent
     from agentica.tools.skill_tool import SkillTool
-    from agentica.tools.shell_tool import ShellTool
+    from agentica.tools.builtin import BuiltinExecuteTool
 
     # Basic usage - skills loaded on-demand (not auto-loaded at startup)
     agent = Agent(
         name="Skill-Enabled Agent",
-        tools=[SkillTool(), ShellTool()],
+        tools=[SkillTool(), BuiltinExecuteTool()],
     )
 
     # Auto-load all skills from standard directories at startup
     skill_tool = SkillTool(auto_load=True)
     agent = Agent(
         name="Auto-Load Skill Agent",
-        tools=[skill_tool, ShellTool()],
+        tools=[skill_tool, BuiltinExecuteTool()],
     )
 
     # With custom skill directories
     skill_tool = SkillTool(custom_skill_dirs=["./my-skills/web-research"])
     agent = Agent(
         name="Custom Skill Agent",
-        tools=[skill_tool, ShellTool()],
+        tools=[skill_tool, BuiltinExecuteTool()],
     )
 """
 import json

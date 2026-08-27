@@ -41,15 +41,13 @@ approved_by_user: contextvars.ContextVar[bool] = contextvars.ContextVar(
 
 DENIED_TOOL_RESULT = "Tool call denied by user."
 
-FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep", "write_html"})
+FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep"})
 WRITE_FILE_TOOLS = frozenset({"write_file", "apply_patch"})
 EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_command"})
 NETWORK_TOOLS = frozenset({"web_search", "fetch_url"})
 # Session-local / product builtins Codex Ask would not prompt on as
 # "file writes". Never inspect ``action``. Ask still parks ``write_file`` /
-# ``apply_patch``, mutating ``execute``, and network tools. ``write_html``
-# is NOT here: it is path-aware (see ``classify``) — in-workdir reports
-# allow, user-specified outside targets park like ``write_file``.
+# ``apply_patch``, mutating ``execute``, and network tools.
 BENIGN_ALWAYS_ALLOW = frozenset({
     "write_todos",
     "ask_user_question",
@@ -461,14 +459,6 @@ def classify(
     name = fc.function.name
     if name in BENIGN_ALWAYS_ALLOW:
         return "allow"
-    if name == "write_html":
-        # Path-aware report write: a report inside the work dir (including
-        # the tmp/reports default) never prompts; a user-specified target
-        # outside it or on a sensitive path gates exactly like write_file.
-        paths = call_paths(fc, work_dir=work_dir)
-        if all(not _file_needs_approval(p, work_dir=work_dir) for p in paths):
-            return "allow"
-        return "ask"
     if _is_hard_unsafe(fc, work_dir=work_dir):
         return "ask"
 
@@ -602,13 +592,6 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
             raw.extend(op.path for op in parse_patch_envelope(patch))
         except (ValueError, TypeError):
             return []
-    elif name == "write_html":
-        path = args.get("file_path")
-        if isinstance(path, str) and path.strip():
-            raw.append(path)
-        else:
-            # Default destination lives under <work_dir>/tmp/reports.
-            raw.append("tmp/reports/report.html")
     return [_resolve_tool_path(p, work_dir) for p in raw]
 
 

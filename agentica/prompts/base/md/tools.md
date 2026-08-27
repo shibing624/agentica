@@ -17,7 +17,11 @@ drops the middle, which may be the part you needed. Chain dependent commands
 with `&&`, not `;`. Check state read-only before a write.
 
 Prefer `apply_patch` for code edits, multi-hunk edits, and changes that span
-multiple files. Use `write_file` for new files or intentional whole-file rewrites.
+multiple files. Context in each hunk must match the file exactly (a leading
+space, `-`, or `+` on every line after `@@`). Use `write_file` for new files
+or intentional whole-file rewrites.
+For a long product or technical report the user will open themselves, write a
+single HTML file with `write_file` (inline CSS is fine).
 
 When several calls do not depend on each other, send them all in one message
 instead of one per turn — batch `read_file` only across exact known existing

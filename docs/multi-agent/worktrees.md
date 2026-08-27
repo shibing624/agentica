@@ -33,24 +33,17 @@ push 时，`origin/main` 看不见它——而那个会话恰恰是你马上要�
 > 没发布过这些字段的老会话记录只会显示 `git: <branch>`，**不会**显示 "clean"。"clean" 是别人
 > 据以决定能不能 rebase 的信息，缺字段不许冒充它。
 
-## 二、写文件时的一次性提醒
+## 二、对方改了哪些文件：看 presence，不写进工具结果
 
-真正要动手的那一刻，如果**另一个 live 会话**（同一个仓库，可以在别的 worktree）也把这个文件
-改脏了，写入结果里会追加一行：
+真正要动手之前，用 `list_agents`（或 `/list-agents`）看对方心跳里的 `dirty:`。那是现场可见的 git 状态，写文件工具**不会**再往结果里追加「另一个会话也改了这个文件」——提醒曾经挂在 `write_file` / `apply_patch` 上，模型会把它当成写入合同的一部分。
 
-```text
-Another live session has agentica/peers.py uncommitted: agentica-52 (main,
-/Users/xuming/Documents/Codes/agentica). Your write went through — decide whether
-to coordinate (send_message) or to work in your own checkout (worktree(...)).
-```
+需要自己在写入时查一次的调用方，仍可用 `agentica.peer_conflicts.PeerConflictChecker`；产品默认路径是看 presence，不是改工具结果。
 
-三个刻意的取舍：
+三个刻意的取舍（对 presence / checker 都成立）：
 
-- **只提醒、不拦截**。两个会话同时改一个文件有时正是对的（一个写实现、一个写测试），没有启发式
-  能替你判断；拦住写入只会把 agent 逼进死角。
-- **只比同一个仓库**。peer 会发布 `repo_root`（共享 `.git` 的主 checkout），所以是精确比较，
-  不会满世界的 `README.md` 互相报警；而同一个仓库的两个 **worktree** 仍然会命中——这才是值得报警的情况。
-- **同一个文件同一个 peer 只说一次**。每次编辑都提醒等于训练 agent 忽略它。
+- **只提醒、不拦截**。两个会话同时改一个文件有时正是对的（一个写实现、一个写测试）。
+- **只比同一个仓库**。peer 会发布 `repo_root`，所以是精确比较；同一个仓库的两个 **worktree** 仍然会命中。
+- **同一个文件同一个 peer，checker 只说一次**。每次编辑都提醒等于训练 agent 忽略它。
 
 ## 三、worktree：一个任务一个目录、一个分支
 

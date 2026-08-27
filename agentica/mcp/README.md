@@ -25,9 +25,8 @@ pip install mcp
 The `McpTool` class is the primary way to integrate MCP services with your Agentica agents:
 
 ```python
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, BuiltinExecuteTool
 from agentica.tools.mcp_tool import McpTool
-from agentica import ShellTool
 
 # For SSE transport (direct connection to running server)
 mcp_tool = McpTool(
@@ -52,7 +51,7 @@ mcp_tool = McpTool(
 async with mcp_tool:
     agent = Agent(
         model=OpenAIChat(model="gpt-4o-mini"),
-        tools=[ShellTool(), mcp_tool]
+        tools=[BuiltinExecuteTool(), mcp_tool]
     )
 
     await agent.print_response("Use the weather tool to check the forecast for Beijing")

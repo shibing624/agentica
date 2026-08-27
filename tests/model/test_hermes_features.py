@@ -142,67 +142,48 @@ class TestOutputTruncation:
 
 # ============== TestExitCodeInterpretation ==============
 
-class TestExitCodeInterpretation:
-    """Test exit code semantic interpretation."""
+class TestExpectedNonzeroExit:
+    """Non-zero exits that are the answer, not a crash, must not raise."""
 
     def test_grep_no_matches(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("grep 'pattern' file.txt", 1)
-        assert result is not None
-        assert "No matches" in result
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("grep 'pattern' file.txt", 1) is True
 
     def test_diff_files_differ(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("diff a.txt b.txt", 1)
-        assert result is not None
-        assert "differ" in result
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("diff a.txt b.txt", 1) is True
 
     def test_curl_dns_failure(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("curl https://example.com", 6)
-        assert result is not None
-        assert "resolve" in result.lower()
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("curl https://example.com", 6) is True
 
     def test_git_normal(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("git diff", 1)
-        assert result is not None
-        assert "normal" in result.lower() or "differ" in result.lower()
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("git diff", 1) is True
 
     def test_pipeline_extraction(self):
-        """Should extract last command from pipeline."""
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("cat file.txt | grep pattern", 1)
-        assert result is not None
-        assert "No matches" in result
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("cat file.txt | grep pattern", 1) is True
 
     def test_env_var_stripping(self):
-        """Should strip VAR=val prefix."""
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("LANG=C grep 'x' file", 1)
-        assert result is not None
-        assert "No matches" in result
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("LANG=C grep 'x' file", 1) is True
 
-    def test_zero_exit_returns_none(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        assert _interpret_exit_code("grep 'pattern' file", 0) is None
+    def test_zero_exit_is_not_expected_nonzero(self):
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("grep 'pattern' file", 0) is False
 
-    def test_unknown_command_returns_none(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        assert _interpret_exit_code("my_custom_tool", 42) is None
+    def test_unknown_command_is_not_expected(self):
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("my_custom_tool", 42) is False
 
     def test_pytest_failures(self):
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("pytest tests/", 1)
-        assert result is not None
-        assert "failed" in result.lower()
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("pytest tests/", 1) is True
 
     def test_full_path_command(self):
-        """Should handle /usr/bin/grep -> grep."""
-        from agentica.tools.builtin.execute_tool import _interpret_exit_code
-        result = _interpret_exit_code("/usr/bin/grep 'x' file", 1)
-        assert result is not None
-        assert "No matches" in result
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        assert _expected_nonzero_exit("/usr/bin/grep 'x' file", 1) is True
 
 
 # ============== TestFileReadSafety ==============

@@ -1,25 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Patch apply tool - supports V4A diff format and unified diff format.
-"""
-import os
-import re
-import difflib
-from pathlib import Path
-from typing import Optional, List, Literal, Tuple
-from dataclasses import dataclass
+@description: V4A patch apply helpers used by BuiltinFileTool.apply_patch.
 
-from agentica.tools.base import Tool
-from agentica.utils.log import logger
+Context matching is exact: a hunk must match the file byte-for-byte aside
+from the required `` `` / ``-`` / ``+`` prefixes. Whitespace and quotes are
+not rewritten.
+"""
+import re
+from typing import List, Literal
+from dataclasses import dataclass
 
 
 ApplyDiffMode = Literal["default", "create"]
-
-# How many context/file lines one failed hunk may print per block, and how much
-# lead-in is kept before the first mismatching line.
-_RENDER_LIMIT = 6
-_RENDER_LEAD_IN = 2
 
 
 @dataclass
@@ -66,95 +59,11 @@ class ContextFailure:
     """One update hunk whose context was not found in the current file."""
 
     hunk_number: int
-    cursor: int
-    context: Tuple[str, ...]
     eof: bool = False
-    actual: Tuple[str, ...] = ()
-    actual_start: int = 0  # 0-based line index of actual[0]
 
     def render(self) -> str:
         location = "EOF context" if self.eof else "context"
-        if self.eof or self.cursor > 0:
-            header = (
-                f"Hunk {self.hunk_number}: {location} not found "
-                f"from line {self.cursor + 1}."
-            )
-        else:
-            header = f"Hunk {self.hunk_number}: {location} not found."
-        lines = [header]
-        diff_index = self._first_difference()
-        start = self._window_start(diff_index)
-        if self.context:
-            lines.append("Expected context:")
-            lines.extend(
-                self._render_window(self.context, start, diff_index, "context lines")
-            )
-        if self.actual:
-            lines.append(f"Actual from line {self.actual_start + start + 1}:")
-            lines.extend(self._render_window(self.actual, start, diff_index, "lines"))
-        elif not self.eof:
-            lines.append("None of the expected lines appear in the file.")
-        if diff_index is not None:
-            lines.append(self._difference_note(diff_index))
-        return "\n".join(lines)
-
-    def _first_difference(self) -> Optional[int]:
-        """Index of the first context line that the file region does not match.
-
-        Returns ``None`` when there is no comparable file region, which is the
-        case for a hunk whose lines appear nowhere in the file.
-        """
-        if not self.actual:
-            return None
-        for index in range(max(len(self.context), len(self.actual))):
-            expected = self.context[index] if index < len(self.context) else None
-            found = self.actual[index] if index < len(self.actual) else None
-            if expected != found:
-                return index
-        return None
-
-    def _window_start(self, diff_index: Optional[int]) -> int:
-        """Slide the preview so the first mismatching line is always visible.
-
-        A hunk that matches for six lines and diverges on the seventh used to
-        print two identical previews with the only difference folded away.
-        """
-        if diff_index is None or diff_index < _RENDER_LIMIT:
-            return 0
-        longest = max(len(self.context), len(self.actual))
-        return max(0, min(diff_index - _RENDER_LEAD_IN, longest - _RENDER_LIMIT))
-
-    def _render_window(
-        self,
-        source: Tuple[str, ...],
-        start: int,
-        diff_index: Optional[int],
-        noun: str,
-    ) -> List[str]:
-        rendered: List[str] = []
-        if start > 0:
-            noun_earlier = "line" if start == 1 else "lines"
-            verb = "matches" if start == 1 else "match"
-            rendered.append(f"  ... ({start} earlier {noun_earlier} {verb})")
-        window = source[start : start + _RENDER_LIMIT]
-        for offset, line in enumerate(window):
-            marker = "> " if start + offset == diff_index else "  "
-            rendered.append(f"{marker}{line}")
-        remaining = len(source) - (start + len(window))
-        if remaining > 0:
-            rendered.append(f"  ... ({remaining} more {noun})")
-        return rendered
-
-    def _difference_note(self, diff_index: int) -> str:
-        if diff_index >= len(self.actual):
-            return (
-                f"First difference at context line {diff_index + 1}: "
-                "the file region ends before the hunk does."
-            )
-        return (
-            f"First difference at context line {diff_index + 1} "
-            f"(file line {self.actual_start + diff_index + 1}), marked '>'."
-        )
+        return f"Hunk {self.hunk_number}: {location} not found."
 
 
 class PatchContextError(ValueError):
@@ -331,27 +240,20 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
 
         if not (anchor or has_bare_anchor or cursor == 0):
             current_line = parser.lines[parser.index] if parser.index < len(parser.lines) else ""
-            raise ValueError(f"Invalid Line:\n{current_line}")
+            raise ValueError(
+                "Malformed patch: each hunk after the first must start with @@; "
+                f"got {current_line!r}"
+            )
 
         if anchor.strip():
-            cursor = _advance_cursor_to_anchor(anchor, input_lines, cursor, parser)
+            cursor = _advance_cursor_to_anchor(anchor, input_lines, cursor)
 
         section = _read_section(parser.lines, parser.index)
         find_result = _find_context(input_lines, section.next_context, cursor, section.eof)
         parser.index = section.end_index
         if find_result.new_index == -1:
-            actual_start, actual = _actual_window(
-                input_lines, section.next_context, cursor, section.eof
-            )
             failures.append(
-                ContextFailure(
-                    hunk_number=hunk_number,
-                    cursor=cursor,
-                    context=tuple(section.next_context),
-                    eof=section.eof,
-                    actual=actual,
-                    actual_start=actual_start,
-                )
+                ContextFailure(hunk_number=hunk_number, eof=section.eof)
             )
             continue
 
@@ -376,84 +278,14 @@ def _advance_cursor_to_anchor(
     anchor: str,
     input_lines: List[str],
     cursor: int,
-    parser: ParserState,
 ) -> int:
-    """Advance cursor to find the anchor line."""
-    found = False
-
-    if not any(line == anchor for line in input_lines[:cursor]):
-        for i in range(cursor, len(input_lines)):
-            if input_lines[i] == anchor:
-                cursor = i + 1
-                found = True
-                break
-
-    if not found and not any(line.strip() == anchor.strip() for line in input_lines[:cursor]):
-        for i in range(cursor, len(input_lines)):
-            if input_lines[i].strip() == anchor.strip():
-                cursor = i + 1
-                parser.fuzz += 1
-                found = True
-                break
-
+    """Advance cursor to the first exact match of the @@ anchor line."""
+    if any(line == anchor for line in input_lines[:cursor]):
+        return cursor
+    for i in range(cursor, len(input_lines)):
+        if input_lines[i] == anchor:
+            return i + 1
     return cursor
-
-
-def _is_name_line(line: str) -> bool:
-    stripped = line.strip()
-    return stripped.startswith(("def ", "async def ", "class "))
-
-
-def _ranked_needles(context: List[str]) -> List[Tuple[int, str]]:
-    """Prefer def/class lines, then longer lines, as search needles."""
-    ranked: List[Tuple[int, int, str]] = []
-    for index, line in enumerate(context):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        score = len(stripped) + (1000 if _is_name_line(line) else 0)
-        ranked.append((score, index, line))
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    return [(index, line) for _, index, line in ranked]
-
-
-def _unique_or_name_hit(lines: List[str], needle: str) -> int:
-    """Return a useful line index for `needle`, or -1 if none."""
-    stripped = needle.strip()
-    hits = [
-        index
-        for index, line in enumerate(lines)
-        if line == needle or line.strip() == stripped
-    ]
-    if len(hits) == 1:
-        return hits[0]
-    if hits and _is_name_line(needle):
-        return hits[0]
-    return -1
-
-
-def _actual_window(
-    lines: List[str], context: List[str], cursor: int, eof: bool
-) -> Tuple[int, Tuple[str, ...]]:
-    """Pick the file region to show next to a failed hunk's expected context.
-
-    Search-from-start failures used to dump the file header, which is almost
-    never the region the hunk meant. When the cursor has already advanced,
-    the local window is the right one.
-    """
-    context_len = max(len(context), 1)
-    if eof:
-        start = max(0, len(lines) - context_len)
-        return start, tuple(lines[start:])
-    if cursor > 0:
-        start = min(cursor, len(lines))
-        return start, tuple(lines[start : start + context_len])
-    for index, needle in _ranked_needles(context):
-        hit = _unique_or_name_hit(lines, needle)
-        if hit >= 0:
-            start = max(0, hit - index)
-            return start, tuple(lines[start : start + context_len])
-    return 0, ()
 
 
 def _read_section(lines: List[str], start_index: int) -> ReadSectionResult:
@@ -493,7 +325,10 @@ def _read_section(lines: List[str], start_index: int) -> ReadSectionResult:
         elif prefix == " ":
             mode = "keep"
         else:
-            raise ValueError(f"Invalid Line: {line}")
+            raise ValueError(
+                "Malformed patch: each line after @@ must start with "
+                f"' ' (keep), '-' (delete), or '+' (add); got {line!r}"
+            )
 
         line_content = line[1:]
         switching_to_context = mode == "keep" and last_mode != mode
@@ -548,63 +383,15 @@ def _find_context(lines: List[str], context: List[str], start: int, eof: bool) -
 
 
 def _find_context_core(lines: List[str], context: List[str], start: int) -> ContextMatch:
-    """Core context finding with fuzzy matching."""
+    """Find an exact context match. No whitespace or quote rewriting."""
     if not context:
         return ContextMatch(new_index=start, fuzz=0)
 
-    for i in range(start, len(lines)):
-        if _equals_slice(lines, context, i, lambda value: value):
+    n = len(context)
+    for i in range(start, len(lines) - n + 1):
+        if lines[i:i + n] == context:
             return ContextMatch(new_index=i, fuzz=0)
-    for i in range(start, len(lines)):
-        if _equals_slice(lines, context, i, lambda value: value.rstrip()):
-            return ContextMatch(new_index=i, fuzz=1)
-    for i in range(start, len(lines)):
-        if _equals_slice(lines, context, i, lambda value: value.strip()):
-            return ContextMatch(new_index=i, fuzz=100)
-
-    quote_matches = [
-        i for i in range(start, len(lines))
-        if _equals_slice(lines, context, i, _normalize_quotes)
-    ]
-    if len(quote_matches) == 1:
-        return ContextMatch(new_index=quote_matches[0], fuzz=1000)
-    if quote_matches:
-        return ContextMatch(new_index=-1, fuzz=0)
-
-    quote_rstrip_matches = [
-        i for i in range(start, len(lines))
-        if _equals_slice(
-            lines,
-            context,
-            i,
-            lambda value: _normalize_quotes(value.rstrip()),
-        )
-    ]
-    if len(quote_rstrip_matches) == 1:
-        return ContextMatch(new_index=quote_rstrip_matches[0], fuzz=1001)
-
     return ContextMatch(new_index=-1, fuzz=0)
-
-
-def _normalize_quotes(value: str) -> str:
-    """Normalize typographic quotes for the final unique-match fallback."""
-    return (
-        value.replace('\u201c', '"').replace('\u201d', '"')
-        .replace('\u2018', "'").replace('\u2019', "'")
-        .replace('\u2032', "'").replace('\u2033', '"')
-    )
-
-
-def _equals_slice(
-    source: List[str], target: List[str], start: int, map_fn
-) -> bool:
-    """Check if a slice of source equals target after applying map_fn."""
-    if start + len(target) > len(source):
-        return False
-    for offset, target_value in enumerate(target):
-        if map_fn(source[start + offset]) != map_fn(target_value):
-            return False
-    return True
 
 
 def _apply_chunks(input_text: str, chunks: List[Chunk]) -> str:
@@ -633,283 +420,3 @@ def _apply_chunks(input_text: str, chunks: List[Chunk]) -> str:
 
     dest_lines.extend(orig_lines[cursor:])
     return "\n".join(dest_lines)
-
-
-class PatchTool(Tool):
-    """
-    A tool for applying patch/diff to files.
-
-    Supports both V4A diff format (used by GPT-5.1) and unified diff format.
-    This tool is useful for applying code changes from AI-generated patches.
-
-    Example V4A format:
-    ```
-    *** Begin Patch
-    *** Update File: path/to/file.py
-    @@ context line
-     unchanged line
-    -removed line
-    +added line
-     unchanged line
-    *** End Patch
-    ```
-    """
-
-    def __init__(
-        self,
-        work_dir: Optional[str] = None,
-        apply_patch: bool = True,
-        compare_files: bool = True,
-    ):
-        """
-        Initialize the PatchTool.
-
-        Args:
-            work_dir: The working directory for file operations. Defaults to current directory.
-            apply_patch: Whether to include the apply_patch function.
-            compare_files: Whether to include the compare_files function.
-        """
-        super().__init__(name="patch_tool")
-        self.work_dir = Path(work_dir) if work_dir else Path.cwd()
-
-        if apply_patch:
-            self.register(self.apply_patch)
-        if compare_files:
-            self.register(self.compare_files)
-
-    def _resolve_path(self, file_path: str) -> Path:
-        """Resolves a file path, making it absolute if it's relative."""
-        path = Path(file_path)
-        if not path.is_absolute():
-            path = self.work_dir.joinpath(path)
-        return path
-
-    def _detect_diff_format(self, patch_content: str) -> str:
-        """Detect the format of the diff.
-
-        Returns:
-            "v4a" for V4A format, "unified" for unified diff format.
-        """
-        # Check for V4A wrapper markers
-        if "*** Begin Patch" in patch_content or "*** Add File:" in patch_content or "*** Update File:" in patch_content:
-            return "v4a"
-
-        # Check for unified diff format: @@ -line,count +line,count @@
-        if re.search(r'@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@', patch_content):
-            return "unified"
-
-        # V4A uses bare @@ or @@ with context (not line numbers)
-        lines = patch_content.strip().split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("@@"):
-                # V4A: @@ alone or @@ followed by context text (not line numbers)
-                if line == "@@" or (line.startswith("@@ ") and not re.match(r'@@ -\d+', line)):
-                    return "v4a"
-
-        # Check for V4A style lines (starting with +, -, or space after @@)
-        in_hunk = False
-        for line in lines:
-            if line.startswith("@@"):
-                in_hunk = True
-                continue
-            if in_hunk and line and line[0] in "+- ":
-                return "v4a"
-
-        return "unified"
-
-    def apply_patch(self, target_file: str, patch_content: str) -> str:
-        """Apply a patch to a file.
-
-        Supports both V4A diff format (used by GPT-5.1) and unified diff format.
-
-        V4A format example:
-        ```
-        *** Begin Patch
-        *** Update File: path/to/file.py
-        @@ context line
-         unchanged line
-        -removed line
-        +added line
-         unchanged line
-        *** End Patch
-        ```
-
-        Unified diff format example:
-        ```
-        --- a/file.py
-        +++ b/file.py
-        @@ -10,3 +10,3 @@
-         unchanged
-        -removed
-        +added
-        ```
-
-        Args:
-            target_file: The path of the file to patch.
-            patch_content: The patch content in V4A or unified diff format.
-
-        Returns:
-            A message describing the result of the operation.
-        """
-        try:
-            file_path = self._resolve_path(target_file)
-            diff_format = self._detect_diff_format(patch_content)
-
-            # Extract the actual diff content from V4A wrapper
-            if "*** Begin Patch" in patch_content:
-                match = re.search(
-                    r'(?:\*{3} Begin Patch[\s\S]*?\*{3} (?:Update|Add) File:[^\n]*\n)([\s\S]+?)(?:\*{3} End Patch|$)',
-                    patch_content
-                )
-                if match:
-                    patch_content = match.group(1).strip()
-
-            # Handle file creation
-            if not file_path.exists():
-                if "*** Add File:" in patch_content or diff_format == "v4a":
-                    # Create file with V4A create mode
-                    new_content = apply_diff("", patch_content, mode="create")
-                    os.makedirs(file_path.parent, exist_ok=True)
-                    file_path.write_text(new_content, encoding='utf-8')
-                    logger.debug(f"Created file: {file_path}")
-                    return f"Created file: {target_file}"
-                raise FileNotFoundError(
-                    f"Cannot apply patch to non-existent file {target_file}"
-                )
-
-            # Read the original file
-            original_content = file_path.read_text(encoding='utf-8')
-
-            # Apply the patch based on format
-            if diff_format == "v4a":
-                new_content = apply_diff(original_content, patch_content, mode="default")
-                file_path.write_text(new_content, encoding='utf-8')
-                logger.debug(f"Applied V4A patch to file: {file_path}")
-                return f"Successfully patched file: {target_file}"
-            # Fall back to unified diff format
-            return self._apply_unified_patch(file_path, original_content, patch_content)
-        except ValueError as e:
-            # apply_diff raises ValueError for malformed patches; keep the
-            # specific context but let the runtime record it as a real error.
-            raise ValueError(f"Error applying patch to {target_file}: {e}") from e
-
-    def _apply_unified_patch(self, file_path: Path, original_content: str, patch_content: str) -> str:
-        """Apply a unified diff format patch."""
-        original_lines = original_content.splitlines()
-        patch_lines = patch_content.splitlines()
-        patched_content = list(original_lines)
-
-        i = 0
-        while i < len(patch_lines):
-            line = patch_lines[i]
-            if line.startswith("@@"):
-                # Parse the hunk header
-                hunk_match = re.match(r'@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@', line)
-                if hunk_match:
-                    orig_start = int(hunk_match.group(1)) - 1  # 0-based indexing
-
-                    # Process the hunk
-                    j = i + 1
-                    orig_lines_list = []
-                    new_lines = []
-
-                    while j < len(patch_lines) and not patch_lines[j].startswith("@@"):
-                        hunk_line = patch_lines[j]
-                        if hunk_line.startswith("+"):
-                            new_lines.append(hunk_line[1:])
-                        elif hunk_line.startswith("-"):
-                            orig_lines_list.append(hunk_line[1:])
-                        else:
-                            line_content = hunk_line[1:] if hunk_line.startswith(" ") else hunk_line
-                            orig_lines_list.append(line_content)
-                            new_lines.append(line_content)
-                        j += 1
-
-                    # Apply the changes
-                    patched_content = (
-                        patched_content[:orig_start]
-                        + new_lines
-                        + patched_content[orig_start + len(orig_lines_list):]
-                    )
-
-                    i = j
-                else:
-                    i += 1
-            else:
-                i += 1
-
-        # Write the patched content
-        file_path.write_text("\n".join(patched_content), encoding='utf-8')
-        logger.debug(f"Applied unified patch to file: {file_path}")
-
-        return f"Successfully patched file: {file_path}"
-
-    def compare_files(self, file1: str, file2: str, context_lines: int = 3) -> str:
-        """Compare two files and return the differences.
-
-        Args:
-            file1: The path to the first file.
-            file2: The path to the second file.
-            context_lines: Number of context lines to show around differences.
-
-        Returns:
-            A unified diff of the two files.
-        """
-        path1 = self._resolve_path(file1)
-        path2 = self._resolve_path(file2)
-
-        if not path1.exists():
-            raise FileNotFoundError(f"File not found: {file1}")
-        if not path2.exists():
-            raise FileNotFoundError(f"File not found: {file2}")
-
-        # Read file contents
-        content1 = path1.read_text(encoding='utf-8').splitlines()
-        content2 = path2.read_text(encoding='utf-8').splitlines()
-
-        # Generate unified diff
-        diff = difflib.unified_diff(
-            content1, content2,
-            fromfile=str(file1), tofile=str(file2),
-            n=context_lines
-        )
-
-        # Convert the diff generator to a string
-        diff_text = "\n".join(diff)
-
-        return diff_text if diff_text else "Files are identical."
-
-
-if __name__ == '__main__':
-    # Simple test
-    tool = PatchTool()
-
-    # Test V4A diff format
-    v4a_patch = """
-*** Begin Patch
-*** Update File: test.py
-@@
-def foo():
--    pass
-+    return 42
-*** End Patch
-"""
-
-    # Create a test file
-    test_file = "test_patch.py"
-    with open(test_file, "w") as f:
-        f.write("def foo():\n    pass\n")
-
-    print("Applying V4A patch...")
-    result = tool.apply_patch(test_file, v4a_patch)
-    print(result)
-
-    # Show result
-    with open(test_file, "r") as f:
-        print("File content after patch:")
-        print(f.read())
-
-    # Cleanup
-    import os
-    if os.path.exists(test_file):
-        os.remove(test_file)

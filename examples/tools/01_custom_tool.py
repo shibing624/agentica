@@ -14,7 +14,7 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool
+from agentica import Agent, OpenAIChat, WeatherTool, BuiltinExecuteTool, Tool
 
 
 # Simple function-based tools
@@ -88,7 +88,7 @@ async def main():
             exponentiate,
             get_text_length,
             WeatherTool(),
-            ShellTool(),
+            BuiltinExecuteTool(),
         ],
     )
     

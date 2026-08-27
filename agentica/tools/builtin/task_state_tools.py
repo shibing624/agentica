@@ -5,7 +5,6 @@
 """
 
 import json
-import re
 from collections import Counter, OrderedDict
 from datetime import date, timedelta
 from pathlib import Path
@@ -33,19 +32,10 @@ class BuiltinTodoTool(Tool):
       The CLI and the web UI both render the list from ``tool_args``, and the
       Runner's periodic reminder re-injects the state when it goes stale.
     - All-completed auto-clear: when every item is completed, list is cleared
-    - Verification nudge: when 3+ tasks all completed and none is a verification
-      step, tool_result appends a reminder to verify before reporting done
     - No system prompt injection (usage guidance lives in the docstring only)
     - Periodic reminder injected by Runner when LLM hasn't called write_todos
       for N turns (see Runner._inject_todo_reminder)
     """
-
-    _VERIFICATION_NUDGE = (
-        "\n\nNOTE: You just closed out 3+ tasks and none of them was a verification step. "
-        "Before writing your final summary, verify your work by running tests, linting, "
-        "or checking the actual output. Do not self-declare completion without evidence -- "
-        "review the results to confirm correctness."
-    )
 
     def __init__(self):
         """Initialize BuiltinTodoTool."""
@@ -86,18 +76,6 @@ class BuiltinTodoTool(Tool):
             self._agent.todos = value
         else:
             self._todos = value
-
-    @staticmethod
-    def _needs_verification_nudge(todos: List[Dict[str, str]]) -> bool:
-        """Check if verification nudge should be appended to tool_result."""
-        if len(todos) < 3:
-            return False
-        if not all(t.get("status") == "completed" for t in todos):
-            return False
-        verification_pattern = re.compile(r"verif|test|lint|check|review|validate", re.IGNORECASE)
-        if any(verification_pattern.search(t.get("content", "")) for t in todos):
-            return False
-        return True
 
     def write_todos(self, todos: Optional[List[Dict[str, str]]] = None) -> str:
         """Create and update a structured task list for the current session.
@@ -150,7 +128,6 @@ class BuiltinTodoTool(Tool):
                 "status": status,
             })
 
-        nudge_needed = self._needs_verification_nudge(validated_todos)
         all_done = all(t["status"] == "completed" for t in validated_todos)
         if all_done:
             self.todos = []
@@ -174,8 +151,6 @@ class BuiltinTodoTool(Tool):
                 if counts[status]
             )
             result_message = f"Todos updated ({total} items: {breakdown})."
-        if nudge_needed:
-            result_message += self._VERIFICATION_NUDGE
 
         return result_message
 

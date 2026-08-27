@@ -165,7 +165,7 @@ agent = DeepAgent()
 **Core engine**
 
 - **Async-First** — Native async API, `asyncio.gather()` parallel tool execution, sync adapter included
-- **Built-in tools** — Search, code execution, file operations, browser, OCR, image generation
+- **Built-in tools** — `read_file` / `write_file` / `apply_patch` / `grep` / `glob`, `execute`, web search; long reports are HTML via `write_file`
 - **Many models** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses), DeepSeek, Claude, ZhipuAI, Qwen, Moonshot, Ollama, LiteLLM and more
 - **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
 - **Multi-Modal** — Text, image, audio, video understanding

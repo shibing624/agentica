@@ -27,6 +27,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.styles import Style as PTStyle
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import TextArea
 
 from agentica.cli.approvals import (
@@ -233,6 +234,18 @@ def _input_prompt_fragments(req) -> list[tuple[str, str]]:
     ]
 
 
+def _live_tool_window_height(n_lines: int, *, asking: bool) -> int:
+    """Rows for the live tool window above the input box.
+
+    An armed ask/approval prompt needs every option visible. The live
+    cap (``LIVE_MAX_ROWS``) would otherwise keep 12 rows reserved above
+    the question and clip the list the user is answering.
+    """
+    if asking or n_lines <= 0:
+        return 0
+    return min(LIVE_MAX_ROWS, n_lines)
+
+
 def _input_prompt_height(req, width: int | None = None) -> int:
     """Rows reserved for the ask/approval widget, including wrapped lines."""
     lines = _ask_prompt_lines(req)
@@ -246,7 +259,8 @@ def _input_prompt_height(req, width: int | None = None) -> int:
     width = max(1, int(width))
     rows = 0
     for line in lines:
-        rows += 1 if not line else (len(line) + width - 1) // width
+        visual = get_cwidth(line) if line else 0
+        rows += 1 if visual <= 0 else (visual + width - 1) // width
     return rows
 
 
@@ -902,10 +916,10 @@ def _setup_tui(
         return frags
 
     def _get_live_tool_height():
-        n = len(tui_state.get("live_tool_lines") or [])
-        if n <= 0:
-            return 0
-        return min(LIVE_MAX_ROWS, n)
+        return _live_tool_window_height(
+            len(tui_state.get("live_tool_lines") or []),
+            asking=state.input_request is not None,
+        )
 
     live_tool_window = ConditionalContainer(
         Window(
@@ -914,7 +928,7 @@ def _setup_tui(
             wrap_lines=False,
         ),
         filter=Condition(
-            lambda: bool(tui_state.get("live_tool_lines"))
+            lambda: _get_live_tool_height() > 0
             and not tui_state.get("_resize_collapsed")
         ),
     )
@@ -997,5 +1011,6 @@ __all__ = [
     '_ask_prompt_lines',
     '_input_prompt_fragments',
     '_input_prompt_height',
+    '_live_tool_window_height',
     '_setup_tui',
 ]

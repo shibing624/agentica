@@ -77,7 +77,6 @@ def _generate_session_id() -> str:
 BUILTIN_TOOLS = [
     "read_file",
     "write_file",
-    "write_html",
     "apply_patch",
     "glob",
     "grep",
@@ -114,7 +113,6 @@ def active_tool_names(agent) -> List[str]:
 TOOL_ICONS = {
     "read_file": "📖",
     "write_file": "✏️",
-    "write_html": "📄",
     "apply_patch": "✎",
     "glob": "🔍",
     "grep": "🔎",
@@ -159,7 +157,6 @@ TOOL_REGISTRY = {
     "file": ("file", "FileTool", "Code & Files", "File system operations"),
     "run_nb_code": ("run_nb_code", "RunNbCodeTool", "Code & Files", "Execute Jupyter notebook code"),
     "run_python_code": ("run_python_code", "RunPythonCodeTool", "Code & Files", "Execute Python code snippets"),
-    "shell": ("shell", "ShellTool", "Code & Files", "Shell command execution"),
     "string": ("string", "StringTool", "Code & Files", "String manipulation utilities"),
     "text_analysis": ("text_analysis", "TextAnalysisTool", "Code & Files", "Text analysis and NLP"),
     "workspace": ("workspace", "WorkspaceTool", "Code & Files", "Workspace file management"),
@@ -1075,8 +1072,6 @@ def create_agent(
 
         cli_tools.insert(0, WorktreeTool(worktree_binder))
 
-    from agentica.peer_conflicts import build_checker as build_peer_conflict_checker
-
     # Delegating needs the session's process registry (that is how the worker is
     # tracked, waited on and reported), so a one-shot `--query` run and a
     # cron-spawned agent — neither of which has one — simply do not get the tool.
@@ -1121,9 +1116,6 @@ def create_agent(
             enable_auto_compact=enable_auto_compact,
             compact_token_limit=compact_token_limit,
         ),
-        # Tell the model when another live session already has the file it just
-        # wrote uncommitted, instead of letting both find out at merge time.
-        peer_conflict_checker=build_peer_conflict_checker(peer_session),
         approve=approve,
     )
 

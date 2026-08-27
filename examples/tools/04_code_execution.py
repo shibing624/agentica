@@ -4,7 +4,7 @@
 @description: Code execution demo - Demonstrates code tools
 
 This example shows how to use code tools:
-1. ShellTool - Execute shell commands
+1. BuiltinExecuteTool - Execute shell commands
 2. CodeTool - Code analysis and quality checking
 """
 import sys
@@ -13,21 +13,21 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, ShellTool
+from agentica import Agent, OpenAIChat, BuiltinExecuteTool
 from agentica.tools.code_tool import CodeTool
 
 
 async def main():
     print("=" * 60)
-    print("Example 1: Shell Command Execution")
+    print("Example 1: Execute")
     print("=" * 60)
 
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
-        tools=[ShellTool()],
+        tools=[BuiltinExecuteTool()],
         instructions=[
             "You are an expert programmer.",
-            "When asked to solve problems, write Python code and use shell to execute it.",
+            "When asked to solve problems, write Python code and use execute to run it.",
         ],
     )
 

@@ -138,11 +138,13 @@ class TestBuiltinFileToolApplyPatch:
         assert function.parameters["required"] == ["patch"]
         assert function.parameters["properties"]["patch"]["type"] == "string"
 
-    def test_description_requires_read_file_before_updates_and_deletes(self, file_tool):
+    def test_description_states_envelope_and_hunk_prefixes(self, file_tool):
         function = file_tool.functions["apply_patch"]
         function.process_entrypoint(strict=False)
-
-        assert "MUST call read_file before every Update or Delete" in function.description
+        description = function.description
+        assert "*** Begin Patch" in description
+        assert "space (keep)" in description
+        assert "MUST call read_file" not in description
 
     def test_applies_update_add_and_delete_in_one_call(self, file_tool, tmp_dir):
         Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")
@@ -233,20 +235,20 @@ class TestBuiltinFileToolApplyPatch:
             asyncio.run(file_tool.apply_patch(patch_text))
 
         message = str(exc.value)
-        assert "Patch preflight failed for 3 files" in message
+        assert "Patch not applied for 3 files" in message
         assert "- first.py:" in message
         assert "Hunk 1: context not found" in message
         assert "Hunk 2: context not found" in message
         assert "- second.py:" in message
         assert "- existing.py:" in message
+        assert "Expected context:" not in message
         assert "Read or re-read" not in message
         assert "short unique context" not in message
         assert first.read_text() == "FIRST = 1\n"
         assert second.read_text() == "SECOND = 2\n"
         assert existing.read_text() == "keep\n"
 
-    def test_context_failure_shows_actual_content(self, file_tool, tmp_dir):
-        """Stale-context hunks show the actual current lines next to the expected ones."""
+    def test_context_mismatch_does_not_dump_expected_actual(self, file_tool, tmp_dir):
         target = Path(tmp_dir, "hello.txt")
         target.write_text("alpha\nbeta-current\ngamma\n")
         patch_text = """*** Begin Patch
@@ -261,13 +263,32 @@ class TestBuiltinFileToolApplyPatch:
             asyncio.run(file_tool.apply_patch(patch_text))
 
         message = str(exc.value)
-        assert "Expected context:" in message
-        assert "Actual from line 1:" in message
-        # The mismatching line is marked '>' in both the expected and actual block.
-        assert "> beta-current" in message
-        assert "> beta" in message
-        assert "First difference at context line 2 (file line 2)" in message
-        assert "Read or re-read" not in message
+        assert "Patch context not found for 1 file" in message
+        assert "Hunk 1: context not found" in message
+        assert "Expected context:" not in message
+        assert "Actual from line" not in message
+        assert "First difference" not in message
+        assert target.read_text() == "alpha\nbeta-current\ngamma\n"
+
+    def test_malformed_unprefixed_line_is_not_a_context_mismatch(self, file_tool, tmp_dir):
+        target = Path(tmp_dir, "bipartite.py")
+        target.write_text("def max_matching(n_left, n_right, adj):\n    return 0\n")
+        patch_text = """*** Begin Patch
+*** Update File: bipartite.py
+@@
+def max_matching(n_left, n_right, adj):
+-    return 0
++    return 1
+*** End Patch"""
+
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.apply_patch(patch_text))
+
+        message = str(exc.value)
+        assert "Malformed patch for 1 file" in message
+        assert "def max_matching" in message
+        assert "Expected context:" not in message
+        assert target.read_text() == "def max_matching(n_left, n_right, adj):\n    return 0\n"
 
     def test_absolute_patch_path_is_reported_relative_to_work_dir(self, file_tool, tmp_dir):
         target = Path(tmp_dir, "pkg", "app.py")
