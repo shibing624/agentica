@@ -54,6 +54,13 @@ export function extractToolPaths(steps?: Array<Record<string, any>>): string[] {
       seen.add(v);
       out.push(v);
     }
+    if (st.name === "write_html" && typeof st.result === "string") {
+      const m = /^Wrote HTML report: (\S+)/m.exec(st.result);
+      if (m && m[1] && !seen.has(m[1])) {
+        seen.add(m[1]);
+        out.push(m[1]);
+      }
+    }
   }
   return out;
 }

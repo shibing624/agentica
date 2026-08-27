@@ -92,6 +92,7 @@ CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定�
 |------|------|
 | `read_file` | 读取文件内容（支持分页，避免大文件撑爆上下文） |
 | `write_file` | 创建或完整覆写文件 |
+| `write_html` | 写单文件 HTML 报告并返回 `file://` URL（不自动打开浏览器） |
 | `apply_patch` | 一次补丁新增、更新或删除多个文件 |
 | `glob` | 文件模式匹配（`**/*.py`） |
 | `grep` | 内容搜索（基于 ripgrep） |

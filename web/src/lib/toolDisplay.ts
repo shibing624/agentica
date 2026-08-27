@@ -43,6 +43,9 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
   if (name === "write_file") {
     return basename(String(args.file_path ?? ""));
   }
+  if (name === "write_html") {
+    return String(args.title ?? "");
+  }
   if (name === "apply_patch") {
     const patch = String(args.patch ?? "");
     const count = (patch.match(/^\*\*\* (?:Add|Update|Delete) File: /gm) || []).length;

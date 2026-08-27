@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- **`write_html`：单文件 HTML 报告**：DeepAgent（CLI / Web）默认注册，内部走 `write_file`，把产品/技术报告写成带 inline CSS 的 `tmp/reports/<title>.html`，工具结果给 `file://` URL 让用户自己点开，不弹浏览器。普通 `get_builtin_tools()` / `Agent()` 默认没有；`include_html_report=True` 打开。应用源码 HTML 仍用 `write_file`。
 - **`/goal` 默认 token 预算不限**：CLI `/goal xxx` 与 SDK `run_goal()` 不传 `token_budget` 时不再回落 500_000（`DEFAULT_TOKEN_BUDGET` 改为 `None`）。要限额度显式传 `--tokens N` / `token_budget=N`；`-1` 仍是不限。Web 目标芯片默认显示「预算不限」，点一下才打开 Token 预算输入（空=不限，支持 `500k`/`2m`），Escape 关掉输入框而不退出目标模式。
 
 #### fixes

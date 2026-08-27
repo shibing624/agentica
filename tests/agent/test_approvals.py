@@ -235,8 +235,9 @@ class TestClassifyAndGrants(unittest.TestCase):
             "write_todos", "ask_user_question", "save_memory",
             "search_memory", "list_skills", "get_skill_info",
             "self_manage", "list_agents", "task", "delegate",
+            "write_html",
         ):
-            fc = _fc(name, {}, is_destructive=(name in ("write_todos", "self_manage")))
+            fc = _fc(name, {}, is_destructive=(name in ("write_todos", "self_manage", "write_html")))
             self.assertEqual(classify("ask", fc, self.grants, work_dir=self.work), "allow", name)
             self.assertEqual(classify("auto", fc, self.grants, work_dir=self.work), "allow", name)
 

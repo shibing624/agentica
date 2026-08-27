@@ -64,6 +64,7 @@ BENIGN_ALWAYS_ALLOW = frozenset({
     "cronjob",
     "worktree",
     "use_capability",
+    "write_html",
 })
 
 _BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")

@@ -45,7 +45,10 @@ class TestBuiltinToolsListing(unittest.TestCase):
     def test_covers_conditionally_added_tools(self):
         """delegate / memory / todos are added outside the factory (deep.py,
         agent/base.py) — the display list must carry them too."""
-        for name in ("write_todos", "delegate", "save_memory", "search_memory", "wait"):
+        for name in (
+            "write_todos", "delegate", "save_memory", "search_memory", "wait",
+            "write_html",
+        ):
             self.assertIn(name, BUILTIN_TOOLS)
 
     def test_active_tool_names_reads_live_agent(self):
