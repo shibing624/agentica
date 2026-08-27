@@ -30,11 +30,10 @@ from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger
 
 from .attachments import _ocr_images_parallel
-from .session_state import _ToolResultSequencer
 
 
 def _completed_tool_payload(chunk) -> Optional[dict]:
-    """Build the sequencer payload for one TOOL_COMPLETED event.
+    """Build the completed-tool payload for one TOOL_COMPLETED event.
 
     Prefer ``chunk.tool_call`` — it is the event subject and the only place
     ``tool_display_meta`` survives. ``chunk.tools`` is the cumulative run list
@@ -56,6 +55,28 @@ def _completed_tool_payload(chunk) -> Optional[dict]:
     if subject.tool_display_meta:
         info["tool_display_meta"] = subject.tool_display_meta
     return info
+
+
+def _show_completed_tool(display: StreamDisplayManager, info: dict) -> None:
+    """Finish one live tool block (prefix-flush happens inside the manager)."""
+    tool_name = info.get("tool_name") or info.get("name", "unknown")
+    result_content = info.get("content", "")
+    is_error = info.get("tool_call_error", False)
+    elapsed = (info.get("metrics") or {}).get("time")
+    tool_args = info.get("tool_args") or info.get("arguments") or {}
+    display_kwargs = {
+        "is_error": is_error,
+        "tool_args": tool_args,
+        "tool_call_id": info.get("tool_call_id"),
+        "tool_display_meta": info.get("tool_display_meta"),
+    }
+    if elapsed is not None:
+        display_kwargs["elapsed"] = float(elapsed)
+    display.display_tool_result(
+        tool_name,
+        str(result_content) if result_content else "",
+        **display_kwargs,
+    )
 
 # ==================== BTW concurrent handler ====================
 
@@ -316,6 +337,7 @@ def _process_stream_response(
     tui_state["_turn_usage_entry_baseline"] = _usage_entry_baseline
 
     turn_checkpointer = None
+    display = None
     try:
         from agentica.run_config import RunConfig
         from agentica.run_context import RunSource
@@ -382,6 +404,13 @@ def _process_stream_response(
             subagent_verbosity=subagent_verbosity,
             work_dir=display_work_dir,
         )
+        tui_state["live_display"] = display
+
+        def _on_live_change() -> None:
+            frame = tui_state.get("_live_spinner", "⠋")
+            tui_state["live_tool_lines"] = display.compose_live(frame)
+
+        display.on_live_change = _on_live_change
         # Register live-event callback so the subagent's tool calls and
         # compression events render in real time (instead of being a black
         # box until the parent tool result arrives).
@@ -402,10 +431,6 @@ def _process_stream_response(
         )
 
         shown_tool_count = 0
-        # Sequencer aligns parallel tool results with their call lines:
-        # backend runs tools concurrently, frontend prints each result exactly
-        # once and directly beneath its own tool-call line.
-        _tool_seq = _ToolResultSequencer()
 
         for chunk in response_stream:
             if current_agent._cancelled:
@@ -442,9 +467,6 @@ def _process_stream_response(
                             except OSError:
                                 pass
 
-                        _tool_seq.on_start(
-                            tool_info.get("tool_call_id"), tool_name
-                        )
                         display.display_tool(
                             tool_name, tool_args,
                             tool_call_id=tool_info.get("tool_call_id"),
@@ -457,36 +479,12 @@ def _process_stream_response(
                 _set_phase("thinking")
                 payload = _completed_tool_payload(chunk)
                 if payload is not None:
-                    _tool_seq.on_complete(payload["tool_call_id"], payload)
+                    _show_completed_tool(display, payload)
                 elif chunk.tools:
                     for tool_info in chunk.tools:
-                        _tool_seq.on_complete(
-                            tool_info.get("tool_call_id"), tool_info
-                        )
-                if payload is not None or chunk.tools:
-                    # Flush completed results in call order. The front slot
-                    # only prints once it is done, so a slow tool never blocks
-                    # later tools from being shown — they just queue until the
-                    # earlier slot is ready, preserving call→result alignment.
-                    for info in _tool_seq.drain():
-                        tool_name = info.get("tool_name") or info.get("name", "unknown")
-                        result_content = info.get("content", "")
-                        is_error = info.get("tool_call_error", False)
-                        elapsed = (info.get("metrics") or {}).get("time")
-                        tool_args = info.get("tool_args") or info.get("arguments") or {}
-                        display_kwargs = {
-                            "is_error": is_error,
-                            "tool_args": tool_args,
-                            "tool_call_id": info.get("tool_call_id"),
-                            "tool_display_meta": info.get("tool_display_meta"),
-                        }
-                        if elapsed is not None:
-                            display_kwargs["elapsed"] = float(elapsed)
-                        display.display_tool_result(
-                            tool_name,
-                            str(result_content) if result_content else "",
-                            **display_kwargs,
-                        )
+                        if "content" not in tool_info:
+                            continue
+                        _show_completed_tool(display, tool_info)
                 continue
 
             has_content = chunk.content and isinstance(chunk.content, str)
@@ -576,6 +574,8 @@ def _process_stream_response(
     except KeyboardInterrupt:
         current_agent.cancel()
         _set_phase("idle")
+        if display is not None:
+            display.abandon_live()
         deadline = time.monotonic() + 3.0
         while current_agent._running and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -592,6 +592,8 @@ def _process_stream_response(
         )
     except AgentCancelledError:
         _set_phase("idle")
+        if display is not None:
+            display.abandon_live()
         current_agent._running = False
         current_agent._cancelled = False
         con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][User interrupted the response][/dim]")
@@ -618,6 +620,8 @@ def _process_stream_response(
 
         # Clear the live-event callback so it doesn't outlive this run.
         current_agent._event_callback = None
+        tui_state.pop("live_display", None)
+        tui_state["live_tool_lines"] = []
         # Strip image payloads from history: the turn already consumed them
         # multimodally; re-encoding and re-sending every local image on each
         # later turn would bloat context and cost. Paths and OCR text remain

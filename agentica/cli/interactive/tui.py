@@ -889,14 +889,46 @@ def _setup_tui(
         ),
     )
 
+    def _get_live_tool_fragments():
+        lines = tui_state.get("live_tool_lines") or []
+        if not lines:
+            return []
+        frags = []
+        for i, line in enumerate(lines):
+            if i:
+                frags.append(("", "\n"))
+            frags.append(("class:live-tool", line))
+        return frags
+
+    def _get_live_tool_height():
+        n = len(tui_state.get("live_tool_lines") or [])
+        if n <= 0:
+            return 0
+        return min(12, n)
+
+    live_tool_window = ConditionalContainer(
+        Window(
+            content=FormattedTextControl(_get_live_tool_fragments),
+            height=_get_live_tool_height,
+            wrap_lines=False,
+        ),
+        filter=Condition(
+            lambda: bool(tui_state.get("live_tool_lines"))
+            and not tui_state.get("_resize_collapsed")
+        ),
+    )
+
     # NOTE: no ``input_rule`` and no standalone ``spinner_widget`` here.
     # The gutter design (assistant ``▏`` bar + closing ``Rule`` in the
     # transcript) already provides a hard boundary between the assistant
     # turn and the input line, so an extra horizontal rule above the input
     # would just stack redundant separators. The spinner text is folded into
     # the leftmost segment of ``status_bar`` (see ``build_status_bar_fragments``)
-    # so we never occupy a full extra row for it.
-    body = HSplit([input_prompt_widget, queue_bar, input_area, status_bar])
+    # so we never occupy a full extra row for it. Unfinished tool calls sit
+    # in ``live_tool_window`` (Kimi-style) until their whole block flushes.
+    body = HSplit([
+        live_tool_window, input_prompt_widget, queue_bar, input_area, status_bar,
+    ])
     layout = Layout(
         FloatContainer(
             content=body,
@@ -915,6 +947,7 @@ def _setup_tui(
             "queue-dim": "#8B8682 italic",
             "queue-time": "#8FBC8F",
             "spinner": "#FFD700 italic",
+            "live-tool": "#8FBC8F italic",
             "input-prompt": "#FFD700 bold",
             "sb": "bg:#1a1a2e #C0C0C0",
             "sb-strong": "bg:#1a1a2e #FFD700 bold",

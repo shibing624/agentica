@@ -28,13 +28,12 @@ from agentica.memory.session_log import SessionLog
 
 
 class TestToolResultAnchoring(unittest.TestCase):
-    """A ``⎿`` result block must name its own call when it is not adjacent to it.
+    """Parallel tools flush as whole blocks in start order (Kimi prefix flush).
 
-    Deferred tools (``read_file`` / ``grep`` / ...) render as ONE atomic block at
-    completion, while ``execute`` prints its call line at START time and its
-    result body at completion. In a parallel batch where a deferred tool is
-    called FIRST, the deferred block lands between ``execute``'s call line and
-    ``execute``'s body — so the ``⎿`` block reads as the deferred tool's result.
+    ``execute`` used to print its call line at START and its body at
+    completion. A deferred sibling finishing in between split the two, so a
+    ``⎿`` body read as the wrong tool's output. Live blocks stay in the TUI
+    window until a finished prefix can flush call+result together.
     """
 
     def _mgr_and_buf(self):
@@ -46,56 +45,84 @@ class TestToolResultAnchoring(unittest.TestCase):
         con = Console(file=buf, width=120, force_terminal=False, no_color=True)
         return StreamDisplayManager(con), buf
 
-    def _render_read_then_execute(self):
-        """Batch call order: read_file (deferred) then execute; in-order results."""
-        mgr, buf = self._mgr_and_buf()
-        mgr.display_tool("read_file", {"file_path": "/proj/working.py",
-                                       "offset": 284, "limit": 30},
-                         tool_call_id="c1")
-        mgr.display_tool("execute", {"command": "grep -n needle cost_tracker.py"},
-                         tool_call_id="c2")
-        mgr.display_tool_result("read_file", "\n".join(f"line {i}" for i in range(34)),
-                                elapsed=0.058, tool_args={"file_path": "/proj/working.py"},
-                                tool_call_id="c1")
-        mgr.display_tool_result("execute", "cost_tracker.py:357: needle here",
-                                elapsed=0.025,
-                                tool_args={"command": "grep -n needle cost_tracker.py"},
-                                tool_call_id="c2")
-        return [ln for ln in buf.getvalue().splitlines() if ln.strip()]
-
-    def test_detached_execute_result_is_anchored_to_its_own_call(self):
-        lines = self._render_read_then_execute()
-        body_idx = next(i for i, ln in enumerate(lines) if "needle here" in ln)
-        # The line directly above the result body must identify execute, not
-        # read_file — otherwise the block reads as read_file's output.
-        anchor = lines[body_idx - 1]
-        self.assertIn("execute", anchor,
-                      f"result body must be anchored to execute, got: {anchor!r}")
-        self.assertNotIn("read_file", anchor)
-
-    def test_adjacent_result_is_not_anchored_twice(self):
-        """The common case (call line immediately followed by its own result)
-        must stay byte-identical — no redundant re-statement of the call."""
+    def test_execute_call_is_silent_until_flush(self):
         mgr, buf = self._mgr_and_buf()
         mgr.display_tool("execute", {"command": "ls"}, tool_call_id="c1")
-        mgr.display_tool_result("execute", "a.py\nb.py", elapsed=0.01,
-                                tool_args={"command": "ls"}, tool_call_id="c1")
+        self.assertNotIn("execute", buf.getvalue())
+        live = mgr.compose_live("⠋")
+        self.assertTrue(any("execute" in line for line in live))
+
+    def test_parallel_execute_and_grep_flush_whole_blocks_in_start_order(self):
+        mgr, buf = self._mgr_and_buf()
+        mgr.display_tool("execute", {"command": "pytest tests/foo.py"}, tool_call_id="e1")
+        mgr.display_tool("grep", {"pattern": "bar", "path": "src"}, tool_call_id="g1")
+        # grep finishes first — prefix flush stops at unfinished execute.
+        mgr.display_tool_result(
+            "grep", "src/a.py:1:bar", elapsed=0.02,
+            tool_args={"pattern": "bar", "path": "src"}, tool_call_id="g1",
+        )
+        mid = buf.getvalue()
+        self.assertNotIn("execute", mid)
+        self.assertNotIn("grep", mid)
+        live = "\n".join(mgr.compose_live("⠋"))
+        self.assertIn("execute", live)
+        self.assertIn("grep", live)
+
+        mgr.display_tool_result(
+            "execute", "ok\n", elapsed=0.4,
+            tool_args={"command": "pytest tests/foo.py"}, tool_call_id="e1",
+        )
+        lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+        exec_idx = next(i for i, ln in enumerate(lines) if "execute" in ln)
+        grep_idx = next(i for i, ln in enumerate(lines) if "grep" in ln)
+        self.assertLess(exec_idx, grep_idx)
+        self.assertNotIn("↳", buf.getvalue())
+        body_idx = next(i for i, ln in enumerate(lines) if "ok" in ln)
+        self.assertEqual(body_idx, exec_idx + 1)
+
+    def test_write_file_finishing_does_not_split_running_execute(self):
+        mgr, buf = self._mgr_and_buf()
+        mgr.display_tool("execute", {"command": "sleep 1"}, tool_call_id="e1")
+        mgr.display_tool(
+            "write_file", {"file_path": "a.py", "content": "x"}, tool_call_id="w1",
+        )
+        mgr.display_tool_result(
+            "write_file", "Created file a.py", elapsed=0.01,
+            tool_args={"file_path": "a.py", "content": "x"}, tool_call_id="w1",
+        )
+        self.assertNotIn("execute", buf.getvalue())
+        self.assertNotIn("write_file", buf.getvalue())
+        mgr.display_tool_result(
+            "execute", "done", elapsed=1.0,
+            tool_args={"command": "sleep 1"}, tool_call_id="e1",
+        )
         out = buf.getvalue()
-        self.assertEqual(out.count("execute"), 1,
-                         "execute must be named once when its result is adjacent")
+        self.assertLess(out.index("execute"), out.index("write_file"))
+        self.assertNotIn("↳", out)
+
+    def test_adjacent_result_names_execute_once(self):
+        mgr, buf = self._mgr_and_buf()
+        mgr.display_tool("execute", {"command": "ls"}, tool_call_id="c1")
+        mgr.display_tool_result(
+            "execute", "a.py\nb.py", elapsed=0.01,
+            tool_args={"command": "ls"}, tool_call_id="c1",
+        )
+        out = buf.getvalue()
+        self.assertEqual(out.count("execute"), 1)
 
     def test_deferred_result_keeps_single_merged_line(self):
-        """Deferred tools are self-labelled already — never anchor them."""
         mgr, buf = self._mgr_and_buf()
         mgr.display_tool("execute", {"command": "ls"}, tool_call_id="c1")
-        mgr.display_tool_result("execute", "a.py", elapsed=0.01,
-                                tool_args={"command": "ls"}, tool_call_id="c1")
-        mgr.display_tool_result("grep", "hit\nhit2", elapsed=0.02,
-                                tool_args={"pattern": "x", "path": "p"},
-                                tool_call_id="c2")
+        mgr.display_tool_result(
+            "execute", "a.py", elapsed=0.01,
+            tool_args={"command": "ls"}, tool_call_id="c1",
+        )
+        mgr.display_tool_result(
+            "grep", "hit\nhit2", elapsed=0.02,
+            tool_args={"pattern": "x", "path": "p"}, tool_call_id="c2",
+        )
         out = buf.getvalue()
-        self.assertEqual(out.count("grep"), 1,
-                         "deferred merged line must not gain an extra anchor line")
+        self.assertEqual(out.count("grep"), 1)
 
 
 class TestStreamDisplayManagerSubagent(unittest.TestCase):
@@ -139,6 +166,50 @@ class TestStreamDisplayManagerSubagent(unittest.TestCase):
         out = self._printed(fake)
         self.assertIn("read_file", out, "tool_started must render in default mode")
         self.assertNotIn("✓", out, "tool_completed checkmark must not render in default mode")
+
+    def test_subagent_events_hang_on_parent_task_block(self):
+        import json
+
+        fake, dm = self._make("all")
+        dm.display_tool(
+            "task",
+            {"description": "look", "subagent_type": "explore"},
+            tool_call_id="t1",
+        )
+        fake.print.assert_not_called()
+        dm.handle_event(
+            {"type": "subagent.start", "run_id": "r1", "agent_name": "explore", "task": "look"}
+        )
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r1",
+                "agent_name": "explore",
+                "tool_name": "read_file",
+                "info": "a.py",
+                "args": {},
+            }
+        )
+        fake.print.assert_not_called()
+        live = "\n".join(dm.compose_live("⠋"))
+        self.assertIn("task", live)
+        self.assertIn("explore", live)
+        dm.display_tool_result(
+            "task",
+            json.dumps({
+                "success": True,
+                "tool_calls_summary": [],
+                "tool_count": 1,
+                "execution_time": 0.5,
+            }),
+            elapsed=0.5,
+            tool_args={"description": "look", "subagent_type": "explore"},
+            tool_call_id="t1",
+        )
+        out = self._printed(fake)
+        self.assertIn("task", out)
+        self.assertIn("explore", out)
+        self.assertIn("read_file", out)
 
     def test_default_dedups_consecutive_identical_tool(self):
         fake, dm = self._make("all")

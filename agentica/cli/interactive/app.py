@@ -887,8 +887,17 @@ def run_interactive(
             # cursor) and replace the stale "🔧 tool (Ns)" phase with a
             # steady "waiting" line so the user knows it's their turn.
             if state.input_request is not None:
+                changed = False
                 if tui_state.get("spinner_text") != _WAITING_FOR_INPUT_TEXT:
                     tui_state["spinner_text"] = _WAITING_FOR_INPUT_TEXT
+                    changed = True
+                live = tui_state.get("live_display")
+                if live is not None:
+                    lines = live.compose_live("⏸")
+                    if tui_state.get("live_tool_lines") != lines:
+                        tui_state["live_tool_lines"] = lines
+                        changed = True
+                if changed:
                     app.invalidate()
                 time.sleep(0.2)
                 continue
@@ -915,6 +924,11 @@ def run_interactive(
                     tui_state.get("_turn_calls_baseline", 0),
                     tui_state.get("_turn_goal_tokens_baseline", 0),
                 )
+            frame = _BRAILLE_SPINNER[_frame_idx[0]]
+            tui_state["_live_spinner"] = frame
+            live = tui_state.get("live_display")
+            if live is not None:
+                tui_state["live_tool_lines"] = live.compose_live(frame)
             _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
             app.invalidate()
             time.sleep(0.12)

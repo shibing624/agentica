@@ -10,8 +10,11 @@ import os
 import re
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from .live_blocks import LiveToolBlock, LiveToolResult, LiveToolStore
 
 from rich.markdown import Markdown
 from rich.syntax import Syntax
@@ -35,6 +38,12 @@ from .tool_format import _display_tool_impl, format_execute_expand, format_tool_
 
 # Opening/closing fence line: 0-3 spaces, then 3+ backticks or tildes.
 _FENCE_LINE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
+_RICH_MARKUP = re.compile(r"\[/?[^\]]+\]")
+
+
+def _strip_rich_markup(text: str) -> str:
+    """Drop Rich markup tags for the plain-text live window."""
+    return _RICH_MARKUP.sub("", text).strip()
 
 
 def _parse_fence_line(line: str) -> Optional[Tuple[str, int, str]]:
@@ -150,7 +159,8 @@ class StreamDisplayManager:
     SUBAGENT_VERBOSITIES = ("all", "verbose", "off")
 
     def __init__(self, console_instance, subagent_verbosity: str = "all",
-                 work_dir: Optional[Path] = None):
+                 work_dir: Optional[Path] = None,
+                 on_live_change: Optional[Callable[[], None]] = None):
         self.console = console_instance
         configured_work_dir = (work_dir or Path.cwd()).expanduser().absolute()
         self._work_dir_input = configured_work_dir
@@ -183,6 +193,7 @@ class StreamDisplayManager:
         self._summary_usage: ProviderUsageSummary | None = None
         self._thinking_buffer = ""
         self._thinking_console = None
+        self.on_live_change = on_live_change
         self.reset()
 
     def reset(self):
@@ -233,11 +244,12 @@ class StreamDisplayManager:
         # apply_patch can mutate several files atomically, so retain every
         # target's action and pre-call content for one combined real diff.
         self._patch_old: Dict[str, List[Tuple[str, str, Optional[str]]]] = {}
-        # tool_call_id of the tool block currently at the bottom of the
-        # transcript — i.e. the call line (or merged block) printed last. A
-        # ``⎿`` result body only reads as "belongs to the line above" while
-        # this still matches its own id; see ``_print_result_anchor``.
-        self._open_block_id: Optional[str] = None
+        # Insertion-ordered live tool blocks. Unfinished ones render in the
+        # prompt_toolkit window; a finished prefix is flushed as whole
+        # call+result blocks so a sibling cannot split execute's call from
+        # its body. See ``LiveToolStore``.
+        self._live = LiveToolStore()
+        self._flushed_ids: set = set()
         # Truncated blocks are cleared at the start of each user turn in
         # display_user_message(), NOT here. Clearing here would wipe the
         # user's just-remembered long query (display_user_message runs before
@@ -354,7 +366,7 @@ class StreamDisplayManager:
 
     def display_tool(self, tool_name: str, tool_args: dict,
                      tool_call_id: Optional[str] = None):
-        """Display a single tool call.
+        """Register a live tool block. Nothing is printed to scrollback yet.
 
         Every tool call counts toward the per-turn total reported in the closing
         separator (``… · N tools``), INCLUDING read-only / write-diff tools whose
@@ -363,29 +375,138 @@ class StreamDisplayManager:
         confuse the user — the visible tool calls and the reported count must
         agree.
 
-        Read-only tools (``_DEFERRED_TOOLS``) skip the start-time call line and
-        collapse into a single completion line, e.g.
-        ``  🔎 grep 'pat' in path - 5 lines`` (slow calls also fold in the
-        elapsed time). The live spinner still announces the running tool, so
-        deferring the print costs no feedback.
+        The running call is shown in the prompt_toolkit live window. Scrollback
+        receives the whole block (call + result, or a merged one-liner for
+        ``_DEFERRED_TOOLS`` / write-diff) only when this block is at the head
+        of the finished prefix.
         """
         # Count every tool call up front, before any deferred-print early
         # return, so the turn summary's "N tools" matches what the user saw.
         self.tool_count += 1
+        tc_id = tool_call_id or f"_anon:{self.tool_count}"
+        if tool_name == "apply_patch":
+            self._capture_patch_before_call(tool_args, tc_id)
+        elif tool_name in self._WRITE_DIFF_TOOLS:
+            self._capture_file_before_call(tool_name, tool_args, tc_id)
+        # Flush any preamble now so live tools don't sit above unspoken text.
+        # Do not print a spacer/call line — tests and the live window both
+        # require start to be silent.
+        if self.in_thinking:
+            self.end_thinking()
+        self._flush_segment()
+        if self._turn_started_at is None:
+            self._turn_started_at = time.monotonic()
+        self._live.start(tc_id, tool_name, tool_args or {})
+        self._notify_live()
+
+    LIVE_MAX_ROWS = 12
+
+    def compose_live(self, spinner: str = "⠋") -> List[str]:
+        """Plain-text rows for the prompt_toolkit live window (capped)."""
+        lines: List[str] = []
+        for block in self._live.blocks():
+            spin = spinner if not block.finished else "✓"
+            icon = TOOL_ICONS.get(block.tool_name, TOOL_ICONS["default"])
+            params = format_tool_display(block.tool_name, block.tool_args)
+            if "\n" in params:
+                params = params.split("\n", 1)[0] + "…"
+            if len(params) > 80:
+                params = params[:77] + "..."
+            head = f"  {spin} {icon} {block.tool_name}"
+            if params:
+                head += f" {params}"
+            lines.append(head)
+            for sub in block.sub_lines:
+                plain = _strip_rich_markup(sub)
+                if len(plain) > 80:
+                    plain = plain[:77] + "..."
+                lines.append(f"     {plain}")
+        if len(lines) <= self.LIVE_MAX_ROWS:
+            return lines
+        hidden = len(lines) - (self.LIVE_MAX_ROWS - 1)
+        return lines[: self.LIVE_MAX_ROWS - 1] + [f"  … +{hidden} more"]
+
+    def _notify_live(self) -> None:
+        if self.on_live_change is not None:
+            self.on_live_change()
+
+    def _match_live(self, tool_name: str, tool_call_id: Optional[str]) -> Optional[str]:
+        if tool_call_id and tool_call_id in self._live:
+            return tool_call_id
+        if tool_call_id:
+            return None
+        return self._live.find_unfinished(tool_name)
+
+    def _drain_live_prefix(self) -> None:
+        for block in self._live.drain_prefix():
+            self._flush_live_block(block)
+        self._notify_live()
+
+    def abandon_live(self) -> None:
+        """Flush leftover live blocks on cancel / turn end (call line only if unfinished)."""
+        leftover = self._live.drain_all()
+        if not leftover:
+            self._notify_live()
+            return
+        for block in leftover:
+            self._flush_live_block(block, unfinished=not block.finished)
+        self._notify_live()
+
+    def _flush_live_block(self, block: LiveToolBlock, *, unfinished: bool = False) -> None:
+        """Print one whole tool block to scrollback: call then result, in order."""
+        self._flushed_ids.add(block.tool_call_id)
+        self.start_tool_section()
+        tool_name = block.tool_name
+        tool_args = block.tool_args
+        if unfinished:
+            _display_tool_impl(
+                self._assistant_console, tool_name, tool_args, self.tool_count,
+                tool_call_id=block.tool_call_id,
+            )
+            return
+        result = block.result
+        if result is None:
+            _display_tool_impl(
+                self._assistant_console, tool_name, tool_args, self.tool_count,
+                tool_call_id=block.tool_call_id,
+            )
+            return
+        elapsed_str = self._fmt_elapsed(result.elapsed, tool_name=tool_name)
         if tool_name in self._DEFERRED_TOOLS:
+            self._display_deferred_merged(
+                tool_name, result.tool_args or tool_args, result.content,
+                result.is_error, elapsed_str,
+            )
             return
         if tool_name == "apply_patch":
-            self._capture_patch_before_call(tool_args, tool_call_id)
+            self._display_patch_summary(
+                result.content, result.is_error, elapsed_str,
+                result.tool_args or tool_args, block.tool_call_id,
+                result.tool_display_meta,
+            )
             return
         if tool_name in self._WRITE_DIFF_TOOLS:
-            self._capture_file_before_call(tool_name, tool_args, tool_call_id)
+            self._display_write_merged(
+                tool_name, result.tool_args or tool_args, result.content,
+                result.is_error, elapsed_str, block.tool_call_id,
+                result.tool_display_meta,
+            )
             return
-        self.start_tool_section()
         _display_tool_impl(
             self._assistant_console, tool_name, tool_args, self.tool_count,
-            tool_call_id=tool_call_id,
+            tool_call_id=block.tool_call_id,
         )
-        self._open_block_id = tool_call_id
+        for line in block.sub_lines:
+            self._assistant_console.print(line)
+        self._emit_tool_result(
+            tool_name,
+            result.content,
+            is_error=result.is_error,
+            elapsed=result.elapsed,
+            tool_args=result.tool_args or tool_args,
+            tool_call_id=block.tool_call_id,
+            tool_display_meta=result.tool_display_meta,
+        )
 
     def _resolve_diff_path(self, raw_path: str) -> Path:
         """Resolve display-only paths against the file tool's work directory."""
@@ -729,58 +850,47 @@ class StreamDisplayManager:
     _EXECUTE_ERROR_TAIL_LINES = 12
     _EXECUTE_DIAGNOSTIC_TAIL_LINES = 8
 
-    def _print_result_anchor(self, tool_name: str, tool_args: dict) -> None:
-        """Re-state the call a detached ``⎿`` result body belongs to.
-
-        Tools render with two different strategies: ``_DEFERRED_TOOLS`` /
-        ``_WRITE_DIFF_TOOLS`` emit ONE self-labelled block at completion, while
-        every other tool prints its call line at START time (so a long
-        ``execute`` is visible while it runs) and its result body at completion.
-        The runner emits a whole parallel batch's completions together, so any
-        earlier-called deferred tool's block lands *between* such a call line
-        and its own body — and ``⎿``, which means "continues the line above",
-        then points at the wrong call. One dim line naming the real call makes
-        the block unambiguous without giving up the live call line.
-        """
-        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        params = format_tool_display(tool_name, tool_args)
-        # task / delegate briefs must stay intact on the anchor line too —
-        # collapsing them to 60 chars re-introduces the same omission the
-        # start-time call line was fixed to avoid.
-        if tool_name not in ("task", "delegate", "send_message"):
-            params = params.replace("\n", " ")
-            if len(params) > 60:
-                params = params[:57] + "..."
-        line = f"    ↳ {icon} {tool_name}"
-        if params:
-            if "\n" in params:
-                self._assistant_console.print(line, style="dim")
-                for part in params.splitlines():
-                    self._assistant_console.print(f"      {part}", style="dim")
-                return
-            line += f" {params}"
-        self._assistant_console.print(line, style="dim")
-
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: Optional[float] = None,
                             tool_args: Optional[dict] = None,
                             tool_call_id: Optional[str] = None,
                             tool_display_meta: Optional[dict] = None):
-        """Display tool execution result.
+        """Finish a live block and prefix-flush whole blocks to scrollback.
 
-        For ``_DEFERRED_TOOLS`` the call line was suppressed at start time, so
-        here we emit the merged single line ``icon name params - count (elapsed)``.
-
-        ``tool_call_id`` identifies which call this result belongs to; when the
-        transcript's last tool block is a *different* call, a bare ``⎿`` body
-        would be misread, so it gets an anchor line first. Callers that render
-        one tool at a time can omit it.
+        Callers that never called ``display_tool`` (unit tests rendering one
+        result at a time) still take the immediate-print path.
         """
+        if tool_call_id and tool_call_id in self._flushed_ids:
+            return
+        matched = self._match_live(tool_name, tool_call_id)
+        if matched is not None:
+            if matched in self._flushed_ids:
+                return
+            self._live.finish(
+                matched,
+                LiveToolResult(
+                    content="" if result_content is None else str(result_content),
+                    is_error=is_error,
+                    elapsed=elapsed,
+                    tool_args=tool_args,
+                    tool_display_meta=tool_display_meta,
+                ),
+            )
+            self._drain_live_prefix()
+            return
+        self._emit_tool_result(
+            tool_name, result_content, is_error=is_error, elapsed=elapsed,
+            tool_args=tool_args, tool_call_id=tool_call_id,
+            tool_display_meta=tool_display_meta,
+        )
+
+    def _emit_tool_result(self, tool_name: str, result_content: str,
+                          is_error: bool = False, elapsed: Optional[float] = None,
+                          tool_args: Optional[dict] = None,
+                          tool_call_id: Optional[str] = None,
+                          tool_display_meta: Optional[dict] = None):
+        """Render a tool result body. The live path prints the call line first."""
         elapsed_str = self._fmt_elapsed(elapsed, tool_name=tool_name)
-        detached = self._open_block_id != tool_call_id
-        # This tool's block is the transcript's last one from here on, whichever
-        # branch below renders it.
-        self._open_block_id = tool_call_id
 
         if tool_name in self._DEFERRED_TOOLS:
             self.start_tool_section()
@@ -810,19 +920,14 @@ class StreamDisplayManager:
             return
 
         if not result_content:
-            if detached:
-                self._print_result_anchor(tool_name, tool_args or {})
             self._assistant_console.print(f"    [dim]⎿ done{elapsed_str}[/dim]")
             return
 
         if tool_name == "task":
             # Its footer already reads ``⎿ task done (...)`` and the subagent's
-            # own steps are nested under it, so it never needs an anchor.
+            # own steps are nested under it.
             self._display_task_result(result_content, is_error)
             return
-
-        if detached:
-            self._print_result_anchor(tool_name, tool_args or {})
 
         result_str = _strip_internal_tool_notices(str(result_content))
 
@@ -1092,14 +1197,30 @@ class StreamDisplayManager:
     def handle_event(self, event: dict) -> None:
         """Dispatch a runtime event from the agent (subagent / compression).
 
-        Called synchronously by Runner / BuiltinTaskTool from the asyncio
-        thread. While these events fire, the parent run is awaiting tool
-        execution or starting a new turn, so the main thread is not mutating
-        display state — direct console output is safe.
+        Subagent lines hang on the parent live ``task`` block when one is
+        still open, so they flush with that block instead of splitting it.
+        Tests (and ``--print``) that never opened a live block still print
+        immediately, matching the previous behaviour.
         """
         et = event.get("type", "")
         if et.startswith("subagent."):
-            self._handle_subagent_event(et, event)
+            run_id = event.get("run_id")
+            parent_id = None
+            if et == "subagent.start":
+                parent_id = self._live.bind_run(run_id) if run_id else None
+            else:
+                parent_id = self._live.parent_for_run(run_id)
+            lines = self._subagent_event_lines(et, event)
+            if parent_id and lines:
+                for line in lines:
+                    self._live.attach_sub_line(parent_id, line)
+                self._notify_live()
+                return
+            if parent_id is not None:
+                self._notify_live()
+                return
+            for line in lines:
+                self._assistant_console.print(line)
         elif et.startswith("compact."):
             self._handle_compact_event(et, event)
 
@@ -1114,8 +1235,13 @@ class StreamDisplayManager:
         return f"[dim]\\[{slot}][/dim] " if slot is not None else ""
 
     def _handle_subagent_event(self, et: str, event: dict) -> None:
+        for line in self._subagent_event_lines(et, event):
+            self._assistant_console.print(line)
+
+    def _subagent_event_lines(self, et: str, event: dict) -> List[str]:
         verbosity = self._subagent_verbosity
         run_id = event.get("run_id")
+        lines: List[str] = []
 
         if et == "subagent.start":
             self._subagent_live_shown += 1
@@ -1125,7 +1251,7 @@ class StreamDisplayManager:
                 self._subagent_last_tool.pop(run_id, None)
 
             if verbosity == "off":
-                return
+                return lines
 
             agent_name = event.get("agent_name", "Subagent")
             # Full task text — truncating here hides the brief the parent wrote.
@@ -1147,21 +1273,21 @@ class StreamDisplayManager:
                 f"[dim cyan]⮕ {agent_name}[/dim cyan]{model_note}"
             )
             if not task:
-                self._assistant_console.print(f"{prefix}[dim]{budget}[/dim]")
+                lines.append(f"{prefix}[dim]{budget}[/dim]")
             elif "\n" in task:
-                self._assistant_console.print(f"{prefix}[dim]{budget}[/dim]")
+                lines.append(f"{prefix}[dim]{budget}[/dim]")
                 for line in task.splitlines():
-                    self._assistant_console.print(
+                    lines.append(
                         f"{self._SUB_INDENT}  [dim italic]{line}[/dim italic]"
                     )
             else:
-                self._assistant_console.print(
+                lines.append(
                     f"{prefix} [dim italic]{task}[/dim italic][dim]{budget}[/dim]"
                 )
 
         elif et == "subagent.tool_started":
             if verbosity == "off":
-                return
+                return lines
             tool_name = event.get("tool_name", "")
             info = event.get("info", "") or ""
             # Consecutive same-(tool, args) dedup: an agent that retries the
@@ -1171,7 +1297,7 @@ class StreamDisplayManager:
             # render normally.
             key = (tool_name, info)
             if run_id and self._subagent_last_tool.get(run_id) == key:
-                return
+                return lines
             if run_id:
                 self._subagent_last_tool[run_id] = key
             if len(info) > 100:
@@ -1182,7 +1308,7 @@ class StreamDisplayManager:
             )
             if info:
                 line += f" [dim]{info}[/dim]"
-            self._assistant_console.print(line)
+            lines.append(line)
 
         elif et == "subagent.tool_completed":
             # Default ``all`` mode is tool-first: completion is hidden because
@@ -1192,7 +1318,7 @@ class StreamDisplayManager:
                 # Always surface errors though — silent failures are worse
                 # than slightly noisier output.
                 if not event.get("is_error"):
-                    return
+                    return lines
             tool_name = event.get("tool_name", "")
             info = event.get("info", "") or ""
             if len(info) > 100:
@@ -1201,11 +1327,11 @@ class StreamDisplayManager:
             elapsed_str = self._fmt_elapsed(event.get("elapsed"), tool_name=tool_name)
             prefix = self._subagent_prefix(run_id)
             if is_error:
-                self._assistant_console.print(
+                lines.append(
                     f"{self._SUB_INDENT}{prefix}"
                     f"[dim red]⚠ {tool_name}[/dim red] [dim]{info}[/dim]"
                 )
-                return
+                return lines
             line = (
                 f"{self._SUB_INDENT}{prefix}"
                 f"[dim green]✓ {tool_name}[/dim green]"
@@ -1214,7 +1340,7 @@ class StreamDisplayManager:
                 line += f" [dim]{info}[/dim]"
             if elapsed_str:
                 line += f"[dim]{elapsed_str}[/dim]"
-            self._assistant_console.print(line)
+            lines.append(line)
 
         elif et == "subagent.end":
             # Reclaim the slot before rendering so the prefix on the final
@@ -1230,10 +1356,12 @@ class StreamDisplayManager:
                     preview = preview[:197] + "..."
                 # Final response is shown in every mode (including ``off``):
                 # it's the actual answer the parent agent will consume.
-                self._assistant_console.print(
+                lines.append(
                     f"{self._SUB_INDENT}[dim cyan]⤷[/dim cyan] "
                     f"[dim italic]{preview}[/dim italic]"
                 )
+
+        return lines
 
     def _handle_compact_event(self, et: str, event: dict) -> None:
         # Eviction only replaces old tool-result bodies and leaves the call
@@ -1448,6 +1576,7 @@ class StreamDisplayManager:
 
         if self.in_thinking:
             self.end_thinking()
+        self.abandon_live()
         if self.in_tool_section:
             self.end_tool_section()
 

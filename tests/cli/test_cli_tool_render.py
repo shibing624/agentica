@@ -345,11 +345,12 @@ class TestCLIToolRender(unittest.TestCase):
             tool_call_id="ask-1",
         )
 
-        rendered = self._render(dm, fake)
-        self.assertIn("ask_user_question", rendered)
-        self.assertNotIn("items]", rendered)
-        self.assertNotIn("实测发现", rendered)
-        self.assertNotIn("...", rendered)
+        self.assertEqual(self._render(dm, fake), "")
+        live = "\n".join(dm.compose_live("⠋"))
+        self.assertIn("ask_user_question", live)
+        self.assertNotIn("items]", live)
+        self.assertNotIn("实测发现", live)
+        self.assertNotIn("...", live)
 
     def test_ask_user_question_result_replays_question_and_answer_in_full(self):
         """The question widget is transient, so the result block is the only
@@ -646,6 +647,13 @@ class TestCLIToolRender(unittest.TestCase):
             {"command": command, "background": True},
             tool_call_id="exec-bg",
         )
+        manager.display_tool_result(
+            "execute",
+            "Started background command #1 (PID 1, id: term_1).",
+            elapsed=0.01,
+            tool_args={"command": command, "background": True},
+            tool_call_id="exec-bg",
+        )
 
         rendered = output.getvalue()
         self.assertIn("value-11", rendered)
@@ -722,10 +730,10 @@ class TestCLIToolRender(unittest.TestCase):
                 self.assertIn("subagent_type='code'", rendered)
 
     def test_display_tool_defers_read_only_call_line(self):
-        """Read-only tools skip the start-time call line (deferred to completion)."""
+        """Read-only tools and execute skip the start-time call line (live window)."""
         from agentica.cli.display import StreamDisplayManager
 
-        for name in ("read_file", "glob", "grep", "web_search", "fetch_url"):
+        for name in ("read_file", "glob", "grep", "web_search", "fetch_url", "execute"):
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
@@ -1205,6 +1213,11 @@ class TestCLIToolRender(unittest.TestCase):
         disp.clear_truncated_blocks()
 
         manager.display_tool("execute", {"command": command}, tool_call_id="exec-long")
+        self.assertNotIn("execute python3", output.getvalue())
+        manager.display_tool_result(
+            "execute", "ok", elapsed=0.01,
+            tool_args={"command": command}, tool_call_id="exec-long",
+        )
 
         rendered = output.getvalue()
         self.assertIn("execute python3 -m personamem.run", rendered)
@@ -1215,7 +1228,7 @@ class TestCLIToolRender(unittest.TestCase):
 
         self.assertEqual(disp.get_truncated_blocks(), [{
             "title": "execute",
-            "content": format_execute_expand(command),
+            "content": format_execute_expand(command, "ok"),
         }])
 
 
@@ -1241,6 +1254,10 @@ class TestCLIToolRender(unittest.TestCase):
         disp.clear_truncated_blocks()
 
         manager.display_tool("execute", {"command": command}, tool_call_id="exec-heredoc")
+        manager.display_tool_result(
+            "execute", "ok", elapsed=0.01,
+            tool_args={"command": command}, tool_call_id="exec-heredoc",
+        )
 
         rendered = output.getvalue()
         self.assertIn("execute python3 - <<'PY'", rendered)
@@ -1250,7 +1267,7 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("print(json.dumps", rendered)
         from agentica.cli.display.tool_format import format_execute_expand
 
-        self.assertEqual(disp.get_last_truncated()["content"], format_execute_expand(command))
+        self.assertEqual(disp.get_last_truncated()["content"], format_execute_expand(command, "ok"))
 
 
     def test_execute_command_and_output_are_one_expandable_block(self):
