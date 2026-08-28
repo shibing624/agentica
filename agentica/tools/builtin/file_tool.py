@@ -751,7 +751,9 @@ class BuiltinFileTool(Tool):
         *** End Patch
 
         Context must match the file exactly — no whitespace or quote
-        rewriting. All paths are validated before any file is changed.
+        rewriting. Read the current file with read_file before building
+        an Update/Delete hunk; do not reconstruct context from memory.
+        All paths are validated before any file is changed.
 
         Args:
             patch: Begin/End Patch envelope. After @@: space keeps, '-' deletes, '+' inserts.
