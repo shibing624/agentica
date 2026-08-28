@@ -98,6 +98,7 @@ huggingface = ["huggingface-hub>=0.20", "sentence-transformers>=2.0"]
 ddg       = []
 wikipedia = ["wikipedia>=1.4"]
 serper    = []
+serply    = []
 exa       = []
 bocha     = []
 tavily    = ["tavily-python>=0.3"]
@@ -141,6 +142,7 @@ tools-search = [
     "agentica[ddg]",
     "agentica[wikipedia]",
     "agentica[serper]",
+    "agentica[serply]",
     "agentica[exa]",
     "agentica[bocha]",
 ]
