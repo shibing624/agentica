@@ -1,6 +1,7 @@
 import * as api from "./api";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
+import { eventsToChatMsgs } from "./lib/hydrateMessages";
 import {
   askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
   saveSessions, setState, showToast, writeLastSessionId,
@@ -43,15 +44,7 @@ export async function loadSessions() {
   setState({ sessions: merged });
   saveSessions();
   const last = readLastSessionId();
-  if (last && merged[last]) {
-    switchTo(last);
-    const sess = merged[last];
-    if (sess.running) {
-      setState({ pendingResume: last });
-    } else if (shouldHydrateFromServer(sess, last)) {
-      void hydrateSession(last, true);
-    }
-  }
+  if (last && merged[last]) switchTo(last);
 }
 
 export function switchTo(id: string) {
@@ -64,8 +57,14 @@ export function switchTo(id: string) {
   }
   writeLastSessionId(id);
   bump();
-  if (sess?.running && !getState().streams[id]) setState({ pendingResume: id });
-  else if (sess && shouldHydrateFromServer(sess, id)) void hydrateSession(id, !!sess.msgs.length);
+  if (!sess || sessionIsLive(id)) return;
+  void (async () => {
+    await hydrateSession(id, true);
+    if (getState().curSess !== id) return;
+    if (getState().sessions[id]?.running && !sessionIsLive(id)) {
+      setState({ pendingResume: id });
+    }
+  })();
 }
 
 export function markSessionRead(id: string) {
@@ -99,23 +98,21 @@ export async function syncSessionStatus() {
   bump();
 }
 
+function sessionIsLive(id: string): boolean {
+  const st = getState();
+  return !!(st.streams[id] || st.goalRuns[id] || st.commandRuns[id]);
+}
+
 /** Replay a session's transcript from the server log so a reload (or another
- *  machine) still shows history localStorage never had. */
+ *  machine) still shows history localStorage never had — including tool
+ *  calls, matching the live web turn. */
 export async function hydrateSession(id: string, force = false) {
-  const { ok, data } = await api.fetchTraceEvents(id, 0, 1000);
-  if (!ok || !data?.events) return;
+  if (sessionIsLive(id)) return;
+  const events = await fetchAllTraceEvents(id);
+  if (!events) return;
   const sess = getState().sessions[id];
-  if (!sess || (sess.msgs.length && !force)) return;
-  const msgs: ChatMsg[] = [];
-  for (const e of data.events) {
-    if (e.type === "user" || e.type === "assistant") {
-      msgs.push({
-        role: e.type,
-        content: String(e.content || ""),
-        ts: e.timestamp ? Date.parse(e.timestamp) : Date.now(),
-      });
-    }
-  }
+  if (!sess || sessionIsLive(id) || (sess.msgs.length && !force)) return;
+  const msgs = eventsToChatMsgs(events);
   if (!msgs.length) return;
   sess.msgs = msgs;
   sess.lastTs = lastQueryTs(sess);
@@ -124,27 +121,18 @@ export async function hydrateSession(id: string, force = false) {
   void syncSessionRoundStats(id);
 }
 
-function looksLikeDisconnectCasualty(sess: Session): boolean {
-  const last = sess.msgs[sess.msgs.length - 1];
-  if (!last || last.role !== "assistant" || !last.error) return false;
-  const err = last.error.toLowerCase();
-  return err.includes("network") || err.includes("failed to fetch") || err.includes("load failed");
-}
-
-function looksIncompleteAssistant(sess: Session): boolean {
-  const last = sess.msgs[sess.msgs.length - 1];
-  if (!last || last.role !== "assistant") return false;
-  if (last.aborted || last.tokIn != null) return false;
-  if (last.error) return looksLikeDisconnectCasualty(sess);
-  const parts = last.parts || [];
-  if (!last.content && !parts.length) return true;
-  return parts.length > 0;
-}
-
-function shouldHydrateFromServer(sess: Session, id: string): boolean {
-  if (getState().streams[id]) return false;
-  if (!sess.msgs.length) return true;
-  return looksLikeDisconnectCasualty(sess) || looksIncompleteAssistant(sess);
+async function fetchAllTraceEvents(id: string): Promise<any[] | null> {
+  const all: any[] = [];
+  let offset = 0;
+  const limit = 1000;
+  for (;;) {
+    const { ok, data } = await api.fetchTraceEvents(id, offset, limit);
+    if (!ok || !data?.events) return offset === 0 ? null : all;
+    all.push(...data.events);
+    const total = typeof data.total === "number" ? data.total : all.length;
+    if (all.length >= total || data.events.length < limit) return all;
+    offset += limit;
+  }
 }
 
 /** Stamp each assistant footer with the same round the Trace page draws. */
