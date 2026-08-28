@@ -187,6 +187,7 @@ class TestSubagentExecutePolicy(unittest.TestCase):
         self.assertTrue(execute_fn.is_read_only)
         self.assertFalse(execute_fn.is_destructive)
         self.assertIn("READ-ONLY", execute_fn.description)
+        self.assertIn("rg", execute_fn.description)
 
     def test_builtin_subagents_expose_read_only_execute(self):
         configs = get_subagent_configs()

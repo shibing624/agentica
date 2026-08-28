@@ -749,6 +749,9 @@ def test_builtin_subagent_configs_are_read_only():
         assert cfg.execute_policy == "read_only", (
             f"{cfg.type} config must restrict execute to read-only commands"
         )
+    explore = configs["explore"]
+    assert "execute" in explore.system_prompt
+    assert "rg" in explore.system_prompt
 
 
 def test_select_child_tools_strips_edit_tools_for_code_subagent():

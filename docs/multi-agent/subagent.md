@@ -184,7 +184,7 @@ if result["status"] == "completed":
 
 ## 只读边界
 
-`execute_policy: read_only` 允许 `git diff`、`git log`、测试和 lint 等检查命令，并拒绝提交、安装、Shell 重定向写文件等明显的状态修改。
+`execute_policy: read_only` 允许 `rg`/`grep`/`find`/`head`/`cat` 等检查管道，以及 `git diff`、`git log`、测试和 lint；拒绝提交、安装、Shell 重定向写文件等明显的状态修改。
 
 这是命令级 best-effort 约束，不是 OS 沙箱。测试代码本身仍可能写文件，复杂命令也不能只靠字符串分类获得强隔离。处理不可信输入时，应使用 Docker、seccomp 或其他系统级沙箱。
 

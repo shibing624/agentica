@@ -351,10 +351,10 @@ class SubagentRegistry:
         guarded_function.is_read_only = True
         guarded_function.is_destructive = False
         guarded_function.description = (
-            "Runs a READ-ONLY shell command. Commands that change state "
-            "(git commit/push/checkout, installs, writes, redirection) are "
-            "refused. Use it to gather evidence: git diff, git log, git show, "
-            "git status, git blame, and test/lint runners.\n\n"
+            "Runs a READ-ONLY shell command. Writes, installs, git "
+            "commit/push/checkout, and file redirection are refused. "
+            "Pipelines that only inspect state are allowed: rg, grep, "
+            "find, cat, head, git diff/log/show/status, tests and linters.\n\n"
             f"{function.description or ''}"
         )
         return guarded_function
