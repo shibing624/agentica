@@ -587,7 +587,7 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
         if not isinstance(patch, str):
             return []
         try:
-            from agentica.tools.patch_tool import parse_patch_envelope
+            from agentica.tools.patch import parse_patch_envelope
 
             raw.extend(op.path for op in parse_patch_envelope(patch))
         except (ValueError, TypeError):

@@ -12,6 +12,15 @@ This is an opt-in SDK primitive. Language servers start lazily on the first
 diagnostics call (first file edit), never during Agent construction, so CLI
 startup is not blocked by pyright initialize.
 
+Known false positive: out-of-band filesystem changes (``git mv``, shell
+``rm``/``mv``) race the language server's file watcher, so an import added
+immediately after such a move can briefly report "could not be resolved" even
+though the target exists on disk. The baseline diff is still correct — the
+diagnostic IS new — but the server's index is stale. Treat import-resolution
+errors after out-of-band moves as suspect and verify against a runtime import
+or the test suite before acting; never "fix" them by deleting caches (an
+orphaned ``__pycache__`` entry can never be loaded).
+
     checker = LspDiagnosticsChecker(work_dir=".", servers=["pyright"])
     checker.snapshot_before("app.py")            # starts LSP here if needed
     ... edit app.py ...

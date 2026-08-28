@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: V4A patch apply helpers used by BuiltinFileTool.apply_patch.
+@description: V4A patch envelope format shared by tools, agent core, and CLI.
+
+Pure string-level library: parses the ``*** Begin Patch`` envelope into
+FilePatch operations and applies update hunks to text. No disk I/O —
+BuiltinFileTool.apply_patch adds path resolution, sandbox checks, locking,
+atomic writes, and diagnostics on top. agent.approvals and the CLI display
+reuse the parser to list which files a patch touches.
 
 Context matching is exact: a hunk must match the file byte-for-byte aside
 from the required `` `` / ``-`` / ``+`` prefixes. Whitespace and quotes are

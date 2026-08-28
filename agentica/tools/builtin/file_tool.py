@@ -19,7 +19,7 @@ import aiofiles
 
 from agentica.tools.base import Tool
 from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
-from agentica.tools.patch_tool import PatchContextError, PatchNoChangeError, apply_diff, parse_patch_envelope
+from agentica.tools.patch import PatchContextError, PatchNoChangeError, apply_diff, parse_patch_envelope
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long

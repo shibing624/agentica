@@ -8,7 +8,7 @@ import sys
 import unittest
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
+from agentica.tools.patch import apply_diff, parse_patch_envelope
 
 
 class TestApplyDiff(unittest.TestCase):

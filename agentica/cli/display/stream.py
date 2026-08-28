@@ -28,7 +28,7 @@ from agentica.cli.usage_display import (
     format_turn_usage_summary,
 )
 from agentica.global_config import get_setting
-from agentica.tools.patch_tool import parse_patch_envelope
+from agentica.tools.patch import parse_patch_envelope
 
 from .console import (
     _is_diagnostic_execute_result,
