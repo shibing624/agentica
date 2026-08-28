@@ -1017,12 +1017,13 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Search file contents for a regex pattern.
 
+        Uses ripgrep (``rg``) when it is on PATH, otherwise a Python fallback.
         Output is matching lines as `file:line_number:content`.
 
         Args:
             pattern: Regex to search for
             path: File or directory to search (default: ".")
-            include: File glob filter, e.g. "*.py"
+            include: File glob filter, e.g. "*.ts" or "*.py"
             limit: Maximum matching lines (default: 100)
 
         Returns:

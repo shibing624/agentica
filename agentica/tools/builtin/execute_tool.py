@@ -187,7 +187,7 @@ class BuiltinExecuteTool(Tool):
 
         Any shell command goes here: programs (git, python, pytest, pip, npm,
         make, docker, curl) and pipelines that shape command output — filter,
-        sort, unique, count, head, tail.
+        sort, unique, count, head, tail. Pipelines are encouraged.
 
         You own what comes back. Bound it with ``| head`` / ``| tail``;
         oversized output is persisted to a session file and the context keeps

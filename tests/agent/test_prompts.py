@@ -102,11 +102,11 @@ class TestPromptModules:
         from agentica.prompts.base.tools import get_tools_prompt
         content = get_tools_prompt()
         assert "exact path string" in content
-        assert "read_file` grounds only that exact" in content
+        assert "only that exact file path" in content
         assert "does not ground sibling files" in content
-        assert "call `glob` on the parent" in content
-        assert "common filenames like `base.py`" in content
-        assert "empty `glob` result is" in content
+        assert "from `glob`, `grep`,\n`execute`" in content
+        assert "`base.py`" in content
+        assert "empty listing is" in content
 
     def test_tools_module_allows_execute_pipelines(self):
         from agentica.prompts.base.tools import get_tools_prompt
