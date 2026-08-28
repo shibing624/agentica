@@ -143,6 +143,7 @@ TOOL_REGISTRY = {
     "search_bocha": ("search_bocha", "SearchBochaTool", "Search", "Web search via Bocha"),
     "search_exa": ("search_exa", "SearchExaTool", "Search", "Web search via Exa"),
     "search_serper": ("search_serper", "SearchSerperTool", "Search", "Web search via Serper (Google)"),
+    "search_serply": ("search_serply", "SearchSerplyTool", "Search", "Web search via Serply (Google web/news/scholar)"),
     "wikipedia": ("wikipedia", "WikipediaTool", "Search", "Search and read Wikipedia articles"),
     "zhipu_web_search": ("zhipu_web_search", "ZhipuWebSearchTool", "Search", "Web search via ZhipuAI"),
     # Web/Network Tools

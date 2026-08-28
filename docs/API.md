@@ -240,7 +240,7 @@ from agentica.tools.duckduckgo_tool import DuckDuckGoTool
 超级组合：
 
 ```bash
-pip install agentica[tools-search]      # DDG + Wikipedia + Serper + Exa + Bocha
+pip install agentica[tools-search]      # DDG + Wikipedia + Serper + Serply + Exa + Bocha
 pip install agentica[tools-research]    # arxiv + wikipedia + newspaper + dblp
 pip install agentica[tools-finance]     # yfinance
 pip install agentica[tools-media]       # dalle + cogview + cogvideo + ocr + image/video analysis
