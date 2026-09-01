@@ -259,6 +259,7 @@ agent = DeepAgent()
 
 ## 🔥 News
 
+- [2026/09/01] **v1.4.15**：新增 TypeScript 客户端 `@agentica-ai/sdk` 与 Gateway Docker 镜像；`/export` 默认出 session JSONL；`apply_patch` 只精确匹配；CLI 不再把工具输出里的 `[/path]` 当成 Rich 标记。详见 [Release-v1.4.15](https://github.com/shibing624/agentica/releases/tag/v1.4.15)
 - [2026/08/25] **v1.4.14**：权限档更新（ask 不再藏写工具，增加「拒绝类似」）；Web/桌面真正多账号；文件工具收成 `apply_patch` + `write_file`（`read_file` 支持 tail）；Worktree 默认进仓库内；系统 skill 包内加载；桌面版首次打开自动装 Python runtime。详见 [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
 - [2026/08/20] **v1.4.13**：Web 换成 Vite + React SPA 并新增轨迹页；网页界面默认英文、设置里可切简体中文；新增 **Desktop App 安装包**（macOS dmg / Windows NSIS / Linux AppImage·deb）。详见 [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
 - [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)

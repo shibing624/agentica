@@ -62,8 +62,4 @@ npm test
 
 ## Publish
 
-This repo publishes **one** npm package: `@agentica-ai/sdk` (org `agentica-ai`). npmjs account: `shibing624-xm`.
-
-Do not publish from a laptop against `www.npmjs.com`. GitHub Actions PUTs to `https://registry.npmjs.org/` on tag `v*` or `sdk-v*` (or **Actions → Publish @agentica-ai/sdk → Run workflow**). Bump `version` in this `package.json` before the tag; a tag whose version is already on the registry is a no-op.
-
-Secret on the GitHub repo: `NPM_TOKEN`.
+This repo publishes **one** npm package: `@agentica-ai/sdk` under the [Agentica AI](https://www.npmjs.com/~agentica-ai) organization.
