@@ -1,4 +1,4 @@
-# @agentica/sdk
+# @agentica-ai/sdk
 
 TypeScript HTTP client for a running [`agentica-gateway`](https://github.com/shibing624/agentica). It is **not** a port of the Python `Agent` runtime: chat, tools and memory stay in that process. This package sends the same REST/SSE calls the Web UI uses.
 
@@ -7,15 +7,15 @@ Starting the Web UI is unchanged: `pip install "agentica[gateway]"` then `agenti
 ## Install
 
 ```bash
-npm install @agentica/sdk
+npm install @agentica-ai/sdk
 ```
 
-Always the scoped name **`@agentica/sdk`**. The CLI talks to `https://registry.npmjs.org/` (not `www.npmjs.com`). Requires Node 18+ (native `fetch`).
+Always the scoped name **`@agentica-ai/sdk`**. The CLI talks to `https://registry.npmjs.org/` (not `www.npmjs.com`). Requires Node 18+ (native `fetch`).
 
 ## Usage
 
 ```ts
-import { Agentica } from "@agentica/sdk";
+import { Agentica } from "@agentica-ai/sdk";
 
 const agentica = new Agentica({
   baseURL: "http://127.0.0.1:8881",
@@ -62,8 +62,8 @@ npm test
 
 ## Publish
 
-This repo publishes **one** npm package: `@agentica/sdk`. npmjs account: `shibing624-xm`.
+This repo publishes **one** npm package: `@agentica-ai/sdk` (org `agentica-ai`). npmjs account: `shibing624-xm`.
 
-Do not publish from a laptop against `www.npmjs.com`. GitHub Actions PUTs to `https://registry.npmjs.org/` on tag `v*` or `sdk-v*` (or **Actions → Publish @agentica/sdk → Run workflow**). Bump `version` in this `package.json` before the tag; a tag whose version is already on the registry is a no-op.
+Do not publish from a laptop against `www.npmjs.com`. GitHub Actions PUTs to `https://registry.npmjs.org/` on tag `v*` or `sdk-v*` (or **Actions → Publish @agentica-ai/sdk → Run workflow**). Bump `version` in this `package.json` before the tag; a tag whose version is already on the registry is a no-op.
 
 Secret on the GitHub repo: `NPM_TOKEN`.

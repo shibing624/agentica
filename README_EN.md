@@ -153,13 +153,13 @@ Open `http://127.0.0.1:8881/chat`. State lives in a named volume; the current di
 For Node programs talking to a **running** gateway. This is not how you start the web UI:
 
 ```bash
-npm install @agentica/sdk
+npm install @agentica-ai/sdk
 ```
 
-Always the full name **`@agentica/sdk`** (from `registry.npmjs.org`; not `agentica-sdk`).
+Always the full name **`@agentica-ai/sdk`** (from `registry.npmjs.org`; not `agentica-sdk`).
 
 ```ts
-import { Agentica } from "@agentica/sdk";
+import { Agentica } from "@agentica-ai/sdk";
 const agentica = new Agentica({
   baseURL: "http://127.0.0.1:8881",
   apiKey: process.env.AGENTICA_GATEWAY_TOKEN, // ~/.agentica/cache/gateway/runtime.json

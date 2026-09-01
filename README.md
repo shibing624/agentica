@@ -144,13 +144,13 @@ docker compose up -d --build
 给**已经在跑的 gateway** 写 Node 脚本时用，不是启动 Web 的步骤：
 
 ```bash
-npm install @agentica/sdk
+npm install @agentica-ai/sdk
 ```
 
-包名必须写全 **`@agentica/sdk`**（`registry.npmjs.org`，不要写成 `agentica-sdk`）。
+包名必须写全 **`@agentica-ai/sdk`**（`registry.npmjs.org`，不要写成 `agentica-sdk`）。
 
 ```ts
-import { Agentica } from "@agentica/sdk";
+import { Agentica } from "@agentica-ai/sdk";
 const agentica = new Agentica({
   baseURL: "http://127.0.0.1:8881",
   apiKey: process.env.AGENTICA_GATEWAY_TOKEN, // ~/.agentica/cache/gateway/runtime.json

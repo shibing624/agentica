@@ -47,7 +47,7 @@ docker compose up -d --build
 
 ### TypeScript 客户端
 
-外部 Node 程序打这份 REST/SSE 时用 **`@agentica/sdk`**（`npm install @agentica/sdk`，registry 是 `https://registry.npmjs.org/`，源码 `sdk-ts/`）。必须写这个全名，不要写成 `agentica` / `agentica-sdk`。**不是**启动 Web 的依赖，也不替代 wheel 里的 UI。凭据是机器令牌 `Authorization: Bearer`（`runtime.json` / `AGENTICA_GATEWAY_TOKEN`），不是浏览器 cookie。
+外部 Node 程序打这份 REST/SSE 时用 **`@agentica-ai/sdk`**（`npm install @agentica-ai/sdk`，registry 是 `https://registry.npmjs.org/`，源码 `sdk-ts/`）。必须写这个全名，不要写成 `@agentica/sdk` / `agentica-sdk`。**不是**启动 Web 的依赖，也不替代 wheel 里的 UI。凭据是机器令牌 `Authorization: Bearer`（`runtime.json` / `AGENTICA_GATEWAY_TOKEN`），不是浏览器 cookie。
 
 启动：
 

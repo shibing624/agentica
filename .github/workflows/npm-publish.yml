@@ -1,6 +1,6 @@
-# Publish @agentica/sdk to https://registry.npmjs.org (not www.npmjs.com).
+# Publish @agentica-ai/sdk to https://registry.npmjs.org (not www.npmjs.com).
 # Trigger: v* / sdk-v* tags, or Run workflow. Secret: NPM_TOKEN (npmjs user shibing624-xm).
-name: Publish @agentica/sdk
+name: Publish @agentica-ai/sdk
 
 on:
   push:
@@ -29,15 +29,15 @@ jobs:
         run: |
           npm ci
           npm test
-      - name: Publish @agentica/sdk
+      - name: Publish @agentica-ai/sdk
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          if [ "$name" != "@agentica/sdk" ]; then
-            echo "refusing to publish '$name' (only @agentica/sdk is allowed)"
+          if [ "$name" != "@agentica-ai/sdk" ]; then
+            echo "refusing to publish '$name' (only @agentica-ai/sdk is allowed)"
             exit 1
           fi
           if npm view "${name}@${version}" version >/dev/null 2>&1; then

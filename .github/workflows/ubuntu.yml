@@ -51,7 +51,7 @@ jobs:
           npm ci
           npm run build
 
-      - name: Test @agentica/sdk
+      - name: Test @agentica-ai/sdk
         working-directory: sdk-ts
         run: |
           npm ci

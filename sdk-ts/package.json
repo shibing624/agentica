@@ -1,5 +1,5 @@
 {
-  "name": "@agentica/sdk",
+  "name": "@agentica-ai/sdk",
   "version": "0.1.0",
   "description": "TypeScript HTTP client for a running agentica-gateway. Not an Agent runtime.",
   "author": "XuMing <xuming624@qq.com>",

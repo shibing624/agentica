@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DeepAgent` / `get_builtin_tools` 去掉 `peer_conflict_checker`**：编辑成功后不再附「别的会话也改了这个文件」提醒。
 
 #### features
-- **npm 包 `@agentica/sdk`（`sdk-ts/`）**：给跑着的 `agentica-gateway` 用的 TypeScript HTTP 客户端（session / chat SSE / 审批），不是 Python `Agent` 的移植。Web 启动路径不变，仍是 `agentica-gateway`；PyPI wheel 继续打进编译好的 UI。发布走 GitHub Actions：tag `v*` / `sdk-v*`（或手动 Run workflow）`npm publish` 到 `https://registry.npmjs.org/`（secret `NPM_TOKEN`，npmjs 账户 `shibing624-xm`）。已经发布过的 version 会跳过，避免 Python 发版 tag 把同一版再推一次。
+- **npm 包 `@agentica-ai/sdk`（`sdk-ts/`）**：给跑着的 `agentica-gateway` 用的 TypeScript HTTP 客户端（session / chat SSE / 审批），不是 Python `Agent` 的移植。Web 启动路径不变，仍是 `agentica-gateway`；PyPI wheel 继续打进编译好的 UI。发布走 GitHub Actions：tag `v*` / `sdk-v*`（或手动 Run workflow）`npm publish` 到 `https://registry.npmjs.org/@agentica-ai/sdk`（org `agentica-ai`，secret `NPM_TOKEN`，npmjs 账户 `shibing624-xm`）。已经发布过的 version 会跳过，避免 Python 发版 tag 把同一版再推一次。
 - **Gateway Docker 镜像**：`Dockerfile` 用 Node stage 编 Web UI，再 `pip install ".[gateway]"`。仓库根 `docker-compose.yml` 一键起自托管服务；本机 `pip` / Desktop 不受影响。
 - **explore / code 子代理会用只读 `execute` 管道**：`execute` 本来就在 `allowed_tools` 里（`execute_policy: read_only`），但 explore 的 prompt 只提 `glob`/`grep`/`read_file`，包装后的说明也只写 git/测试，模型就不会 `cd` 到工作区外的树去 `rg`。现在 prompt 和只读 `execute` 说明都写上 `rg`/`find`/`head` 管道。
 - **`execute` 输出里出现的路径也算 grounded**：`rg` 等扫到的精确路径字符串可以直接给 `read_file` / `apply_patch`，不必再绕一次 `glob`。`read_file` 仍只 grounded 它打开的那一个文件。
