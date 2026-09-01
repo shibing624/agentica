@@ -1,0 +1,49 @@
+# Agentica Gateway (self-hosted)
+#
+# Usage:
+#   cp .env.docker.example .env   # fill OPENAI_API_KEY
+#   docker compose up -d --build
+#
+# The Web UI is built in the image (Node stage) and served by agentica-gateway.
+# pip / Desktop users are unchanged: they still get the UI from the PyPI wheel.
+#
+# Ports bind to 127.0.0.1. Inside the container the process listens on 0.0.0.0
+# so the published port works; GATEWAY_AUTH=false is required because a
+# generated web password is not allowed on a non-loopback bind. Do not publish
+# 0.0.0.0:8881 until you have set a real password and GATEWAY_AUTH=true.
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/shibing624/agentica:latest
+    ports:
+      - "127.0.0.1:8881:8881"
+    volumes:
+      - agentica-home:/data
+      - ${WORKSPACE:-.}:/workspace
+    environment:
+      AGENTICA_HOME: /data
+      HOST: 0.0.0.0
+      PORT: "8881"
+      GATEWAY_AUTH: "false"
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8881/api/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  agentica-home:

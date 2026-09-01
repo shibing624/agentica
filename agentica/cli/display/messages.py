@@ -231,7 +231,7 @@ def render_markdown_response(console_instance, text: str) -> None:
     if _has_markdown(text):
         console_instance.print(Markdown(text))
     else:
-        console_instance.print(text, style=COLORS["agent"])
+        console_instance.print(text, style=COLORS["agent"], markup=False, highlight=False)
 
 
 def display_diff(console_instance, file_path: str, old_content: str, new_content: str) -> None:

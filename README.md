@@ -130,6 +130,38 @@ agentica-gateway
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI 截图" />
 
+自托管（Docker，镜像里编好 UI，运行时不需要 Node）：
+
+```bash
+cp .env.docker.example .env   # 填 OPENAI_API_KEY
+docker compose up -d --build
+```
+
+浏览器打开 `http://127.0.0.1:8881/chat`。数据在 named volume，当前目录挂到容器 `/workspace`。
+
+### TypeScript SDK
+
+给**已经在跑的 gateway** 写 Node 脚本时用，不是启动 Web 的步骤：
+
+```bash
+npm install @agentica/sdk
+```
+
+包名必须写全 **`@agentica/sdk`**（`registry.npmjs.org`，不要写成 `agentica-sdk`）。
+
+```ts
+import { Agentica } from "@agentica/sdk";
+const agentica = new Agentica({
+  baseURL: "http://127.0.0.1:8881",
+  apiKey: process.env.AGENTICA_GATEWAY_TOKEN, // ~/.agentica/cache/gateway/runtime.json
+});
+for await (const event of agentica.chat.stream({ message: "ping", session_id: "demo" })) {
+  if (event.event === "content") process.stdout.write(String(event.data));
+}
+```
+
+源码在 [`sdk-ts/`](https://github.com/shibing624/agentica/tree/main/sdk-ts)。
+
 ### Python SDK
 
 让 Agent 直接搜资料 + 写文件，一行 `run_sync` 开始干活：

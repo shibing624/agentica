@@ -41,13 +41,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            sdk-ts/package-lock.json
 
       - name: Build Web UI
         working-directory: web
         run: |
           npm ci
           npm run build
+
+      - name: Test @agentica/sdk
+        working-directory: sdk-ts
+        run: |
+          npm ci
+          npm test
 
       - name: Verify current wheel
         run: |

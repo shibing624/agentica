@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`DeepAgent` / `get_builtin_tools` 去掉 `peer_conflict_checker`**：编辑成功后不再附「别的会话也改了这个文件」提醒。
 
 #### features
+- **npm 包 `@agentica/sdk`（`sdk-ts/`）**：给跑着的 `agentica-gateway` 用的 TypeScript HTTP 客户端（session / chat SSE / 审批），不是 Python `Agent` 的移植。Web 启动路径不变，仍是 `agentica-gateway`；PyPI wheel 继续打进编译好的 UI。发布走 GitHub Actions：tag `v*` / `sdk-v*`（或手动 Run workflow）`npm publish` 到 `https://registry.npmjs.org/`（secret `NPM_TOKEN`，npmjs 账户 `shibing624-xm`）。已经发布过的 version 会跳过，避免 Python 发版 tag 把同一版再推一次。
+- **Gateway Docker 镜像**：`Dockerfile` 用 Node stage 编 Web UI，再 `pip install ".[gateway]"`。仓库根 `docker-compose.yml` 一键起自托管服务；本机 `pip` / Desktop 不受影响。
 - **explore / code 子代理会用只读 `execute` 管道**：`execute` 本来就在 `allowed_tools` 里（`execute_policy: read_only`），但 explore 的 prompt 只提 `glob`/`grep`/`read_file`，包装后的说明也只写 git/测试，模型就不会 `cd` 到工作区外的树去 `rg`。现在 prompt 和只读 `execute` 说明都写上 `rg`/`find`/`head` 管道。
 - **`execute` 输出里出现的路径也算 grounded**：`rg` 等扫到的精确路径字符串可以直接给 `read_file` / `apply_patch`，不必再绕一次 `glob`。`read_file` 仍只 grounded 它打开的那一个文件。
 - **`web_search` 新增 `serply` 引擎（`SearchSerplyTool`）**：[Serply](https://serply.io) 的 Google 搜索 API，`SERPLY_API_KEY`，无额外依赖（`pip install agentica[serply]`）。同一个 key 还覆盖 Google News / Google Scholar：SDK 传 `SearchSerplyTool(search_type="news"|"scholar")`，`web_search` 分发器路径用 `AGENTICA_SERPLY_SEARCH_TYPE` 切换，模型看到的工具名不变。CLI `--tools search_serply`。API 文档见 [serply.io/docs](https://serply.io/docs)。
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/goal` 默认 token 预算不限**：CLI `/goal xxx` 与 SDK `run_goal()` 不传 `token_budget` 时不再回落 500_000（`DEFAULT_TOKEN_BUDGET` 改为 `None`）。要限额度显式传 `--tokens N` / `token_budget=N`；`-1` 仍是不限。Web 目标芯片默认显示「预算不限」，点一下才打开 Token 预算输入（空=不限，支持 `500k`/`2m`），Escape 关掉输入框而不退出目标模式。
 
 #### fixes
+- **CLI 渲染工具输出 / 纯文本回答时不再把 `[/xxx]` 当成 Rich 闭合标记**：`execute` 结果里的 `[/usr/bin/cmake]`、grep 路径、agent 纯文本里的 `[/red]` 以前走 `console.print(..., markup=True)`，Rich 抛 `MarkupError`，整轮报 `Agent execution failed`。现在不受信任的正文 `markup=False`，拼进标记串的字段先 `escape()`。
 - **Web 打开 CLI 会话（以及刷新后的网页对话）不再丢掉 tool call / 结果**：`hydrateSession` 以前只把 session JSONL 里的 `user` / `assistant` 正文拼成气泡，`assistant.tool_calls` 和 `type: "tool"` 行直接丢掉，所以侧栏里点开 CLI 会话只剩问答、没有 WorkGroup。现在按 harness 同一条规则重建：一轮用户提问折成一条 assistant（思考 → 工具卡 → 终答），参数和结果走与实时 SSE 相同的 `parts`。打开会话时以服务端日志为准覆盖本地缓存（正在流式的会话不覆盖）。
 - **`search_memory` 搜对话归档不再 `NameError`**：按 `---` 切 block 用了 `re.split`，模块顶上没 `import re`，一点到 conversation 源就炸。
 - **`apply_patch` docstring 补回「改之前先 `read_file`」**：Update/Delete hunk 必须对着当前文件原文，不能凭记忆拼上下文。

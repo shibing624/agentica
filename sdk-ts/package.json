@@ -1,0 +1,50 @@
+{
+  "name": "@agentica/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript HTTP client for a running agentica-gateway. Not an Agent runtime.",
+  "author": "XuMing <xuming624@qq.com>",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shibing624/agentica.git",
+    "directory": "sdk-ts"
+  },
+  "homepage": "https://github.com/shibing624/agentica/tree/main/sdk-ts",
+  "bugs": {
+    "url": "https://github.com/shibing624/agentica/issues"
+  },
+  "keywords": [
+    "agentica",
+    "gateway",
+    "agent",
+    "sse"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

@@ -139,6 +139,38 @@ Serves at `http://127.0.0.1:8881/chat` (chat, traces, settings). The first start
 
 <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agentica-web.png" width="800" alt="Agentica Web UI screenshot" />
 
+Self-host with Docker (the image compiles the UI; runtime still has no Node):
+
+```bash
+cp .env.docker.example .env   # fill OPENAI_API_KEY
+docker compose up -d --build
+```
+
+Open `http://127.0.0.1:8881/chat`. State lives in a named volume; the current directory is mounted at `/workspace`.
+
+### TypeScript SDK
+
+For Node programs talking to a **running** gateway. This is not how you start the web UI:
+
+```bash
+npm install @agentica/sdk
+```
+
+Always the full name **`@agentica/sdk`** (from `registry.npmjs.org`; not `agentica-sdk`).
+
+```ts
+import { Agentica } from "@agentica/sdk";
+const agentica = new Agentica({
+  baseURL: "http://127.0.0.1:8881",
+  apiKey: process.env.AGENTICA_GATEWAY_TOKEN, // ~/.agentica/cache/gateway/runtime.json
+});
+for await (const event of agentica.chat.stream({ message: "ping", session_id: "demo" })) {
+  if (event.event === "content") process.stdout.write(String(event.data));
+}
+```
+
+Source: [`sdk-ts/`](https://github.com/shibing624/agentica/tree/main/sdk-ts).
+
 ### Python SDK
 
 Give the Agent search + files and start working with one `run_sync`:

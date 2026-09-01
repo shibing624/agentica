@@ -9,6 +9,7 @@ import textwrap
 from pathlib import Path
 from typing import List, Optional
 
+from rich.markup import escape
 from rich.text import Text
 
 from agentica.cli.runtime import TOOL_ICONS, get_console
@@ -317,13 +318,15 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     # avoid using "tasks" as the label here to prevent confusion.
     elif tool_name == "write_todos" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
-        console_instance.print(f"    {display_str}", style="dim")
+        console_instance.print(f"    {display_str}", style="dim", highlight=False, markup=False)
     elif tool_name in ("send_message", "task", "delegate") and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
         for line in display_str.splitlines():
-            console_instance.print(f"    {line}", style="dim")
+            console_instance.print(f"    {line}", style="dim", highlight=False, markup=False)
     elif display_str:
-        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta] [dim]{display_str}[/dim]")
+        console_instance.print(
+            f" {icon} [bold magenta]{tool_name}[/bold magenta] [dim]{escape(display_str)}[/dim]"
+        )
     else:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
 

@@ -1463,6 +1463,82 @@ class TestCLIToolRender(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("TAIL_MARK", rendered)
 
+    def test_execute_result_treats_closing_bracket_path_as_literal(self):
+        """Tool output like '[/usr/bin/cmake]' is text, not a Rich close tag."""
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "execute",
+            "OK   cmake -> cmake version 3.26.5  [/usr/bin/cmake]",
+            is_error=False,
+            elapsed=0.01,
+        )
+        rendered = output.getvalue()
+        self.assertIn("[/usr/bin/cmake]", rendered)
+
+    def test_generic_tool_result_treats_closing_bracket_as_literal(self):
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "self_manage",
+            "ok at [/usr/bin/cmake]",
+            is_error=False,
+            elapsed=0.01,
+            tool_args={"action": "show"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("[/usr/bin/cmake]", rendered)
+
+    def test_deferred_tool_call_line_escapes_bracket_path(self):
+        """grep params are interpolated into [dim]…[/dim]; a path must stay literal."""
+        dm, output = self._stream_console()
+        dm.display_tool_result(
+            "grep",
+            "1 match",
+            is_error=False,
+            elapsed=0.01,
+            tool_args={"pattern": "foo", "path": "[/usr/bin/cmake]"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("[/usr/bin/cmake]", rendered)
+
+    def test_tool_call_display_escapes_bracket_in_args(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from agentica.cli.display.tool_format import _display_tool_impl
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=False, color_system=None)
+        _display_tool_impl(
+            console,
+            "send_message",
+            {"target": "peer-a", "message": "OK cmake [/usr/bin/cmake]"},
+        )
+        _display_tool_impl(
+            console,
+            "grep",
+            {"pattern": "foo", "path": "[/usr/bin/cmake]"},
+        )
+        rendered = output.getvalue()
+        self.assertIn("[/usr/bin/cmake]", rendered)
+        self.assertIn("foo", rendered)
+
+    def test_render_markdown_response_treats_closing_bracket_as_literal(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from agentica.cli.display.messages import render_markdown_response
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=False, color_system=None)
+        render_markdown_response(
+            console,
+            "OK   cmake -> cmake version 3.26.5  [/usr/bin/cmake]",
+        )
+        rendered = output.getvalue()
+        self.assertIn("[/usr/bin/cmake]", rendered)
+
 
 
 

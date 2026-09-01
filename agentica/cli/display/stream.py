@@ -664,10 +664,10 @@ class StreamDisplayManager:
         params = format_tool_display(tool_name, tool_args)
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
         if params:
-            line += f" [dim]{params}[/dim]"
+            line += f" [dim]{rich_escape(params)}[/dim]"
         if is_error:
             err = str(result_content).replace("\n", " ").strip()
-            line += f" [dim]- error: {err}{elapsed_str}[/dim]"
+            line += f" [dim]- error: {rich_escape(err)}{elapsed_str}[/dim]"
         else:
             summary = self._result_count_summary(tool_name, result_content)
             if summary:
@@ -698,7 +698,9 @@ class StreamDisplayManager:
 
         summary, _, details = content.partition("\n")
         summary = re.sub(r"^Successfully applied patch to ", "Edited ", summary)
-        self._assistant_console.print(line + f" [dim]- {summary}{elapsed_str}[/dim]")
+        self._assistant_console.print(
+            line + f" [dim]- {rich_escape(summary)}{elapsed_str}[/dim]"
+        )
         changes = (tool_display_meta or {}).get("files") or []
         if changes:
             files = [
@@ -786,7 +788,7 @@ class StreamDisplayManager:
 
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
         if display_path:
-            line += f" [dim]{display_path}[/dim]"
+            line += f" [dim]{rich_escape(display_path)}[/dim]"
         if is_error:
             line += f" [dim]- error{elapsed_str}[/dim]"
             self._assistant_console.print(line)
@@ -1026,7 +1028,9 @@ class StreamDisplayManager:
             if len(line) > max_line_width:
                 line = line[:max_line_width - 3] + "..."
             p = prefix if i == 0 else cont_prefix
-            self._assistant_console.print(f"{p}{line}", style=style)
+            self._assistant_console.print(
+                f"{p}{line}", style=style, highlight=False, markup=False
+            )
 
         remaining = len(lines) - max_lines
         if remaining > 0:
@@ -1131,7 +1135,9 @@ class StreamDisplayManager:
             if len(line) > max_line_width:
                 line = line[:max_line_width - 3] + "..."
             p = first_prefix if i == 0 else cont_prefix
-            self._assistant_console.print(f"{p}{line}", style=style)
+            self._assistant_console.print(
+                f"{p}{line}", style=style, highlight=False, markup=False
+            )
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
     
@@ -1145,8 +1151,10 @@ class StreamDisplayManager:
         try:
             data = json.loads(result_content)
         except (ValueError, TypeError):
-            self._assistant_console.print(f"    ⎿ {result_content}", style="dim",
-                                          highlight=False)
+            self._assistant_console.print(
+                f"    ⎿ {result_content}", style="dim",
+                highlight=False, markup=False,
+            )
             return
 
         success = data.get("success", False)
@@ -1156,8 +1164,10 @@ class StreamDisplayManager:
 
         if not success:
             error_msg = data.get("error", "Unknown error")
-            self._assistant_console.print(f"    ⎿ ⚠ {error_msg}", style="dim",
-                                          highlight=False)
+            self._assistant_console.print(
+                f"    ⎿ ⚠ {error_msg}", style="dim",
+                highlight=False, markup=False,
+            )
             if self._subagent_live_shown > 0:
                 self._subagent_live_shown -= 1
             return
@@ -1190,7 +1200,9 @@ class StreamDisplayManager:
                 self._assistant_console.print(f"      ", end="")
             self._assistant_console.print(f"{name}", end="", style="dim bold")
             if info:
-                self._assistant_console.print(f" {info}", style="dim")
+                self._assistant_console.print(
+                    f" {info}", style="dim", highlight=False, markup=False
+                )
             else:
                 self._assistant_console.print(style="dim")
 

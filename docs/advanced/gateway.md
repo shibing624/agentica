@@ -32,6 +32,23 @@ pip install "agentica[dingtalk]"   # dingtalk-stream（钉钉 Stream）
 
 > 飞书（Lark）SDK `lark-oapi` 已经包含在基础 `[gateway]` 里。
 
+### Docker
+
+PyPI wheel **仍然**打进编译好的 Web UI；Docker 镜像只是在 build 时用 Node stage 做同一件事，这样 `docker compose up` 的机器上不需要 Node / pip。本机继续 `agentica-gateway` 即可。
+
+```bash
+cp .env.docker.example .env   # OPENAI_API_KEY 等
+docker compose up -d --build
+```
+
+默认把 `8881` 绑在 `127.0.0.1`。容器内进程听 `0.0.0.0`（否则 port publish 进不来），所以 compose 示例里 `GATEWAY_AUTH=false`——生成的初始网页密码不允许绑非 loopback。不要把端口发到 `0.0.0.0:8881`，除非已经 `agentica-gateway --set-password` 并打开 `GATEWAY_AUTH=true`。
+
+镜像：`ghcr.io/shibing624/agentica`（tag 推送时构建）。数据目录 `AGENTICA_HOME=/data`，当前目录挂到 `/workspace`。
+
+### TypeScript 客户端
+
+外部 Node 程序打这份 REST/SSE 时用 **`@agentica/sdk`**（`npm install @agentica/sdk`，registry 是 `https://registry.npmjs.org/`，源码 `sdk-ts/`）。必须写这个全名，不要写成 `agentica` / `agentica-sdk`。**不是**启动 Web 的依赖，也不替代 wheel 里的 UI。凭据是机器令牌 `Authorization: Bearer`（`runtime.json` / `AGENTICA_GATEWAY_TOKEN`），不是浏览器 cookie。
+
 启动：
 
 ```bash
