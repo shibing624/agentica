@@ -367,8 +367,15 @@ class Model(ABC):
             return
         self.tool_choice = tool_choice
 
+    # Two capture groups because the shapes disagree on which side of the
+    # keyword the number sits; whichever matched is the learned limit.
+    #   "maximum context length is 128000 tokens"      (OpenAI, after keyword)
+    #   "context_length_exceeded: limit 200000"        (key-style, after keyword)
+    #   "Input tokens exceed the configured limit of   (Taiji/gateway style:
+    #    192000 tokens"                                  number BEFORE keyword)
     _CONTEXT_LIMIT_PATTERN = re.compile(
-        r"(?:maximum context (?:length|window)|context_length|max_context_length)[^\d]*(\d[\d,]*)",
+        r"(?:maximum context (?:length|window)|context_length|max_context_length)[^\d]*(\d[\d,]*)"
+        r"|(?:input|context|token|prompt)[^\n]{0,60}?limit[^\d]{0,30}(\d[\d,]*)\s*tokens",
         re.IGNORECASE,
     )
 
@@ -421,8 +428,9 @@ class Model(ABC):
     def _learn_context_limit_from_error(self, error_message: str) -> None:
         """Extract context window size from API error messages and update self.context_window."""
         match = self._CONTEXT_LIMIT_PATTERN.search(error_message)
-        if match:
-            limit = int(match.group(1).replace(",", ""))
+        raw = next((g for g in match.groups() if g), None) if match else None
+        if raw is not None:
+            limit = int(raw.replace(",", ""))
             if limit > 1000 and limit != self.context_window:
                 old = self.context_window
                 self.context_window = limit

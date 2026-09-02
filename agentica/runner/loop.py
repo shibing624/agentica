@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from agentica.agent import Agent
 
 from agentica.runner.types import LoopBreak, ToolHandlingResult
+from agentica.compression.evict import is_irreducible_prompt_too_long
 
 
 def _sanitize_run_input(value: Any) -> Any:
@@ -933,6 +934,43 @@ class LoopMixin:
                                     )
                                     self._sanitize_tool_history_after_error(agent, messages_for_model)
                                     continue
+
+                                # Same consumption-site gap for prompt_too_long: a
+                                # context_length_exceeded 400 also surfaces here,
+                                # never through _call_with_retry's classifier, so
+                                # its reactive-compact recovery (the only safety
+                                # net when the catalog window exceeds the
+                                # deployment's real input limit) must be mirrored
+                                # too. Without this, streaming runs (the CLI
+                                # default) die on a context that a compact would
+                                # have rescued.
+                                is_too_long = any(h in err for h in loop_state.PROMPT_TOO_LONG_HINTS)
+                                if is_too_long:
+                                    _window = (
+                                        active_model.context_window
+                                        if isinstance(active_model.context_window, int)
+                                        else 0
+                                    )
+                                    if is_irreducible_prompt_too_long(
+                                        messages_for_model,
+                                        context_window=_window,
+                                        model_id=active_model.id,
+                                    ):
+                                        logger.warning(
+                                            f"[prompt_too_long] {active_model.id}: trailing user turn "
+                                            f"already fills the context window; surfacing provider error"
+                                        )
+                                        raise
+                                    if not loop_state.reactive_compact_done:
+                                        loop_state.reactive_compact_done = True
+                                        if await self._try_reactive_compact(
+                                            messages_for_model, agent, active_model
+                                        ):
+                                            loop_state.context_collapsed = True
+                                            continue
+                                    # Compact already tried (or refused) and the retry
+                                    # still does not fit — surface the provider error.
+                                    raise
                                 raise
 
                             # Streaming appends the turn's assistant message during
