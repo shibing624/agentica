@@ -62,4 +62,11 @@ npm test
 
 ## Publish
 
-This repo publishes **one** npm package: `@agentica-ai/sdk` under the [Agentica AI](https://www.npmjs.com/~agentica-ai) organization.
+Manual, same as the PyPI wheel. One package: `@agentica-ai/sdk` (org `agentica-ai`). Bump `version` in `package.json` first; do not republish an existing version.
+
+```bash
+cd sdk-ts
+npm ci
+npm test
+npm publish --access public --registry https://registry.npmjs.org/
+```
