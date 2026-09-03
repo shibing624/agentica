@@ -30,9 +30,15 @@ def test_writes_execute_todos_search():
         "agentica/cli/commands/session.py"
     )
     assert format_tool_display("write_file", {"file_path": "/x/y/z.py"}) == "/x/y/z.py"
-    assert "2 files" in format_tool_display("apply_patch", {
+    assert format_tool_display("apply_patch", {
+        "patch": "*** Update File: agentica/cli/commands/session.py\n@@\n-a\n+b\n",
+    }) == "agentica/cli/commands/session.py"
+    assert format_tool_display("apply_patch", {
+        "patch": f"*** Update File: {cwd_abs}\n@@\n-a\n+b\n",
+    }) == "agentica/cli/commands/session.py"
+    assert format_tool_display("apply_patch", {
         "patch": "*** Add File: a.py\n*** Update File: b.py\n",
-    })
+    }) == "a.py, b.py"
     assert "pytest" in format_tool_display("execute", {"command": "pytest tests/a.py"})
     todos = format_tool_display("write_todos", {"todos": [
         {"content": "done", "status": "completed"},

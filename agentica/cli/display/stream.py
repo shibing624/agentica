@@ -36,7 +36,12 @@ from .console import (
     remember_truncated,
 )
 from .messages import _has_markdown
-from .tool_format import _display_tool_impl, format_execute_expand, format_tool_display
+from .tool_format import (
+    _display_tool_impl,
+    format_execute_expand,
+    format_tool_display,
+    patch_file_paths,
+)
 
 # Opening/closing fence line: 0-3 spaces, then 3+ backticks or tildes.
 _FENCE_LINE = re.compile(r"^( {0,3})(`{3,}|~{3,})(.*)$")
@@ -682,10 +687,21 @@ class StreamDisplayManager:
                                tool_display_meta: Optional[dict] = None) -> None:
         """Render apply_patch as one summary plus its real multi-file diff."""
         icon = TOOL_ICONS.get("apply_patch", TOOL_ICONS["default"])
-        line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
         content = self._shorten_workdir_text(str(result_content).strip())
         key = tool_call_id or tool_args.get("patch", "")
         old_files = self._patch_old.pop(key, [])
+        changes = (tool_display_meta or {}).get("files") or []
+        raw_paths = [str(change.get("path") or "") for change in changes if change.get("path")]
+        if not raw_paths:
+            raw_paths = [raw_path for raw_path, _, _ in old_files]
+        if not raw_paths:
+            raw_paths = patch_file_paths(str(tool_args.get("patch", "") or ""))
+        path_part = ", ".join(
+            p for p in (self._display_path(raw) for raw in raw_paths) if p
+        )
+        line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
+        if path_part:
+            line += f" [dim]{rich_escape(path_part)}[/dim]"
         if is_error:
             self._assistant_console.print(line + f" [dim]- error{elapsed_str}[/dim]")
             # Preflight reports name the failing file/hunk at the head — show
@@ -701,7 +717,6 @@ class StreamDisplayManager:
         self._assistant_console.print(
             line + f" [dim]- {rich_escape(summary)}{elapsed_str}[/dim]"
         )
-        changes = (tool_display_meta or {}).get("files") or []
         if changes:
             files = [
                 (change.get("path", ""), change.get("action", "update"),

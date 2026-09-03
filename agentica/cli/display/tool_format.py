@@ -38,6 +38,17 @@ def _shorten_path(file_path: str) -> str:
         return str(p)
 
 
+_PATCH_FILE_RE = re.compile(
+    r"^\*\*\*\s*(?:Add|Update|Delete)\s+File:\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def patch_file_paths(patch: str) -> List[str]:
+    """File paths named in an apply_patch envelope, in order."""
+    return [m.group(1).strip() for m in _PATCH_FILE_RE.finditer(patch or "") if m.group(1).strip()]
+
+
 def _shorten_paths_in_command(command: str) -> str:
     """Shorten absolute paths embedded in a shell command."""
     cwd = str(Path.cwd())
@@ -182,9 +193,8 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         return _shorten_path(file_path) if file_path else ""
 
     if tool_name == "apply_patch":
-        patch = str(tool_args.get("patch", ""))
-        count = len(re.findall(r"^\*\*\* (?:Add|Update|Delete) File: ", patch, re.MULTILINE))
-        return f"{count} {'file' if count == 1 else 'files'}" if count else ""
+        paths = [_shorten_path(p) for p in patch_file_paths(str(tool_args.get("patch", "") or ""))]
+        return ", ".join(paths)
     
     # Execute command - shorten absolute paths in command
     if tool_name == "execute":

@@ -187,6 +187,9 @@ class TestCLIToolRender(unittest.TestCase):
             ]},
         )
 
+        rendered = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("a.py, b.py", rendered)
+        self.assertIn("Edited 2 files (+1 -1)", rendered)
         diff_text = str(fake.print.call_args_list[-1].args[0].code)
         self.assertIn("diff -- a.py", diff_text)
         self.assertIn("diff -- b.py", diff_text)
@@ -933,6 +936,7 @@ class TestCLIToolRender(unittest.TestCase):
 
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("apply_patch", text)
+        self.assertIn("pkg/app.py, tests/test_app.py", text)
         self.assertIn("Edited 2 files (+3 -1)", text)
         self.assertNotIn("ms)", text)
         syntax_args = [

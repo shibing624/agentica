@@ -45,8 +45,10 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
   }
   if (name === "apply_patch") {
     const patch = String(args.patch ?? "");
-    const count = (patch.match(/^\*\*\* (?:Add|Update|Delete) File: /gm) || []).length;
-    return count ? `${count} ${count === 1 ? "file" : "files"}` : "";
+    const paths = [...patch.matchAll(/^\*\*\*\s*(?:Add|Update|Delete)\s+File:\s*(.+?)\s*$/gim)]
+      .map((m) => shortenPath(m[1].trim(), cwd))
+      .filter(Boolean);
+    return paths.join(", ");
   }
   if (name === "execute") {
     return shortenPathsInCommand(String(args.command ?? ""), cwd);
