@@ -16,11 +16,6 @@ from agentica.cli.runtime import TOOL_ICONS, get_console
 
 from .console import remember_truncated
 
-def _extract_filename(file_path: str) -> str:
-    """Extract filename from a file path."""
-    return Path(file_path).name
-
-
 def _format_line_range(offset: int, limit: int) -> str:
     """Format line range as L{start}-{end}."""
     if offset < 0:
@@ -181,10 +176,10 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         line_range = _format_line_range(offset, limit)
         return f"{filename} ({line_range})"
     
-    # File writing tools - show filename only
+    # File writing tools — same relative path as read_file, not basename.
     if tool_name == "write_file":
-        file_path = tool_args.get("file_path", "")
-        return _extract_filename(file_path)
+        file_path = str(tool_args.get("file_path", "") or "")
+        return _shorten_path(file_path) if file_path else ""
 
     if tool_name == "apply_patch":
         patch = str(tool_args.get("patch", ""))

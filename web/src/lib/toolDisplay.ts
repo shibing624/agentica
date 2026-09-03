@@ -41,7 +41,7 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
     return `${shortenPath(filePath, cwd)} (${lineRange(offset, limit)})`;
   }
   if (name === "write_file") {
-    return basename(String(args.file_path ?? ""));
+    return shortenPath(String(args.file_path ?? ""), cwd);
   }
   if (name === "apply_patch") {
     const patch = String(args.patch ?? "");
@@ -139,12 +139,6 @@ function formatHandoff(args: Record<string, unknown>, bodyKey: string, metaKeys:
 
 function reprStr(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
-}
-
-function basename(filePath: string): string {
-  const s = filePath.replace(/\\/g, "/");
-  const i = s.lastIndexOf("/");
-  return i >= 0 ? s.slice(i + 1) : s;
 }
 
 function lineRange(offset: number, limit: number): string {

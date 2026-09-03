@@ -22,7 +22,14 @@ def test_read_file_glob_grep():
 
 
 def test_writes_execute_todos_search():
-    assert format_tool_display("write_file", {"file_path": "/x/y/z.py"}) == "z.py"
+    assert format_tool_display("write_file", {"file_path": "agentica/cli/commands/session.py"}) == (
+        "agentica/cli/commands/session.py"
+    )
+    cwd_abs = os.path.join(os.getcwd(), "agentica", "cli", "commands", "session.py")
+    assert format_tool_display("write_file", {"file_path": cwd_abs}) == (
+        "agentica/cli/commands/session.py"
+    )
+    assert format_tool_display("write_file", {"file_path": "/x/y/z.py"}) == "/x/y/z.py"
     assert "2 files" in format_tool_display("apply_patch", {
         "patch": "*** Add File: a.py\n*** Update File: b.py\n",
     })
