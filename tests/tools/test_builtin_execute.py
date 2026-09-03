@@ -61,6 +61,24 @@ class TestBuiltinExecuteTool:
         assert "find . -type f" not in doc
         assert "xargs ls" not in doc
         assert "(find, ls, cat, awk)" not in doc
+        assert "Prefer one long" in doc
+        assert "<<'EOF'" in doc
+        assert "DO NOT use newlines" not in doc
+        assert "avoid cd when possible" not in doc
+        assert "swift" not in doc
+        assert "App.app" not in doc
+
+    def test_execute_runs_heredoc_and_chained_echo(self, execute_tool, tmp_dir):
+        """A multi-line command is the product: newlines stay, && / heredoc run."""
+        command = (
+            f"cd {tmp_dir} && {sys.executable} - <<'EOF'\n"
+            "print('from-heredoc')\n"
+            "EOF\n"
+            "echo after"
+        )
+        result = asyncio.run(execute_tool.execute(command))
+        assert "from-heredoc" in result
+        assert "after" in result
 
     def test_execute_returns_full_output_and_declares_persist_threshold(self, tmp_dir):
         """The tool no longer truncates or persists itself: Layer 0 in

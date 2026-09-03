@@ -250,6 +250,9 @@ class TestGetSystemMessage:
 
         assert msg is not None
         assert "# Using Your Tools" in msg.content
+        assert "Prefer one long call" in msg.content
+        assert "<<'EOF'" in msg.content
+        assert "swift" not in msg.content
 
     @pytest.mark.asyncio
     async def test_system_message_separates_tool_policy_and_session_guidance(self):

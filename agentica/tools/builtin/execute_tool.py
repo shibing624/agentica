@@ -187,17 +187,26 @@ class BuiltinExecuteTool(Tool):
 
         Any shell command goes here: programs (git, python, pytest, pip, npm,
         make, docker, curl) and pipelines that shape command output — filter,
-        sort, unique, count, head, tail. Pipelines are encouraged.
+        sort, unique, count, head, tail.
 
-        You own what comes back. Bound it with ``| head`` / ``| tail``;
-        oversized output is persisted to a session file and the context keeps
-        only a head/tail preview plus the path. Chain dependent commands with
-        ``&&``, not ``;``. Check state read-only before a write.
+        Prefer one long ``execute`` over many short ones when the steps share a
+        directory. Each extra call is another model round-trip. Pack a verify /
+        build / launch sequence with pipes, ``&&``, and a heredoc
+        (``python3 - <<'EOF'`` … ``EOF``). Newlines in the command string are
+        required for a heredoc and are passed through unchanged.
+
+        You own what comes back. Bound each noisy program with ``| head`` /
+        ``| tail``; oversized output is persisted to a session file and the
+        context keeps only a head/tail preview plus the path. Chain dependent
+        commands with ``&&``, not ``;``. Check state read-only before a write.
+        Surgical, context-sensitive edits still belong in ``apply_patch``; a
+        one-shot script is for the same substitution across several files, or
+        work that is already a program.
 
         Before executing:
         1. Verify target directory exists (use glob first if unsure)
         2. Always quote file paths with spaces: cd "/path with spaces/"
-        3. Use absolute paths; avoid cd when possible
+        3. For a multi-step in one tree, start with ``cd /abs/path &&``
 
         Usage notes:
         - The command string is passed unchanged to the system shell after
@@ -217,8 +226,6 @@ class BuiltinExecuteTool(Tool):
           `&&` in a single call is the right way to say that anyway. When
           unsure, leave it off; the cost is waiting, and the cost of getting it
           wrong is a corrupted working tree.
-        - Use '&&' to chain dependent commands; use ';' for independent commands
-        - DO NOT use newlines in commands (newlines ok inside quoted strings)
         - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
           Oversized output is persisted to a session file with a head/tail
           preview and path. When output redaction is enabled, detected secrets
@@ -233,12 +240,30 @@ class BuiltinExecuteTool(Tool):
           unless the user explicitly requests it
 
         Examples:
-            - execute(command="python3 /path/to/script.py")
-            - execute(command="pytest /path/to/tests/ -q --tb=short")
+            - One verify-then-next-step call (preferred over N short executes)::
+
+                  cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8
+
+            - Same substitution across several files, then a peek (newlines are the command)::
+
+                  cd /abs/project && python3 - <<'EOF'
+                  import pathlib
+                  edits = {
+                      'src/app/store.py': ('OldName', 'NewName'),
+                      'docs/USAGE.md': ('OldName is', 'NewName is'),
+                  }
+                  for path, (old, new) in edits.items():
+                      p = pathlib.Path(path)
+                      p.write_text(p.read_text().replace(old, new))
+                      print('updated', path)
+                  EOF
+                  echo '=== pyproject.toml ==='
+                  python3 -c "from pathlib import Path; print(chr(10).join(Path('pyproject.toml').read_text().splitlines()[:25]))"
+
+            - execute(command="API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8")
             - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
             - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
             - execute(command="git diff --stat | tail -5")
-            - execute(command="git status")
             - execute(command="npm install && npm test", timeout=300)
             - execute(command="pytest tests/unit -q", parallel_safe=True)
               alongside execute(command="pytest tests/e2e -q", parallel_safe=True)

@@ -222,7 +222,8 @@ self.functions["execute"].parallel_arg = "parallel_safe"
 模型在同一条消息里发多个 `execute(command=..., parallel_safe=True)` 才会真正并发；
 不带这个参数时整批串行、保持顺序，并且其中一条报错会取消后面的（sibling-abort）。
 只有当批次内每条命令读写的东西互不相交时才应该带上它——有依赖关系的命令应该用
-`&&` 写在同一条 `command` 里。
+`&&`、管道和 heredoc 写在同一条 `command` 里（一条长命令，少一次往返），不要拆成
+N 次短 `execute`。
 
 调度器读的是 `FunctionCall.is_concurrency_safe()`：未设置 `parallel_arg` 的工具沿用
 函数级的 `concurrency_safe`，设置了的则以本次调用传入的值为准（缺省仍回落到函数级）。
@@ -319,7 +320,7 @@ tools = get_builtin_tools(work_dir="./")
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。规范信封 `*** Begin Patch` … `*** End Patch`；围栏 / heredoc / 漏信封但有 `*** Update/Add/Delete File:` 也会收。hunk 行以空格（保留）/ `-`（删）/ `+`（增）开头；忘了空格但能在文件里唯一对上的 keep 行会补上。**上下文精确匹配**；对不上报出那一行。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `include` / `limit`；`limit` 是全局条数上限，读满即停 rg |
-| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`parallel_safe=True` 同轮并发，`background=True` 进后台。非零退出只报 exit code，不附启发式 Note |
+| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）。鼓励一条命令里用管道 / `&&` / heredoc 拼完验证或构建。`parallel_safe=True` 同轮并发，`background=True` 进后台。非零退出只报 exit code，不附启发式 Note |
 | `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |

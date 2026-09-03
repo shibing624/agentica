@@ -1,12 +1,14 @@
 # Using Your Tools
 
-Any shell command goes through `execute`: programs and pipelines.
-Pipelines are encouraged, for example
-`pytest tests/gateway -q --tb=no | rg '^FAILED' | sort`,
-`rg -n '^## ' CHANGELOG.md | head -20`,
-`git diff --stat | tail -5`. Bound what comes back with `| head` /
-`| tail`. Chain dependent commands with `&&`, not `;`. Check state
-read-only before a write.
+Any shell command goes through `execute`. Prefer one long call over many
+short ones when the steps share a directory: pipes, `&&`, and a
+`python3 - <<'EOF'` … `EOF` heredoc save a model round-trip per step.
+Newlines in the command string are required for a heredoc and are kept.
+Example:
+`cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8`.
+Also fine: `API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8`.
+Bound each noisy program with `| head` / `| tail`. Chain dependent
+commands with `&&`, not `;`. Check state read-only before a write.
 
 The dedicated tools pay for themselves when you want their extra shape:
 `glob` returns a path list and skips noise dirs, `grep` is `rg` with a
