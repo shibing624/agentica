@@ -388,14 +388,6 @@ class RetryMixin:
                         trigger = "content_filter"
                         break  # next model
 
-                    # Hard outage errors: do not retry the same model. Switch
-                    # directly to the next fallback model when configured.
-                    is_fallback_only = any(r in err for r in state.FALLBACK_ONLY_SUBSTRINGS)
-                    if is_fallback_only:
-                        logger.warning(f"[fallback] {current.id} hit non-retry outage: {exc}; trying next fallback")
-                        trigger = "fallback_only"
-                        break
-
                     # Retryable transient errors: backoff within current model.
                     # Merge SDK defaults with model-level + env-level user
                     # extensions, so deployment-specific proxy markers
@@ -403,6 +395,23 @@ class RetryMixin:
                     # without touching SDK source.
                     _retryable = current.get_retryable_substrings(state.RETRYABLE_SUBSTRINGS)
                     is_retryable = any(r in err for r in _retryable)
+
+                    # Hard outage errors: do not retry the same model. Switch
+                    # directly to the next fallback model when configured.
+                    # Checked AFTER the retryable match: transport drops such as
+                    # "peer closed connection ... (incomplete chunked read)"
+                    # contain "connection" (fallback-only) AND an explicit
+                    # retryable marker — the retryable classification must win,
+                    # otherwise those RETRYABLE substrings could never trigger
+                    # a same-model retry.
+                    is_fallback_only = not is_retryable and any(
+                        r in err for r in state.FALLBACK_ONLY_SUBSTRINGS
+                    )
+                    if is_fallback_only:
+                        logger.warning(f"[fallback] {current.id} hit non-retry outage: {exc}; trying next fallback")
+                        trigger = "fallback_only"
+                        break
+
                     if is_retryable and attempt < state.max_api_retry - 1:
                         wait = (2**attempt) + random.uniform(0.0, 1.0)
                         logger.warning(

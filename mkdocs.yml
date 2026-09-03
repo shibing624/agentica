@@ -65,6 +65,7 @@ nav:
   - API Reference:
       - Agent: api/agent.md
   - 评测: guides/benchmark.md
+  - Changelog 存档: changelog-archive.md
 
 markdown_extensions:
   - pymdownx.highlight:

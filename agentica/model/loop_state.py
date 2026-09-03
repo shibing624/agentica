@@ -32,6 +32,7 @@ class LoopState:
 
     # API call attempts per model in Runner-level retry/fallback handling.
     # 1 means no same-model retry; fallback can still switch models immediately.
+    # The streaming consume site uses the same budget for mid-stream drops.
     max_api_retry: int = 1
 
     # Death spiral detection

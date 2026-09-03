@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from typing import (
     Any,
@@ -858,6 +859,12 @@ class LoopMixin:
                         )
 
                         call_start = len(messages_for_model)
+                        # Content accumulated by earlier turns of this run. A
+                        # mid-stream transient retry must restore this baseline
+                        # so the re-issued turn does not duplicate the partial
+                        # text it already streamed into model_response.
+                        content_at_call_start = model_response.content
+                        reasoning_at_call_start = model_response.reasoning_content
                         # The question goes on disk before the request it caused.
                         # Idempotent per turn; the end-of-turn write backfills a
                         # turn that never reached an LLM call. Writing it later
@@ -866,133 +873,174 @@ class LoopMixin:
                         if messages is None:
                             self._persist_turn_user_message(agent, message, user_messages)
                         self._trace_session_prelude(agent, messages_for_model)
-                        self._trace_event(agent, "request_begin")
-                        _trace_status = "failed"
-                        # When each phase of this request actually ended. Only
-                        # the stream knows: by the time the assistant message is
-                        # on disk, thinking and the reply are one blob with one
-                        # timestamp. Filled as the last token of each kind
-                        # arrives, so the last write wins.
-                        phase_ends: dict[str, float] = {}
-                        try:
-                            model_call = await self._call_with_retry(
-                                active_model, messages_for_model, loop_state, agent, stream=True
-                            )
-                            model_response_stream = model_call.response
-                            active_model = model_call.used_model
-                            if model_call.used_fallback:
-                                agent.run_response.fallback_used = True
-                            if model_call.used_fallback or fallback_transaction_model is not None:
-                                fallback_transaction_model = active_model
-                            # Stamp truthful model id onto RunResponse: reflects the
-                            # model that actually answered, including any per-call
-                            # fallback. Optimistic for streaming (final answer may
-                            # still hit content_filter at end-of-stream, but this
-                            # call did at least connect to `last_used_model_id`).
-                            if loop_state.last_used_model_id is not None:
-                                agent.run_response.model = loop_state.last_used_model_id
+                        # Same-turn re-issue for mid-stream drops. tool_history /
+                        # prompt_too_long still restart the outer turn (they
+                        # mutate the transcript and need compression again).
+                        _ms_attempt = 0
+                        _restart_turn = False
+                        while True:
+                            self._trace_event(agent, "request_begin")
+                            _trace_status = "failed"
+                            # When each phase of this request actually ended. Only
+                            # the stream knows: by the time the assistant message is
+                            # on disk, thinking and the reply are one blob with one
+                            # timestamp. Filled as the last token of each kind
+                            # arrives, so the last write wins.
+                            phase_ends: dict[str, float] = {}
                             try:
-                                async for model_response_chunk in model_response_stream:
-                                    agent._check_cancelled()
-                                    if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
-                                        if model_response_chunk.reasoning_content is not None:
-                                            if model_response.reasoning_content is None:
-                                                model_response.reasoning_content = ""
-                                            model_response.reasoning_content += model_response_chunk.reasoning_content
-                                            phase_ends["thinking"] = time.time()
-                                            yield RunResponse(
-                                                event=RunEvent.run_response,
-                                                reasoning_content=model_response_chunk.reasoning_content,
-                                                run_id=agent.run_id,
-                                                agent_id=agent.agent_id,
-                                            )
-                                        if model_response_chunk.content is not None and model_response.content is not None:
-                                            model_response.content += model_response_chunk.content
-                                            phase_ends["text"] = time.time()
-                                            yield RunResponse(
-                                                event=RunEvent.run_response,
-                                                content=model_response_chunk.content,
-                                                run_id=agent.run_id,
-                                                agent_id=agent.agent_id,
-                                            )
-                            except Exception as exc:
-                                # _call_with_retry's tool-history sanitize-retry never
-                                # fires for streaming: it only wraps generator
-                                # *creation* (lazy, no HTTP call yet), not consumption
-                                # — the actual request/error happens here, on the
-                                # first chunk. Mirror that one-shot recovery at the
-                                # point the error actually surfaces.
-                                err = str(exc).lower()
-                                is_tool_history_error = any(h in err for h in loop_state.TOOL_HISTORY_HINTS)
-                                if is_tool_history_error and not loop_state.tool_history_sanitized_done:
-                                    loop_state.tool_history_sanitized_done = True
-                                    del messages_for_model[call_start:]
-                                    logger.warning(
-                                        f"[tool_history] {active_model.id} rejected tool-call "
-                                        f"history mid-stream (likely cross-model resume); "
-                                        f"stripping tool messages and retrying once: {exc}"
-                                    )
-                                    self._sanitize_tool_history_after_error(agent, messages_for_model)
-                                    continue
-
-                                # Same consumption-site gap for prompt_too_long: a
-                                # context_length_exceeded 400 also surfaces here,
-                                # never through _call_with_retry's classifier, so
-                                # its reactive-compact recovery (the only safety
-                                # net when the catalog window exceeds the
-                                # deployment's real input limit) must be mirrored
-                                # too. Without this, streaming runs (the CLI
-                                # default) die on a context that a compact would
-                                # have rescued.
-                                is_too_long = any(h in err for h in loop_state.PROMPT_TOO_LONG_HINTS)
-                                if is_too_long:
-                                    _window = (
-                                        active_model.context_window
-                                        if isinstance(active_model.context_window, int)
-                                        else 0
-                                    )
-                                    if is_irreducible_prompt_too_long(
-                                        messages_for_model,
-                                        context_window=_window,
-                                        model_id=active_model.id,
-                                    ):
+                                model_call = await self._call_with_retry(
+                                    active_model, messages_for_model, loop_state, agent, stream=True
+                                )
+                                model_response_stream = model_call.response
+                                active_model = model_call.used_model
+                                if model_call.used_fallback:
+                                    agent.run_response.fallback_used = True
+                                if model_call.used_fallback or fallback_transaction_model is not None:
+                                    fallback_transaction_model = active_model
+                                # Stamp truthful model id onto RunResponse: reflects the
+                                # model that actually answered, including any per-call
+                                # fallback. Optimistic for streaming (final answer may
+                                # still hit content_filter at end-of-stream, but this
+                                # call did at least connect to `last_used_model_id`).
+                                if loop_state.last_used_model_id is not None:
+                                    agent.run_response.model = loop_state.last_used_model_id
+                                try:
+                                    async for model_response_chunk in model_response_stream:
+                                        agent._check_cancelled()
+                                        if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
+                                            if model_response_chunk.reasoning_content is not None:
+                                                if model_response.reasoning_content is None:
+                                                    model_response.reasoning_content = ""
+                                                model_response.reasoning_content += model_response_chunk.reasoning_content
+                                                phase_ends["thinking"] = time.time()
+                                                yield RunResponse(
+                                                    event=RunEvent.run_response,
+                                                    reasoning_content=model_response_chunk.reasoning_content,
+                                                    run_id=agent.run_id,
+                                                    agent_id=agent.agent_id,
+                                                )
+                                            if model_response_chunk.content is not None and model_response.content is not None:
+                                                model_response.content += model_response_chunk.content
+                                                phase_ends["text"] = time.time()
+                                                yield RunResponse(
+                                                    event=RunEvent.run_response,
+                                                    content=model_response_chunk.content,
+                                                    run_id=agent.run_id,
+                                                    agent_id=agent.agent_id,
+                                                )
+                                except Exception as exc:
+                                    # _call_with_retry's tool-history sanitize-retry never
+                                    # fires for streaming: it only wraps generator
+                                    # *creation* (lazy, no HTTP call yet), not consumption
+                                    # — the actual request/error happens here, on the
+                                    # first chunk. Mirror that one-shot recovery at the
+                                    # point the error actually surfaces.
+                                    err = str(exc).lower()
+                                    is_tool_history_error = any(h in err for h in loop_state.TOOL_HISTORY_HINTS)
+                                    if is_tool_history_error and not loop_state.tool_history_sanitized_done:
+                                        loop_state.tool_history_sanitized_done = True
+                                        del messages_for_model[call_start:]
                                         logger.warning(
-                                            f"[prompt_too_long] {active_model.id}: trailing user turn "
-                                            f"already fills the context window; surfacing provider error"
+                                            f"[tool_history] {active_model.id} rejected tool-call "
+                                            f"history mid-stream (likely cross-model resume); "
+                                            f"stripping tool messages and retrying once: {exc}"
                                         )
-                                        raise
-                                    if not loop_state.reactive_compact_done:
-                                        loop_state.reactive_compact_done = True
-                                        if await self._try_reactive_compact(
-                                            messages_for_model, agent, active_model
+                                        self._sanitize_tool_history_after_error(agent, messages_for_model)
+                                        _restart_turn = True
+                                        break
+
+                                    # Same consumption-site gap for prompt_too_long: a
+                                    # context_length_exceeded 400 also surfaces here,
+                                    # never through _call_with_retry's classifier, so
+                                    # its reactive-compact recovery (the only safety
+                                    # net when the catalog window exceeds the
+                                    # deployment's real input limit) must be mirrored
+                                    # too. Without this, streaming runs (the CLI
+                                    # default) die on a context that a compact would
+                                    # have rescued.
+                                    is_too_long = any(h in err for h in loop_state.PROMPT_TOO_LONG_HINTS)
+                                    if is_too_long:
+                                        _window = (
+                                            active_model.context_window
+                                            if isinstance(active_model.context_window, int)
+                                            else 0
+                                        )
+                                        if is_irreducible_prompt_too_long(
+                                            messages_for_model,
+                                            context_window=_window,
+                                            model_id=active_model.id,
                                         ):
-                                            loop_state.context_collapsed = True
-                                            continue
-                                    # Compact already tried (or refused) and the retry
-                                    # still does not fit — surface the provider error.
+                                            logger.warning(
+                                                f"[prompt_too_long] {active_model.id}: trailing user turn "
+                                                f"already fills the context window; surfacing provider error"
+                                            )
+                                            raise
+                                        if not loop_state.reactive_compact_done:
+                                            loop_state.reactive_compact_done = True
+                                            if await self._try_reactive_compact(
+                                                messages_for_model, agent, active_model
+                                            ):
+                                                loop_state.context_collapsed = True
+                                                _restart_turn = True
+                                                break
+                                        # Compact already tried (or refused) and the retry
+                                        # still does not fit — surface the provider error.
+                                        raise
+
+                                    # Mid-stream drop after chunks were already
+                                    # yielded. Re-issue on this same turn using
+                                    # max_api_retry — do not continue the outer
+                                    # loop (that would increment turn_count).
+                                    # Already-yielded chunks stay on the wire
+                                    # (--print concatenates partial + retry).
+                                    _midstream_retryable = any(
+                                        r in err
+                                        for r in active_model.get_retryable_substrings(
+                                            loop_state.RETRYABLE_SUBSTRINGS
+                                        )
+                                    )
+                                    if (
+                                        _midstream_retryable
+                                        and _ms_attempt < loop_state.max_api_retry - 1
+                                    ):
+                                        _ms_attempt += 1
+                                        del messages_for_model[call_start:]
+                                        model_response.content = content_at_call_start
+                                        model_response.reasoning_content = reasoning_at_call_start
+                                        _wait = (2 ** (_ms_attempt - 1)) + random.uniform(0.0, 1.0)
+                                        logger.warning(
+                                            f"[midstream-retry] {active_model.id} stream dropped "
+                                            f"mid-turn (retry {_ms_attempt}/"
+                                            f"{loop_state.max_api_retry} in {_wait:.1f}s); "
+                                            f"re-issuing the call: {exc}"
+                                        )
+                                        await asyncio.sleep(_wait)
+                                        continue
                                     raise
-                                raise
 
-                            # Streaming appends the turn's assistant message during
-                            # consumption, so capture the transaction-start marker now
-                            # (once) — the first message produced at ``call_start``.
-                            if (
-                                fallback_transaction_model is not None
-                                and fallback_transaction_marker is None
-                                and call_start < len(messages_for_model)
-                            ):
-                                fallback_transaction_marker = messages_for_model[call_start]
+                                # Streaming appends the turn's assistant message during
+                                # consumption, so capture the transaction-start marker now
+                                # (once) — the first message produced at ``call_start``.
+                                if (
+                                    fallback_transaction_model is not None
+                                    and fallback_transaction_marker is None
+                                    and call_start < len(messages_for_model)
+                                ):
+                                    fallback_transaction_marker = messages_for_model[call_start]
 
-                            # --- Lifecycle: LLM end (stream) ---
-                            await self._dispatch_run_hook(
-                                "on_llm_end",
-                                lambda hook: hook.on_llm_end(agent=agent, response=model_response),
-                            )
-                            self._trace_request_segments(agent, messages_for_model, phase_ends)
-                            _trace_status = "completed"
-                            self._trace_token_usage(agent, messages_for_model)
-                        finally:
-                            self._trace_event(agent, "request_end", status=_trace_status)
+                                # --- Lifecycle: LLM end (stream) ---
+                                await self._dispatch_run_hook(
+                                    "on_llm_end",
+                                    lambda hook: hook.on_llm_end(agent=agent, response=model_response),
+                                )
+                                self._trace_request_segments(agent, messages_for_model, phase_ends)
+                                _trace_status = "completed"
+                                self._trace_token_usage(agent, messages_for_model)
+                            finally:
+                                self._trace_event(agent, "request_end", status=_trace_status)
+                            break
+                        if _restart_turn:
+                            continue
 
                         # --- Runner-owned tool execution (streaming) ---
                         # Model.response_stream() only parsed tool_calls (run_tools=False).

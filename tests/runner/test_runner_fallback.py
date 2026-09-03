@@ -197,6 +197,48 @@ class TestFallbackContentFilterException(unittest.TestCase):
 class TestFallbackRetryableExhausted(unittest.TestCase):
     """Retryable errors retry up to max_api_retry; hard outages fallback immediately."""
 
+    def test_transport_drop_matching_both_lists_retries_same_model(self):
+        """A mid-transfer drop ("peer closed connection ... incomplete chunked
+        read") matches BOTH FALLBACK_ONLY ("connection") and RETRYABLE
+        ("incomplete chunked read"). The explicit retryable marker must win:
+        same-model backoff retry, not an immediate switch to the fallback.
+        Pre-fix, the fallback-only check ran first, so those RETRYABLE
+        substrings could never trigger a same-model retry.
+        """
+        call_count = {"n": 0}
+
+        async def _flaky_drop(messages):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError(
+                    "peer closed connection without sending complete message body "
+                    "(incomplete chunked read)"
+                )
+            return ModelResponse(content="recovered", finish_reason="stop")
+
+        primary = MagicMock()
+        primary.id = "primary"
+        primary.response = _flaky_drop
+        primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+        primary.extra_retryable_substrings = None
+
+        fallback = _fake_model(
+            "fb",
+            response_factory=lambda: ModelResponse(content="fallback used", finish_reason="stop"),
+        )
+        agent = _make_agent()
+        agent._run_fallback_models = [fallback]
+
+        state = LoopState(max_api_retry=2)
+        with unittest.mock.patch("agentica.runner.retry_fallback.asyncio.sleep", new_callable=AsyncMock):
+            result = asyncio.run(
+                Runner._call_with_retry(primary, [], state, agent, stream=False)
+            )
+
+        self.assertEqual(call_count["n"], 2)
+        self.assertEqual(result.content, "recovered")
+        self.assertEqual(state.last_used_model_id, "primary")
+
     def test_retries_then_falls_back_after_exhausting_local_retries(self):
         call_count = {"n": 0}
 

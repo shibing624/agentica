@@ -1039,5 +1039,108 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
             self._assert_single_tool_turn(agent)
 
 
+class TestMidStreamTransientRetry(unittest.TestCase):
+    """A mid-stream transport drop must not kill the run.
+
+    Reproduces the delegated-task failure: "peer closed connection without
+    sending complete message body (incomplete chunked read)" arrives AFTER
+    chunks were already yielded, so stream_with_retry propagates it and
+    _call_with_retry never sees it (streams are returned unconsumed). The
+    runner's consumption site must discard the partial turn and re-issue the
+    call instead of letting the error kill a long-running headless task.
+    """
+
+    @staticmethod
+    def _chunk(content=None, tool_calls=None, finish_reason=None):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason=finish_reason,
+                delta=SimpleNamespace(content=content, reasoning_content=None,
+                                      audio=None, tool_calls=tool_calls),
+            )],
+            usage=None,
+        )
+
+    DROP_MESSAGE = (
+        "peer closed connection without sending complete message body "
+        "(incomplete chunked read)"
+    )
+
+    def test_midstream_drop_is_retried_and_content_not_duplicated(self):
+        import tempfile
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        attempts = {"n": 0}
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+
+        async def fake_invoke_stream(messages):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                # Partial output is already downstream when the proxy drops.
+                yield self._chunk(content="partial answer that will be")
+                raise RuntimeError(self.DROP_MESSAGE)
+            yield self._chunk(content="recovered full answer", finish_reason="stop")
+
+        model.invoke_stream = fake_invoke_stream
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, max_api_retry=2,
+                session_id="s-midstream-retry", session_base_dir=tmp,
+            )
+            # If the retry continued the outer while True, turn_count would
+            # become 2 and this cap would abort before the re-issue.
+            agent._max_turns = 2
+
+            async def _drive():
+                async for _ in agent.run_stream("hello"):
+                    pass
+
+            # Skip the retry backoff sleep (2s+ real time otherwise).
+            with patch("agentica.runner.loop.asyncio.sleep", new_callable=AsyncMock):
+                asyncio.run(_drive())
+
+            self.assertEqual(attempts["n"], 2, "stream should be re-issued once")
+            self.assertEqual(agent.run_response.content, "recovered full answer")
+            # The failed attempt's assistant turn must not survive anywhere.
+            final_messages = agent.run_response.messages or []
+            assistant_contents = [
+                m.content for m in final_messages if m.role == "assistant"
+            ]
+            self.assertEqual(assistant_contents, ["recovered full answer"])
+
+    def test_midstream_drop_raises_after_retry_limit(self):
+        import tempfile
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        attempts = {"n": 0}
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+
+        async def always_drop(messages):
+            attempts["n"] += 1
+            yield self._chunk(content="partial")
+            raise RuntimeError(self.DROP_MESSAGE)
+
+        model.invoke_stream = always_drop
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, max_api_retry=2,
+                session_id="s-midstream-exhausted", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("hello"):
+                    pass
+
+            with patch("agentica.runner.loop.asyncio.sleep", new_callable=AsyncMock):
+                with self.assertRaises(RuntimeError) as ctx:
+                    asyncio.run(_drive())
+
+            self.assertIn("incomplete chunked read", str(ctx.exception))
+            self.assertEqual(attempts["n"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
