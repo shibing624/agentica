@@ -47,7 +47,11 @@ def skill_catalog_budget(
     context_window: Optional[int] = None,
 ) -> Tuple[str, int]:
     """Return ``("tokens"|"chars", limit)`` for the whole catalog block."""
-    if context_window is not None and context_window > 0:
+    # isinstance guard, same convention as runner/compress.py: the value
+    # reaches here straight off a Model instance, and a test double (bare
+    # MagicMock) or an uncoerced config string must degrade to the char
+    # budget rather than raise inside agent construction.
+    if isinstance(context_window, int) and not isinstance(context_window, bool) and context_window > 0:
         return (
             "tokens",
             max(1, (context_window * SKILL_CATALOG_WINDOW_PERCENT) // 100),

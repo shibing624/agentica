@@ -40,6 +40,18 @@ class TestSkillCatalogBudget(unittest.TestCase):
         self.assertEqual(unit, "chars")
         self.assertEqual(limit, 8000)
 
+    def test_non_int_window_falls_back_to_chars(self):
+        """A model mock (or a config value that slipped through uncoerced)
+        must degrade to the char budget, not crash agent construction."""
+        from unittest.mock import MagicMock
+
+        unit, limit = skill_catalog_budget(MagicMock())
+        self.assertEqual(unit, "chars")
+        self.assertEqual(limit, 8000)
+        # Quoted YAML value that never hit a pydantic int field:
+        unit, limit = skill_catalog_budget("192000")
+        self.assertEqual(unit, "chars")
+
     def test_description_cap_front_loads(self):
         long = "TRIGGER " + ("x" * 2000)
         capped = cap_skill_description(long)
