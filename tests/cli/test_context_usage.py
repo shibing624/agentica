@@ -84,6 +84,43 @@ class TestMeasureContext(unittest.TestCase):
         self.assertEqual(b.window, 1000)
         self.assertAlmostEqual(b.percent_full, b.total / 10, places=4)
 
+    def test_measure_reflects_what_eviction_will_actually_send(self):
+        """The idle bar must show the next request's real size, not the
+        pre-compression history.
+
+        Layer 1 evicts old tool results before every request once the request
+        crosses the pressure threshold. A bar that ignores that showed 144%
+        (284K/192K) on a session whose next request actually shipped ~75% —
+        the user cannot tell "about to die" from "healthy, will be evicted".
+        """
+        from agentica.model.message import Message
+
+        agent = _agent(add_history_to_context=True)
+        agent.model.context_window = 8_000  # pressure threshold = 6_400
+        msgs = [Message(role="user", content="question " * 50)]
+        # Old tool rounds: exactly what Layer 1 replaces with placeholders.
+        for i in range(20):
+            msgs.append(Message(
+                role="assistant", content="", tool_calls=[{
+                    "id": f"call_{i}", "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }],
+            ))
+            msgs.append(Message(
+                role="tool", tool_call_id=f"call_{i}",
+                content="file body " * 400,
+            ))
+        agent.working_memory.add_run(AgentRun(response=RunResponse(messages=msgs)))
+
+        from agentica.utils.tokens import count_tokens
+        raw = count_tokens(msgs, None, "gpt-4o-mini")
+        # The raw history alone is far over the pressure line...
+        self.assertGreater(raw, 6_400)
+        b = _measure(agent)
+        # ...and the eviction the runner would run is already reflected: the
+        # plain-history section shrinks below its raw size.
+        self.assertLess(_row(b, "Conversation") + _row(b, "Summarized conversation"), raw)
+
 
 class TestMcpToolSplit(unittest.TestCase):
     """MCP schemas are billed to the context like any other tool."""

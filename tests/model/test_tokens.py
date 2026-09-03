@@ -90,6 +90,25 @@ def test_count_message_tokens_remote_image_url_content_does_not_fetch_network(mo
     assert tokens > 0
 
 
+def test_count_message_tokens_ignores_reasoning_content():
+    """reasoning_content is response-only: providers ignore it on input.
+
+    Taiji/hy4 (and DeepSeek-style APIs generally) accept the field on input
+    messages but do not count it (verified against the live endpoint: a
+    215KB reasoning_content changed prompt_tokens by 0). Estimating the
+    request with it included inflates context occupancy and fires Layer-1
+    eviction early — observed as a status bar reading 144% while the
+    provider saw ~80%.
+    """
+    reasoning = "let me think about this step by step. " * 2000
+    with_reasoning = Message(role="assistant", content="answer", reasoning_content=reasoning)
+    without = Message(role="assistant", content="answer")
+
+    assert count_message_tokens(with_reasoning, "hy4-preview") == count_message_tokens(
+        without, "hy4-preview"
+    )
+
+
 def test_count_tool_tokens_accepts_function_objects_and_dicts():
     function = Function(
         name="read_file",

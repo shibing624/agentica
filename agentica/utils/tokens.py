@@ -519,9 +519,11 @@ def count_message_tokens(message: Message, model_id: str = "gpt-4o") -> int:
     if message.tool_call_id:
         text_parts.append(message.tool_call_id)
 
-    # Collect reasoning content
-    if message.reasoning_content:
-        text_parts.append(message.reasoning_content)
+    # NOTE: reasoning_content is deliberately NOT counted. It is a
+    # response-only field; providers ignore it on input (measured against
+    # Taiji/hy4: 215KB of reasoning_content changed prompt_tokens by 0), so
+    # counting it inflates the estimate of what the request will cost the
+    # window and fires compression layers early.
 
     # Collect name field
     if message.name:

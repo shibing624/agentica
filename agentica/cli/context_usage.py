@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from agentica.model.message import Message
 from agentica.utils.tokens import count_tokens, count_tool_tokens
+from agentica.compression.evict import evict_context, evict_threshold_ratio
 
 # Marker written by CompressionManager.auto_compact() and the CLI /compact
 # fallback in front of the summary that replaced the compacted turns.
@@ -117,6 +118,30 @@ async def measure_context(agent) -> ContextBreakdown:
     summary_msgs = [m for m in history if _is_compact_summary(m)]
     plain_msgs = [m for m in history if not _is_compact_summary(m)]
 
+    # What the next request will ACTUALLY carry. Under pressure (>= 0.8 of the
+    # window) the runner evicts old tool results before every request, so the
+    # raw history overstates the request. Run the same eviction on a copy so
+    # the idle bar shows the shipped size, not the pre-compression one — a
+    # session can read 144% here while its next request fits at ~75%.
+    conv_tokens = count_tokens(plain_msgs, None, model_id)
+    window = agent.model.context_window or 0
+    if window > 0 and plain_msgs:
+        pre_total = sum(
+            [base_tokens, workspace_tokens, skills_tokens, tool_guide_tokens,
+             count_tool_tokens(local_tools, model_id) if local_tools else 0,
+             count_tool_tokens(mcp_tools, model_id) if mcp_tools else 0,
+             count_tokens(summary_msgs, None, model_id), conv_tokens]
+        )
+        if pre_total >= window * evict_threshold_ratio():
+            shadow = [m.model_copy(deep=True) for m in plain_msgs]
+            evict_context(
+                shadow,
+                context_tokens=pre_total,
+                context_window=window,
+                model_id=model_id,
+            )
+            conv_tokens = count_tokens(shadow, None, model_id)
+
     breakdown.sections = [
         ("System prompt", base_tokens),
         ("Rules & workspace", workspace_tokens),
@@ -125,7 +150,7 @@ async def measure_context(agent) -> ContextBreakdown:
         ("Tool definitions", count_tool_tokens(local_tools, model_id) if local_tools else 0),
         ("MCP tools", count_tool_tokens(mcp_tools, model_id) if mcp_tools else 0),
         ("Summarized conversation", count_tokens(summary_msgs, None, model_id)),
-        ("Conversation", count_tokens(plain_msgs, None, model_id)),
+        ("Conversation", conv_tokens),
     ]
     return breakdown
 

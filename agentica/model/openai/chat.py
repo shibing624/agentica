@@ -590,7 +590,15 @@ class OpenAIChat(Model):
         if message.audio is not None:
             message = self.add_audio_to_message(message=message, audio=message.audio)
 
-        return message.to_model_dict()
+        wire = message.to_model_dict()
+        # reasoning_content is response-only: providers accept it on input but
+        # ignore it (Taiji/hy4 measured: prompt_tokens unchanged with 215KB of
+        # it; DeepSeek documents the same). History messages carrying it would
+        # ship megabytes of dead weight every request, so strip it at the wire
+        # boundary. Persistence/replay keep it via to_replay_dict().
+        if "reasoning_content" in wire:
+            del wire["reasoning_content"]
+        return wire
 
     # ── Prompt caching (Anthropic-via-OpenAI proxies) ──
 
