@@ -160,6 +160,21 @@ class TestBuiltinFileToolApplyPatch:
         assert "Successfully applied patch" in result
         assert Path(tmp_dir, "app.py").read_text() == "VALUE = 2\nKEEP = True\n"
 
+    def test_applies_update_when_wrapped_in_markdown_fence(self, file_tool, tmp_dir):
+        Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")
+        result = asyncio.run(file_tool.apply_patch(
+            "```patch\n"
+            "here is the edit\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+            " KEEP = True\n"
+            "```\n"
+        ))
+        assert "Successfully applied patch" in result
+        assert Path(tmp_dir, "app.py").read_text() == "VALUE = 2\nKEEP = True\n"
+
     def test_noop_keep_only_hunk_says_to_use_minus_not_malformed(self, file_tool, tmp_dir):
         Path(tmp_dir, "app.py").write_text("VALUE = 1\n# keep me\n")
         patch_text = """*** Begin Patch
@@ -295,30 +310,27 @@ class TestBuiltinFileToolApplyPatch:
         message = str(exc.value)
         assert "Patch context not found for 1 file" in message
         assert "Hunk 1: context not found" in message
+        assert "beta" in message
         assert "Expected context:" not in message
         assert "Actual from line" not in message
         assert "First difference" not in message
+        assert "beta-current" not in message
         assert target.read_text() == "alpha\nbeta-current\ngamma\n"
 
-    def test_malformed_unprefixed_line_is_not_a_context_mismatch(self, file_tool, tmp_dir):
+    def test_unprefixed_file_line_is_recovered_as_keep(self, file_tool, tmp_dir):
         target = Path(tmp_dir, "bipartite.py")
         target.write_text("def max_matching(n_left, n_right, adj):\n    return 0\n")
-        patch_text = """*** Begin Patch
-*** Update File: bipartite.py
-@@
-def max_matching(n_left, n_right, adj):
--    return 0
-+    return 1
-*** End Patch"""
-
-        with pytest.raises(ValueError) as exc:
-            asyncio.run(file_tool.apply_patch(patch_text))
-
-        message = str(exc.value)
-        assert "Malformed patch for 1 file" in message
-        assert "def max_matching" in message
-        assert "Expected context:" not in message
-        assert target.read_text() == "def max_matching(n_left, n_right, adj):\n    return 0\n"
+        result = asyncio.run(file_tool.apply_patch(
+            "*** Begin Patch\n"
+            "*** Update File: bipartite.py\n"
+            "@@\n"
+            "def max_matching(n_left, n_right, adj):\n"
+            "-    return 0\n"
+            "+    return 1\n"
+            "*** End Patch"
+        ))
+        assert "Successfully applied patch" in result
+        assert target.read_text() == "def max_matching(n_left, n_right, adj):\n    return 1\n"
 
     def test_absolute_patch_path_is_reported_relative_to_work_dir(self, file_tool, tmp_dir):
         target = Path(tmp_dir, "pkg", "app.py")

@@ -753,7 +753,11 @@ class BuiltinFileTool(Tool):
         Context must match the file exactly — no whitespace or quote
         rewriting. Read the current file with read_file before building
         an Update/Delete hunk; do not reconstruct context from memory.
-        All paths are validated before any file is changed.
+        All paths are validated before any file is changed. A markdown
+        fence, heredoc, or omitted Begin/End around a File header is
+        accepted. A keep line that forgot its leading space is recovered
+        when it uniquely matches the current file; other hunk lines still
+        need ' ', '-', or '+'.
 
         Args:
             patch: Begin/End Patch envelope. After @@: space keeps, '-' deletes, '+' inserts.

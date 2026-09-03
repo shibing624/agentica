@@ -9,12 +9,13 @@ BuiltinFileTool.apply_patch adds path resolution, sandbox checks, locking,
 atomic writes, and diagnostics on top. agent.approvals and the CLI display
 reuse the parser to list which files a patch touches.
 
-Context matching is exact: a hunk must match the file byte-for-byte aside
-from the required `` `` / ``-`` / ``+`` prefixes. Whitespace and quotes are
-not rewritten.
+The envelope is extracted the way Codex (lenient) and OpenCode do: find
+Begin/End anywhere, unwrap a markdown fence or heredoc, and wrap a bare
+``*** Update/Add/Delete File:`` body. Hunk context matching stays exact.
 """
+import json
 import re
-from typing import List, Literal
+from typing import List, Literal, Optional
 from dataclasses import dataclass
 
 
@@ -66,10 +67,14 @@ class ContextFailure:
 
     hunk_number: int
     eof: bool = False
+    unmatched: str = ""
 
     def render(self) -> str:
         location = "EOF context" if self.eof else "context"
-        return f"Hunk {self.hunk_number}: {location} not found."
+        if not self.unmatched:
+            return f"Hunk {self.hunk_number}: {location} not found."
+        tip = self.unmatched if len(self.unmatched) <= 120 else self.unmatched[:119] + "…"
+        return f"Hunk {self.hunk_number}: {location} not found: {tip!r}."
 
 
 class PatchContextError(ValueError):
@@ -97,6 +102,7 @@ class FilePatch:
 
 
 # V4A diff markers
+BEGIN_PATCH = "*** Begin Patch"
 END_PATCH = "*** End Patch"
 END_FILE = "*** End of File"
 SECTION_TERMINATORS = [
@@ -108,35 +114,135 @@ SECTION_TERMINATORS = [
 END_SECTION_MARKERS = [*SECTION_TERMINATORS, END_FILE]
 
 
-_FILE_MARKER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
+_FILE_MARKER_RE = re.compile(
+    r"^\*\*\*\s*(Add|Update|Delete)\s+File:\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+_BEGIN_RE = re.compile(r"^\*\*\*\s*Begin Patch\s*$", re.IGNORECASE)
+_END_RE = re.compile(r"^\*\*\*\s*End Patch\s*$", re.IGNORECASE)
+_FENCE_OPEN_RE = re.compile(r"^```(?:patch|diff|apply_patch)?\s*$", re.IGNORECASE)
+_FENCE_CLOSE_RE = re.compile(r"^```\s*$")
+_HEREDOC_OPEN_RE = re.compile(r"^<<(['\"]?)(\w+)\1\s*$")
+
+
+def _unwrap_json_patch(text: str) -> str:
+    """Peel ``{"patch": "..."}`` / ``{"command":["apply_patch","..."]}`` wrappers."""
+    stripped = text.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return text
+    try:
+        data = json.loads(stripped)
+    except ValueError:
+        return text
+    if not isinstance(data, dict):
+        return text
+    inner = data.get("patch")
+    if isinstance(inner, str) and inner.strip():
+        return inner
+    command = data.get("command")
+    if (
+        isinstance(command, list)
+        and len(command) >= 2
+        and "apply_patch" in str(command[0])
+        and isinstance(command[1], str)
+    ):
+        return command[1]
+    return text
+
+
+def _strip_markdown_fence(text: str) -> str:
+    lines = text.strip("\n").split("\n")
+    start = 0
+    end = len(lines) - 1
+    while start <= end and not lines[start].strip():
+        start += 1
+    while end >= start and not lines[end].strip():
+        end -= 1
+    if start >= end:
+        return text
+    if _FENCE_OPEN_RE.fullmatch(lines[start].strip()) and _FENCE_CLOSE_RE.fullmatch(
+        lines[end].strip()
+    ):
+        return "\n".join(lines[start + 1:end])
+    return text
+
+
+def _strip_heredoc(text: str) -> str:
+    """Codex lenient mode: ``<<EOF`` / ``<<'EOF'`` … ``EOF`` around the patch."""
+    lines = text.strip("\n").split("\n")
+    if len(lines) < 4:
+        return text
+    opener = _HEREDOC_OPEN_RE.fullmatch(lines[0].strip())
+    if opener is None:
+        return text
+    token = opener.group(2)
+    if lines[-1].strip() != token:
+        return text
+    return "\n".join(lines[1:-1])
+
+
+def _file_marker(line: str) -> Optional[re.Match]:
+    return _FILE_MARKER_RE.fullmatch(line.rstrip())
+
+
+def _extract_envelope_lines(text: str) -> List[str]:
+    """Return canonical ``Begin … End`` lines, or raise a model-facing error."""
+    raw = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    raw = _unwrap_json_patch(raw)
+    raw = _strip_markdown_fence(raw)
+    raw = _strip_heredoc(raw)
+    lines = raw.strip("\n").split("\n") if raw.strip() else []
+
+    begin_idx = next((i for i, line in enumerate(lines) if _BEGIN_RE.fullmatch(line.strip())), None)
+    end_idx = None
+    if begin_idx is not None:
+        for i in range(len(lines) - 1, begin_idx, -1):
+            if _END_RE.fullmatch(lines[i].strip()):
+                end_idx = i
+                break
+        inner = lines[begin_idx + 1:end_idx] if end_idx is not None else lines[begin_idx + 1:]
+    else:
+        file_idx = next((i for i, line in enumerate(lines) if _file_marker(line)), None)
+        if file_idx is None:
+            first = lines[0] if lines else ""
+            raise ValueError(
+                "Patch must contain '*** Begin Patch' / '*** End Patch', "
+                "or start with '*** Update/Add/Delete File:'. "
+                f"Got first line: {first!r}."
+            )
+        inner = lines[file_idx:]
+        if inner and _END_RE.fullmatch(inner[-1].strip()):
+            inner = inner[:-1]
+
+    while inner and _file_marker(inner[0]) is None:
+        inner = inner[1:]
+
+    if not inner or _file_marker(inner[0]) is None:
+        raise ValueError(
+            "Patch contains no '*** Update/Add/Delete File:' operation."
+        )
+    return [BEGIN_PATCH, *inner, END_PATCH]
 
 
 def parse_patch_envelope(patch: str) -> List[FilePatch]:
-    """Parse a strict multi-file ``*** Begin Patch`` envelope.
+    """Parse a multi-file ``*** Begin Patch`` envelope.
 
-    If the first line is already ``*** Update/Add/Delete File:``, the
-    Begin/End markers are inserted. Other omitted-envelope shapes are
-    rejected. Per-file update bodies are validated later against current
-    file content by ``apply_diff`` before any filesystem mutation occurs.
+    Envelope wrapping is lenient (fence / heredoc / preamble / omitted
+    Begin-End around a File header). Hunk bodies stay exact. Per-file
+    update bodies are validated later against current file content by
+    ``apply_diff`` before any filesystem mutation occurs.
     """
-    normalized = patch.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
-    lines = normalized.split("\n") if normalized else []
-    # Models often emit a valid body starting at "*** Update File:" and
-    # omit the envelope. That is the same grammar, not a second one.
-    if lines and _FILE_MARKER_RE.fullmatch(lines[0]):
-        if lines[-1] != END_PATCH:
-            lines.append(END_PATCH)
-        lines.insert(0, "*** Begin Patch")
-    if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != END_PATCH:
-        raise ValueError(
-            "Patch must start with '*** Begin Patch' and end with '*** End Patch'."
-        )
+    lines = _extract_envelope_lines(patch)
 
     operations: List[FilePatch] = []
     seen_paths = set()
     index = 1
     while index < len(lines) - 1:
-        marker = _FILE_MARKER_RE.fullmatch(lines[index])
+        while index < len(lines) - 1 and not lines[index].strip():
+            index += 1
+        if index >= len(lines) - 1:
+            break
+        marker = _file_marker(lines[index])
         if marker is None:
             raise ValueError(f"Invalid patch line {index + 1}: {lines[index]!r}")
 
@@ -150,8 +256,8 @@ def parse_patch_envelope(patch: str) -> List[FilePatch]:
 
         index += 1
         body_start = index
-        while index < len(lines) - 1 and _FILE_MARKER_RE.fullmatch(lines[index]) is None:
-            if lines[index] == "*** Begin Patch":
+        while index < len(lines) - 1 and _file_marker(lines[index]) is None:
+            if _BEGIN_RE.fullmatch(lines[index].strip()):
                 raise ValueError(f"Unexpected nested patch marker on line {index + 1}.")
             index += 1
         body = "\n".join(lines[body_start:index])
@@ -236,10 +342,60 @@ def _parse_create_diff(lines: List[str]) -> str:
     return "\n".join(output)
 
 
+def _context_unmatched_line(context: List[str], input_lines: List[str]) -> str:
+    """The hunk line that most likely failed: first context line absent from the file."""
+    if not context:
+        return ""
+    present = set(input_lines)
+    for line in context:
+        if line not in present:
+            return line
+    return context[0]
+
+
+def _recover_unprefixed_keep_lines(
+    diff_lines: List[str],
+    input_lines: List[str],
+) -> List[str]:
+    """Treat an unprefixed line as keep when it uniquely matches the file.
+
+    Exact file line → keep as written. Else one distinct line that matches
+    after rstrip → keep using the file's bytes. Ambiguous or not in the
+    file stays unprefixed so ``_read_section`` still raises Malformed.
+    """
+    exact = set(input_lines)
+    rstrip_originals: dict[str, List[str]] = {}
+    for line in input_lines:
+        key = line.rstrip()
+        seen = rstrip_originals.setdefault(key, [])
+        if line not in seen:
+            seen.append(line)
+
+    recovered: List[str] = []
+    for raw in diff_lines:
+        if (
+            not raw
+            or raw.startswith(("+", "-", " ", "@@"))
+            or raw.startswith("***")
+        ):
+            recovered.append(raw)
+            continue
+        if raw in exact:
+            recovered.append(" " + raw)
+            continue
+        originals = rstrip_originals.get(raw.rstrip(), [])
+        if len(originals) == 1:
+            recovered.append(" " + originals[0])
+            continue
+        recovered.append(raw)
+    return recovered
+
+
 def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
     """Parse an update diff with context hunks."""
-    parser = ParserState(lines=[*lines, END_PATCH])
     input_lines = input_text.split("\n")
+    lines = _recover_unprefixed_keep_lines(lines, input_lines)
+    parser = ParserState(lines=[*lines, END_PATCH])
     chunks: List[Chunk] = []
     failures: List[ContextFailure] = []
     cursor = 0
@@ -269,7 +425,11 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
         parser.index = section.end_index
         if find_result.new_index == -1:
             failures.append(
-                ContextFailure(hunk_number=hunk_number, eof=section.eof)
+                ContextFailure(
+                    hunk_number=hunk_number,
+                    eof=section.eof,
+                    unmatched=_context_unmatched_line(section.next_context, input_lines),
+                )
             )
             continue
 

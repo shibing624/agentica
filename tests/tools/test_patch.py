@@ -153,14 +153,25 @@ def world():
         message = str(exc.exception)
         self.assertIn("Hunk 1: context not found", message)
         self.assertIn("Hunk 2: context not found", message)
+        self.assertIn("STALE_FIRST = 1", message)
+        self.assertIn("STALE_SECOND = 2", message)
         self.assertNotIn("Expected context:", message)
         self.assertNotIn("Actual from line", message)
-        self.assertNotIn("STALE_FIRST = 1", message)
 
-    def test_unprefixed_source_line_is_malformed_not_context_mismatch(self):
+    def test_unprefixed_file_line_is_recovered_as_keep(self):
         original = "def max_matching(n_left, n_right, adj):\n    return 0\n"
         diff = """@@
 def max_matching(n_left, n_right, adj):
+-    return 0
++    return 1"""
+
+        result = apply_diff(original, diff, mode="default")
+        self.assertEqual(result, "def max_matching(n_left, n_right, adj):\n    return 1\n")
+
+    def test_unprefixed_line_not_in_file_stays_malformed(self):
+        original = "def foo():\n    return 0\n"
+        diff = """@@
+this line is not in the file
 -    return 0
 +    return 1"""
 
@@ -169,9 +180,18 @@ def max_matching(n_left, n_right, adj):
 
         message = str(exc.exception)
         self.assertIn("Malformed patch", message)
-        self.assertIn("def max_matching", message)
+        self.assertIn("this line is not in the file", message)
         self.assertNotIn("context not found", message)
-        self.assertNotIn("Expected context:", message)
+
+    def test_unprefixed_rstrip_unique_uses_file_bytes(self):
+        original = "value = 1   \nkeep = True"
+        diff = """@@
+value = 1
+-keep = True
++keep = False"""
+
+        result = apply_diff(original, diff, mode="default")
+        self.assertEqual(result, "value = 1   \nkeep = False")
 
 
 class TestParsePatchEnvelope(unittest.TestCase):
@@ -211,9 +231,11 @@ class TestParsePatchEnvelope(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Duplicate file operation"):
             parse_patch_envelope(patch)
 
-    def test_rejects_text_outside_envelope(self):
-        with self.assertRaisesRegex(ValueError, "must start"):
-            parse_patch_envelope("prefix\n*** Begin Patch\n*** Delete File: a.py\n*** End Patch")
+    def test_ignores_preamble_outside_envelope(self):
+        operations = parse_patch_envelope(
+            "prefix\n*** Begin Patch\n*** Delete File: a.py\n*** End Patch"
+        )
+        self.assertEqual([(op.action, op.path) for op in operations], [("delete", "a.py")])
 
     def test_wraps_update_file_body_missing_envelope(self):
         operations = parse_patch_envelope(
@@ -222,9 +244,35 @@ class TestParsePatchEnvelope(unittest.TestCase):
         self.assertEqual([(op.action, op.path) for op in operations], [("update", "app.py")])
         self.assertIn("-OLD = 1", operations[0].diff)
 
-    def test_rejects_markdown_fence(self):
-        with self.assertRaisesRegex(ValueError, "must start"):
-            parse_patch_envelope("```patch\n*** Update File: app.py\n@@\n-a\n+b\n```")
+    def test_accepts_markdown_fence(self):
+        operations = parse_patch_envelope(
+            "```patch\n*** Update File: app.py\n@@\n-a\n+b\n```"
+        )
+        self.assertEqual([(op.action, op.path) for op in operations], [("update", "app.py")])
+        self.assertIn("-a", operations[0].diff)
+
+    def test_accepts_heredoc_and_json_wrapper(self):
+        body = "*** Begin Patch\n*** Add File: hello.txt\n+hi\n*** End Patch"
+        heredoc = parse_patch_envelope(f"<<'EOF'\n{body}\nEOF\n")
+        self.assertEqual([(op.action, op.path) for op in heredoc], [("add", "hello.txt")])
+        wrapped = parse_patch_envelope('{"patch": "*** Update File: app.py\\n@@\\n-a\\n+b"}')
+        self.assertEqual([(op.action, op.path) for op in wrapped], [("update", "app.py")])
+        command = parse_patch_envelope(
+            '{"command": ["apply_patch", "*** Delete File: obsolete.py"]}'
+        )
+        self.assertEqual([(op.action, op.path) for op in command], [("delete", "obsolete.py")])
+
+    def test_accepts_begin_without_end_and_trailing_marker_space(self):
+        operations = parse_patch_envelope(
+            "*** Begin Patch  \n*** Update File: app.py\n@@\n-a\n+b"
+        )
+        self.assertEqual([(op.action, op.path) for op in operations], [("update", "app.py")])
+
+    def test_rejects_text_with_no_file_header(self):
+        with self.assertRaisesRegex(ValueError, "Update/Add/Delete File"):
+            parse_patch_envelope("just some text")
+        with self.assertRaisesRegex(ValueError, "Update/Add/Delete File"):
+            parse_patch_envelope("```\n@@\n-a\n+b\n```")
 
 if __name__ == '__main__':
     unittest.main()

@@ -316,7 +316,7 @@ tools = get_builtin_tools(work_dir="./")
 |------|------|------|
 | `read_file` | `BuiltinFileTool` | 读文件（offset/limit 分页，`tail` 取尾、负 `offset` 从末尾开窗；大文件守卫只拦从头分页，从尾扫描 20s 超时）。空文件返回 `File is empty: …` |
 | `write_file` | `BuiltinFileTool` | 创建/覆写文件。长报告可直接写成 HTML，方便用户在浏览器打开 |
-| `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。信封 `*** Begin Patch` … `*** End Patch`；hunk 行以空格（保留）/ `-`（删）/ `+`（增）开头。**上下文精确匹配**。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
+| `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。规范信封 `*** Begin Patch` … `*** End Patch`；围栏 / heredoc / 漏信封但有 `*** Update/Add/Delete File:` 也会收。hunk 行以空格（保留）/ `-`（删）/ `+`（增）开头；忘了空格但能在文件里唯一对上的 keep 行会补上。**上下文精确匹配**；对不上报出那一行。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `include` / `limit`；`limit` 是全局条数上限，读满即停 rg |
 | `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`parallel_safe=True` 同轮并发，`background=True` 进后台。非零退出只报 exit code，不附启发式 Note |
