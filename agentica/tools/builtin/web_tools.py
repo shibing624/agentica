@@ -88,6 +88,14 @@ def _zhipu_backend(api_key: Optional[str]) -> Any:
     return ZhipuWebSearchTool(api_key=api_key, search_engine=engine)
 
 
+def _youcom_backend(api_key: Optional[str]) -> Any:
+    """You.com's MCP endpoint answers anonymously from a shared free pool via
+    its ``?profile=free`` profile; ``YDC_API_KEY`` moves the call onto your own
+    quota with the full search surface."""
+    from agentica.tools.search_youcom_tool import SearchYoucomTool
+    return SearchYoucomTool(api_key=api_key)
+
+
 def _exa_backend(api_key: Optional[str]) -> Any:
     from agentica.tools.search_mcp_tool import McpSearchTool
     return McpSearchTool(api_key=api_key)
@@ -116,6 +124,9 @@ def _custom_mcp_backend(api_key: Optional[str]) -> Any:
 _BACKENDS: Dict[str, WebSearchBackend] = {
     "baidu": WebSearchBackend(_baidu_backend, "baidu_search"),
     "duckduckgo": WebSearchBackend(_duckduckgo_backend, "duckduckgo_search"),
+    # You.com's public MCP endpoint answers anonymously (rate-limited free
+    # profile); YDC_API_KEY moves the call onto your own quota.
+    "youcom": WebSearchBackend(_youcom_backend, "search_youcom", "YDC_API_KEY", key_required=False),
     # Exa's public MCP endpoint answers anonymously from a rate-limited shared
     # pool; EXA_API_KEY moves the call onto your own quota.
     "exa": WebSearchBackend(_exa_backend, "mcp_search", "EXA_API_KEY", key_required=False),
@@ -183,7 +194,7 @@ class BuiltinWebSearchTool(Tool):
 
         Args:
             provider: Engine name, e.g. "exa", "baidu", "bocha", "serper",
-                "serply", "duckduckgo", "zhipu", "mcp", or any name passed to
+                "serply", "duckduckgo", "youcom", "zhipu", "mcp", or any name passed to
                 ``register_web_search_backend``. Defaults to the
                 ``AGENTICA_WEB_SEARCH`` env var, then to
                 ``DEFAULT_WEB_SEARCH_PROVIDER`` (``exa``).

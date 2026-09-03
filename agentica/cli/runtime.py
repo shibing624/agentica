@@ -144,6 +144,7 @@ TOOL_REGISTRY = {
     "search_exa": ("search_exa", "SearchExaTool", "Search", "Web search via Exa"),
     "search_serper": ("search_serper", "SearchSerperTool", "Search", "Web search via Serper (Google)"),
     "search_serply": ("search_serply", "SearchSerplyTool", "Search", "Web search via Serply (Google web/news/scholar)"),
+    "search_youcom": ("search_youcom", "SearchYoucomTool", "Search", "Web search via You.com (MCP)"),
     "wikipedia": ("wikipedia", "WikipediaTool", "Search", "Search and read Wikipedia articles"),
     "zhipu_web_search": ("zhipu_web_search", "ZhipuWebSearchTool", "Search", "Web search via ZhipuAI"),
     # Web/Network Tools

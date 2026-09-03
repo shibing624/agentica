@@ -551,6 +551,7 @@ if TYPE_CHECKING:
     )
     from agentica.tools.search_serper_tool import SearchSerperTool  # noqa: F401
     from agentica.tools.search_serply_tool import SearchSerplyTool  # noqa: F401
+    from agentica.tools.search_youcom_tool import SearchYoucomTool  # noqa: F401
     from agentica.tools.dalle_tool import DalleTool  # noqa: F401
     from agentica.tools.code_tool import CodeTool  # noqa: F401
     from agentica.tools.mcp_tool import McpTool, CompositeMultiMcpTool  # noqa: F401
