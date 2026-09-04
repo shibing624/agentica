@@ -20,12 +20,15 @@ not by how big the job feels.
 | Runs in | your process | its own process, headless | its own terminal |
 | You get back | the subagent's answer | the worker's final answer | messages, when it sends them |
 | Can write files | no, read-only | yes | yes |
+| Parallel | **yes** — several in one message | yes, a few at once | start several sessions |
 | Human can watch or join | no | no | **yes, attach to the pane** |
 | Outlives you | no | no | yes, until killed |
-| Cost | one cheap model call | a whole session | a whole session |
+| Cost | cheap aux model each | a whole session each | a whole session each |
 
 - **`task`** for reading and reporting: explore, research, review. Cheapest,
-  and several can run at once in a single message.
+  and the default way to run workers in parallel — issue several `task` calls
+  in one message. Parallelism is not a reason to reach for `delegate` or a
+  second CLI.
 - **`delegate`** for a self-contained job you want the *answer* to. It is a full
   session with its own context window, tracked like a background process.
 - **A second CLI** when the work needs a place a human can look at and take

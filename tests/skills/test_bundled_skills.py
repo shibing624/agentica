@@ -252,6 +252,9 @@ class TestBundledSkillContent(unittest.TestCase):
         self.assertIn("tmux kill-session", body)
         self.assertIn("tmux attach", body)
         self.assertIn("never by session id", body)
+        # Parallelism is a property of `task`, not a reason to pick delegate.
+        self.assertIn("several `task` calls", body)
+        self.assertIn("not a reason to reach for `delegate`", body)
         self.assertIn("IS your user", body)
         self.assertIn("goes back to the sender with `send_message`", body)
         self.assertIn("goes in a file and the message carries its absolute path", body)

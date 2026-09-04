@@ -64,8 +64,8 @@ In the CLI: default to `task`; reach for `delegate` only when the work deserves 
 
 | Tool | Process | Relationship | Result | Best For |
 |------|---------|--------------|--------|----------|
-| `task` | Same process | Parent → child | Immediate tool result | Cheap, short, usually read-only work |
-| `delegate` | New OS process | Parent → child | Background report / `wait` | Independent context, other `work_dir`, long parallel jobs |
+| `task` | Same process | Parent → child | Immediate tool result | Cheap, short, usually read-only; several in one message |
+| `delegate` | New OS process | Parent → child | Background report / `wait` | Independent context, other `work_dir`, long jobs |
 | peer (`send_message`) | Two user terminals | Peers | Receiver decides | Handoffs between live sessions |
 
 `delegate` is **not** a wrapper around `task`. It starts `agentica --query ... --print` through the existing `BackgroundProcessRegistry` (`/ps`, `/stop`, `wait`). Delegated workers do not appear in `list_agents` — that listing is for interactive peers only. Details: [CLI Terminal](../getting-started/terminal.md).
@@ -77,4 +77,4 @@ In the CLI: default to `task`; reach for `delegate` only when the work deserves 
 - If a child must not inherit all parent tools, use `Subagent` with explicit `allowed_tools` or `denied_tools`.
 - If you cannot describe why workers must coordinate autonomously, do not use `Swarm`.
 - Scheduled daily tasks should call a bounded agent preset through the cron scheduler, not a free-form `Swarm`.
-- In the CLI: do not `delegate` what a few tool calls or one `task` can finish; do not use peer messaging as a substitute for `delegate` when you need a report back.
+- In the CLI: do not `delegate` what a few tool calls or several parallel `task` calls can finish; do not use peer messaging as a substitute for `delegate` when you need a report back.
