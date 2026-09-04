@@ -116,6 +116,39 @@ def _text_from_content_blocks(content) -> str:
     return "\n".join(parts)
 
 
+def _images_from_content_blocks(content) -> List[dict]:
+    """Anthropic-shaped ``image`` blocks carried inside a content-block list.
+
+    The same turn may instead arrive as ``Message.images``; both shapes have
+    to survive a switch, or the new model answers a question it cannot see.
+    """
+    if not isinstance(content, list):
+        return []
+    return [
+        b for b in content
+        if isinstance(b, dict) and b.get("type") in ("image", "image_url")
+    ]
+
+
+def _merge_images(*groups) -> List[dict]:
+    """Union of image blocks, deduplicated by identity then by value.
+
+    A session may record the same image in both shapes; sending it twice
+    makes some providers reject the request.
+    """
+    merged: List[dict] = []
+    seen: List[dict] = []
+    for group in groups:
+        for image in group or ():
+            if any(image is known for known in merged):
+                continue
+            if image in seen:
+                continue
+            merged.append(image)
+            seen.append(image)
+    return merged
+
+
 def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = False) -> List[Message]:
     """Reduce history to portable user/assistant text for a model switch.
 
@@ -141,8 +174,9 @@ def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = Fal
             if _content_has_block_type(m.content, "tool_result"):
                 continue
             text = _text_from_content_blocks(m.content)
-            if m.images:
-                cleaned.append(Message(role="user", content=text or None, images=m.images))
+            images = _merge_images(m.images, _images_from_content_blocks(m.content))
+            if images:
+                cleaned.append(Message(role="user", content=text or None, images=images))
             elif isinstance(text, str) and text.strip():
                 cleaned.append(Message(role="user", content=text))
             continue

@@ -174,7 +174,8 @@ Layer 1 的 0.8 / 0.5 相对 min(compact_token_limit 或 ∞, window)
 `can_recover_spill(model.functions)` 检查是否注册了 `read_file` 或 `execute`：
 
 - **能取回**（CLI、带文件工具的 agent）：写入磁盘，上下文里换成预览 + 路径（`<persisted-output>`），
-  模型一次 `read_file` 就能拿回全量。
+  模型一次 `read_file` 就能拿回全量。`execute` 撞上 64MiB 硬顶被杀掉时，落盘文件只有前 64MiB，
+  头文案写 INCOMPLETE，不要把它当全文读。
 
   ```
   ~/.agentica/projects/<user>/<project-hash>/<session-id>/tool-results/<tool_use_id>.txt

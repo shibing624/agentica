@@ -316,3 +316,43 @@ def test_strip_keeps_system_when_not_dropping():
     history = [Message(role="system", content="sys"), _user("hi")]
     out = strip_all_tool_artifacts(history, drop_system=False)
     assert [(m.role, m.content) for m in out] == [("system", "sys"), ("user", "hi")]
+
+
+def test_strip_keeps_images_carried_in_content_blocks():
+    """An Anthropic-shaped user turn can carry the image inside ``content``.
+
+    Only ``Message.images`` was preserved, so a switch onto a model that reads
+    the block form dropped the picture and answered a question it could not
+    see. Both shapes have to travel.
+    """
+    image_block = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "AAA"},
+    }
+    history = [
+        Message(role="user", content=[{"type": "text", "text": "what is this?"}, image_block]),
+        Message(role="assistant", content="a cat"),
+    ]
+    out = strip_all_tool_artifacts(history)
+    assert len(out) == 2
+    assert out[0].role == "user"
+    assert out[0].content == "what is this?"
+    assert image_block in (out[0].images or [])
+
+
+def test_strip_does_not_duplicate_images_from_both_shapes():
+    """A session that fills ``Message.images`` and the content block must not
+    get the same image twice, which some providers reject."""
+    image_block = {"type": "image", "source": {"type": "base64", "data": "AAA"}}
+    history = [Message(role="user", content=[image_block], images=[image_block])]
+    out = strip_all_tool_artifacts(history)
+    assert len(out[0].images) == 1
+
+
+def test_strip_keeps_image_only_user_turn():
+    """No text at all: the image is the whole question, so the turn survives."""
+    image_block = {"type": "image", "source": {"type": "base64", "data": "AAA"}}
+    history = [Message(role="user", content=[image_block])]
+    out = strip_all_tool_artifacts(history)
+    assert len(out) == 1
+    assert out[0].images == [image_block]

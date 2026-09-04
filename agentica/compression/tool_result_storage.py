@@ -197,16 +197,35 @@ def _build_persisted_message(
     *,
     size_bytes: Optional[int] = None,
     n_lines: Optional[int] = None,
+    incomplete: bool = False,
 ) -> str:
-    """Preview + the path holding the full copy, for a session that can read it."""
+    """Preview + the path holding the copy, for a session that can read it.
+
+    ``incomplete`` is a killed-at-cap spill: the file is the first N bytes,
+    not the command's full output. The header must say so — burying that in
+    the preview while this wrapper still says "Full output" / "read_file
+    for the rest" tells the model to treat a truncated copy as complete.
+    """
     kb = (size_bytes / 1024) if size_bytes is not None else _size_kb(content)
     lines = n_lines if n_lines is not None else _line_count(content)
+    if incomplete:
+        where = (
+            f"INCOMPLETE copy saved to:\n"
+            f"{file_path}\n\n"
+            f"The command was killed at the capture cap, so this file is not "
+            f"the full output. Do not read_file it as the whole thing. "
+            f"Re-run with a bound (| head / | tail) or on a narrower input.\n\n"
+        )
+    else:
+        where = (
+            f"Full output saved to:\n"
+            f"{file_path}\n\n"
+            f"Use read_file (tail or offset/limit) or grep on that path for the rest.\n\n"
+        )
     return (
         f"<persisted-output>\n"
         f"Output too large ({kb:.1f} KB, {lines} lines). "
-        f"Full output saved to:\n"
-        f"{file_path}\n\n"
-        f"Use read_file (tail or offset/limit) or grep on that path for the rest.\n\n"
+        f"{where}"
         f"Preview ({PREVIEW_CHARS} chars, 40%head+60%tail):\n"
         f"{_preview(content)}"
         f"\n</persisted-output>"

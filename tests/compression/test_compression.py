@@ -648,6 +648,24 @@ class TestBuildPersistedMessage(unittest.TestCase):
         # The message should NOT have the ellipsis line
         self.assertNotIn("\n...\n", msg)
 
+    def test_incomplete_header_does_not_invite_read_file(self):
+        from agentica.compression.tool_result_storage import _build_persisted_message
+        msg = _build_persisted_message(
+            "/path/to/file.txt", "preview", size_bytes=64 * 1024 * 1024,
+            n_lines=10, incomplete=True,
+        )
+        self.assertIn("INCOMPLETE", msg)
+        self.assertIn("Do not read_file", msg)
+        self.assertNotIn("Full output saved", msg)
+        self.assertNotIn("Use read_file", msg)
+
+    def test_complete_spill_still_points_at_read_file(self):
+        from agentica.compression.tool_result_storage import _build_persisted_message
+        msg = _build_persisted_message("/path/to/file.txt", "preview")
+        self.assertIn("Full output saved", msg)
+        self.assertIn("Use read_file", msg)
+        self.assertNotIn("INCOMPLETE", msg)
+
 
 class TestEnforceToolBatchBudget(unittest.TestCase):
     """Layer 0 per-batch budget — bound one turn's fresh results by the window."""

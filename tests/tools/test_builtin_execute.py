@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -730,3 +731,167 @@ print(f(21))"'''
         tool = BuiltinExecuteTool(work_dir=tmp_dir)
         result = asyncio.run(tool.execute("pwd"))
         assert tmp_dir in result
+
+
+class TestExecuteOutputCap:
+    """The capture hard cap: it must bound the turn, not pin it.
+
+    ``_drain_stream`` returns as soon as *its* stream crosses the cap while
+    the child is still writing. Waiting for both drains (``gather``) then
+    blocks on an EOF that cannot arrive through a pipe nobody is reading,
+    so the command hangs until ``timeout`` and the cap never fires.
+    """
+
+    @staticmethod
+    def _run(cmd, **kwargs):
+        tool = BuiltinExecuteTool(work_dir="/tmp", **kwargs)
+        return asyncio.run(tool.execute(cmd, timeout=20))
+
+    def test_generator_over_the_cap_returns_promptly(self, tmp_dir, monkeypatch):
+        """A command that never stops writing must be killed, not waited out."""
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(Path(tmp_dir) / "projects"))
+        # Emit slightly more than the cap, then keep going forever.
+        overflow = (
+            "import sys\n"
+            "buf = b'x' * (1 << 20)\n"
+            "w = sys.stdout.buffer.write\n"
+            "for _ in range(70):\n"
+            "    w(buf)\n"
+            "while True:\n"
+            "    w(buf)\n"
+        )
+        script = Path(tmp_dir) / "flood.py"
+        script.write_text(overflow)
+
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        started = time.monotonic()
+        result = asyncio.run(tool.execute(f"{shlex.quote(sys.executable)} {script}", timeout=20))
+        elapsed = time.monotonic() - started
+
+        # The point: bounded well under the 20s timeout, not pinned to it.
+        assert elapsed < 15, f"cap did not fire; hung for {elapsed:.1f}s"
+        assert "<persisted-output>" in result
+        assert "INCOMPLETE" in result
+        assert "Full output saved" not in result
+        assert "Use read_file" not in result
+        assert "Do not read_file" in result
+
+    def test_cap_kill_is_not_reported_as_a_command_failure(self, tmp_dir, monkeypatch):
+        """SIGKILL we sent is our truncation, not the command exiting badly."""
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(Path(tmp_dir) / "projects"))
+        script = Path(tmp_dir) / "flood2.py"
+        script.write_text(
+            "import sys\nbuf = b'x' * (1 << 20)\nw = sys.stdout.buffer.write\n"
+            "for _ in range(70):\n    w(buf)\nwhile True:\n    w(buf)\n"
+        )
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        result = asyncio.run(tool.execute(f"{shlex.quote(sys.executable)} {script}", timeout=20))
+        assert "Exit code: -9" not in result
+
+    def test_truncated_spill_says_it_is_incomplete(self, tmp_dir, monkeypatch):
+        """The header must not invite read_file of a killed-at-cap copy."""
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(Path(tmp_dir) / "projects"))
+        script = Path(tmp_dir) / "flood3.py"
+        script.write_text(
+            "import sys\nbuf = b'x' * (1 << 20)\nw = sys.stdout.buffer.write\n"
+            "for _ in range(70):\n    w(buf)\nwhile True:\n    w(buf)\n"
+        )
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        result = asyncio.run(tool.execute(f"{shlex.quote(sys.executable)} {script}", timeout=20))
+        assert "INCOMPLETE" in result
+        assert "killed" in result
+        assert "Full output saved" not in result
+        assert "Use read_file" not in result
+        assert "Do not read_file" in result
+
+    def test_normal_oversized_output_is_not_marked_incomplete(self, tmp_dir, monkeypatch):
+        """Over max_output_length but under the cap: the copy is complete."""
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(Path(tmp_dir) / "projects"))
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        payload = "H" * 400
+        cmd = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(' + repr(payload) + ')')}"
+        result = asyncio.run(tool.execute(cmd))
+        assert "<persisted-output>" in result
+        assert "INCOMPLETE" not in result
+        assert "Full output saved" in result
+        assert "Use read_file" in result
+
+    def test_stderr_closed_first_still_kills_on_stdout_cap(self, tmp_dir, monkeypatch):
+        """Cap on the second-finishing stream must still SIGKILL, not wait it out."""
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(Path(tmp_dir) / "projects"))
+        script = Path(tmp_dir) / "flood_stderr_closed.py"
+        script.write_text(
+            "import sys\n"
+            "sys.stderr.close()\n"
+            "buf = b'x' * (1 << 20)\n"
+            "w = sys.stdout.buffer.write\n"
+            "for _ in range(70):\n"
+            "    w(buf)\n"
+            "while True:\n"
+            "    w(buf)\n"
+        )
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        started = time.monotonic()
+        result = asyncio.run(tool.execute(f"{shlex.quote(sys.executable)} {script}", timeout=20))
+        elapsed = time.monotonic() - started
+        assert elapsed < 15, f"second-stream cap did not kill; hung for {elapsed:.1f}s"
+        assert "INCOMPLETE" in result
+        assert "Full output saved" not in result
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX killpg")
+    def test_kill_process_group_is_not_gated_on_returncode(self, monkeypatch):
+        """A reaped shell (`cmd &`) still has a grandchild in the group."""
+        from agentica.tools.builtin.execute_tool import _kill_process_group
+
+        killed = []
+        monkeypatch.setattr(os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.pid = 4242
+        _kill_process_group(proc)
+        assert killed == [(4242, signal.SIGKILL)]
+
+
+class TestExecuteRedactionReachesTheSpillFile:
+    """With redaction on, the on-disk copy must be masked too.
+
+    The model is handed a redacted preview plus a path and told to
+    ``read_file`` it. A plaintext copy behind that path makes the toggle a
+    promise it does not keep.
+    """
+
+    def test_spilled_file_is_redacted_when_the_toggle_is_on(self, tmp_dir, monkeypatch):
+        projects = Path(tmp_dir) / "projects"
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(projects))
+        monkeypatch.setenv("AGENTICA_REDACT_TOOL_OUTPUTS", "1")
+
+        secret = "sk-" + "A" * 40
+        payload = ("noise\n" * 300) + f"token={secret}\n" + ("noise\n" * 300)
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        cmd = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(' + repr(payload) + ')')}"
+        result = asyncio.run(tool.execute(cmd))
+
+        path_line = next(
+            ln.strip() for ln in result.splitlines()
+            if ln.strip().endswith(".txt") and "tool-results" in ln.replace("\\", "/")
+        )
+        on_disk = Path(path_line).read_text(encoding="utf-8")
+        assert secret not in on_disk
+        assert "noise" in on_disk, "redaction must not blank ordinary output"
+
+    def test_spilled_file_is_untouched_when_the_toggle_is_off(self, tmp_dir, monkeypatch):
+        """Default off: byte-exact round-trips (read_file -> apply_patch) must hold."""
+        projects = Path(tmp_dir) / "projects"
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(projects))
+        monkeypatch.delenv("AGENTICA_REDACT_TOOL_OUTPUTS", raising=False)
+
+        payload = "marker_" + ("M" * 600)
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=200)
+        cmd = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(' + repr(payload) + ')')}"
+        result = asyncio.run(tool.execute(cmd))
+
+        path_line = next(
+            ln.strip() for ln in result.splitlines()
+            if ln.strip().endswith(".txt") and "tool-results" in ln.replace("\\", "/")
+        )
+        assert payload in Path(path_line).read_text(encoding="utf-8")

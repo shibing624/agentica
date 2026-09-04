@@ -16,6 +16,20 @@ from agentica.swarm import Swarm, SwarmResult
 from agentica.workspace import Workspace
 
 
+class _ScriptedPipe:
+    """A pipe that yields ``payload`` then EOF, as a real one would."""
+
+    def __init__(self, payload: bytes = b""):
+        self._payload = payload
+        self._done = False
+
+    async def read(self, n: int = -1) -> bytes:
+        if self._done:
+            return b""
+        self._done = True
+        return self._payload
+
+
 # =========================================================================
 # C3+C4: Sandbox bypass fixes
 # =========================================================================
@@ -100,6 +114,28 @@ class TestBuiltinFileToolDescriptions:
 class TestSandboxCommandBlocking:
     """Tests for C3: command blocking with boundary matching."""
 
+    @staticmethod
+    def _mock_process(stdout: bytes = b"gone\n", stderr: bytes = b""):
+        """A subprocess double whose pipes the real drain loop can read.
+
+        ``execute`` no longer calls ``communicate()``: it drains
+        ``proc.stdout`` / ``proc.stderr`` itself, so a MagicMock that only
+        answers ``communicate`` fails with "object MagicMock can't be used in
+        'await' expression" and the sandbox never gets exercised at all.
+        """
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.pid = 1
+        proc._transport = None
+        proc.stdout = _ScriptedPipe(stdout)
+        proc.stderr = _ScriptedPipe(stderr)
+
+        async def _wait():
+            return 0
+
+        proc.wait = _wait
+        return proc
+
     def test_blocked_command_detected(self):
         """'rm -rf /' should be blocked."""
         from agentica.tools.builtin import BuiltinExecuteTool
@@ -166,9 +202,7 @@ class TestSandboxCommandBlocking:
 
         config = SandboxConfig(enabled=True)
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
-        proc = MagicMock()
-        proc.returncode = 0
-        proc.communicate = AsyncMock(return_value=(b"gone\n", b""))
+        proc = self._mock_process()
 
         with patch(
             "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
@@ -184,9 +218,7 @@ class TestSandboxCommandBlocking:
 
         config = SandboxConfig(enabled=True)
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
-        proc = MagicMock()
-        proc.returncode = 0
-        proc.communicate = AsyncMock(return_value=(b"gone\n", b""))
+        proc = self._mock_process()
         token = approved_by_user.set(True)
         try:
             with patch(
@@ -203,9 +235,7 @@ class TestSandboxCommandBlocking:
         from agentica.tools.builtin import BuiltinExecuteTool
 
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=SandboxConfig(enabled=False))
-        proc = MagicMock()
-        proc.returncode = 0
-        proc.communicate = AsyncMock(return_value=(b"gone\n", b""))
+        proc = self._mock_process()
         with patch(
             "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
             new=AsyncMock(return_value=proc),

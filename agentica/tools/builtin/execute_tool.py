@@ -4,8 +4,10 @@
 @description: Built-in execute/wait tools
 """
 import asyncio
+import contextlib
 import os
 import re
+import signal
 import tempfile
 import time
 from pathlib import Path
@@ -83,6 +85,9 @@ _MAX_FOREGROUND_SLEEP_SECONDS = 120
 # the process so the drain cannot pin the turn.
 _EXECUTE_SPILL_HARD_CAP_BYTES = 64 * 1024 * 1024
 _PIPE_CHUNK = 65536
+# After a cap-triggered SIGKILL the pipes hit EOF on their own; this bounds
+# the wait for a grandchild that outlived the group and still holds one.
+_POST_KILL_DRAIN_SECONDS = 5
 
 
 async def _drain_stream(stream, spool, hard_cap: int) -> tuple[int, int, bool]:
@@ -110,6 +115,49 @@ async def _drain_stream(stream, spool, hard_cap: int) -> tuple[int, int, bool]:
         if len(data) > room:
             return total, newlines, True
     return total, newlines, False
+
+
+def _kill_process_group(proc) -> None:
+    """SIGKILL the child's whole process group.
+
+    Deliberately not ``terminate_subprocess``: that calls
+    ``process.communicate()``, which starts its own readers on pipes our
+    drain coroutines are already reading — asyncio raises ``read() called
+    while another coroutine is already waiting for incoming data``. Here the
+    drain owns the pipes, so the kill has to be the raw syscall.
+
+    Not gated on ``proc.returncode``. ``cmd &`` reaps the shell while a
+    grandchild still holds our pipes; skipping the signal there leaves the
+    writer alive and the other drain waiting for EOF. ``pid == pgid``
+    because we spawn with ``start_new_session`` — ``getpgid`` of an already
+    reaped leader raises and would miss the group.
+    """
+    if proc is None:
+        return
+    pid = proc.pid
+    if pid is None:
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        if hasattr(os, "killpg"):
+            os.killpg(pid, signal.SIGKILL)
+            return
+        proc.kill()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+
+
+async def _cancel_drain_tasks(tasks) -> None:
+    """Drop leftover pipe readers before anyone else touches the pipes.
+
+    A cancelled or timed-out turn falls through to ``terminate_subprocess``,
+    which ``communicate()``s. Those readers must be finished first.
+    """
+    leftover = [task for task in tasks if not task.done()]
+    for task in leftover:
+        task.cancel()
+    if leftover:
+        await asyncio.gather(*leftover, return_exceptions=True)
 
 
 def _decode_spool_head_tail(spool, max_chars: int) -> str:
@@ -162,10 +210,38 @@ def _copy_spools_to_path(path: str, stdout_spool, stderr_spool) -> int:
     return written
 
 
-# Default for a single `wait` call when the model omits timeout. Same contract
-# as execute(timeout=...): the caller decides, no silent upper clamp.
-_DEFAULT_WAIT_SECONDS = 300
-_WAIT_POLL_INTERVAL = 0.2
+def _copy_spools_to_path_redacted(path: str, stdout_spool, stderr_spool) -> int:
+    """``_copy_spools_to_path`` with secrets masked, for redacting deployments.
+
+    The preview handed to the model is redacted, so the file the model is
+    told to ``read_file`` must be too — otherwise the toggle promises
+    redaction while the full copy on disk stays plaintext, and one
+    ``read_file`` recovers every secret the toggle was meant to hide.
+
+    Whole-stream rather than chunked on purpose: redaction rewrites spans
+    that cross any boundary (a PEM block matches across newlines), so a
+    chunked pass needs carry-over state that is easy to get subtly wrong.
+    The input is already bounded by ``_EXECUTE_SPILL_HARD_CAP_BYTES``.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    written = 0
+    with open(path, "wb") as fh:
+        for spool in (stdout_spool, stderr_spool):
+            spool.seek(0, os.SEEK_END)
+            if not spool.tell():
+                continue
+            if spool is stderr_spool:
+                marker = b"\n[stderr]\n"
+                fh.write(marker)
+                written += len(marker)
+            spool.seek(0)
+            text = spool.read().decode("utf-8", errors="replace")
+            text = redact_sensitive_text(text) or ""
+            data = text.encode("utf-8", errors="replace")
+            fh.write(data)
+            written += len(data)
+    return written
+
 
 # Default for a single `wait` call when the model omits timeout. Same contract
 # as execute(timeout=...): the caller decides, no silent upper clamp.
@@ -285,6 +361,54 @@ class BuiltinExecuteTool(Tool):
                 user_id = agent.workspace.user_id
         return session_id, user_id, cwd
 
+    async def _drain_both(self, proc, stdout_spool, stderr_spool):
+        """Drain both pipes, killing the child the moment a stream hits the cap.
+
+        ``asyncio.gather`` (ALL_COMPLETED) deadlocks here. ``_drain_stream``
+        returns as soon as *its* stream crosses the hard cap, but the child is
+        still alive and still writing; the other drain then blocks forever
+        waiting for an EOF that cannot arrive while this pipe stays full. The
+        command hangs until ``effective_timeout`` and the cap is never
+        enforced — a 70 MB ``cat`` pinned the turn for the full 120 s default.
+
+        So wait on FIRST_COMPLETED, then on the rest if the first stream
+        was under the cap (stderr often EOFs first). Kill if *any* stream
+        tripped the cap — not only the one that finished first. The pipes
+        reaching EOF is what lets a remaining drain return promptly.
+        """
+        tasks = [
+            asyncio.ensure_future(
+                _drain_stream(proc.stdout, stdout_spool, _EXECUTE_SPILL_HARD_CAP_BYTES)
+            ),
+            asyncio.ensure_future(
+                _drain_stream(proc.stderr, stderr_spool, _EXECUTE_SPILL_HARD_CAP_BYTES)
+            ),
+        ]
+        try:
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED,
+            )
+            hit_cap = any(task.result()[2] for task in done)
+            # The first stream to finish is often the quiet one (stderr
+            # closed, nothing written). The flood may still be on the
+            # other pipe — wait for it, then kill if *that* trip hit cap.
+            if not hit_cap and pending:
+                await asyncio.wait(pending)
+                hit_cap = any(task.result()[2] for task in tasks)
+            if hit_cap:
+                _kill_process_group(proc)
+                still = [task for task in tasks if not task.done()]
+                if still:
+                    await asyncio.wait(still, timeout=_POST_KILL_DRAIN_SECONDS)
+            await _cancel_drain_tasks(tasks)
+        except BaseException:
+            await _cancel_drain_tasks(tasks)
+            raise
+        return tuple(
+            task.result() if task.done() and not task.cancelled() else (0, 0, False)
+            for task in tasks
+        )
+
     def _finish_captured_output(
         self,
         stdout_spool,
@@ -327,11 +451,17 @@ class BuiltinExecuteTool(Tool):
             )
         preview = "\n".join(preview_parts).strip()
         n_lines = out_lines + err_lines + (1 if err_bytes else 0)
-        if hit_hard_cap:
-            preview = (
-                f"{preview}\n\n[stopped after {_EXECUTE_SPILL_HARD_CAP_BYTES} bytes; "
-                "re-run with a bound (| head / | tail) or read_file the original path]"
-            )
+        # Header, not preview: `_build_persisted_message` used to say
+        # "Full output" / "read_file for the rest" while this note sat
+        # inside `_preview()` where the model can miss it.
+        truncated_note = (
+            f"\n\n[stopped after {_EXECUTE_SPILL_HARD_CAP_BYTES} bytes. The command was "
+            f"killed, so any saved copy is INCOMPLETE — the first "
+            f"{_EXECUTE_SPILL_HARD_CAP_BYTES} bytes only. Re-run with a "
+            f"bound (| head / | tail) or on a narrower input.]"
+            if hit_hard_cap
+            else ""
+        )
 
         session_id, user_id, cwd = self._spill_target()
         names = set(self.functions) if self.functions else {"execute"}
@@ -341,14 +471,20 @@ class BuiltinExecuteTool(Tool):
                 cwd=cwd, session_id=session_id, user_id=user_id,
             )
             try:
-                size = _copy_spools_to_path(file_path, stdout_spool, stderr_spool)
+                copier = (
+                    _copy_spools_to_path_redacted
+                    if redact_tool_outputs_enabled()
+                    else _copy_spools_to_path
+                )
+                size = copier(file_path, stdout_spool, stderr_spool)
             except OSError as e:
                 logger.warning(f"Failed to persist execute overflow to {file_path}: {e}")
-                return _build_truncated_message(preview)
+                return _build_truncated_message(preview + truncated_note)
             return _build_persisted_message(
                 file_path, preview, size_bytes=size, n_lines=n_lines,
+                incomplete=hit_hard_cap,
             )
-        return _build_truncated_message(preview)
+        return _build_truncated_message(preview + truncated_note)
 
     async def execute(
             self,
@@ -560,19 +696,14 @@ class BuiltinExecuteTool(Tool):
                     cwd=cwd,
                     start_new_session=os.name != "nt",
                 )
-                (out_bytes, out_lines, out_cap), (err_bytes, err_lines, err_cap) = (
-                    await asyncio.wait_for(
-                        asyncio.gather(
-                            _drain_stream(proc.stdout, stdout_spool, _EXECUTE_SPILL_HARD_CAP_BYTES),
-                            _drain_stream(proc.stderr, stderr_spool, _EXECUTE_SPILL_HARD_CAP_BYTES),
-                        ),
-                        timeout=effective_timeout,
-                    )
+                out, err = await asyncio.wait_for(
+                    self._drain_both(proc, stdout_spool, stderr_spool),
+                    timeout=effective_timeout,
                 )
+                (out_bytes, out_lines, out_cap) = out
+                (err_bytes, err_lines, err_cap) = err
                 hit_hard_cap = out_cap or err_cap
-                if hit_hard_cap:
-                    await terminate_subprocess(proc, process_group=True, grace_period=0)
-                elif proc.returncode is None:
+                if not hit_hard_cap and proc.returncode is None:
                     await proc.wait()
                 drained = True
             except asyncio.TimeoutError:
@@ -603,7 +734,12 @@ class BuiltinExecuteTool(Tool):
                 hit_hard_cap=hit_hard_cap,
             )
 
-            if proc.returncode and proc.returncode != 0:
+            # -9 is the SIGKILL *we* sent for crossing the cap, not the
+            # command failing. Reporting it as "[Exit code: -9]" (and then
+            # raising on it below) would turn a deliberate truncation into a
+            # tool error the model has to retry.
+            killed_by_cap = hit_hard_cap and proc.returncode in (-9, -signal.SIGKILL)
+            if proc.returncode and proc.returncode != 0 and not killed_by_cap:
                 output = f"{output}\n\n[Exit code: {proc.returncode}]"
 
             logger.debug(f"Command exit code: {proc.returncode}")
@@ -622,6 +758,7 @@ class BuiltinExecuteTool(Tool):
             if (
                 proc.returncode
                 and proc.returncode != 0
+                and not killed_by_cap
                 and not _expected_nonzero_exit(command, proc.returncode)
             ):
                 raise RuntimeError(
