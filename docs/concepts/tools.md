@@ -315,12 +315,12 @@ tools = get_builtin_tools(work_dir="./")
 
 | 工具 | 模块 | 功能 |
 |------|------|------|
-| `read_file` | `BuiltinFileTool` | 读文件（offset/limit 分页，`tail` 取尾、负 `offset` 从末尾开窗；大文件守卫只拦从头分页，从尾扫描 20s 超时）。空文件返回 `File is empty: …` |
+| `read_file` | `BuiltinFileTool` | 读文件。从头：`offset`/`limit`（默认 0/500；`tail=0` 等于省略）。取尾：`tail=N`（N>=1；负 N 当末尾 \|N\| 行）。大文件守卫只拦从头分页，从尾扫描 20s 超时。空文件返回 `File is empty: …` |
 | `write_file` | `BuiltinFileTool` | 创建/覆写文件。长报告可直接写成 HTML，方便用户在浏览器打开 |
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。规范信封 `*** Begin Patch` … `*** End Patch`；围栏 / heredoc / 漏信封但有 `*** Update/Add/Delete File:` 也会收。hunk 行以空格（保留）/ `-`（删）/ `+`（增）开头；忘了空格但能在文件里唯一对上的 keep 行会补上。**上下文精确匹配**；对不上报出那一行。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `include` / `limit`；`limit` 是全局条数上限，读满即停 rg |
-| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）。鼓励一条命令里用管道 / `&&` / heredoc 拼完验证或构建。`parallel_safe=True` 同轮并发，`background=True` 进后台。非零退出只报 exit code，不附启发式 Note |
+| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）。鼓励一条命令里用管道 / `&&` / heredoc 拼完验证或构建。搜文本优先 `rg`，没有再 `grep`。`parallel_safe=True` 同轮并发，`background=True` 进后台。非零退出只报 exit code，不附启发式 Note |
 | `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |

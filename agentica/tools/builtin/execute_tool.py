@@ -509,7 +509,9 @@ class BuiltinExecuteTool(Tool):
         get numbered lines for ``apply_patch``. A shell dump of a whole file
         is bounded: oversized stdout is persisted and this result keeps only a
         preview, but you still spent a turn filling a pipe. Bound each noisy
-        program with ``| head`` / ``| tail``. Chain dependent
+        program with ``| head`` / ``| tail``. Search with ``rg``; if ``rg``
+        is missing, ``grep`` (``rg -n PAT -- path || grep -n PAT path``).
+        Chain dependent
         commands with ``&&``, not ``;``. Check state read-only before a write.
         Surgical, context-sensitive edits still belong in ``apply_patch``; a
         one-shot script is for the same substitution across several files, or
@@ -575,6 +577,7 @@ class BuiltinExecuteTool(Tool):
             - execute(command="API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8")
             - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
             - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
+            - execute(command="rg -n TODO src || grep -n TODO src")
             - execute(command="git diff --stat | tail -5")
             - execute(command="npm install && npm test", timeout=300)
             - execute(command="pytest tests/unit -q", parallel_safe=True)

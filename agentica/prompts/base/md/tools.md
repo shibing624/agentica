@@ -7,8 +7,11 @@ Newlines in the command string are required for a heredoc and are kept.
 Example:
 `cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8`.
 Also fine: `API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8`.
-Bound each noisy program with `| head` / `| tail`. To read a file, use
-`read_file` (`offset`/`limit` or `tail`) — a shell dump of the whole file
+Bound each noisy program with `| head` / `| tail`. Search in the shell
+with `rg`; if `rg` is missing, `grep` (`rg -n PAT -- path || grep -n PAT path`).
+To read a file, use `read_file`: from the start, `offset`/`limit`
+(default 0/500; omit `tail`, do not pass `tail=0` as a required field);
+last N lines, `tail=N` with N>=1. A shell dump of the whole file
 still fills a pipe even though the result is persisted down to a preview.
 Chain dependent
 commands with `&&`, not `;`. Check state read-only before a write.

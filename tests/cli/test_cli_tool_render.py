@@ -680,6 +680,18 @@ class TestCLIToolRender(unittest.TestCase):
             ),
             "a.log (oldest 10 of last 50)",
         )
+        self.assertEqual(
+            format_tool_display("read_file", {"file_path": "a.md", "tail": 0}),
+            "a.md (L1-500)",
+        )
+        self.assertEqual(
+            format_tool_display("read_file", {"file_path": "a.md", "tail": 700}),
+            "a.md (tail 700)",
+        )
+        self.assertEqual(
+            format_tool_display("read_file", {"file_path": "a.md", "tail": -3}),
+            "a.md (tail 3)",
+        )
 
     def test_task_and_delegate_calls_show_full_brief(self):
         """task / delegate must not truncate the handoff instruction in the CLI."""

@@ -237,11 +237,34 @@ class TestBuiltinFileToolReadCorrectness:
         assert "line7" in result and "line8" in result
         assert "line9" not in result and "line10" not in result
 
-    def test_read_file_tail_zero_rejected(self, file_tool, tmp_dir):
+    def test_effective_tail_treats_zero_as_omit(self):
+        from agentica.tools.builtin.file_tool import _effective_tail
+
+        assert _effective_tail(None) is None
+        assert _effective_tail(0) is None
+        assert _effective_tail("0") is None
+        assert _effective_tail(3) == 3
+        assert _effective_tail(-3) == 3
+
+    def test_read_file_tail_zero_reads_from_start(self, file_tool, tmp_dir):
+        """tail=0 is omit, not an error — models send it for a top-of-file page."""
         p = Path(tmp_dir, "zero.txt")
-        p.write_text("a\nb\n")
-        with pytest.raises(ValueError, match="tail must be >= 1"):
-            asyncio.run(file_tool.read_file(str(p), tail=0))
+        p.write_text("a\nb\nc\n")
+        result = asyncio.run(file_tool.read_file(str(p), tail=0))
+        assert "a" in result and "b" in result
+
+    def test_read_file_negative_tail_is_last_n_lines(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "neg_tail.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 11)))
+        result = asyncio.run(file_tool.read_file(str(p), tail=-3))
+        assert "line8" in result and "line10" in result
+        assert "line7" not in result
+
+    def test_read_file_tail_larger_than_file_returns_all(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "short.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 4)))
+        result = asyncio.run(file_tool.read_file(str(p), tail=700))
+        assert "line1" in result and "line3" in result
 
     def test_read_file_tail_beats_large_file_guard(self, file_tool, tmp_dir):
         """tail holds a bounded number of lines on any file size — the 256KB

@@ -37,6 +37,24 @@ _GREP_TIMEOUT = 20
 # Tail / negative-offset reads scan the file from the start (deque of N lines).
 # A multi-GB log must not pin the turn; 20s matches grep/glob. Not exposed.
 _READ_TIMEOUT = 20
+
+
+def _effective_tail(tail) -> Optional[int]:
+    """Last-N count from the ``tail`` argument, or None to page from the start.
+
+    ``tail=0`` / omit means "not a tail read" — models send 0 when they want
+    the default top-of-file page. A negative value is last ``|N|`` lines
+    (same window as ``offset=-N``).
+    """
+    if tail is None or tail == "":
+        return None
+    try:
+        n = int(tail)
+    except (TypeError, ValueError):
+        return None
+    if n == 0:
+        return None
+    return abs(n)
 _FURTHER_TRUNCATED = "... (further results truncated)"
 
 # Directories every search skips. ``.agentica`` earns its place for a specific
@@ -514,24 +532,31 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Reads a file from the filesystem. A missing file returns an error.
 
-        Usage:
-        - file_path may be absolute, relative to the working directory, or `~`-prefixed
-        - Reads up to `limit` lines (default 500) starting from `offset`
-          (0-based). A negative `offset` opens a window on the end of the
-          file: offset=-50 is the last 50 lines, and `limit` then keeps the
-          oldest lines of that window (offset=-50, limit=10 → lines N-49..N-40).
-        - `tail=N` reads the last N lines (shorthand for offset=-N). A tail
-          scan of a huge file times out after 20 seconds.
-        - Any line longer than 2000 characters is truncated
-        - Results are returned with line-number prefixes (metadata only)
-        - Prefer one larger read over many small slices
+        Two ways to page — pick one:
+
+        - From the start (default): omit ``tail`` (or pass ``tail=0``).
+          ``offset`` is 0-based (0 = first line). ``limit`` is how many
+          lines (default 500). Next page: offset=500, limit=500. To read
+          700 lines from the top, use ``limit=700``, not ``tail=700``.
+        - From the end: ``tail=N`` with N>=1 is the last N lines. A file
+          shorter than N returns the whole file. ``offset=-N`` is the same
+          window; ``limit`` then keeps the oldest lines of it
+          (offset=-50, limit=10 → lines N-49..N-40).
+
+        A tail scan of a huge file times out after 20 seconds.
+        file_path may be absolute, relative to the working directory, or
+        `~`-prefixed. Lines longer than 2000 characters are truncated.
+        Results have line-number prefixes. Prefer one larger read over
+        many small slices.
 
         Args:
-            file_path: File path for md/txt/py/etc. Supports absolute paths, relative paths, and `~`
-            offset: Starting line number (0-based). Negative counts from the
-                end and opens a window of that many lines.
-            limit: Maximum number of lines to read, defaults to 500
-            tail: If set, read the last N lines (overrides offset/limit)
+            file_path: File path for md/txt/py/etc. Absolute, relative, or `~`
+            offset: 0-based start line when not using tail. Negative = window
+                of that many lines at the end.
+            limit: Lines to return from offset (default 500). From-the-start
+                paging uses this, not tail.
+            tail: Last N lines (N>=1). Omit or 0 = read from the start with
+                offset/limit. Negative N is last |N| lines.
 
         Returns:
             File content with line numbers
@@ -551,10 +576,9 @@ class BuiltinFileTool(Tool):
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
-        if tail is not None:
-            if tail < 1:
-                raise ValueError("tail must be >= 1")
-            offset, limit = -tail, tail
+        n_tail = _effective_tail(tail)
+        if n_tail is not None:
+            offset, limit = -n_tail, n_tail
 
         limit = limit if limit is not None else self.max_read_lines
         max_line_len = self.max_line_length

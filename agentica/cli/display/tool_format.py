@@ -180,8 +180,13 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "read_file":
         file_path = tool_args.get("file_path", "")
         filename = _shorten_path(file_path)
-        if tool_args.get("tail") is not None:
-            return f"{filename} (tail {tool_args['tail']})"
+        raw_tail = tool_args.get("tail")
+        try:
+            n_tail = int(raw_tail) if raw_tail not in (None, "") else 0
+        except (TypeError, ValueError):
+            n_tail = 0
+        if n_tail:
+            return f"{filename} (tail {abs(n_tail)})"
         offset = tool_args.get("offset", 0)
         limit = tool_args.get("limit", 500)
         line_range = _format_line_range(offset, limit)
