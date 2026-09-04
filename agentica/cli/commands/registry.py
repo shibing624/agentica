@@ -33,6 +33,7 @@ from agentica.cli.commands.runtime import (
     _cmd_steer,
     _cmd_stop,
 )
+from agentica.cli.commands.worktree_cmd import _cmd_worktree
 from agentica.cli.commands.session import (
     _cmd_clear,
     _cmd_compact,
@@ -88,6 +89,10 @@ COMMAND_REGISTRY = {
     "/peers": (_cmd_list_agents, "List messageable live sessions (alias for /list-agents)"),
     "/send-message": (_cmd_send_message, "Send a message yourself: /send-message <session> <text>"),
     "/send": (_cmd_send_message, "Send a message to a session (alias for /send-message)"),
+    "/worktree": (
+        _cmd_worktree,
+        "This session's git worktree: status | use <name> | merge | remove",
+    ),
     "/fork": (_cmd_fork, "Branch into a new session: /fork [list|n|uuid]"),
     "/rewind": (
         _cmd_rewind,

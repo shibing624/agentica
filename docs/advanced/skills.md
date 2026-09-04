@@ -93,9 +93,9 @@ metadata:
 5. `~/.agentica/skills/`（用户级）
 6. 包内 `agentica/skills/bundled/`（**仅 CLI / gateway**，`load_system_skills()`；SDK 的 `load_skills()` 不扫这一层）
 
-同名 Skill，项目级覆盖用户级；用户级覆盖包内内置（`agentica` / `multi-agent`）。内置 skill 直接从包内目录原位加载，不往 `$AGENTICA_HOME` 拷贝任何文件（升级即随包更新）。覆盖方式是在 `~/.agentica/skills/<name>/` 写同名 skill。
+同名 Skill，项目级覆盖用户级；用户级覆盖包内内置（`agentica` / `multi-agent` / `worktree` / `cron`）。内置 skill 直接从包内目录原位加载，不往 `$AGENTICA_HOME` 拷贝任何文件（升级即随包更新）。覆盖方式是在 `~/.agentica/skills/<name>/` 写同名 skill。
 
-`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这两个内置 skill。
+`Agent()` / `DeepAgent()` 作为 SDK 使用时不会自动出现这些内置 skill。
 
 ## 加载与使用
 

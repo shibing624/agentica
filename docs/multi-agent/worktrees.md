@@ -52,12 +52,14 @@ push 时，`origin/main` 看不见它——而那个会话恰恰是你马上要�
 agentica --worktree gateway-peers
 ```
 
-已经跑了几周的会话不必重启——让它自己切（这也是被 `send_message` 遥控时唯一可行的方式）：
+已经跑了几周的会话不必重启——模型读内置 `worktree` skill 后调用工具（人也可用 `/worktree`）：
 
 ```text
 你（或另一个会话）："先切到 gateway-peers 那个 worktree，再改代码"
 agent 调用：worktree(action="use", name="gateway-peers")
 ```
+
+人的入口：启动时 `agentica --worktree <任务>`，会话中 `/worktree status|use|merge|remove`。用法判断在 skill 里，不进每轮 system prompt。
 
 `worktree` 工具的动作：
 

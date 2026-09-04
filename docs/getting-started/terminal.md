@@ -216,6 +216,19 @@ mcp, skill, ...
 
 这两个限制只约束无人值守的循环，不约束你：你在本终端**敲任何一行**（包括「给 temp-30 发条消息」这类指令）都会立即清空计数，对端用 `/send-message` 转发过来的消息同样清空。所以不会出现「你让 agent 发消息、却被限制拦住」的情况。
 
+### `/worktree`
+
+把**当前这个** CLI 会话绑到本仓库的一个任务 worktree（目录 + `wt/<任务>` 分支），避免几个会话抢同一个 checkout。
+
+```text
+> /worktree
+> /worktree use gateway-peers
+> /worktree merge
+> /worktree remove
+```
+
+启动时也可以 `agentica --worktree gateway-peers`。模型侧用同名 `worktree` 工具（用法见内置 `worktree` skill），不要让它 `git worktree add` 再 `cd`。详见 [worktrees](../multi-agent/worktrees.md)。
+
 ### 委托任务给另一个 CLI（`delegate`）
 
 一个交互会话可以把**整块**工作丢给另一个 agentica 进程去做：它有自己的上下文窗口、自己的模型、自己的工作目录，做完把结论交回来。

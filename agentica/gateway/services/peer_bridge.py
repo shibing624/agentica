@@ -23,7 +23,7 @@ Two consequences of that design decide the rest of this module:
 
 **A relayed line is the user, so it carries the user's authority.** Sends use
 ``from_kind="user"``: the receiving CLI treats it as if it were typed in that
-terminal (``PEER_MESSAGING_POLICY``). That is the point — the user *is* typing
+terminal (the bundled ``multi-agent`` skill). That is the point — the user *is* typing
 it, from a phone. This is a personal-assistant gateway, so the bridge is on by
 default and adds no gate of its own; a channel's ``allowed_users`` (when set)
 already filters every inbound message before it can reach the bridge.

@@ -15,31 +15,8 @@ for one of them.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from agentica.tools.base import Tool
 from agentica.worktrees import WorktreeError
-
-WORKTREE_POLICY = """<worktrees>
-Several sessions sharing one checkout overwrite each other's edits and fight
-over git's index. A worktree is one directory + one branch per *task*, sharing
-the repository — created on first use, reused while that task is still in
-progress, removed after the work lands on the local base (or when unused).
-
-Use `worktree(action="use", name="<task>")` when you are about to make changes
-and another live session is working in the same directory (`list_agents` shows
-each session's directory, branch and dirty files). The switch is immediate and
-does not restart anything: this conversation, its todo list and its goal
-continue, and the transcript keeps being written where it already was.
-
-Name the *task*, not yourself: a name is a place two sessions can hand work over
-in ("gateway-peers", "wechat-fix") while it is unfinished. After merge the
-directory is gone; the next feature with a new name starts from current main.
-
-`worktree(action="merge")` puts the work on the local base branch (usually
-main) and removes the worktree. `worktree(action="remove")` drops one that has
-no unique work (no uncommitted files, no commits not already on the local base).
-</worktrees>"""
 
 
 class WorktreeTool(Tool):
@@ -51,9 +28,6 @@ class WorktreeTool(Tool):
         # Not concurrency-safe by any reading: it changes the directory every
         # other tool resolves paths against.
         self.register(self.worktree, is_destructive=False)
-
-    def get_system_prompt(self) -> Optional[str]:
-        return WORKTREE_POLICY
 
     async def worktree(self, action: str = "status", name: str = "", base: str = "") -> str:
         """Put this session in its own git worktree of the current repository.

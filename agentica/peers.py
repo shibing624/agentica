@@ -890,14 +890,14 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     telling the model to copy the peer's name into ``to``.
 
     **Reporting the outcome is not optional, and the header is where that is
-    decided.** ``PEER_MESSAGING_POLICY`` says work that is finished or stuck
-    goes back to whoever handed it over, but the header used to end in "if
-    needed" / "only if it is waiting on an answer" — a per-message instruction
-    beats a standing one, and a dispatcher is never visibly "waiting", so the
-    worker did the job and told nobody. That is what leaves the user relaying
-    results by hand between a phone and a terminal. Purely informational
-    messages still need no reply; the distinction is the handover, not the
-    sender.
+    decided.** The bundled ``multi-agent`` skill says work that is finished or
+    stuck goes back to whoever handed it over, but the header used to end in
+    "if needed" / "only if it is waiting on an answer" — a per-message
+    instruction beats a standing one, and a dispatcher is never visibly
+    "waiting", so the worker did the job and told nobody. That is what leaves
+    the user relaying results by hand between a phone and a terminal. Purely
+    informational messages still need no reply; the distinction is the
+    handover, not the sender.
     """
     blocks = []
     for message in messages:

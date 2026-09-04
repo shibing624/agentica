@@ -103,6 +103,42 @@ class TestRemoveValidatesBeforeMoving:
         assert Path(wt.path).is_dir()
 
 
+class TestSlashWorktree:
+    def test_status_is_the_default(self, monkeypatch):
+        from agentica.cli.commands.context import CommandContext
+        from agentica.cli.commands.worktree_cmd import _cmd_worktree
+
+        class Binder:
+            def status(self):
+                return "WHERE"
+
+        printed = []
+        monkeypatch.setattr(
+            "agentica.cli.commands.worktree_cmd.get_console",
+            lambda: type("C", (), {"print": staticmethod(printed.append)})(),
+        )
+        ctx = CommandContext(agent_config={}, current_agent=None, worktree_binder=Binder())
+        _cmd_worktree(ctx, "")
+        assert printed == ["WHERE"]
+
+    def test_use_needs_a_name(self, monkeypatch):
+        from agentica.cli.commands.context import CommandContext
+        from agentica.cli.commands.worktree_cmd import _cmd_worktree
+
+        class Binder:
+            def switch(self, name, *, base=None):
+                raise AssertionError("must not switch")
+
+        printed = []
+        monkeypatch.setattr(
+            "agentica.cli.commands.worktree_cmd.get_console",
+            lambda: type("C", (), {"print": staticmethod(printed.append)})(),
+        )
+        ctx = CommandContext(agent_config={}, current_agent=None, worktree_binder=Binder())
+        _cmd_worktree(ctx, "use")
+        assert printed and "use <name>" in str(printed[0])
+
+
 class TestSwitchReportsSharing:
     def test_a_live_foreign_lock_is_named_in_the_switch_result(self, repo):
         wt = ensure(str(repo), "docs")

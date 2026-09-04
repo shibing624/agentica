@@ -104,9 +104,5 @@ class TestRefusals:
 
 
 class TestInstructions:
-    def test_the_policy_reaches_the_system_prompt(self):
-        prompt = WorktreeTool(FakeBinder()).get_system_prompt()
-        assert "worktree" in prompt
-        assert "list_agents" in prompt
-        assert "never deleted" not in prompt
-        assert "remove" in prompt
+    def test_the_tool_does_not_inject_a_system_prompt(self):
+        assert WorktreeTool(FakeBinder()).get_system_prompt() is None

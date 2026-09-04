@@ -20,7 +20,18 @@ from agentica.peers import (
     list_live_peers,
     resolve_peer,
 )
+from agentica.skills.skill import Skill
+from agentica.skills.skill_loader import SkillLoader
 from agentica.tools.peer_tool import PeerMessagingTool
+
+
+def _peer_policy_text() -> str:
+    """Receiving-side peer rules live in the bundled multi-agent skill."""
+    body = Skill.from_skill_md(
+        SkillLoader.BUNDLED_SKILL_DIR / "multi-agent" / "SKILL.md",
+        location="bundled",
+    ).content
+    return " ".join(body.split())
 
 
 @pytest.fixture(autouse=True)
@@ -556,8 +567,11 @@ class TestPeerMessagingTool:
         assert out.startswith("Message not sent:")
         assert "list_agents" in out
 
-    def test_the_tool_carries_the_receiving_side_policy(self):
-        prompt = PeerMessagingTool(_session("alpha")).get_system_prompt()
+    def test_the_tool_does_not_inject_a_system_prompt(self):
+        assert PeerMessagingTool(_session("alpha")).get_system_prompt() is None
+
+    def test_the_multi_agent_skill_carries_the_receiving_side_policy(self):
+        prompt = _peer_policy_text()
 
         # The model must be told a peer message is not the user talking; without
         # it, another session's text can talk it into skipping a confirmation.
@@ -574,9 +588,7 @@ class TestPeerMessagingTool:
         one terminal at a time. Authority is untouched — this is about who owns
         the answer, and a question grants nobody anything.
         """
-        # Flattened: these are wrapped prose, so a line break must not decide
-        # whether the rule is considered present.
-        prompt = " ".join(PeerMessagingTool(_session("alpha")).get_system_prompt().split())
+        prompt = _peer_policy_text()
 
         assert "Keep asking your user" not in prompt
         assert "ask_user_question" in prompt
@@ -593,7 +605,7 @@ class TestPeerMessagingTool:
         diff or log spends the context that session needs in order to act,
         while the file it came from is already readable on the shared machine.
         """
-        prompt = " ".join(PeerMessagingTool(_session("alpha")).get_system_prompt().split())
+        prompt = _peer_policy_text()
 
         assert "goes in a file and the message carries its absolute path" in prompt
 
@@ -604,7 +616,7 @@ class TestPeerMessagingTool:
         question in parallel, a relay of stages, or two sessions arguing a
         call — so it is written about the session that handed you the work.
         """
-        prompt = " ".join(PeerMessagingTool(_session("alpha")).get_system_prompt().split())
+        prompt = _peer_policy_text()
 
         assert "planner" not in prompt.lower()
         assert "the person who wanted it is at THAT session" in prompt

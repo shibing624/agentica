@@ -1031,7 +1031,7 @@ def create_agent(
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
     from agentica.tools.self_manage_tool import SelfManageTool, CLI_RESTART_HINT
-    from agentica.tools.cron_tool import CronTool, CLI_DAEMON_HINT
+    from agentica.tools.cron_tool import CronTool
 
     # Immediate-run executor for the cronjob tool: builds a fresh CLI agent per
     # run (mirrors the `/cron run` command) so `action='run'` is a real trial run
@@ -1056,7 +1056,7 @@ def create_agent(
     # user-supplied extra tool with the same name could still override.
     cli_tools = [
         SelfManageTool(restart_hint=CLI_RESTART_HINT),
-        CronTool(job_runner=cron_job_runner, daemon_hint=CLI_DAEMON_HINT),
+        CronTool(job_runner=cron_job_runner),
     ] + list(extra_tools or [])
 
     if peer_session is not None:

@@ -188,7 +188,7 @@ class TestQueuePayloadClassification:
         assert not queued.is_relayed
 
     def test_a_relayed_slash_command_stays_text(self):
-        """PEER_MESSAGING_POLICY promises the sender that a slash command in a
+        """The multi-agent skill promises the sender that a slash command in a
         peer message is plain text; this is what makes that true."""
         queued = unpack_queue_payload(("__RELAYED__", "/compact now please"))
 

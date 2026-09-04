@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """Tests for the skills shipped inside the package.
 
-An agentica install should know how to drive agentica, so two skills travel
+An agentica install should know how to drive agentica, so bundled skills travel
 with the code. They are ordinary skills in every other respect — in particular
 a user who writes their own of the same name must win, and slash commands
 come from ``name`` (no ``trigger`` field; that is not part of the standard
-Agent Skills format).
+Agent Skills format). The CLI ``/worktree`` and ``/cron`` commands are
+registered first, so they win over the skills' auto-commands of the same slug.
 """
 import tempfile
 import unittest
@@ -16,7 +17,7 @@ from agentica.skills.skill import Skill
 from agentica.skills.skill_loader import SkillLoader
 from agentica.skills.skill_registry import SkillRegistry
 
-BUNDLED = ("agentica", "multi-agent")
+BUNDLED = ("agentica", "cron", "multi-agent", "worktree")
 
 
 class TestBundledSkillsShip(unittest.TestCase):
@@ -44,7 +45,9 @@ class TestBundledSkillsShip(unittest.TestCase):
             registry.register(loader.load_skill(skill_md, "bundled"))
         cmds = registry.auto_commands()
         self.assertEqual(cmds["/agentica"].name, "agentica")
+        self.assertEqual(cmds["/cron"].name, "cron")
         self.assertEqual(cmds["/multi-agent"].name, "multi-agent")
+        self.assertEqual(cmds["/worktree"].name, "worktree")
 
     def test_loading_registers_exactly_these_as_bundled(self):
         """The bundled set is closed on purpose, so adding to it is a decision.
@@ -112,7 +115,7 @@ class TestBundledSkillsArePreemptable(unittest.TestCase):
 
 
 class TestSystemSkillsAreProductOnly(unittest.TestCase):
-    """SDK load_skills must not register or materialize agentica/multi-agent."""
+    """SDK load_skills must not register or materialize bundled product skills."""
 
     def test_sdk_load_does_not_register_bundled_names(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -121,7 +124,9 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
                 loader.home_dir = Path(tmp)
                 registry = loader.load_all(SkillRegistry())
         self.assertIsNone(registry.get("agentica"))
+        self.assertIsNone(registry.get("cron"))
         self.assertIsNone(registry.get("multi-agent"))
+        self.assertIsNone(registry.get("worktree"))
 
     def test_sdk_load_skips_leftover_system_dir(self):
         """A stale ``.system`` dir from an older CLI must not be picked up."""
@@ -189,7 +194,9 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
                 tool = SkillTool(auto_load=True)
                 tool.initialize()
         self.assertIsNone(tool.registry.get("agentica"))
+        self.assertIsNone(tool.registry.get("cron"))
         self.assertIsNone(tool.registry.get("multi-agent"))
+        self.assertIsNone(tool.registry.get("worktree"))
 
     def test_skill_tool_after_product_load_keeps_system_skills(self):
         """CLI create_agent preloads via load_system_skills, then SkillTool
@@ -245,6 +252,28 @@ class TestBundledSkillContent(unittest.TestCase):
         self.assertIn("tmux kill-session", body)
         self.assertIn("tmux attach", body)
         self.assertIn("never by session id", body)
+        self.assertIn("IS your user", body)
+        self.assertIn("goes back to the sender with `send_message`", body)
+        self.assertIn("goes in a file and the message carries its absolute path", body)
+
+    def test_the_cron_skill_points_at_the_tool_and_both_daemon_surfaces(self):
+        body = self._body("cron")
+        self.assertIn("cronjob", body)
+        self.assertIn("self-contained", body)
+        self.assertIn("/cron daemon on", body)
+        self.assertIn("cron.enabled", body)
+        self.assertIn("deployment", body)
+        self.assertIn("cannot type slash commands", body)
+        for action in ("action='create'", "action='list'", "action='pause'"):
+            self.assertNotIn(action, body)
+
+    def test_the_worktree_skill_forbids_execute_git_and_points_at_the_tool(self):
+        body = self._body("worktree")
+        self.assertIn("git worktree add", body)
+        self.assertIn("worktree", body)
+        self.assertIn("list_agents", body)
+        self.assertIn("/worktree", body)
+        self.assertIn("cannot type slash commands", body)
 
 
 if __name__ == "__main__":

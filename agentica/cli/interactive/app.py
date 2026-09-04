@@ -721,9 +721,9 @@ def run_interactive(
             # A slash command is a shortcut for the human at this keyboard, so
             # only typed input dispatches one. Relayed text (a peer message, a
             # finished job's report) stays plain text — the single place that
-            # enforces what PEER_MESSAGING_POLICY promises the sender. Until now
-            # it held only by accident: `format_for_model` happens to prefix an
-            # authority header, so the first word was never `/compact`.
+            # enforces what the bundled multi-agent skill promises the sender.
+            # Until now it held only by accident: `format_for_model` happens to
+            # prefix an authority header, so the first word was never `/compact`.
             is_command = not already_shown and (
                 first_word in COMMAND_HANDLERS or first_word in skill_cmds
             )

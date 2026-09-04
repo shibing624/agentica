@@ -135,6 +135,7 @@ def show_help(skills_registry=None):
             "/stop <id|all>":   "Stop background tasks (needs a target; Ctrl+C stops the current run)",
             "/list-agents":     "List your other live sessions (/peers alias)",
             "/send-message":    "Message another session yourself (/send alias)",
+            "/worktree":        "This session's git worktree: status | use <name> | merge | remove",
         },
         "Configure": {
             "/model [p/m]":     "Show or switch model",

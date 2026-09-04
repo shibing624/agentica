@@ -139,6 +139,12 @@ class TestCLIAwareness(unittest.TestCase):
         self.assertIs(COMMAND_REGISTRY["/agents"][0], cli_tools_skills._cmd_agents)
         self.assertIs(COMMAND_REGISTRY["/agent"][0], cli_tools_skills._cmd_agents)
 
+    def test_cmd_worktree_registered(self):
+        from agentica.cli.commands.worktree_cmd import _cmd_worktree
+
+        self.assertIn("/worktree", COMMAND_REGISTRY)
+        self.assertIs(COMMAND_REGISTRY["/worktree"][0], _cmd_worktree)
+
     def test_cmd_ps_registered(self):
         self.assertIn("/ps", COMMAND_REGISTRY)
         self.assertIs(COMMAND_REGISTRY["/ps"][0], cli_runtime_commands._cmd_ps)
