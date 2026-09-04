@@ -355,7 +355,6 @@ tools = get_builtin_tools(work_dir="./")
 | `duckduckgo` | DuckDuckGo | 不需要 | 直连 HTML 端点，无额外依赖 |
 | `bocha` | 博查 | `BOCHA_API_KEY` | 中文效果好 |
 | `serper` | Google/Serper | `SERPER_API_KEY` | |
-| `serply` | Google/[Serply](https://serply.io) | `SERPLY_API_KEY` | 同一个 key 也可搜 Google News / Scholar：`AGENTICA_SERPLY_SEARCH_TYPE=news|scholar`（默认 `web`），见 [serply.io/docs](https://serply.io/docs) |
 | `zhipu` | 智谱 Web Search | `ZAI_API_KEY` | 4 档引擎，见下 |
 | `mcp` | 任意 MCP 搜索服务 | 可选 | 见「自定义引擎」 |
 
@@ -476,7 +475,6 @@ agent = DeepAgent(
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.duckduckgo_tool import DuckDuckGoTool
 from agentica.tools.search_serper_tool import SearchSerperTool  # SERPER_API_KEY
-from agentica.tools.search_serply_tool import SearchSerplyTool  # SERPLY_API_KEY, search_type="web"|"news"|"scholar"
 from agentica.tools.search_exa_tool import SearchExaTool        # EXA_API_KEY
 
 agent = Agent(tools=[DuckDuckGoTool()])

@@ -241,7 +241,7 @@ def main():
                 sys.stdout.flush()
             else:
                 con.print()  # final newline
-        except (KeyboardInterrupt, AgentCancelledError):
+        except (KeyboardInterrupt, InterruptedError, AgentCancelledError):
             con.print("\n[yellow]Interrupted.[/yellow]")
             assert agent_instance.model is not None
             con.print(

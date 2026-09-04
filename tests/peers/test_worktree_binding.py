@@ -44,11 +44,33 @@ def _binder(work_dir, agent=None):
     ), agent, cfg
 
 
+class TestReleaseOnlyAfterEntering:
+    def test_release_skips_git_when_session_never_entered_a_worktree(self, repo, monkeypatch):
+        wt = ensure(str(repo), "docs")
+        binder, _, _ = _binder(wt.path)
+        probed = []
+        monkeypatch.setattr(worktrees, "is_git_repo", lambda *_a, **_k: probed.append(True) or True)
+        assert binder.release() is None
+        assert probed == []
+        assert Path(wt.path).is_dir()
+
+    def test_release_swallows_getcwd_eintr_when_entered(self, monkeypatch):
+        def boom():
+            raise InterruptedError(4, "Interrupted system call")
+
+        monkeypatch.setattr("os.getcwd", boom)
+        binder, _, _ = _binder("/unused")
+        binder.mark_entered()
+        binder._agent_config.clear()
+        assert binder.release() is None
+
+
 class TestReleaseOwnsOnlyWtBranches:
     def test_release_does_not_delete_a_detached_foreign_worktree(self, repo, tmp_path):
         inspect = tmp_path / "inspect"
         _git(repo, "worktree", "add", "--detach", str(inspect), "HEAD")
         binder, _, _ = _binder(inspect)
+        binder.mark_entered()
         assert binder.release() is None
         assert inspect.is_dir()
 
@@ -59,6 +81,7 @@ class TestReleaseKeepsLockOnUniqueWork:
         assert worktrees.claim_lock(wt.path) is True
         (Path(wt.path) / "dirty.py").write_text("nope\n")
         binder, _, _ = _binder(wt.path)
+        binder.mark_entered()
         assert binder.release() is None
         entry = worktrees.resolve_entry(wt.path)
         assert entry.locked

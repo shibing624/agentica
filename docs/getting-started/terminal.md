@@ -122,7 +122,7 @@ agentica --help
 
 ```
 cogvideo, cogview, dalle, image_analysis, ocr, video_analysis,
-arxiv, baidu_search, dblp, duckduckgo, search_bocha, search_exa, search_serper, search_serply, wikipedia,
+arxiv, baidu_search, dblp, duckduckgo, search_bocha, search_exa, search_serper, wikipedia,
 browser, jina, newspaper, url_crawler,
 calculator, code, sql, weather, yfinance,
 mcp, skill, ...

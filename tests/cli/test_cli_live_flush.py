@@ -223,3 +223,57 @@ class TestGenericExceptionFlushesLive(unittest.TestCase):
 
         self.assertIn("execute", buf.getvalue())
         self.assertIn("pytest", buf.getvalue())
+
+
+class TestInterruptedSyscallIsCancel(unittest.TestCase):
+    def test_eintr_is_user_cancel_not_provider_error(self):
+        from io import StringIO
+        from rich.console import Console
+        from agentica.cli.interactive.stream_loop import _process_stream_response
+
+        buf = StringIO()
+        con = Console(file=buf, width=120, force_terminal=False, no_color=True)
+
+        def _stream(*_a, **_k):
+            raise InterruptedError(4, "Interrupted system call")
+
+        agent = SimpleNamespace(
+            model=SimpleNamespace(
+                usage=SimpleNamespace(request_usage_entries=[], request_summary=lambda: None),
+                supports_images=False,
+                id="fake",
+                context_window=128000,
+            ),
+            session_id="s",
+            _session_log=SimpleNamespace(exists=lambda: False),
+            working_memory=SimpleNamespace(messages=[Message(role="user", content="hi")]),
+            _cancelled=False,
+            _running=False,
+            _event_callback=None,
+            name="Agent",
+            cancel=MagicMock(),
+            run_response=SimpleNamespace(break_reason=None, break_message=None),
+            run_stream_sync=_stream,
+        )
+        cp = MagicMock()
+        tui_state = {
+            "cost_usd": 0.0,
+            "active_seconds": 0.0,
+            "total_api_calls": 0,
+            "goal_tokens_used": 0,
+            "debug": False,
+            "session_started_at": time.monotonic(),
+            "work_dir": "/tmp",
+        }
+        with patch(
+            "agentica.cli.interactive.stream_loop.get_console", return_value=con,
+        ), patch(
+            "agentica.cli.interactive.stream_loop.get_turn_checkpointer", return_value=cp,
+        ), patch(
+            "agentica.cli.interactive.stream_loop.display_agent_execution_error",
+        ) as err:
+            _process_stream_response(agent, "?", tui_state)
+
+        err.assert_not_called()
+        agent.cancel.assert_called()
+        self.assertIn("Agent cancelled", buf.getvalue())

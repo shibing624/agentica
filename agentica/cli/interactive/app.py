@@ -326,6 +326,7 @@ def run_interactive(
     # checkout: someone who asked for isolation is worse off silently editing the
     # same files as three other sessions.
     requested_worktree = agent_config.pop("worktree", None)
+    started_in_worktree = False
     if requested_worktree:
         from agentica.worktrees import WorktreeError, claim_lock, ensure as ensure_worktree
 
@@ -339,6 +340,7 @@ def run_interactive(
             return
         claim_lock(bound.path)
         agent_config["work_dir"] = bound.path
+        started_in_worktree = True
         get_console().print(
             f"[dim]Worktree {bound.branch_short}: {bound.path}[/dim]"
         )
@@ -380,6 +382,8 @@ def run_interactive(
         get_peers=lambda: state.peer_session,
         get_tui_state=lambda: tui_state,
     )
+    if started_in_worktree:
+        worktree_binder.mark_entered()
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
         ask_user_question_callback=_cli_ask_user_question_callback,
@@ -1079,7 +1083,7 @@ def run_interactive(
     try:
         with patch_stdout():
             app.run()
-    except (EOFError, KeyboardInterrupt, BrokenPipeError):
+    except (EOFError, KeyboardInterrupt, BrokenPipeError, InterruptedError):
         pass
     finally:
         state.should_exit = True
@@ -1093,27 +1097,35 @@ def run_interactive(
             langfuse_thread = start_shutdown_thread()
         except Exception:
             pass
-        _stop_cron(state)
-        state.background_processes.stop()
-        if worktree_binder is not None:
-            removed = worktree_binder.release()
-            if removed:
-                get_console().print(f"[dim]Removed unused worktree {removed}[/dim]")
-        if state.peer_session is not None:
-            state.peer_session.unpublish()
-        set_active_console(None)
-        set_default_ask_user_question_callback(None)
-        _restore_sigquit_escape(sigquit_installation)
-        _clear_output_pause()
+        # A leftover Ctrl+C / EINTR during getcwd, git, or lock I/O used to
+        # escape this finally and skip the goodbye line entirely.
+        try:
+            _stop_cron(state)
+            state.background_processes.stop()
+            if worktree_binder is not None:
+                removed = worktree_binder.release()
+                if removed:
+                    get_console().print(f"[dim]Removed unused worktree {removed}[/dim]")
+            if state.peer_session is not None:
+                state.peer_session.unpublish()
+            set_active_console(None)
+            set_default_ask_user_question_callback(None)
+            _restore_sigquit_escape(sigquit_installation)
+            _clear_output_pause()
+        except (KeyboardInterrupt, InterruptedError, BrokenPipeError):
+            pass
 
-    _print_interactive_exit_summary(state, tui_state)
-    get_console().print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")
+    try:
+        _print_interactive_exit_summary(state, tui_state)
+        get_console().print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")
 
-    if langfuse_thread is not None:
-        # Cap the flush well below the consumer-poll sleep (~2s): on a
-        # reachable host force_flush ships in ~0.1-0.3s, so 0.8s keeps the
-        # real spans; what we cut is langfuse's idle polling joins.
-        langfuse_thread.join(timeout=0.8)
+        if langfuse_thread is not None:
+            # Cap the flush well below the consumer-poll sleep (~2s): on a
+            # reachable host force_flush ships in ~0.1-0.3s, so 0.8s keeps the
+            # real spans; what we cut is langfuse's idle polling joins.
+            langfuse_thread.join(timeout=0.8)
+    except (KeyboardInterrupt, InterruptedError, BrokenPipeError):
+        pass
 
 
 __all__ = ['_maybe_start_cron', '_stop_cron', 'run_interactive']

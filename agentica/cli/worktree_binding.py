@@ -54,6 +54,9 @@ class WorktreeBinder:
         self._get_agent = get_agent
         self._get_peers = get_peers
         self._get_tui_state = get_tui_state
+        # True only after ``--worktree`` or ``switch()``. Plain CLI sessions
+        # must not run git teardown on every exit.
+        self._entered = False
 
     # -- state -------------------------------------------------------------
 
@@ -104,6 +107,7 @@ class WorktreeBinder:
                     f" another live session ({holder}) is in this worktree — "
                     "sharing it; expect index.lock contention."
                 )
+            self._entered = True
             return (
                 f"Already working in {worktree.path} "
                 f"(branch {worktree.branch_short}); nothing to move.{extra}"
@@ -111,6 +115,7 @@ class WorktreeBinder:
 
         previous = os.path.realpath(cwd)
         state = self._relocate(worktree.path)
+        self._entered = True
         if os.path.realpath(previous) != os.path.realpath(worktrees.main_root(worktree.path)):
             worktrees.release_lock(previous)
 
@@ -157,6 +162,7 @@ class WorktreeBinder:
         main = worktrees.main_root(cwd)
         root = worktrees.current_root(cwd)
         self._relocate(main)
+        self._entered = False
         leftover = ""
         try:
             worktrees.remove(root)
@@ -189,38 +195,51 @@ class WorktreeBinder:
         worktrees.check_removable(root)
         self._relocate(main)
         worktrees.remove(root)
+        self._entered = False
         return (
             f"Removed worktree {root} and returned to {main}. "
             "The branch is gone if it had no unique commits."
         )
 
+    def mark_entered(self) -> None:
+        """Record that this session is in a managed worktree (``--worktree``)."""
+        self._entered = True
+
     def release(self) -> Optional[str]:
         """Session teardown: delete a clean unused *agentica* worktree.
 
-        Called from the CLI ``finally`` so a ``--worktree`` that never produced
-        unique work does not leak a directory. Foreign checkouts (detached,
+        Only runs if this session actually entered one (``--worktree`` or
+        ``switch``). Called from the CLI ``finally`` so that checkout does not
+        leak when it never produced unique work. Foreign checkouts (detached,
         Claude Code, a hand-made ``git worktree add``) are left alone. Unique
         work (dirty or unmerged) is left on disk *and stays locked*; the next
         ``use`` of the same name steals the lock once this pid is dead.
         """
-        cwd = self.work_dir()
-        if not worktrees.is_git_repo(cwd):
+        if not self._entered:
             return None
         try:
-            root = worktrees.current_root(cwd)
-            main = worktrees.main_root(cwd)
-            entry = worktrees.resolve_entry(root)
-        except worktrees.WorktreeError:
-            return None
-        if entry.is_main or not worktrees.is_managed(entry):
-            return None
-        from agentica.cli.session_resume import enter_work_dir
-        enter_work_dir(main)
-        try:
-            worktrees.remove(root)
-            self._agent_config["work_dir"] = main
-            return root
-        except worktrees.WorktreeError:
+            cwd = self.work_dir()
+            if not worktrees.is_git_repo(cwd):
+                return None
+            try:
+                root = worktrees.current_root(cwd)
+                main = worktrees.main_root(cwd)
+                entry = worktrees.resolve_entry(root)
+            except worktrees.WorktreeError:
+                return None
+            if entry.is_main or not worktrees.is_managed(entry):
+                return None
+            from agentica.cli.session_resume import enter_work_dir
+            enter_work_dir(main)
+            try:
+                worktrees.remove(root)
+                self._agent_config["work_dir"] = main
+                return root
+            except worktrees.WorktreeError:
+                return None
+        except (KeyboardInterrupt, InterruptedError):
+            # Session teardown: a leftover Ctrl+C / EINTR must not dump a
+            # traceback in place of the goodbye line.
             return None
 
     def _relocate(self, target: str):

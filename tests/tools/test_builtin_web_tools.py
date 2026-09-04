@@ -230,7 +230,6 @@ class TestWebSearchBackendSignatureUniformity:
         from agentica.tools.search_bocha_tool import SearchBochaTool
         from agentica.tools.search_mcp_tool import McpSearchTool
         from agentica.tools.search_serper_tool import SearchSerperTool
-        from agentica.tools.search_serply_tool import SearchSerplyTool
         from agentica.tools.zhipu_web_search_tool import ZhipuWebSearchTool
 
         cases = [
@@ -238,7 +237,6 @@ class TestWebSearchBackendSignatureUniformity:
             (DuckDuckGoTool, "duckduckgo_search"),
             (SearchBochaTool, "search_bocha"),
             (SearchSerperTool, "search_google"),
-            (SearchSerplyTool, "search_serply"),
             (ZhipuWebSearchTool, "zhipu_web_search"),
             (McpSearchTool, "mcp_search"),
         ]

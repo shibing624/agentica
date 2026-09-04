@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### breaking
+- **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
+
 #### fixes
+- **CLI 退出 / 回合里的 `EINTR` 不再甩堆栈**：macOS 上 Ctrl+C 会打断 `getcwd` 等系统调用，Python 抛的是 `InterruptedError`（`[Errno 4] Interrupted system call`），不是 `KeyboardInterrupt`。以前回合里当成「provider 挂了」，`finally` 里无条件 `worktree_binder.release()`（没开 `--worktree` 也跑 git/`getcwd`）再中一次就跳过告别语。现在没进过托管 worktree 的会话退出是空操作；进过的也按用户中断处理，清理失败不挡正常结束。
 - **流式中途断流按 `max_api_retry` 同 turn 重发**：SSE 被掐（`incomplete chunked read`）发生在已吐 chunk 之后，`stream_with_retry` / `_call_with_retry` 都接不住。Runner 消费点回滚本轮 `model_response` 内容并重开流，预算与同模型 API retry 共用（CLI 默认 2，即再打一次）；耗尽照旧抛。已 yield 的 chunk 收不回——交互会重打一段，`--print` / delegate 的 stdout 会拼上半截。同时修了 `_call_with_retry` 分类：`RETRYABLE`（含 `incomplete chunked read`）先于 `FALLBACK_ONLY`（含 `connection`），否则这类断流永远走 fallback、从不在同模型上重试。
 - **`apply_patch` 信封按 Codex/OpenCode 宽松提取**：小模型常把补丁包进 ` ```patch ` 围栏、前面加说明、漏 `*** End Patch`，或写成 `{"patch":"..."}`，以前一律报 `Patch must start with '*** Begin Patch'`。现在找出 Begin/End（或裸的 `*** Update/Add/Delete File:`）再解析；hunk 仍精确匹配，缺 File 头或行首不是空格/`-`/`+` 照旧拒绝。
 - **`apply_patch` 对不上时点出那一行**：`Hunk N: context not found: '…'` 带上 hunk 里文件中不存在的那一行，不再只报一句 not found。不回 Expected/Actual 预览。

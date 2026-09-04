@@ -22,7 +22,6 @@ import pytest
 # (module, class, ctor kwargs, functions that must be parallelizable)
 READ_ONLY_TOOLS = [
     ("agentica.tools.search_serper_tool", "SearchSerperTool", {"api_key": "fake"}, ["search_google"]),
-    ("agentica.tools.search_serply_tool", "SearchSerplyTool", {"api_key": "fake"}, ["search_serply"]),
     ("agentica.tools.search_exa_tool", "SearchExaTool", {"api_key": "fake"}, ["search_exa"]),
     ("agentica.tools.search_bocha_tool", "SearchBochaTool", {"api_key": "fake"}, ["search_bocha"]),
     ("agentica.tools.baidu_search_tool", "BaiduSearchTool", {}, ["baidu_search"]),

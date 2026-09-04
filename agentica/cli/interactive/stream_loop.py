@@ -571,7 +571,10 @@ def _process_stream_response(
             _set_phase("idle")
             con.print("[info]Agent returned no content.[/info]")
 
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, InterruptedError):
+        # Ctrl+C is KeyboardInterrupt on the TUI thread. A worker in getcwd /
+        # read / wait sees the same SIGINT as InterruptedError (EINTR) — that
+        # is still a user interrupt, not a provider failure.
         current_agent.cancel()
         _set_phase("idle")
         if display is not None:

@@ -556,7 +556,6 @@ env: {}
 #   # --- search / web tools ---
 #   JINA_API_KEY:               # read_url_content(reader) via Jina
 #   SERPER_API_KEY:             # Google search via serper.dev
-#   SERPLY_API_KEY:             # Google search via serply.io (web / news / scholar)
 #   EXA_API_KEY:                # Exa search
 #   BOCHA_API_KEY:              # Bocha search
 #   # --- shell tool safety (execute/run_shell_command) ---

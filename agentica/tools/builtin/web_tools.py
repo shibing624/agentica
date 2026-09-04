@@ -72,14 +72,6 @@ def _serper_backend(api_key: Optional[str]) -> Any:
     return SearchSerperTool(api_key=api_key)
 
 
-def _serply_backend(api_key: Optional[str]) -> Any:
-    """One Serply key covers Google web, News and Scholar, so the vertical is selectable."""
-    from agentica.tools.search_serply_tool import DEFAULT_SEARCH_TYPE, SearchSerplyTool
-
-    search_type = os.getenv("AGENTICA_SERPLY_SEARCH_TYPE", DEFAULT_SEARCH_TYPE)
-    return SearchSerplyTool(api_key=api_key, search_type=search_type)
-
-
 def _zhipu_backend(api_key: Optional[str]) -> Any:
     """Zhipu's engines differ in quality *and* price, so the tier is selectable."""
     from agentica.tools.zhipu_web_search_tool import DEFAULT_SEARCH_ENGINE, ZhipuWebSearchTool
@@ -121,7 +113,6 @@ _BACKENDS: Dict[str, WebSearchBackend] = {
     "exa": WebSearchBackend(_exa_backend, "mcp_search", "EXA_API_KEY", key_required=False),
     "bocha": WebSearchBackend(_bocha_backend, "search_bocha", "BOCHA_API_KEY", key_required=True),
     "serper": WebSearchBackend(_serper_backend, "search_google", "SERPER_API_KEY", key_required=True),
-    "serply": WebSearchBackend(_serply_backend, "search_serply", "SERPLY_API_KEY", key_required=True),
     "zhipu": WebSearchBackend(_zhipu_backend, "zhipu_web_search", "ZAI_API_KEY", key_required=True),
     "mcp": WebSearchBackend(_custom_mcp_backend, "mcp_search", "AGENTICA_WEB_SEARCH_API_KEY"),
 }
@@ -183,7 +174,7 @@ class BuiltinWebSearchTool(Tool):
 
         Args:
             provider: Engine name, e.g. "exa", "baidu", "bocha", "serper",
-                "serply", "duckduckgo", "zhipu", "mcp", or any name passed to
+                "duckduckgo", "zhipu", "mcp", or any name passed to
                 ``register_web_search_backend``. Defaults to the
                 ``AGENTICA_WEB_SEARCH`` env var, then to
                 ``DEFAULT_WEB_SEARCH_PROVIDER`` (``exa``).
