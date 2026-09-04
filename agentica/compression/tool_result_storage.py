@@ -187,12 +187,23 @@ def _line_count(content: str) -> int:
     return content.count("\n") + (0 if content.endswith("\n") else 1)
 
 
-def _build_persisted_message(file_path: str, content: str) -> str:
+def _already_shrunk(content: str) -> bool:
+    return "<persisted-output>" in content or "<truncated-output>" in content
+
+
+def _build_persisted_message(
+    file_path: str,
+    content: str,
+    *,
+    size_bytes: Optional[int] = None,
+    n_lines: Optional[int] = None,
+) -> str:
     """Preview + the path holding the full copy, for a session that can read it."""
-    n_lines = _line_count(content)
+    kb = (size_bytes / 1024) if size_bytes is not None else _size_kb(content)
+    lines = n_lines if n_lines is not None else _line_count(content)
     return (
         f"<persisted-output>\n"
-        f"Output too large ({_size_kb(content):.1f} KB, {n_lines} lines). "
+        f"Output too large ({kb:.1f} KB, {lines} lines). "
         f"Full output saved to:\n"
         f"{file_path}\n\n"
         f"Use read_file (tail or offset/limit) or grep on that path for the rest.\n\n"
@@ -286,10 +297,37 @@ def maybe_persist_result(
 
     Returns:
         Original content (if under threshold) or a bounded preview.
+        Never raises: a failed shrink still returns a truncated preview, so a
+        50 MB ``execute`` dump cannot survive into the next model request.
     """
     if max_result_size_chars is None:
         return content
+    if _already_shrunk(content):
+        return content
+    try:
+        return _maybe_persist_result_inner(
+            tool_name, tool_use_id, content,
+            session_id=session_id, cwd=cwd,
+            max_result_size_chars=max_result_size_chars,
+            user_id=user_id, recoverable=recoverable,
+        )
+    except Exception as persist_err:
+        logger.warning(f"Tool result persistence failed: {persist_err}")
+        return _build_truncated_message(content[: PREVIEW_CHARS * 3])
 
+
+def _maybe_persist_result_inner(
+    tool_name: str,
+    tool_use_id: str,
+    content: str,
+    *,
+    session_id: str,
+    cwd: Optional[str],
+    max_result_size_chars: int,
+    user_id: Optional[str],
+    recoverable: bool,
+) -> str:
+    """Shrink one oversized result. Caller wraps this so it cannot leak."""
     # ── Classify first: image/binary should never sit raw in context, even
     #    when under the size threshold (a 5 KB base64 image is still noise). ──
     from agentica.compression.tool_result_classification import (
@@ -369,7 +407,7 @@ def enforce_tool_batch_budget(
     sizes = []
     for msg in tool_results:
         content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-        already_shrunk = "<persisted-output>" in content or "<truncated-output>" in content
+        already_shrunk = _already_shrunk(content)
         sizes.append((count_text_tokens(content, model_id), already_shrunk))
 
     total = sum(t for t, _ in sizes)

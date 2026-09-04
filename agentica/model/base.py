@@ -316,6 +316,11 @@ class Model(ABC):
         (e.g. sync clients, or subclasses without a cached client).
         """
         client = getattr(self, "client", None)
+        # Detach first so a cancelled aclose cannot leave the client cached
+        # for __del__ on the next (already closed) loop.
+        self.client = None
+        if getattr(self, "_client_loop", None) is not None:
+            self._client_loop = None
         if client is None:
             return
         # The openai / anthropic async SDK clients expose an async ``close()``;
@@ -329,13 +334,12 @@ class Model(ABC):
             result = closer()
             if inspect.isawaitable(result):
                 await result
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             # Best-effort teardown at an I/O boundary — never let a failed
-            # close abort the run's cleanup.
+            # close abort the run's cleanup. CancelledError: a second Ctrl+C
+            # during aclose used to skip the detach above and dump
+            # "Event loop is closed" from httpx __del__.
             pass
-        self.client = None
-        if getattr(self, "_client_loop", None) is not None:
-            self._client_loop = None
 
     def _get_model_run_state(self) -> ModelRunState:
         state = _MODEL_RUN_STATE.get()

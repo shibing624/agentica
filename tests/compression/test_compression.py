@@ -512,6 +512,26 @@ class TestMaybePersistResult(unittest.TestCase):
         result = maybe_persist_result("test_tool", "call_2", big, max_result_size_chars=None)
         self.assertEqual(result, big, "None threshold should never persist")
 
+    def test_already_shrunk_is_left_alone(self):
+        from agentica.compression.tool_result_storage import maybe_persist_result
+        body = "<persisted-output>\npreview\n</persisted-output>"
+        result = maybe_persist_result("execute", "call_x", body, max_result_size_chars=10)
+        self.assertEqual(result, body)
+
+    def test_persist_failure_still_returns_a_truncated_preview(self):
+        from agentica.compression.tool_result_storage import maybe_persist_result
+        def boom(*_a, **_k):
+            raise RuntimeError("disk full")
+        with patch(
+            "agentica.compression.tool_result_storage._maybe_persist_result_inner",
+            boom,
+        ):
+            out = maybe_persist_result(
+                "execute", "call_fail", "Z" * 8000, max_result_size_chars=50,
+            )
+        self.assertIn("<truncated-output>", out)
+        self.assertNotIn("Z" * 8000, out)
+
     def test_large_content_persisted(self):
         from agentica.compression.tool_result_storage import maybe_persist_result
         with tempfile.TemporaryDirectory() as tmpdir:

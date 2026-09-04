@@ -21,17 +21,25 @@ from agentica.tools.background_processes import (
 from agentica.tools.builtin import BuiltinExecuteTool
 
 
+class _BlockingPipe:
+    def __init__(self, started: asyncio.Event):
+        self._started = started
+
+    async def read(self, n: int = -1) -> bytes:
+        self._started.set()
+        await asyncio.Future()
+        return b""
+
+
 class BlockingSubprocess:
-    """Minimal subprocess double whose first communicate call blocks."""
+    """Minimal subprocess double whose first pipe read blocks."""
 
     def __init__(self):
         self.started = asyncio.Event()
         self.returncode = None
         self._transport = None
-
-    async def communicate(self):
-        self.started.set()
-        await asyncio.Future()
+        self.stdout = _BlockingPipe(self.started)
+        self.stderr = _BlockingPipe(self.started)
 
 
 class TestBuiltinExecuteTool:
@@ -63,6 +71,7 @@ class TestBuiltinExecuteTool:
         assert "(find, ls, cat, awk)" not in doc
         assert "Prefer one long" in doc
         assert "<<'EOF'" in doc
+        assert "read_file" in doc
         assert "DO NOT use newlines" not in doc
         assert "avoid cd when possible" not in doc
         assert "swift" not in doc
@@ -80,31 +89,40 @@ class TestBuiltinExecuteTool:
         assert "from-heredoc" in result
         assert "after" in result
 
-    def test_execute_returns_full_output_and_declares_persist_threshold(self, tmp_dir):
-        """The tool no longer truncates or persists itself: Layer 0 in
-        Model.run_function_calls owns that, with real session/user ids and a
-        recoverability check. Direct calls return honest output; the
-        threshold the framework reads is max_output_length."""
+    def test_execute_oversized_output_is_persisted_not_returned_whole(self, tmp_dir, monkeypatch):
+        """A cat of a huge file must not enter the result string. Layer 1
+        cannot evict the live round, so the capture itself has to bound it."""
+        projects = Path(tmp_dir) / "projects"
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(projects))
         tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=400)
         payload = "H" * 80 + "M" * 400 + "T" * 80
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(' + repr(payload) + ')')}"
         result = asyncio.run(tool.execute(command))
-        assert "M" * 400 in result  # middle preserved — no silent truncation
-        assert "OUTPUT TRUNCATED" not in result
+        assert "<persisted-output>" in result
+        assert "M" * 400 not in result
+        assert "...[truncated]" not in result
+        path_line = next(
+            ln.strip() for ln in result.splitlines()
+            if ln.strip().endswith(".txt") and "tool-results" in ln.replace("\\", "/")
+        )
+        assert payload in Path(path_line).read_text(encoding="utf-8")
         assert tool.functions["execute"].max_result_size_chars == 400
 
-    def test_execute_error_path_returns_full_output(self, tmp_dir):
-        """Failing commands raise with the honest full output — no silent
-        middle drop. Layer 0 persists it via function_call.error (see the
-        integration test below)."""
+    def test_execute_error_path_bounds_output_before_raise(self, tmp_dir, monkeypatch):
+        """Failing commands still must not leak the full dump through error."""
+        projects = Path(tmp_dir) / "projects"
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(projects))
         tool = BuiltinExecuteTool(work_dir=tmp_dir, max_output_length=400)
         payload = "M" * 2000
         command = (
             f"{shlex.quote(sys.executable)} -c "
             f"{shlex.quote('print(' + repr(payload) + '); import sys; sys.exit(1)')}"
         )
-        with pytest.raises(RuntimeError, match="exited with code 1"):
+        with pytest.raises(RuntimeError, match="exited with code 1") as excinfo:
             asyncio.run(tool.execute(command))
+        err = str(excinfo.value)
+        assert "<persisted-output>" in err
+        assert "M" * 2000 not in err
 
     def test_failed_execute_persists_via_layer0(self, tmp_dir, monkeypatch):
         """A failing command's oversized output reaches the model as a

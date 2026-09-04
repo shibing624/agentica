@@ -362,6 +362,10 @@ class OpenAIChat(Model):
 
     # OpenAI client (async-only)
     client: Optional[AsyncOpenAIClient] = None
+    # Same loop-affinity rule as Anthropic: the CLI runs each turn on a fresh
+    # asyncio.run loop. Reusing a client whose httpx pool is bound to a closed
+    # loop prints "Event loop is closed" from aclose/__del__.
+    _client_loop: Optional[Any] = field(default=None, init=False, repr=False)
 
     # Internal parameters. Not used for API requests
     # Whether to use the structured outputs with this Model.
@@ -408,7 +412,18 @@ class OpenAIChat(Model):
         Returns:
             AsyncOpenAIClient: An instance of the async OpenAI client.
         """
-        if self.client:
+        if self.client is not None and self._client_loop is None:
+            return self.client
+        try:
+            _loop: Optional[Any] = asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = None
+        if (
+            self.client is not None
+            and _loop is not None
+            and self._client_loop is _loop
+            and not _loop.is_closed()
+        ):
             return self.client
 
         client_params: Dict[str, Any] = self.get_client_params()
@@ -430,6 +445,7 @@ class OpenAIChat(Model):
             self.client = LangfuseAsyncOpenAI(**client_params)
         else:
             self.client = AsyncOpenAIClient(**client_params)
+        self._client_loop = _loop
         return self.client
 
     def _uses_claude_text_tool_call_compatibility(self) -> bool:

@@ -6,9 +6,11 @@
 import asyncio
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 
 from agentica.tools.base import Tool
@@ -21,6 +23,12 @@ from agentica.tools.safety import (
 from agentica.security.redact import redact_tool_outputs_enabled
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
+from agentica.compression.tool_result_storage import (
+    _build_persisted_message,
+    _build_truncated_message,
+    can_recover_spill,
+    get_tool_result_path,
+)
 
 # Unix conventions where a non-zero exit is the answer, not a crashed
 # command. Used only to decide whether to raise; the exit code is still
@@ -70,6 +78,94 @@ def _expected_nonzero_exit(command: str, exit_code: int) -> bool:
 _SELF_DETACHING_COMMAND = re.compile(r"(?<!&)&\s*$")
 _LEADING_SLEEP = re.compile(r"^\s*sleep\s+(\d+(?:\.\d+)?)\b")
 _MAX_FOREGROUND_SLEEP_SECONDS = 120
+# Drain at most this much per stream. A 600k-line source file is tens of MB and
+# fits; ``yes`` / ``/dev/urandom`` must not fill the disk. Hitting the cap kills
+# the process so the drain cannot pin the turn.
+_EXECUTE_SPILL_HARD_CAP_BYTES = 64 * 1024 * 1024
+_PIPE_CHUNK = 65536
+
+
+async def _drain_stream(stream, spool, hard_cap: int) -> tuple[int, int, bool]:
+    """Copy ``stream`` into ``spool`` up to ``hard_cap`` bytes.
+
+    Returns ``(bytes_written, newline_count, hit_hard_cap)``. Hitting the cap
+    stops writing; the caller must then kill the process so a generator like
+    ``yes`` cannot pin the drain.
+    """
+    if stream is None:
+        return 0, 0, False
+    total = 0
+    newlines = 0
+    while True:
+        data = await stream.read(_PIPE_CHUNK)
+        if not data:
+            break
+        if total >= hard_cap:
+            return total, newlines, True
+        room = hard_cap - total
+        chunk = data if len(data) <= room else data[:room]
+        spool.write(chunk)
+        total += len(chunk)
+        newlines += chunk.count(b"\n")
+        if len(data) > room:
+            return total, newlines, True
+    return total, newlines, False
+
+
+def _decode_spool_head_tail(spool, max_chars: int) -> str:
+    """UTF-8 preview of a spool without loading the middle into memory."""
+    spool.seek(0, os.SEEK_END)
+    size = spool.tell()
+    if size == 0:
+        return ""
+    head_n = min(size, max(1, int(max_chars * 0.4)))
+    tail_n = min(size, max_chars - head_n) if size > head_n else 0
+    spool.seek(0)
+    head = spool.read(head_n)
+    if size <= head_n + tail_n:
+        rest = spool.read()
+        return (head + rest).decode("utf-8", errors="replace")
+    spool.seek(size - tail_n)
+    tail = spool.read(tail_n)
+    omitted = size - len(head) - len(tail)
+    return (
+        head.decode("utf-8", errors="replace")
+        + f"\n\n... [{omitted} bytes omitted] ...\n\n"
+        + tail.decode("utf-8", errors="replace")
+    )
+
+
+def _copy_spools_to_path(path: str, stdout_spool, stderr_spool) -> int:
+    """Write stdout then optional stderr to ``path``. Returns bytes written."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    written = 0
+    with open(path, "wb") as fh:
+        stdout_spool.seek(0)
+        while True:
+            chunk = stdout_spool.read(_PIPE_CHUNK)
+            if not chunk:
+                break
+            fh.write(chunk)
+            written += len(chunk)
+        stderr_spool.seek(0, os.SEEK_END)
+        if stderr_spool.tell():
+            marker = b"\n[stderr]\n"
+            fh.write(marker)
+            written += len(marker)
+            stderr_spool.seek(0)
+            while True:
+                chunk = stderr_spool.read(_PIPE_CHUNK)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                written += len(chunk)
+    return written
+
+
+# Default for a single `wait` call when the model omits timeout. Same contract
+# as execute(timeout=...): the caller decides, no silent upper clamp.
+_DEFAULT_WAIT_SECONDS = 300
+_WAIT_POLL_INTERVAL = 0.2
 
 # Default for a single `wait` call when the model omits timeout. Same contract
 # as execute(timeout=...): the caller decides, no silent upper clamp.
@@ -176,6 +272,84 @@ class BuiltinExecuteTool(Tool):
         """
         self._work_dir = Path(work_dir)
 
+    def _spill_target(self) -> tuple[str, Optional[str], Optional[str]]:
+        """``(session_id, user_id, cwd)`` for a captured overflow file."""
+        fn = self.functions.get("execute")
+        agent = fn._agent if fn is not None else None
+        session_id = "default"
+        user_id = None
+        cwd = str(self._work_dir) if self._work_dir else None
+        if agent is not None:
+            session_id = agent.session_id or "default"
+            if agent.workspace is not None:
+                user_id = agent.workspace.user_id
+        return session_id, user_id, cwd
+
+    def _finish_captured_output(
+        self,
+        stdout_spool,
+        stderr_spool,
+        *,
+        out_bytes: int,
+        err_bytes: int,
+        out_lines: int,
+        err_lines: int,
+        hit_hard_cap: bool,
+    ) -> str:
+        """Turn drained pipes into a result that never exceeds ``max_output_length``.
+
+        Under the cap this is the decoded stdout/stderr, same as ``communicate``.
+        Over it, the full bytes stay on disk (or are discarded) and the returned
+        string is a preview — Layer 1 cannot evict the live round, so this is
+        the only bound that can save the next model call.
+        """
+        marker = len(b"\n[stderr]\n") if err_bytes else 0
+        combined = out_bytes + err_bytes + marker
+        under_cap = combined <= self._max_output_length and not hit_hard_cap
+        if under_cap:
+            stdout_spool.seek(0)
+            stderr_spool.seek(0)
+            parts = []
+            if out_bytes:
+                parts.append(stdout_spool.read().decode("utf-8", errors="replace"))
+            if err_bytes:
+                parts.append(
+                    "[stderr]\n" + stderr_spool.read().decode("utf-8", errors="replace")
+                )
+            return "\n".join(parts).strip()
+
+        preview_parts = []
+        if out_bytes:
+            preview_parts.append(_decode_spool_head_tail(stdout_spool, self._max_output_length))
+        if err_bytes:
+            preview_parts.append(
+                "[stderr]\n" + _decode_spool_head_tail(stderr_spool, self._max_output_length)
+            )
+        preview = "\n".join(preview_parts).strip()
+        n_lines = out_lines + err_lines + (1 if err_bytes else 0)
+        if hit_hard_cap:
+            preview = (
+                f"{preview}\n\n[stopped after {_EXECUTE_SPILL_HARD_CAP_BYTES} bytes; "
+                "re-run with a bound (| head / | tail) or read_file the original path]"
+            )
+
+        session_id, user_id, cwd = self._spill_target()
+        names = set(self.functions) if self.functions else {"execute"}
+        if can_recover_spill(names):
+            file_path = get_tool_result_path(
+                f"execute-{uuid4().hex[:12]}",
+                cwd=cwd, session_id=session_id, user_id=user_id,
+            )
+            try:
+                size = _copy_spools_to_path(file_path, stdout_spool, stderr_spool)
+            except OSError as e:
+                logger.warning(f"Failed to persist execute overflow to {file_path}: {e}")
+                return _build_truncated_message(preview)
+            return _build_persisted_message(
+                file_path, preview, size_bytes=size, n_lines=n_lines,
+            )
+        return _build_truncated_message(preview)
+
     async def execute(
             self,
             command: str,
@@ -195,9 +369,11 @@ class BuiltinExecuteTool(Tool):
         (``python3 - <<'EOF'`` … ``EOF``). Newlines in the command string are
         required for a heredoc and are passed through unchanged.
 
-        You own what comes back. Bound each noisy program with ``| head`` /
-        ``| tail``; oversized output is persisted to a session file and the
-        context keeps only a head/tail preview plus the path. Chain dependent
+        Open a file with ``read_file`` (``offset``/``limit`` or ``tail``) so you
+        get numbered lines for ``apply_patch``. A shell dump of a whole file
+        is bounded: oversized stdout is persisted and this result keeps only a
+        preview, but you still spent a turn filling a pipe. Bound each noisy
+        program with ``| head`` / ``| tail``. Chain dependent
         commands with ``&&``, not ``;``. Check state read-only before a write.
         Surgical, context-sensitive edits still belong in ``apply_patch``; a
         one-shot script is for the same substitution across several files, or
@@ -370,74 +546,92 @@ class BuiltinExecuteTool(Tool):
         proc = None
         timed_out = False
         drained = False
+        stdout_spool = tempfile.SpooledTemporaryFile(max_size=self._max_output_length)
+        stderr_spool = tempfile.SpooledTemporaryFile(max_size=self._max_output_length)
+        hit_hard_cap = False
+        out_bytes = err_bytes = 0
+        out_lines = err_lines = 0
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                start_new_session=os.name != "nt",
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=effective_timeout,
-            )
-            drained = True
-        except asyncio.TimeoutError:
-            timed_out = True
-            logger.warning(f"Command timed out after {effective_timeout}s: {command}")
-            raise TimeoutError(
-                f"Command timed out after {effective_timeout} seconds"
-            ) from None
-        finally:
-            # A timeout or a cancelled turn leaves the group running with our
-            # pipes open. `not drained` rather than `returncode is None`: the
-            # shell in `cmd & ...` exits immediately while the grandchild it
-            # backgrounded keeps the write end, which is the state where the
-            # unclosed transport later dumps "Event loop is closed" into the
-            # next turn's TUI.
-            if proc is not None and not drained:
-                await terminate_subprocess(
-                    proc,
-                    process_group=True,
-                    grace_period=5 if timed_out else 0,
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    start_new_session=os.name != "nt",
                 )
-            close_subprocess_transport(proc)
+                (out_bytes, out_lines, out_cap), (err_bytes, err_lines, err_cap) = (
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            _drain_stream(proc.stdout, stdout_spool, _EXECUTE_SPILL_HARD_CAP_BYTES),
+                            _drain_stream(proc.stderr, stderr_spool, _EXECUTE_SPILL_HARD_CAP_BYTES),
+                        ),
+                        timeout=effective_timeout,
+                    )
+                )
+                hit_hard_cap = out_cap or err_cap
+                if hit_hard_cap:
+                    await terminate_subprocess(proc, process_group=True, grace_period=0)
+                elif proc.returncode is None:
+                    await proc.wait()
+                drained = True
+            except asyncio.TimeoutError:
+                timed_out = True
+                logger.warning(f"Command timed out after {effective_timeout}s: {command}")
+                raise TimeoutError(
+                    f"Command timed out after {effective_timeout} seconds"
+                ) from None
+            finally:
+                # A timeout or a cancelled turn leaves the group running with our
+                # pipes open. `not drained` rather than `returncode is None`: the
+                # shell in `cmd & ...` exits immediately while the grandchild it
+                # backgrounded keeps the write end, which is the state where the
+                # unclosed transport later dumps "Event loop is closed" into the
+                # next turn's TUI.
+                if proc is not None and not drained:
+                    await terminate_subprocess(
+                        proc,
+                        process_group=True,
+                        grace_period=5 if timed_out else 0,
+                    )
+                close_subprocess_transport(proc)
 
-        # Combine stdout and stderr
-        output_parts = []
-        if stdout:
-            output_parts.append(stdout.decode("utf-8", errors="replace"))
-        if stderr:
-            output_parts.append(f"[stderr]\n{stderr.decode('utf-8', errors='replace')}")
-
-        output = "\n".join(output_parts).strip()
-
-        if proc.returncode and proc.returncode != 0:
-            output = f"{output}\n\n[Exit code: {proc.returncode}]"
-
-        logger.debug(f"Command exit code: {proc.returncode}")
-        if not output:
-            output = f"Command executed successfully (exit code: {proc.returncode})"
-
-        if redact_tool_outputs_enabled():
-            output = redact_sensitive_text(output)
-
-        if self_detaching:
-            output = (
-                f"{output}\n\n[Note: trailing '&' detached this work; "
-                "it is untracked.]"
+            output = self._finish_captured_output(
+                stdout_spool, stderr_spool,
+                out_bytes=out_bytes, err_bytes=err_bytes,
+                out_lines=out_lines, err_lines=err_lines,
+                hit_hard_cap=hit_hard_cap,
             )
 
-        if (
-            proc.returncode
-            and proc.returncode != 0
-            and not _expected_nonzero_exit(command, proc.returncode)
-        ):
-            raise RuntimeError(
-                f"Command exited with code {proc.returncode}.\n{output}"
-            )
+            if proc.returncode and proc.returncode != 0:
+                output = f"{output}\n\n[Exit code: {proc.returncode}]"
 
-        return output
+            logger.debug(f"Command exit code: {proc.returncode}")
+            if not output:
+                output = f"Command executed successfully (exit code: {proc.returncode})"
+
+            if redact_tool_outputs_enabled():
+                output = redact_sensitive_text(output)
+
+            if self_detaching:
+                output = (
+                    f"{output}\n\n[Note: trailing '&' detached this work; "
+                    "it is untracked.]"
+                )
+
+            if (
+                proc.returncode
+                and proc.returncode != 0
+                and not _expected_nonzero_exit(command, proc.returncode)
+            ):
+                raise RuntimeError(
+                    f"Command exited with code {proc.returncode}.\n{output}"
+                )
+
+            return output
+        finally:
+            stdout_spool.close()
+            stderr_spool.close()
 
     async def wait(self, id: str, timeout: int = _DEFAULT_WAIT_SECONDS) -> str:
         """Blocks until a background command finishes, then reports how it went.
