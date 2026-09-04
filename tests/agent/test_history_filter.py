@@ -266,6 +266,52 @@ def test_strip_pure_tool_call_assistant_is_dropped():
     assert strip_all_tool_artifacts(history) == []
 
 
+def test_strip_thinking_blocks_without_tool_calls():
+    """GPT leftover thinking+signature must not survive a /model switch onto Claude."""
+    history = [
+        _user("hi"),
+        Message(
+            role="assistant",
+            content=[
+                {"type": "thinking", "thinking": "gpt thoughts", "signature": "not-claude"},
+                {"type": "text", "text": "hello"},
+            ],
+        ),
+    ]
+    out = strip_all_tool_artifacts(history)
+    assert [(m.role, m.content) for m in out] == [("user", "hi"), ("assistant", "hello")]
+
+
+def test_strip_thinking_only_assistant_is_dropped():
+    history = [
+        Message(
+            role="assistant",
+            content=[{"type": "thinking", "thinking": "x", "signature": "s"}],
+        ),
+    ]
+    assert strip_all_tool_artifacts(history) == []
+
+
+def test_strip_drops_reasoning_content_on_plain_assistant():
+    history = [
+        _user("q"),
+        Message(role="assistant", content="answer", reasoning_content="secret chain"),
+    ]
+    out = strip_all_tool_artifacts(history)
+    assert [(m.role, m.content) for m in out] == [("user", "q"), ("assistant", "answer")]
+    assert out[1].reasoning_content is None
+
+
+def test_strip_flattens_text_block_lists():
+    history = [
+        _user("q"),
+        Message(role="assistant", content=[{"type": "text", "text": "hello"}]),
+    ]
+    out = strip_all_tool_artifacts(history)
+    assert out[1].content == "hello"
+    assert isinstance(out[1].content, str)
+
+
 def test_strip_keeps_system_when_not_dropping():
     history = [Message(role="system", content="sys"), _user("hi")]
     out = strip_all_tool_artifacts(history, drop_system=False)

@@ -42,6 +42,17 @@ def test_tag_content_block_list_tags_last_block_only():
     assert out[1]["cache_control"] == {"type": "ephemeral"}
 
 
+def test_tag_content_block_skips_trailing_thinking():
+    blocks = [
+        {"type": "text", "text": "a"},
+        {"type": "thinking", "thinking": "plan", "signature": "sig"},
+    ]
+    out = _tag_content_block_cache_control(blocks)
+    assert out[0]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in out[1]
+    assert out[1]["signature"] == "sig"
+
+
 def test_tag_tools_caches_last_tool_only():
     tools = [{"type": "function", "function": {"name": "a"}}, {"type": "function", "function": {"name": "b"}}]
     out = _tag_tools_cache_control(tools)

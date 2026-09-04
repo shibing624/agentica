@@ -49,15 +49,11 @@ def format_cli_log_location() -> Optional[str]:
 
 
 def _sanitize_history_for_model_switch(agent) -> None:
-    """Strip tool artifacts from history so it replays on a different provider.
+    """Keep only user questions and assistant answers across a model switch.
 
-    Cross-provider switches (e.g. OpenAI chat/completions <-> Anthropic
-    /v1/messages) fail because tool calls/results are serialised differently:
-    OpenAI uses flat role="tool" messages + assistant.tool_calls, while
-    Anthropic uses list content blocks (tool_use / tool_result with
-    tool_use_id). Replaying one format on the other API 400s
-    ("unexpected tool_use_id found in tool_result blocks"). We drop every
-    tool artifact (both formats) and keep only plain user/assistant text.
+    Either direction (OpenAI ↔ Claude, native or via a proxy). Thinking and
+    tool rounds stay behind — a switch is a new Q&A round, and those artifacts
+    are what the next provider 400s on.
 
     Both ``wm.runs[].response.messages`` (the source for future prompts) and
     the flat ``wm.messages`` list are sanitised.

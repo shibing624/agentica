@@ -114,11 +114,29 @@ def _has_cacheable_content(content: Any) -> bool:
     return False
 
 
+_THINKING_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
+
+
+def _is_unsigned_thinking_block(block: Any) -> bool:
+    """True for a thinking block Claude would reject as ``Invalid signature``."""
+    if not isinstance(block, dict):
+        return False
+    block_type = block.get("type")
+    if block_type == "thinking":
+        signature = block.get("signature")
+        return not (isinstance(signature, str) and signature)
+    if block_type == "redacted_thinking":
+        data = block.get("data")
+        return not (isinstance(data, str) and data)
+    return False
+
+
 def _tag_content_block_cache_control(content: Any) -> Any:
-    """Ensure ``content`` is a list of blocks and tag the last block ephemeral.
+    """Ensure ``content`` is a list of blocks and tag the last cacheable block.
 
     Accepts str (wrapped into one text block) or a list of content blocks.
     None / empty content is returned unchanged (nothing to cache).
+    Thinking blocks are skipped: tagging them invalidates the signature.
     """
     if content is None:
         return content
@@ -127,9 +145,17 @@ def _tag_content_block_cache_control(content: Any) -> Any:
             return content
         return [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
     if isinstance(content, list) and content:
+        tag_at = None
+        for idx in range(len(content) - 1, -1, -1):
+            block = content[idx]
+            if isinstance(block, dict) and block.get("type") not in _THINKING_BLOCK_TYPES:
+                tag_at = idx
+                break
+        if tag_at is None:
+            return list(content)
         new_blocks = []
         for idx, block in enumerate(content):
-            if idx == len(content) - 1 and isinstance(block, dict):
+            if idx == tag_at and isinstance(block, dict):
                 b = dict(block)
                 b["cache_control"] = {"type": "ephemeral"}
                 new_blocks.append(b)
@@ -598,6 +624,13 @@ class OpenAIChat(Model):
         # boundary. Persistence/replay keep it via to_replay_dict().
         if "reasoning_content" in wire:
             del wire["reasoning_content"]
+        # A thinking block without a signature is never valid to replay
+        # (the signer is gone). Drop it regardless of model id.
+        content = wire.get("content")
+        if isinstance(content, list):
+            filtered = [b for b in content if not _is_unsigned_thinking_block(b)]
+            if filtered != content:
+                wire["content"] = filtered
         return wire
 
     # ── Prompt caching (Anthropic-via-OpenAI proxies) ──

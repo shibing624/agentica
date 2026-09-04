@@ -180,3 +180,33 @@ def test_non_claude_models_keep_incremental_text_streaming():
         ]
 
     assert asyncio.run(run()) == ["Hello", " world"]
+
+
+def test_claude_proxy_drops_unsigned_thinking_on_the_wire():
+    """GPT leftover thinking with an empty signature must not reach Venus/Claude."""
+    model = _claude_proxy_model()
+    payload = model.format_message(
+        Message(
+            role="assistant",
+            content=[
+                {"type": "thinking", "thinking": "stale", "signature": ""},
+                {"type": "text", "text": "ok"},
+            ],
+        )
+    )
+    assert [b["type"] for b in payload["content"]] == ["text"]
+
+
+def test_claude_proxy_keeps_signed_thinking():
+    model = _claude_proxy_model()
+    payload = model.format_message(
+        Message(
+            role="assistant",
+            content=[
+                {"type": "thinking", "thinking": "plan", "signature": "sig-from-this-claude"},
+                {"type": "text", "text": "ok"},
+            ],
+        )
+    )
+    assert payload["content"][0]["type"] == "thinking"
+    assert payload["content"][0]["signature"] == "sig-from-this-claude"

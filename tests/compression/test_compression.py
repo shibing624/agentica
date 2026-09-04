@@ -294,7 +294,7 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
     """JSON-safe shrinking for assistant tool_call arguments."""
 
     def test_shrinks_long_string_leaves_and_preserves_json(self):
-        from agentica.compression.tool_call_args import shrink_tool_call_arguments_json
+        from agentica.compression.tool_call_args import omitted_tool_arg, shrink_tool_call_arguments_json
 
         args = json.dumps({
             "path": "/tmp/example.txt",
@@ -308,8 +308,10 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
 
         self.assertEqual(parsed["path"], "/tmp/example.txt")
         self.assertEqual(parsed["count"], 3)
-        self.assertEqual(parsed["content"], "x" * 20 + "...[truncated]")
-        self.assertEqual(parsed["nested"]["note"], "y" * 20 + "...[truncated]")
+        self.assertEqual(parsed["content"], omitted_tool_arg(100))
+        self.assertEqual(parsed["nested"]["note"], omitted_tool_arg(100))
+        self.assertFalse(parsed["content"].startswith("x"))
+        self.assertNotIn("...[truncated]", parsed["content"])
 
     def test_invalid_json_is_returned_unchanged(self):
         from agentica.compression.tool_call_args import shrink_tool_call_arguments_json
@@ -318,47 +320,159 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
 
         self.assertEqual(shrink_tool_call_arguments_json(args), args)
 
-    def _write_file_call(self, content):
+    def _write_file_call(self, content, *, call_id="call_1", path="a.txt"):
         return [
-            Message(role="user", content="write file"),
+            Message(role="user", content=f"write {path}"),
             Message(role="assistant", tool_calls=[{
-                "id": "call_1",
+                "id": call_id,
                 "type": "function",
                 "function": {
                     "name": "write_file",
-                    "arguments": json.dumps({"content": content, "path": "a.txt"}),
+                    "arguments": json.dumps({"content": content, "path": path}),
                 },
             }]),
-            Message(role="tool", tool_call_id="call_1", content="ok"),
+            Message(role="tool", tool_call_id=call_id, content="ok"),
         ]
 
-    def test_shrinks_assistant_tool_call_arguments_under_pressure(self):
-        """A write payload lives in the assistant message, out of eviction's reach."""
+    def _content_of(self, messages, assistant_index):
+        return json.loads(
+            messages[assistant_index].tool_calls[0]["function"]["arguments"]
+        )["content"]
+
+    def test_leaves_trailing_turn_write_file_arguments_intact(self):
+        """The current turn's write is what just landed on disk; truncating it
+        teaches the model to copy ``...[truncated]`` into the next write_file."""
         from agentica.compression.evict import shrink_tool_call_arguments
 
-        messages = self._write_file_call("z" * 300)
+        payload = "z" * 300
+        messages = self._write_file_call(payload)
+
+        shrunk = shrink_tool_call_arguments(
+            messages, context_tokens=9_000, context_window=10_000, max_string_chars=20,
+        )
+
+        self.assertEqual(shrunk, 0)
+        self.assertEqual(self._content_of(messages, 1), payload)
+
+    def test_omits_older_write_file_payloads_under_pressure(self):
+        """A write payload lives in the assistant message, out of result eviction.
+        Older turns may shrink; the replacement must not look like file content."""
+        from agentica.compression.evict import shrink_tool_call_arguments
+        from agentica.compression.tool_call_args import omitted_tool_arg
+
+        old_payload = "z" * 300
+        new_payload = "n" * 300
+        messages = (
+            self._write_file_call(old_payload, call_id="call_old", path="old.txt")
+            + self._write_file_call(new_payload, call_id="call_new", path="new.txt")
+        )
 
         shrunk = shrink_tool_call_arguments(
             messages, context_tokens=9_000, context_window=10_000, max_string_chars=20,
         )
 
         self.assertEqual(shrunk, 1)
-        parsed = json.loads(messages[1].tool_calls[0]["function"]["arguments"])
-        self.assertEqual(parsed["content"], "z" * 20 + "...[truncated]")
-        self.assertEqual(parsed["path"], "a.txt")
+        self.assertEqual(self._content_of(messages, 1), omitted_tool_arg(300))
+        self.assertEqual(self._content_of(messages, 4), new_payload)
+        self.assertNotIn("...[truncated]", self._content_of(messages, 1))
+
+    def test_omits_anthropic_tool_use_input_in_older_turns(self):
+        """Claude stores the same payload in content tool_use.input; shrinking
+        only tool_calls would leave the wire format full-size and out of sync."""
+        from agentica.compression.evict import shrink_tool_call_arguments
+        from agentica.compression.tool_call_args import omitted_tool_arg
+
+        old_payload = "z" * 300
+        old = Message(
+            role="assistant",
+            content=[{
+                "type": "tool_use",
+                "id": "call_old",
+                "name": "write_file",
+                "input": {"path": "old.txt", "content": old_payload},
+            }],
+            tool_calls=[{
+                "id": "call_old",
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "arguments": json.dumps({"path": "old.txt", "content": old_payload}),
+                },
+            }],
+        )
+        messages = [
+            Message(role="user", content="first"),
+            old,
+            Message(role="tool", tool_call_id="call_old", content="ok"),
+            Message(role="user", content="second"),
+            Message(role="assistant", content="done"),
+        ]
+
+        shrunk = shrink_tool_call_arguments(
+            messages, context_tokens=9_000, context_window=10_000, max_string_chars=20,
+        )
+
+        self.assertGreaterEqual(shrunk, 1)
+        self.assertEqual(old.content[0]["input"]["content"], omitted_tool_arg(300))
+        self.assertEqual(self._content_of(messages, 1), omitted_tool_arg(300))
+
+    def test_shrinking_tool_use_drops_sibling_thinking(self):
+        """Mutating tool_use.input would 400 Claude with Invalid signature."""
+        from agentica.compression.evict import shrink_tool_call_arguments
+        from agentica.compression.tool_call_args import omitted_tool_arg
+
+        old_payload = "z" * 300
+        old = Message(
+            role="assistant",
+            content=[
+                {"type": "thinking", "thinking": "plan", "signature": "sig"},
+                {
+                    "type": "tool_use",
+                    "id": "call_old",
+                    "name": "write_file",
+                    "input": {"path": "old.txt", "content": old_payload},
+                },
+            ],
+            tool_calls=[{
+                "id": "call_old",
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "arguments": json.dumps({"path": "old.txt", "content": old_payload}),
+                },
+            }],
+        )
+        messages = [
+            Message(role="user", content="first"),
+            old,
+            Message(role="tool", tool_call_id="call_old", content="ok"),
+            Message(role="user", content="second"),
+            Message(role="assistant", content="done"),
+        ]
+
+        shrink_tool_call_arguments(
+            messages, context_tokens=9_000, context_window=10_000, max_string_chars=20,
+        )
+
+        self.assertFalse(any(b.get("type") == "thinking" for b in old.content))
+        tool_use = next(b for b in old.content if b.get("type") == "tool_use")
+        self.assertEqual(tool_use["input"]["content"], omitted_tool_arg(300))
 
     def test_leaves_tool_call_arguments_alone_when_roomy(self):
         from agentica.compression.evict import shrink_tool_call_arguments
 
-        messages = self._write_file_call("z" * 300)
+        messages = (
+            self._write_file_call("z" * 300, call_id="call_old", path="old.txt")
+            + self._write_file_call("n" * 300, call_id="call_new", path="new.txt")
+        )
 
         shrunk = shrink_tool_call_arguments(
             messages, context_tokens=1_000, context_window=10_000, max_string_chars=20,
         )
 
         self.assertEqual(shrunk, 0)
-        parsed = json.loads(messages[1].tool_calls[0]["function"]["arguments"])
-        self.assertEqual(parsed["content"], "z" * 300)
+        self.assertEqual(self._content_of(messages, 1), "z" * 300)
+        self.assertEqual(self._content_of(messages, 4), "n" * 300)
 
 
 class TestSanitizePath(unittest.TestCase):

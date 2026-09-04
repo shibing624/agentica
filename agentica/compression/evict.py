@@ -24,9 +24,14 @@ file read the original path holds fresher content than the snapshot would.
 Tool *results* are not the only bulk in a transcript: a ``write_file`` or
 ``apply_patch`` call carries its whole payload in the assistant message's
 arguments, which no amount of result eviction can reach. Those strings are
-shrunk in place, keeping the JSON valid so the provider still accepts the
-transcript. When Layer 1 cannot get the request under target, the answer is
-Layer 2 (``CompressionManager.auto_compact``), not more aggressive evicting.
+replaced with an omission marker (not a truncated prefix — the model copies
+``head + "...[truncated]"`` into the next write). The live tool round is
+left intact (in-flight calls and the trailing result batch), matching the
+trailing-result exclusion: that payload is what just executed. The cutoff is
+by message position, not tool name — SDK ``tools=``, CLI ``--tools``, Web
+extra tools, and MCP share the round with builtins. When Layer 1
+cannot get the request under target, the answer is Layer 2
+(``CompressionManager.auto_compact``), not eating the round in progress.
 
 **The unit of eviction is a result, not a message**, because the two provider
 shapes disagree about how results are packed:
@@ -44,7 +49,10 @@ import json
 import os
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
 
-from agentica.compression.tool_call_args import shrink_tool_call_arguments_json
+from agentica.compression.tool_call_args import (
+    shrink_tool_call_arguments_json,
+    shrink_tool_arg_leaves,
+)
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_message_tokens, count_tokens
 
@@ -188,6 +196,34 @@ def _last_batch_start(messages: "List[Message]") -> int:
     return i
 
 
+def live_tool_round_start(messages: "List[Message]") -> int:
+    """Start of the tool round that is still live: in-flight, or just returned.
+
+    Compress runs before the next LLM call. The live round is:
+
+    * a trailing assistant with ``tool_calls`` and no results yet (the tools
+      are executing or have not been parsed), or
+    * the assistant that issued the trailing result batch, plus those results.
+
+    Layer 1 must not shrink arguments or evict results from this index on.
+    The tool name does not matter: builtins, SDK ``tools=``, CLI ``--tools``,
+    Web extra tools, and MCP calls all occupy the same round.
+    """
+    n = len(messages)
+    if n == 0:
+        return 0
+    last = messages[-1]
+    if last.role == "assistant" and last.tool_calls:
+        return n - 1
+    batch = _last_batch_start(messages)
+    if batch <= 0 or batch >= n:
+        return batch
+    prev = messages[batch - 1]
+    if prev.role == "assistant" and prev.tool_calls:
+        return batch - 1
+    return batch
+
+
 def _call_index(messages: "List[Message]") -> Dict[str, Tuple[Optional[str], Any]]:
     """Map tool-call id to the ``(name, arguments)`` the assistant requested.
 
@@ -291,7 +327,7 @@ def evict_tool_results(
     if must_save <= 0:
         return 0
 
-    cutoff = _last_batch_start(messages)
+    cutoff = live_tool_round_start(messages)
     calls = _call_index(messages)
     saved = 0
     evicted = 0
@@ -340,23 +376,38 @@ def shrink_tool_call_arguments(
     context_window: int,
     max_string_chars: int = TOOL_CALL_ARG_MAX_CHARS,
 ) -> int:
-    """Shrink long strings inside assistant tool-call arguments (in-place).
+    """Omit long strings inside older assistant tool-call arguments (in-place).
 
     A ``write_file`` payload lives in the assistant message, not in a tool
-    result, so eviction cannot reach it. Shrinking goes through the JSON-aware
-    helper because the provider re-parses these arguments and a blunt slice
-    would leave them unparseable.
+    result, so eviction cannot reach it. The live tool round is skipped
+    (``live_tool_round_start``): that payload is what just landed on disk or
+    is still executing, and replacing it with a truncated prefix made the
+    model copy ``...[truncated]`` into the next write / execute / grep.
+
+    Older turns keep JSON valid via ``shrink_tool_call_arguments_json``. OpenAI
+    stores the payload in ``tool_calls[].function.arguments``; Anthropic also
+    keeps it in ``content`` ``tool_use.input`` dicts, which the wire format
+    actually sends — both must shrink together.
 
     Returns:
-        Number of argument strings that actually changed.
+        Number of argument containers that actually changed.
     """
     if not under_pressure(context_tokens, context_window):
         return 0
 
+    start = live_tool_round_start(messages)
     shrunk = 0
-    for msg in messages:
-        if msg.role != "assistant" or not msg.tool_calls:
+    for msg in messages[:start]:
+        if msg.role != "assistant":
             continue
+        shrunk += _shrink_assistant_tool_args(msg, max_string_chars)
+    return shrunk
+
+
+def _shrink_assistant_tool_args(msg: "Message", max_string_chars: int) -> int:
+    """Shrink one assistant message's OpenAI tool_calls and Anthropic tool_use inputs."""
+    changed = 0
+    if msg.tool_calls:
         for tool_call in msg.tool_calls:
             if not isinstance(tool_call, dict):
                 continue
@@ -372,8 +423,39 @@ def shrink_tool_call_arguments(
                 )
                 if shrunken != arguments:
                     container["arguments"] = shrunken
-                    shrunk += 1
-    return shrunk
+                    changed += 1
+    if isinstance(msg.content, list):
+        for block in msg.content:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            inp = block.get("input")
+            if not isinstance(inp, dict):
+                continue
+            shrunken = shrink_tool_arg_leaves(inp, max_string_chars)
+            if shrunken != inp:
+                block["input"] = shrunken
+                changed += 1
+                call_id = block.get("id")
+                if call_id and msg.tool_calls:
+                    dumped = json.dumps(shrunken, ensure_ascii=False)
+                    for tool_call in msg.tool_calls:
+                        if not isinstance(tool_call, dict) or tool_call.get("id") != call_id:
+                            continue
+                        function = tool_call.get("function")
+                        if isinstance(function, dict):
+                            function["arguments"] = dumped
+                        if "arguments" in tool_call:
+                            tool_call["arguments"] = dumped
+    if changed and isinstance(msg.content, list):
+        # A mutated sibling tool_use.input invalidates the thinking signature
+        # on some Claude proxies (``Invalid signature in thinking block``).
+        # Anthropic allows omitting older thinking; keep the tool_use.
+        msg.content = [
+            block
+            for block in msg.content
+            if not (isinstance(block, dict) and block.get("type") in ("thinking", "redacted_thinking"))
+        ]
+    return changed
 
 
 def evict_context(

@@ -5,15 +5,26 @@ import json
 from typing import Any
 
 
-def _shrink_string_leaves(value: Any, max_string_chars: int) -> Any:
+def omitted_tool_arg(n: int) -> str:
+    """Placeholder for a string leaf dropped from context.
+
+    Must not be a prefix of the original payload. ``head + "...[truncated]"``
+    looks like real ``write_file`` / ``apply_patch`` content, and the model
+    copies it into the next write.
+    """
+    return f"<evicted-tool-arg chars={n}>"
+
+
+def shrink_tool_arg_leaves(value: Any, max_string_chars: int) -> Any:
+    """Replace oversize string leaves with ``omitted_tool_arg``, keeping JSON shape."""
     if isinstance(value, str):
         if len(value) > max_string_chars:
-            return value[:max_string_chars] + "...[truncated]"
+            return omitted_tool_arg(len(value))
         return value
     if isinstance(value, dict):
-        return {key: _shrink_string_leaves(item, max_string_chars) for key, item in value.items()}
+        return {key: shrink_tool_arg_leaves(item, max_string_chars) for key, item in value.items()}
     if isinstance(value, list):
-        return [_shrink_string_leaves(item, max_string_chars) for item in value]
+        return [shrink_tool_arg_leaves(item, max_string_chars) for item in value]
     return value
 
 
@@ -24,5 +35,5 @@ def shrink_tool_call_arguments_json(arguments: str, max_string_chars: int = 200)
     except (TypeError, ValueError):
         return arguments
 
-    shrunken = _shrink_string_leaves(parsed, max_string_chars)
+    shrunken = shrink_tool_arg_leaves(parsed, max_string_chars)
     return json.dumps(shrunken, ensure_ascii=False)

@@ -100,7 +100,7 @@ def _content_has_block_type(content, block_type: str) -> bool:
 def _text_from_content_blocks(content) -> str:
     """Extract concatenated text from an Anthropic-style content-block list.
 
-    Drops tool_use/tool_result blocks, keeps only ``{"type": "text", ...}``.
+    Drops tool_use/tool_result/thinking blocks, keeps only ``{"type": "text", ...}``.
     Returns "" when there's no reusable text.
     """
     if isinstance(content, str):
@@ -117,47 +117,40 @@ def _text_from_content_blocks(content) -> str:
 
 
 def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = False) -> List[Message]:
-    """Strip every tool-call/tool-result artifact from history, wire-format agnostic.
+    """Reduce history to portable user/assistant text for a model switch.
 
-    Removes both OpenAI-style and Anthropic-style tool encodings so history
-    recorded under one provider can be safely replayed on another (the
-    ``/model`` switch case and the post-error recovery case):
+    Switching models starts a new Q&A round. Thinking and tool rounds do not
+    travel: their wire shapes disagree (OpenAI ``role=tool`` vs Anthropic
+    ``tool_use`` / ``tool_result`` blocks), and a ``thinking.signature`` is
+    bound to the model that issued it. What remains is what any provider can
+    consume — user questions and assistant answers as plain strings.
 
-      OpenAI style:
-        * role="tool" messages                          -> dropped
-        * assistant messages with ``tool_calls`` field   -> keep text only
-
-      Anthropic style (list content blocks):
-        * role="user" whose content holds tool_result blocks   -> dropped
-        * role="assistant" whose content holds tool_use blocks  -> keep text only
-
-    Only plain user/assistant text survives. ``drop_system`` also removes
-    system messages (used by the recovery path where the system prompt is
-    rebuilt fresh each run).
+    ``drop_system`` also removes system messages (recovery path; the system
+    prompt is rebuilt fresh each run).
     """
     cleaned: List[Message] = []
     for m in messages:
-        # OpenAI-style flat tool result.
         if m.role == "tool":
             continue
-
-        # Anthropic-style tool result carried on a user message.
-        if m.role == "user" and _content_has_block_type(m.content, "tool_result"):
-            continue
-
-        if m.role == "assistant":
-            # OpenAI-style tool_calls field, or Anthropic-style tool_use blocks.
-            has_openai_calls = bool(m.tool_calls)
-            has_anthropic_calls = _content_has_block_type(m.content, "tool_use")
-            if has_openai_calls or has_anthropic_calls:
-                text = _text_from_content_blocks(m.content)
-                if text.strip():
-                    cleaned.append(Message(role="assistant", content=text))
-                continue
-
         if drop_system and m.role == "system":
             continue
-
+        if m.role == "system":
+            cleaned.append(m)
+            continue
+        if m.role == "user":
+            if _content_has_block_type(m.content, "tool_result"):
+                continue
+            text = _text_from_content_blocks(m.content)
+            if m.images:
+                cleaned.append(Message(role="user", content=text or None, images=m.images))
+            elif isinstance(text, str) and text.strip():
+                cleaned.append(Message(role="user", content=text))
+            continue
+        if m.role == "assistant":
+            text = _text_from_content_blocks(m.content)
+            if isinstance(text, str) and text.strip():
+                cleaned.append(Message(role="assistant", content=text))
+            continue
         cleaned.append(m)
     return cleaned
 

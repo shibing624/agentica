@@ -11,7 +11,7 @@ the API as ``{"type": "text", "text": ""}`` and 400 with
 import asyncio
 import unittest
 
-from agentica.agent.history_filter import strip_tool_artifacts_from_memory
+from agentica.agent.history_filter import strip_all_tool_artifacts, strip_tool_artifacts_from_memory
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.anthropic.claude import Claude
@@ -115,6 +115,79 @@ class TestReplayedToolHistoryCapability(unittest.TestCase):
 
     def test_anthropic_does_not(self):
         self.assertFalse(Claude(api_key="fake_anthropic_key").supports_replayed_tool_history)
+
+    def test_openai_chat_capability_is_the_wire_format_not_the_model_id(self):
+        """A Claude id on OpenAIChat still speaks the OpenAI wire. Portable
+        history is the /model sanitizer's job, not a name check."""
+        self.assertTrue(
+            OpenAIChat(id="claude-opus-5", api_key="fake_openai_key").supports_replayed_tool_history
+        )
+
+
+class TestModelSwitchPortableHistory(unittest.TestCase):
+    """Either direction of /model keeps Q&A text and drops thinking + tools."""
+
+    def test_claude_history_formats_on_openai_after_strip(self):
+        history = [
+            Message(role="user", content="read it"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "plan", "signature": "claude-sig"},
+                    {"type": "text", "text": "checking"},
+                    {"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {}},
+                ],
+                tool_calls=[{"id": "tu_1", "type": "function", "function": {"name": "read_file"}}],
+                reasoning_content="plan",
+            ),
+            Message(
+                role="user",
+                content=[{"type": "tool_result", "tool_use_id": "tu_1", "content": "PORT = 8080"}],
+            ),
+            Message(role="assistant", content="The port is 8080."),
+        ]
+        out = strip_all_tool_artifacts(history)
+        model = OpenAIChat(api_key="fake_openai_key")
+        wires = [model.format_message(m) for m in out]
+        self.assertEqual(
+            [(w["role"], w["content"]) for w in wires],
+            [("user", "read it"), ("assistant", "checking"), ("assistant", "The port is 8080.")],
+        )
+        for wire in wires:
+            self.assertNotIn("tool_calls", wire)
+            self.assertNotIn("reasoning_content", wire)
+            self.assertIsInstance(wire["content"], str)
+
+    def test_openai_thinking_history_formats_on_claude_after_strip(self):
+        history = [
+            Message(role="user", content="hi"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "gpt thoughts", "signature": "not-claude"},
+                    {"type": "text", "text": "hello"},
+                ],
+                reasoning_content="gpt thoughts",
+            ),
+            Message(role="assistant", content="done", tool_calls=[
+                {"id": "c1", "type": "function", "function": {"name": "glob"}},
+            ]),
+            Message(role="tool", tool_call_id="c1", content="files"),
+        ]
+        out = strip_all_tool_artifacts(history)
+        model = Claude(api_key="fake_anthropic_key")
+        chat_messages, _ = asyncio.run(model.format_messages(out))
+        types = [block.get("type") for msg in chat_messages for block in msg["content"]]
+        self.assertNotIn("thinking", types)
+        self.assertNotIn("tool_use", types)
+        self.assertNotIn("tool_result", types)
+        texts = [
+            block["text"]
+            for msg in chat_messages
+            for block in msg["content"]
+            if block.get("type") == "text"
+        ]
+        self.assertEqual(texts, ["hi", "hello", "done"])
 
 
 class TestStripToolArtifactsFromMemory(unittest.TestCase):

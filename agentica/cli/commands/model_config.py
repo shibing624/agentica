@@ -338,7 +338,12 @@ def _rebuild_live_model(ctx: CommandContext):
         "extra_headers": ctx.agent_config.get("extra_headers"),
         "default_headers": ctx.agent_config.get("default_headers"),
     }
+    previous = ctx.current_agent.model
+    previous_key = (type(previous), previous.id if previous is not None else None)
     ctx.current_agent.model = get_model(**model_kwargs)
+    new_model = ctx.current_agent.model
+    if (type(new_model), new_model.id) != previous_key:
+        _sanitize_history_for_model_switch(ctx.current_agent)
     ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
     cap = _resolve_compact_token_limit(ctx.agent_config)
     ctx.current_agent.tool_config.compact_token_limit = cap

@@ -24,6 +24,7 @@ from agentica.cli.runtime import (
 from agentica.cli.display import (
     format_session_summary,
     print_header,
+    render_markdown_response,
     resumable_session_id,
 )
 from agentica.cli.session_resume import (
@@ -232,7 +233,7 @@ def display_conversation_history(runs: list[AgentRun], title: str) -> HistoryRen
                         _display_run_tool_summary(con, run_number, messages)
                         tool_summary_shown = True
                     con.print(f"\n[bold green]Agent - run {run_number}[/bold green]")
-                    con.print(content_text, markup=False, highlight=False)
+                    render_markdown_response(con, content_text)
                 if message.tool_calls:
                     tool_activity_seen = True
 

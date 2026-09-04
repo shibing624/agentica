@@ -304,6 +304,47 @@ class TestClaudeCacheControlBudget(unittest.TestCase):
         chat_messages, _ = asyncio.run(model.format_messages(messages))
         self.assertEqual(self._count_msg_cache_control(chat_messages), 0)
 
+    def test_cache_control_skips_thinking_last_block(self):
+        """Tagging thinking with cache_control invalidates the signature."""
+        model = Claude(id="claude-opus-4-8", api_key="fake")
+        model.enable_cache_control = True
+        messages = [
+            Message(role="user", content="q"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "plan", "signature": "sig-a"},
+                    {"type": "tool_use", "id": "t1", "name": "glob", "input": {}},
+                    {"type": "thinking", "thinking": "more", "signature": "sig-b"},
+                ],
+            ),
+            Message(role="user", content="next"),
+        ]
+        chat_messages, _ = asyncio.run(model.format_messages(messages))
+        assistant = next(m for m in chat_messages if m["role"] == "assistant")
+        thinking = [b for b in assistant["content"] if b.get("type") == "thinking"]
+        self.assertEqual(len(thinking), 2)
+        for block in thinking:
+            self.assertNotIn("cache_control", block)
+            self.assertTrue(block.get("signature"))
+        tool_use = next(b for b in assistant["content"] if b.get("type") == "tool_use")
+        self.assertEqual(tool_use.get("cache_control"), {"type": "ephemeral"})
+
+    def test_unsigned_thinking_is_dropped_from_wire(self):
+        model = Claude(id="claude-opus-4-8", api_key="fake")
+        model.enable_cache_control = False
+        messages = [
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "stale gpt", "signature": ""},
+                    {"type": "text", "text": "ok"},
+                ],
+            ),
+        ]
+        chat_messages, _ = asyncio.run(model.format_messages(messages))
+        self.assertEqual([b["type"] for b in chat_messages[0]["content"]], ["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -109,6 +109,42 @@ def _is_empty_text_block(block: Any) -> bool:
     return not (isinstance(text, str) and text.strip())
 
 
+_THINKING_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
+
+
+def _is_unsigned_thinking_block(block: Any) -> bool:
+    """True for a thinking block Claude would reject as ``Invalid signature``.
+
+    A GPT (or empty) signature replayed on Claude 400s. Same-model thinking
+    always carries a non-empty ``signature`` (or ``data`` when redacted).
+    """
+    if not isinstance(block, dict):
+        return False
+    block_type = block.get("type")
+    if block_type == "thinking":
+        signature = block.get("signature")
+        return not (isinstance(signature, str) and signature)
+    if block_type == "redacted_thinking":
+        data = block.get("data")
+        return not (isinstance(data, str) and data)
+    return False
+
+
+def _attach_cache_control(content: Any) -> bool:
+    """Tag the last cacheable block. Never mutate a thinking signature."""
+    if not isinstance(content, list):
+        return False
+    for i in range(len(content) - 1, -1, -1):
+        block = content[i]
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") in _THINKING_BLOCK_TYPES:
+            continue
+        block["cache_control"] = {"type": "ephemeral"}
+        return True
+    return False
+
+
 @dataclass
 class MessageData:
     response_content: str = ""
@@ -385,7 +421,11 @@ class Claude(Model):
                 if isinstance(content, str):
                     blocks = [{"type": "text", "text": content}] if content.strip() else []
                 else:
-                    blocks = [b for b in content if not _is_empty_text_block(b)]
+                    blocks = [
+                        b
+                        for b in content
+                        if not _is_empty_text_block(b) and not _is_unsigned_thinking_block(b)
+                    ]
 
                 has_tool_result = any(
                     isinstance(block, dict) and block.get("type") == "tool_result"
@@ -449,10 +489,10 @@ class Claude(Model):
             for msg in reversed(chat_messages):
                 if applied >= 3:
                     break
-                content = msg["content"]
-                last_block = content[-1]
-                if isinstance(last_block, dict):
-                    last_block["cache_control"] = {"type": "ephemeral"}
+                # Tag a text/tool_use/tool_result block, never thinking:
+                # adding cache_control to a thinking block invalidates its
+                # signature (``Invalid signature in thinking block``).
+                if _attach_cache_control(msg["content"]):
                     applied += 1
 
         return chat_messages, " ".join(system_messages)
