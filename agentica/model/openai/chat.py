@@ -32,6 +32,10 @@ from openai.types.chat.chat_completion_chunk import (
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from agentica.model.base import Model, require_first_choice
+from agentica.model.cache_routing import (
+    persistent_cache_session_id,
+    resolve_cache_session_id,
+)
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
@@ -225,32 +229,8 @@ def _tag_tools_cache_control(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return out
 
 
-def _persistent_cache_session_id(base_url: Any) -> str:
-    """Load-or-create the sticky cache-routing id for this endpoint.
-
-    Persisted in ``~/.agentica/cache/cache_routing.json`` keyed by base_url so
-    a new CLI process keeps the same routing id and lands on the same proxy
-    backend (a fresh random id would guarantee a cold cache). Best-effort: if
-    the file is unreadable/unwritable, an in-memory id is used for this process.
-    """
-    path = Path.home() / ".agentica" / "cache" / "cache_routing.json"
-    key = str(base_url or "default").rstrip("/")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        if not isinstance(data, dict):
-            data = {}
-    except (OSError, ValueError):
-        data = {}
-    sid = data.get(key)
-    if not sid:
-        sid = f"agentica-cache-{uuid4()}"
-        data[key] = sid
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except OSError:
-            pass  # persistence is best-effort; the in-memory id still works
-    return sid
+# The id helpers live in agentica.model.cache_routing so the Anthropic provider
+# can share them without importing this module (and the OpenAI SDK with it).
 
 
 def _request_has_cache_control(messages: List[Dict[str, Any]], tools: Any) -> bool:
@@ -326,7 +306,6 @@ class OpenAIChat(Model):
     # consecutive invokes — even across CLI restarts — land on the same
     # backend and actually hit the cache written by earlier requests. None = off.
     cache_control_session_header: Optional[str] = None
-    _cache_session_id: Optional[str] = field(default=None, init=False, repr=False)
     # OpenAI's own cache is implicit — nothing is marked, the prefix is matched
     # automatically — but a hit also requires landing on the machine holding it,
     # and routing hashes only the first ~256 prompt tokens. ``prompt_cache_key``
@@ -664,11 +643,9 @@ class OpenAIChat(Model):
         """
         if not self.enable_prompt_cache_key:
             return None
-        if self.session_id:
-            return self.session_id
-        if self._cache_session_id is None:
-            self._cache_session_id = _persistent_cache_session_id(self.base_url)
-        return self._cache_session_id
+        # Resolved per call, not memoized — a first request before
+        # update_model() sets session_id must not pin the fallback id.
+        return resolve_cache_session_id(session_id=self.session_id, base_url=self.base_url)
 
     def _with_cache_session_header(self, existing: Any) -> Any:
         """Merge a stable per-run session id into extra_headers for sticky routing.
@@ -679,18 +656,26 @@ class OpenAIChat(Model):
         ``~/.agentica/cache/cache_routing.json`` so cache affinity survives CLI
         restarts. Only merges into a dict-typed extra_headers; other types are
         returned unchanged (we cannot safely merge into openai Header objects).
+
+        Session-scoped when there is a live session (matches ``_prompt_cache_key``
+        and the Anthropic path): one conversation shares one prompt prefix, and
+        a fresh session re-roles the routing dice — the escape hatch when a
+        proxy pins you to a misbehaving backend. The endpoint-persistent id is
+        the fallback for bare SDK use with no session.
         """
         if not self.cache_control_session_header:
             return existing
-        if self._cache_session_id is None:
-            self._cache_session_id = _persistent_cache_session_id(self.base_url)
+        # Resolved per call (see cache_routing.resolve_cache_session_id): a
+        # first request before update_model() sets session_id must not pin the
+        # fallback id for the rest of the run.
+        sid = resolve_cache_session_id(session_id=self.session_id, base_url=self.base_url)
         if isinstance(existing, dict):
             headers = dict(existing)
         elif existing is None:
             headers = {}
         else:
             return existing
-        headers.setdefault(self.cache_control_session_header, self._cache_session_id)
+        headers.setdefault(self.cache_control_session_header, sid)
         return headers
 
     def _arm_cache_keepalive(self) -> None:

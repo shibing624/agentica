@@ -216,6 +216,48 @@ class TestCLIModelParams(unittest.TestCase):
         )
         self.assertIsNone(model.default_headers)
 
+    def test_get_model_passes_cache_session_header_for_anthropic(self):
+        """Regression: the wire_api gate used to drop this silently for anthropic.
+
+        Venus-style proxies need it — without sticky routing, unrouted requests
+        hit a much higher rate of schema-validation 400s.
+        """
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "anthropic",
+            "claude-opus-5",
+            api_key="k",
+            cache_control_session_header="Venus-Session-Id",
+        )
+        self.assertEqual(model.cache_control_session_header, "Venus-Session-Id")
+
+    def test_get_model_passes_cache_session_header_for_openai(self):
+        """The same knob still reaches OpenAIChat (no behaviour change there)."""
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "openai",
+            "gpt-5.2",
+            api_key="k",
+            cache_control_session_header="X-Session-Id",
+        )
+        self.assertEqual(model.cache_control_session_header, "X-Session-Id")
+
+    def test_get_model_still_gates_openai_only_cache_knobs(self):
+        """cache_control_messages / cache_keepalive remain OpenAI-only."""
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "anthropic",
+            "claude-opus-5",
+            api_key="k",
+            cache_control_messages=5,
+            cache_keepalive=False,
+        )
+        self.assertFalse(hasattr(model, "cache_control_messages"))
+        self.assertFalse(hasattr(model, "cache_keepalive"))
+
     def test_reasoning_effort_accepts_low_medium(self):
         import sys
         from agentica.cli.runtime import parse_args

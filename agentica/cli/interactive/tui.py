@@ -27,7 +27,6 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.styles import Style as PTStyle
-from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import TextArea
 
 from agentica.cli.approvals import (
@@ -201,20 +200,21 @@ class _CleanResizeApplication(Application):
 _ASK_KEY_HINT = "    Enter to answer · Ctrl+C to cancel · Ctrl+\\ if frozen"
 
 
-def _ask_prompt_lines(req) -> list[str]:
-    """Lines rendered above the input box while an ask_user_question is armed.
-
-    Both the fragment builder and the widget height derive from this, so the
-    reserved height can't drift from what is actually drawn.
-    """
+def _ask_prompt_text(req) -> str:
+    """Plain text shown above the input box while a question is armed."""
     if req.kind == "approval":
-        text = (req.prompt or "").rstrip("\n")
-        return text.split("\n") if text else [""]
-    lines = [f"  ? {req.prompt}"]
+        return (req.prompt or "").rstrip("\n")
+    parts = [f"  ? {(req.prompt or '').rstrip('\n')}"]
     if req.options:
-        lines.extend(f"    {i}. {opt}" for i, opt in enumerate(req.options, 1))
-    lines.append(_ASK_KEY_HINT)
-    return lines
+        parts.append("")
+        parts.extend(f"    {i}. {opt}" for i, opt in enumerate(req.options, 1))
+    parts.append(_ASK_KEY_HINT)
+    return "\n".join(parts)
+
+
+def _ask_prompt_lines(req) -> list[str]:
+    text = _ask_prompt_text(req)
+    return text.split("\n") if text else [""]
 
 
 def _input_prompt_fragments(req) -> list[tuple[str, str]]:
@@ -224,12 +224,12 @@ def _input_prompt_fragments(req) -> list[tuple[str, str]]:
     is not stolen as a hint line with an extra leading newline — that
     extra row used to clip deny off the reserved height.
     """
-    lines = _ask_prompt_lines(req)
-    if getattr(req, "kind", None) == "approval":
-        return [("class:input-prompt", "\n".join(lines))]
-    *question, hint = lines
+    text = _ask_prompt_text(req)
+    if req.kind == "approval":
+        return [("class:input-prompt", text)]
+    body, _, hint = text.rpartition("\n")
     return [
-        ("class:input-prompt", "\n".join(question)),
+        ("class:input-prompt", body),
         ("class:hint", f"\n{hint}"),
     ]
 
@@ -244,24 +244,6 @@ def _live_tool_window_height(n_lines: int, *, asking: bool) -> int:
     if asking or n_lines <= 0:
         return 0
     return min(LIVE_MAX_ROWS, n_lines)
-
-
-def _input_prompt_height(req, width: int | None = None) -> int:
-    """Rows reserved for the ask/approval widget, including wrapped lines."""
-    lines = _ask_prompt_lines(req)
-    if width is None:
-        try:
-            from prompt_toolkit.application.current import get_app
-
-            width = get_app().output.get_size().columns
-        except Exception:
-            width = shutil.get_terminal_size(fallback=(80, 24)).columns
-    width = max(1, int(width))
-    rows = 0
-    for line in lines:
-        visual = get_cwidth(line) if line else 0
-        rows += 1 if visual <= 0 else (visual + width - 1) // width
-    return rows
 
 
 def _setup_tui(
@@ -861,17 +843,11 @@ def _setup_tui(
             return []
         return _input_prompt_fragments(req)
 
-    def _get_input_prompt_height() -> int:
-        req = state.input_request
-        if req is None:
-            return 0
-        return _input_prompt_height(req)
-
     input_prompt_widget = ConditionalContainer(
         Window(
             content=FormattedTextControl(_get_input_prompt_fragments),
-            height=_get_input_prompt_height,
             wrap_lines=True,
+            dont_extend_height=True,
         ),
         filter=Condition(
             lambda: state.input_request is not None
@@ -934,13 +910,11 @@ def _setup_tui(
     )
 
     # NOTE: no ``input_rule`` and no standalone ``spinner_widget`` here.
-    # The gutter design (assistant ``▏`` bar + closing ``Rule`` in the
-    # transcript) already provides a hard boundary between the assistant
-    # turn and the input line, so an extra horizontal rule above the input
-    # would just stack redundant separators. The spinner text is folded into
+    # The transcript already ends with a separator; an extra rule above
+    # the input would stack another one. The spinner text is folded into
     # the leftmost segment of ``status_bar`` (see ``build_status_bar_fragments``)
     # so we never occupy a full extra row for it. Unfinished tool calls sit
-    # in ``live_tool_window`` (Kimi-style) until their whole block flushes.
+    # in ``live_tool_window`` until their whole block flushes.
     body = HSplit([
         live_tool_window, input_prompt_widget, queue_bar, input_area, status_bar,
     ])
@@ -1009,8 +983,8 @@ __all__ = [
     '_CleanResizeApplication',
     '_ASK_KEY_HINT',
     '_ask_prompt_lines',
+    '_ask_prompt_text',
     '_input_prompt_fragments',
-    '_input_prompt_height',
     '_live_tool_window_height',
     '_setup_tui',
 ]

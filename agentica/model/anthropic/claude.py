@@ -19,6 +19,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from agentica.model.base import Model
+from agentica.model.cache_routing import resolve_cache_session_id
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
@@ -210,6 +211,17 @@ class Claude(Model):
     timeout: Optional[float] = None
     default_headers: Optional[Dict[str, str]] = None
     client_params: Optional[Dict[str, Any]] = None
+    # Optional sticky-routing header name (e.g. "Venus-Session-Id"): when set,
+    # a session id is injected as a client header so consecutive invokes land
+    # on the same proxy backend and actually hit the cache written by earlier
+    # requests. Mirrors OpenAIChat's knob of the same name — see
+    # agentica.model.cache_routing for how the value is resolved.
+    #
+    # This matters for more than cache hit rate. Venus-style proxies fan out
+    # across several upstreams, and requests sent with NO sticky header show a
+    # materially higher rate of `invalid_request_error` (some upstream rejects
+    # a valid tool schema). Pinning the route avoids that path entirely.
+    cache_control_session_header: Optional[str] = None
 
     # Anthropic client
     client: Optional[AnthropicClient] = None
@@ -303,6 +315,16 @@ class Claude(Model):
             _headers["Authorization"] = f"Bearer {self.api_key}"
         if self.default_headers:
             _headers.update(self.default_headers)
+        if self.cache_control_session_header:
+            # Resolved per client build, not memoized: the client may first be
+            # built before update_model() assigns session_id, and caching that
+            # fallback would hide the real session on every later rebuild.
+            _sid: str = resolve_cache_session_id(
+                session_id=self.session_id, base_url=self.base_url
+            )
+            # setdefault, not assignment: an explicit same-named entry in
+            # default_headers is the user's deliberate value and wins.
+            _headers.setdefault(self.cache_control_session_header, _sid)
         if _headers:
             _client_params["default_headers"] = _headers
         if self.timeout is not None:

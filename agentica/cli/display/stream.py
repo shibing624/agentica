@@ -153,11 +153,7 @@ def _parse_ask_user_exchange(
 
 
 class StreamDisplayManager:
-    """Manages CLI output display state for streaming responses.
-
-    Assistant output uses a left gutter (▏) instead of a box.
-    Thinking/reasoning uses a left gutter (▎) in magenta.
-    """
+    """Manages CLI output display state for streaming responses."""
 
     # Subagent rendering verbosity. Three explicit modes (see PR notes):
     #   "all"     — default. Show ``tool_started`` only (one line per call,
@@ -176,13 +172,6 @@ class StreamDisplayManager:
         self._work_dir_input = configured_work_dir
         self._work_dir = configured_work_dir.resolve()
         self._raw_console = console_instance
-        # Post-redesign: assistant/thinking output is emitted as plain text
-        # (no left-side gutter bar). Only the user query keeps a ``▎`` prefix,
-        # which acts as the sole visual delimiter between the human question
-        # and the AI response body. The ``_assistant_console`` alias remains
-        # so the rest of ``StreamDisplayManager`` doesn't have to branch, but
-        # it now points at the raw console — the ``_GutteredConsole`` proxy
-        # is only constructed on-the-fly inside ``display_user_message``.
         self._assistant_console = console_instance
         self._term_width = min(console_instance.width or 80, 120)
         if subagent_verbosity not in self.SUBAGENT_VERBOSITIES:
@@ -266,8 +255,6 @@ class StreamDisplayManager:
         # the manager is created), which used to make Ctrl+O show only tool
         # results and never the folded query.
 
-    # No more box methods; gutter is used instead.
-
     def _print_plain(self, text: str) -> None:
         for line in text.split("\n"):
             self._assistant_console.print(line, highlight=False, markup=False)
@@ -312,12 +299,7 @@ class StreamDisplayManager:
         self._committed_len = 0
 
     def start_thinking(self):
-        """Start thinking section.
-
-        Post-redesign: no left-side gutter — the thinking segment is just
-        raw text on the raw console, distinguished from the assistant's
-        answer by an ``italic dim magenta`` style applied at print time.
-        """
+        """Start thinking section."""
         if not self.thinking_shown:
             # Any assistant text buffered before this thinking block is a
             # mid-turn preamble (the model spoke, then thought). Flush it as
@@ -1482,14 +1464,7 @@ class StreamDisplayManager:
             self.response_started = False
     
     def start_response(self):
-        """Start the assistant response section.
-
-        With the gutter design there is no visible ``open`` — the visual
-        signal is the left-side ``▏`` bar that appears on each printed line
-        via ``self._assistant_console``. This method only manages state:
-        prints a blank spacer line and records the turn start timestamp so
-        ``finalize()`` can report elapsed time.
-        """
+        """Start the assistant response section."""
         if not self.response_started:
             if self.in_thinking:
                 self.end_thinking()
@@ -1592,14 +1567,9 @@ class StreamDisplayManager:
     ):
         """Finalize the assistant turn: flush buffers and draw the closing rule.
 
-        With the gutter design there is no visible box to close. Instead we
-        render a compact dim separator at the bottom whose body carries a
-        summary of *what this turn cost* (Plan A layout):
+        Compact dim separator with this turn's cost:
 
             ──── #7 · 20:29:29 · 6.4s · +3.2K · +$0.08 · 4 tools ────
-
-        The separator is drawn on the *raw* console (no gutter), so it acts
-        as a hard boundary between this turn and the next user query.
 
         Args:
             turn_no: 1-based turn number within the session. Rendered as

@@ -343,27 +343,20 @@ class TestAskPromptKeyHint(unittest.TestCase):
         lines = _ask_prompt_lines(req)
 
         self.assertEqual(lines[0], "  ? Pick one")
-        self.assertEqual(lines[1:3], ["    1. a", "    2. b"])
+        self.assertEqual(lines[1], "")
+        self.assertEqual(lines[2:4], ["    1. a", "    2. b"])
         self.assertEqual(lines[-1], _ASK_KEY_HINT)
         self.assertIn("Ctrl+\\", _ASK_KEY_HINT)
 
-    def test_reserved_height_matches_rendered_lines(self):
+    def test_prompt_is_dumped_verbatim(self):
         from agentica.cli.interactive.session_state import _InputRequest
-        from agentica.cli.interactive.tui import _ask_prompt_lines
+        from agentica.cli.interactive.tui import _ask_prompt_text
 
-        # question rows + option rows + the hint row. Both the fragment builder
-        # and the widget height derive from this list, so a hint added without
-        # reserving a row for it is impossible by construction; these numbers
-        # pin the row count the widget asks the layout for.
-        cases = [
-            (_InputRequest(prompt="one line", options=None), 2),
-            (_InputRequest(prompt="two\nlines", options=None), 3),
-            (_InputRequest(prompt="with\nopts", options=["x", "y", "z"]), 6),
-        ]
-        for req, expected_rows in cases:
-            lines = _ask_prompt_lines(req)
-            rows = sum(1 + line.count("\n") for line in lines)
-            self.assertEqual(rows, expected_rows, msg=f"prompt={req.prompt!r}")
+        req = _InputRequest(prompt="two\nlines", options=["x", "y", "z"])
+        text = _ask_prompt_text(req)
+
+        self.assertTrue(text.startswith("  ? two\nlines"))
+        self.assertIn("\n\n    1. x\n    2. y\n    3. z\n", text)
 
     def test_live_window_yields_its_rows_while_the_user_is_answering(self):
         """LIVE_MAX_ROWS=12 used to stay reserved above the ask widget, so a
@@ -380,41 +373,44 @@ class TestAskPromptKeyHint(unittest.TestCase):
         self.assertEqual(_live_tool_window_height(3, asking=False), 3)
         self.assertEqual(_live_tool_window_height(0, asking=False), 0)
 
-    def test_ask_prompt_height_is_not_capped_at_live_max_rows(self):
+    def test_long_option_list_is_dumped_in_full(self):
         from agentica.cli.display.live_blocks import LIVE_MAX_ROWS
         from agentica.cli.interactive.session_state import _InputRequest
-        from agentica.cli.interactive.tui import _ask_prompt_lines, _input_prompt_height
+        from agentica.cli.interactive.tui import _ask_prompt_lines
 
         options = [f"option {i}: keep this whole label visible" for i in range(1, 16)]
         req = _InputRequest(prompt="Pick one", options=options)
         lines = _ask_prompt_lines(req)
-        height = _input_prompt_height(req, width=120)
 
         self.assertGreater(len(lines), LIVE_MAX_ROWS)
-        self.assertEqual(height, len(lines))
         for i, opt in enumerate(options, 1):
             self.assertIn(f"    {i}. {opt}", lines)
 
-    def test_ask_prompt_height_uses_display_width_for_cjk(self):
-        from prompt_toolkit.utils import get_cwidth
-
+    def test_multiline_prompt_is_dumped_verbatim(self):
         from agentica.cli.interactive.session_state import _InputRequest
-        from agentica.cli.interactive.tui import _ask_prompt_lines, _input_prompt_height
+        from agentica.cli.interactive.tui import _ask_prompt_text
 
-        option = "全量重跑（推荐）" * 8
-        req = _InputRequest(prompt="选哪个？", options=[option])
-        width = 20
-        lines = _ask_prompt_lines(req)
-        expected = sum(
-            1 if not line else (get_cwidth(line) + width - 1) // width
-            for line in lines
+        prompt = (
+            "计划写好了：/tmp/plan.md\n"
+            "\n"
+            "两处想先跟你确认，其余按计划走：\n"
+            "\n"
+            "1) session id 的粒度。\n"
+            "   - 每 CLI 会话一个\n"
+            "\n"
+            "2) config.yaml 里的 default_headers 要替换成 sid。\n"
         )
-        naive = sum(
-            1 if not line else (len(line) + width - 1) // width
-            for line in lines
-        )
-        self.assertGreater(expected, naive)
-        self.assertEqual(_input_prompt_height(req, width=width), expected)
+        options = [
+            "两个都按你说的做（每会话粒度 + 改 config.yaml）",
+            "每 profile 粒度，改 config.yaml",
+            "只改代码，config.yaml 我自己改",
+            "先不动，我只想看分析",
+        ]
+        text = _ask_prompt_text(_InputRequest(prompt=prompt, options=options))
+
+        self.assertIn(prompt.rstrip("\n"), text)
+        self.assertIn("    1. 两个都按你说的做（每会话粒度 + 改 config.yaml）", text)
+        self.assertIn("    4. 先不动，我只想看分析", text)
 
     def test_ctrl_c_interrupt_notice_does_not_advertise_the_kill_key(self):
         import inspect

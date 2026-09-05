@@ -683,7 +683,13 @@ def get_model(
         if effective_wire_api == "chat_completions" and "cache_control_messages" in model_fields:
             if cache_control_messages is not None:
                 params["cache_control_messages"] = cache_control_messages
-        if effective_wire_api == "chat_completions" and "cache_control_session_header" in model_fields:
+        # Gated on the field, not on wire_api: the Anthropic provider needs it
+        # too. Venus-style proxies fan requests out across upstreams unless a
+        # sticky header pins the route, and unrouted requests hit a much higher
+        # rate of schema-validation 400s. cache_control_messages and
+        # cache_keepalive stay OpenAI-only — Claude manages its own message
+        # breakpoints and has no keep-alive thread.
+        if "cache_control_session_header" in model_fields:
             if cache_control_session_header is not None:
                 params["cache_control_session_header"] = cache_control_session_header
         if effective_wire_api == "chat_completions" and "cache_keepalive" in model_fields:

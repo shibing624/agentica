@@ -353,24 +353,24 @@ def test_apply_cache_control_strips_marker_when_caching_off():
 
 
 def test_persistent_session_id_stable_per_base_url(tmp_path, monkeypatch):
-    from agentica.model.openai import chat as chat_mod
+    from agentica.model import cache_routing as chat_mod
 
     monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
-    a = chat_mod._persistent_cache_session_id("https://x.example/v1")
-    b = chat_mod._persistent_cache_session_id("https://x.example/v1")
-    c = chat_mod._persistent_cache_session_id("https://y.example/v1")
+    a = chat_mod.persistent_cache_session_id("https://x.example/v1")
+    b = chat_mod.persistent_cache_session_id("https://x.example/v1")
+    c = chat_mod.persistent_cache_session_id("https://y.example/v1")
     assert a == b and a.startswith("agentica-cache-")
     assert c != a
 
 
 def test_persistent_session_id_tolerates_corrupt_file(tmp_path, monkeypatch):
-    from agentica.model.openai import chat as chat_mod
+    from agentica.model import cache_routing as chat_mod
 
     monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
     f = tmp_path / ".agentica" / "cache" / "cache_routing.json"
     f.parent.mkdir(parents=True)
     f.write_text("not json at all")
-    sid = chat_mod._persistent_cache_session_id("https://x.example/v1")
+    sid = chat_mod.persistent_cache_session_id("https://x.example/v1")
     assert sid.startswith("agentica-cache-")
 
 
@@ -528,9 +528,9 @@ def test_prompt_cache_key_can_be_turned_off():
 
 def test_prompt_cache_key_falls_back_to_sticky_routing_id(monkeypatch):
     """A bare SDK Agent sets no session; an arbitrary stable key still beats none."""
-    from agentica.model.openai import chat as chat_mod
+    from agentica.model import cache_routing as routing
 
-    monkeypatch.setattr(chat_mod, "_persistent_cache_session_id", lambda _base: "sticky-1")
+    monkeypatch.setattr(routing, "persistent_cache_session_id", lambda _base, home=None: "sticky-1")
     model = OpenAIChat(id="m", api_key="fake_openai_key")
     assert model.session_id is None
     assert model.request_kwargs["prompt_cache_key"] == "sticky-1"

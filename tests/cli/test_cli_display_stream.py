@@ -427,10 +427,9 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
             mgr.finalize()
 
         out = self._capture(render)
-        # No box glyphs anywhere — gutter design replaced them
         self.assertNotIn("╭", out)
         self.assertNotIn("╰", out)
-        self.assertNotIn("Response", out, "no 'Response' title — gutter design has no box header")
+        self.assertNotIn("Response", out)
         # Rule glyph + timestamp on the closing line
         self.assertIn("─", out, "closing rule must be drawn")
         self.assertRegex(out, r"\d{2}:\d{2}:\d{2}", "rule must embed HH:MM:SS")

@@ -59,11 +59,9 @@ class TestCLIStreamDisplay(unittest.TestCase):
         dm.stream_response("hello world")
         dm.finalize()
         out = buf.getvalue()
-        # No box glyphs — gutter design was itself replaced by plain text
         self.assertNotIn("╭", out)
         self.assertNotIn("╰", out)
-        # Assistant gutter must NOT appear on the streamed line anymore
-        self.assertNotIn("▏", out, "assistant ▏ gutter has been removed")
+        self.assertNotIn("▏", out)
         self.assertIn("hello world", out)
         # Closing separator: fixed short edges + timestamp
         self.assertIn("────", out, "closing separator must have ──── edges")
@@ -123,8 +121,7 @@ class TestCLIStreamDisplay(unittest.TestCase):
         """An incomplete last block stays buffered; finalize flushes it.
 
         A heading with no following block is still open, so it must not land
-        token-by-token. Uses a real ``Console`` (StringIO-backed) because the
-        gutter proxy needs a working ``capture()``.
+        token-by-token. Uses a real ``Console`` (StringIO-backed).
         """
         from io import StringIO
         from rich.console import Console
@@ -143,26 +140,6 @@ class TestCLIStreamDisplay(unittest.TestCase):
         post_final = buf.getvalue()
         self.assertIn("Title", post_final, "finalize must flush the buffered markdown")
         self.assertNotIn("▏", post_final)
-
-
-    def test_gutter_console_works_with_chatconsole(self):
-        """Regression: _GutteredConsole must not blow up when wrapping the
-        CLI's ChatConsole. ChatConsole is a slim adapter (used inside the
-        prompt_toolkit app) — it exposes ``render_ansi`` and ``print`` but
-        NOT ``rich.Console.capture``. Earlier the gutter proxy hard-coded
-        ``self._console.capture()``, raising ``AttributeError`` on the
-        first ask_user_question turn inside ``process_loop``.
-        """
-        from agentica.cli.display.console import _GutteredConsole
-        from agentica.cli.interactive.console_io import ChatConsole
-
-        cc = ChatConsole()
-        gutter_con = _GutteredConsole(cc, "▎", "cyan")
-        # Should NOT raise
-        gutter_con.print("hello from ChatConsole gutter")
-        # Prefix cache should be a string (ANSI-rendered by ``render_ansi``)
-        self.assertIsInstance(gutter_con.gutter_prefix_ansi, str)
-        self.assertIn("▎", gutter_con.gutter_prefix_ansi)
 
 
     def test_chatconsole_markdown_link_does_not_leak_osc8_payload(self):

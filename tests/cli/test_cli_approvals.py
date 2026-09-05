@@ -23,7 +23,6 @@ from agentica.cli.interactive.tui import (
     _ASK_KEY_HINT,
     _ask_prompt_lines,
     _input_prompt_fragments,
-    _input_prompt_height,
 )
 from agentica.tools.base import Function, FunctionCall
 
@@ -172,7 +171,6 @@ class TestApprovalPromptCopy:
         blob = "".join(text for _, text in _input_prompt_fragments(req))
         assert blob.startswith("Would you like to run the following command?")
         assert "2. No, deny (esc/n)" in blob
-        assert _input_prompt_height(req, width=200) == len(lines)
 
     def test_approval_record_keeps_execute_command(self):
         pending = PendingApproval(
@@ -191,22 +189,22 @@ class TestApprovalPromptCopy:
         assert "✗ denied" in denied
         assert "tell the agent" not in denied
 
-    def test_wrapped_command_reserves_extra_rows(self):
+    def test_long_command_is_dumped_in_full(self):
+        command = "rm " + "x" * 80
         req = _InputRequest(
             prompt=format_approval_prompt(
                 PendingApproval(
                     tool_call_id="t7",
                     name="execute",
-                    arguments={"command": "rm " + "x" * 80},
+                    arguments={"command": command},
                     question="q",
-                    preview="rm " + "x" * 80,
+                    preview=command,
                     options=("allow", "deny"),
                 )
             ),
             kind="approval",
         )
-        lines = _ask_prompt_lines(req)
-        assert _input_prompt_height(req, width=40) > len(lines)
+        assert command in "\n".join(_ask_prompt_lines(req))
 
     def test_ask_prompt_lines_skip_typed_answer_hint(self):
         req = _InputRequest(

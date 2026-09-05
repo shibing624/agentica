@@ -642,11 +642,15 @@ def _prompt_cache_control(console, provider: str, current: Optional[dict] = None
     else ``{}``. Skipped for the ``anthropic`` provider, which manages its own
     native cache_control. Design: the user filling this in == turning it on.
 
+    Anthropic is not skipped outright: ``cache_control_session_header`` is the
+    one knob it needs (sticky routing to a single proxy backend), so it gets a
+    short dedicated prompt instead of the OpenAI message-breakpoint questions.
+
     ``current`` carries existing cache settings so a re-run pre-fills them;
     declining to edit returns the existing block unchanged (survives upsert).
     """
     if provider == "anthropic":
-        return {}
+        return _prompt_sticky_routing(console, current)
     existing = _pick_keys(current, _CACHE_KEYS)
     has_existing = existing.get("enable_cache_control") is True
     console.print()
@@ -666,7 +670,36 @@ def _prompt_cache_control(console, provider: str, current: Optional[dict] = None
     elif cur_msgs is not None:
         params["cache_control_messages"] = cur_msgs
     cur_header = existing.get("cache_control_session_header")
-    header = pt_prompt(_label("Sticky routing header (e.g. X-Session-Id)", cur_header)).strip()
+    header = pt_prompt(_label("Sticky routing header (e.g. X-Session-Id, Venus-Session-Id)", cur_header)).strip()
+    if header:
+        params["cache_control_session_header"] = header
+    elif cur_header:
+        params["cache_control_session_header"] = cur_header
+    return params
+
+
+def _prompt_sticky_routing(console, current: Optional[dict] = None) -> Dict:
+    """Anthropic-only: ask just for the sticky-routing header.
+
+    Proxies that fan out across upstreams (Venus et al.) need a header to pin
+    consecutive requests to one backend — otherwise the prompt cache never hits
+    AND spurious schema-validation 400s show up from whichever upstream the
+    unrouted request lands on. Everything else about Anthropic caching is
+    handled natively by the Claude model class, so there is nothing to ask.
+    """
+    existing = _pick_keys(current, _CACHE_KEYS)
+    cur_header = existing.get("cache_control_session_header")
+    has_existing = bool(cur_header)
+    console.print()
+    console.print("  Sticky routing pins every request to one backend so the prompt", style="dim")
+    console.print("  cache actually hits. Recommended for proxies (e.g. Venus:", style="dim")
+    console.print("  Venus-Session-Id). Leave blank to let the proxy load-balance.", style="dim")
+    gate = "Edit sticky routing?" if has_existing else "Enable sticky routing?"
+    answer = pt_prompt(f"  {gate} [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        return existing
+    params: Dict = dict(existing)
+    header = pt_prompt(_label("Sticky routing header (e.g. Venus-Session-Id)", cur_header)).strip()
     if header:
         params["cache_control_session_header"] = header
     elif cur_header:

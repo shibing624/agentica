@@ -11,7 +11,10 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentica.model.anthropic.claude import Claude
+from agentica.model import cache_routing as routing
 from agentica.model.message import Message
 
 
@@ -293,6 +296,89 @@ class TestEndToEndRequestShape(unittest.TestCase):
             content = msg["content"]
             last_block = content[-1] if isinstance(content, list) else content
             self.assertIn("cache_control", last_block)
+
+
+class TestStickyRoutingHeader(unittest.TestCase):
+    """cache_control_session_header pins requests to one proxy backend.
+
+    Venus-style proxies fan out across upstreams unless a sticky header is
+    sent; unrouted requests show a much higher rate of schema-validation 400s.
+    """
+
+    def _headers(self, model: Claude) -> dict:
+        client = model.get_client()
+        return {k.lower(): v for k, v in (client.default_headers or {}).items()}
+
+    def test_off_by_default(self):
+        model = _make_claude()
+        model.session_id = "sess-1"
+        self.assertNotIn("x-session-id", self._headers(model))
+
+    def test_session_id_is_used_when_set(self):
+        model = _make_claude(cache_control_session_header="Venus-Session-Id")
+        model.session_id = "sess-abc-123"
+        self.assertEqual(self._headers(model).get("venus-session-id"), "sess-abc-123")
+
+    def test_falls_back_to_persistent_id_without_session(self):
+        """Bare SDK use: no session, but a stable key still beats none."""
+        model = _make_claude(cache_control_session_header="Venus-Session-Id",
+                              base_url="https://proxy.example/anthropic")
+        self.assertIsNone(model.session_id)
+        sid = self._headers(model).get("venus-session-id")
+        self.assertTrue(sid and sid.startswith("agentica-cache-"))
+
+    def test_id_is_stable_across_calls(self):
+        model = _make_claude(cache_control_session_header="Venus-Session-Id",
+                              base_url="https://proxy.example/anthropic")
+        first = self._headers(model).get("venus-session-id")
+        second = self._headers(model).get("venus-session-id")
+        self.assertTrue(first)
+        self.assertEqual(first, second)
+
+    def test_explicit_default_headers_win(self):
+        """A same-named entry in default_headers is deliberate and not clobbered."""
+        model = _make_claude(
+            cache_control_session_header="Venus-Session-Id",
+            default_headers={"Venus-Session-Id": "pinned-by-user"},
+        )
+        model.session_id = "sess-abc-123"
+        self.assertEqual(self._headers(model).get("venus-session-id"), "pinned-by-user")
+
+    def test_header_survives_client_rebuild(self):
+        """The CLI rebuilds the client per event loop; the id must stick across it."""
+        model = _make_claude(cache_control_session_header="Venus-Session-Id",
+                              base_url="https://proxy.example/anthropic")
+
+        async def build():
+            return model.get_client()
+
+        c1 = asyncio.run(build())
+        c2 = asyncio.run(build())  # fresh loop -> fresh client
+        self.assertIsNot(c1, c2)
+        self.assertEqual(
+            {k.lower(): v for k, v in c1.default_headers.items()}.get("venus-session-id"),
+            {k.lower(): v for k, v in c2.default_headers.items()}.get("venus-session-id"),
+        )
+
+    def test_session_id_arriving_late_is_not_frozen_out(self):
+        """Regression: the id must be resolved per client build, not memoized.
+
+        session_id is None until Agent.update_model() runs. A client built
+        before that used to cache the fallback id, and every later rebuild
+        inherited it — the real session never reached the wire.
+        """
+        model = _make_claude(cache_control_session_header="Venus-Session-Id",
+                              base_url="https://proxy.example/anthropic")
+
+        async def build():
+            return model.get_client()
+
+        first = self._headers(model).get("venus-session-id")
+        self.assertTrue(first.startswith("agentica-cache-"))
+
+        model.client = None  # force a rebuild, as a loop change would
+        model.session_id = "sess-arrives-later"
+        self.assertEqual(self._headers(model).get("venus-session-id"), "sess-arrives-later")
 
 
 if __name__ == "__main__":

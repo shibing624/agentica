@@ -35,7 +35,7 @@ from agentica.cli.display.status_bar import (
     format_duration_compact,
 )
 from agentica.cli.display.stream import StreamDisplayManager
-from agentica.cli.display.tool_format import display_tool_call, format_tool_display
+from agentica.cli.display.tool_format import format_tool_display
 
 __all__ = [
     "COLORS",
@@ -48,7 +48,6 @@ __all__ = [
     "display_diff",
     "display_peer_messages",
     "display_token_stats",
-    "display_tool_call",
     "display_user_message",
     "format_duration_compact",
     "format_session_summary",

@@ -13,7 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### breaking
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
+#### features
+- **Claude 也认 `cache_control_session_header`，值按 CLI 会话换**：Venus 一类代理不粘路由会打到不同后端，缓存冷、schema 400 也更多。header（如 `Venus-Session-Id`）注入当前 `session_id`，新开会话换路由；没有会话才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的 id。不再把第一次（还没 session）的 fallback 冻在实例上。`get_model` 不再只给 OpenAI chat 传这个字段；setup 对 anthropic 只问粘路由 header。
+
 #### fixes
+- **CLI `ask_user_question` 不再裁掉问题后半段**：提问组件以前自己算预留行数，把整段 `prompt` 当成一行折行，短段落被低估，第 2 问和选项出了屏。现在原文倒出来（前面加 `?`，空一行再列选项），窗口高度交给 prompt_toolkit。tool result 本身没截过。
 - **内置工具 schema 不再点名别的可选工具**：`grep` 不提 `execute`，`execute` 不提 `read_file` / `apply_patch`，`task` / memory 也不再写对方的名字。`delegate` 可以提 `wait`（同一套后台 registry）。SDK 可以只装文件工具、不装 `execute`。`tools.md` 只在有文件工具时注入，同样不提 `execute`。按文件名过滤：收窄 `grep` 的 `path`。
 - **`grep` 去掉 `include`**：schema 里写 `include=` 等于每轮教 GNU grep 的 `--include`，模型再抄到 `rg` 上就炸。参数只留 `pattern` / `path` / `limit`。
 - **`execute` 不再改写 `rg --include`**：命令原样进 shell。过滤扩展名写 `rg -g '*.py'` / `rg -t py`，schema 也不再提 `--include`。
@@ -36,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`apply_patch` 找回忘了前导空格的 keep 行**：无 ` `/`-`/`+` 前缀的行若与当前文件某行完全一致（或去行尾空白后只对应一种原文），当成 keep；对不上或多种原文仍报 `Malformed patch`，不做空白/缩进 fuzzy。
 
 #### changes
+- **CLI 去掉已废弃的 `_GutteredConsole` 和从未调用的 `display_tool_call`**：左侧 gutter 早就不画了，代理类和 `agentica.cli.display_tool_call` 导出只剩死代码。
 - **`worktree` 用法改走内置 skill，人用 `/worktree`**：工具还在（模型要搬家仍得调它，`execute git worktree` 只多一个目录、会话还在旧 cwd）。以前每轮把整段 `<worktrees>` policy 塞进 system prompt。现在判断在 `agentica/skills/bundled/worktree/`，目录匹配才读；人用 `/worktree status|use|merge|remove`（和 `--worktree` 同一套 binder）。
 - **peer 收信规则并进 `multi-agent` skill**：`list_agents` / `send_message` 仍每轮注册。以前 `PEER_MESSAGING_POLICY` 每轮塞进 system prompt（授权头、证据用路径、peer 派的活不要 `ask_user_question`）。现在只在目录对上、模型去读 skill 时才进上下文。消息头 `format_for_model` 和 `ask_user_question` 的「这个框能到谁」仍每轮在。
 - **cron 用法改走内置 `cron` skill**：`cronjob` 工具还在。以前 `CronTool.get_system_prompt()` 每轮灌用法 + 按表面切换的 `daemon_hint`（CLI 写 `/cron daemon on`，gateway 写 `cron.enabled`）。现在判断在 `agentica/skills/bundled/cron/`，两种开 daemon 的办法写在同一份 skill 里按表面选；`daemon_hint` / `CLI_DAEMON_HINT` 删掉。人用 `/cron`（skill 同名 auto-command 让位给已有斜杠命令）。

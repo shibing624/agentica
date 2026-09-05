@@ -12,7 +12,7 @@ from typing import List, Optional
 from rich.markup import escape
 from rich.text import Text
 
-from agentica.cli.runtime import TOOL_ICONS, get_console
+from agentica.cli.runtime import TOOL_ICONS
 
 from .console import remember_truncated
 
@@ -335,7 +335,3 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
         )
     else:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
-
-def display_tool_call(tool_name: str, tool_args: dict) -> None:
-    """Display a tool call with icon and colored tool name."""
-    _display_tool_impl(get_console(), tool_name, tool_args)
