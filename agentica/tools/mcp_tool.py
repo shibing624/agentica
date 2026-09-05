@@ -16,11 +16,15 @@ from datetime import timedelta
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamablehttp_client
 
 from agentica.mcp.client import MCPClient
 from agentica.mcp.config import MCPConfig
-from agentica.mcp.server import MCPServerStdio, MCPServerSse, MCPServerStreamableHttp
+from agentica.mcp.server import (
+    MCPServerSse,
+    MCPServerStdio,
+    MCPServerStreamableHttp,
+    streamablehttp_client,
+)
 from agentica.tools.base import Function
 from agentica.tools.base import Tool
 from agentica.tools.origin import ToolOrigin

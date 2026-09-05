@@ -397,7 +397,7 @@ def test_elided_notice_warns_even_without_writes():
     assert "Writes that actually ran" not in text
 
 
-def test_strip_from_memory_appends_one_assistant_notice():
+def test_strip_from_memory_folds_notice_into_last_assistant_turn():
     from agentica.memory.models import AgentRun
     from agentica.memory.working import WorkingMemory
     from agentica.run_response import RunResponse
@@ -425,12 +425,73 @@ def test_strip_from_memory_appends_one_assistant_notice():
     for messages in (memory.messages, memory.runs[0].response.messages):
         assert all(m.role != "tool" for m in messages)
         assert all(not m.tool_calls for m in messages)
-        notice = messages[-1]
-        assert notice.role == "assistant"
-        assert ELIDED_TOOLS_MARK in notice.content
-        assert "write_file docs/foo.md" in notice.content
-        assert "Wrote docs/foo.md" in notice.content
-        assert messages[-2].content == "写好了：docs/foo.md（193 行）"
+        # Merged into the existing answer, not a second assistant message:
+        # consecutive same-role turns are a 400 on Bedrock and some proxies.
+        assert [m.role for m in messages] == ["user", "assistant"]
+        last = messages[-1]
+        assert last.content.startswith("写好了：docs/foo.md（193 行）")
+        assert ELIDED_TOOLS_MARK in last.content
+        assert "write_file docs/foo.md" in last.content
+        assert "Wrote docs/foo.md" in last.content
+
+
+def test_strip_from_memory_is_idempotent():
+    """A second switch must not stack another digest."""
+    from agentica.memory.models import AgentRun
+    from agentica.memory.working import WorkingMemory
+    from agentica.run_response import RunResponse
+
+    history = [
+        _user("edit it"),
+        _assistant(
+            tool_calls=[{
+                "id": "w1",
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "arguments": '{"file_path": "docs/foo.md", "content": "x"}',
+                },
+            }]
+        ),
+        _tool("w1", "write_file", "Wrote docs/foo.md"),
+        _assistant("done"),
+    ]
+    memory = WorkingMemory()
+    memory.add_messages(history)
+    memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
+    strip_tool_artifacts_from_memory(memory)
+    strip_tool_artifacts_from_memory(memory)
+
+    for messages in (memory.messages, memory.runs[0].response.messages):
+        assert [m.role for m in messages] == ["user", "assistant"]
+        assert messages[-1].content.count(ELIDED_TOOLS_MARK) == 1
+
+
+def test_strip_from_memory_adds_no_notice_without_tool_rounds():
+    """Chat-only history: claiming tools were dropped would be false."""
+    from agentica.memory.models import AgentRun
+    from agentica.memory.working import WorkingMemory
+    from agentica.run_response import RunResponse
+
+    history = [_user("hi"), _assistant("hello")]
+    memory = WorkingMemory()
+    memory.add_messages(history)
+    memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
+    strip_tool_artifacts_from_memory(memory)
+
+    for messages in (memory.messages, memory.runs[0].response.messages):
+        assert [(m.role, m.content) for m in messages] == [
+            ("user", "hi"),
+            ("assistant", "hello"),
+        ]
+
+
+def test_strip_elided_notice_leaves_prose():
+    from agentica.agent.history_filter import strip_elided_notice
+
+    merged = "The port is 8080.\n\n" + elided_tools_notice([])
+    assert strip_elided_notice(merged) == "The port is 8080."
+    assert strip_elided_notice("plain text") == "plain text"
 
 
 def test_strip_keeps_image_only_user_turn():
@@ -440,3 +501,41 @@ def test_strip_keeps_image_only_user_turn():
     out = strip_all_tool_artifacts(history)
     assert len(out) == 1
     assert out[0].images == [image_block]
+
+
+def test_notice_never_adds_a_consecutive_assistant_turn():
+    """The digest merges into the trailing assistant turn.
+
+    ``strip_all_tool_artifacts`` itself can still leave two assistant turns
+    adjacent (pre-existing; four tests pin that shape). What must not regress
+    is the notice adding *another* one on top.
+    """
+    from agentica.memory.models import AgentRun
+    from agentica.memory.working import WorkingMemory
+    from agentica.run_response import RunResponse
+
+    history = [
+        _user("edit"),
+        Message(
+            role="assistant",
+            content=[
+                {"type": "text", "text": "ok"},
+                {"type": "tool_use", "id": "t1", "name": "write_file", "input": {}},
+            ],
+        ),
+        Message(
+            role="user",
+            content=[{"type": "tool_result", "tool_use_id": "t1", "content": "Wrote a.md"}],
+        ),
+        _assistant("done"),
+    ]
+    memory = WorkingMemory()
+    memory.add_messages(history)
+    memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
+    before = [m.role for m in strip_all_tool_artifacts(history)]
+    strip_tool_artifacts_from_memory(memory)
+
+    after = [m.role for m in memory.messages]
+    assert after == before, "the notice must not append a further assistant turn"
+    assert sum(ELIDED_TOOLS_MARK in (m.content or "") for m in memory.messages) == 1
+    assert memory.messages[-1].content.startswith("done")

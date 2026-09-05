@@ -11,13 +11,24 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, Union
 
+from collections.abc import Callable
+
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession, StdioServerParameters, Tool as MCPTool, stdio_client
 from mcp.client.sse import sse_client
-from mcp.client.streamable_http import GetSessionIdCallback, streamablehttp_client
 from mcp.shared.message import SessionMessage
 from mcp.types import CallToolResult, InitializeResult
 from typing_extensions import NotRequired, TypedDict
+
+try:
+    from mcp.client.streamable_http import streamablehttp_client
+except ImportError:  # mcp 2.x renamed the helper
+    from mcp.client.streamable_http import streamable_http_client as streamablehttp_client
+
+try:
+    from mcp.client.streamable_http import GetSessionIdCallback
+except ImportError:  # mcp 2.x dropped the public alias
+    GetSessionIdCallback = Callable[[], str | None]
 
 from agentica.utils.log import logger
 

@@ -20,6 +20,7 @@ The original Message objects are never mutated; we copy via
 from __future__ import annotations
 
 import json
+import re
 from fnmatch import fnmatchcase
 from typing import Callable, List, Optional
 
@@ -192,8 +193,41 @@ def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = Fal
 
 
 ELIDED_TOOLS_MARK = "<elided-tools>"
+ELIDED_TOOLS_CLOSE = "</elided-tools>"
 _ELIDED_WRITE_TOOLS = frozenset({"write_file", "apply_patch"})
 _ELIDED_WRITE_LINES_CAP = 20
+_ELIDED_BLOCK_RE = re.compile(
+    re.escape(ELIDED_TOOLS_MARK) + r".*?" + re.escape(ELIDED_TOOLS_CLOSE),
+    re.DOTALL,
+)
+
+
+def has_tool_artifacts(messages: List[Message]) -> bool:
+    """True if ``messages`` still carries a tool round in either wire format.
+
+    The notice below is only honest when something was actually dropped.
+    ``supports_replayed_tool_history`` is a *provider* property, so the strip
+    also runs over chat-only histories where there is nothing to warn about.
+    """
+    for m in messages:
+        if m.role == "tool" or m.tool_calls:
+            return True
+        if _content_has_block_type(m.content, "tool_use"):
+            return True
+        if _content_has_block_type(m.content, "tool_result"):
+            return True
+    return False
+
+
+def strip_elided_notice(text: str) -> str:
+    """Drop the ``<elided-tools>`` block from text meant for human eyes.
+
+    The notice is bookkeeping aimed at the next model. Transcript replay
+    (``/resume``, ``/history``) should show the turn's prose, not the marker.
+    """
+    if not isinstance(text, str) or ELIDED_TOOLS_MARK not in text:
+        return text
+    return _ELIDED_BLOCK_RE.sub("", text).strip()
 
 
 def _tool_call_name_and_args(tool_call: dict) -> tuple[str, dict]:
@@ -294,8 +328,31 @@ def elided_tools_notice(messages: List[Message]) -> str:
     if writes:
         parts.append("Writes that actually ran:")
         parts.extend(writes)
-    parts.append(f"</{ELIDED_TOOLS_MARK.strip('<>')}>")
+    parts.append(ELIDED_TOOLS_CLOSE)
     return "\n".join(parts)
+
+
+def _append_elided_notice(messages: List[Message], notice_text: str) -> List[Message]:
+    """Fold the notice into the trailing assistant turn, at most once.
+
+    Merged rather than appended as its own message: a standalone assistant
+    note after an assistant answer is two consecutive same-role turns, which
+    Bedrock and several aggregating proxies reject with
+    ``400 roles must alternate`` — the very failure the strip exists to avoid.
+    Merging also makes the operation idempotent, so resume-then-``/model``
+    cannot stack a second copy.
+    """
+    out = list(messages or [])
+    for m in out:
+        if m.role == "assistant" and isinstance(m.content, str) and ELIDED_TOOLS_MARK in m.content:
+            return out
+    if out and out[-1].role == "assistant" and isinstance(out[-1].content, str):
+        prose = out[-1].content or ""
+        joined = f"{prose}\n\n{notice_text}" if prose.strip() else notice_text
+        out[-1] = out[-1].model_copy(update={"content": joined})
+        return out
+    out.append(Message(role="assistant", content=notice_text))
+    return out
 
 
 def strip_tool_artifacts_from_memory(working_memory) -> None:
@@ -306,9 +363,9 @@ def strip_tool_artifacts_from_memory(working_memory) -> None:
     and ``/export`` show. Leaving the flat list untouched would make the two
     disagree about what the model can still see.
 
-    A single assistant note is appended so the next model still knows which
-    writes were real. Role is assistant (not user) so the following typed
-    line is not a second consecutive user message.
+    When a tool round was actually dropped, a note naming the real writes is
+    folded into the trailing assistant turn so the next model does not treat
+    prior prose as proof. A history that never had tool rounds gets no note.
     """
     source: List[Message] = []
     for run in working_memory.runs:
@@ -317,24 +374,30 @@ def strip_tool_artifacts_from_memory(working_memory) -> None:
         source.extend(run.response.messages)
     if not source and working_memory.messages:
         source = list(working_memory.messages)
-    notice = Message(role="assistant", content=elided_tools_notice(source))
+    notice_text = elided_tools_notice(source) if has_tool_artifacts(source) else ""
 
     for run in working_memory.runs:
         if run.response is None or not run.response.messages:
             continue
         run.response.messages = strip_all_tool_artifacts(run.response.messages, drop_system=True)
-    if working_memory.runs:
-        last = working_memory.runs[-1]
-        if last.response is not None:
-            last.response.messages = list(last.response.messages or []) + [
-                notice.model_copy()
-            ]
-
     if working_memory.messages:
         working_memory.messages = strip_all_tool_artifacts(
             working_memory.messages, drop_system=False
         )
-        working_memory.messages = list(working_memory.messages) + [notice.model_copy()]
+
+    if not notice_text:
+        return
+
+    if working_memory.runs:
+        last = working_memory.runs[-1]
+        if last.response is not None:
+            last.response.messages = _append_elided_notice(
+                last.response.messages, notice_text
+            )
+    if working_memory.messages:
+        working_memory.messages = _append_elided_notice(
+            working_memory.messages, notice_text
+        )
 
 
 def _matches_any(name: Optional[str], patterns: List[str]) -> bool:

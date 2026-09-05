@@ -416,6 +416,63 @@ class TestBuiltinFileToolGrep:
         assert "hello world" in result, "default mode must include matched line content"
         assert "c.txt" not in result
 
+    def test_grep_long_line_returns_bounded_context_with_position(self, file_tool, tmp_dir):
+        long_line = "A" * 5000 + '"timeout": 30' + "B" * 5000
+        Path(tmp_dir, "data.jsonl").write_text(long_line + "\n")
+        result = asyncio.run(file_tool.grep(r'"timeout": 30', tmp_dir))
+        assert len(result) < 1000
+        assert '"timeout": 30' in result
+        assert "line_len=10013" in result
+        assert "col=5001" in result
+
+    def test_grep_fallback_long_line_matches_rg_bounded_format(self, file_tool, tmp_dir):
+        long_line = "A" * 5000 + '"timeout": 30' + "B" * 5000
+        Path(tmp_dir, "data.jsonl").write_text(long_line + "\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            result = asyncio.run(file_tool.grep(r'"timeout": 30', tmp_dir))
+        assert len(result) < 1000
+        assert '"timeout": 30' in result
+        assert "line_len=10013" in result
+        assert "col=5001" in result
+
+    def test_format_rg_output_does_not_treat_time_as_line_number(self):
+        from agentica.tools.builtin.file_tool import _format_rg_output
+
+        content = "A" * 3000 + '{"timeout": 30, "ts": "12:30:45"}' + "B" * 3000
+        raw = f"/tmp/data.jsonl:1:{content}"
+        out = _format_rg_output(raw, r'"timeout": 30')
+        assert out.startswith("/tmp/data.jsonl:1: col=")
+        assert '"timeout": 30' in out
+        assert f"line_len={len(content)}" in out
+        assert "12:30: col=" not in out
+
+    def test_format_rg_output_uses_column_when_rg_provides_it(self):
+        from agentica.tools.builtin.file_tool import _format_rg_output
+
+        content = "A" * 3000 + '{"timeout": 30, "ts": "12:30:45"}' + "B" * 3000
+        raw = f"/tmp/data.jsonl:1:3001:{content}"
+        out = _format_rg_output(raw, r'"timeout": 30', with_column=True)
+        assert out.startswith("/tmp/data.jsonl:1: col=3001")
+        assert '"timeout": 30' in out
+        assert f"line_len={len(content)}" in out
+
+    def test_grep_long_line_with_timestamp_keeps_match_window(self, file_tool, tmp_dir):
+        payload = '{"timeout": 30, "ts": "12:30:45"}'
+        long_line = "A" * 3000 + payload + "B" * 3000
+        Path(tmp_dir, "data.jsonl").write_text(long_line + "\n")
+        result = asyncio.run(file_tool.grep(r'"timeout": 30', tmp_dir))
+        assert "data.jsonl:1: col=" in result
+        assert '"timeout": 30' in result
+        assert f"line_len={len(long_line)}" in result
+        assert "12:30: col=" not in result
+
+    def test_grep_short_line_stays_file_line_content(self, file_tool, tmp_dir):
+        Path(tmp_dir, "log.txt").write_text("hello 12:30:45 timeout\n")
+        result = asyncio.run(file_tool.grep("hello", tmp_dir))
+        assert "col=" not in result
+        assert "line_len=" not in result
+        assert "hello 12:30:45 timeout" in result
+
     def test_grep_content_mode(self, file_tool, tmp_dir):
         Path(tmp_dir, "code.py").write_text("def foo():\n    pass\ndef bar():\n    pass\n")
         result = asyncio.run(file_tool.grep("def", tmp_dir))

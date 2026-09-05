@@ -520,9 +520,17 @@ class StreamDisplayManager:
                 return lexical_path.relative_to(work_root).as_posix()
             except ValueError:
                 continue
-        # Outside the work dir: keep the path the caller wrote (after ~),
-        # not the basename. ``abspath`` on macOS turns /tmp into /private/tmp.
-        return path.as_posix()
+        # Outside the work dir: keep the path the caller wrote, not the
+        # basename. Collapse ``..`` lexically (``normpath``) but never
+        # ``resolve`` — on macOS that turns /tmp into /private/tmp. Matches
+        # tool_format._shorten_path so the two renderers agree.
+        if str(raw_path).startswith("~"):
+            return str(raw_path)
+        if not Path(raw_path).expanduser().is_absolute():
+            # A relative path that escaped the root (``../sibling/x.py``) reads
+            # better as written than re-anchored to an absolute one.
+            return str(raw_path)
+        return Path(os.path.normpath(path)).as_posix()
 
     def _shorten_workdir_text(self, content: str) -> str:
         """Replace absolute work-dir paths in tool output with relative paths."""

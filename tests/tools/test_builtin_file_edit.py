@@ -154,6 +154,8 @@ class TestBuiltinFileToolApplyPatch:
         assert "-    retries = 1\n+    retries = 3" in description
         assert "one ``@@`` under the same" in description
         assert "One Update File per path" in description
+        assert "per whole line" in description
+        assert "JSONL" in description
         assert "spaced copy of the file is a no-op" in description
         assert "then one patch" in description
         assert "Read the current file" not in description

@@ -18,8 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
 #### fixes
+- **`mcp` 2.x 仍能 import `McpTool`**：SDK 把 `streamablehttp_client` 改成了 `streamable_http_client`，并去掉 `GetSessionIdCallback`。以前 extra 一装上 2.x，`from agentica.tools.mcp_tool import McpTool` 直接 ImportError。现在认两个名字。
+- **`grep` 超长行只回匹配窗口，并从左边拆 `path:line:`**：超过 2000 字不再吐整行，格式是 `file:line: col=N, line_len=M: ...window...`。以前用贪婪的最后一个 `:数字:` 拆 rg 输出，JSONL 里的 `"12:30:45"` 会把行号和窗口抢走。`rg` 加 `--column`，读到一行就裁，结果里不再攒整行。
+- **`apply_patch` schema 写明按行匹配**：超长单行（JSONL）这里改不了，那种情况自己做唯一字面替换。不改匹配引擎，也不往 `tools.md` 里教脚本。
 - **CLI `write_file` / `read_file` / `apply_patch` 工作区外不再只显示文件名**：以前 `_display_path` 对不上 work dir 就收成 basename，`/tmp/dupprobe/probe.py` 变成 `probe.py`，diff 头也是。工作区内仍是相对路径，区外保留调用时的路径。
-- **`/model` / Claude resume 剥 tool 时留下写入摘要**：切模型仍丢掉 thinking 和 tool 的 wire 格式（否则换 provider 会 400），但会追加一条 `<elided-tools>`：散文里的「写好了 193 行」不算证据，真正跑过的 `write_file` / `apply_patch` 列在下面。以前只留问答文本，下一轮就会接着演一遍没发生过的写文件。`execute` 输出不进摘要（会漏密钥）。
+- **`/model` / Claude resume 剥 tool 时留下写入摘要**：切模型仍丢掉 thinking 和 tool 的 wire 格式（否则换 provider 会 400），但会追加一条 `<elided-tools>`：散文里的「写好了 193 行」不算证据，真正跑过的 `write_file` / `apply_patch` 列在下面。以前只留问答文本，下一轮就会接着演一遍没发生过的写文件。`execute` 输出不进摘要（会漏密钥）。摘要合进结尾那条 assistant 正文，不单独占一条消息：连续同角色轮次在 Bedrock 和部分聚合代理上是 `400 roles must alternate`，而剥离本身就是为了别 400；合并同时让操作幂等，resume 之后再按 `/model` 不会叠第二份。判据是「历史里真有 tool 轮」而不是 provider 能力，纯聊天会话 resume 到 Claude 不再被塞一条「tool calls were dropped」的假话。`/resume`、`/history` 回放时不显示这个内部标记。
+- **CLI 两个路径缩短器不再各说一套**：`_display_path` 在工作区外直接返回未规范化的路径，`../` 会留在绝对路径中间（`/Users/me/proj/../other/x.py`）；现在和 `_shorten_path` 一样用 `normpath` 词法折叠（不用 `resolve`，否则 macOS 把 `/tmp` 变成 `/private/tmp`）。`~` 保持写成 `~`，不再展开成带用户名的绝对路径。
+- **SDK `print_response` 的工具行按 agent 的 work dir 缩短**：`printer.py` 没给 `format_tool_display` 传 `work_dir`，回落到 `os.getcwd()`；`delegate(work_dir=...)` 或 SDK 嵌入时 agent 跑在别的目录，路径就按错的根算。
 - **`apply_patch` 示例补上同文件多处**：一条补丁里一个 `*** Update File` 下几个 `@@` 改几处，不要拆成多次调用，也不要写两个同路径的 Update File。以前示例只有「一文件一 hunk」，模型就把同一文件拆成两次调用。
 - **CLI 输入框折行后不再把上一行卷走**：`TextArea` 按显示宽度（`get_cwidth`，中文两列）折行，prompt 只算在第一逻辑行；以前用 `len(line) // (终端宽-2)` 估高度，中文刚折到第 2 行时盒子仍是 1 行，光标把第一行顶没，再打约一行才长高回来。现在跟 prompt_toolkit 同一套折行算行数。
 - **CLI `ask_user_question` 不再裁掉问题后半段**：提问组件以前自己算预留行数，把整段 `prompt` 当成一行折行，短段落被低估，第 2 问和选项出了屏。现在原文倒出来（前面加 `?`，空一行再列选项），窗口高度交给 prompt_toolkit。tool result 本身没截过。

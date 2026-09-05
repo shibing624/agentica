@@ -1064,6 +1064,47 @@ class TestCLIToolRender(unittest.TestCase):
             outside,
         )
 
+    def test_two_path_renderers_agree_outside_the_work_dir(self):
+        """_display_path and _shorten_path must not disagree on the same input."""
+        from agentica.cli.display import StreamDisplayManager
+        from agentica.cli.display.tool_format import _shorten_path
+
+        root = Path("/Users/me/proj")
+        console = MagicMock()
+        console.width = 80
+        manager = StreamDisplayManager(console, work_dir=root)
+
+        for raw, expected in (
+            ("../other/x.py", "../other/x.py"),
+            ("/Users/me/proj/../other/y.py", "/Users/me/other/y.py"),
+            ("/tmp/a.py", "/tmp/a.py"),
+            ("~/.agentica/config.yaml", "~/.agentica/config.yaml"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(manager._display_path(raw), expected)
+                self.assertEqual(_shorten_path(raw, root), expected)
+
+    def test_shorten_path_collapses_dotdot_back_into_the_work_dir(self):
+        from agentica.cli.display.tool_format import _shorten_path
+
+        root = Path("/Users/me/proj")
+        self.assertEqual(_shorten_path("/Users/me/proj/sub/../app.py", root), "app.py")
+        self.assertEqual(_shorten_path("sub/../app.py", root), "app.py")
+
+    def test_sdk_printer_tool_line_uses_the_agents_work_dir(self):
+        """printer.py must not fall back to cwd when the agent runs elsewhere."""
+        from agentica.agent.printer import _tool_call_line
+        from agentica.run_response import ToolCallInfo
+
+        info = ToolCallInfo(
+            tool_name="read_file",
+            tool_args={"file_path": "/Users/me/proj/pkg/app.py"},
+        )
+        self.assertIn("pkg/app.py", _tool_call_line(info, "/Users/me/proj"))
+        self.assertNotIn("/Users/me/proj/pkg/app.py", _tool_call_line(info, "/Users/me/proj"))
+        # No work_dir given: cwd fallback, absolute path kept rather than basename.
+        self.assertIn("/Users/me/proj/pkg/app.py", _tool_call_line(info))
+
     def test_write_file_outside_work_dir_shows_full_path_in_summary_and_diff(self):
         from agentica.cli.display import StreamDisplayManager
 

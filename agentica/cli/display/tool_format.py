@@ -4,6 +4,7 @@
 @description: Tool-call line formatting for the CLI transcript
 """
 
+import os
 import re
 import textwrap
 from pathlib import Path
@@ -28,16 +29,27 @@ def _format_line_range(offset: int, limit: int) -> str:
 
 
 def _shorten_path(file_path: str, work_dir: Optional[Path] = None) -> str:
-    """Work-dir relative path, or the original path when outside it."""
+    """Work-dir relative path, or the path as written when outside it.
+
+    Normalisation is lexical (``normpath``, not ``resolve``): a ``..`` segment
+    should collapse, but following symlinks would rewrite the path the caller
+    typed (on macOS ``/tmp`` becomes ``/private/tmp``). ``~`` is kept as ``~``
+    for the same reason — expanding it is longer than what was written and
+    puts the user's name on screen.
+    """
     if not file_path or file_path == ".":
         return "."
-    p = Path(file_path).expanduser()
+    written = str(file_path)
+    p = Path(written).expanduser()
     root = Path(work_dir).expanduser() if work_dir is not None else Path.cwd()
     try:
         candidate = p if p.is_absolute() else root / p
-        return candidate.relative_to(root).as_posix()
+        lexical = Path(os.path.normpath(candidate))
+        return lexical.relative_to(Path(os.path.normpath(root))).as_posix()
     except ValueError:
-        return p.as_posix() if p.is_absolute() else str(p)
+        if written.startswith("~"):
+            return written
+        return Path(os.path.normpath(p)).as_posix() if p.is_absolute() else written
 
 
 _PATCH_FILE_RE = re.compile(

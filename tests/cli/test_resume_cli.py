@@ -188,10 +188,71 @@ def test_resume_drops_tool_history_for_a_provider_that_cannot(tmp_path):
     hydrate_resumed_session(agent)
 
     history = agent.working_memory.get_messages_from_last_n_runs()
+    # Roles still alternate: the elided-tools digest is folded into the
+    # trailing assistant turn rather than appended as a second assistant
+    # message (Bedrock/proxies 400 on consecutive same-role turns).
+    assert [m.role for m in history] == ["user", "assistant"]
+    assert history[0].content == "read config.py"
+    assert history[1].content.startswith("The port is 8080.")
+    assert "<elided-tools>" in history[1].content
+
+
+def test_resume_of_a_text_only_session_adds_no_elided_notice(tmp_path):
+    """Nothing was dropped, so the digest would be a lie — it must be absent."""
+    log = SessionLog("session-claude-text", base_dir=str(tmp_path))
+    log.append("user", "hi")
+    log.append("assistant", "hello")
+    agent = SimpleNamespace(
+        _session_log=log,
+        working_memory=WorkingMemory(),
+        model=SimpleNamespace(supports_replayed_tool_history=False),
+    )
+
+    hydrate_resumed_session(agent)
+
+    history = agent.working_memory.get_messages_from_last_n_runs()
     assert [(m.role, m.content) for m in history] == [
-        ("user", "read config.py"),
-        ("assistant", "The port is 8080."),
+        ("user", "hi"),
+        ("assistant", "hello"),
     ]
+
+
+def test_repeated_strips_do_not_stack_the_elided_notice(tmp_path):
+    """resume-into-Claude then /model must not append a second digest."""
+    from agentica.agent.history_filter import strip_tool_artifacts_from_memory
+
+    agent = SimpleNamespace(
+        _session_log=_tool_round_log(tmp_path, "session-claude-twice"),
+        working_memory=WorkingMemory(),
+        model=SimpleNamespace(supports_replayed_tool_history=False),
+    )
+    hydrate_resumed_session(agent)
+    strip_tool_artifacts_from_memory(agent.working_memory)
+    strip_tool_artifacts_from_memory(agent.working_memory)
+
+    history = agent.working_memory.get_messages_from_last_n_runs()
+    assert [m.role for m in history] == ["user", "assistant"]
+    assert history[1].content.count("<elided-tools>") == 1
+
+
+def test_resumed_transcript_hides_the_elided_marker(tmp_path):
+    """The digest is for the next model; the user sees the prose."""
+    from agentica.agent.history_filter import elided_tools_notice
+
+    run = _history_run([
+        Message(role="user", content="read config.py"),
+        Message(
+            role="assistant",
+            content="The port is 8080.\n\n" + elided_tools_notice([]),
+        ),
+    ])
+    console = MagicMock()
+    console.width = 80
+    with patch("agentica.cli.commands.session.get_console", return_value=console):
+        display_resumed_transcript([run], "session-claude")
+    rendered = "\n".join(str(c.args[0]) for c in console.print.call_args_list if c.args)
+    assert "<elided-tools>" not in rendered
+    assert "The port is 8080." in rendered
 
 
 def _history_run(messages):

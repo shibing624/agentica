@@ -34,7 +34,10 @@ from agentica.cli.session_resume import (
 )
 from agentica.cli.setup import apply_named_profile_to_agent_config
 from agentica.global_config import set_project_profile
-from agentica.agent.history_filter import strip_tool_artifacts_from_memory
+from agentica.agent.history_filter import (
+    strip_elided_notice,
+    strip_tool_artifacts_from_memory,
+)
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
@@ -222,6 +225,9 @@ def display_conversation_history(runs: list[AgentRun], title: str) -> HistoryRen
                 continue
 
             content_text = message.get_content_string()
+            # The <elided-tools> digest is bookkeeping for the next model,
+            # not transcript prose; replay shows the turn the user saw.
+            content_text = strip_elided_notice(content_text)
             if message.role == "user":
                 con.print(f"\n[bold cyan]You - run {run_number}[/bold cyan]")
                 con.print(content_text, markup=False, highlight=False)

@@ -56,6 +56,11 @@ def _effective_tail(tail) -> Optional[int]:
         return None
     return abs(n)
 _FURTHER_TRUNCATED = "... (further results truncated)"
+_GREP_LONG_LINE_THRESHOLD = 2000
+_GREP_CONTEXT_CHARS = 200
+# Leftmost `path:line:` — a greedy `(.*):(\d+):` steals `"12:30:45"` from JSONL.
+_RG_LINE_PREFIX = re.compile(r"^(.*?):(\d+):(.*)$")
+_RG_COLUMN_PREFIX = re.compile(r"^(\d+):(.*)$")
 
 # Directories every search skips. ``.agentica`` earns its place for a specific
 # reason: with ``settings.worktree.root`` pointing inside the repository
@@ -127,9 +132,84 @@ def _cap_output_lines(output: str, limit: int) -> str:
     return "\n".join(lines[:limit]) + f"\n... ({omitted} more results truncated)"
 
 
+def _split_rg_line(
+        raw: str, *, with_column: bool = False,
+) -> Optional[Tuple[str, int, Optional[int], str]]:
+    """Split ``path:line:content`` (or ``path:line:col:content``) from the left."""
+    match = _RG_LINE_PREFIX.match(raw.rstrip("\r\n"))
+    if not match:
+        return None
+    path, line_s, rest = match.group(1), match.group(2), match.group(3)
+    col = None
+    content = rest
+    if with_column:
+        column_match = _RG_COLUMN_PREFIX.match(rest)
+        if column_match:
+            col = int(column_match.group(1))
+            content = column_match.group(2)
+    return path, int(line_s), col, content
+
+
+def _format_grep_match(
+        path: str, line_num: int, line: str, pattern: str,
+        start: Optional[int] = None,
+) -> str:
+    """Bound long matching lines while retaining the match location."""
+    content = line.rstrip("\r\n")
+    if len(content) <= _GREP_LONG_LINE_THRESHOLD:
+        return f"{path}:{line_num}:{content}"
+    end = None
+    if start is None:
+        try:
+            match = re.search(pattern, content)
+        except re.error:
+            match = None
+        if match:
+            start, end = match.start(), match.end()
+        else:
+            start, end = 0, min(len(content), _GREP_CONTEXT_CHARS)
+    else:
+        start = max(0, min(start, len(content)))
+        # ``start`` came from rg's --column. Do not run the pattern through
+        # Python again: the engine/escaping may differ, and the column is the
+        # authoritative match location.
+        end = start + 1
+    left = max(0, start - _GREP_CONTEXT_CHARS)
+    right = min(len(content), end + _GREP_CONTEXT_CHARS)
+    prefix = "..." if left else ""
+    suffix = "..." if right < len(content) else ""
+    window = f"{prefix}{content[left:right]}{suffix}"
+    return (
+        f"{path}:{line_num}: col={start + 1}, line_len={len(content)}: {window}"
+    )
+
+
+def _format_rg_line(
+        raw: str, pattern: str, *, with_column: bool = False,
+) -> str:
+    parsed = _split_rg_line(raw, with_column=with_column)
+    if parsed is None:
+        return raw.rstrip("\r\n")
+    path, line_num, col, content = parsed
+    start = (col - 1) if col is not None else None
+    return _format_grep_match(path, line_num, content, pattern, start=start)
+
+
+def _format_rg_output(
+        output: str, pattern: str, *, with_column: bool = False,
+) -> str:
+    return "\n".join(
+        _format_rg_line(raw, pattern, with_column=with_column)
+        for raw in output.splitlines()
+    )
+
+
 async def _collect_rg_output(
     proc: asyncio.subprocess.Process,
     max_lines: Optional[int],
+    pattern: Optional[str] = None,
+    *,
+    with_column: bool = False,
 ) -> Tuple[bytes, bytes, bool]:
     """Read rg stdout until EOF or ``max_lines``, then reap the process.
 
@@ -147,6 +227,13 @@ async def _collect_rg_output(
         line = await proc.stdout.readline()
         if not line:
             break
+        if pattern is not None:
+            text = _format_rg_line(
+                line.decode("utf-8", errors="replace"),
+                pattern,
+                with_column=with_column,
+            )
+            line = (text + "\n").encode("utf-8")
         chunks.append(line)
         if max_chunks is not None and len(chunks) >= max_chunks:
             hit_cap = True
@@ -765,6 +852,8 @@ class BuiltinFileTool(Tool):
         Related edits: parallel read_file, then one patch — not
         read-then-patch one file at a time.
         Use write_file for new files or whole-file rewrites.
+        Matching is per whole line. This tool cannot edit one oversized
+        line (a JSONL record); write a unique-literal replace for that case.
 
         After ``@@``, the first character of each line is a space (keep an
         existing line), ``-`` (delete), or ``+`` (insert). To add a comment,
@@ -1058,8 +1147,10 @@ class BuiltinFileTool(Tool):
         """Search file contents for a regex pattern.
 
         Uses ripgrep (``rg``) when it is on PATH, otherwise a Python fallback.
-        Output is matching lines as `file:line_number:content`.
-        To filter by filename, pass a tighter ``path``.
+        Output is matching lines as `file:line_number:content`. A line
+        longer than 2000 characters is a window around the match:
+        `file:line: col=N, line_len=M: ...window...`. The ellipsis is not
+        in the file. To filter by filename, pass a tighter ``path``.
 
         Args:
             pattern: Regex to search for
@@ -1078,7 +1169,7 @@ class BuiltinFileTool(Tool):
         if rg_path is None:
             return await self._run_grep_fallback(pattern, path, limit)
 
-        cmd: List[str] = [rg_path, "--line-number"]
+        cmd: List[str] = [rg_path, "--line-number", "--column"]
         for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
         for root in _nested_checkouts(base_path):
@@ -1096,7 +1187,9 @@ class BuiltinFileTool(Tool):
             )
             max_lines = limit if limit >= 0 else None
             stdout, stderr, hit_cap = await asyncio.wait_for(
-                _collect_rg_output(proc, max_lines),
+                _collect_rg_output(
+                    proc, max_lines, pattern=pattern, with_column=True,
+                ),
                 timeout=_GREP_TIMEOUT,
             )
             drained = True
@@ -1178,16 +1271,17 @@ class BuiltinFileTool(Tool):
                 break
             try:
                 with open(fp, "r", encoding="utf-8", errors="ignore") as handle:
-                    lines_in = handle.readlines()
+                    for line_num, line in enumerate(handle, 1):
+                        if not regex_pattern.search(line):
+                            continue
+                        results.append(
+                            _format_grep_match(str(fp), line_num, line, pattern)
+                        )
+                        n_emitted += 1
+                        if n_emitted >= limit:
+                            break
             except OSError:
                 continue
-            for line_num, line in enumerate(lines_in, 1):
-                if regex_pattern.search(line):
-                    body = line.rstrip("\n")[:200]
-                    results.append(f"{fp}:{line_num}: {body}")
-                    n_emitted += 1
-                    if n_emitted >= limit:
-                        break
 
         result = "\n".join(results) if results else f"No matches found for '{pattern}'"
         result = truncate_if_too_long(result)

@@ -27,12 +27,21 @@ _HIDE_RESULT_TOOLS = frozenset({"read_file", "glob", "grep"})
 _RESULT_PREVIEW_CHARS = 200
 
 
-def _tool_call_line(tool_info) -> str:
+def _tool_call_line(tool_info, work_dir: Optional[str] = None) -> str:
     """CLI ``format_tool_display`` copy on one stdout line."""
+    from pathlib import Path
+
     from agentica.cli.display.tool_format import format_tool_display
 
     name = tool_info.tool_name or "unknown"
-    display = format_tool_display(name, tool_info.tool_args or {})
+    # Without work_dir the formatter falls back to os.getcwd(), which is the
+    # wrong root whenever the agent runs against another directory
+    # (delegate(work_dir=...), SDK embedding).
+    display = format_tool_display(
+        name,
+        tool_info.tool_args or {},
+        work_dir=Path(work_dir) if work_dir else None,
+    )
     if display:
         return f"  🔧 {name} {display}"
     return f"  🔧 {name}"
@@ -98,7 +107,7 @@ class PrinterMixin:
             print()
             for tool in run_response.tools:
                 info = tool if isinstance(tool, ToolCallInfo) else ToolCallInfo.from_dict(tool)
-                print(_tool_call_line(info))
+                print(_tool_call_line(info, getattr(self, "work_dir", None)))
                 result_line = _tool_result_line(info)
                 if result_line:
                     print(result_line)
@@ -193,7 +202,10 @@ class PrinterMixin:
                 if tool_info is None:
                     continue
                 if kind == RunDisplayEventKind.TOOL_STARTED:
-                    print(f"\n{_tool_call_line(tool_info)}", flush=True)
+                    print(
+                        f"\n{_tool_call_line(tool_info, getattr(self, 'work_dir', None))}",
+                        flush=True,
+                    )
                     _need_answer_header = True
                 else:
                     result_line = _tool_result_line(tool_info)
