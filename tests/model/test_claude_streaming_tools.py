@@ -115,6 +115,51 @@ class TestClaudeStreamingToolCalls(unittest.TestCase):
         self.assertEqual(assistant.tool_calls[0]["function"]["name"], "add")
         self.assertEqual(assistant.tool_calls[0]["id"], "toolu_1")
 
+    def test_stream_does_not_yield_blank_separator(self):
+        """Claude used to yield a ``\\n\\n`` after every stream (and again
+        before running tools). Accumulated into the next round, that became
+        the blank-line stacks in the session jsonl.
+        """
+        from anthropic.lib.streaming._types import ParsedMessageStopEvent
+
+        msg = MagicMock()
+        msg.usage = MagicMock(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        msg.stop_reason = "end_turn"
+        msg_stop = ParsedMessageStopEvent.model_construct(type="message_stop", message=msg)
+
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.run_tools = True
+        model.functions = {}
+
+        def _stream(**_kwargs):
+            return _StreamMgr([msg_stop])
+
+        mock_client = MagicMock()
+        mock_client.messages.stream = _stream
+        model.client = mock_client
+
+        async def _fake_format(_msgs):
+            return ([{"role": "user", "content": "hi"}], "sys")
+
+        model.format_messages = _fake_format  # type: ignore[assignment]
+
+        async def _drain():
+            chunks = []
+            async for chunk in model.response_stream([]):
+                chunks.append(chunk)
+            return chunks
+
+        chunks = asyncio.run(_drain())
+        self.assertFalse(
+            any(getattr(c, "content", None) == "\n\n" for c in chunks),
+            f"blank separators in {[getattr(c, 'content', None) for c in chunks]!r}",
+        )
+
     def test_parsed_message_stop_sets_finish_reason(self):
         """ParsedMessageStopEvent must set last_finish_reason (max_tokens -> length)."""
         from anthropic.lib.streaming._types import ParsedMessageStopEvent

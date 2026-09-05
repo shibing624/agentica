@@ -222,6 +222,43 @@ class TestSessionLogBasic:
             assert prev["role"] == "assistant"
             assert m["tool_call_id"] in [t["id"] for t in prev.get("tool_calls", [])]
 
+    def test_claude_tool_round_aside_is_persisted(self, tmp_dir):
+        """Claude stores asides as content-block lists; persist must not drop them.
+
+        ``isinstance(content, str) else ""`` wrote an empty assistant(tool_calls)
+        row, so /history and the jsonl last-assistant dump looked like a display
+        ticker (the model really did emit a lone ``count`` line between tools).
+        """
+        log = SessionLog("claude-aside", base_dir=tmp_dir)
+        agent = _FakeAgent(
+            log,
+            messages=[
+                Message(
+                    role="assistant",
+                    content=[
+                        {"type": "thinking", "thinking": "plan", "signature": "sig"},
+                        {"type": "text", "text": "looking at the tree"},
+                        {"type": "text", "text": "count"},
+                        {"type": "tool_use", "id": "A", "name": "glob", "input": {}},
+                    ],
+                    tool_calls=[{"id": "A", "type": "function",
+                                 "function": {"name": "glob", "arguments": "{}"}}],
+                ),
+                Message(role="tool", tool_call_id="A", content="files", tool_name="glob"),
+                Message(role="assistant", content="done"),
+            ],
+            tools=[{"tool_call_id": "A", "tool_name": "glob", "content": "files", "replay": True}],
+        )
+        Runner._persist_assistant_tool_calls(agent)
+
+        messages = log.load()
+        assert messages[0]["role"] == "assistant"
+        assert messages[0]["tool_calls"][0]["id"] == "A"
+        assert "looking at the tree" in messages[0]["content"]
+        assert "count" in messages[0]["content"]
+        assert "tool_use" not in messages[0]["content"]
+        assert "plan" not in messages[0]["content"]
+
     def test_tool_calling_assistant_keeps_reasoning_content_across_replay(self, tmp_dir):
         """A resumed tool-calling assistant must still carry its reasoning trace.
 

@@ -26,7 +26,10 @@ from pydantic import BaseModel
 
 from agentica.utils.log import logger, _run_id_var, _parent_run_id_var, _short
 from agentica.utils.string import replace_invalid_utf8
-from agentica.agent.history_filter import strip_tool_artifacts_from_memory
+from agentica.agent.history_filter import (
+    _text_from_content_blocks,
+    strip_tool_artifacts_from_memory,
+)
 from agentica.cost_tracker import CostTracker
 from agentica.hooks import RunHooks, _CompositeAgentHooks, _CompositeRunHooks
 from agentica.model.base import Model
@@ -872,17 +875,20 @@ class LoopMixin:
                             messages_for_model, agent, active_model, loop_state
                         )
 
+                        call_start = len(messages_for_model)
+                        # Each LLM call is its own reply. Accumulating across
+                        # tool rounds concatenates asides (and Claude's
+                        # end-of-stream ``\n\n``) into the final answer.
+                        # Mid-stream retry still restores THIS call's
+                        # baseline so a re-issue does not duplicate the
+                        # partial already streamed into model_response.
+                        model_response.content = ""
+                        model_response.reasoning_content = ""
                         # --- Lifecycle: LLM start (stream) ---
                         await self._dispatch_run_hook(
                             "on_llm_start",
                             lambda hook: hook.on_llm_start(agent=agent, messages=messages_for_model),
                         )
-
-                        call_start = len(messages_for_model)
-                        # Content accumulated by earlier turns of this run. A
-                        # mid-stream transient retry must restore this baseline
-                        # so the re-issued turn does not duplicate the partial
-                        # text it already streamed into model_response.
                         content_at_call_start = model_response.content
                         reasoning_at_call_start = model_response.reasoning_content
                         # The question goes on disk before the request it caused.
@@ -1539,9 +1545,24 @@ class LoopMixin:
                     #    mid-turn are skipped.
                     self._persist_assistant_tool_calls(agent)
 
-                    # 3. Log assistant output (with model info + usage, mirrors CC)
-                    _assistant_text = agent.run_response.content
-                    if _assistant_text and isinstance(_assistant_text, str):
+                    # 3. Log assistant output (with model info + usage, mirrors CC).
+                    # The last assistant without tool_calls is this turn's
+                    # answer. Do not write run_response.content: even after
+                    # per-call reset it can still disagree with the message
+                    # (Claude list content, lstrip on OpenAI).
+                    _final_assistant = next(
+                        (
+                            item for item in reversed(agent.run_response.messages or [])
+                            if isinstance(item, Message) and item.role == "assistant" and not item.tool_calls
+                        ),
+                        None,
+                    )
+                    _assistant_text = ""
+                    if _final_assistant is not None:
+                        _assistant_text = _text_from_content_blocks(_final_assistant.content)
+                    if not _assistant_text and isinstance(agent.run_response.content, str):
+                        _assistant_text = agent.run_response.content
+                    if _assistant_text:
                         _model_meta = {}
                         if agent.run_response.model:
                             _model_meta["model"] = agent.run_response.model
@@ -1559,13 +1580,6 @@ class LoopMixin:
                                 "input_tokens": _last_usage.input_tokens,
                                 "output_tokens": _last_usage.output_tokens,
                             }
-                        _final_assistant = next(
-                            (
-                                item for item in reversed(agent.run_response.messages or [])
-                                if isinstance(item, Message) and item.role == "assistant" and not item.tool_calls
-                            ),
-                            None,
-                        )
                         if _final_assistant is not None:
                             _model_meta.update(self._provider_replay_meta(_final_assistant))
                         agent._session_log.append("assistant", _assistant_text, **_model_meta)

@@ -1038,6 +1038,81 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
             asyncio.run(_drive())
             self._assert_single_tool_turn(agent)
 
+    def test_streaming_asides_stay_on_tool_round_not_final(self):
+        """Tool-round asides must not be concatenated into the final answer.
+
+        The stream loop used to ``+=`` every chunk across the whole agentic
+        turn, and persist wrote that blob as the last assistant. A model that
+        muttered ``count`` before each tool then looked like the CLI was
+        counting; /resume replayed the whole aside stack as one reply.
+        """
+        import tempfile
+        from types import SimpleNamespace
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        def _chunk(content=None, tool_calls=None, finish_reason=None):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    finish_reason=finish_reason,
+                    delta=SimpleNamespace(content=content, reasoning_content=None,
+                                          audio=None, tool_calls=tool_calls),
+                )],
+                usage=None,
+            )
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        turns = iter([
+            [
+                _chunk(content="looking at files"),
+                _chunk(content="\ncount"),
+                _chunk(
+                    tool_calls=[SimpleNamespace(
+                        index=0, id="call_1", type="function",
+                        function=SimpleNamespace(name="echo", arguments='{"text": "hi"}'),
+                    )],
+                    finish_reason="tool_calls",
+                ),
+            ],
+            [_chunk(content="the answer", finish_reason="stop")],
+        ])
+
+        async def fake_invoke_stream(messages):
+            for chunk in next(turns):
+                yield chunk
+
+        model.invoke_stream = fake_invoke_stream
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                session_id="s-aside-persist", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("please echo hi"):
+                    pass
+
+            asyncio.run(_drive())
+
+            self.assertEqual(agent.run_response.content, "the answer")
+            entries = [
+                e for e in self._entries(agent)
+                if e["type"] in ("user", "assistant", "tool")
+            ]
+            self.assertEqual(
+                [e["type"] for e in entries],
+                ["user", "assistant", "tool", "assistant"],
+            )
+            self.assertIn("looking at files", entries[1]["content"])
+            self.assertIn("count", entries[1]["content"])
+            self.assertEqual(entries[-1]["content"], "the answer")
+            self.assertNotIn("looking at files", entries[-1]["content"])
+            self.assertNotIn("count", entries[-1]["content"])
+
 
 class TestMidStreamTransientRetry(unittest.TestCase):
     """A mid-stream transport drop must not kill the run.

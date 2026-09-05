@@ -502,14 +502,11 @@ class BuiltinExecuteTool(Tool):
         substitution in several files is ``rg`` then one multi-file
         patch, not a shell or python rewriter.
 
-        Prefer one long ``execute`` over many short ones. Each extra call
-        is another model round-trip.
-
-        - Dependent work (later steps need the earlier ones): pipes and
-          ``&&``. Verify / build / launch in one call.
-        - Independent probes (a missing path must not stop the rest):
-          ``;`` and ``2>/dev/null``. Several ``rg … | head`` sites with
-          ``echo ===`` between them is one call, not N ``grep``s.
+        Split or combine as needed — do not force every probe into one
+        script. Independent calls in one message can run together
+        (``parallel_safe=True``). Dependent steps can share one command
+        (pipes and ``&&``). A miss that must not stop the rest: ``;``
+        and ``2>/dev/null``.
 
         Search with ``rg``; if ``rg`` is missing, ``grep``
         (``rg -n PAT -- path || grep -n PAT path``). Bound noisy output

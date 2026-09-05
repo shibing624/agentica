@@ -168,7 +168,6 @@ class Ollama(Model):
         """Handle tool calls in the assistant message (async-only)."""
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             model_response.content = assistant_message.get_content_string()
-            model_response.content += "\n\n"
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
@@ -356,7 +355,6 @@ class Ollama(Model):
     ) -> AsyncIterator[ModelResponse]:
         """Handle tool calls for response stream (async-only)."""
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            yield ModelResponse(content="\n\n")
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 

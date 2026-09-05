@@ -1099,7 +1099,6 @@ class Claude(Model):
         """
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             model_response.content = str(response_content)
-            model_response.content += "\n\n"
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
@@ -1217,7 +1216,6 @@ class Claude(Model):
             AsyncIterator[ModelResponse]: Yields model responses during function execution.
         """
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            yield ModelResponse(content="\n\n")
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
@@ -1291,7 +1289,6 @@ class Claude(Model):
                     self.last_finish_reason = "length" if _stop == "max_tokens" else _stop
         finally:
             await stream_mgr.__aexit__(None, None, None)
-        yield ModelResponse(content="\n\n")
 
         metrics.response_timer.stop()
 

@@ -116,6 +116,9 @@ class TestPromptModules:
         assert "(not find" not in content
         assert "not cat" not in content
         assert "| rg" in content or "| head" in content
+        assert "do not force every probe into one script" in content
+        assert "parallel_safe=True" in content
+        assert "Prefer one long call" not in content
         assert "apply_patch" in content
         assert "find . -type f" not in content
         assert "xargs ls" not in content
@@ -251,7 +254,8 @@ class TestGetSystemMessage:
 
         assert msg is not None
         assert "# Using Your Tools" in msg.content
-        assert "Prefer one long call" in msg.content
+        assert "do not force every probe into one script" in msg.content
+        assert "parallel_safe=True" in msg.content
         assert "<<'EOF'" in msg.content
         assert "2>/dev/null" in msg.content
         assert "apply_patch" in msg.content

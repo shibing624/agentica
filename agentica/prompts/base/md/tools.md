@@ -1,16 +1,12 @@
 # Using Your Tools
 
-Any shell command goes through `execute`. Prefer one long call over many
-short ones: each extra call is another model round-trip.
-
-Two kinds of long call:
-
-- Dependent work (later steps need the earlier ones to succeed): pipes
-  and `&&`.
-  `cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8`
-- Independent probes (a missing path must not stop the rest): `;` and
-  `2>/dev/null`.
-  `rg -n Foo -A 12 src/a.py | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head`
+Any shell command goes through `execute`. Split or combine as needed —
+do not force every probe into one script. Independent calls in one
+message can run together (`execute(parallel_safe=True)`). Dependent
+steps can share one command (pipes and `&&`). A miss that must not
+stop the rest: `;` and `2>/dev/null`.
+`cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8`
+`rg -n Foo -A 12 src/a.py | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head`
 
 Search with `rg`; if `rg` is missing, `grep`
 (`rg -n PAT -- path || grep -n PAT path`). Bound noisy output with
@@ -30,8 +26,7 @@ several `*** Update File` hunks — not a shell or python rewriter.
 `execute` is for explore, analyze, verify, build, and git.
 
 `glob` / `grep` / `read_file` pay for themselves when you want their
-shape (path list, capped rg, numbered lines for a patch). A multi-site
-`rg | head; echo ===; …` probe is one `execute`, not N `grep`s.
+shape (path list, capped rg, numbered lines for a patch).
 
 When several dedicated-tool calls do not depend on each other, send them
 in one message. When a call's arguments come from another call's result,

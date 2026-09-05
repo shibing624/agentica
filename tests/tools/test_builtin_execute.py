@@ -78,7 +78,9 @@ class TestBuiltinExecuteTool:
         assert "find . -type f" not in doc
         assert "xargs ls" not in doc
         assert "(find, ls, cat, awk)" not in doc
-        assert "Prefer one long" in doc
+        assert "do not force every probe" in doc
+        assert "parallel_safe=True" in doc
+        assert "Prefer one long" not in doc
         assert "<<'EOF'" in doc
         assert "read_file" in doc
         assert "DO NOT use newlines" not in doc

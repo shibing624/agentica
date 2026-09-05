@@ -21,6 +21,7 @@ from typing import (
 
 
 from agentica.utils.log import logger
+from agentica.agent.history_filter import _text_from_content_blocks
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.usage import split_prompt_usage
@@ -242,7 +243,9 @@ class PersistMixin:
                 if _round_key in session_log._turn_written_tool_call_rounds:
                     continue
                 session_log._turn_written_tool_call_rounds.add(_round_key)
-                _text = msg.content if isinstance(msg.content, str) else ""
+                # Claude tool rounds store asides as a content-block list
+                # (text + thinking + tool_use). A str-only check wrote "".
+                _text = _text_from_content_blocks(msg.content)
                 session_log.append(
                     "assistant",
                     _text,
@@ -286,7 +289,7 @@ class PersistMixin:
                     # minimal entry so resume still has a valid assistant->tool pair.
                     session_log.append(
                         "tool",
-                        msg.content if isinstance(msg.content, str) else "",
+                        _text_from_content_blocks(msg.content),
                         tool_call_id=msg.tool_call_id or "",
                         **PersistMixin._provider_replay_meta(msg),
                     )
@@ -781,7 +784,7 @@ class PersistMixin:
         reasoning = assistant.reasoning_content or assistant.thinking
         if isinstance(reasoning, str) and reasoning.strip():
             marks.append((ends.get("thinking", now), "thinking", {}))
-        content = assistant.content if isinstance(assistant.content, str) else ""
+        content = _text_from_content_blocks(assistant.content)
         if content.strip():
             marks.append((ends.get("text", now), "text", {}))
         for tc in assistant.tool_calls or []:
