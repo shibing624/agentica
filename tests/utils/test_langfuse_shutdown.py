@@ -19,6 +19,43 @@ def _require_langfuse():
     pytest.importorskip("langfuse", reason="Langfuse tests require the langfuse extra")
 
 
+class TestLangfuseMediaGuard(unittest.TestCase):
+    def test_sse_frame_is_not_a_media_uri(self):
+        self.assertFalse(
+            li._looks_like_base64_data_uri(
+                'data: {"choices":[{"delta":{"role":"assistant"}}]}'
+            )
+        )
+
+    def test_real_image_data_uri_is_recognized(self):
+        self.assertTrue(
+            li._looks_like_base64_data_uri("data:image/png;base64,iVBORw0KGgo=")
+        )
+
+    def test_guard_swallows_sse_frames_without_error_log(self):
+        _require_langfuse()
+        from langfuse.media import LangfuseMedia
+
+        li._install_langfuse_media_guard()
+        with patch.object(LangfuseMedia, "_log") as mock_log:
+            media = LangfuseMedia(
+                base64_data_uri='data: {"choices":[{"delta":{"role":"assistant"}}]}'
+            )
+        self.assertIsNone(media._content_bytes)
+        mock_log.error.assert_not_called()
+
+    def test_guard_still_parses_real_base64_data_uri(self):
+        _require_langfuse()
+        from langfuse.media import LangfuseMedia
+
+        li._install_langfuse_media_guard()
+        raw = b"\x01\x02\x03\x04"
+        import base64
+
+        uri = "data:audio/wav;base64," + base64.b64encode(raw).decode()
+        media = LangfuseMedia(base64_data_uri=uri)
+        self.assertEqual(media._content_bytes, raw)
+
 class TestStartShutdownThread(unittest.TestCase):
     def test_returns_none_when_not_configured(self):
         with patch.object(li, "is_langfuse_configured", return_value=False):

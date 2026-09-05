@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
 #### fixes
+- **Langfuse 不再把 SSE 的 `data: {...}` 当媒体**：MediaManager 见 `data:` 就当 base64 data URI，会话里的流式帧和源码片段会打 `Error parsing base64 data URI` / `Data is not base64 encoded`。只有 `data:...;base64,...` 才解析。
 - **CLI 状态栏思考强度只显示 `high`**：OpenAI 兼容代理把 `reasoning_effort` 和 `thinking_display` 放进 `extra_body` 时，以前 `describe_thinking_mode()` 会拼成 `on(reasoning_effort=high, display=omitted)`。有强度就只显示强度，`display=` 不再进状态栏。
 - **Anthropic 原生路径不再把可选参数全标成必填**：`Claude.get_tools()` 自己按「type 里没有 `null` 就算 required」重算了一遍，而 `get_json_schema` 恰好相反——它用「不出现在 required 里」表达 Optional（type 数组好几家 provider 不收）。于是每个参数都被判成必填：`read_file` 要求同时传 `offset`/`limit`/`tail`，`execute` 要求传 `timeout`/`parallel_safe`。现在直接用 `parameters["required"]`（签名默认值算出来的，或 `parameters_override` 给的），非 list 一律收敛成 `[]`，`properties` 里没有的名字丢掉。只影响 `model_provider: anthropic`，OpenAI 路径发的是 `Function.to_dict()`，一直是对的。
 - **Anthropic 工具 schema 不再抹掉 enum / items / 嵌套 properties**：每个参数以前被压成 `{"type","description"}` 两个键，自动生成的 schema 里没有 per-param description，所以描述还都是空串。现在整份属性 schema 原样透传。

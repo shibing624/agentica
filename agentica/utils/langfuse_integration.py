@@ -72,6 +72,41 @@ def _suppress_opentelemetry_errors():
 _langfuse_timeout_warned: bool = False
 
 
+def _looks_like_base64_data_uri(data: Any) -> bool:
+    """True only for real media data URIs Langfuse can upload.
+
+    Langfuse's MediaManager treats every string starting with ``data:`` as a
+    base64 media URI. SSE frames (``data: {"choices":...}``), Swift type
+    annotations, and other ``data:`` prefixes then explode as
+    ``Error parsing base64 data URI`` / ``Data is not base64 encoded``.
+    """
+    if not isinstance(data, str) or not data.startswith("data:"):
+        return False
+    header, sep, _rest = data[5:].partition(",")
+    if not sep or not header:
+        return False
+    return "base64" in header.split(";")
+
+
+def _install_langfuse_media_guard() -> None:
+    """Skip Langfuse media parsing unless the string is actually ``data:...;base64,...``."""
+    try:
+        from langfuse.media import LangfuseMedia
+    except ImportError:
+        return
+    original = LangfuseMedia._parse_base64_data_uri
+    if getattr(original, "_agentica_guarded", False):
+        return
+
+    def _parse_base64_data_uri(self, data: str):
+        if not _looks_like_base64_data_uri(data):
+            return None, None
+        return original(self, data)
+
+    _parse_base64_data_uri._agentica_guarded = True  # type: ignore[attr-defined]
+    LangfuseMedia._parse_base64_data_uri = _parse_base64_data_uri  # type: ignore[method-assign]
+
+
 def _check_langfuse_connection() -> bool:
     """
     Check if Langfuse host is reachable.
@@ -130,6 +165,7 @@ def is_langfuse_available() -> bool:
         if _langfuse_available:
             # Suppress OpenTelemetry exporter errors (e.g., timeout when host is unreachable)
             _suppress_opentelemetry_errors()
+            _install_langfuse_media_guard()
             # Check connection and warn user if host is unreachable
             if _check_langfuse_connection():
                 logger.debug("Langfuse is available and configured (using OpenTelemetry auto-instrumentation)")
