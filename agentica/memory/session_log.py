@@ -160,6 +160,26 @@ def _has_text(message: Any) -> bool:
     return content is not None and content != []
 
 
+def _anthropic_tool_result_ids(message: Any) -> tuple:
+    """Ids answered by an Anthropic-shaped tool answer, in block order.
+
+    Anthropic replies to a tool call with ``role="user"`` carrying
+    ``tool_result`` blocks. Read as a plain user message it looks like the
+    turn simply never answered its ``tool_use``, so the pairing check was
+    blind on the one provider that rejects that shape.
+    """
+    content = _msg_field(message, "content")
+    if _msg_field(message, "role") != "user" or not isinstance(content, list):
+        return ()
+    return tuple(
+        str(block.get("tool_use_id"))
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "tool_result"
+        and block.get("tool_use_id")
+    )
+
+
 def trajectory_skeleton(messages: List[Any]) -> List[tuple]:
     """Structure of a message sequence, stripped of everything cosmetic.
 
@@ -168,6 +188,10 @@ def trajectory_skeleton(messages: List[Any]) -> List[tuple]:
     ids, and which tool result answered which id. Content, metrics and
     timestamps are deliberately ignored — compaction, markers and
     synthesized messages rewrite content legally.
+
+    An Anthropic ``role="user"`` message of ``tool_result`` blocks is the
+    same step as the OpenAI ``role="tool"`` messages it stands in for: one
+    ``("tool", id)`` per block, so both wire shapes compare equal.
 
     Two normalisations encode legal log-vs-live differences:
     - messages with neither text nor tool_calls are dropped (the log does not
@@ -183,6 +207,10 @@ def trajectory_skeleton(messages: List[Any]) -> List[tuple]:
             continue
         if role == "tool":
             items.append(("tool", str(_msg_field(message, "tool_call_id") or "")))
+            continue
+        result_ids = _anthropic_tool_result_ids(message)
+        if result_ids:
+            items.extend(("tool", tc_id) for tc_id in result_ids)
             continue
         tool_calls = _msg_field(message, "tool_calls")
         if role == "assistant" and tool_calls:

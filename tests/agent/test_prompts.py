@@ -108,6 +108,9 @@ class TestPromptModules:
         assert "*** Update File" in content
         assert "python rewriter" in content
         assert "`config.py`" in content
+        assert "parallel `read_file`" in content
+        assert "not read-patch-read-patch" in content
+        assert "Read the current file" not in content
 
     def test_tools_module_allows_execute_pipelines(self):
         from agentica.prompts.base.tools import get_tools_prompt

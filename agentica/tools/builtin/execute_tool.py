@@ -498,7 +498,8 @@ class BuiltinExecuteTool(Tool):
         Any shell command goes here: explore, analyze, verify, build, git,
         and pipelines that shape stdout — filter, sort, unique, count,
         head, tail. Repo edits are ``apply_patch`` (one call can update
-        many files) or ``write_file``, not this tool. The same
+        many files; parallel ``read_file`` then one patch, not one file
+        per call) or ``write_file``, not this tool. The same
         substitution in several files is ``rg`` then one multi-file
         patch, not a shell or python rewriter.
 

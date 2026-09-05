@@ -68,13 +68,17 @@ class ContextFailure:
     hunk_number: int
     eof: bool = False
     unmatched: str = ""
+    contiguous: bool = False
 
     def render(self) -> str:
         location = "EOF context" if self.eof else "context"
+        prefix = f"Hunk {self.hunk_number}: {location} not found"
+        if self.contiguous:
+            return f"{prefix} as a contiguous block{self.unmatched}"
         if not self.unmatched:
-            return f"Hunk {self.hunk_number}: {location} not found."
+            return f"{prefix}."
         tip = self.unmatched if len(self.unmatched) <= 120 else self.unmatched[:119] + "…"
-        return f"Hunk {self.hunk_number}: {location} not found: {tip!r}."
+        return f"{prefix}: {tip!r}."
 
 
 class PatchContextError(ValueError):
@@ -342,15 +346,63 @@ def _parse_create_diff(lines: List[str]) -> str:
     return "\n".join(output)
 
 
-def _context_unmatched_line(context: List[str], input_lines: List[str]) -> str:
-    """The hunk line that most likely failed: first context line absent from the file."""
+def _trim_context_tip(text: str, limit: int = 80) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _contiguous_break_note(
+    context: List[str],
+    input_lines: List[str],
+    start: int,
+) -> str:
+    """Where a hunk whose lines all exist fails to match as one block."""
     if not context:
         return ""
+    first = context[0]
+    search_from = start
+    if not any(line == first for line in input_lines[start:]):
+        search_from = 0
+    for i in range(search_from, len(input_lines)):
+        if input_lines[i] != first:
+            continue
+        for j, expected in enumerate(context):
+            pos = i + j
+            actual = input_lines[pos] if pos < len(input_lines) else None
+            if actual != expected:
+                got = "EOF" if actual is None else repr(_trim_context_tip(actual))
+                want = repr(_trim_context_tip(expected))
+                return f" (line {i + 1}). file: {got}, hunk: {want}."
+        break
+    return ""
+
+
+def _context_failure(
+    hunk_number: int,
+    eof: bool,
+    context: List[str],
+    input_lines: List[str],
+    start: int,
+) -> ContextFailure:
+    missing = ""
     present = set(input_lines)
     for line in context:
         if line not in present:
-            return line
-    return context[0]
+            missing = line
+            break
+    if missing:
+        return ContextFailure(hunk_number=hunk_number, eof=eof, unmatched=missing)
+    note = _contiguous_break_note(context, input_lines, start)
+    if note:
+        return ContextFailure(
+            hunk_number=hunk_number, eof=eof, unmatched=note, contiguous=True
+        )
+    return ContextFailure(
+        hunk_number=hunk_number,
+        eof=eof,
+        unmatched=context[0] if context else "",
+    )
 
 
 def _recover_unprefixed_keep_lines(
@@ -425,10 +477,8 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
         parser.index = section.end_index
         if find_result.new_index == -1:
             failures.append(
-                ContextFailure(
-                    hunk_number=hunk_number,
-                    eof=section.eof,
-                    unmatched=_context_unmatched_line(section.next_context, input_lines),
+                _context_failure(
+                    hunk_number, section.eof, section.next_context, input_lines, cursor
                 )
             )
             continue

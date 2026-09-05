@@ -40,6 +40,29 @@ class PersistMixin:
     agent: Any
 
     @staticmethod
+    def _anthropic_tool_results(message: Message) -> List[Dict[str, Any]]:
+        """The ``tool_result`` blocks of an Anthropic-shaped tool answer.
+
+        Anthropic answers a tool call with ``role="user"`` carrying
+        ``tool_result`` blocks, not one ``role="tool"`` message per id (see
+        ``Claude.format_function_call_results``). Anything that matched only
+        ``role == "tool"`` therefore dropped every native Claude tool result
+        on the floor — which stayed invisible while a broken
+        ``sanitize_messages`` injected "execution may have been interrupted"
+        placeholders, since those *were* ``role="tool"`` and so were the only
+        tool rows a Claude session ever logged.
+        """
+        if message.role != "user" or not isinstance(message.content, list):
+            return []
+        return [
+            block
+            for block in message.content
+            if isinstance(block, dict)
+            and block.get("type") == "tool_result"
+            and block.get("tool_use_id")
+        ]
+
+    @staticmethod
     def _tool_records_from_messages(
         messages: List[Message],
         *,
@@ -47,24 +70,59 @@ class PersistMixin:
         fallback_model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
+        # An Anthropic ``tool_result`` block names only the id it answers; the
+        # tool's name and arguments live on the assistant round that issued it.
+        calls_by_id: Dict[str, Dict[str, Any]] = {}
         for msg in messages:
-            if msg.role != "tool" or not msg.tool_name:
+            if msg.role == "assistant" and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        calls_by_id[str(tc["id"])] = tc
                 continue
-            record = {
-                "tool_call_id": msg.tool_call_id,
-                "tool_name": msg.tool_name,
-                "tool_args": msg.tool_args,
-                "content": msg.content,
-                "tool_call_error": msg.tool_call_error or False,
-                "metrics": msg.metrics if msg.metrics else {},
-            }
-            if fallback_compacted:
-                record["fallback_compacted"] = True
-                record["replay"] = False
-                if fallback_model:
-                    record["fallback_model"] = fallback_model
-            records.append(record)
+            pending: List[Dict[str, Any]] = []
+            if msg.role == "tool":
+                if not msg.tool_name:
+                    continue
+                pending.append({
+                    "tool_call_id": msg.tool_call_id,
+                    "tool_name": msg.tool_name,
+                    "tool_args": msg.tool_args,
+                    "content": msg.content,
+                    "tool_call_error": msg.tool_call_error or False,
+                    "metrics": msg.metrics if msg.metrics else {},
+                })
+            else:
+                for block in PersistMixin._anthropic_tool_results(msg):
+                    _tc_id = str(block["tool_use_id"])
+                    _fn = (calls_by_id.get(_tc_id) or {}).get("function") or {}
+                    if not _fn.get("name"):
+                        continue
+                    pending.append({
+                        "tool_call_id": _tc_id,
+                        "tool_name": _fn["name"],
+                        "tool_args": PersistMixin._tool_args_from_arguments(_fn.get("arguments")),
+                        "content": _text_from_content_blocks(block.get("content")),
+                        "tool_call_error": bool(block.get("is_error", False)),
+                        "metrics": {},
+                    })
+            for record in pending:
+                if fallback_compacted:
+                    record["fallback_compacted"] = True
+                    record["replay"] = False
+                    if fallback_model:
+                        record["fallback_model"] = fallback_model
+                records.append(record)
         return records
+
+    @staticmethod
+    def _tool_args_from_arguments(arguments: Any) -> Any:
+        """Tool arguments as a dict when the wire form is a JSON string."""
+        if isinstance(arguments, str):
+            try:
+                return json.loads(arguments)
+            except (ValueError, TypeError):
+                return arguments
+        return arguments
 
     @staticmethod
     def _provider_replay_meta(message: Message) -> Dict[str, Any]:
@@ -232,6 +290,59 @@ class PersistMixin:
             for tc in _records
         }
         _functions = (agent.model.functions or {}) if agent.model else {}
+
+        def _write_tool_result(
+            tool_call_id: Optional[str],
+            fallback_content: Any,
+            msg: Message,
+            fallback_is_error: bool = False,
+        ) -> None:
+            """Write one tool result row, whichever wire shape carried it."""
+            if tool_call_id and tool_call_id in session_log._turn_written_tool_call_ids:
+                return
+            if tool_call_id:
+                session_log._turn_written_tool_call_ids.add(tool_call_id)
+            _tc = tool_by_id.get(tool_call_id)
+            if _tc is None:
+                # Tool result without matching FunctionCall metadata: log a
+                # minimal entry so resume still has a valid assistant->tool pair.
+                _minimal: Dict[str, Any] = {}
+                if fallback_is_error:
+                    _minimal["is_error"] = True
+                session_log.append(
+                    "tool",
+                    _text_from_content_blocks(fallback_content),
+                    tool_call_id=tool_call_id or "",
+                    **_minimal,
+                    **PersistMixin._provider_replay_meta(msg),
+                )
+                return
+            _tool_content = _tc.get("content", "") or ""
+            if len(_tool_content) > 2000:
+                _tool_content = _tool_content[:2000] + "\n... [truncated]"
+            _origin_meta: Dict[str, Any] = {}
+            _fn = _functions.get(_tc.get("tool_name", ""))
+            if _fn is not None and _fn.origin is not None:
+                _origin_meta["origin_type"] = _fn.origin.type
+                if _fn.origin.provider_name:
+                    _origin_meta["origin_provider_name"] = _fn.origin.provider_name
+                if _fn.origin.agent_name:
+                    _origin_meta["origin_agent_name"] = _fn.origin.agent_name
+                if _fn.origin.source_tool_name:
+                    _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
+            session_log.append(
+                "tool_audit" if _tc.get("replay") is False else "tool",
+                _tool_content,
+                tool_name=_tc.get("tool_name", ""),
+                tool_call_id=_tc.get("tool_call_id", ""),
+                is_error=_tc.get("tool_call_error", False),
+                fallback_compacted=_tc.get("fallback_compacted", False),
+                fallback_model=_tc.get("fallback_model"),
+                replay=_tc.get("replay", True),
+                **PersistMixin._provider_replay_meta(msg),
+                **_origin_meta,
+            )
+
         for msg in _msgs:
             if not isinstance(msg, Message):
                 continue
@@ -253,45 +364,16 @@ class PersistMixin:
                     **PersistMixin._provider_replay_meta(msg),
                 )
             elif msg.role == "tool":
-                if msg.tool_call_id and msg.tool_call_id in session_log._turn_written_tool_call_ids:
-                    continue
-                if msg.tool_call_id:
-                    session_log._turn_written_tool_call_ids.add(msg.tool_call_id)
-                _tc = tool_by_id.get(msg.tool_call_id)
-                if _tc is not None:
-                    _tool_content = _tc.get("content", "") or ""
-                    if len(_tool_content) > 2000:
-                        _tool_content = _tool_content[:2000] + "\n... [truncated]"
-                    _origin_meta: Dict[str, Any] = {}
-                    _fn = _functions.get(_tc.get("tool_name", ""))
-                    if _fn is not None and _fn.origin is not None:
-                        _origin_meta["origin_type"] = _fn.origin.type
-                        if _fn.origin.provider_name:
-                            _origin_meta["origin_provider_name"] = _fn.origin.provider_name
-                        if _fn.origin.agent_name:
-                            _origin_meta["origin_agent_name"] = _fn.origin.agent_name
-                        if _fn.origin.source_tool_name:
-                            _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
-                    session_log.append(
-                        "tool_audit" if _tc.get("replay") is False else "tool",
-                        _tool_content,
-                        tool_name=_tc.get("tool_name", ""),
-                        tool_call_id=_tc.get("tool_call_id", ""),
-                        is_error=_tc.get("tool_call_error", False),
-                        fallback_compacted=_tc.get("fallback_compacted", False),
-                        fallback_model=_tc.get("fallback_model"),
-                        replay=_tc.get("replay", True),
-                        **PersistMixin._provider_replay_meta(msg),
-                        **_origin_meta,
-                    )
-                else:
-                    # Tool message without matching FunctionCall metadata: log a
-                    # minimal entry so resume still has a valid assistant->tool pair.
-                    session_log.append(
-                        "tool",
-                        _text_from_content_blocks(msg.content),
-                        tool_call_id=msg.tool_call_id or "",
-                        **PersistMixin._provider_replay_meta(msg),
+                _write_tool_result(msg.tool_call_id, msg.content, msg)
+            else:
+                # Anthropic packs a round's results into one role="user"
+                # message of tool_result blocks; each block is its own row.
+                for _block in PersistMixin._anthropic_tool_results(msg):
+                    _write_tool_result(
+                        str(_block["tool_use_id"]),
+                        _block.get("content"),
+                        msg,
+                        fallback_is_error=bool(_block.get("is_error", False)),
                     )
 
     @staticmethod

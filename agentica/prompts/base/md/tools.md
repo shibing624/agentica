@@ -20,9 +20,11 @@ is `read_file`: from the start, `offset`/`limit` (default 0/500; omit
 a turn filling a pipe.
 
 Repo edits go through `apply_patch` (one call can update many files) or
-`write_file` (new file or whole-file rewrite). The same substitution in
-several files is `rg` to list the sites, then one `apply_patch` with
-several `*** Update File` hunks — not a shell or python rewriter.
+`write_file` (new file or whole-file rewrite). Files you will change:
+parallel `read_file`, then one `apply_patch` with a `*** Update File`
+hunk per file — not read-patch-read-patch. The same substitution in
+several files is `rg` to list the sites, then that one patch — not a
+shell or python rewriter.
 `execute` is for explore, analyze, verify, build, and git.
 
 `glob` / `grep` / `read_file` pay for themselves when you want their

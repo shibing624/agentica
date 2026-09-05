@@ -761,6 +761,8 @@ class BuiltinFileTool(Tool):
         Use this for code edits, multi-hunk edits, and changes that span
         multiple files. The same substitution in several files is one
         patch with several Update File hunks, not a shell rewriter.
+        Related edits across files: parallel read_file, then one patch —
+        not read-then-patch one file at a time.
         Use write_file for new files or whole-file rewrites.
 
         After ``@@``, the first character of each line is a space (keep an
@@ -774,11 +776,16 @@ class BuiltinFileTool(Tool):
          def run():
         -    timeout = 10
         +    timeout = 30
+        *** Update File: tests/test_app.py
+        @@
+        -assert run() == 10
+        +assert run() == 30
         *** End Patch
 
-        Context must match the file exactly — no whitespace or quote
-        rewriting. Read the current file with read_file before building
-        an Update/Delete hunk; do not reconstruct context from memory.
+        Context must match each file exactly — no whitespace or quote
+        rewriting. Parallel ``read_file`` the files you will edit, then
+        one patch covering all of them; do not reconstruct context from
+        memory.
         All paths are validated before any file is changed. A markdown
         fence, heredoc, or omitted Begin/End around a File header is
         accepted. A keep line that forgot its leading space is recovered

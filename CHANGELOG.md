@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### fixes
+- **Claude 的工具结果终于落盘了**：Anthropic 用 `role="user"` + `tool_result` 块回答工具调用，落盘只认 `role="tool"`，所以每个原生 Claude 会话写下的都是 `assistant(tool_calls)` 后面什么都没有——真实工具输出一次也没进 jsonl，投影里全是孤儿 `tool_use` id。以前看不出来，是因为坏掉的 `sanitize_messages` 会注入「execution may have been interrupted」占位，那些占位恰好是 `role="tool"`，于是成了 Claude 会话唯一的 tool 行（历史日志里 `interrupted` 占 tool 行 100%）；上一条修掉占位后 tool 行直接归零。现在按 `tool_use_id` 拆成每块一行，`tool_name`/`is_error` 一并带上；in-turn flush 手里没有 FunctionCall 记录时，从发起那一轮的 `tool_calls` 取名字和参数。
+- **`trajectory_skeleton` 认得 Claude 的工具回答**：`role="user"` + `tool_result` 块归一成与 `role="tool"` 相同的轨迹步（每块一个 `("tool", id)`）。以前整轮 Claude 读起来是一串普通 user 消息，配对检查根本看不见结果——专门用来抓孤儿 `tool_use` 的那条不变式，在唯一会因此报 400 的 provider 上是瞎的。
 - **流式工具轮的旁白不再糊进终答**：以前 `model_response.content += chunk` 跨过整轮工具往上累加，Claude 中间 `assistant(tool_calls)` 的 `content` 又是 block 列表，落盘 `isinstance(str) else ""` 写成空串，所有旁白（包括模型自己吐的单独一行 `count`）堆在 jsonl 最后一条。现在中间旁白留在对应的 `assistant(tool_calls)` 上（抽出 text block），终答只留最后一轮；Claude/Ollama 也不再在每轮流结束 yield `\n\n`。不滤 `count`——那是模型输出。
 - **`sanitize_messages` 不再把 Claude 的成功结果标成中断**：Claude 用 `role=user` + `tool_result` 块回答，以前只认 `role=tool`，每条成功调用前都插一句「execution may have been interrupted」。现在先吃掉这些块再判断缺没缺。`format_tool_results` 的缺 id 补齐落到 OpenAI/Ollama 基类，中断回合不再只靠下一跳 sanitize。
 - **Claude 回合中断后不再留下孤儿 `tool_use`**：Anthropic 要求每条 `tool_use` 都有对应 `tool_result`。以前按位置 zip，中断或乱序返回就会贴错 id，后续每跳都 400。现在按 `tool_call_id` 配对，缺的补一条 interrupted 错误；这类 400 走 transcript sanitize，不再原样重发。
@@ -27,12 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **流式中途断流按 `max_api_retry` 同 turn 重发**：SSE 被掐（`incomplete chunked read`）发生在已吐 chunk 之后，`stream_with_retry` / `_call_with_retry` 都接不住。Runner 消费点回滚本轮 `model_response` 内容并重开流，预算与同模型 API retry 共用（CLI 默认 2，即再打一次）；耗尽照旧抛。已 yield 的 chunk 收不回——交互会重打一段，`--print` / delegate 的 stdout 会拼上半截。同时修了 `_call_with_retry` 分类：`RETRYABLE`（含 `incomplete chunked read`）先于 `FALLBACK_ONLY`（含 `connection`），否则这类断流永远走 fallback、从不在同模型上重试。
 - **`apply_patch` 信封按 Codex/OpenCode 宽松提取**：小模型常把补丁包进 ` ```patch ` 围栏、前面加说明、漏 `*** End Patch`，或写成 `{"patch":"..."}`，以前一律报 `Patch must start with '*** Begin Patch'`。现在找出 Begin/End（或裸的 `*** Update/Add/Delete File:`）再解析；hunk 仍精确匹配，缺 File 头或行首不是空格/`-`/`+` 照旧拒绝。
 - **`apply_patch` 对不上时点出那一行**：`Hunk N: context not found: '…'` 带上 hunk 里文件中不存在的那一行，不再只报一句 not found。不回 Expected/Actual 预览。
+- **`apply_patch` 对不上时分清「行不存在」和「行在、但不连着」**：hunk 里每行都能在文件里找到、只是中间跳过了几行时，以前把第一行 keep 报成 `not found: '…'`。模型刚 `read_file` 过那一行，以为工具在撒谎，再读一遍。现在写 `not found as a contiguous block (line N). file: …, hunk: …`。真缺的行仍报 `not found: '…'`。
 - **`apply_patch` 找回忘了前导空格的 keep 行**：无 ` `/`-`/`+` 前缀的行若与当前文件某行完全一致（或去行尾空白后只对应一种原文），当成 keep；对不上或多种原文仍报 `Malformed patch`，不做空白/缩进 fuzzy。
 
 #### changes
 - **`worktree` 用法改走内置 skill，人用 `/worktree`**：工具还在（模型要搬家仍得调它，`execute git worktree` 只多一个目录、会话还在旧 cwd）。以前每轮把整段 `<worktrees>` policy 塞进 system prompt。现在判断在 `agentica/skills/bundled/worktree/`，目录匹配才读；人用 `/worktree status|use|merge|remove`（和 `--worktree` 同一套 binder）。
 - **peer 收信规则并进 `multi-agent` skill**：`list_agents` / `send_message` 仍每轮注册。以前 `PEER_MESSAGING_POLICY` 每轮塞进 system prompt（授权头、证据用路径、peer 派的活不要 `ask_user_question`）。现在只在目录对上、模型去读 skill 时才进上下文。消息头 `format_for_model` 和 `ask_user_question` 的「这个框能到谁」仍每轮在。
 - **cron 用法改走内置 `cron` skill**：`cronjob` 工具还在。以前 `CronTool.get_system_prompt()` 每轮灌用法 + 按表面切换的 `daemon_hint`（CLI 写 `/cron daemon on`，gateway 写 `cron.enabled`）。现在判断在 `agentica/skills/bundled/cron/`，两种开 daemon 的办法写在同一份 skill 里按表面选；`daemon_hint` / `CLI_DAEMON_HINT` 删掉。人用 `/cron`（skill 同名 auto-command 让位给已有斜杠命令）。
+- **`apply_patch` 默认形态改成一条补丁改多个文件**：docstring 示例两个 `*** Update File`；要改的文件先并行 `read_file`，再一条补丁。以前示例只有 `app.py`、文案写「先读当前文件」，模型就读一个改一个。精确匹配没变。
 - **`multi-agent` skill / 文档不再把「要并行」写成 `delegate` 的理由**：`task` 一条消息里就可以并行多个（`concurrency_safe`）。对比表补上 Parallel 行；`delegate` 只为独立 context / 换目录 / 要写文件。
 - **CLI / Web 的 `apply_patch` 调用行显示工作区相对路径**：以前只报 `Edited 1 file (+8 -3)`，看不出改了哪个文件。现在和 `read_file` / `write_file` 一样带上路径（`apply_patch agentica/cli/commands/session.py - Edited 1 file (+8 -3)`）；多文件逗号并列。
 - **`execute` 不再规定必须一条长命令**：依赖可用管道/`&&`，互不依赖可同一轮多条 `execute(parallel_safe=True)`，怎么拆交给模型。不要用 shell 倒整份源码（`cd && cat f.py` 是 `read_file`），也不要用 `execute` 改仓库：同一替换是 `rg` 列出位点再一条多文件 `apply_patch`。路径 grounding 只卡 `read_file` / `write_file` / `apply_patch`；`execute` 可以复用已知路径、从 `.` 搜，或对候选加 `2>/dev/null`。以前写「prefer one long / 不要 N 个 grep」会把独立探查焊成一条超长脚本。

@@ -158,6 +158,32 @@ def world():
         self.assertNotIn("Expected context:", message)
         self.assertNotIn("Actual from line", message)
 
+    def test_noncontiguous_existing_lines_name_the_file_line_that_breaks_the_block(self):
+        """A line that exists, but not next to the rest of the hunk, is not 'missing'.
+
+        Blaming the first keep line sent the model back to re-read a span it
+        already had (the diary-menu line was in the file; the hunk skipped
+        the separator in between).
+        """
+        original = "alpha\nmiddle\ngamma\n"
+        diff = """@@
+ alpha
+-gamma
++GAMMA
+"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("Hunk 1: context not found as a contiguous block", message)
+        self.assertIn("line 1", message)
+        self.assertIn("middle", message)
+        self.assertIn("gamma", message)
+        self.assertNotIn("not found: 'alpha'", message)
+        self.assertNotIn("Expected context:", message)
+        self.assertNotIn("Actual from line", message)
+
     def test_unprefixed_file_line_is_recovered_as_keep(self):
         original = "def max_matching(n_left, n_right, adj):\n    return 0\n"
         diff = """@@

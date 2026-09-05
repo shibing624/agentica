@@ -1113,6 +1113,130 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
             self.assertNotIn("looking at files", entries[-1]["content"])
             self.assertNotIn("count", entries[-1]["content"])
 
+    class _AnthropicStreamMgr:
+        """Minimal async stand-in for anthropic's ``messages.stream()``."""
+
+        def __init__(self, events):
+            self._events = list(events)
+
+        async def __aenter__(self):
+            events = self._events
+
+            class _Iter:
+                def __aiter__(self_inner):
+                    return self_inner
+
+                async def __anext__(self_inner):
+                    if not events:
+                        raise StopAsyncIteration
+                    return events.pop(0)
+
+            return _Iter()
+
+        async def __aexit__(self, *_a):
+            return None
+
+    def test_anthropic_turn_persists_its_tool_result(self):
+        """A native-Claude tool round must reach the log with its result.
+
+        Claude answers a tool call with ``role="user"`` + ``tool_result``
+        blocks. Persist matched only ``role == "tool"``, so every Anthropic
+        session logged ``assistant(tool_calls)`` with nothing after it and the
+        projection carried orphan ``tool_use`` ids. The gap hid behind the
+        placeholder results a broken ``sanitize_messages`` used to inject.
+        """
+        import tempfile
+        from unittest.mock import MagicMock
+        from agentica.agent import Agent
+        from agentica.model.anthropic.claude import Claude
+        from agentica.memory.session_log import assert_trajectory_equivalent
+        from anthropic.types import TextBlock, ToolUseBlock
+        from anthropic.lib.streaming._types import (
+            ParsedContentBlockStopEvent,
+            ParsedMessageStopEvent,
+        )
+        from anthropic.types import RawContentBlockDeltaEvent, TextDelta
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        def _message_stop(stop_reason):
+            msg = MagicMock()
+            msg.usage = MagicMock(
+                input_tokens=10, output_tokens=5,
+                cache_read_input_tokens=0, cache_creation_input_tokens=0,
+            )
+            msg.stop_reason = stop_reason
+            return ParsedMessageStopEvent.model_construct(type="message_stop", message=msg)
+
+        def _block_stop(block):
+            return ParsedContentBlockStopEvent.model_construct(
+                type="content_block_stop", index=0, content_block=block
+            )
+
+        def _text_delta(text):
+            return RawContentBlockDeltaEvent.model_construct(
+                type="content_block_delta", index=0,
+                delta=TextDelta(type="text_delta", text=text),
+            )
+
+        rounds = iter([
+            [
+                _text_delta("calling echo"),
+                _block_stop(TextBlock(type="text", text="calling echo")),
+                _block_stop(ToolUseBlock(
+                    type="tool_use", id="toolu_1", name="echo", input={"text": "hi"},
+                )),
+                _message_stop("tool_use"),
+            ],
+            [
+                _text_delta("the answer"),
+                _block_stop(TextBlock(type="text", text="the answer")),
+                _message_stop("end_turn"),
+            ],
+        ])
+
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        client = MagicMock()
+        client.messages.stream = lambda **_kw: self._AnthropicStreamMgr(next(rounds))
+        model.client = client
+
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                session_id="s-anthropic-persist", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("please echo hi"):
+                    pass
+
+            asyncio.run(_drive())
+
+            entries = [
+                e for e in self._entries(agent)
+                if e["type"] in ("user", "assistant", "tool")
+            ]
+            self.assertEqual(
+                [e["type"] for e in entries],
+                ["user", "assistant", "tool", "assistant"],
+                f"unexpected transcript: {[e['type'] for e in entries]}",
+            )
+            self.assertEqual(entries[1]["tool_calls"][0]["id"], "toolu_1")
+            self.assertIn("calling echo", entries[1]["content"])
+            self.assertEqual(entries[2]["tool_call_id"], "toolu_1")
+            self.assertEqual(entries[2]["tool_name"], "echo")
+            self.assertIn("echo:hi", entries[2]["content"])
+            self.assertNotIn("interrupted", entries[2]["content"])
+            self.assertEqual(entries[-1]["content"], "the answer")
+
+            # The log must project back to the trajectory really sent.
+            live = [m for m in agent.run_response.messages if m.role != "system"]
+            self.assertIsNone(
+                assert_trajectory_equivalent(agent._session_log.derive_messages(), live)
+            )
+
 
 class TestMidStreamTransientRetry(unittest.TestCase):
     """A mid-stream transport drop must not kill the run.

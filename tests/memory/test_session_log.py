@@ -259,6 +259,127 @@ class TestSessionLogBasic:
         assert "tool_use" not in messages[0]["content"]
         assert "plan" not in messages[0]["content"]
 
+    def test_anthropic_tool_results_are_persisted(self, tmp_dir):
+        """Claude answers a tool call with role="user" + tool_result blocks.
+
+        Persist only recognised the OpenAI ``role="tool"`` shape, so every
+        native-Anthropic turn wrote ``assistant(tool_calls)`` with no result
+        after it: the real tool output never reached the log, and the
+        projection carried orphan ``tool_use`` ids. It stayed hidden while a
+        broken ``sanitize_messages`` injected "execution may have been
+        interrupted" placeholders, which *did* have role="tool" and so were
+        the only tool rows Claude sessions ever got.
+        """
+        log = SessionLog("claude-tool-results", base_dir=tmp_dir)
+        live = [
+            Message(role="user", content="find and read"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "text", "text": "looking"},
+                    {"type": "tool_use", "id": "A", "name": "glob", "input": {}},
+                    {"type": "tool_use", "id": "B", "name": "read_file", "input": {}},
+                ],
+                tool_calls=[
+                    {"id": "A", "type": "function",
+                     "function": {"name": "glob", "arguments": "{}"}},
+                    {"id": "B", "type": "function",
+                     "function": {"name": "read_file", "arguments": '{"p": "a.py"}'}},
+                ],
+            ),
+            Message(
+                role="user",
+                content=[
+                    {"type": "tool_result", "tool_use_id": "A", "content": "a.py"},
+                    {"type": "tool_result", "tool_use_id": "B",
+                     "content": "boom", "is_error": True},
+                ],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+        agent = _FakeAgent(
+            log,
+            messages=live,
+            tools=[
+                {"tool_call_id": "A", "tool_name": "glob", "content": "a.py", "replay": True},
+                {"tool_call_id": "B", "tool_name": "read_file", "content": "boom",
+                 "tool_call_error": True, "replay": True},
+            ],
+        )
+        log.append("user", "find and read")
+        Runner._persist_assistant_tool_calls(agent)
+        log.append("assistant", "done", model="m1")
+
+        messages = log.load()
+        assert [m["role"] for m in messages] == [
+            "user", "assistant", "tool", "tool", "assistant",
+        ]
+        assert [tc["id"] for tc in messages[1]["tool_calls"]] == ["A", "B"]
+        assert messages[2]["tool_call_id"] == "A"
+        assert messages[2]["content"] == "a.py"
+        assert messages[3]["tool_call_id"] == "B"
+        assert messages[3]["content"] == "boom"
+
+        raw = [json.loads(line) for line in
+               log.path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        by_id = {e.get("tool_call_id"): e for e in raw if e["type"] == "tool"}
+        assert by_id["A"]["tool_name"] == "glob"
+        assert by_id["B"]["tool_name"] == "read_file"
+        assert by_id["B"]["is_error"] is True
+
+        # The projection must replay: no tool_use id left unanswered, and the
+        # same trajectory the provider actually saw.
+        assert assert_trajectory_equivalent(log.derive_messages(), live) is None
+
+    def test_anthropic_tool_results_persist_without_tool_records(self, tmp_dir):
+        """The in-turn flush has no FunctionCall records yet — still no orphan.
+
+        ``_flush_turn_tool_rounds`` derives its records from the turn's
+        messages, so an Anthropic round must survive on the blocks alone.
+        """
+        log = SessionLog("claude-tool-results-bare", base_dir=tmp_dir)
+        live = [
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "A", "type": "function",
+                             "function": {"name": "glob", "arguments": "{}"}}],
+            ),
+            Message(
+                role="user",
+                content=[{"type": "tool_result", "tool_use_id": "A",
+                          "content": [{"type": "text", "text": "a.py"}]}],
+            ),
+        ]
+        agent = _FakeAgent(log, messages=live, tools=[])
+        Runner._persist_assistant_tool_calls(agent)
+
+        messages = log.load()
+        assert [m["role"] for m in messages] == ["assistant", "tool"]
+        assert messages[1]["tool_call_id"] == "A"
+        assert messages[1]["content"] == "a.py"
+        assert assert_trajectory_equivalent(log.derive_messages(), live) is None
+
+    def test_anthropic_tool_round_is_written_once(self, tmp_dir):
+        """In-turn flush then end-of-turn backfill must not double-write."""
+        log = SessionLog("claude-tool-results-once", base_dir=tmp_dir)
+        live = [
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "A", "type": "function",
+                             "function": {"name": "glob", "arguments": "{}"}}],
+            ),
+            Message(
+                role="user",
+                content=[{"type": "tool_result", "tool_use_id": "A", "content": "a.py"}],
+            ),
+        ]
+        agent = _FakeAgent(log, messages=live, tools=[])
+        log.begin_turn()
+        Runner._persist_assistant_tool_calls(agent)
+        Runner._persist_assistant_tool_calls(agent)
+
+        assert [m["role"] for m in log.load()] == ["assistant", "tool"]
+
     def test_tool_calling_assistant_keeps_reasoning_content_across_replay(self, tmp_dir):
         """A resumed tool-calling assistant must still carry its reasoning trace.
 
@@ -1206,6 +1327,59 @@ class TestTrajectoryEquivalence:
             Message(role="assistant", content="a"),
         ]
         assert assert_trajectory_equivalent(log.derive_messages(), live) is None
+
+    def test_anthropic_tool_result_message_is_a_tool_step(self, tmp_dir):
+        """role="user" + tool_result blocks is the same step as role="tool".
+
+        Without this normalisation every native-Claude turn reads as a run of
+        plain user messages: the pairing check cannot see the results at all,
+        so the one invariant that catches orphan ``tool_use`` was blind on the
+        provider that actually rejects them.
+        """
+        from agentica.memory.session_log import trajectory_skeleton
+
+        live = [
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "A", "type": "function",
+                             "function": {"name": "glob", "arguments": "{}"}}],
+            ),
+            Message(
+                role="user",
+                content=[{"type": "tool_result", "tool_use_id": "A", "content": "a.py"}],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+        assert trajectory_skeleton(live) == [
+            ("assistant_tool_calls", ("A",)),
+            ("tool", "A"),
+            ("assistant", ()),
+        ]
+
+    def test_anthropic_orphan_tool_use_is_detected(self, tmp_dir):
+        """The unanswered Claude round the projection used to hide."""
+        log = SessionLog("traj-anthropic-orphan", base_dir=tmp_dir)
+        log.append("user", "q")
+        log.append("assistant", "", tool_calls=[{"id": "A", "type": "function",
+                                                 "function": {"name": "glob", "arguments": "{}"}}])
+        log.append("assistant", "done", model="m1")
+
+        live = [
+            Message(role="user", content="q"),
+            Message(
+                role="assistant",
+                tool_calls=[{"id": "A", "type": "function",
+                             "function": {"name": "glob", "arguments": "{}"}}],
+            ),
+            Message(
+                role="user",
+                content=[{"type": "tool_result", "tool_use_id": "A", "content": "a.py"}],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+        divergence = assert_trajectory_equivalent(log.derive_messages(), live)
+        assert divergence is not None
+        assert "diverges at index" in divergence
 
     def test_tool_call_id_reordering_is_detected(self, tmp_dir):
         """Same roles, wrong pairing: tool B answered under assistant A's round."""

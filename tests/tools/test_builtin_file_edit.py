@@ -143,6 +143,8 @@ class TestBuiltinFileToolApplyPatch:
         function.process_entrypoint(strict=False)
         description = function.description
         assert "*** Begin Patch" in description
+        assert "*** Update File: app.py" in description
+        assert "*** Update File: tests/test_app.py" in description
         assert (
             "+# matching via BFS\n"
             " def run():\n"
@@ -150,6 +152,8 @@ class TestBuiltinFileToolApplyPatch:
             "+    timeout = 30"
         ) in description
         assert "spaced copy of the file is a no-op" in description
+        assert "then one patch" in description
+        assert "Read the current file" not in description
         assert "MUST call read_file" not in description
 
     def test_applies_update_when_envelope_markers_are_omitted(self, file_tool, tmp_dir):
