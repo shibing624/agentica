@@ -28,10 +28,56 @@ SDK 仍读纯环境变量。import 时 `agentica/config.py` 调 `apply_global_co
 | `temperature` | float | 采样 |
 | `top_p` | float | 采样 |
 | `extra_body` | dict | 原样透传给 API 的额外请求体参数 |
-| `extra_headers` | dict | 原样透传的额外 HTTP 头 |
+| `extra_headers` | dict | 原样透传的额外 HTTP 头（**非 anthropic**；`/v1/messages` 没有 per-request header 通道，用 `default_headers`） |
+| `default_headers` | dict | 写死值的静态 HTTP 头，建客户端时注入（**仅 anthropic**）。见下节 |
+| `enable_cache_control` | bool | prompt cache 断点注入。Claude 默认 **开**（原生 `cache_control`）；OpenAI 兼容端点默认 **关**，显式开启后才注入 |
+| `cache_control_session_header` | str | 粘性路由 header 的**名字**，值自动填当前会话 id。anthropic 与 openai 两侧都生效。见下节 |
+| `cache_control_messages` | int | 最近若干条消息上打断点（默认 3；仅 `wire_api: chat_completions`，Claude 自己管断点） |
+| `cache_keepalive` | bool | 空闲时定期 ping 保活缓存（默认 true；仅 `wire_api: chat_completions`） |
 | `auxiliary_model` | block | 可选廉价模型（provider/name/base_url/api_key + 同上调优项）用于后台调用 + `task` subagent。同 provider 省略字段继承 main model；跨 provider 不继承 main 的 key/base_url；无论是否同 provider 都不继承 main 的 `extra_body`/`extra_headers` |
 
 profile 之外的顶层块：`settings`（CLI 行为开关，与 model 无关，如 `num_history_turns`，经 `get_setting`/`set_setting` 读写）和 `env`（任意 key-value，注入 `os.environ`）。
+
+## 代理网关的粘性路由（prompt cache 的前提）
+
+prompt cache 只在**连续请求落到同一台上游**时才有意义。多数聚合型代理网关为了吞吐会把请求扇出到多个上游，缓存不会跟着走——于是每一轮都是 cache write，账单反而更高。这类网关通常允许用一个请求头把路由钉住，agentica 有两种配法，区别只在**粘性的粒度**。
+
+### 账号级：`default_headers` 写死一个值
+
+```yaml
+default_headers: {X-Sticky-Routing: token}
+```
+
+原样注入客户端静态头。上例是按 Bearer token 粘——**同一个 key 的所有会话共用一台上游**，于是缓存跨会话共享：今天在同一个项目里开的第十个会话，命中的还是第一个会话写下的缓存。
+
+### 会话级：`cache_control_session_header` 只给名字
+
+```yaml
+cache_control_session_header: X-Session-Id
+```
+
+只配 header 的**名字**，值由 `agentica/model/cache_routing.py::resolve_cache_session_id` 每次请求现算：有会话用 `session_id`，没有（裸 SDK）才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的持久 id。
+
+> 这个值**不能缓存到实例字段上**。`Model.session_id` 由 `Agent.update_model()` 每轮赋值，在更早的调用里合法地为 `None`；把第一次的答案冻住，真实会话就永远上不了线。
+
+### 怎么选
+
+| | 缓存命中 | 并发 | 路由稳定性 |
+|---|---|---|---|
+| 账号级（写死） | 跨会话共享，命中率高 | 所有会话挤一台上游，网关侧并发能力下降 | 稳定，除非改配置 |
+| 会话级（按 session） | 每个新会话冷启动一次 | 天然分散到多台 | **每开一个会话重新路由一次** |
+
+会话级那条"重新路由"有个反直觉的后果：它等于周期性地回到**未钉住**的状态。如果网关后面有一台行为异常的上游（例如对合法的 tool schema 回 `invalid_request_error`），会话级粒度会让你隔三差五撞上它一次；账号级钉住之后反而再也碰不到。反过来，真撞上了，账号级只能改配置才能换走，会话级开个新会话就换了。
+
+经验法则：**长期在同一个项目里反复开会话，选账号级**；需要逃生能力或要避免并发挤压，选会话级。
+
+### 两个都配时
+
+`default_headers` 是用户写死的显式值，**优先**——注入用的是 `setdefault`（`agentica/model/anthropic/claude.py:327`），同名 header 不会被会话 id 覆盖。
+
+### 缓存前缀什么时候会变
+
+粘住了路由，缓存仍然按**字节精确的前缀**匹配。system prompt 里带工作目录和 AGENTS.md 注入，所以**换项目目录 = 换前缀 = 重写一次缓存**，这是预期行为。会话中途哪些内容被冻结、为什么，见 [Memory & Workspace · 会话快照与 prompt cache](../concepts/memory.md#prompt-cache)。
 
 ## Key functions（`agentica/global_config.py`）
 

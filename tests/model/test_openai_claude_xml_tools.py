@@ -183,7 +183,7 @@ def test_non_claude_models_keep_incremental_text_streaming():
 
 
 def test_claude_proxy_drops_unsigned_thinking_on_the_wire():
-    """GPT leftover thinking with an empty signature must not reach Venus/Claude."""
+    """GPT leftover thinking with an empty signature must not reach Claude."""
     model = _claude_proxy_model()
     payload = model.format_message(
         Message(

@@ -46,14 +46,13 @@ def format_cli_log_location() -> Optional[str]:
     return f"{format_path_for_display(path)} ({config.AGENTICA_LOG_LEVEL})"
 
 
-
-
 def _sanitize_history_for_model_switch(agent) -> None:
-    """Keep only user questions and assistant answers across a model switch.
+    """Keep portable Q&A plus an elided-tools digest across a model switch.
 
     Either direction (OpenAI ↔ Claude, native or via a proxy). Thinking and
-    tool rounds stay behind — a switch is a new Q&A round, and those artifacts
-    are what the next provider 400s on.
+    raw tool rounds stay behind — those artifacts are what the next
+    provider 400s on. A short ``<elided-tools>`` note lists writes that
+    actually ran, so the next model does not treat prior prose as proof.
 
     Both ``wm.runs[].response.messages`` (the source for future prompts) and
     the flat ``wm.messages`` list are sanitised.
@@ -61,7 +60,6 @@ def _sanitize_history_for_model_switch(agent) -> None:
     from agentica.agent.history_filter import strip_tool_artifacts_from_memory
 
     strip_tool_artifacts_from_memory(agent.working_memory)
-
 
 
 def _refresh_skills_session(ctx: CommandContext):
@@ -84,7 +82,6 @@ def _refresh_skills_session(ctx: CommandContext):
         "skills_registry": new_registry,
         "current_agent": new_agent,
     }
-
 
 
 def _run_async_safe(coro):
@@ -159,7 +156,6 @@ def _get_defined_agents_for_display() -> list:
         }
         for name, cfg in get_subagent_configs().items()
     ]
-
 
 
 def _runtime_config_path(ctx: CommandContext) -> Path:

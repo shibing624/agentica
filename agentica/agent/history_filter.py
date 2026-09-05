@@ -19,11 +19,13 @@ The original Message objects are never mutated; we copy via
 
 from __future__ import annotations
 
+import json
 from fnmatch import fnmatchcase
 from typing import Callable, List, Optional
 
 from agentica.agent.config import HistoryConfig
 from agentica.model.message import Message
+from agentica.tools.patch import parse_patch_envelope
 
 
 HistoryFilter = Callable[[List[Message]], List[Message]]
@@ -189,6 +191,113 @@ def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = Fal
     return cleaned
 
 
+ELIDED_TOOLS_MARK = "<elided-tools>"
+_ELIDED_WRITE_TOOLS = frozenset({"write_file", "apply_patch"})
+_ELIDED_WRITE_LINES_CAP = 20
+
+
+def _tool_call_name_and_args(tool_call: dict) -> tuple[str, dict]:
+    fn = tool_call.get("function") or {}
+    name = fn.get("name") or tool_call.get("name") or ""
+    raw = fn.get("arguments") or tool_call.get("arguments") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = {}
+    return name, raw if isinstance(raw, dict) else {}
+
+
+def _write_target(name: str, args: dict) -> str:
+    if name == "write_file":
+        return str(args.get("file_path") or args.get("path") or "").strip()
+    if name == "apply_patch":
+        patch = args.get("patch")
+        if not isinstance(patch, str) or not patch.strip():
+            return ""
+        try:
+            return ", ".join(op.path for op in parse_patch_envelope(patch))
+        except ValueError:
+            return ""
+    return ""
+
+
+def _first_result_line(content) -> str:
+    if not isinstance(content, str):
+        return ""
+    line = content.strip().splitlines()[0] if content.strip() else ""
+    if len(line) > 100:
+        return line[:99] + "…"
+    return line
+
+
+def summarize_elided_writes(messages: List[Message]) -> List[str]:
+    """One line per write_file / apply_patch, from args + first result line.
+
+    Execute / read results stay out: those bodies leak secrets and are not
+    what the next model invents files from. Cap keeps a long session short.
+    """
+    pending: dict[str, tuple[str, str]] = {}
+    for m in messages:
+        if m.role == "assistant" and m.tool_calls:
+            for tc in m.tool_calls:
+                name, args = _tool_call_name_and_args(tc)
+                if name not in _ELIDED_WRITE_TOOLS:
+                    continue
+                call_id = tc.get("id")
+                if not call_id:
+                    continue
+                pending[call_id] = (name, _write_target(name, args))
+        if m.role == "tool" and m.tool_call_id in pending:
+            pending[m.tool_call_id] = (
+                *pending[m.tool_call_id],
+                _first_result_line(m.content),
+            )
+        if m.role == "user" and _content_has_block_type(m.content, "tool_result"):
+            for block in m.content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                call_id = block.get("tool_use_id")
+                if call_id not in pending:
+                    continue
+                pending[call_id] = (
+                    *pending[call_id],
+                    _first_result_line(block.get("content")),
+                )
+
+    lines: List[str] = []
+    for name, target, *rest in pending.values():
+        result = rest[0] if rest else ""
+        label = f"{name} {target}".strip() if target else name
+        lines.append(f"- {label} → {result}" if result else f"- {label}")
+    if len(lines) > _ELIDED_WRITE_LINES_CAP:
+        omitted = len(lines) - _ELIDED_WRITE_LINES_CAP
+        lines = lines[-_ELIDED_WRITE_LINES_CAP:]
+        lines.insert(0, f"- … +{omitted} earlier writes omitted")
+    return lines
+
+
+def elided_tools_notice(messages: List[Message]) -> str:
+    """Portable note after a /model or Claude-resume strip.
+
+    Raw tool rounds cannot cross providers. Dropping them without a
+    replacement leaves only assistant prose, and the next model treats
+    「写好了：docs/foo.md（193 行）」 as a completed write.
+    """
+    writes = summarize_elided_writes(messages)
+    parts = [
+        ELIDED_TOOLS_MARK,
+        "Tool calls were dropped after a model switch (provider wire format). "
+        "Earlier assistant prose is not proof a file exists or a command ran. "
+        "Use tools; do not narrate work as if it already happened.",
+    ]
+    if writes:
+        parts.append("Writes that actually ran:")
+        parts.extend(writes)
+    parts.append(f"</{ELIDED_TOOLS_MARK.strip('<>')}>")
+    return "\n".join(parts)
+
+
 def strip_tool_artifacts_from_memory(working_memory) -> None:
     """Reduce a WorkingMemory's history to plain user/assistant text, in place.
 
@@ -196,13 +305,36 @@ def strip_tool_artifacts_from_memory(working_memory) -> None:
     prompt builder replays to the model, and ``messages`` is what ``/history``
     and ``/export`` show. Leaving the flat list untouched would make the two
     disagree about what the model can still see.
+
+    A single assistant note is appended so the next model still knows which
+    writes were real. Role is assistant (not user) so the following typed
+    line is not a second consecutive user message.
     """
+    source: List[Message] = []
+    for run in working_memory.runs:
+        if run.response is None or not run.response.messages:
+            continue
+        source.extend(run.response.messages)
+    if not source and working_memory.messages:
+        source = list(working_memory.messages)
+    notice = Message(role="assistant", content=elided_tools_notice(source))
+
     for run in working_memory.runs:
         if run.response is None or not run.response.messages:
             continue
         run.response.messages = strip_all_tool_artifacts(run.response.messages, drop_system=True)
+    if working_memory.runs:
+        last = working_memory.runs[-1]
+        if last.response is not None:
+            last.response.messages = list(last.response.messages or []) + [
+                notice.model_copy()
+            ]
+
     if working_memory.messages:
-        working_memory.messages = strip_all_tool_artifacts(working_memory.messages, drop_system=False)
+        working_memory.messages = strip_all_tool_artifacts(
+            working_memory.messages, drop_system=False
+        )
+        working_memory.messages = list(working_memory.messages) + [notice.model_copy()]
 
 
 def _matches_any(name: Optional[str], patterns: List[str]) -> bool:

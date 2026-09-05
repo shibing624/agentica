@@ -27,15 +27,17 @@ def _format_line_range(offset: int, limit: int) -> str:
     return f"L{start}-{end}"
 
 
-def _shorten_path(file_path: str) -> str:
-    """Shorten a file path for display: prefer relative path, keep outside paths intact."""
+def _shorten_path(file_path: str, work_dir: Optional[Path] = None) -> str:
+    """Work-dir relative path, or the original path when outside it."""
     if not file_path or file_path == ".":
         return "."
-    p = Path(file_path)
+    p = Path(file_path).expanduser()
+    root = Path(work_dir).expanduser() if work_dir is not None else Path.cwd()
     try:
-        return str(p.relative_to(Path.cwd()))
+        candidate = p if p.is_absolute() else root / p
+        return candidate.relative_to(root).as_posix()
     except ValueError:
-        return str(p)
+        return p.as_posix() if p.is_absolute() else str(p)
 
 
 _PATCH_FILE_RE = re.compile(
@@ -174,12 +176,12 @@ def _format_handoff_display(
     return ", ".join(meta)
 
 
-def format_tool_display(tool_name: str, tool_args: dict) -> str:
+def format_tool_display(tool_name: str, tool_args: dict, work_dir: Optional[Path] = None) -> str:
     """Format tool call for user-friendly display."""
     # File reading tools - show filename and line range
     if tool_name == "read_file":
         file_path = tool_args.get("file_path", "")
-        filename = _shorten_path(file_path)
+        filename = _shorten_path(file_path, work_dir)
         raw_tail = tool_args.get("tail")
         try:
             n_tail = int(raw_tail) if raw_tail not in (None, "") else 0
@@ -195,10 +197,10 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     # File writing tools — same relative path as read_file, not basename.
     if tool_name == "write_file":
         file_path = str(tool_args.get("file_path", "") or "")
-        return _shorten_path(file_path) if file_path else ""
+        return _shorten_path(file_path, work_dir) if file_path else ""
 
     if tool_name == "apply_patch":
-        paths = [_shorten_path(p) for p in patch_file_paths(str(tool_args.get("patch", "") or ""))]
+        paths = [_shorten_path(p, work_dir) for p in patch_file_paths(str(tool_args.get("patch", "") or ""))]
         return ", ".join(paths)
     
     # Execute command - shorten absolute paths in command
@@ -240,12 +242,12 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "glob":
         pattern = tool_args.get("pattern", "*")
         path = tool_args.get("path", ".")
-        return f"{pattern} in {_shorten_path(path)}"
+        return f"{pattern} in {_shorten_path(path, work_dir)}"
 
     if tool_name == "grep":
         pattern = tool_args.get("pattern", "")
         path = tool_args.get("path", ".")
-        return f"'{pattern[:40]}' in {_shorten_path(path)}"
+        return f"'{pattern[:40]}' in {_shorten_path(path, work_dir)}"
     
     # task / delegate — these hand off work; truncating the brief hides what
     # the user needs to audit. Show every arg in full (multi-line body below).
@@ -303,10 +305,11 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
 
 
 def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
-                       tool_count: int = 0, tool_call_id: Optional[str] = None) -> None:
+                       tool_count: int = 0, tool_call_id: Optional[str] = None,
+                       work_dir: Optional[Path] = None) -> None:
     """Shared implementation for displaying a tool call."""
     icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-    display_str = format_tool_display(tool_name, tool_args)
+    display_str = format_tool_display(tool_name, tool_args, work_dir=work_dir)
 
     # Add blank line between tools for readability
     if tool_count > 1:

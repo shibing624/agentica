@@ -937,7 +937,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 {
                     "model_provider": "openai",
                     "model_name": "glm-5",
-                    "profile_name": "venus-main",
+                    "profile_name": "main",
                     "debug": False,
                     "work_dir": None,
                 },
@@ -946,7 +946,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 skills_registry=None,
             )
 
-        self.assertEqual(captured["session_profile"], "venus-main")
+        self.assertEqual(captured["session_profile"], "main")
 
 
 class TestDebugToggle(unittest.TestCase):

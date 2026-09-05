@@ -397,7 +397,9 @@ class StreamDisplayManager:
         for block in self._live.blocks():
             spin = spinner if not block.finished else "✓"
             icon = TOOL_ICONS.get(block.tool_name, TOOL_ICONS["default"])
-            params = format_tool_display(block.tool_name, block.tool_args)
+            params = format_tool_display(
+                block.tool_name, block.tool_args, work_dir=self._work_dir_input,
+            )
             if "\n" in params:
                 params = params.split("\n", 1)[0] + "…"
             if len(params) > 80:
@@ -451,14 +453,14 @@ class StreamDisplayManager:
         if unfinished:
             _display_tool_impl(
                 self._assistant_console, tool_name, tool_args, self.tool_count,
-                tool_call_id=block.tool_call_id,
+                tool_call_id=block.tool_call_id, work_dir=self._work_dir_input,
             )
             return
         result = block.result
         if result is None:
             _display_tool_impl(
                 self._assistant_console, tool_name, tool_args, self.tool_count,
-                tool_call_id=block.tool_call_id,
+                tool_call_id=block.tool_call_id, work_dir=self._work_dir_input,
             )
             return
         elapsed_str = self._fmt_elapsed(result.elapsed, tool_name=tool_name)
@@ -484,7 +486,7 @@ class StreamDisplayManager:
             return
         _display_tool_impl(
             self._assistant_console, tool_name, tool_args, self.tool_count,
-            tool_call_id=block.tool_call_id,
+            tool_call_id=block.tool_call_id, work_dir=self._work_dir_input,
         )
         for line in block.sub_lines:
             self._assistant_console.print(line)
@@ -518,7 +520,9 @@ class StreamDisplayManager:
                 return lexical_path.relative_to(work_root).as_posix()
             except ValueError:
                 continue
-        return lexical_path.name
+        # Outside the work dir: keep the path the caller wrote (after ~),
+        # not the basename. ``abspath`` on macOS turns /tmp into /private/tmp.
+        return path.as_posix()
 
     def _shorten_workdir_text(self, content: str) -> str:
         """Replace absolute work-dir paths in tool output with relative paths."""
@@ -648,7 +652,7 @@ class StreamDisplayManager:
         (errors surface a truncated message instead of the count).
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        params = format_tool_display(tool_name, tool_args)
+        params = format_tool_display(tool_name, tool_args, work_dir=self._work_dir_input)
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
         if params:
             line += f" [dim]{rich_escape(params)}[/dim]"
@@ -1034,7 +1038,9 @@ class StreamDisplayManager:
             self._assistant_console.print(
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+O to expand)", style="dim italic"
             )
-            brief = format_tool_display(tool_name, tool_args or {})
+            brief = format_tool_display(
+                tool_name, tool_args or {}, work_dir=self._work_dir_input,
+            )
             header = f"{tool_name} {brief}".rstrip()
             remember_truncated(
                 f"Tool output · {tool_name}",

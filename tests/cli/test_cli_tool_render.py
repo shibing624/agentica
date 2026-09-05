@@ -880,7 +880,7 @@ class TestCLIToolRender(unittest.TestCase):
             }
             fake = MagicMock()
             fake.width = 80
-            dm = StreamDisplayManager(fake)
+            dm = StreamDisplayManager(fake, work_dir=Path(td))
             dm.display_tool("write_file", args, tool_call_id="write-1")
             with open(path, "w") as f:
                 f.write("DEBUG = True\nKEEP = 1\n")
@@ -1036,6 +1036,82 @@ class TestCLIToolRender(unittest.TestCase):
 
             self.assertEqual(manager._display_path(str(link / "app.py")), "linked/app.py")
 
+    def test_display_path_keeps_full_path_outside_work_dir(self):
+        from agentica.cli.display import StreamDisplayManager
+        from agentica.cli.display.tool_format import format_tool_display
+
+        console = MagicMock()
+        console.width = 80
+        manager = StreamDisplayManager(console, work_dir=Path("/Users/me/proj"))
+        outside = "/tmp/dupprobe/probe.py"
+
+        self.assertEqual(manager._display_path(outside), outside)
+        self.assertEqual(
+            format_tool_display("write_file", {"file_path": outside}, work_dir=Path("/Users/me/proj")),
+            outside,
+        )
+        self.assertEqual(
+            format_tool_display(
+                "read_file", {"file_path": outside, "offset": 0, "limit": 20},
+                work_dir=Path("/Users/me/proj"),
+            ),
+            f"{outside} (L1-20)",
+        )
+        self.assertEqual(
+            format_tool_display("apply_patch", {
+                "patch": f"*** Begin Patch\n*** Add File: {outside}\n+x\n*** End Patch\n",
+            }, work_dir=Path("/Users/me/proj")),
+            outside,
+        )
+
+    def test_write_file_outside_work_dir_shows_full_path_in_summary_and_diff(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as work, tempfile.TemporaryDirectory() as outside:
+            root = Path(work)
+            target = Path(outside) / "probe.py"
+            args = {"file_path": str(target), "content": "print(1)\n"}
+            fake = MagicMock()
+            fake.width = 80
+            manager = StreamDisplayManager(fake, work_dir=root)
+            manager.display_tool("write_file", args, tool_call_id="write-out")
+            target.write_text("print(1)\n", encoding="utf-8")
+            manager.display_tool_result(
+                "write_file",
+                f"Created file, absolute path: {target}",
+                elapsed=0.1,
+                tool_args=args,
+                tool_call_id="write-out",
+            )
+            rendered = "\n".join(
+                str(call.args[0]) for call in fake.print.call_args_list if call.args
+            )
+            syntax = fake.print.call_args_list[-1].args[0]
+
+        self.assertIn(str(target), rendered)
+        self.assertIn(f"diff -- {target}", str(syntax.code))
+
+    def test_apply_patch_outside_work_dir_shows_full_path(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        manager = StreamDisplayManager(fake, work_dir=Path("/Users/me/proj"))
+        outside = "/tmp/dupprobe/probe.py"
+        manager.display_tool_result(
+            "apply_patch",
+            "Successfully applied patch to 1 file (+1 -0)",
+            tool_args={"patch": f"*** Add File: {outside}\n"},
+            tool_display_meta={"files": [
+                {"path": outside, "action": "add", "before": None, "after": "x = 1\n"},
+            ]},
+        )
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn(outside, rendered)
+        syntax = fake.print.call_args_list[-1].args[0]
+        self.assertIn(f"diff -- {outside}", str(syntax.code))
 
     def test_shorten_workdir_text_respects_path_boundaries(self):
         from agentica.cli.display import StreamDisplayManager

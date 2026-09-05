@@ -758,10 +758,12 @@ class BuiltinFileTool(Tool):
         """Apply one context patch across one or more text files.
 
         Use this for code edits, multi-hunk edits, and changes that span
-        multiple files. The same substitution in several files is one
-        patch with several Update File hunks, not a shell rewriter.
-        Related edits across files: parallel read_file, then one patch —
-        not read-then-patch one file at a time.
+        multiple files. Each site in a file is one ``@@`` under the same
+        Update File, not another call. One Update File per path. The same
+        substitution in several files is one patch with several Update
+        File hunks, not a shell rewriter.
+        Related edits: parallel read_file, then one patch — not
+        read-then-patch one file at a time.
         Use write_file for new files or whole-file rewrites.
 
         After ``@@``, the first character of each line is a space (keep an
@@ -775,6 +777,9 @@ class BuiltinFileTool(Tool):
          def run():
         -    timeout = 10
         +    timeout = 30
+        @@
+        -    retries = 1
+        +    retries = 3
         *** Update File: tests/test_app.py
         @@
         -assert run() == 10

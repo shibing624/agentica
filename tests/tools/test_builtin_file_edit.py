@@ -151,6 +151,9 @@ class TestBuiltinFileToolApplyPatch:
             "-    timeout = 10\n"
             "+    timeout = 30"
         ) in description
+        assert "-    retries = 1\n+    retries = 3" in description
+        assert "one ``@@`` under the same" in description
+        assert "One Update File per path" in description
         assert "spaced copy of the file is a no-op" in description
         assert "then one patch" in description
         assert "Read the current file" not in description
@@ -163,6 +166,22 @@ class TestBuiltinFileToolApplyPatch:
         ))
         assert "Successfully applied patch" in result
         assert Path(tmp_dir, "app.py").read_text() == "VALUE = 2\nKEEP = True\n"
+
+    def test_two_hunks_in_one_update_file_apply_together(self, file_tool, tmp_dir):
+        Path(tmp_dir, "app.py").write_text("timeout = 10\nname = \"demo\"\nretries = 1\n")
+        result = asyncio.run(file_tool.apply_patch(
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-timeout = 10\n"
+            "+timeout = 30\n"
+            "@@\n"
+            "-retries = 1\n"
+            "+retries = 3\n"
+            "*** End Patch\n"
+        ))
+        assert "Successfully applied patch" in result
+        assert Path(tmp_dir, "app.py").read_text() == "timeout = 30\nname = \"demo\"\nretries = 3\n"
 
     def test_applies_update_when_wrapped_in_markdown_fence(self, file_tool, tmp_dir):
         Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")

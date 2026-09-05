@@ -176,13 +176,13 @@ class TestWhatItStarts:
     def test_a_model_that_matches_a_profile_runs_on_it(self):
         registry = _FakeRegistry()
         _delegate(
-            _tool(registry, profile_lookup=lambda name, **_k: {"claude-opus-5": "venus-opus-5-anthropic"}.get(name)),
+            _tool(registry, profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name)),
             task="port the parser",
             model="anthropic/claude-opus-5",
         )
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-opus-5-anthropic"
+        assert argv[argv.index("--profile") + 1] == "opus-5-anthropic"
         assert "--model_provider" not in argv
 
     def test_an_sdk_model_sends_its_endpoint_as_a_flag_and_its_key_in_the_env(self):
@@ -255,13 +255,13 @@ class TestWhatItStarts:
                 provider="openai",
                 model=sdk_model.id,
                 sdk_model=sdk_model,
-                profile_lookup=lambda name, **_k: {"glm-5.3-external": "venus-glm-5.3"}.get(name),
+                profile_lookup=lambda name, **_k: {"glm-5.3-external": "glm-5.3"}.get(name),
             ),
             task="port the parser",
         )
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-glm-5.3"
+        assert argv[argv.index("--profile") + 1] == "glm-5.3"
 
     def test_a_bare_model_name_keeps_the_callers_provider(self):
         registry = _FakeRegistry()
@@ -310,27 +310,27 @@ class TestWhatItStarts:
                 registry,
                 provider="openai",
                 model="glm-5",
-                session_profile="venus-main",
+                session_profile="main",
                 # Old behaviour: first config.yaml profile whose model_name
                 # matches. That is how a worker landed on the cheap clone.
-                profile_lookup=lambda name, **_k: "venus-cheap",
+                profile_lookup=lambda name, **_k: "cheap",
             ),
             task="port the parser",
         )
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-main"
+        assert argv[argv.index("--profile") + 1] == "main"
         assert argv[argv.index("--model_name") + 1] == "glm-5"
         assert "--model_provider" not in argv
 
     def test_inherit_picks_the_profile_that_shares_the_callers_endpoint(self):
         profiles = {
-            "venus-cheap": {
+            "cheap": {
                 "model_name": "glm-5",
                 "model_provider": "openai",
                 "base_url": "http://cheap/",
             },
-            "venus-main": {
+            "main": {
                 "model_name": "glm-5",
                 "model_provider": "openai",
                 "base_url": "http://main/",
@@ -350,16 +350,16 @@ class TestWhatItStarts:
         )
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-main"
+        assert argv[argv.index("--profile") + 1] == "main"
 
     def test_inherit_does_not_guess_a_profile_on_a_different_endpoint(self):
         profiles = {
-            "venus-cheap": {
+            "cheap": {
                 "model_name": "glm-5",
                 "model_provider": "openai",
                 "base_url": "http://cheap/",
             },
-            "venus-other": {
+            "other": {
                 "model_name": "glm-5",
                 "model_provider": "openai",
                 "base_url": "http://other/",
@@ -412,14 +412,14 @@ class TestWhatItStarts:
                 registry,
                 provider="deepseek",
                 model="deepseek-chat",
-                profile_lookup=lambda name, **_k: "venus-glm" if name == "openai/glm-5" else None,
+                profile_lookup=lambda name, **_k: "openai-glm" if name == "openai/glm-5" else None,
             ),
             task="port the parser",
             model="openai/glm-5",
         )
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-glm"
+        assert argv[argv.index("--profile") + 1] == "openai-glm"
         assert "--model_provider" not in argv
 
 
@@ -448,7 +448,7 @@ class TestProfileForModel:
     def test_provider_breaks_a_name_tie(self):
         profiles = {
             "zhipu": {"model_name": "glm-5", "model_provider": "zhipuai"},
-            "venus": {"model_name": "glm-5", "model_provider": "openai"},
+            "openai-glm": {"model_name": "glm-5", "model_provider": "openai"},
         }
         assert profile_for_model("glm-5", provider="zhipuai", profiles=profiles) == "zhipu"
 
@@ -539,10 +539,9 @@ class TestToolSurface:
         tool = _tool(_FakeRegistry())
         assert list(tool.functions) == ["delegate"]
 
-    def test_the_description_steers_away_from_the_cheaper_options(self):
+    def test_the_description_warns_the_worker_cannot_reach_the_user(self):
         tool = _tool(_FakeRegistry())
         description = tool.functions["delegate"].description or ""
-        assert "`task` tool" in description
         assert "cannot ask anyone anything" in description
 
 

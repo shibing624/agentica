@@ -5,8 +5,9 @@ omit `tail`); last N lines, `tail=N` with N>=1.
 
 Repo edits go through `apply_patch` (one call can update many files) or
 `write_file` (new file or whole-file rewrite). Files you will change:
-parallel `read_file`, then one `apply_patch` with a `*** Update File`
-hunk per file — not read-patch-read-patch. The same substitution in
+parallel `read_file`, then one `apply_patch` — not read-patch-read-patch.
+Each site in a file is one `@@` under the same `*** Update File`, not
+another call. One `*** Update File` per path. The same substitution in
 several files is `grep` to list the sites, then that one patch — not a
 shell or python rewriter.
 

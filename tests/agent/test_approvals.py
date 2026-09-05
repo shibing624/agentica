@@ -604,12 +604,12 @@ class TestProjectApprovalPersist(unittest.TestCase):
         )
 
         base = project_base_dir(work, "default")
-        write_project_file(base, {"work_dir": work, "active_profile": "venus-glm-5.3"})
+        write_project_file(base, {"work_dir": work, "active_profile": "glm-5.3"})
         grants = SessionGrants()
         grants.add_command_prefix("git add foo.py")
         persist_grants_to_project(grants, work_dir=work, user_id="default")
         data = read_project_file(base)
-        self.assertEqual(data["active_profile"], "venus-glm-5.3")
+        self.assertEqual(data["active_profile"], "glm-5.3")
         self.assertEqual(data["work_dir"], work)
         self.assertEqual(data["approvals"]["command_prefixes"], [["git", "add"]])
 

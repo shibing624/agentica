@@ -27,6 +27,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.styles import Style as PTStyle
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import TextArea
 
 from agentica.cli.approvals import (
@@ -232,6 +233,30 @@ def _input_prompt_fragments(req) -> list[tuple[str, str]]:
         ("class:input-prompt", body),
         ("class:hint", f"\n{hint}"),
     ]
+
+
+def _count_input_visual_rows(
+    lines: list[str],
+    *,
+    width: int,
+    first_line_prefix_width: int = 0,
+) -> int:
+    """Visual rows a wrap_lines TextArea occupies for ``lines``.
+
+    prompt_toolkit prepends the prompt via BeforeInput (first logical line
+    only) and wraps by display width (``get_cwidth``), not ``len()``. A
+    ``len(line) // (width - 2)`` count hid the first visual row of CJK
+    input until another ~width characters arrived.
+    """
+    if width <= 0:
+        return 1
+    total_rows = 0
+    for i, line in enumerate(lines):
+        display = get_cwidth(line)
+        if i == 0:
+            display += first_line_prefix_width
+        total_rows += max(1, -(-display // width))
+    return max(1, total_rows)
 
 
 def _live_tool_window_height(n_lines: int, *, asking: bool) -> int:
@@ -756,22 +781,20 @@ def _setup_tui(
         # cleared by _restore_after_resize.
         if tui_state.get("_resize_collapsed"):
             return Dimension(min=1, max=1, preferred=1)
-        # Count *visual* rows, not just logical lines. With wrap_lines=True a
-        # single long line wraps onto multiple terminal rows; counting only
-        # explicit '\n' (document.line_count) would keep the box one row tall
-        # and hide the wrapped text. We estimate wrapped rows from the usable
-        # text width (terminal width minus the 2-char prompt like "❯ ").
+        # Count *visual* rows the same way prompt_toolkit wraps: display
+        # width (get_cwidth) with the BeforeInput prompt on the first
+        # logical line only. ``len(line) // (term_width - 2)`` hid the
+        # first wrapped row of CJK until another ~width characters arrived.
         try:
             term_width = shutil.get_terminal_size((80, 24)).columns
         except OSError:
             term_width = 80
-        usable_width = max(1, term_width - 2)
-        total_rows = 0
-        for line in widget.buffer.document.lines:
-            # A line of N chars occupies ceil(N / usable_width) rows
-            # (empty line still occupies 1 row).
-            total_rows += max(1, -(-len(line) // usable_width))
-        total_rows = max(1, total_rows)
+        prefix_width = sum(get_cwidth(text) for _style, text in _get_prompt())
+        total_rows = _count_input_visual_rows(
+            list(widget.buffer.document.lines),
+            width=max(1, term_width),
+            first_line_prefix_width=prefix_width,
+        )
         needed = min(_MAX_INPUT_ROWS, total_rows)
         # IMPORTANT: pin min == max == preferred == needed (a fixed size, not
         # a range). prompt_toolkit's HSplit dimension solver treats `max` as
@@ -984,6 +1007,7 @@ __all__ = [
     '_ASK_KEY_HINT',
     '_ask_prompt_lines',
     '_ask_prompt_text',
+    '_count_input_visual_rows',
     '_input_prompt_fragments',
     '_live_tool_window_height',
     '_setup_tui',

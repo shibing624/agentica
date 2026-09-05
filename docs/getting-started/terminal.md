@@ -265,7 +265,7 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
 - **不阻塞**。`delegate` 立刻返回，任务在后台跑；主 agent 可以继续干别的。完成后报告会自动送回这轮对话（和 `execute(background=True)` 同一套机制），需要马上拿结果就 `wait(id="term_1")`。
 - **最多同时 3 个**，第 4 个会被拒绝并告诉它去 `wait` 哪一个。用 `/ps` 查看、`/stop <id>` 停掉。
 - **权限跟着父会话走**：派出去的那一刻你是什么模式（`auto` / `allow-all`），子进程就是什么模式；`ask` 模式下这个工具根本不出现。
-- **模型默认继承当前会话的 profile**（不是 `config.yaml` 里第一个同名 `model_name`）。也可以指定：`model="zhipuai/glm-4.7-flash"`（跨 provider）或只给模型名（沿用当前 provider）。id 本身带 `/`（如 Venus 的 `openai/glm-5`）会整段保留，不会先拆成 `provider/name`。API key 不会出现在命令行上，子进程自己读 `config.yaml` / 环境变量。
+- **模型默认继承当前会话的 profile**（不是 `config.yaml` 里第一个同名 `model_name`）。也可以指定：`model="zhipuai/glm-4.7-flash"`（跨 provider）或只给模型名（沿用当前 provider）。id 本身带 `/`（如某些代理的 `openai/glm-5`）会整段保留，不会先拆成 `provider/name`。API key 不会出现在命令行上，子进程自己读 `config.yaml` / 环境变量。
 - **只有一层**。被委托出去的会话拿不到 `delegate` 工具，不会再往下派。
 - **不出现在 `list_agents` 里**。它是一次性 `--query` 进程，不是一个终端会话；委托是父子关系并且有返回值，peer 消息是平级会话之间说话，两者刻意分开。
 - 子进程用的是 `agentica --query "..." --print`，`--print` 只把最终回答写到 stdout（没有 banner、没有日志），你也可以在脚本里直接这么用；失败时退出码非 0。

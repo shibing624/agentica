@@ -211,13 +211,13 @@ class Claude(Model):
     timeout: Optional[float] = None
     default_headers: Optional[Dict[str, str]] = None
     client_params: Optional[Dict[str, Any]] = None
-    # Optional sticky-routing header name (e.g. "Venus-Session-Id"): when set,
+    # Optional sticky-routing header name (e.g. "X-Session-Id"): when set,
     # a session id is injected as a client header so consecutive invokes land
     # on the same proxy backend and actually hit the cache written by earlier
     # requests. Mirrors OpenAIChat's knob of the same name — see
     # agentica.model.cache_routing for how the value is resolved.
     #
-    # This matters for more than cache hit rate. Venus-style proxies fan out
+    # This matters for more than cache hit rate. Aggregating proxies fan out
     # across several upstreams, and requests sent with NO sticky header show a
     # materially higher rate of `invalid_request_error` (some upstream rejects
     # a valid tool schema). Pinning the route avoids that path entirely.

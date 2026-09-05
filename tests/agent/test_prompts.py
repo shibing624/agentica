@@ -109,6 +109,7 @@ class TestPromptModules:
         assert "`config.py`" in content
         assert "parallel `read_file`" in content
         assert "not read-patch-read-patch" in content
+        assert "one `@@` under the same `*** Update File`" in content
         assert "Read the current file" not in content
         assert "execute" not in content
         assert "`rg`" not in content

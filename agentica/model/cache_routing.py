@@ -3,8 +3,8 @@
 @description: Sticky-routing session ids for prompt caches on caching proxies.
 
 A prompt cache only pays off when consecutive requests land on the same backend
-machine. Proxies that fan out across several upstreams (Venus, LiteLLM, ...) let
-the caller pin that choice with a request header. Both the Anthropic and the
+machine. Aggregating proxies that fan out across several upstreams let the
+caller pin that choice with a request header. Both the Anthropic and the
 OpenAI provider need the same id resolution, so it lives here rather than under
 one provider's module — importing ``model/openai/chat.py`` from the Anthropic
 side would drag the whole OpenAI SDK in.

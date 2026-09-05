@@ -684,7 +684,7 @@ def get_model(
             if cache_control_messages is not None:
                 params["cache_control_messages"] = cache_control_messages
         # Gated on the field, not on wire_api: the Anthropic provider needs it
-        # too. Venus-style proxies fan requests out across upstreams unless a
+        # too. Aggregating proxies fan requests out across upstreams unless a
         # sticky header pins the route, and unrouted requests hit a much higher
         # rate of schema-validation 400s. cache_control_messages and
         # cache_keepalive stay OpenAI-only — Claude manages its own message

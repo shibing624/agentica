@@ -344,7 +344,7 @@ class BuiltinDelegateTool(Tool):
     def _resolve_model(self, model: str) -> tuple[Optional[str], Optional[str]]:
         """Resolve a caller-supplied model against the session defaults.
 
-        A slash is first treated as part of a model id (Venus-style
+        A slash is first treated as part of a model id (proxy-style
         ``openai/glm-5``, or the environment-context form
         ``provider/<id>``). Only when that string is not the caller's own
         id and not a profile's ``model_name`` does it split as

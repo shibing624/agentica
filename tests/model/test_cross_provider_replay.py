@@ -202,15 +202,21 @@ class TestStripToolArtifactsFromMemory(unittest.TestCase):
         memory = self._memory()
         strip_tool_artifacts_from_memory(memory)
 
+        from agentica.agent.history_filter import ELIDED_TOOLS_MARK
+
         for messages in (memory.messages, memory.runs[0].response.messages):
+            roles = [(m.role, m.content) for m in messages]
             self.assertEqual(
-                [(m.role, m.content) for m in messages],
+                roles[:3],
                 [
                     ("user", "read config.py"),
                     ("assistant", "The port is 8080."),
                     ("user", "what did I ask before?"),
                 ],
             )
+            self.assertEqual(roles[-1][0], "assistant")
+            self.assertIn(ELIDED_TOOLS_MARK, roles[-1][1])
+            self.assertNotIn("PORT = 8080", roles[-1][1])
 
 
 if __name__ == "__main__":

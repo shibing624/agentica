@@ -14,9 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
-- **Claude 也认 `cache_control_session_header`，值按 CLI 会话换**：Venus 一类代理不粘路由会打到不同后端，缓存冷、schema 400 也更多。header（如 `Venus-Session-Id`）注入当前 `session_id`，新开会话换路由；没有会话才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的 id。不再把第一次（还没 session）的 fallback 冻在实例上。`get_model` 不再只给 OpenAI chat 传这个字段；setup 对 anthropic 只问粘路由 header。
+- **Claude 也认 `cache_control_session_header`，值按 CLI 会话换**：聚合型代理不粘路由会打到不同后端，缓存冷、schema 400 也更多。header（如 `X-Session-Id`）注入当前 `session_id`，新开会话换路由；没有会话才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的 id。不再把第一次（还没 session）的 fallback 冻在实例上。`get_model` 不再只给 OpenAI chat 传这个字段；setup 对 anthropic 只问粘路由 header。
+- **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
 #### fixes
+- **CLI `write_file` / `read_file` / `apply_patch` 工作区外不再只显示文件名**：以前 `_display_path` 对不上 work dir 就收成 basename，`/tmp/dupprobe/probe.py` 变成 `probe.py`，diff 头也是。工作区内仍是相对路径，区外保留调用时的路径。
+- **`/model` / Claude resume 剥 tool 时留下写入摘要**：切模型仍丢掉 thinking 和 tool 的 wire 格式（否则换 provider 会 400），但会追加一条 `<elided-tools>`：散文里的「写好了 193 行」不算证据，真正跑过的 `write_file` / `apply_patch` 列在下面。以前只留问答文本，下一轮就会接着演一遍没发生过的写文件。`execute` 输出不进摘要（会漏密钥）。
+- **`apply_patch` 示例补上同文件多处**：一条补丁里一个 `*** Update File` 下几个 `@@` 改几处，不要拆成多次调用，也不要写两个同路径的 Update File。以前示例只有「一文件一 hunk」，模型就把同一文件拆成两次调用。
+- **CLI 输入框折行后不再把上一行卷走**：`TextArea` 按显示宽度（`get_cwidth`，中文两列）折行，prompt 只算在第一逻辑行；以前用 `len(line) // (终端宽-2)` 估高度，中文刚折到第 2 行时盒子仍是 1 行，光标把第一行顶没，再打约一行才长高回来。现在跟 prompt_toolkit 同一套折行算行数。
 - **CLI `ask_user_question` 不再裁掉问题后半段**：提问组件以前自己算预留行数，把整段 `prompt` 当成一行折行，短段落被低估，第 2 问和选项出了屏。现在原文倒出来（前面加 `?`，空一行再列选项），窗口高度交给 prompt_toolkit。tool result 本身没截过。
 - **内置工具 schema 不再点名别的可选工具**：`grep` 不提 `execute`，`execute` 不提 `read_file` / `apply_patch`，`task` / memory 也不再写对方的名字。`delegate` 可以提 `wait`（同一套后台 registry）。SDK 可以只装文件工具、不装 `execute`。`tools.md` 只在有文件工具时注入，同样不提 `execute`。按文件名过滤：收窄 `grep` 的 `path`。
 - **`grep` 去掉 `include`**：schema 里写 `include=` 等于每轮教 GNU grep 的 `--include`，模型再抄到 `rg` 上就炸。参数只留 `pattern` / `path` / `limit`。
@@ -26,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **流式工具轮的旁白不再糊进终答**：以前 `model_response.content += chunk` 跨过整轮工具往上累加，Claude 中间 `assistant(tool_calls)` 的 `content` 又是 block 列表，落盘 `isinstance(str) else ""` 写成空串，所有旁白（包括模型自己吐的单独一行 `count`）堆在 jsonl 最后一条。现在中间旁白留在对应的 `assistant(tool_calls)` 上（抽出 text block），终答只留最后一轮；Claude/Ollama 也不再在每轮流结束 yield `\n\n`。不滤 `count`——那是模型输出。
 - **`sanitize_messages` 不再把 Claude 的成功结果标成中断**：Claude 用 `role=user` + `tool_result` 块回答，以前只认 `role=tool`，每条成功调用前都插一句「execution may have been interrupted」。现在先吃掉这些块再判断缺没缺。`format_tool_results` 的缺 id 补齐落到 OpenAI/Ollama 基类，中断回合不再只靠下一跳 sanitize。
 - **Claude 回合中断后不再留下孤儿 `tool_use`**：Anthropic 要求每条 `tool_use` 都有对应 `tool_result`。以前按位置 zip，中断或乱序返回就会贴错 id，后续每跳都 400。现在按 `tool_call_id` 配对，缺的补一条 interrupted 错误；这类 400 走 transcript sanitize，不再原样重发。
-- **`delegate` 不再偶发选错模型**：不填 `model` 时子进程走当前会话的 profile（`session_profile`），不再按 `model_name` 扫 `config.yaml` 里第一个同名的。两个 profile 共用一个模型名时，对得上 `base_url` 才映射，对不上就带父会话的 `--base_url`，不猜。`model` 里带 `/` 的先当完整 id（Venus 的 `openai/glm-5`，或环境上下文的 `provider/<id>`），对不上再拆 `provider/name`。
+- **`delegate` 不再偶发选错模型**：不填 `model` 时子进程走当前会话的 profile（`session_profile`），不再按 `model_name` 扫 `config.yaml` 里第一个同名的。两个 profile 共用一个模型名时，对得上 `base_url` 才映射，对不上就带父会话的 `--base_url`，不猜。`model` 里带 `/` 的先当完整 id（代理的 `openai/glm-5`，或环境上下文的 `provider/<id>`），对不上再拆 `provider/name`。
 - **`read_file` 的 `tail=0` 不再报错**：模型把 `tail=0` 当成「从头读」，以前抛 `tail must be >= 1` 白烧一轮。0 / 省略都是从头按 `offset`/`limit` 分页；`tail=N`（N>=1）才是末尾 N 行，文件比 N 短就整份返回；负的 `tail` 当成末尾 `|N|` 行。docstring / `tools.md` 写明两套分页，不要用 `tail=700` 表示「从头读 700 行」（那是 `limit=700`）。
 - **`execute` 搜文本优先 `rg`，没有再 `grep`**：docstring 写 `rg -g '*.py' -n PAT -- path || grep -n PAT path`。命令不改写。
 - **切模型只留问答文本，OpenAI ↔ Claude 双向可跑**：`/model`（含 `/config set` 真换了模型）把 thinking、tool call/result 都剥掉，只保留 user 问题和 assistant 回答。thinking 的 `signature` 绑签发模型，带着切就是 400；切模型本身是新一轮问答，那些内容也不值钱。能力按 wire 格式（OpenAIChat vs 原生 Claude），不按模型名猜。同会话里 `cache_control` 仍不准打在 thinking 上；Layer 1 缩过 `tool_use.input` 的旧回合同时丢掉旁边的 thinking。

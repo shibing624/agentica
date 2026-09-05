@@ -427,5 +427,68 @@ class TestAskPromptKeyHint(unittest.TestCase):
         self.assertIn("Ctrl+C again to force exit", notice)
 
 
+class TestInputVisualRows(unittest.TestCase):
+    """The input box height must match prompt_toolkit's wrap, not ``len()``.
+
+    TextArea prepends ``❯ `` via BeforeInput (first logical line only) and
+    wraps by display width (``get_cwidth``). Counting ``len(line) // (width-2)``
+    kept the box one row tall for CJK: the cursor line scrolled the first
+    visual row away until another ~width characters arrived, at which point
+    the height finally jumped and the missing line reappeared.
+    """
+
+    def test_cjk_wraps_on_the_first_overflow_row(self):
+        from agentica.cli.interactive.tui import _count_input_visual_rows
+
+        # width=80, prompt=2: 40 fullwidth chars → display 82 → 2 visual rows.
+        # The old ``len()`` count treated this as 40 / 78 → still 1 row.
+        self.assertEqual(
+            _count_input_visual_rows(
+                ["中" * 40], width=80, first_line_prefix_width=2,
+            ),
+            2,
+        )
+        self.assertEqual(
+            _count_input_visual_rows(
+                ["中" * 39], width=80, first_line_prefix_width=2,
+            ),
+            1,
+        )
+
+    def test_ascii_wraps_when_prompt_plus_text_exceeds_width(self):
+        from agentica.cli.interactive.tui import _count_input_visual_rows
+
+        self.assertEqual(
+            _count_input_visual_rows(
+                ["a" * 78], width=80, first_line_prefix_width=2,
+            ),
+            1,
+        )
+        self.assertEqual(
+            _count_input_visual_rows(
+                ["a" * 79], width=80, first_line_prefix_width=2,
+            ),
+            2,
+        )
+
+    def test_prompt_width_applies_only_to_the_first_logical_line(self):
+        from agentica.cli.interactive.tui import _count_input_visual_rows
+
+        self.assertEqual(
+            _count_input_visual_rows(
+                ["hello", "world"], width=80, first_line_prefix_width=2,
+            ),
+            2,
+        )
+
+    def test_empty_input_is_one_row(self):
+        from agentica.cli.interactive.tui import _count_input_visual_rows
+
+        self.assertEqual(
+            _count_input_visual_rows([""], width=80, first_line_prefix_width=2),
+            1,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
