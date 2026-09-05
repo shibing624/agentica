@@ -10,6 +10,7 @@ from agentica.cost_tracker import (
     _CACHE_TTL,
     _FALLBACK_PRICING,
     _get_catalog,
+    _get_model_entry,
     _load_cached,
     _parse_catalog,
     CostTracker,
@@ -59,6 +60,24 @@ class TestCostTrackerLookupPricing(unittest.TestCase):
         pricing = ct._lookup_pricing("gpt-4o-2024-11-20")
         self.assertGreater(pricing["input"], 0)
         self.assertGreater(pricing["output"], 0)
+
+    def test_dated_snapshot_uses_longest_prefix(self):
+        ct = CostTracker()
+        # A pinned snapshot must bill as its own model, not as the parent:
+        # "gpt-4o-mini-2024-07-18" → "gpt-4o-mini", never "gpt-4o".
+        for dated, base in (
+            ("gpt-4o-mini-2024-07-18", "gpt-4o-mini"),
+            ("gpt-4.1-nano-2025-04-14", "gpt-4.1-nano"),
+            ("gpt-5-mini-2025-08-07", "gpt-5-mini"),
+            ("o3-mini-2025-01-31", "o3-mini"),
+        ):
+            self.assertEqual(ct._lookup_pricing(dated), ct._lookup_pricing(base), dated)
+
+    def test_prefix_match_agrees_with_model_entry(self):
+        ct = CostTracker()
+        # Pricing and context_window must resolve to the same catalog entry.
+        pricing = ct._lookup_pricing("gpt-4o-mini-2024-07-18")
+        self.assertEqual(pricing, _get_model_entry("gpt-4o-mini-2024-07-18"))
 
     def test_family_match(self):
         ct = CostTracker()
