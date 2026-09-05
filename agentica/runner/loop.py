@@ -343,7 +343,11 @@ class LoopMixin:
         # Results collected so far are still formatted: run_function_calls
         # appends each result to ``function_call_results`` as it completes, and
         # format_tool_results pads any call that never produced one, so the
-        # emitted round always answers every id in ``tool_ids``.
+        # emitted round always answers every id the assistant issued. That
+        # padding is implemented on the base Model (and by Claude for its block
+        # shape), so it holds on every provider path -- do not narrow it to one
+        # provider on the assumption that the per-request sanitize_messages will
+        # cover the rest.
         try:
             async for tool_resp in self._execute_tool_calls(
                 function_calls=function_calls,

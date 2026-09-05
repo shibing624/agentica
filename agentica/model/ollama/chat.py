@@ -246,13 +246,26 @@ class Ollama(Model):
     ) -> tuple:
         """Parse tool calls for Ollama format (uses role='user' for errors)."""
         function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
-        return function_calls_to_run, {"tool_role": tool_role}
+        # Carry tool_ids so format_tool_results can pad an interrupted round.
+        return function_calls_to_run, {
+            "tool_role": tool_role,
+            "tool_ids": [
+                tc.get("id")
+                for tc in (assistant_message.tool_calls or [])
+                if isinstance(tc, dict) and tc.get("id")
+            ],
+        }
 
     def format_tool_results(
         self, function_call_results: List[Message], messages: List[Message], provider_metadata: dict,
     ) -> None:
-        """Format tool results for Ollama (append directly)."""
-        self.format_function_call_results(function_call_results, messages)
+        """Format tool results for Ollama (append directly).
+
+        Delegates to the base implementation so an interrupted round still
+        answers every id it issued; overriding with a bare append would drop
+        that padding and leave an orphan tool call behind.
+        """
+        super().format_tool_results(function_call_results, messages, provider_metadata)
 
     def create_assistant_message(self, response: Mapping[str, Any], metrics: Metrics) -> Message:
         """Create an assistant message from the response."""

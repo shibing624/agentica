@@ -298,5 +298,173 @@ class TestRepairUnansweredToolCalls(unittest.TestCase):
         self.assertEqual(answered, {"a", "b"})
 
 
+class TestSanitizeMessagesUnderstandsBlockShape(unittest.TestCase):
+    """``sanitize_messages`` must not call an answered Anthropic round unanswered.
+
+    It scanned only for ``role="tool"`` replies, but Claude answers a tool call
+    with ``role="user"`` carrying ``tool_result`` blocks. Every Claude tool
+    result therefore looked missing, and a placeholder reading "execution may
+    have been interrupted" was inserted *before* the real output -- telling the
+    model its successful tool had failed, on every single call.
+    """
+
+    @staticmethod
+    def _placeholders(msgs):
+        from agentica.model.base import Model
+
+        out = Model.sanitize_messages(list(msgs))
+        return out, [
+            m
+            for m in out
+            if m.role == "tool" and "did not return a response" in (m.content or "")
+        ]
+
+    def test_answered_anthropic_round_gets_no_placeholder(self):
+        out, injected = self._placeholders(
+            [
+                Message(role="assistant", content="", tool_calls=[{"id": "t1", "function": {"name": "execute"}}]),
+                Message(role="user", content=[{"type": "tool_result", "tool_use_id": "t1", "content": "real output"}]),
+            ]
+        )
+        self.assertEqual(
+            injected,
+            [],
+            "the result is right there in the next message; claiming it was "
+            "interrupted feeds the model a false failure",
+        )
+        self.assertEqual(len(out), 2, "nothing should be inserted")
+
+    def test_genuinely_unanswered_anthropic_round_still_padded(self):
+        _out, injected = self._placeholders(
+            [
+                Message(role="assistant", content="", tool_calls=[{"id": "t1", "function": {"name": "execute"}}]),
+                Message(role="assistant", content="next turn"),
+            ]
+        )
+        self.assertEqual(len(injected), 1, "a real orphan must still be padded")
+
+    def test_partially_answered_anthropic_round_pads_only_the_gap(self):
+        _out, injected = self._placeholders(
+            [
+                Message(
+                    role="assistant",
+                    content="",
+                    tool_calls=[
+                        {"id": "t1", "function": {"name": "a"}},
+                        {"id": "t2", "function": {"name": "b"}},
+                    ],
+                ),
+                Message(role="user", content=[{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]),
+            ]
+        )
+        self.assertEqual(len(injected), 1)
+        self.assertEqual(injected[0].tool_call_id, "t2")
+
+    def test_openai_shape_is_unaffected(self):
+        _out, injected = self._placeholders(
+            [
+                Message(role="assistant", content="", tool_calls=[{"id": "c1", "function": {"name": "x"}}]),
+                Message(role="tool", tool_call_id="c1", content="ok"),
+            ]
+        )
+        self.assertEqual(injected, [])
+
+        _out, injected = self._placeholders(
+            [
+                Message(role="assistant", content="", tool_calls=[{"id": "c1", "function": {"name": "x"}}]),
+            ]
+        )
+        self.assertEqual(len(injected), 1)
+
+class TestPaddingHoldsOnEveryProvider(unittest.TestCase):
+    """``format_tool_results`` must answer every issued id on ALL paths.
+
+    The Runner calls this from a ``finally`` and its comment asserts the round
+    is atomic. That guarantee was only true for Claude: the default
+    implementation did a bare ``messages.extend`` and ``parse_tool_calls``
+    returned no ``tool_ids``, so an interrupted round left orphans on the
+    OpenAI/Ollama paths. They happened to survive because the per-request
+    ``sanitize_messages`` bridged the gap later -- so removing or narrowing
+    that pass would have broken them silently. Pinned here so the invariant
+    the comment claims is the invariant the code has.
+    """
+
+    def _answered(self, model):
+        assistant = Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {"id": "c1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                {"id": "c2", "type": "function", "function": {"name": "b", "arguments": "{}"}},
+                {"id": "c3", "type": "function", "function": {"name": "c", "arguments": "{}"}},
+            ],
+        )
+        _fc, meta = model.parse_tool_calls(assistant, [assistant], tool_role="tool")
+        messages = [assistant]
+        # Only the first call came back: the shape an interrupt produces.
+        model.format_tool_results(
+            [Message(role="tool", tool_call_id="c1", content="ok")], messages, meta
+        )
+        answered = set()
+        for m in messages:
+            answered |= _tool_result_ids(m)
+        return answered
+
+    def test_openai_chat_pads_interrupted_round(self):
+        from agentica.model.openai.chat import OpenAIChat
+
+        self.assertEqual(
+            self._answered(OpenAIChat(id="gpt-4o", api_key="fake")), {"c1", "c2", "c3"}
+        )
+
+    def test_openai_responses_pads_interrupted_round(self):
+        from agentica.model.openai.responses import OpenAIResponses
+
+        self.assertEqual(
+            self._answered(OpenAIResponses(id="gpt-4o", api_key="fake")), {"c1", "c2", "c3"}
+        )
+
+    def test_ollama_pads_interrupted_round(self):
+        from agentica.model.ollama.chat import Ollama
+
+        self.assertEqual(self._answered(Ollama(id="llama3")), {"c1", "c2", "c3"})
+
+    def test_claude_pads_interrupted_round(self):
+        self.assertEqual(
+            self._answered(Claude(id="claude-opus-5", api_key="fake")), {"c1", "c2", "c3"}
+        )
+
+    def test_parse_tool_calls_carries_tool_ids_on_base_path(self):
+        """Padding is impossible without the ids; pin them into the metadata."""
+        from agentica.model.openai.chat import OpenAIChat
+
+        assistant = Message(
+            role="assistant",
+            content="",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "a", "arguments": "{}"}}],
+        )
+        _fc, meta = OpenAIChat(id="gpt-4o", api_key="fake").parse_tool_calls(
+            assistant, [assistant], tool_role="tool"
+        )
+        self.assertEqual(meta.get("tool_ids"), ["c1"])
+
+    def test_fully_answered_round_is_not_padded(self):
+        from agentica.model.openai.chat import OpenAIChat
+
+        model = OpenAIChat(id="gpt-4o", api_key="fake")
+        assistant = Message(
+            role="assistant",
+            content="",
+            tool_calls=[{"id": "c1", "type": "function", "function": {"name": "a", "arguments": "{}"}}],
+        )
+        _fc, meta = model.parse_tool_calls(assistant, [assistant], tool_role="tool")
+        messages = [assistant]
+        model.format_tool_results(
+            [Message(role="tool", tool_call_id="c1", content="real output")], messages, meta
+        )
+        self.assertEqual(len(messages), 2, "nothing to pad, nothing appended")
+        self.assertEqual(messages[1].content, "real output")
+
+
 if __name__ == "__main__":
     unittest.main()

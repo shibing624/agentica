@@ -589,6 +589,25 @@ class Model(ABC):
                     if next_msg.role == "tool" and next_msg.tool_call_id in expected_ids:
                         del expected_ids[next_msg.tool_call_id]
                         j += 1
+                    elif next_msg.role == "user" and isinstance(next_msg.content, list):
+                        # Anthropic answers a tool call with role="user" carrying
+                        # tool_result blocks, not a role="tool" message. Counting
+                        # only the OpenAI shape made every Claude tool result look
+                        # unanswered, so a placeholder claiming "execution may have
+                        # been interrupted" was injected *ahead of the real
+                        # output* -- telling the model its successful tool had
+                        # failed. Consume these ids before deciding anything is
+                        # missing; the block-shaped message stays where it is.
+                        for block in next_msg.content:
+                            if (
+                                isinstance(block, dict)
+                                and block.get("type") == "tool_result"
+                                and block.get("tool_use_id") in expected_ids
+                            ):
+                                del expected_ids[block["tool_use_id"]]
+                        if not expected_ids:
+                            break
+                        j += 1
                     elif next_msg.role == "assistant":
                         # Reached the next assistant turn — stop scanning
                         break
@@ -745,7 +764,18 @@ class Model(ABC):
                 continue
             function_calls_to_run.append(_function_call)
 
-        return function_calls_to_run, {"tool_role": tool_role}
+        # ``tool_ids`` is every id this round issued, so format_tool_results can
+        # tell "this call produced no result" from "this call was never made".
+        # Without it the default path cannot pad, and an interrupted round
+        # leaves an orphan for the provider to reject.
+        return function_calls_to_run, {
+            "tool_role": tool_role,
+            "tool_ids": [
+                tc.get("id")
+                for tc in assistant_message.tool_calls
+                if isinstance(tc, dict) and tc.get("id")
+            ],
+        }
 
     def format_tool_results(
         self, function_call_results: List[Message], messages: List[Message], provider_metadata: dict,
@@ -754,9 +784,40 @@ class Model(ABC):
 
         Default (OpenAI): extend messages directly (tool results already have role="tool").
         Anthropic overrides to wrap in role="user" with tool_result content blocks.
+
+        Pads any id from ``tool_ids`` that produced no result, so an interrupted
+        round still answers every tool call it issued. The Runner relies on this:
+        it calls this method from a ``finally`` to keep "tool_use is in the
+        array" and "its results are in the array" one atomic unit. Leaving the
+        padding to the per-request ``sanitize_messages`` instead would make that
+        guarantee depend on a later, separate pass.
         """
         if function_call_results:
             messages.extend(function_call_results)
+
+        tool_ids = provider_metadata.get("tool_ids") or []
+        if not tool_ids:
+            return
+        answered = {
+            m.tool_call_id
+            for m in messages
+            if m.role == "tool" and m.tool_call_id
+        }
+        tool_role = provider_metadata.get("tool_role", "tool")
+        for tc_id in tool_ids:
+            if tc_id in answered:
+                continue
+            messages.append(
+                Message(
+                    role=tool_role,
+                    tool_call_id=tc_id,
+                    content=(
+                        "Error: tool call did not return a response "
+                        "(execution may have been interrupted)."
+                    ),
+                    tool_call_error=True,
+                )
+            )
 
     async def run_function_calls(
             self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
