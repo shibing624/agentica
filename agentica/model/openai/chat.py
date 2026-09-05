@@ -515,13 +515,14 @@ class OpenAIChat(Model):
           the flat thinking params ``thinking_enabled`` / ``reasoning_effort`` /
           ``thinking_display`` are forwarded as top-level request fields)
         """
-        details: List[str] = []
         is_on: Optional[bool] = None
+        effort = None
+        extra_details: List[str] = []
         if self.reasoning_effort:
             if str(self.reasoning_effort).lower() in ("off", "none", "disabled"):
                 is_on = False
             else:
-                details.append(f"reasoning_effort={self.reasoning_effort}")
+                effort = self.reasoning_effort
                 is_on = True
         if isinstance(self.extra_body, dict):
             thinking = self.extra_body.get("thinking")
@@ -533,7 +534,7 @@ class OpenAIChat(Model):
                 elif t == "disabled":
                     is_on = False
                 if budget:
-                    details.append(f"budget={budget}")
+                    extra_details.append(f"budget={budget}")
             enable_thinking = self.extra_body.get("enable_thinking")
             if isinstance(enable_thinking, bool):
                 is_on = enable_thinking
@@ -542,15 +543,19 @@ class OpenAIChat(Model):
             if isinstance(thinking_enabled, bool):
                 is_on = thinking_enabled
             eb_effort = self.extra_body.get("reasoning_effort")
-            if eb_effort and not self.reasoning_effort:
-                details.append(f"reasoning_effort={eb_effort}")
-            eb_display = self.extra_body.get("thinking_display")
-            if eb_display:
-                details.append(f"display={eb_display}")
+            if (
+                eb_effort
+                and effort is None
+                and str(eb_effort).lower() not in ("off", "none", "disabled")
+            ):
+                effort = eb_effort
         if is_on is None:
             return "default"
-        status = "on" if is_on else "off"
-        return f"{status}({', '.join(details)})" if details else status
+        if not is_on:
+            return "off"
+        if effort:
+            return str(effort)
+        return f"on({', '.join(extra_details)})" if extra_details else "on"
 
     def _is_deepseek_thinking_request(self, request_params: Dict[str, Any]) -> bool:
         """Return True when DeepSeek thinking mode is explicitly enabled."""

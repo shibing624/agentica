@@ -175,6 +175,15 @@ class TestStatusProjectIdentity(unittest.TestCase):
             "off",
         )
 
+    def test_extra_body_effort_is_just_the_intensity(self):
+        agent = _make_agent()
+        agent.model.extra_body = {
+            "thinking_enabled": True,
+            "reasoning_effort": "high",
+            "thinking_display": "omitted",
+        }
+        self.assertEqual(_status_thinking_mode(agent, {}), "high")
+
     def test_git_branch_is_empty_outside_a_repository(self):
         import tempfile
 

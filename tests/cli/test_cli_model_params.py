@@ -167,6 +167,22 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.reasoning_effort, "off")
         self.assertEqual(model.describe_thinking_mode(), "off")
 
+    def test_openai_compatible_effort_label_is_just_the_intensity(self):
+        """Status bar shows `high`, not `on(reasoning_effort=high, display=omitted)`."""
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "openai",
+            "openai/claude-opus-5",
+            api_key="k",
+            extra_body={
+                "thinking_enabled": True,
+                "reasoning_effort": "high",
+                "thinking_display": "omitted",
+            },
+        )
+        self.assertEqual(model.describe_thinking_mode(), "high")
+
     def test_get_model_passes_extra_body_and_extra_headers(self):
         from agentica.cli.runtime import get_model
 
