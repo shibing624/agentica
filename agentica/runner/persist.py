@@ -499,6 +499,80 @@ class PersistMixin:
                 filtered.append(filtered_msg)
         return filtered
 
+    @staticmethod
+    def repair_unanswered_tool_calls(msgs: List[Message], *, anthropic_blocks: bool) -> int:
+        """Answer every unanswered ``tool_calls`` round in place. Returns the count.
+
+        Recovery for a provider rejection of transcript *shape* ("`tool_use`
+        ids were found without `tool_result` blocks", "must be followed by tool
+        messages responding to each tool_call_id"). The orphan can sit anywhere
+        in the array, including rounds from far earlier in the run, so trimming
+        the current turn cannot reach it.
+
+        Unlike ``_sanitize_tool_history_after_error`` this keeps the transcript:
+        it injects a placeholder result for the ids that never got one, which is
+        the minimum edit that satisfies the provider. Dropping all tool history
+        to fix one missing result throws away the whole run's context.
+        """
+        def result_ids(message: Message) -> set:
+            if message.role == "tool" and message.tool_call_id:
+                return {message.tool_call_id}
+            if message.role != "user" or not isinstance(message.content, list):
+                return set()
+            return {
+                block.get("tool_use_id")
+                for block in message.content
+                if isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and block.get("tool_use_id")
+            }
+
+        repaired = 0
+        i = 0
+        while i < len(msgs):
+            m = msgs[i]
+            if m.role == "assistant" and m.tool_calls:
+                ids = [tc.get("id") for tc in m.tool_calls if isinstance(tc, dict) and tc.get("id")]
+                # Only the messages up to the next assistant turn may answer it.
+                answered: set = set()
+                j = i + 1
+                while j < len(msgs) and msgs[j].role != "assistant":
+                    answered |= result_ids(msgs[j])
+                    j += 1
+                missing = [tc_id for tc_id in ids if tc_id not in answered]
+                if missing:
+                    text = (
+                        "Error: tool call did not return a response "
+                        "(execution was interrupted)."
+                    )
+                    if anthropic_blocks:
+                        pad = Message(
+                            role="user",
+                            content=[
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tc_id,
+                                    "content": text,
+                                    "is_error": True,
+                                }
+                                for tc_id in missing
+                            ],
+                        )
+                        msgs.insert(j, pad)
+                        j += 1
+                    else:
+                        for tc_id in missing:
+                            msgs.insert(
+                                j,
+                                Message(role="tool", tool_call_id=tc_id, content=text),
+                            )
+                            j += 1
+                    repaired += len(missing)
+                i = j
+                continue
+            i += 1
+        return repaired
+
     def _try_persist_incomplete_turn(self, *args: Any, **kwargs: Any) -> None:
         """Best-effort ``_persist_incomplete_turn``: keeping history is never
         worth masking the cancel or failure that is already propagating."""

@@ -101,12 +101,13 @@ class TestPromptModules:
     def test_tools_module_requires_exact_path_grounding(self):
         from agentica.prompts.base.tools import get_tools_prompt
         content = get_tools_prompt()
-        assert "exact path string" in content
-        assert "only that exact file path" in content
-        assert "does not ground sibling files" in content
-        assert "from `glob`, `grep`,\n`execute`" in content
-        assert "`base.py`" in content
-        assert "empty listing is" in content
+        assert "Do not invent file paths" in content
+        assert "does not invent siblings" in content
+        assert "hedge-probe" in content
+        assert "Before calling any path-taking tool" not in content
+        assert "*** Update File" in content
+        assert "python rewriter" in content
+        assert "`config.py`" in content
 
     def test_tools_module_allows_execute_pipelines(self):
         from agentica.prompts.base.tools import get_tools_prompt
@@ -252,6 +253,9 @@ class TestGetSystemMessage:
         assert "# Using Your Tools" in msg.content
         assert "Prefer one long call" in msg.content
         assert "<<'EOF'" in msg.content
+        assert "2>/dev/null" in msg.content
+        assert "apply_patch" in msg.content
+        assert "not `;`" not in msg.content
         assert "swift" not in msg.content
 
     @pytest.mark.asyncio

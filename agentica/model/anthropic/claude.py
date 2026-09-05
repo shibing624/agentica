@@ -974,16 +974,66 @@ class Claude(Model):
             tool_ids (List[str]): The tool ids.
             messages (List[Message]): The list of conversation messages.
         """
-        if len(function_call_results) > 0:
-            fc_responses: List = []
-            for _fc_message_index, _fc_message in enumerate(function_call_results):
-                fc_responses.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_ids[_fc_message_index],
-                        "content": _fc_message.content,
-                    }
+        # Anthropic requires the message right after a tool_use to answer EVERY
+        # id it issued. Two failure modes are guarded here:
+        #
+        #  1. Pair by id, not by position. Zipping ``tool_ids[i]`` to
+        #     ``function_call_results[i]`` silently mislabels every result once
+        #     the two lists differ in length or order -- which is exactly what a
+        #     partial round (interrupted, or parallel tools finishing out of
+        #     order) produces. A result whose own ``tool_call_id`` is known wins.
+        #  2. Pad the ids that never produced a result, so an interrupted round
+        #     still emits a complete, well-formed answer instead of leaving the
+        #     tool_use orphaned for the rest of the run.
+        if not tool_ids and not function_call_results:
+            return
+
+        by_id = {
+            m.tool_call_id: m
+            for m in function_call_results
+            if getattr(m, "tool_call_id", None)
+        }
+        # Results with no id (older/edge paths) are consumed in arrival order
+        # for whichever expected ids remain unmatched.
+        unlabelled = [
+            m for m in function_call_results if not getattr(m, "tool_call_id", None)
+        ]
+
+        expected = list(tool_ids) or list(by_id.keys())
+        fc_responses: List = []
+        for _tool_use_id in expected:
+            result = by_id.pop(_tool_use_id, None)
+            if result is None and unlabelled:
+                result = unlabelled.pop(0)
+            if result is None:
+                content = (
+                    "Error: tool call did not return a response "
+                    "(execution may have been interrupted)."
                 )
+                is_error = True
+            else:
+                content = result.content
+                is_error = bool(getattr(result, "tool_call_error", False))
+            block = {
+                "type": "tool_result",
+                "tool_use_id": _tool_use_id,
+                "content": content,
+            }
+            if is_error:
+                block["is_error"] = True
+            fc_responses.append(block)
+
+        # Any result whose id was not in ``tool_ids`` still belongs on the wire.
+        for _tool_use_id, result in by_id.items():
+            fc_responses.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": _tool_use_id,
+                    "content": result.content,
+                }
+            )
+
+        if fc_responses:
             messages.append(Message(role="user", content=fc_responses))
 
     def parse_tool_calls(

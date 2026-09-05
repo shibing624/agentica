@@ -918,6 +918,36 @@ class TestCLIConfiguration(unittest.TestCase):
 
         self.assertNotIn("builtin_delegate_tool", names)
 
+    def test_create_agent_hands_the_session_profile_to_deep_agent(self):
+        from agentica.cli.runtime import create_agent
+
+        captured = {}
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.tools = []
+                self._session_log = None
+
+        with (
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
+            patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
+        ):
+            create_agent(
+                {
+                    "model_provider": "openai",
+                    "model_name": "glm-5",
+                    "profile_name": "venus-main",
+                    "debug": False,
+                    "work_dir": None,
+                },
+                extra_tools=[],
+                workspace=None,
+                skills_registry=None,
+            )
+
+        self.assertEqual(captured["session_profile"], "venus-main")
+
 
 class TestDebugToggle(unittest.TestCase):
     """`/debug` is a runtime switch for verbose logging, not a status dump.

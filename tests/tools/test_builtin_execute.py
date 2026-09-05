@@ -68,6 +68,13 @@ class TestBuiltinExecuteTool:
         assert "Bad examples" not in doc
         assert "| head" in doc or "| rg" in doc
         assert "rg -n TODO src || grep -n TODO src" in doc
+        assert "2>/dev/null" in doc
+        assert "apply_patch" in doc
+        assert "write_file" in doc
+        assert "package layout" in doc
+        assert "multi-file" in doc
+        assert "not `;`" not in doc
+        assert "write_text" not in doc
         assert "find . -type f" not in doc
         assert "xargs ls" not in doc
         assert "(find, ls, cat, awk)" not in doc

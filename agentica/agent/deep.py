@@ -152,6 +152,7 @@ class DeepAgent(Agent):
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
         background_process_registry: Optional[Any] = None,
+        session_profile: Optional[str] = None,
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback: Optional[Callable] = None,
@@ -284,6 +285,7 @@ class DeepAgent(Agent):
                     model=model,
                     model_provider=provider_for_model(model),
                     model_name=model.id,
+                    session_profile=session_profile,
                 ),
             )
 

@@ -1085,6 +1085,7 @@ def create_agent(
         model=model,
         auxiliary_model=auxiliary_model,
         task_model=task_model,
+        session_profile=agent_config.get("profile_name") or None,
         fallback_models=fallback_models,
         max_api_retry=max_api_retry,
         description=(

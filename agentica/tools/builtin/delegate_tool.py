@@ -44,19 +44,37 @@ DEPTH_ENV_VAR = "AGENTICA_DELEGATE_DEPTH"
 MAX_DEPTH = 1
 
 
-def profile_for_model(model_name: str) -> Optional[str]:
-    """Name of the first config.yaml profile whose main model is ``model_name``.
+def profile_for_model(
+    model_name: str,
+    provider: Optional[str] = None,
+    base_url: Optional[str] = None,
+    *,
+    profiles: Optional[dict] = None,
+) -> Optional[str]:
+    """Name of the one config.yaml profile that uniquely describes this model.
 
     A delegated worker cannot receive credentials on the command line, and bare
     ``--model_provider``/``--model_name`` flags cannot leave the child's active
     endpoint (see ``resolve_model_config``). Launching the child on a *profile*
     is the only way a model crosses endpoints with its base_url, api_key and
     tuning intact.
+
+    Matching on ``model_name`` alone and taking the first hit is how a worker
+    used to land on the wrong endpoint when two profiles shared a name. When
+    ``provider`` and/or ``base_url`` are given they must match; if several
+    profiles still qualify, return None rather than guess.
     """
-    for name, profile in get_profiles().items():
-        if isinstance(profile, dict) and profile.get("model_name") == model_name:
-            return name
-    return None
+    items = profiles if profiles is not None else get_profiles()
+    matches: List[str] = []
+    for name, profile in items.items():
+        if not isinstance(profile, dict) or profile.get("model_name") != model_name:
+            continue
+        if provider is not None and profile.get("model_provider") != provider:
+            continue
+        if base_url is not None and profile.get("base_url") != base_url:
+            continue
+        matches.append(name)
+    return matches[0] if len(matches) == 1 else None
 
 
 # Model class name → provider key. Only the base classes appear: the
@@ -137,7 +155,8 @@ class BuiltinDelegateTool(Tool):
         model_provider: Optional[str] = None,
         model_name: Optional[str] = None,
         model: Optional["Model"] = None,
-        profile_lookup: Optional[Callable[[str], Optional[str]]] = None,
+        session_profile: Optional[str] = None,
+        profile_lookup: Optional[Callable[..., Optional[str]]] = None,
     ):
         """
         Args:
@@ -157,6 +176,10 @@ class BuiltinDelegateTool(Tool):
                 on the command line. Supplied by the caller when it has a real
                 model; model_provider/model_name are the CLI's split form of
                 the same thing.
+            session_profile: the config.yaml profile this session is actually
+                running on. An omitted ``model`` launches the child on this
+                profile, not on the first profile that happens to share a
+                model_name.
             profile_lookup: maps a model name to the config.yaml profile that
                 runs it; injectable so tests do not read the real config.
                 API keys are never passed on the command line — the child reads
@@ -169,6 +192,7 @@ class BuiltinDelegateTool(Tool):
         self._model_provider = model_provider
         self._model_name = model_name
         self._model = model
+        self._session_profile = session_profile
         self._profile_lookup = profile_lookup or profile_for_model
         self.register(self.delegate, is_destructive=True)
 
@@ -202,11 +226,14 @@ class BuiltinDelegateTool(Tool):
                 when the point of delegating is to work on another checkout.
             model: Model for the worker, as "provider/name" (e.g.
                 "deepseek/deepseek-chat") or just a name to keep your provider.
-                A model that a config.yaml profile runs is delegated on that
-                profile so its endpoint and key come along. A provider nothing
-                on this machine is configured for is refused instead of
+                A value that is already your model id — including ids that
+                contain a slash, like "openai/glm-5" — is kept whole; only
+                when that string is not an id does it split on the first "/".
+                A model that exactly one config.yaml profile runs is delegated
+                on that profile so its endpoint and key come along. A provider
+                nothing on this machine is configured for is refused instead of
                 launched into an authentication failure. Defaults to your own
-                model.
+                model (and your session profile, when the CLI has one).
 
         Returns:
             str: The worker's id and how to reach its result, or why it was refused.
@@ -246,8 +273,19 @@ class BuiltinDelegateTool(Tool):
         ]
         child_env: dict = {}
         provider, model_name = self._resolve_model(model)
-        if provider and model_name:
-            profile = self._profile_lookup(model_name)
+        inherited = (provider, model_name) == (self._model_provider, self._model_name)
+        if inherited and self._session_profile:
+            argv += ["--profile", self._session_profile]
+            if model_name:
+                argv += ["--model_name", model_name]
+        elif provider and model_name:
+            if inherited:
+                parent_url = self._model.base_url if self._model is not None else None
+                profile = self._profile_lookup(model_name, provider=None, base_url=parent_url)
+            elif (model or "").strip() == model_name:
+                profile = self._profile_lookup(model_name, provider=None, base_url=None)
+            else:
+                profile = self._profile_lookup(model_name, provider=provider, base_url=None)
             if profile:
                 argv += ["--profile", profile]
             elif self._model is not None:
@@ -256,7 +294,7 @@ class BuiltinDelegateTool(Tool):
                 # base_url is not a secret and rides along as a flag — while
                 # the api_key reaches the child through the environment, never
                 # the command line where `ps` would show it.
-                api_key = getattr(self._model, "api_key", None)
+                api_key = self._model.api_key
                 key_var = provider_env_var(provider)
                 if api_key and not key_var:
                     return (
@@ -265,7 +303,7 @@ class BuiltinDelegateTool(Tool):
                         f"command line. Run such work in-process (the `task` tool) instead."
                     )
                 argv += ["--model_provider", provider, "--model_name", model_name]
-                base_url = getattr(self._model, "base_url", None)
+                base_url = self._model.base_url
                 if base_url:
                     argv += ["--base_url", str(base_url)]
                 if api_key and key_var:
@@ -305,10 +343,27 @@ class BuiltinDelegateTool(Tool):
         )
 
     def _resolve_model(self, model: str) -> tuple[Optional[str], Optional[str]]:
-        """Split a caller-supplied "provider/name" (or bare name) against the defaults."""
+        """Resolve a caller-supplied model against the session defaults.
+
+        A slash is first treated as part of a model id (Venus-style
+        ``openai/glm-5``, or the environment-context form
+        ``provider/<id>``). Only when that string is not the caller's own
+        id and not a profile's ``model_name`` does it split as
+        ``provider/name``.
+        """
         choice = (model or "").strip()
         if not choice:
             return self._model_provider, self._model_name
+        if choice == self._model_name:
+            return self._model_provider, self._model_name
+        if (
+            self._model_provider
+            and self._model_name
+            and choice == f"{self._model_provider}/{self._model_name}"
+        ):
+            return self._model_provider, self._model_name
+        if self._profile_lookup(choice, provider=None, base_url=None):
+            return self._model_provider, choice
         provider, _, name = choice.partition("/")
         if name:
             return provider, name

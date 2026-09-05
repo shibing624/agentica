@@ -38,10 +38,12 @@ class TestDeepAgentDefaults(unittest.TestCase):
                 workspace=tmpdir,
                 include_skills=False,
                 background_process_registry=BackgroundProcessRegistry(),
+                session_profile="venus-main",
             )
 
         delegates = [t for t in agent.tools if t.name == "builtin_delegate_tool"]
         self.assertEqual(len(delegates), 1)
+        self.assertEqual(delegates[0]._session_profile, "venus-main")
 
     def test_deep_agent_without_a_registry_has_no_delegate(self):
         from agentica.agent.deep import DeepAgent

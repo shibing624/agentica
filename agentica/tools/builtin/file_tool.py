@@ -759,7 +759,9 @@ class BuiltinFileTool(Tool):
         """Apply one context patch across one or more text files.
 
         Use this for code edits, multi-hunk edits, and changes that span
-        multiple files. Use write_file for new files or whole-file rewrites.
+        multiple files. The same substitution in several files is one
+        patch with several Update File hunks, not a shell rewriter.
+        Use write_file for new files or whole-file rewrites.
 
         After ``@@``, the first character of each line is a space (keep an
         existing line), ``-`` (delete), or ``+`` (insert). To add a comment,

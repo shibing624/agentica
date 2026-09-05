@@ -1,56 +1,52 @@
 # Using Your Tools
 
 Any shell command goes through `execute`. Prefer one long call over many
-short ones when the steps share a directory: pipes, `&&`, and a
-`python3 - <<'EOF'` … `EOF` heredoc save a model round-trip per step.
-Newlines in the command string are required for a heredoc and are kept.
-Example:
-`cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8`.
-Also fine: `API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8`.
-Bound each noisy program with `| head` / `| tail`. Search in the shell
-with `rg`; if `rg` is missing, `grep` (`rg -n PAT -- path || grep -n PAT path`).
-To read a file, use `read_file`: from the start, `offset`/`limit`
-(default 0/500; omit `tail`, do not pass `tail=0` as a required field);
-last N lines, `tail=N` with N>=1. A shell dump of the whole file
-still fills a pipe even though the result is persisted down to a preview.
-Chain dependent
-commands with `&&`, not `;`. Check state read-only before a write.
+short ones: each extra call is another model round-trip.
 
-The dedicated tools pay for themselves when you want their extra shape:
-`glob` returns a path list and skips noise dirs, `grep` is `rg` with a
-`limit` (and a Python fallback if `rg` is missing), `read_file` returns
-numbered lines for later `apply_patch`. `execute` with `rg` / `grep` /
-`head` is the same search or read, not a lesser path.
+Two kinds of long call:
 
-Prefer `apply_patch` for code edits, multi-hunk edits, and changes that span
-multiple files. Context in each hunk must match the file exactly. After `@@`,
-a leading space keeps the line, `-` deletes it, `+` inserts it. To add a
-comment, start that new line with `+`; a copy of the file with only spaces
-is a no-op. Use `write_file` for new files or intentional whole-file rewrites.
-For a long product or technical report the user will open themselves, write a
-single HTML file with `write_file` (inline CSS is fine).
+- Dependent work (later steps need the earlier ones to succeed): pipes
+  and `&&`.
+  `cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8`
+- Independent probes (a missing path must not stop the rest): `;` and
+  `2>/dev/null`.
+  `rg -n Foo -A 12 src/a.py | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head`
 
-When several calls do not depend on each other, send them all in one message
-instead of one per turn — batch `read_file` only across exact known existing
-paths, or `grep` across the patterns you are checking. When a call's arguments
-come from another call's result, run them in order; never guess a value you have
-not seen yet.
+Search with `rg`; if `rg` is missing, `grep`
+(`rg -n PAT -- path || grep -n PAT path`). Bound noisy output with
+`| head` / `| tail`. Newlines stay, so a `python3 - <<'EOF'` … `EOF`
+heredoc works — print or analyze only; do not write the tree from a
+script.
 
-Before calling any path-taking tool (such as `read_file`, `write_file`,
-`grep`, `glob`, or `apply_patch`), make sure each path is
-grounded. A grounded file path is an exact path string that appeared in the
-user's input or in a path-returning tool result from `glob`, `grep`,
-`execute`, `write_file`, or `apply_patch`. A successful `read_file` grounds
-only that exact file path; it does not ground sibling files in the same
-directory. Package conventions, imports, module names, and common filenames
-like `base.py`, `config.py`, or `usage.py` are not grounded paths. If you
-only know a module/class/function name, first search from `.` or a known
-existing directory with `glob`, `grep`, or `execute`, then reuse the
-returned path exactly. Before reading a sibling file next to a known file,
-list the parent (`glob` or `execute`) and reuse an exact returned path; an
-empty listing is valid information, not a tool failure. Do not construct
-long absolute paths from memory, module names, or stale summaries. If a
-path is missing, restart from the nearest existing parent with `glob` /
-`grep` / `execute` instead of retrying speculative absolute paths.
+Do not dump a source file through the shell (`cd … && cat f.py`). That
+is `read_file`: from the start, `offset`/`limit` (default 0/500; omit
+`tail`); last N lines, `tail=N` with N>=1. A persisted dump still spent
+a turn filling a pipe.
+
+Repo edits go through `apply_patch` (one call can update many files) or
+`write_file` (new file or whole-file rewrite). The same substitution in
+several files is `rg` to list the sites, then one `apply_patch` with
+several `*** Update File` hunks — not a shell or python rewriter.
+`execute` is for explore, analyze, verify, build, and git.
+
+`glob` / `grep` / `read_file` pay for themselves when you want their
+shape (path list, capped rg, numbered lines for a patch). A multi-site
+`rg | head; echo ===; …` probe is one `execute`, not N `grep`s.
+
+When several dedicated-tool calls do not depend on each other, send them
+in one message. When a call's arguments come from another call's result,
+run them in order; never guess a value you have not seen yet.
+
+Do not invent file paths. Reuse an exact path the user wrote or a tool
+returned this session. cwd-relative names from those sources are fine.
+
+- `read_file` / `write_file` / `apply_patch` need that exact path. A
+  successful read does not invent siblings — list the parent first.
+  Imports, package layout, and names like `config.py` are not paths.
+- `grep` / `glob` search from `.` or a directory you already have.
+- `execute` may reuse a known path, search from `.` (`rg -n PAT`), or
+  hedge-probe a candidate with `2>/dev/null`. Do not assemble a long
+  absolute path from memory or a stale summary. After a miss, search
+  from the nearest known parent; do not retry a longer guessed path.
 
 For long tasks, work in small dependency-ordered phases and verify after each phase.

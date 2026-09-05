@@ -126,6 +126,15 @@ class LoopState:
             "must be a response to a preceding message",
             "tool_call_ids found in tool_calls",
             "unexpected tool_use_id",
+            # Anthropic: an assistant tool_use whose tool_result is missing.
+            # Recovered by the tool-history sanitize path, NOT by a blind
+            # re-send: this is a deterministic transcript-shape rejection, so
+            # retrying the same array 400s identically.
+            "ids were found without",
+            "must have a corresponding `tool_result`",
+            # OpenAI chat completions / Responses wording for the same shape.
+            "must be followed by tool messages responding",
+            "no tool output found for function call",
         ),
         repr=False,
     )

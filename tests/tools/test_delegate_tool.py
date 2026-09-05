@@ -21,6 +21,7 @@ from agentica.tools.builtin.delegate_tool import (
     BuiltinDelegateTool,
     agentica_command,
     delegation_depth,
+    profile_for_model,
     provider_for_model,
 )
 
@@ -74,7 +75,8 @@ def _tool(
     model: Optional[str] = "deepseek-chat",
     work_dir="/tmp/proj",
     profile_lookup=None,
-sdk_model=None,
+    sdk_model=None,
+    session_profile: Optional[str] = None,
 ):
     return BuiltinDelegateTool(
         background_process_registry=registry,
@@ -83,9 +85,10 @@ sdk_model=None,
         model_provider=provider,
         model_name=model,
         model=sdk_model,
+        session_profile=session_profile,
         # Default "no profile matches" so argv tests never depend on the
         # machine's real config.yaml.
-        profile_lookup=profile_lookup or (lambda name: None),
+        profile_lookup=profile_lookup or (lambda name, provider=None, base_url=None: None),
     )
 
 
@@ -160,7 +163,7 @@ class TestWhatItStarts:
     def test_the_callers_own_model_runs_on_its_profile_when_one_matches(self):
         registry = _FakeRegistry()
         _delegate(
-            _tool(registry, profile_lookup=lambda name: {"deepseek-chat": "deepseek-main"}.get(name)),
+            _tool(registry, profile_lookup=lambda name, **_k: {"deepseek-chat": "deepseek-main"}.get(name)),
             task="port the parser",
         )
 
@@ -173,7 +176,7 @@ class TestWhatItStarts:
     def test_a_model_that_matches_a_profile_runs_on_it(self):
         registry = _FakeRegistry()
         _delegate(
-            _tool(registry, profile_lookup=lambda name: {"claude-opus-5": "venus-opus-5-anthropic"}.get(name)),
+            _tool(registry, profile_lookup=lambda name, **_k: {"claude-opus-5": "venus-opus-5-anthropic"}.get(name)),
             task="port the parser",
             model="anthropic/claude-opus-5",
         )
@@ -252,7 +255,7 @@ class TestWhatItStarts:
                 provider="openai",
                 model=sdk_model.id,
                 sdk_model=sdk_model,
-                profile_lookup=lambda name: {"glm-5.3-external": "venus-glm-5.3"}.get(name),
+                profile_lookup=lambda name, **_k: {"glm-5.3-external": "venus-glm-5.3"}.get(name),
             ),
             task="port the parser",
         )
@@ -299,6 +302,155 @@ class TestWhatItStarts:
 
         assert "term_1" in result
         assert 'wait(id="term_1")' in result
+
+    def test_inherit_uses_the_session_profile_not_the_first_name_match(self):
+        registry = _FakeRegistry()
+        _delegate(
+            _tool(
+                registry,
+                provider="openai",
+                model="glm-5",
+                session_profile="venus-main",
+                # Old behaviour: first config.yaml profile whose model_name
+                # matches. That is how a worker landed on the cheap clone.
+                profile_lookup=lambda name, **_k: "venus-cheap",
+            ),
+            task="port the parser",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-main"
+        assert argv[argv.index("--model_name") + 1] == "glm-5"
+        assert "--model_provider" not in argv
+
+    def test_inherit_picks_the_profile_that_shares_the_callers_endpoint(self):
+        profiles = {
+            "venus-cheap": {
+                "model_name": "glm-5",
+                "model_provider": "openai",
+                "base_url": "http://cheap/",
+            },
+            "venus-main": {
+                "model_name": "glm-5",
+                "model_provider": "openai",
+                "base_url": "http://main/",
+            },
+        }
+        registry = _FakeRegistry()
+        sdk = SimpleNamespace(id="glm-5", api_key="sk", base_url="http://main/")
+        _delegate(
+            _tool(
+                registry,
+                provider="openai",
+                model="glm-5",
+                sdk_model=sdk,
+                profile_lookup=lambda name, **k: profile_for_model(name, profiles=profiles, **k),
+            ),
+            task="port the parser",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-main"
+
+    def test_inherit_does_not_guess_a_profile_on_a_different_endpoint(self):
+        profiles = {
+            "venus-cheap": {
+                "model_name": "glm-5",
+                "model_provider": "openai",
+                "base_url": "http://cheap/",
+            },
+            "venus-other": {
+                "model_name": "glm-5",
+                "model_provider": "openai",
+                "base_url": "http://other/",
+            },
+        }
+        registry = _FakeRegistry()
+        sdk = SimpleNamespace(id="glm-5", api_key="sk", base_url="http://main/")
+        _delegate(
+            _tool(
+                registry,
+                provider="openai",
+                model="glm-5",
+                sdk_model=sdk,
+                profile_lookup=lambda name, **k: profile_for_model(name, profiles=profiles, **k),
+            ),
+            task="port the parser",
+        )
+
+        argv = _argv(registry.started[0])
+        assert "--profile" not in argv
+        assert argv[argv.index("--base_url") + 1] == "http://main/"
+
+    def test_passing_the_callers_slashed_id_does_not_split_it(self):
+        registry = _FakeRegistry()
+        _delegate(
+            _tool(registry, provider="openai", model="openai/glm-5"),
+            task="port the parser",
+            model="openai/glm-5",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_provider") + 1] == "openai"
+        assert argv[argv.index("--model_name") + 1] == "openai/glm-5"
+
+    def test_environment_style_provider_slash_id_inherits(self):
+        registry = _FakeRegistry()
+        _delegate(
+            _tool(registry, provider="openai", model="openai/glm-5"),
+            task="port the parser",
+            model="openai/openai/glm-5",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_name") + 1] == "openai/glm-5"
+
+    def test_a_slashed_id_that_a_profile_runs_is_kept_whole(self):
+        registry = _FakeRegistry()
+        _delegate(
+            _tool(
+                registry,
+                provider="deepseek",
+                model="deepseek-chat",
+                profile_lookup=lambda name, **_k: "venus-glm" if name == "openai/glm-5" else None,
+            ),
+            task="port the parser",
+            model="openai/glm-5",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-glm"
+        assert "--model_provider" not in argv
+
+
+class TestProfileForModel:
+    def test_a_single_match_is_returned(self):
+        profiles = {
+            "deepseek-main": {"model_name": "deepseek-chat", "model_provider": "deepseek"},
+            "other": {"model_name": "glm-5", "model_provider": "openai"},
+        }
+        assert profile_for_model("deepseek-chat", profiles=profiles) == "deepseek-main"
+
+    def test_two_profiles_sharing_a_name_are_not_guessed(self):
+        profiles = {
+            "cheap": {"model_name": "glm-5", "model_provider": "openai", "base_url": "http://a/"},
+            "main": {"model_name": "glm-5", "model_provider": "openai", "base_url": "http://b/"},
+        }
+        assert profile_for_model("glm-5", profiles=profiles) is None
+
+    def test_base_url_breaks_a_name_tie(self):
+        profiles = {
+            "cheap": {"model_name": "glm-5", "model_provider": "openai", "base_url": "http://a/"},
+            "main": {"model_name": "glm-5", "model_provider": "openai", "base_url": "http://b/"},
+        }
+        assert profile_for_model("glm-5", base_url="http://b/", profiles=profiles) == "main"
+
+    def test_provider_breaks_a_name_tie(self):
+        profiles = {
+            "zhipu": {"model_name": "glm-5", "model_provider": "zhipuai"},
+            "venus": {"model_name": "glm-5", "model_provider": "openai"},
+        }
+        assert profile_for_model("glm-5", provider="zhipuai", profiles=profiles) == "zhipu"
 
 
 class TestDepth:

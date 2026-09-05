@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### fixes
+- **Claude 回合中断后不再留下孤儿 `tool_use`**：Anthropic 要求每条 `tool_use` 都有对应 `tool_result`。以前按位置 zip，中断或乱序返回就会贴错 id，后续每跳都 400。现在按 `tool_call_id` 配对，缺的补一条 interrupted 错误；这类 400 走 transcript sanitize，不再原样重发。
+- **`delegate` 不再偶发选错模型**：不填 `model` 时子进程走当前会话的 profile（`session_profile`），不再按 `model_name` 扫 `config.yaml` 里第一个同名的。两个 profile 共用一个模型名时，对得上 `base_url` 才映射，对不上就带父会话的 `--base_url`，不猜。`model` 里带 `/` 的先当完整 id（Venus 的 `openai/glm-5`，或环境上下文的 `provider/<id>`），对不上再拆 `provider/name`。
 - **`read_file` 的 `tail=0` 不再报错**：模型把 `tail=0` 当成「从头读」，以前抛 `tail must be >= 1` 白烧一轮。0 / 省略都是从头按 `offset`/`limit` 分页；`tail=N`（N>=1）才是末尾 N 行，文件比 N 短就整份返回；负的 `tail` 当成末尾 `|N|` 行。docstring / `tools.md` 写明两套分页，不要用 `tail=700` 表示「从头读 700 行」（那是 `limit=700`）。
 - **`execute` 搜文本优先 `rg`，没有再 `grep`**：docstring / `tools.md` 写 `rg -n PAT -- path || grep -n PAT path`。命令本身不改写。
 - **切模型只留问答文本，OpenAI ↔ Claude 双向可跑**：`/model`（含 `/config set` 真换了模型）把 thinking、tool call/result 都剥掉，只保留 user 问题和 assistant 回答。thinking 的 `signature` 绑签发模型，带着切就是 400；切模型本身是新一轮问答，那些内容也不值钱。能力按 wire 格式（OpenAIChat vs 原生 Claude），不按模型名猜。同会话里 `cache_control` 仍不准打在 thinking 上；Layer 1 缩过 `tool_use.input` 的旧回合同时丢掉旁边的 thinking。
@@ -31,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **cron 用法改走内置 `cron` skill**：`cronjob` 工具还在。以前 `CronTool.get_system_prompt()` 每轮灌用法 + 按表面切换的 `daemon_hint`（CLI 写 `/cron daemon on`，gateway 写 `cron.enabled`）。现在判断在 `agentica/skills/bundled/cron/`，两种开 daemon 的办法写在同一份 skill 里按表面选；`daemon_hint` / `CLI_DAEMON_HINT` 删掉。人用 `/cron`（skill 同名 auto-command 让位给已有斜杠命令）。
 - **`multi-agent` skill / 文档不再把「要并行」写成 `delegate` 的理由**：`task` 一条消息里就可以并行多个（`concurrency_safe`）。对比表补上 Parallel 行；`delegate` 只为独立 context / 换目录 / 要写文件。
 - **CLI / Web 的 `apply_patch` 调用行显示工作区相对路径**：以前只报 `Edited 1 file (+8 -3)`，看不出改了哪个文件。现在和 `read_file` / `write_file` 一样带上路径（`apply_patch agentica/cli/commands/session.py - Edited 1 file (+8 -3)`）；多文件逗号并列。
-- **`execute` 鼓励一条长命令**：docstring 和 `tools.md` 以前正例都是单条短命令（还写着「尽量别 `cd` / 命令里不要换行」），模型就拆成多次往返。现在推荐共享目录下用管道、`&&`、`python3 - <<'EOF'` 拼完验证/构建/启动，输出用 `| tail` / `| head` 兜住；精确改代码仍走 `apply_patch`。
+- **`execute` 鼓励一条长命令**：依赖链用管道和 `&&`；多位点探查用 `;` 和 `2>/dev/null`（缺文件不能停后面）。不要用 shell 倒整份源码（`cd && cat f.py` 是 `read_file`），也不要用 `execute` 改仓库：同一替换是 `rg` 列出位点再一条多文件 `apply_patch`。路径 grounding 只卡 `read_file` / `write_file` / `apply_patch`（禁止凭记忆/包布局拼路径）；`execute` 可以复用已知路径、从 `.` 搜，或对候选加 `2>/dev/null`。以前写「只用 `&&`、不要 `;`」和「任何带路径的工具都先搜」把探查拆成多次往返。
 - **CLI / Web 的 `write_file` 调用行显示工作区相对路径**：以前只留文件名（`session.py`），和 `read_file` 的 `agentica/cli/commands/session.py` 不一致。现在两边都走同一套缩短（cwd 下相对，工作区外保留原路径）。
 - **去掉 `@agentica-ai/sdk` 的 GitHub Actions 自动发布**（删除 `.github/workflows/npm-publish.yml`）：和 PyPI 一样改成仓库里手动 `npm publish`。`v*` tag 不再二次 PUT；`1.4.15` 已经 staged 过，Actions 再推一次会 E409，而 `npm view` 看不见 staged 版本，跳过检查拦不住。
 

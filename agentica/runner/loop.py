@@ -329,17 +329,33 @@ class LoopMixin:
 
         function_call_results: List[Message] = []
         tool_role = provider_metadata.get("tool_role", "tool")
-        async for tool_resp in self._execute_tool_calls(
-            function_calls=function_calls,
-            function_call_results=function_call_results,
-            agent=agent,
-            model=model,
-            tool_role=tool_role,
-            stream=True,
-        ):
-            yield tool_resp
-
-        model.format_tool_results(function_call_results, messages, provider_metadata)
+        # The assistant(tool_use) message is already in ``messages`` (appended by
+        # the model's stream consumer); its tool_result is only appended below,
+        # after every tool has run. A cancel/abort inside that window used to
+        # leave the tool_use unanswered forever, and every later request in the
+        # run re-sent that orphan -- Anthropic 400s with "`tool_use` ids were
+        # found without `tool_result` blocks", OpenAI chat and Responses reject
+        # it too. The window is provider-independent, so close it here: make
+        # "tool_use is in the array" and "its results are in the array" one
+        # atomic unit by always formatting results on the way out, including
+        # when the caller throws CancelledError into this generator.
+        #
+        # Results collected so far are still formatted: run_function_calls
+        # appends each result to ``function_call_results`` as it completes, and
+        # format_tool_results pads any call that never produced one, so the
+        # emitted round always answers every id in ``tool_ids``.
+        try:
+            async for tool_resp in self._execute_tool_calls(
+                function_calls=function_calls,
+                function_call_results=function_call_results,
+                agent=agent,
+                model=model,
+                tool_role=tool_role,
+                stream=True,
+            ):
+                yield tool_resp
+        finally:
+            model.format_tool_results(function_call_results, messages, provider_metadata)
 
     async def _run_impl(
         self,
@@ -940,6 +956,33 @@ class LoopMixin:
                                     if is_tool_history_error and not loop_state.tool_history_sanitized_done:
                                         loop_state.tool_history_sanitized_done = True
                                         del messages_for_model[call_start:]
+                                        # An unanswered tool_call round is a shape
+                                        # error the provider reports by index, and
+                                        # the orphan may predate this turn, so the
+                                        # trim above cannot reach it. Pad the
+                                        # missing results first: it fixes the
+                                        # rejection while keeping the transcript.
+                                        # Only fall back to dropping all tool
+                                        # history when there was nothing to pad
+                                        # (i.e. a genuine cross-provider format
+                                        # mismatch).
+                                        _repaired = self.repair_unanswered_tool_calls(
+                                            messages_for_model,
+                                            # Claude sets this False: it needs
+                                            # tool_result content blocks on a
+                                            # user message, not a role="tool" one.
+                                            anthropic_blocks=not getattr(
+                                                active_model, "supports_replayed_tool_history", True
+                                            ),
+                                        )
+                                        if _repaired:
+                                            logger.warning(
+                                                f"[tool_history] {active_model.id} rejected an "
+                                                f"unanswered tool-call round mid-stream; padded "
+                                                f"{_repaired} missing tool result(s) and retrying once: {exc}"
+                                            )
+                                            _restart_turn = True
+                                            break
                                         logger.warning(
                                             f"[tool_history] {active_model.id} rejected tool-call "
                                             f"history mid-stream (likely cross-model resume); "

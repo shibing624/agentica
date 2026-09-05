@@ -495,32 +495,40 @@ class BuiltinExecuteTool(Tool):
     ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
-        Any shell command goes here: programs (git, python, pytest, pip, npm,
-        make, docker, curl) and pipelines that shape command output — filter,
-        sort, unique, count, head, tail.
+        Any shell command goes here: explore, analyze, verify, build, git,
+        and pipelines that shape stdout — filter, sort, unique, count,
+        head, tail. Repo edits are ``apply_patch`` (one call can update
+        many files) or ``write_file``, not this tool. The same
+        substitution in several files is ``rg`` then one multi-file
+        patch, not a shell or python rewriter.
 
-        Prefer one long ``execute`` over many short ones when the steps share a
-        directory. Each extra call is another model round-trip. Pack a verify /
-        build / launch sequence with pipes, ``&&``, and a heredoc
-        (``python3 - <<'EOF'`` … ``EOF``). Newlines in the command string are
-        required for a heredoc and are passed through unchanged.
+        Prefer one long ``execute`` over many short ones. Each extra call
+        is another model round-trip.
 
-        Open a file with ``read_file`` (``offset``/``limit`` or ``tail``) so you
-        get numbered lines for ``apply_patch``. A shell dump of a whole file
-        is bounded: oversized stdout is persisted and this result keeps only a
-        preview, but you still spent a turn filling a pipe. Bound each noisy
-        program with ``| head`` / ``| tail``. Search with ``rg``; if ``rg``
-        is missing, ``grep`` (``rg -n PAT -- path || grep -n PAT path``).
-        Chain dependent
-        commands with ``&&``, not ``;``. Check state read-only before a write.
-        Surgical, context-sensitive edits still belong in ``apply_patch``; a
-        one-shot script is for the same substitution across several files, or
-        work that is already a program.
+        - Dependent work (later steps need the earlier ones): pipes and
+          ``&&``. Verify / build / launch in one call.
+        - Independent probes (a missing path must not stop the rest):
+          ``;`` and ``2>/dev/null``. Several ``rg … | head`` sites with
+          ``echo ===`` between them is one call, not N ``grep``s.
+
+        Search with ``rg``; if ``rg`` is missing, ``grep``
+        (``rg -n PAT -- path || grep -n PAT path``). Bound noisy output
+        with ``| head`` / ``| tail``. Newlines stay, so a
+        ``python3 - <<'EOF'`` … ``EOF`` heredoc works — print or analyze
+        only; do not write the tree from a script.
+
+        Do not dump a source file through the shell
+        (``cd … && cat f.py``). That is ``read_file``
+        (``offset``/``limit`` or ``tail``), which also gives numbered
+        lines for ``apply_patch``. A persisted dump still spent a turn
+        filling a pipe.
 
         Before executing:
-        1. Verify target directory exists (use glob first if unsure)
-        2. Always quote file paths with spaces: cd "/path with spaces/"
-        3. For a multi-step in one tree, start with ``cd /abs/path &&``
+        1. Always quote file paths with spaces: cd "/path with spaces/"
+        2. For a verify/build in one tree, start with ``cd /abs/path &&``
+        3. Search from ``.`` or a known directory; hedge unknown
+           candidates with ``2>/dev/null``. Do not assemble a long
+           absolute path from package layout.
 
         Usage notes:
         - The command string is passed unchanged to the system shell after
@@ -558,21 +566,16 @@ class BuiltinExecuteTool(Tool):
 
                   cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8
 
-            - Same substitution across several files, then a peek (newlines are the command)::
+            - Independent probes in one call (``;`` so a miss does not abort)::
 
-                  cd /abs/project && python3 - <<'EOF'
-                  import pathlib
-                  edits = {
-                      'src/app/store.py': ('OldName', 'NewName'),
-                      'docs/USAGE.md': ('OldName is', 'NewName is'),
-                  }
-                  for path, (old, new) in edits.items():
-                      p = pathlib.Path(path)
-                      p.write_text(p.read_text().replace(old, new))
-                      print('updated', path)
+                  rg -n Foo -A 12 src/a.py | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head
+
+            - Read-only heredoc (newlines are the command; do not write files)::
+
+                  python3 - <<'EOF'
+                  from pathlib import Path
+                  print(chr(10).join(Path('pyproject.toml').read_text().splitlines()[:25]))
                   EOF
-                  echo '=== pyproject.toml ==='
-                  python3 -c "from pathlib import Path; print(chr(10).join(Path('pyproject.toml').read_text().splitlines()[:25]))"
 
             - execute(command="API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8")
             - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
