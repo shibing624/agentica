@@ -203,12 +203,14 @@ _ASK_KEY_HINT = "    Enter to answer · Ctrl+C to cancel · Ctrl+\\ if frozen"
 
 def _ask_prompt_text(req) -> str:
     """Plain text shown above the input box while a question is armed."""
+    prompt = req.prompt.rstrip("\n")
     if req.kind == "approval":
-        return (req.prompt or "").rstrip("\n")
-    parts = [f"  ? {(req.prompt or '').rstrip('\n')}"]
+        return prompt
+    parts = [f"  ? {prompt}"]
     if req.options:
         parts.append("")
-        parts.extend(f"    {i}. {opt}" for i, opt in enumerate(req.options, 1))
+        for i, opt in enumerate(req.options, 1):
+            parts.append(f"    {i}. {opt}")
     parts.append(_ASK_KEY_HINT)
     return "\n".join(parts)
 
