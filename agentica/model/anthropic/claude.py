@@ -259,6 +259,16 @@ class Claude(Model):
             schema = self.response_format.model_json_schema()
             # Remove $defs at top level, inline refs not needed for Anthropic tool schema
             schema.pop("$defs", None)
+            # Anthropic validates ``input_schema.required`` as a list. Pydantic
+            # OMITS the key entirely when every field has a default, so a
+            # response_model with no mandatory field would serialise to
+            # ``"required": null`` and the API answers
+            # ``input_schema.required: Input should be a valid list``.
+            declared = schema.get("required")
+            schema["required"] = declared if isinstance(declared, list) else []
+            if not isinstance(schema.get("properties"), dict):
+                schema["properties"] = {}
+            schema.setdefault("type", "object")
             return {
                 "name": "structured_output",
                 "description": f"Return structured output as {self.response_format.__name__}",
@@ -643,22 +653,37 @@ class Claude(Model):
 
         tools: List[Dict[str, Any]] = []
         for func_name, func_def in self.functions.items():
+            # Deferred tools stay executable but must not reach the provider
+            # schema, and an unavailable one must not be advertised. The
+            # OpenAI path gets both for free via ``self.tools`` /
+            # ``get_tools_for_api``; this path iterates ``functions``, so it
+            # has to apply the same two gates itself.
+            if getattr(func_def, "deferred", False):
+                continue
+            if not func_def.is_available():
+                continue
+
             parameters: Dict[str, Any] = func_def.parameters or {}
             properties: Dict[str, Any] = parameters.get("properties", {})
-            required_params: List[str] = []
+            # ``parameters["required"]`` is already correct — derived from the
+            # signature's defaults (Function._parse_parameters), or supplied
+            # verbatim via parameters_override. Do NOT recompute it from the
+            # presence of a "null" type: get_json_schema deliberately encodes
+            # Optional by *omitting* the name from ``required`` rather than as
+            # ``["<type>", "null"]`` (many providers reject a type array), so
+            # the old "no null => required" rule marked every optional
+            # parameter mandatory — read_file demanded offset/limit/tail and
+            # execute demanded timeout/parallel_safe.
+            declared = parameters.get("required")
+            required_params: List[str] = [
+                name for name in (declared if isinstance(declared, list) else [])
+                if name in properties
+            ]
 
-            for param_name, param_info in properties.items():
-                param_type = param_info.get("type", "")
-                param_type_list: List[str] = [param_type] if isinstance(param_type, str) else param_type or []
-
-                if "null" not in param_type_list:
-                    required_params.append(param_name)
-
-            input_properties: Dict[str, Dict[str, Union[str, List[str]]]] = {
-                param_name: {
-                    "type": param_info.get("type", ""),
-                    "description": param_info.get("description", ""),
-                }
+            # Keep each property's own schema (enum/items/nested objects and
+            # any real description) instead of flattening it to type+"".
+            input_properties: Dict[str, Any] = {
+                param_name: (param_info if isinstance(param_info, dict) else {})
                 for param_name, param_info in properties.items()
             }
 
