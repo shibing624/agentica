@@ -47,10 +47,10 @@ class BuiltinTaskTool(Tool):
 
     Use it only when you do not yet know where to look — the search would span
     directories you cannot enumerate. If you already know the target file,
-    definition, or a handful of files, use `read_file` / `grep` / `glob`
-    directly; task size is not the criterion. Do not use `task` for edits or
-    state-changing commands (subagents are refused these), for work that needs
-    this conversation's context, or merely to keep your own context small.
+    definition, or a handful of files, look there yourself; task size is
+    not the criterion. Do not use `task` for edits or state-changing
+    commands (subagents are refused these), for work that needs this
+    conversation's context, or merely to keep your own context small.
 
     The `Model` column below shows which model a type runs on. Treat every
     subagent result as evidence that you still reason over. Do not delegate code

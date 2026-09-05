@@ -402,6 +402,7 @@ class TestBuiltinFileToolGrep:
         execute_params = inspect.signature(BuiltinExecuteTool.execute).parameters
         assert "timeout" not in grep_params
         assert "multiline" not in grep_params
+        assert "include" not in grep_params
         assert "timeout" not in glob_params
         assert "timeout" in wait_params
         assert "timeout" in execute_params
@@ -547,14 +548,14 @@ class TestBuiltinFileToolGrep:
     def test_grep_accepts_file_path(self, file_tool, tmp_dir):
         fp = Path(tmp_dir, "single.py")
         fp.write_text("gate_passed = True\n")
-        result = asyncio.run(file_tool.grep("gate_passed", str(fp), include="*.py"))
+        result = asyncio.run(file_tool.grep("gate_passed", str(fp)))
         assert "gate_passed = True" in result
 
     def test_grep_fallback_accepts_file_path(self, file_tool, tmp_dir):
         fp = Path(tmp_dir, "single.py")
         fp.write_text("commit_pass = True\n")
         with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
-            result = asyncio.run(file_tool.grep("commit_pass", str(fp), include="*.py"))
+            result = asyncio.run(file_tool.grep("commit_pass", str(fp)))
         assert "commit_pass = True" in result
 
     def test_grep_manages_own_timeout(self, file_tool):

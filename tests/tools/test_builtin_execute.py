@@ -67,12 +67,13 @@ class TestBuiltinExecuteTool:
         assert "sed -i" not in doc
         assert "Bad examples" not in doc
         assert "| head" in doc or "| rg" in doc
-        assert "rg -n TODO src || grep -n TODO src" in doc
+        assert "rg -g '*.py' -n TODO src || grep -n TODO src" in doc
+        assert "-g '*.py'" in doc
         assert "2>/dev/null" in doc
-        assert "apply_patch" in doc
-        assert "write_file" in doc
+        assert "apply_patch" not in doc
+        assert "write_file" not in doc
+        assert "read_file" not in doc
         assert "package layout" in doc
-        assert "multi-file" in doc
         assert "not `;`" not in doc
         assert "write_text" not in doc
         assert "find . -type f" not in doc
@@ -82,11 +83,24 @@ class TestBuiltinExecuteTool:
         assert "parallel_safe=True" in doc
         assert "Prefer one long" not in doc
         assert "<<'EOF'" in doc
-        assert "read_file" in doc
         assert "DO NOT use newlines" not in doc
         assert "avoid cd when possible" not in doc
         assert "swift" not in doc
         assert "App.app" not in doc
+        assert "--include" not in doc
+
+    def test_execute_rg_glob_filters_by_extension(self, execute_tool, tmp_dir):
+        import shutil
+
+        if shutil.which("rg") is None:
+            pytest.skip("rg not installed")
+        (Path(tmp_dir) / "hit.py").write_text("TOKEN_XYZ\n")
+        (Path(tmp_dir) / "miss.txt").write_text("TOKEN_XYZ\n")
+        result = asyncio.run(
+            execute_tool.execute("rg -g '*.py' -n TOKEN_XYZ")
+        )
+        assert "hit.py" in result
+        assert "miss.txt" not in result
 
     def test_execute_runs_heredoc_and_chained_echo(self, execute_tool, tmp_dir):
         """A multi-line command is the product: newlines stay, && / heredoc run."""

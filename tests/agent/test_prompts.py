@@ -103,7 +103,6 @@ class TestPromptModules:
         content = get_tools_prompt()
         assert "Do not invent file paths" in content
         assert "does not invent siblings" in content
-        assert "hedge-probe" in content
         assert "Before calling any path-taking tool" not in content
         assert "*** Update File" in content
         assert "python rewriter" in content
@@ -111,20 +110,20 @@ class TestPromptModules:
         assert "parallel `read_file`" in content
         assert "not read-patch-read-patch" in content
         assert "Read the current file" not in content
+        assert "execute" not in content
+        assert "`rg`" not in content
 
-    def test_tools_module_allows_execute_pipelines(self):
+    def test_tools_module_stays_on_file_tools(self):
         from agentica.prompts.base.tools import get_tools_prompt
         content = get_tools_prompt()
         assert "grep (not grep/rg)" not in content
         assert "(not find" not in content
         assert "not cat" not in content
-        assert "| rg" in content or "| head" in content
-        assert "do not force every probe into one script" in content
-        assert "parallel_safe=True" in content
-        assert "Prefer one long call" not in content
         assert "apply_patch" in content
         assert "find . -type f" not in content
         assert "xargs ls" not in content
+        assert "execute" not in content
+        assert "parallel_safe" not in content
 
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt
@@ -257,12 +256,8 @@ class TestGetSystemMessage:
 
         assert msg is not None
         assert "# Using Your Tools" in msg.content
-        assert "do not force every probe into one script" in msg.content
-        assert "parallel_safe=True" in msg.content
-        assert "<<'EOF'" in msg.content
-        assert "2>/dev/null" in msg.content
         assert "apply_patch" in msg.content
-        assert "not `;`" not in msg.content
+        assert "parallel_safe" not in msg.content
         assert "swift" not in msg.content
 
     @pytest.mark.asyncio

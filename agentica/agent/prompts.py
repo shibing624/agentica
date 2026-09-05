@@ -23,10 +23,9 @@ from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
-# Tools that `tools.md` gives guidance about. The section is only worth its
-# tokens when the agent actually has them; an agent with, say, only a weather
-# tool would otherwise be told to prefer `read_file` / `apply_patch` over
-# `execute` — naming eight tools it cannot call.
+# tools.md is only about the file-tool family. Injected when any of these
+# names is registered. An SDK agent can have files without execute / task;
+# the guide must not name tools that are not in this set.
 _FILE_TOOL_NAMES = frozenset({
     "read_file", "write_file",
     "apply_patch", "glob", "grep",

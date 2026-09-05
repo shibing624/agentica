@@ -202,8 +202,8 @@ class BuiltinDelegateTool(Tool):
         The worker is a full agentica run in its own OS process: its own context
         window, its own model, its own tools. It starts immediately and you are
         not blocked — start several, keep working, and each one's report arrives
-        when it finishes. Call wait(id="term_N") when your next step actually
-        needs a worker's answer.
+        when it finishes. Call wait(id="term_N") when your next step
+        actually needs a worker's answer.
 
         Use it for a chunk of work that is independent of what you are doing and
         big enough to deserve its own context window: build and verify a feature
@@ -211,9 +211,8 @@ class BuiltinDelegateTool(Tool):
         against three services at once.
 
         Do NOT use it for: anything you can do in a few tool calls yourself;
-        reading or searching code (that is the `task` tool, which is far
-        cheaper); or work that needs to ask the user something — the worker has
-        no terminal and cannot ask anyone anything.
+        a cheap in-process search; or work that needs to ask the user
+        something — the worker has no terminal and cannot ask anyone anything.
 
         The task text is all the worker gets. It cannot see your conversation, so
         state the goal, the files or directory involved, and what "done" means.
@@ -300,7 +299,7 @@ class BuiltinDelegateTool(Tool):
                     return (
                         f"Nothing delegated: provider '{provider}' has no environment variable a "
                         f"worker could take an API key from, and credentials never travel the "
-                        f"command line. Run such work in-process (the `task` tool) instead."
+                        f"command line. Run such work in-process instead."
                     )
                 argv += ["--model_provider", provider, "--model_name", model_name]
                 base_url = self._model.base_url

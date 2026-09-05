@@ -4,7 +4,7 @@
 @description: TOOLS module - Tool usage strategy
 
 This module provides prompts for guiding tool usage:
-1. Dedicated tools for bounded filesystem work; execute pipelines for shaping stdout
+1. Dedicated file tools: read, search, and patch
 2. Choosing between the file-editing tools
 3. Batching independent calls vs sequencing dependent ones
 

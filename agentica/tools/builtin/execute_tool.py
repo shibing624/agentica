@@ -49,13 +49,9 @@ _EXPECTED_NONZERO = {
 }
 
 
-def _expected_nonzero_exit(command: str, exit_code: int) -> bool:
-    """True when this command's non-zero exit is a normal result."""
-    if exit_code == 0:
-        return False
-    segments = re.split(r'\s*(?:\|\||&&|[|;])\s*', command)
-    last_segment = (segments[-1] if segments else command).strip()
-    words = last_segment.split()
+def _first_command_name(segment: str) -> str:
+    """Bare executable of one ``;`` / ``&&`` / ``|`` piece (env assignments skipped)."""
+    words = segment.split()
     base_cmd = ""
     cmd_index = -1
     for i, w in enumerate(words):
@@ -69,7 +65,16 @@ def _expected_nonzero_exit(command: str, exit_code: int) -> bool:
     if base_cmd in {"python", "python3"} and cmd_index >= 0:
         if len(words) > cmd_index + 2 and words[cmd_index + 1] == "-m":
             base_cmd = words[cmd_index + 2].split(".")[0].split("/")[-1]
-    return exit_code in _EXPECTED_NONZERO.get(base_cmd, ())
+    return base_cmd
+
+
+def _expected_nonzero_exit(command: str, exit_code: int) -> bool:
+    """True when this command's non-zero exit is a normal result."""
+    if exit_code == 0:
+        return False
+    segments = re.split(r"\s*(?:\|\||&&|[|;])\s*", command)
+    last_segment = (segments[-1] if segments else command).strip()
+    return exit_code in _EXPECTED_NONZERO.get(_first_command_name(last_segment), ())
 
 
 # ─── File safety guards ──────────────────────────────────────────────────────
@@ -497,11 +502,7 @@ class BuiltinExecuteTool(Tool):
 
         Any shell command goes here: explore, analyze, verify, build, git,
         and pipelines that shape stdout — filter, sort, unique, count,
-        head, tail. Repo edits are ``apply_patch`` (one call can update
-        many files; parallel ``read_file`` then one patch, not one file
-        per call) or ``write_file``, not this tool. The same
-        substitution in several files is ``rg`` then one multi-file
-        patch, not a shell or python rewriter.
+        head, tail.
 
         Split or combine as needed — do not force every probe into one
         script. Independent calls in one message can run together
@@ -509,17 +510,15 @@ class BuiltinExecuteTool(Tool):
         (pipes and ``&&``). A miss that must not stop the rest: ``;``
         and ``2>/dev/null``.
 
-        Search with ``rg``; if ``rg`` is missing, ``grep``
-        (``rg -n PAT -- path || grep -n PAT path``). Bound noisy output
-        with ``| head`` / ``| tail``. Newlines stay, so a
-        ``python3 - <<'EOF'`` … ``EOF`` heredoc works — print or analyze
-        only; do not write the tree from a script.
+        Search with ``rg`` (``rg -g '*.py' -n PAT`` or ``rg -t py``);
+        if ``rg`` is missing, ``grep``
+        (``rg -g '*.py' -n PAT -- path || grep -n PAT path``). Bound noisy
+        output with ``| head`` / ``| tail``. Newlines stay, so a
+        ``python3 - <<'EOF'`` … ``EOF`` heredoc works.
 
-        Do not dump a source file through the shell
-        (``cd … && cat f.py``). That is ``read_file``
-        (``offset``/``limit`` or ``tail``), which also gives numbered
-        lines for ``apply_patch``. A persisted dump still spent a turn
-        filling a pipe.
+        Do not dump a whole source file through the shell
+        (``cd … && cat f.py``). Bound it with head/tail. A persisted
+        dump still spent a turn filling a pipe.
 
         Before executing:
         1. Always quote file paths with spaces: cd "/path with spaces/"
@@ -566,9 +565,9 @@ class BuiltinExecuteTool(Tool):
 
             - Independent probes in one call (``;`` so a miss does not abort)::
 
-                  rg -n Foo -A 12 src/a.py | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head
+                  rg -g '*.py' -n Foo src | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head
 
-            - Read-only heredoc (newlines are the command; do not write files)::
+            - Heredoc (newlines are the command)::
 
                   python3 - <<'EOF'
                   from pathlib import Path
@@ -578,14 +577,14 @@ class BuiltinExecuteTool(Tool):
             - execute(command="API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8")
             - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
             - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
-            - execute(command="rg -n TODO src || grep -n TODO src")
+            - execute(command="rg -g '*.py' -n TODO src || grep -n TODO src")
             - execute(command="git diff --stat | tail -5")
             - execute(command="npm install && npm test", timeout=300)
             - execute(command="pytest tests/unit -q", parallel_safe=True)
               alongside execute(command="pytest tests/e2e -q", parallel_safe=True)
 
         Args:
-            command: Exact shell command to execute without normalization or repair
+            command: Exact shell command. Not rewritten.
             timeout: optional timeout in seconds (default 120, no upper cap)
             parallel_safe: run concurrently with the other calls in this
                 message. Only for commands independent of every sibling call;

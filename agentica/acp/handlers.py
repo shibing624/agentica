@@ -152,7 +152,6 @@ class ACPHandlers:
                     "properties": {
                         "pattern": {"type": "string", "description": "Search pattern"},
                         "path": {"type": "string", "description": "Directory to search"},
-                        "include": {"type": "string", "description": "File glob filter, e.g. *.py"},
                     },
                     "required": ["pattern"],
                 },

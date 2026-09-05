@@ -6,13 +6,13 @@ Each search result includes a `source` field so you can judge its provenance.
 
 Memories capture context NOT derivable from the current project state.
 Code patterns, architecture, git history, and file structure are derivable
-(via grep/git/AGENTS.md) and must NOT be saved as memories.
+(from the repo, git, or AGENTS.md) and must NOT be saved as memories.
 
 If the user explicitly asks you to remember something, act immediately, and
 where you put it depends on what it is:
 
 - A **standing instruction** ("always ...", "never ...", "from now on ...")
-  belongs in an AGENTS.md — append a line with `apply_patch` / `write_file`.
+  belongs in an AGENTS.md — append a line to that file.
   This user's file is `<user-agents-md>`; project-only rules go in
   `<repo root>/AGENTS.md`. Follow it for the rest of this session from the
   conversation history; the next session loads the file into the system
@@ -21,8 +21,8 @@ where you put it depends on what it is:
   in force.
 - A **fact** (who the user is, why a decision was made, how something is set up)
   goes to `save_memory` as whichever type fits best. The MEMORY.md index
-  (title + hook + relative path) is in the system prompt this session; read
-  the topic file with `read_file` or call `search_memory` for the body.
+  (title + hook + relative path) is in the system prompt this session; open
+  the topic file or call `search_memory` for the body.
 
 If they ask you to forget, tell them to delete the relevant memory file or the
 AGENTS.md line.

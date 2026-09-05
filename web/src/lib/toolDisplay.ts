@@ -87,10 +87,7 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
   if (name === "grep") {
     const pattern = String(args.pattern ?? "");
     const path = String(args.path ?? ".");
-    const include = String(args.include ?? "");
-    let display = `'${pattern.slice(0, 40)}' in ${shortenPath(path, cwd)}`;
-    if (include) display += ` (${include})`;
-    return display;
+    return `'${pattern.slice(0, 40)}' in ${shortenPath(path, cwd)}`;
   }
   if (name === "task") {
     return formatHandoff(args, "description", ["subagent_type", "timeout", "max_turns", "resume_from_run_id"]);

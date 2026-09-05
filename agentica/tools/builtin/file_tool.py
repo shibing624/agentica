@@ -193,8 +193,7 @@ def _check_sensitive_write_path(filepath: str) -> Optional[str]:
     for prefix in _SENSITIVE_PATH_PREFIXES:
         if resolved.startswith(prefix):
             return (
-                f"Refusing to write to sensitive system path: {filepath}\n"
-                "Use the execute tool with sudo if you need to modify system files."
+                f"Refusing to write to sensitive system path: {filepath}"
             )
     # Home-directory sensitive locations
     home = str(Path.home())
@@ -615,8 +614,8 @@ class BuiltinFileTool(Tool):
             except asyncio.TimeoutError:
                 raise TimeoutError(
                     f"read_file timed out after {_READ_TIMEOUT} seconds while "
-                    f"reading from the end of {file_path}. Use execute with "
-                    f"tail/rg on a narrower path."
+                    f"reading from the end of {file_path}. Use a smaller tail "
+                    f"or a narrower file."
                 ) from None
         else:
             result, total_lines, start_shown, actual_end = await self._read_from_start(
@@ -1049,18 +1048,17 @@ class BuiltinFileTool(Tool):
             pattern: str,
             path: str = ".",
             *,
-            include: Optional[str] = None,
             limit: int = 100,
     ) -> str:
         """Search file contents for a regex pattern.
 
         Uses ripgrep (``rg``) when it is on PATH, otherwise a Python fallback.
         Output is matching lines as `file:line_number:content`.
+        To filter by filename, pass a tighter ``path``.
 
         Args:
             pattern: Regex to search for
             path: File or directory to search (default: ".")
-            include: File glob filter, e.g. "*.ts" or "*.py"
             limit: Maximum matching lines (default: 100)
 
         Returns:
@@ -1073,11 +1071,9 @@ class BuiltinFileTool(Tool):
 
         rg_path = shutil.which("rg")
         if rg_path is None:
-            return await self._run_grep_fallback(pattern, path, include, limit)
+            return await self._run_grep_fallback(pattern, path, limit)
 
         cmd: List[str] = [rg_path, "--line-number"]
-        if include:
-            cmd.extend(["--glob", include])
         for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
         for root in _nested_checkouts(base_path):
@@ -1102,7 +1098,7 @@ class BuiltinFileTool(Tool):
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {_GREP_TIMEOUT} seconds. "
-                f"Narrow `path` or `include`."
+                f"Narrow `path`."
             ) from None
         finally:
             if proc is not None and not drained:
@@ -1130,7 +1126,6 @@ class BuiltinFileTool(Tool):
             self,
             pattern: str,
             path: str,
-            include: Optional[str],
             limit: int,
     ) -> str:
         loop = asyncio.get_event_loop()
@@ -1138,21 +1133,20 @@ class BuiltinFileTool(Tool):
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(
-                    None, self._grep_fallback, pattern, path, include, limit,
+                    None, self._grep_fallback, pattern, path, limit,
                 ),
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
             raise TimeoutError(
                 f"grep timed out after {timeout} seconds. "
-                f"Narrow `path` or `include`."
+                f"Narrow `path`."
             )
 
     def _grep_fallback(
             self,
             pattern: str,
             path: str,
-            include: Optional[str],
             limit: int,
     ) -> str:
         base_path = self._resolve_path(path)
@@ -1162,9 +1156,7 @@ class BuiltinFileTool(Tool):
             raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
 
         if base_path.is_file():
-            files = [base_path] if not include or base_path.match(include) else []
-        elif include:
-            files = list(base_path.glob(f"**/{include}"))
+            files = [base_path]
         else:
             files = list(base_path.glob("**/*"))
 

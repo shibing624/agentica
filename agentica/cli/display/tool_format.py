@@ -245,11 +245,7 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "grep":
         pattern = tool_args.get("pattern", "")
         path = tool_args.get("path", ".")
-        include = tool_args.get("include", "")
-        display = f"'{pattern[:40]}' in {_shorten_path(path)}"
-        if include:
-            display += f" ({include})"
-        return display
+        return f"'{pattern[:40]}' in {_shorten_path(path)}"
     
     # task / delegate — these hand off work; truncating the brief hides what
     # the user needs to audit. Show every arg in full (multi-line body below).

@@ -63,7 +63,7 @@ def get_builtin_tools(
         work_dir: Work directory for file operations
         include_file_tools: Whether to include file tools (read_file, write_file,
             apply_patch, glob, grep). ``grep`` takes ``pattern``, ``path``,
-            ``include``, ``limit`` only. ``apply_patch`` matches context exactly.
+            ``limit`` only. ``apply_patch`` matches context exactly.
         include_execute: Whether to include code execution tool
         include_web_search: Whether to include web search tool
         include_fetch_url: Whether to include URL fetching tool

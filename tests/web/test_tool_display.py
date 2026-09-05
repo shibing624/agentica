@@ -16,9 +16,9 @@ def test_read_file_glob_grep():
     assert "foo.py" in format_tool_display("read_file", {"file_path": "/tmp/proj/foo.py", "offset": 0, "limit": 80})
     assert "L1-" in format_tool_display("read_file", {"file_path": "a.py"})
     assert "*.py in" in format_tool_display("glob", {"pattern": "*.py", "path": "."})
-    grep = format_tool_display("grep", {"pattern": "hello", "path": "src", "include": "*.py"})
+    grep = format_tool_display("grep", {"pattern": "hello", "path": "src"})
     assert "'hello'" in grep
-    assert "*.py" in grep
+    assert "src" in grep
 
 
 def test_writes_execute_todos_search():

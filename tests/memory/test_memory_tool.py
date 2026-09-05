@@ -81,8 +81,10 @@ class TestBuiltinMemoryTool:
         prompt = self.tool.get_system_prompt()
         assert "AGENTS.md" in prompt
         assert "edit_file" not in prompt
-        assert "apply_patch" in prompt
-        assert "write_file" in prompt
+        assert "apply_patch" not in prompt
+        assert "write_file" not in prompt
+        assert "read_file" not in prompt
+        assert "AGENTS.md" in prompt
         assert "next session" in prompt
 
     def test_save_memory(self):

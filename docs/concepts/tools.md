@@ -318,8 +318,8 @@ tools = get_builtin_tools(work_dir="./")
 | `write_file` | `BuiltinFileTool` | 创建/覆写文件。长报告可直接写成 HTML，方便用户在浏览器打开 |
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。要改的文件先并行 `read_file`，再一条补丁（不要读一个改一个）。规范信封 `*** Begin Patch` … `*** End Patch`；围栏 / heredoc / 漏信封但有 `*** Update/Add/Delete File:` 也会收。hunk 行以空格（保留）/ `-`（删）/ `+`（增）开头；忘了空格但能在文件里唯一对上的 keep 行会补上。**上下文精确匹配**；对不上报出那一行。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
-| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `include` / `limit`；`limit` 是全局条数上限，读满即停 rg |
-| `execute` | `BuiltinExecuteTool` | Shell：探查 / 分析 / 验证 / 构建 / git。依赖可用管道和 `&&`，互不依赖可同一轮多条 `execute(parallel_safe=True)`。搜文本优先 `rg`。不要用 shell 倒整份源码（那是 `read_file`），也不要用它改仓库（同一替换是 `rg` 列出位点再一条多文件 `apply_patch`）。路径：`read_file` / `write_file` / `apply_patch` 只用用户原文或本轮工具返回值；`execute` 可以复用已知路径、从 `.` 搜，或对候选加 `2>/dev/null`，不要凭包布局拼长绝对路径。`background=True` 进后台。 |
+| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `limit`；`limit` 是全局条数上限，读满即停 rg。按文件名过滤走更窄的 `path` |
+| `execute` | `BuiltinExecuteTool` | Shell：探查 / 分析 / 验证 / 构建 / git。依赖可用管道和 `&&`，互不依赖可同一轮多条 `execute(parallel_safe=True)`。搜文本优先 `rg`（按扩展名用 `-g '*.py'` / `-t py`）。不要用 shell 倒整份源码（`| head` / `| tail`）。从 `.` 或已知目录搜；候选加 `2>/dev/null`，不要凭包布局拼长绝对路径。`background=True` 进后台。 |
 | `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |

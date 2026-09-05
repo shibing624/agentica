@@ -95,7 +95,7 @@ CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定�
 | `write_file` | 创建或完整覆写文件（长报告可写成 HTML，用户自己打开） |
 | `apply_patch` | 一次补丁新增、更新或删除多个文件（上下文精确匹配；编辑后可附 Pyright 诊断） |
 | `glob` | 文件模式匹配（`**/*.py`） |
-| `grep` | 内容搜索（`pattern` / `path` / `include` / `limit`，基于 ripgrep） |
+| `grep` | 内容搜索（`pattern` / `path` / `limit`，基于 ripgrep） |
 | `execute` | 执行 Shell 命令（git、pytest、pip 等）；非零退出只报 exit code |
 | `web_search` | 网页搜索 |
 | `fetch_url` | 抓取网页内容 |

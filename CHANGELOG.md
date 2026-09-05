@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### fixes
+- **内置工具 schema 不再点名别的可选工具**：`grep` 不提 `execute`，`execute` 不提 `read_file` / `apply_patch`，`task` / memory 也不再写对方的名字。`delegate` 可以提 `wait`（同一套后台 registry）。SDK 可以只装文件工具、不装 `execute`。`tools.md` 只在有文件工具时注入，同样不提 `execute`。按文件名过滤：收窄 `grep` 的 `path`。
+- **`grep` 去掉 `include`**：schema 里写 `include=` 等于每轮教 GNU grep 的 `--include`，模型再抄到 `rg` 上就炸。参数只留 `pattern` / `path` / `limit`。
+- **`execute` 不再改写 `rg --include`**：命令原样进 shell。过滤扩展名写 `rg -g '*.py'` / `rg -t py`，schema 也不再提 `--include`。
 - **Claude 的工具结果终于落盘了**：Anthropic 用 `role="user"` + `tool_result` 块回答工具调用，落盘只认 `role="tool"`，所以每个原生 Claude 会话写下的都是 `assistant(tool_calls)` 后面什么都没有——真实工具输出一次也没进 jsonl，投影里全是孤儿 `tool_use` id。以前看不出来，是因为坏掉的 `sanitize_messages` 会注入「execution may have been interrupted」占位，那些占位恰好是 `role="tool"`，于是成了 Claude 会话唯一的 tool 行（历史日志里 `interrupted` 占 tool 行 100%）；上一条修掉占位后 tool 行直接归零。现在按 `tool_use_id` 拆成每块一行，`tool_name`/`is_error` 一并带上；in-turn flush 手里没有 FunctionCall 记录时，从发起那一轮的 `tool_calls` 取名字和参数。
 - **`trajectory_skeleton` 认得 Claude 的工具回答**：`role="user"` + `tool_result` 块归一成与 `role="tool"` 相同的轨迹步（每块一个 `("tool", id)`）。以前整轮 Claude 读起来是一串普通 user 消息，配对检查根本看不见结果——专门用来抓孤儿 `tool_use` 的那条不变式，在唯一会因此报 400 的 provider 上是瞎的。
 - **流式工具轮的旁白不再糊进终答**：以前 `model_response.content += chunk` 跨过整轮工具往上累加，Claude 中间 `assistant(tool_calls)` 的 `content` 又是 block 列表，落盘 `isinstance(str) else ""` 写成空串，所有旁白（包括模型自己吐的单独一行 `count`）堆在 jsonl 最后一条。现在中间旁白留在对应的 `assistant(tool_calls)` 上（抽出 text block），终答只留最后一轮；Claude/Ollama 也不再在每轮流结束 yield `\n\n`。不滤 `count`——那是模型输出。
@@ -21,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Claude 回合中断后不再留下孤儿 `tool_use`**：Anthropic 要求每条 `tool_use` 都有对应 `tool_result`。以前按位置 zip，中断或乱序返回就会贴错 id，后续每跳都 400。现在按 `tool_call_id` 配对，缺的补一条 interrupted 错误；这类 400 走 transcript sanitize，不再原样重发。
 - **`delegate` 不再偶发选错模型**：不填 `model` 时子进程走当前会话的 profile（`session_profile`），不再按 `model_name` 扫 `config.yaml` 里第一个同名的。两个 profile 共用一个模型名时，对得上 `base_url` 才映射，对不上就带父会话的 `--base_url`，不猜。`model` 里带 `/` 的先当完整 id（Venus 的 `openai/glm-5`，或环境上下文的 `provider/<id>`），对不上再拆 `provider/name`。
 - **`read_file` 的 `tail=0` 不再报错**：模型把 `tail=0` 当成「从头读」，以前抛 `tail must be >= 1` 白烧一轮。0 / 省略都是从头按 `offset`/`limit` 分页；`tail=N`（N>=1）才是末尾 N 行，文件比 N 短就整份返回；负的 `tail` 当成末尾 `|N|` 行。docstring / `tools.md` 写明两套分页，不要用 `tail=700` 表示「从头读 700 行」（那是 `limit=700`）。
-- **`execute` 搜文本优先 `rg`，没有再 `grep`**：docstring / `tools.md` 写 `rg -n PAT -- path || grep -n PAT path`。命令本身不改写。
+- **`execute` 搜文本优先 `rg`，没有再 `grep`**：docstring 写 `rg -g '*.py' -n PAT -- path || grep -n PAT path`。命令不改写。
 - **切模型只留问答文本，OpenAI ↔ Claude 双向可跑**：`/model`（含 `/config set` 真换了模型）把 thinking、tool call/result 都剥掉，只保留 user 问题和 assistant 回答。thinking 的 `signature` 绑签发模型，带着切就是 400；切模型本身是新一轮问答，那些内容也不值钱。能力按 wire 格式（OpenAIChat vs 原生 Claude），不按模型名猜。同会话里 `cache_control` 仍不准打在 thinking 上；Layer 1 缩过 `tool_use.input` 的旧回合同时丢掉旁边的 thinking。
 - **Layer 1 不准动正在跑的那一轮工具（参数和 result 都不动）**：上下文一紧就把调用参数切成 `…[truncated]`，或把刚返回的 tool result 换成淘汰占位符，agent loop 等于吃掉自己的证据。`live_tool_round_start` 按消息位置护住未返回的调用和末批 result，不认工具名：内置 `write_file` / `execute` / `grep` / `glob`、SDK `tools=`、CLI `--tools`、Web extra、MCP 都在这一轮里。更早回合的超长参数换成 `<evicted-tool-arg chars=N>`，不是原文前缀。
 - **`execute cat` 超大文件不再撑爆 live round**：以前 `communicate()` 把整份 stdout 读进内存，Layer 1 又不能淘汰刚返回的那一轮，下一跳直接超 `max context window`，CLI 收尾再甩 `Event loop is closed`。现在管道按 `max_output_length` 落盘预览（硬顶 64MiB 后杀进程），结果只留 `<persisted-output>`；读文件走 `read_file`（offset/limit/tail），不要整文件 dump。硬上限截断的头文案写 INCOMPLETE，不再说 Full output / 去 `read_file` 当全文；开了 `AGENTICA_REDACT_TOOL_OUTPUTS` 时落盘副本也脱敏。主动 SIGKILL 不当作命令失败。Layer 0 失败也截断，不再把原文送进下一跳。OpenAI 客户端跟 Claude 一样绑当前 loop，`close_client` 先摘掉再 aclose，避免关 loop 后 httpx `__del__`。
@@ -49,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI `/export` 默认导出 session JSONL，不再是对话瘦 JSON**：以前 `/export` / `/save` 把 `working_memory.messages` 存成一份没有 event、没有工具正文的 JSON。现在默认拷贝磁盘上那份 `<session_id>.jsonl`（与 Web 轨迹同一文件）。旧行为改为 `/export messages [path]`；`/export analysis [path]` 写出与 `GET /api/sessions/{id}/trace/analysis` 相同的 JSON。
 - **`apply_patch` 只精确匹配上下文**：不再对空白 / 引号做 fuzz。对不上就是 `Hunk N: context not found`。死的 SDK 类 `PatchTool`（双格式 unified/V4A）删除；补丁走 `BuiltinFileTool.apply_patch`，模块只留 `apply_diff` / `parse_patch_envelope`。
 - **删除 `write_html` 和 `ShellTool`**：长报告用 `write_file` 写 HTML；shell 用 `execute` / `BuiltinExecuteTool`。`get_builtin_tools` / `DeepAgent` 去掉 `include_html_report`。
-- **`grep` 只留 `pattern` / `path` / `include` / `limit`**：去掉 `output_mode`、`case_insensitive`、`fixed_strings`、`context_lines` / `before_context` / `after_context`。
+- **`grep` 只留 `pattern` / `path` / `limit`**：去掉 `include`、`output_mode`、`case_insensitive`、`fixed_strings`、`context_lines` / `before_context` / `after_context`。按文件名过滤走 `glob` 或 `execute` 的 `rg -g`。
 - **`DeepAgent` / `get_builtin_tools` 去掉 `peer_conflict_checker`**：编辑成功后不再附「别的会话也改了这个文件」提醒。
 
 #### features

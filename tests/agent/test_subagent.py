@@ -1066,8 +1066,9 @@ def test_task_policy_lives_only_in_the_system_prompt():
     docstring = tool.functions["task"].description or ""
     prompt = tool.get_system_prompt()
 
-    assert "read_file" in prompt
+    assert "read_file" not in prompt
     assert "read_file" not in docstring
+    assert "look there yourself" in prompt
     assert "task Tool" in docstring, "docstring must point at the policy section"
 
 
