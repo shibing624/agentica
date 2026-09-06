@@ -172,6 +172,27 @@ def _char_col_from_byte_col(content: str, byte_col: int) -> int:
     return len(raw[: byte_col - 1].decode("utf-8", errors="ignore")) + 1
 
 
+def _relativize(path: str, root: Path) -> str:
+    """Drop the work-dir prefix from a match path.
+
+    rg is given an absolute search root, so every one of its result lines
+    repeats that root — on a 100-match search the prefix alone was ~30% of the
+    output, paid again on every turn the result stays in context. Paths outside
+    the work dir keep their absolute form: they are not reconstructable from a
+    relative one, and the model needs to be able to feed them back to read_file.
+    """
+    if not path:
+        return path
+    try:
+        rel = os.path.relpath(path, str(root))
+    except (ValueError, OSError):
+        # Different drive on Windows, or an unresolvable path.
+        return path
+    if rel == os.curdir or rel.startswith(os.pardir + os.sep) or rel == os.pardir:
+        return path
+    return Path(rel).as_posix()
+
+
 def _match_end_at(content: str, pattern: str, start: int) -> int:
     """End offset of the match rg located at ``start``.
 
@@ -222,6 +243,7 @@ def _format_grep_match(
 
 def _format_rg_line(
         raw: str, pattern: str, *, with_column: bool = False,
+        root: Optional[Path] = None,
 ) -> str:
     parsed = _split_rg_line(raw, with_column=with_column)
     if parsed is None:
@@ -230,14 +252,17 @@ def _format_rg_line(
     start = (
         _char_col_from_byte_col(content, col) - 1 if col is not None else None
     )
+    if root is not None:
+        path = _relativize(path, root)
     return _format_grep_match(path, line_num, content, pattern, start=start)
 
 
 def _format_rg_output(
         output: str, pattern: str, *, with_column: bool = False,
+        root: Optional[Path] = None,
 ) -> str:
     return "\n".join(
-        _format_rg_line(raw, pattern, with_column=with_column)
+        _format_rg_line(raw, pattern, with_column=with_column, root=root)
         for raw in output.splitlines()
     )
 
@@ -301,6 +326,7 @@ async def _collect_rg_output(
     pattern: Optional[str] = None,
     *,
     with_column: bool = False,
+    root: Optional[Path] = None,
 ) -> Tuple[bytes, bytes, bool]:
     """Read rg stdout until EOF or ``max_lines``, then reap the process.
 
@@ -325,6 +351,7 @@ async def _collect_rg_output(
                 line.decode("utf-8", errors="replace"),
                 pattern,
                 with_column=with_column,
+                root=root,
             )
             line = (text + "\n").encode("utf-8")
         chunks.append(line)
@@ -1288,6 +1315,7 @@ class BuiltinFileTool(Tool):
             stdout, stderr, hit_cap = await asyncio.wait_for(
                 _collect_rg_output(
                     proc, max_lines, pattern=pattern, with_column=True,
+                    root=self.work_dir,
                 ),
                 timeout=_GREP_TIMEOUT,
             )
@@ -1370,15 +1398,15 @@ class BuiltinFileTool(Tool):
                 break
             try:
                 with open(fp, "r", encoding="utf-8", errors="ignore") as handle:
+                    rel = _relativize(str(fp), self.work_dir)
                     for line_num, line in enumerate(handle, 1):
-                        if not regex_pattern.search(line):
-                            continue
-                        results.append(
-                            _format_grep_match(str(fp), line_num, line, pattern)
-                        )
-                        n_emitted += 1
-                        if n_emitted >= limit:
-                            break
+                        if regex_pattern.search(line):
+                            results.append(
+                                _format_grep_match(rel, line_num, line, pattern)
+                            )
+                            n_emitted += 1
+                            if n_emitted >= limit:
+                                break
             except OSError:
                 continue
 

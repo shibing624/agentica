@@ -208,6 +208,13 @@ class SkillLoader:
         if registry is None:
             registry = get_skill_registry()
 
+        # One INFO per skill per call was 19-38 lines every time, and `load_all`
+        # re-runs on reload / profile switch / worktree rebind — one observed
+        # process logged 291 of these. The per-skill detail is DEBUG; INFO gets
+        # one summary line, and only when something actually changed.
+        registered_names: List[str] = []
+        skipped = 0
+
         for search_path, location in self.get_search_paths(include_system=include_system):
             skill_files = self.discover_skills(search_path)
 
@@ -216,11 +223,22 @@ class SkillLoader:
                 if skill:
                     registered = registry.register(skill)
                     if registered:
-                        logger.info(f"Registered skill: {skill.name} ({location})")
+                        registered_names.append(f"{skill.name} ({location})")
+                        logger.debug(f"Registered skill: {skill.name} ({location})")
                     else:
+                        skipped += 1
                         logger.debug(
                             f"Skipped skill {skill.name} - already registered from higher priority location"
                         )
+
+        if registered_names:
+            logger.info(
+                f"Registered {len(registered_names)} skill(s): "
+                f"{', '.join(sorted(registered_names))}"
+                + (f"; {skipped} already registered" if skipped else "")
+            )
+        elif skipped:
+            logger.debug(f"No new skills; {skipped} already registered")
 
         return registry
 

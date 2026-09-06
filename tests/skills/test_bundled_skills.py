@@ -27,6 +27,52 @@ class TestBundledSkillsShip(unittest.TestCase):
         self.assertTrue(SkillLoader.BUNDLED_SKILL_DIR.is_dir())
         self.assertEqual(SkillLoader.BUNDLED_SKILL_DIR.parent.name, "skills")
 
+
+class TestSkillRegistrationLogging(unittest.TestCase):
+    """``load_all`` re-runs on reload / profile switch / worktree rebind.
+
+    One INFO line per skill meant 19-38 lines every time; one observed CLI log
+    held 291 of them for a set of skills that had not changed.
+    """
+
+    @staticmethod
+    def _load_capturing_info(registry=None):
+        import io
+        import logging
+
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        handler.setLevel(logging.INFO)
+        agentica_logger = logging.getLogger("agentica")
+        agentica_logger.addHandler(handler)
+        previous = agentica_logger.level
+        agentica_logger.setLevel(logging.INFO)
+        try:
+            reg = SkillLoader().load_all(registry=registry, include_system=True)
+        finally:
+            agentica_logger.removeHandler(handler)
+            agentica_logger.setLevel(previous)
+        return reg, [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+
+    def test_first_load_logs_one_summary_not_one_line_per_skill(self):
+        _, emitted = self._load_capturing_info(registry=SkillRegistry())
+        self.assertLessEqual(
+            len(emitted), 1, f"expected one summary line, got {len(emitted)}",
+        )
+        if emitted:
+            self.assertIn("skill(s)", emitted[0])
+
+    def test_reloading_the_same_skills_stays_silent_at_info(self):
+        registry = SkillLoader().load_all(
+            registry=SkillRegistry(), include_system=True,
+        )
+        _, emitted = self._load_capturing_info(registry=registry)
+        self.assertEqual(
+            emitted, [], "re-registering unchanged skills must not log at INFO",
+        )
+
+
+
     def test_every_bundled_skill_parses(self):
         for name in BUNDLED:
             path = SkillLoader.BUNDLED_SKILL_DIR / name / "SKILL.md"

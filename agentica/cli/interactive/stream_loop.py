@@ -223,8 +223,27 @@ def _record_main_context_usage(event: dict, tui_state: dict) -> None:
         tui_state["context_window"] = event["context_window"]
 
 
+# work_dir -> (.git/HEAD mtime_ns, branch). The status bar re-read the branch
+# after every turn, which is a `git` subprocess per turn for a value that only
+# changes on checkout/worktree switch. Keyed on HEAD's mtime so a real branch
+# change is still picked up on the next turn.
+_GIT_BRANCH_CACHE: dict[str, tuple[int, str]] = {}
+
+
 def _read_git_branch(work_dir: str) -> str:
     """Return the current branch for ``work_dir``, or empty outside Git."""
+    head = Path(work_dir) / ".git" / "HEAD"
+    try:
+        stamp = head.stat().st_mtime_ns
+    except OSError:
+        # Not a plain checkout (worktree/submodule use a .git *file*, and a
+        # non-repo has nothing): fall through to git itself rather than
+        # guessing, but there is no stamp to cache against.
+        stamp = None
+    if stamp is not None:
+        cached = _GIT_BRANCH_CACHE.get(work_dir)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
     try:
         result = subprocess.run(
             ["git", "branch", "--show-current"],
@@ -235,7 +254,10 @@ def _read_git_branch(work_dir: str) -> str:
         )
     except (OSError, UnicodeError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip() if result.returncode == 0 else ""
+    branch = result.stdout.strip() if result.returncode == 0 else ""
+    if stamp is not None:
+        _GIT_BRANCH_CACHE[work_dir] = (stamp, branch)
+    return branch
 
 
 def _status_thinking_mode(agent, agent_config: dict) -> str:

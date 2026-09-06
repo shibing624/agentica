@@ -626,6 +626,56 @@ class TestJSONLFormat:
         assert entry["cwd"] == str(repo.resolve())
         assert entry["git_branch"] == "feature"
 
+    def test_event_rows_omit_invariant_stamps(self, tmp_dir, tmp_path):
+        """Events are the bulk of a long log and these three never vary in one.
+
+        Repeating them cost ~8% of the file for no reader: Trace takes the first
+        occurrence, and ``session_meta`` still carries them for an events-only
+        log.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", "-b", "feature"], cwd=repo, check=True, capture_output=True,
+        )
+        log = SessionLog("s-ev", base_dir=tmp_dir, work_dir=str(repo))
+        log.append_event("session_meta", model="m")
+        log.append_event("request_begin")
+        log.append("user", "hi")
+        rows = [json.loads(l) for l in log.path.read_text(encoding="utf-8").splitlines()]
+        by_name = {r.get("name") or r["type"]: r for r in rows}
+
+        # session_meta stays self-describing.
+        assert by_name["session_meta"]["git_branch"] == "feature"
+        assert by_name["session_meta"]["cwd"] == str(repo.resolve())
+        # Ordinary events drop them.
+        for field in ("cwd", "version", "git_branch"):
+            assert field not in by_name["request_begin"], field
+        # Conversation rows are unchanged.
+        assert by_name["user"]["git_branch"] == "feature"
+        # Every row still carries what threads the log together.
+        for row in rows:
+            assert "uuid" in row and "session_id" in row and "timestamp" in row
+
+    def test_trace_still_resolves_meta_from_an_events_only_log(self, tmp_dir, tmp_path):
+        from agentica.memory.trace import analyze_entries
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", "-b", "feature"], cwd=repo, check=True, capture_output=True,
+        )
+        log = SessionLog("s-tr", base_dir=tmp_dir, work_dir=str(repo))
+        log.append_trace_prelude(
+            model="m", provider="p", context_window=1000,
+            tools=["grep"], system_prompt="sys",
+        )
+        log.append_event("request_begin")
+        rows = [json.loads(l) for l in log.path.read_text(encoding="utf-8").splitlines()]
+        meta = analyze_entries(rows)["meta"]
+        assert meta["gitBranch"] == "feature"
+        assert meta["cwd"] == str(repo.resolve())
+
     def test_set_cwd_updates_later_stamps(self, tmp_dir, tmp_path):
         a = tmp_path / "a"
         b = tmp_path / "b"

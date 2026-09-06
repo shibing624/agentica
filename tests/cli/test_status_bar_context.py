@@ -190,6 +190,41 @@ class TestStatusProjectIdentity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work_dir:
             self.assertEqual(_read_git_branch(work_dir), "")
 
+    def test_git_branch_is_cached_per_head_state(self):
+        """The status bar re-read the branch after every turn, which is a git
+        subprocess per turn for a value that changes on checkout only."""
+        import subprocess as _sp
+        import tempfile
+        from agentica.cli.interactive import stream_loop as sl
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            _sp.run(["git", "init", "-b", "main"], cwd=work_dir,
+                    check=True, capture_output=True)
+            sl._GIT_BRANCH_CACHE.clear()
+            spawns = []
+            real_run = sl.subprocess.run
+
+            def counting(*args, **kwargs):
+                spawns.append(args)
+                return real_run(*args, **kwargs)
+
+            sl.subprocess.run = counting
+            try:
+                values = [_read_git_branch(work_dir) for _ in range(20)]
+                self.assertEqual(values, ["main"] * 20)
+                cached_spawns = len(spawns)
+                self.assertEqual(cached_spawns, 1, "branch re-read per call")
+
+                _sp.run(["git", "checkout", "-b", "other"], cwd=work_dir,
+                        check=True, capture_output=True)
+                self.assertEqual(_read_git_branch(work_dir), "other")
+                self.assertGreater(
+                    len(spawns), cached_spawns,
+                    "HEAD change must invalidate the cache",
+                )
+            finally:
+                sl.subprocess.run = real_run
+
 
 class TestCompactingSpinner(unittest.TestCase):
     """Auto-compact blocks the turn on an LLM call; the spinner must say so."""

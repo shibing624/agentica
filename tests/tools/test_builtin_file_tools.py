@@ -403,6 +403,7 @@ class TestBuiltinFileToolGrep:
         assert "timeout" not in grep_params
         assert "multiline" not in grep_params
         assert "include" not in grep_params
+        assert "context" not in grep_params
         assert "timeout" not in glob_params
         assert "timeout" in wait_params
         assert "timeout" in execute_params
@@ -521,14 +522,15 @@ class TestBuiltinFileToolGrep:
         direct = asyncio.run(file_tool.grep("NEEDLE_DIR", str(fp)))
         via_dir = asyncio.run(file_tool.grep("NEEDLE_DIR", tmp_dir))
         assert direct == via_dir
-        assert str(fp) in direct
+        # Inside the work dir the path is reported relative, not absolute.
+        assert direct.startswith("cjk.txt:1:")
 
     def test_grep_single_file_long_line_reports_real_line_number(self, file_tool, tmp_dir):
         """The match is on line 2; the column must not be reported as the line."""
         fp = Path(tmp_dir, "long.txt")
         fp.write_text("short\n" + "A" * 3000 + "NEEDLE" + "B" * 3000 + "\n")
         result = asyncio.run(file_tool.grep("NEEDLE", str(fp)))
-        assert result.startswith(f"{fp}:2: col=3001,")
+        assert result.startswith("long.txt:2: col=3001,")
 
     def test_grep_window_width_same_with_and_without_rg_column(self):
         """rg locates the match, Python measures its width: both paths must
@@ -552,6 +554,59 @@ class TestBuiltinFileToolGrep:
         assert _char_col_from_byte_col(cjk, 3) == 1  # mid-codepoint, clamps back
         assert _char_col_from_byte_col(cjk, 10 ** 9) == len(cjk) + 1
         assert all(_char_col_from_byte_col("abcdef", i) == i for i in range(1, 7))
+
+    def test_grep_paths_inside_work_dir_are_relative(self, file_tool, tmp_dir):
+        """rg is handed an absolute root, so every match line repeated it.
+
+        On a wide search that prefix was ~30% of the output, re-billed on every
+        turn the result stayed in context.
+        """
+        Path(tmp_dir, "a.py").write_text("hit here\n")
+        sub = Path(tmp_dir, "pkg")
+        sub.mkdir()
+        Path(sub, "b.py").write_text("hit there\n")
+        result = asyncio.run(file_tool.grep("hit", tmp_dir))
+        assert "a.py:1:hit here" in result
+        assert "pkg/b.py:1:hit there" in result
+        assert tmp_dir not in result, "absolute work-dir prefix still emitted"
+
+    def test_grep_paths_outside_work_dir_stay_absolute(self, file_tool, tmp_dir, tmp_path):
+        """A relative path would be unusable: the model must be able to feed the
+        result straight back to read_file."""
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (outside / "c.py").write_text("hit outside\n")
+        result = asyncio.run(file_tool.grep("hit", str(outside)))
+        assert str(outside / "c.py") in result
+        assert ".." not in result, "escaped the root as a ../ path"
+
+    def test_grep_relative_paths_round_trip_through_read_file(self, file_tool, tmp_dir):
+        """What grep prints must be openable as-is."""
+        Path(tmp_dir, "pkg").mkdir()
+        Path(tmp_dir, "pkg", "d.py").write_text("needle line\n")
+        result = asyncio.run(file_tool.grep("needle", tmp_dir))
+        reported = result.split(":")[0]
+        assert reported == "pkg/d.py"
+        back = asyncio.run(file_tool.read_file(reported))
+        assert "needle line" in str(back)
+
+    def test_grep_fallback_also_relativizes(self, file_tool, tmp_dir):
+        """The pure-Python path must not disagree with rg on path shape."""
+        Path(tmp_dir, "e.py").write_text("hit fallback\n")
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
+            result = asyncio.run(file_tool.grep("hit", tmp_dir))
+        assert "e.py:1:hit fallback" in result
+        assert tmp_dir not in result
+
+    def test_relativize_keeps_sibling_directories_absolute(self):
+        """A plain string prefix-strip would mangle ``<root>-other/``."""
+        from agentica.tools.builtin.file_tool import _relativize
+
+        root = Path("/work/proj")
+        assert _relativize("/work/proj/a/b.py", root) == "a/b.py"
+        assert _relativize("/work/proj-other/b.py", root) == "/work/proj-other/b.py"
+        assert _relativize("/elsewhere/b.py", root) == "/elsewhere/b.py"
+        assert _relativize("", root) == ""
 
     def test_read_rg_line_handles_any_line_length(self):
         """Lines past asyncio's 64 KiB stream buffer must be read, not raise."""
@@ -856,6 +911,7 @@ class TestFileToolRegistrationGuard:
         }
         assert "timeout" not in by_name["grep"]
         assert "multiline" not in by_name["grep"]
+        assert "context" not in by_name["grep"]
         assert "timeout" not in by_name["glob"]
 
     def test_auto_mode_schema_does_not_include_request_path_access(self):

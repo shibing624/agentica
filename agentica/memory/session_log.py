@@ -7,7 +7,8 @@ Mirrors CC's sessionStorage.ts:
 - Entry types use role as type: "user", "assistant", "system", "tool"
 - Each entry has uuid + parent_uuid forming a chain
 - compact_boundary sets parent_uuid=null to break the chain
-- Each entry carries session_id, cwd, version, git_branch
+- Conversation rows carry session_id, cwd, version, git_branch; event rows
+  omit the three invariants (cwd/version/git_branch) except ``session_meta``
 - timestamp uses ISO string format (CC convention)
 - Default storage: <AGENTICA_PROJECT_DIR>/<cwd-name>/<session_id>.jsonl
 - load() replays from the last compact_boundary
@@ -300,7 +301,8 @@ class SessionLog:
     Mirrors CC's sessionStorage.ts core design:
     - Each entry has uuid + parent_uuid forming a linked list
     - compact_boundary breaks the chain (parent_uuid=null)
-    - Each entry stamped with session_id, cwd, version, git_branch
+    - Conversation rows stamped with session_id, cwd, version, git_branch;
+      event rows omit cwd/version/git_branch except ``session_meta``
     - timestamp uses ISO 8601 string format
     - Default path: <AGENTICA_PROJECTS_DIR>/<cwd-name>/<session_id>.jsonl
     - Large files: only read bytes after last compact_boundary
@@ -609,6 +611,13 @@ class SessionLog:
         which is what made the Trace timeline draw a single bar over a turn that
         actually thought, called a tool and then answered. Rows stay in write
         order; only the clock is corrected.
+
+        ``cwd`` / ``version`` / ``git_branch`` are deliberately NOT stamped
+        here. Events are the bulk of the file (79% of rows in a long session)
+        and these three never vary within one, so repeating them cost ~8% of
+        the log for no reader: ``trace.py`` takes the first occurrence it sees
+        and the conversation rows still carry them. ``session_meta`` records
+        them once, up front, for a log that is all events.
         """
         entry_uuid = str(uuid4())
         entry: Dict[str, Any] = {
@@ -617,11 +626,14 @@ class SessionLog:
             "uuid": entry_uuid,
             "parent_uuid": None,
             "session_id": self.session_id,
-            "cwd": self._cwd,
             "timestamp": timestamp or iso_timestamp(),
-            "version": self._version,
-            "git_branch": self._git_branch,
         }
+        if name == "session_meta":
+            # The one event that must stand alone: a session whose log holds no
+            # conversation rows yet still needs cwd/branch/version for Trace.
+            entry["cwd"] = self._cwd
+            entry["version"] = self._version
+            entry["git_branch"] = self._git_branch
         entry.update(payload)
         self._append(entry)
         return entry_uuid
