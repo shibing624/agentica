@@ -58,6 +58,12 @@ def _effective_tail(tail) -> Optional[int]:
 _FURTHER_TRUNCATED = "... (further results truncated)"
 _GREP_LONG_LINE_THRESHOLD = 2000
 _GREP_CONTEXT_CHARS = 200
+# Per-line ceiling when reading rg stdout. There is no line-length limit in
+# the reader itself (asyncio's 64 KiB stream buffer used to abort the whole
+# grep on one long JSONL record), but an unbounded accumulator would let a
+# single newline-free file buffer the entire file into memory. Past this the
+# rest of the line is consumed and dropped: the window is bounded anyway.
+_RG_MAX_LINE_BYTES = 10 * 1024 * 1024
 # Leftmost `path:line:` — a greedy `(.*):(\d+):` steals `"12:30:45"` from JSONL.
 _RG_LINE_PREFIX = re.compile(r"^(.*?):(\d+):(.*)$")
 _RG_COLUMN_PREFIX = re.compile(r"^(\d+):(.*)$")
@@ -150,6 +156,37 @@ def _split_rg_line(
     return path, int(line_s), col, content
 
 
+def _char_col_from_byte_col(content: str, byte_col: int) -> int:
+    """Convert rg's 1-based *byte* column to a 1-based *character* column.
+
+    ``rg --column`` counts bytes, but windows are cut with string slicing.
+    Using the byte offset as a character index overshoots on any non-ASCII
+    line: a CJK line would report ``col`` past ``line_len`` and the window
+    would not contain the match at all.
+    """
+    if byte_col <= 1:
+        return 1
+    raw = content.encode("utf-8", errors="replace")
+    if byte_col - 1 >= len(raw):
+        return len(content) + 1
+    return len(raw[: byte_col - 1].decode("utf-8", errors="ignore")) + 1
+
+
+def _match_end_at(content: str, pattern: str, start: int) -> int:
+    """End offset of the match rg located at ``start``.
+
+    The location stays rg's (authoritative); Python is only asked how wide the
+    match is, so the window is the same size whether or not rg supplied a
+    column. A hard-coded ``start + 1`` used to make the two paths disagree and
+    truncated matches longer than one character.
+    """
+    try:
+        match = re.compile(pattern).match(content, start)
+    except re.error:
+        match = None
+    return match.end() if match else start + 1
+
+
 def _format_grep_match(
         path: str, line_num: int, line: str, pattern: str,
         start: Optional[int] = None,
@@ -170,10 +207,9 @@ def _format_grep_match(
             start, end = 0, min(len(content), _GREP_CONTEXT_CHARS)
     else:
         start = max(0, min(start, len(content)))
-        # ``start`` came from rg's --column. Do not run the pattern through
-        # Python again: the engine/escaping may differ, and the column is the
-        # authoritative match location.
-        end = start + 1
+        # ``start`` came from rg's --column and is authoritative for *where*
+        # the match is. Python is consulted only for how long it is.
+        end = _match_end_at(content, pattern, start)
     left = max(0, start - _GREP_CONTEXT_CHARS)
     right = min(len(content), end + _GREP_CONTEXT_CHARS)
     prefix = "..." if left else ""
@@ -191,7 +227,9 @@ def _format_rg_line(
     if parsed is None:
         return raw.rstrip("\r\n")
     path, line_num, col, content = parsed
-    start = (col - 1) if col is not None else None
+    start = (
+        _char_col_from_byte_col(content, col) - 1 if col is not None else None
+    )
     return _format_grep_match(path, line_num, content, pattern, start=start)
 
 
@@ -202,6 +240,59 @@ def _format_rg_output(
         _format_rg_line(raw, pattern, with_column=with_column)
         for raw in output.splitlines()
     )
+
+
+async def _read_rg_line(stream: asyncio.StreamReader) -> bytes:
+    """Read one newline-terminated line of any length, or b"" at EOF.
+
+    ``StreamReader.readline()`` cannot do this: it raises ``ValueError`` once a
+    line exceeds the stream buffer (64 KiB by default), and that error aborted
+    the entire grep — every other match in the file included. A single long
+    JSONL record was enough to make grep look like "no matches".
+
+    Bytes past ``_RG_MAX_LINE_BYTES`` are consumed but dropped, so a file with
+    no newline at all cannot be buffered whole.
+    """
+    parts: List[bytes] = []
+    total = 0
+    truncated = False
+
+    def keep(chunk: bytes) -> None:
+        """Accumulate up to the ceiling, clipping the chunk that crosses it."""
+        nonlocal total, truncated
+        room = _RG_MAX_LINE_BYTES - total
+        if room <= 0:
+            truncated = bool(chunk)
+            return
+        if len(chunk) > room:
+            parts.append(chunk[:room])
+            total += room
+            truncated = True
+            return
+        parts.append(chunk)
+        total += len(chunk)
+
+    while True:
+        try:
+            chunk = await stream.readuntil(b"\n")
+        except asyncio.LimitOverrunError as e:
+            # Separator exists but sits past the buffer: take what is buffered
+            # and keep going.
+            keep(await stream.readexactly(e.consumed))
+            continue
+        except asyncio.IncompleteReadError as e:
+            # EOF with no trailing newline.
+            keep(e.partial)
+            break
+        keep(chunk)
+        break
+    if truncated:
+        # Keep the line newline-terminated: b"" means EOF to the caller, and a
+        # missing newline would run two results together.
+        if parts and parts[-1].endswith(b"\n"):
+            return b"".join(parts)
+        parts.append(b"\n")
+    return b"".join(parts)
 
 
 async def _collect_rg_output(
@@ -223,8 +314,10 @@ async def _collect_rg_output(
     chunks: List[bytes] = []
     hit_cap = False
     max_chunks = max_lines + 1 if max_lines is not None else None
+    out_stream = proc.stdout
+    assert out_stream is not None, "rg must be spawned with stdout=PIPE"
     while True:
-        line = await proc.stdout.readline()
+        line = await _read_rg_line(out_stream)
         if not line:
             break
         if pattern is not None:
@@ -243,7 +336,7 @@ async def _collect_rg_output(
         stdout = stdout[: sum(len(c) for c in chunks[:max_lines])]
         await terminate_subprocess(proc)
         return stdout, b"", True
-    stderr = await proc.stderr.read()
+    stderr = await proc.stderr.read() if proc.stderr is not None else b""
     await proc.wait()
     return stdout, stderr, False
 
@@ -1169,7 +1262,13 @@ class BuiltinFileTool(Tool):
         if rg_path is None:
             return await self._run_grep_fallback(pattern, path, limit)
 
-        cmd: List[str] = [rg_path, "--line-number", "--column"]
+        # --with-filename: rg omits the path when given a single file, which
+        # made the output `line:col:content` — the parser then read the line
+        # number as the path and the column as the line number. Forcing the
+        # path on gives both modes one shape: `path:line:col:content`.
+        cmd: List[str] = [
+            rg_path, "--line-number", "--column", "--with-filename",
+        ]
         for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
         for root in _nested_checkouts(base_path):

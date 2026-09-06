@@ -17,7 +17,7 @@ class _BlockingStream:
     def __init__(self, started: asyncio.Event):
         self._started = started
 
-    async def readline(self):
+    async def readuntil(self, sep=b"\n"):
         self._started.set()
         await asyncio.Future()
 
@@ -27,7 +27,7 @@ class _BlockingStream:
 
 
 class BlockingSubprocess:
-    """Minimal subprocess double whose stdout readline blocks until cancelled."""
+    """Minimal subprocess double whose stdout read blocks until cancelled."""
 
     def __init__(self):
         self.started = asyncio.Event()
@@ -473,6 +473,133 @@ class TestBuiltinFileToolGrep:
         assert "line_len=" not in result
         assert "hello 12:30:45 timeout" in result
 
+    def test_grep_line_past_stream_buffer_still_returns(self, file_tool, tmp_dir):
+        """A line longer than asyncio's 64 KiB stream buffer must not abort grep.
+
+        Regression: `StreamReader.readline()` raised "Separator is found, but
+        chunk is longer than limit" and the whole call failed, which the caller
+        could not tell apart from "no matches".
+        """
+        long_line = "A" * 80000 + "NEEDLE_ALPHA" + "B" * 80000
+        Path(tmp_dir, "big.jsonl").write_text(long_line + "\n")
+        result = asyncio.run(file_tool.grep("NEEDLE_ALPHA", tmp_dir))
+        assert "NEEDLE_ALPHA" in result
+        assert f"line_len={len(long_line)}" in result
+        assert "col=80001" in result
+
+    def test_grep_long_line_does_not_hide_other_matches(self, file_tool, tmp_dir):
+        """One oversized line must not take the rest of the file down with it."""
+        Path(tmp_dir, "mixed.jsonl").write_text(
+            "X" * 100000 + "NEEDLE_ALPHA\n" + "tiny NEEDLE_BETA\n"
+        )
+        result = asyncio.run(file_tool.grep("NEEDLE_", tmp_dir))
+        assert "NEEDLE_ALPHA" in result
+        assert "NEEDLE_BETA" in result, "short match lost to the long line"
+
+    def test_grep_non_ascii_long_line_window_contains_match(self, file_tool, tmp_dir):
+        """rg --column counts bytes; windows are cut with string slicing.
+
+        Regression: the byte offset was used as a character index, so on a CJK
+        line `col` overshot past `line_len` and the window never showed the
+        match.
+        """
+        pad = "中文填充" * 800
+        line = pad + "NEEDLE_DIR" + pad
+        Path(tmp_dir, "cjk.txt").write_text(line + "\n", encoding="utf-8")
+        result = asyncio.run(file_tool.grep("NEEDLE_DIR", tmp_dir))
+        assert "NEEDLE_DIR" in result, "match not inside the reported window"
+        assert f"col={len(pad) + 1}," in result
+        assert f"line_len={len(line)}" in result
+
+    def test_grep_single_file_and_directory_modes_agree(self, file_tool, tmp_dir):
+        """Searching a file directly and via its directory must report the same
+        path, line, and column. rg omits the filename for a single file, which
+        used to shift the whole prefix by one field."""
+        pad = "中文填充" * 800
+        fp = Path(tmp_dir, "cjk.txt")
+        fp.write_text(pad + "NEEDLE_DIR" + pad + "\n", encoding="utf-8")
+        direct = asyncio.run(file_tool.grep("NEEDLE_DIR", str(fp)))
+        via_dir = asyncio.run(file_tool.grep("NEEDLE_DIR", tmp_dir))
+        assert direct == via_dir
+        assert str(fp) in direct
+
+    def test_grep_single_file_long_line_reports_real_line_number(self, file_tool, tmp_dir):
+        """The match is on line 2; the column must not be reported as the line."""
+        fp = Path(tmp_dir, "long.txt")
+        fp.write_text("short\n" + "A" * 3000 + "NEEDLE" + "B" * 3000 + "\n")
+        result = asyncio.run(file_tool.grep("NEEDLE", str(fp)))
+        assert result.startswith(f"{fp}:2: col=3001,")
+
+    def test_grep_window_width_same_with_and_without_rg_column(self):
+        """rg locates the match, Python measures its width: both paths must
+        produce the identical window, not one clipped to a single char."""
+        from agentica.tools.builtin.file_tool import _format_grep_match
+
+        content = "A" * 3000 + '"timeout": 30' + "B" * 3000
+        from_python = _format_grep_match("f.jsonl", 1, content, r'"timeout": 30')
+        from_rg = _format_grep_match(
+            "f.jsonl", 1, content, r'"timeout": 30', start=3000,
+        )
+        assert from_python == from_rg
+        assert '"timeout": 30' in from_rg
+
+    def test_char_col_from_byte_col_edges(self):
+        from agentica.tools.builtin.file_tool import _char_col_from_byte_col
+
+        cjk = "中" * 10
+        assert _char_col_from_byte_col(cjk, 1) == 1
+        assert _char_col_from_byte_col(cjk, 4) == 2
+        assert _char_col_from_byte_col(cjk, 3) == 1  # mid-codepoint, clamps back
+        assert _char_col_from_byte_col(cjk, 10 ** 9) == len(cjk) + 1
+        assert all(_char_col_from_byte_col("abcdef", i) == i for i in range(1, 7))
+
+    def test_read_rg_line_handles_any_line_length(self):
+        """Lines past asyncio's 64 KiB stream buffer must be read, not raise."""
+        from agentica.tools.builtin.file_tool import _read_rg_line
+
+        async def run():
+            reader = asyncio.StreamReader(limit=64 * 1024)
+            reader.feed_data(b"X" * 200000 + b"\n" + b"tail\n")
+            reader.feed_eof()
+            first = await _read_rg_line(reader)
+            second = await _read_rg_line(reader)
+            third = await _read_rg_line(reader)
+            return first, second, third
+
+        first, second, third = asyncio.run(run())
+        assert len(first) == 200001 and first.endswith(b"\n")
+        assert second == b"tail\n", "long line must not swallow the next one"
+        assert third == b"", "EOF must still be reported as empty bytes"
+
+    def test_read_rg_line_eof_without_trailing_newline(self):
+        from agentica.tools.builtin.file_tool import _read_rg_line
+
+        async def run():
+            reader = asyncio.StreamReader(limit=64 * 1024)
+            reader.feed_data(b"Y" * 100000)
+            reader.feed_eof()
+            return await _read_rg_line(reader), await _read_rg_line(reader)
+
+        line, after = asyncio.run(run())
+        assert len(line) == 100000
+        assert after == b""
+
+    def test_read_rg_line_bounds_a_newline_free_file(self):
+        """No newline anywhere must not buffer the whole file into memory."""
+        from agentica.tools.builtin import file_tool as ft
+
+        async def run():
+            reader = asyncio.StreamReader(limit=64 * 1024)
+            reader.feed_data(b"Z" * 500000 + b"\n" + b"after\n")
+            reader.feed_eof()
+            return await ft._read_rg_line(reader), await ft._read_rg_line(reader)
+
+        with patch.object(ft, "_RG_MAX_LINE_BYTES", 100000):
+            line, following = asyncio.run(run())
+        assert len(line) <= 100001, "accumulator ignored its ceiling"
+        assert line.endswith(b"\n"), "truncated line must stay newline-terminated"
+        assert following == b"after\n", "truncation must not eat the next line"
+
     def test_grep_content_mode(self, file_tool, tmp_dir):
         Path(tmp_dir, "code.py").write_text("def foo():\n    pass\ndef bar():\n    pass\n")
         result = asyncio.run(file_tool.grep("def", tmp_dir))
@@ -508,10 +635,10 @@ class TestBuiltinFileToolGrep:
                 self._lines = list(lines)
                 self.reads = 0
 
-            async def readline(self):
+            async def readuntil(self, sep=b"\n"):
                 self.reads += 1
                 if not self._lines:
-                    return b""
+                    raise asyncio.IncompleteReadError(b"", None)
                 return self._lines.pop(0)
 
         class _Proc:
@@ -558,9 +685,9 @@ class TestBuiltinFileToolGrep:
             def __init__(self, lines):
                 self._lines = list(lines)
 
-            async def readline(self):
+            async def readuntil(self, sep=b"\n"):
                 if not self._lines:
-                    return b""
+                    raise asyncio.IncompleteReadError(b"", None)
                 return self._lines.pop(0)
 
         class _Proc:
