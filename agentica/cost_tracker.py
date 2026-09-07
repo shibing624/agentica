@@ -535,10 +535,12 @@ class CostTracker:
         if normalised_id in table:
             return table[normalised_id]
 
-        # Prefix match — e.g. "gpt-4o-2024-11-20" → "gpt-4o"
-        for key in table:
-            if normalised_id.startswith(key):
-                return table[key]
+        # Longest separator-anchored prefix — e.g. "gpt-4o-2024-11-20" → "gpt-4o",
+        # "gpt-4o-mini-2024-07-18" → "gpt-4o-mini". Same rule as _get_model_entry(),
+        # so pricing and context_window never disagree for one model id.
+        entry = _get_model_entry(normalised_id)
+        if entry is not None:
+            return entry
 
         # Best-effort family match (first dash-separated segment).
         # Prefer a non-zero pricing entry.
