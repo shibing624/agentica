@@ -61,6 +61,13 @@ class TestCoerceToolArgs:
         result = coerce_tool_args(args, func)
         assert result["items"] == [1, 2, 3]
 
+    def test_array_coercion_from_fenced_json(self):
+        from agentica.tools.base import coerce_tool_args, Function
+        func = Function(name="test", parameters={"type": "object", "properties": {"items": {"type": "array"}}})
+        args = {"items": '```json\n["a", "b"]\n```'}
+        result = coerce_tool_args(args, func)
+        assert result["items"] == ["a", "b"]
+
     def test_object_coercion(self):
         from agentica.tools.base import coerce_tool_args, Function
         func = Function(name="test", parameters={"type": "object", "properties": {"data": {"type": "object"}}})

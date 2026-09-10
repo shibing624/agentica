@@ -2,7 +2,7 @@
 
 TypeScript HTTP client for a running [`agentica-gateway`](https://github.com/shibing624/agentica). It is **not** a port of the Python `Agent` runtime: chat, tools and memory stay in that process. This package sends the same REST/SSE calls the Web UI uses.
 
-Starting the Web UI is unchanged: `pip install "agentica[gateway]"` then `agentica-gateway`. You only need this package if you are writing a Node/TypeScript program that talks to that gateway.
+Starting the Web UI is unchanged: `uv tool install "agentica[gateway]"` then `agentica-gateway`. You only need this package if you are writing a Node/TypeScript program that talks to that gateway.
 
 ## Install
 

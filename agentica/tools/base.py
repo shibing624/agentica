@@ -17,6 +17,7 @@ from typing import Callable, get_type_hints, Any, Dict, Union, Optional, Type, T
 from pydantic import BaseModel, Field, ValidationError, field_validator, validate_call
 from agentica.model.message import Message
 from agentica.tools.origin import ToolOrigin
+from agentica.utils.json_parse import extract_json_array, extract_json_object
 from agentica.utils.log import logger
 
 T = TypeVar("T")
@@ -660,10 +661,13 @@ def _coerce_value(value: str, expected_type):
         return _coerce_boolean(value)
     if expected_type in ("array", "object"):
         stripped = value.strip()
-        try:
-            return json.loads(stripped)
-        except (json.JSONDecodeError, ValueError):
-            pass
+        extracted = (
+            extract_json_array(stripped)
+            if expected_type == "array"
+            else extract_json_object(stripped)
+        )
+        if extracted is not None:
+            return extracted
         # Some models serialise nested array/object args as a Python-repr
         # string (single quotes, True/None) instead of valid JSON. literal_eval
         # recovers those safely (literals only, no code execution).

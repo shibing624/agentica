@@ -48,16 +48,31 @@
 
 ## 安装
 
+CLI（`agentica`）和 Web / Desktop 后端（`agentica-gateway`）都用 [`uv tool`](https://docs.astral.sh/uv/guides/tools/) 装进隔离环境，不绑系统 Python。没有 uv：
+
 ```bash
-pip install -U agentica
+curl -LsSf https://astral.sh/uv/install.sh | sh    # 独立安装，进 ~/.local/bin
+# macOS 也可以：brew install uv
 ```
+
+```bash
+# CLI
+uv tool install agentica
+
+# Web / Desktop（同一套命令，多出 agentica-gateway）
+uv tool install "agentica[gateway]"
+```
+
+已经装过 CLI、再补 Web：`uv tool install --force "agentica[gateway]"`。升级：`uv tool upgrade agentica`。命令找不到时跑一次 `uv tool update-shell`。
+
+开发本仓库用 `pip install -e .`。详见 [安装文档](https://shibing624.github.io/agentica/getting-started/installation)。
 
 ### 桌面版
 
 窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
 
 > [!IMPORTANT]
-> 当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可。机器上还没有 `agentica-gateway` 时，桌面版会在**第一次打开**时用 uv 安装一份托管 runtime（Python 3.12 + `agentica[gateway]`），放在 Application Support，不进 `~/.agentica`。已经 `pip install` 过的继续用你原来的。
+> 当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可。机器上还没有 `agentica-gateway` 时，桌面版会在**第一次打开**时用 uv 安装一份托管 runtime（Python 3.12 + `agentica[gateway]`），放在 Application Support，不进 `~/.agentica`。已经 `uv tool install`（或旧的 `pip install`）过的继续用你原来的。
 
 <details>
 <summary><b>🍎 macOS 提示「Agentica 已损坏，无法打开」</b></summary>
@@ -122,7 +137,7 @@ agentica
 ### Web
 
 ```bash
-pip install -U "agentica[gateway]"
+uv tool install "agentica[gateway]"
 agentica-gateway
 ```
 

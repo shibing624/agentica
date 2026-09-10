@@ -15,7 +15,8 @@ Agentica 是一个 **Async-First** 的 Python AI Agent 框架。所有核心方�
 ### 安装
 
 ```bash
-pip install agentica
+uv add agentica
+# 改本仓库：pip install -e .
 ```
 
 ### 运行第一个示例

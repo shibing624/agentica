@@ -48,9 +48,24 @@ WeChat / WeCom / Feishu / Telegram reach the agents on this machine: address one
 
 ## Installation
 
+The CLI (`agentica`) and the Web / Desktop backend (`agentica-gateway`) are products: install them with [`uv tool`](https://docs.astral.sh/uv/guides/tools/) into an isolated env, not your system Python. No uv yet:
+
 ```bash
-pip install -U agentica
+curl -LsSf https://astral.sh/uv/install.sh | sh    # standalone binary → ~/.local/bin
+# macOS: brew install uv
 ```
+
+```bash
+# CLI
+uv tool install agentica
+
+# Web / Desktop (same command; also puts agentica-gateway on PATH)
+uv tool install "agentica[gateway]"
+```
+
+Already have the CLI and want the Web UI: `uv tool install --force "agentica[gateway]"`. Upgrade with `uv tool upgrade agentica`. If the command is missing, run `uv tool update-shell`.
+
+Embed Agentica in your own Python project with `uv add agentica`. Only checkout development uses `pip install -e .`. Details: [Installation docs](https://shibing624.github.io/agentica/getting-started/installation).
 
 ### Desktop app
 
@@ -60,7 +75,7 @@ The window is the same web UI, on the same `~/.agentica` — mixing it with the 
 > These builds are **unsigned**, so the OS may block the first launch — one step, once.
 > If this machine has no `agentica-gateway` yet, the first launch installs a managed
 > runtime (uv + Python 3.12 + `agentica[gateway]`) under Application Support, not
-> inside `~/.agentica`. An existing `pip install` is used as-is.
+> inside `~/.agentica`. An existing `uv tool install` (or an older `pip install`) is used as-is.
 
 | OS | Installer |
 |---|---|
@@ -131,7 +146,7 @@ Once the interactive terminal is up, just talk — e.g. "find out why the tests 
 ### Web
 
 ```bash
-pip install -U "agentica[gateway]"
+uv tool install "agentica[gateway]"
 agentica-gateway
 ```
 

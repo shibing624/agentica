@@ -81,41 +81,33 @@ class AskUserQuestionTool(Tool):
         ```
     """
 
-    ASK_USER_QUESTION_SYSTEM_PROMPT = """## `ask_user_question` (Human-in-the-loop)
+    # Session-context only. The call shape lives on the tool schema; repeating
+    # it here taught models to copy a Python list as a string.
+    ASK_USER_QUESTION_SYSTEM_PROMPT = """## `ask_user_question`
 
-You have access to the `ask_user_question` tool to request input or confirmation from the user during execution.
+This prompt renders in YOUR terminal. Work handed to you by another agent
+session must go back with `send_message` — this box never reaches that person
+and only blocks until it times out."""
 
-### When to use:
-1. **Critical Operations**: Before performing irreversible actions (delete files, send emails, make purchases)
-2. **Ambiguous Requests**: When the user's intent is unclear and you need clarification
-3. **Sensitive Information**: When you need passwords, API keys, or personal information
-4. **Decision Points**: When multiple valid approaches exist and user preference matters
-5. **Offer Choices**: Pass `options` to let the user pick one; omit it for free-form answers
-
-### How it behaves:
-Ask a plain question in `prompt`. Optionally pass `options` to present numbered
-choices. The user replies in their own words — a number, a paraphrase, a yes/no,
-a rationale, or none of the above — and you get that reply back verbatim next to
-the question. Read it in context: a bare number means that numbered option,
-anything else means what it says.
-
-### Recommending an option:
-When one choice is your recommendation, put it first in `options` and say so in
-its label — e.g. "全量重跑（推荐）" or "Rerun everything (recommended)". The
-user then picks it with one keystroke.
-
-### Who this reaches:
-This renders in YOUR terminal. If the work you are doing was handed to you by
-another agent session, the person who asked for it is sitting at that session,
-not this one — this prompt never reaches them, it only blocks until it times
-out. Send the question back to that session with `send_message` and end your
-turn instead. Keep using this tool for the user who is actually here.
-
-### Best Practices:
-- Provide clear, concise prompts that explain what you need and why
-- For confirmations, clearly state what action will be taken if confirmed
-- Don't overuse — only ask when truly necessary to avoid breaking flow
-- Group related questions when possible to minimize interruptions"""
+    _ASK_PARAMETERS = {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "The question to show the user.",
+            },
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Choices as a JSON array of strings, not a string. "
+                    'Example: ["Keep current (recommended)", "Rewrite", "Skip"]. '
+                    "Omit for a free-form answer. Put the recommended choice first."
+                ),
+            },
+        },
+        "required": ["prompt"],
+    }
 
     def __init__(
         self,
@@ -137,7 +129,7 @@ turn instead. Keep using this tool for the user who is actually here.
         self.timeout = timeout
         self.default_on_timeout = default_on_timeout
 
-        self.register(self.ask_user_question)
+        self.register(self.ask_user_question, parameters_override=self._ASK_PARAMETERS)
         # Human-in-the-loop: wait indefinitely for the user (like CC/Cursor),
         # don't let the outer ~120s tool-executor timeout auto-pass the prompt
         # and silently continue without an answer.
@@ -188,34 +180,11 @@ turn instead. Keep using this tool for the user who is actually here.
         prompt: str,
         options: Optional[List[str]] = None,
     ) -> str:
-        """
-        Request input from the user during agent execution.
+        """Ask the user a question and wait for their reply.
 
-        This pauses the agent and waits for the user's reply. Use it when you
-        need clarification, confirmation, or additional information to proceed.
-
-        Args:
-            prompt: Clear description of what input is needed and why. For a
-                confirmation, describe the action that will be taken.
-            options: Optional list of choices to present. When given, the user
-                picks one (in any wording); when omitted, the reply is
-                free-form. Put the choice you recommend first and say so in its
-                label, e.g. "Rerun everything (recommended)".
-
-        Returns:
-            str: JSON with ``prompt``, the user's ``response`` verbatim, and the
-            ``options`` that were offered, if any.
-
-        Examples:
-            # Confirmation
-            ask_user_question(prompt="Delete all temp files? This cannot be undone.")
-            # Free-form input
-            ask_user_question(prompt="Please provide the API endpoint URL.")
-            # Pick from choices, recommendation first
-            ask_user_question(
-                prompt="Choose the output format:",
-                options=["JSON (recommended)", "CSV", "XML"],
-            )
+        Use when a choice or confirmation is needed before continuing.
+        ``options`` is a JSON array of strings, never a stringified array.
+        Omit it for a free-form answer. The reply comes back verbatim.
         """
         logger.info(f"User input requested: prompt={prompt[:100]}...")
 

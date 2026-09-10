@@ -9,7 +9,7 @@ If a capability is not reachable over HTTP, the desktop app cannot do it
 either. That is the point: there is no second UI to keep in sync. It is also
 the least updatable code in the product — a change here reaches a user only
 through a new installer, while a change in the SPA or the gateway reaches them
-on the next `pip install -U` — so anything that *could* ship over HTTP must.
+on the next `uv tool upgrade` — so anything that *could* ship over HTTP must.
 
 ## Run it
 
@@ -108,6 +108,7 @@ one-time unlock each OS asks for.
 
 `npm start` and the installers agree: the app is a **shell** and does not
 carry a Python interpreter inside the `.app`. A machine that already has
-`agentica-gateway` (CLI `pip install`) keeps using it. A machine that does not
-gets a managed runtime on first launch, outside the bundle, so a later
-`pip install -U` still updates the gateway without a new dmg.
+`agentica-gateway` (`uv tool install "agentica[gateway]"`) keeps using it. A
+machine that does not gets a managed runtime on first launch, outside the
+bundle, so a later `uv tool upgrade agentica` still updates the gateway
+without a new dmg.

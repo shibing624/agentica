@@ -114,3 +114,57 @@ class TestAskUserQuestionTool:
         ))
         assert shown["options"] == options
         assert result["response"] == "1"
+
+    def test_schema_says_options_is_an_array_not_a_string(self):
+        """The first call used to stringify the list because the schema had
+        no property description and the docstring showed a Python list."""
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "1")
+        fn = tool.functions["ask_user_question"]
+        fn.process_entrypoint()
+        options = fn.parameters["properties"]["options"]
+        assert options["type"] == "array"
+        assert options["items"] == {"type": "string"}
+        assert "not a string" in options["description"]
+        assert "options=[" not in (fn.description or "")
+        assert "options=[" not in (tool.get_system_prompt() or "")
+
+    def test_stringified_options_are_coerced_before_validate_call(self):
+        """Models often emit options as a JSON string on the first call.
+
+        pydantic validate_call then raised ``Input should be a valid list``
+        and the user saw a failed tool before the retry got the type right.
+        """
+        import os
+
+        os.environ.setdefault("OPENAI_API_KEY", "test-key")
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+        from agentica.tools.base import get_function_call
+
+        captured = {}
+
+        def cb(prompt, options=None):
+            captured["options"] = options
+            return "1"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        tool.functions["ask_user_question"].process_entrypoint()
+        options = [
+            "稳定版 a364f26 为主表（推荐）：LME-198 配对 38.38% vs mem0 28.28%（+10.10pp）",
+            "最新 main dcf6c58 为主表",
+            "两版都进正文",
+        ]
+        call = get_function_call(
+            name="ask_user_question",
+            arguments=json.dumps(
+                {"prompt": "用哪一套？", "options": json.dumps(options, ensure_ascii=False)},
+                ensure_ascii=False,
+            ),
+            functions=tool.functions,
+        )
+        assert call is not None
+        assert call.error is None
+        assert call.arguments["options"] == options
+        assert asyncio.run(call.execute()) is True
+        assert captured["options"] == options

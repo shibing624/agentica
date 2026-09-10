@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
 #### fixes
+- **`ask_user_question` 第一次调用不再因 `options` 是字符串而失败**：模型常把选项收成 `'["A", "B"]'`，pydantic 报 `Input should be a valid list`，重试才过。schema 写明 `options` 是 string 数组而不是一段 JSON；docstring / system prompt 去掉会诱使模型照抄的 Python `options=[...]`。字符串化的数组在进 `validate_call` 之前解开（含 XML `<parameter>` 和带 fence 的 JSON）。
 - **带日期的模型快照按自己的单价计，不再套父模型**：`CostTracker._lookup_pricing` 以前取 catalog 里第一个 `startswith` 命中，`_FALLBACK_PRICING` 又是宽名在前（`gpt-4o` 先于 `gpt-4o-mini`），于是 `gpt-4o-mini-2024-07-18` 按 2.50/10.00 而不是 0.15/0.60，状态栏和 `RunResponse.cost_summary` 都偏。现在前缀查找复用 `_get_model_entry` 的最长分隔符锚定规则，和 `context_window` 对同一个 id 不再各算各的。
 - **Langfuse 不再把 SSE 的 `data: {...}` 当媒体**：MediaManager 见 `data:` 就当 base64 data URI，会话里的流式帧和源码片段会打 `Error parsing base64 data URI` / `Data is not base64 encoded`。只有 `data:...;base64,...` 才解析。
 - **CLI 状态栏思考强度只显示 `high`**：OpenAI 兼容代理把 `reasoning_effort` 和 `thinking_display` 放进 `extra_body` 时，以前 `describe_thinking_mode()` 会拼成 `on(reasoning_effort=high, display=omitted)`。有强度就只显示强度，`display=` 不再进状态栏。
@@ -60,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`apply_patch` 找回忘了前导空格的 keep 行**：无 ` `/`-`/`+` 前缀的行若与当前文件某行完全一致（或去行尾空白后只对应一种原文），当成 keep；对不上或多种原文仍报 `Malformed patch`，不做空白/缩进 fuzzy。
 
 #### changes
+- **安装改推 `uv tool install`，不再把系统 `pip install agentica` 写成产品入口**：CLI 用 `uv tool install agentica`，Web / Desktop 用 `uv tool install "agentica[gateway]"`，装进隔离环境、不绑系统 Python。已经装过 CLI 再补 extras 是 `uv tool install --force "agentica[gateway]"`，升级是 `uv tool upgrade`。`uv add agentica` 留给自己的项目当库用，`pip install -e .` 留给改本仓库。README / 安装页 / Gateway / API extras 同步改了。
 - **CLI 去掉已废弃的 `_GutteredConsole` 和从未调用的 `display_tool_call`**：左侧 gutter 早就不画了，代理类和 `agentica.cli.display_tool_call` 导出只剩死代码。
 - **`worktree` 用法改走内置 skill，人用 `/worktree`**：工具还在（模型要搬家仍得调它，`execute git worktree` 只多一个目录、会话还在旧 cwd）。以前每轮把整段 `<worktrees>` policy 塞进 system prompt。现在判断在 `agentica/skills/bundled/worktree/`，目录匹配才读；人用 `/worktree status|use|merge|remove`（和 `--worktree` 同一套 binder）。
 - **peer 收信规则并进 `multi-agent` skill**：`list_agents` / `send_message` 仍每轮注册。以前 `PEER_MESSAGING_POLICY` 每轮塞进 system prompt（授权头、证据用路径、peer 派的活不要 `ask_user_question`）。现在只在目录对上、模型去读 skill 时才进上下文。消息头 `format_for_model` 和 `ask_user_question` 的「这个框能到谁」仍每轮在。

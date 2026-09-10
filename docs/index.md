@@ -71,7 +71,11 @@
 ## 30 秒上手
 
 ```bash
-pip install -U agentica
+# 终端产品
+uv tool install agentica
+
+# 自己的项目里当库用
+uv add agentica
 export ZAI_API_KEY="your-api-key"
 ```
 

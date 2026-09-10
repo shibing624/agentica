@@ -474,14 +474,24 @@ class OpenAIChat(Model):
                     "OpenAI-compatible provider returned a malformed Claude XML tool call."
                 )
 
-            arguments: Dict[str, str] = {}
+            arguments: Dict[str, Any] = {}
             for parameter in invoke:
                 name = parameter.attrib.get("name") if parameter.tag == "parameter" else None
                 if not name or name in arguments:
                     raise ValueError(
                         "OpenAI-compatible provider returned a malformed Claude XML tool call."
                     )
-                arguments[name] = "".join(parameter.itertext()).strip()
+                raw = "".join(parameter.itertext()).strip()
+                # Every XML parameter is text. Array/object args therefore
+                # arrive as a JSON string; parse them here so later
+                # validation sees a list/dict instead of rejecting the call.
+                if raw[:1] in "[{":
+                    try:
+                        arguments[name] = json.loads(raw)
+                        continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                arguments[name] = raw
 
             calls.append(
                 {

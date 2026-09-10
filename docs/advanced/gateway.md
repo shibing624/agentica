@@ -13,22 +13,32 @@ HTTP API + WebSocket 流式接口 + 多个 IM 平台机器人 + 定时任务调�
 
 ## 安装
 
-```bash
-pip install "agentica[gateway]"
-```
-
-PyPI 的 wheel 已经打进编译好的 Web UI，运行时不需要 Node。源码在仓库 `web/`，改界面请看那边的 README（`npm run dev`）；不要把 `agentica/gateway/ui/` 提交进 git。
-
-按需追加 IM 平台 SDK（每个 IM 都是可选 extras，不装则该渠道自动跳过）：
+`agentica-gateway` 是 Web / Desktop 产品，用 `uv tool` 装进隔离环境（和 CLI 同一套，多出这条命令）：
 
 ```bash
-pip install "agentica[wechat]"     # 个人微信（微信 ClawBot / iLink 官方协议，含媒体 AES-128-ECB + CDN）
-pip install "agentica[telegram]"   # python-telegram-bot
-pip install "agentica[discord]"    # discord.py
-pip install "agentica[qq]"         # qq-botpy（QQ 开放平台 WebSocket）
-pip install "agentica[wecom]"      # wecom_aibot_sdk（企业微信 AI Bot）
-pip install "agentica[dingtalk]"   # dingtalk-stream（钉钉 Stream）
+uv tool install "agentica[gateway]"
 ```
+
+已经用 `uv tool install agentica` 装过 CLI 的，补 extras：
+
+```bash
+uv tool install --force "agentica[gateway]"
+```
+
+改本仓库才 `pip install -e ".[gateway]"`。PyPI 的 wheel 已经打进编译好的 Web UI，运行时不需要 Node。源码在仓库 `web/`，改界面请看那边的 README（`npm run dev`）；不要把 `agentica/gateway/ui/` 提交进 git。
+
+按需追加 IM 平台 SDK（每个 IM 都是可选 extras，不装则该渠道自动跳过）。产品安装写进同一个 spec：
+
+```bash
+uv tool install --force "agentica[gateway,wechat]"     # 个人微信（微信 ClawBot / iLink 官方协议，含媒体 AES-128-ECB + CDN）
+uv tool install --force "agentica[gateway,telegram]"   # python-telegram-bot
+uv tool install --force "agentica[gateway,discord]"    # discord.py
+uv tool install --force "agentica[gateway,qq]"         # qq-botpy（QQ 开放平台 WebSocket）
+uv tool install --force "agentica[gateway,wecom]"      # wecom_aibot_sdk（企业微信 AI Bot）
+uv tool install --force "agentica[gateway,dingtalk]"   # dingtalk-stream（钉钉 Stream）
+```
+
+开发本仓库、或把 gateway 当库嵌进自己的项目时，对应写成 `uv add "agentica[wechat]"` / `pip install -e ".[wechat]"`。
 
 > 飞书（Lark）SDK `lark-oapi` 已经包含在基础 `[gateway]` 里。
 
@@ -344,7 +354,7 @@ agentica-gateway
 想接个人微信：装好 `agentica[wechat]` 后启动 gateway，打开 **设置 › 个人助理**，点微信那一行的「配置」，用个人微信扫码即可。白名单留空 = 不限制：
 
 ```bash
-pip install 'agentica[wechat]'   # 提供 qrcode / pycryptodome / Pillow，用于扫码与媒体收发
+uv tool install --force "agentica[gateway,wechat]"   # qrcode / pycryptodome / Pillow，扫码与媒体收发
 # 默认 token：~/.agentica/cache/wxbot_token.json ；WECHAT_ALLOWED_USERS 留空
 ```
 
@@ -694,7 +704,7 @@ settings:
 ## 故障排查
 
 - **某个渠道启动后立刻报 "Missing xxx, skipped"**：环境变量没设，渠道被跳过；这是正常行为
-- **`pip install 'agentica[xxx]'`：找不到 extras**：检查使用的是 `agentica` 包名（非旧名），且 pip 版本 ≥ 21；注意 extras 里的 `[]` 在 zsh 下需用单引号包裹，否则会被当成 glob 报错
+- **`uv tool install "agentica[xxx]"`：找不到 extras**：检查使用的是 `agentica` 包名（非旧名）。zsh 下 extras 的 `[]` 必须加引号，否则会被当成 glob。已经装过 CLI、要补 extras 用 `--force` 重装同一个 tool，不要另开一份 `pip install`。
 - **WeCom `send` 一直返回 False**：该 chat 还没收到过用户消息，没有缓存到 `frame`；让用户先发一条
 - **DingTalk 401 / errcode 9001**：`accessToken` 过期或 robotCode 与 ChatBot 创建时不一致，检查 `DINGTALK_CLIENT_ID`
 - **WeChat 扫码后无响应**：检查日志里 `bot_id` 是否落盘到 `WECHAT_TOKEN_FILE`；如已过期把 token 文件删了重启即可重新扫码

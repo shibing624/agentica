@@ -145,7 +145,7 @@ agent = DeepAgent()
 
 ## Tier 2：主仓可选能力（`agentica[xxx]`）
 
-### RAG 栈 — `pip install agentica[rag]`
+### RAG 栈 — `uv add "agentica[rag]"`
 
 ```python
 from agentica.knowledge import Knowledge
@@ -164,7 +164,7 @@ from agentica.vectordb import InMemoryVectorDb
 # from agentica.vectordb import ChromaDb
 ```
 
-### Storage — `pip install agentica[sql]` / `[postgres]` / `[mysql]` / `[redis]`
+### Storage — `uv add "agentica[sql]"` / `[postgres]` / `[mysql]` / `[redis]`
 
 ```python
 from agentica.db import InMemoryDb, JsonDb  # 默认可用
@@ -184,7 +184,7 @@ from agentica.guardrails import (
 )
 ```
 
-### Gateway — `pip install agentica[gateway]`
+### Gateway — 产品用 `uv tool install "agentica[gateway]"`；当库用 `uv add "agentica[gateway]"`
 
 ```python
 from agentica.gateway.main import app, main  # FastAPI app
@@ -209,13 +209,13 @@ agentica --query "..."
 
 CLI 是面向最终用户的产品入口，默认使用 `DeepAgent` 体验。CLI 参数、权限模式、技能安装、日常任务命令和 TUI 行为属于 Product Surface，不应作为嵌入式 SDK 的最小依赖假设。
 
-### ACP（IDE 集成）— `pip install agentica[acp]`
+### ACP（IDE 集成）— `uv add "agentica[acp]"`
 
 ```python
 from agentica.acp import ACPServer
 ```
 
-### MCP（Model Context Protocol）— `pip install agentica[mcp]`
+### MCP（Model Context Protocol）— `uv add "agentica[mcp]"`
 
 ```python
 from agentica.mcp import MCPClient, MCPServer
@@ -224,27 +224,27 @@ from agentica.mcp import MCPClient, MCPServer
 ### Tools 扩展 — 细粒度 extras
 
 ```python
-# pip install agentica[arxiv]
+# uv add "agentica[arxiv]"
 from agentica.tools.arxiv_tool import ArxivTool
 
-# pip install agentica[yfinance]
+# uv add "agentica[yfinance]"
 from agentica.tools.yfinance_tool import YFinanceTool
 
-# pip install agentica[crawl]
+# uv add "agentica[crawl]"
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 
-# pip install agentica[ddg]
+# uv add "agentica[ddg]"
 from agentica.tools.duckduckgo_tool import DuckDuckGoTool
 ```
 
-超级组合：
+超级组合（自己的项目用 `uv add`；产品隔离环境用 `uv tool install --force "agentica[…]"`）：
 
 ```bash
-pip install agentica[tools-search]      # DDG + Wikipedia + Serper + Exa + Bocha
-pip install agentica[tools-research]    # arxiv + wikipedia + newspaper + dblp
-pip install agentica[tools-finance]     # yfinance
-pip install agentica[tools-media]       # dalle + cogview + cogvideo + ocr + image/video analysis
-pip install agentica[tools-browser]     # browser + crawl
+uv add "agentica[tools-search]"      # DDG + Wikipedia + Serper + Exa + Bocha
+uv add "agentica[tools-research]"    # arxiv + wikipedia + newspaper + dblp
+uv add "agentica[tools-finance]"     # yfinance
+uv add "agentica[tools-media]"       # dalle + cogview + cogvideo + ocr + image/video analysis
+uv add "agentica[tools-browser]"     # browser + crawl
 ```
 
 ---

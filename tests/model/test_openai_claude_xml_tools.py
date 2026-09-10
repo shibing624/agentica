@@ -38,6 +38,21 @@ def test_claude_invoke_text_becomes_standard_function_call():
     }
 
 
+def test_claude_xml_parses_json_array_parameters():
+    """XML parameters are always text. A JSON array must become a list."""
+    calls = _claude_proxy_model()._parse_claude_text_tool_calls(
+        '<invoke name="ask_user_question">'
+        '<parameter name="prompt">Pick one</parameter>'
+        '<parameter name="options">["Keep current (recommended)", "Rewrite"]</parameter>'
+        "</invoke>"
+    )
+
+    assert calls is not None
+    args = json.loads(calls[0]["function"]["arguments"])
+    assert args["prompt"] == "Pick one"
+    assert args["options"] == ["Keep current (recommended)", "Rewrite"]
+
+
 def test_malformed_claude_invoke_text_raises_protocol_error():
     """Incomplete invoke markup must fail rather than polluting history."""
     with pytest.raises(ValueError, match="malformed Claude XML tool call"):

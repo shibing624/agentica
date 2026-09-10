@@ -2,53 +2,102 @@
 
 ## 环境要求
 
-- **Python >= 3.10**（推荐 3.12）
+- [`uv`](https://docs.astral.sh/uv/guides/tools/)（产品安装走它；开发本仓库也可以只用 Python >= 3.10）
 - 至少一个 LLM 提供商的 API Key
 
-## 安装
-
-### 从 PyPI 安装（推荐）
+没有 uv 时用独立安装器（二进制进 `~/.local/bin`，不绑任何一个 Python）：
 
 ```bash
-pip install -U agentica
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# macOS：brew install uv
+# Windows：powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 从源码安装（开发模式）
+不要 `pip3 install uv`：uv 自己会被焊到当前 `pip3` 的解释器上，换 conda / 卸那个 Python，`uv` 就没了。`uv tool install` 自己带一份隔离的 Python，不占用系统 / conda。装完命令不在 PATH 时跑一次 `uv tool update-shell`。
+
+## 装产品（推荐）
+
+`agentica` 是 CLI，`agentica-gateway` 是 Web / Desktop 的后端，两个都是命令行产品，用 `uv tool` 装进隔离环境。不要用系统自带的 `pip install agentica` 把它们焊到某一个 Python 上。
+
+```bash
+# CLI
+uv tool install agentica
+
+# Web / Desktop（同一套隔离环境，多出 agentica-gateway）
+uv tool install "agentica[gateway]"
+```
+
+已经装过 CLI、再补 Web：
+
+```bash
+uv tool install --force "agentica[gateway]"
+```
+
+升级 / 卸载：
+
+```bash
+uv tool upgrade agentica
+uv tool uninstall agentica
+```
+
+CLI 里的 `/upgrade` 仍是对**当前解释器**跑 `pip install -U`。`uv tool` 装的请用上面的 `uv tool upgrade`，不要用 `/upgrade` 去碰系统 pip。
+
+IM 等 extras 写进同一个 spec（zsh 下括号要加引号）：
+
+```bash
+uv tool install --force "agentica[gateway,wechat,telegram]"
+```
+
+Desktop 安装包第一次打开时，如果本机还没有 `agentica-gateway`，会自己用 uv 装一份托管 runtime。已经 `uv tool install` 过的继续用你原来的。
+
+## 当库用（自己的项目）
+
+把 Agentica 嵌进另一个 Python 项目，用项目里的 `uv add`，不要 `pip install` 进系统 Python：
+
+```bash
+uv add agentica
+uv add "agentica[rag]"          # 可选 extras
+```
+
+## 开发本仓库
+
+改 Agentica 源码才把包装进当前解释器：
 
 ```bash
 git clone https://github.com/shibing624/agentica.git
 cd agentica
 pip install -e .
+# 或：uv pip install -e ".[dev,gateway]"
 ```
 
 开发模式下，代码修改立即生效，无需重新安装。
 
 ### 可选依赖
 
-Agentica 的核心功能不需要额外依赖，部分工具和功能需要单独安装：
+产品安装用 extras（见上）。开发 / 当库用时再按需加：
 
 ```bash
 # 浏览器工具
-pip install playwright              # BrowserTool
+uv add playwright
 playwright install chromium
 
 # RAG / 向量数据库
-pip install lancedb                 # LanceDb（推荐本地向量存储）
-pip install qdrant-client           # QdrantVectorDb
-pip install chromadb                # ChromaDb
+uv add lancedb                  # LanceDb（推荐本地向量存储）
+uv add qdrant-client            # QdrantVectorDb
+uv add chromadb                 # ChromaDb
 
 # MCP 协议
-pip install mcp                     # McpTool（Model Context Protocol）
+uv add mcp                      # McpTool（Model Context Protocol）
 
 # 本地模型
-# Ollama 无需 pip，直接下载安装：https://ollama.ai
+# Ollama 无需 Python 包：https://ollama.ai
 
 # 文档解析
-pip install pypdf                   # PDF 解析
-pip install python-docx             # Word 文档
+uv add pypdf
+uv add python-docx
 
 # 评测
-pip install agentica[dev]           # 开发工具 + 测试依赖
+uv pip install -e ".[dev]"
 ```
 
 ## 配置 API Key
@@ -156,11 +205,12 @@ agent = Agent(
 ## 验证安装
 
 ```bash
-# 检查版本
-python -c "import agentica; print(agentica.__version__)"
+# 产品（uv tool 装的走这条，不要用当前 python -c import）
+agentica --version
+agentica --query "你好"          # 需要配置 API Key
 
-# 运行 CLI（需要配置 API Key）
-agentica --query "你好"
+# 当库 / 开发本仓库
+python -c "import agentica; print(agentica.__version__)"
 ```
 
 ## 免费快速入门（零成本）

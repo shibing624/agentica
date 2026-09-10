@@ -12,7 +12,8 @@
 ## 安装
 
 ```bash
-pip install mcp
+uv add "agentica[mcp]"
+# 或只装协议库：uv add mcp
 ```
 
 ## 基本用法
