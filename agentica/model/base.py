@@ -19,8 +19,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import GeneratorType
-from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
+from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Tuple, Union, Sequence
 
+from PIL import Image
 from PIL.Image import Image as PILImage
 
 from agentica.run_response import AgentCancelledError
@@ -62,6 +63,101 @@ _STREAM_REDACTION_MAX_BUFFER_CHARS = 4096
 _STREAM_REDACTION_TAIL_CHARS = 512
 _STREAM_PRIVATE_KEY_BEGIN_RE = re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----")
 _STREAM_PRIVATE_KEY_END_RE = re.compile(r"-----END[A-Z ]*PRIVATE KEY-----")
+
+# Inline images: token cost is decoded geometry, not the base64 wrapper.
+# Cap the long edge locally so a retina screenshot is not re-sent full-size
+# every turn (the provider would clamp it before tokenising anyway).
+VISION_MAX_IMAGE_EDGE = 2000
+# Encoded payload cap. Decoded pixel bombs are Pillow's MAX_IMAGE_PIXELS.
+VISION_MAX_IMAGE_BYTES = 100 * 1024 * 1024
+_VISION_JPEG_QUALITIES = (85, 70, 55, 40)
+# JPEG is lossy: only replace PNG when the lossless encode is genuinely huge.
+_VISION_PNG_BUDGET_BYTES = 1024 * 1024
+
+
+def _has_transparency(img: PILImage) -> bool:
+    """True when transparency is used, not merely when an alpha channel exists.
+
+    macOS clipboard screenshots are RGBA even when every pixel is opaque.
+    Check before ``resize``: the palette ``transparency`` key does not survive it.
+    """
+    if img.mode in ("RGBA", "LA"):
+        lowest, _highest = img.getchannel("A").getextrema()
+        return lowest < 255
+    if img.mode == "P":
+        return "transparency" in img.info
+    return False
+
+
+def _cap_and_encode(img: PILImage, *, original_len: Optional[int] = None) -> Tuple[bytes, str]:
+    """Resize so the long edge is ``VISION_MAX_IMAGE_EDGE`` and encode.
+
+    Prefer PNG (screenshots stay sharp). Opaque images whose PNG exceeds
+    ``_VISION_PNG_BUDGET_BYTES`` may fall back to JPEG. Caller already knows
+    the image is oversized.
+    """
+    width, height = img.size
+    scale = VISION_MAX_IMAGE_EDGE / max(width, height)
+    has_alpha = _has_transparency(img)
+    resized = img.resize(
+        (max(1, round(width * scale)), max(1, round(height * scale))),
+        Image.Resampling.LANCZOS,
+    )
+    if not has_alpha and resized.mode in ("RGBA", "LA"):
+        resized = resized.convert("RGB")
+
+    png_buf = io.BytesIO()
+    resized.save(png_buf, format="PNG", optimize=True)
+    png_data = png_buf.getvalue()
+    data, out_mime = png_data, "image/png"
+
+    if not has_alpha and len(png_data) > _VISION_PNG_BUDGET_BYTES:
+        rgb = resized if resized.mode == "RGB" else resized.convert("RGB")
+        for quality in _VISION_JPEG_QUALITIES:
+            jpeg_buf = io.BytesIO()
+            rgb.save(jpeg_buf, format="JPEG", quality=quality)
+            candidate = jpeg_buf.getvalue()
+            if len(candidate) < len(png_data) and (
+                original_len is None or len(candidate) <= original_len
+            ):
+                data, out_mime = candidate, "image/jpeg"
+                break
+    return data, out_mime
+
+
+def _prepare_image_bytes(raw: bytes, mime_type: str, *, source: str = "") -> Tuple[bytes, str]:
+    """Downscale an oversized inline image to the provider-safe edge.
+
+    Inside the cap: original bytes and mime, no re-encode. Past it: PNG, or
+    JPEG when a lossless encode would be huge. If the capped copy is not
+    smaller than the original, keep the original.
+    """
+    if len(raw) > VISION_MAX_IMAGE_BYTES:
+        limit_mb = VISION_MAX_IMAGE_BYTES // 1024 // 1024
+        where = f": {source}" if source else ""
+        raise ValueError(
+            f"Image is too large: {len(raw) / 1024 / 1024:.1f} MB "
+            f"(limit {limit_mb} MB){where}"
+        )
+
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            width, height = img.size
+            if max(width, height) <= VISION_MAX_IMAGE_EDGE:
+                return raw, mime_type
+            data, out_mime = _cap_and_encode(img, original_len=len(raw))
+            if len(data) >= len(raw):
+                return raw, mime_type
+    except OSError as e:
+        # SVG / corrupt / unknown codec: keep the caller's bytes.
+        logger.debug(f"Image downscale skipped ({type(e).__name__}: {e})")
+        return raw, mime_type
+
+    logger.debug(
+        f"Downscaled image {width}x{height} -> {VISION_MAX_IMAGE_EDGE} long-edge "
+        f"({len(raw)} -> {len(data)} bytes, {mime_type} -> {out_mime})"
+    )
+    return data, out_mime
 
 
 @dataclass
@@ -1674,49 +1770,55 @@ class Model(ABC):
                 cache_write_tokens=cache_write,
             )
 
+    def _image_block(self, raw: bytes, mime_type: str) -> Dict[str, Any]:
+        encoded = base64.b64encode(raw).decode("utf-8")
+        return {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}}
+
     def _process_string_image(self, image: str) -> Dict[str, Any]:
         """Process string-based image (base64, URL, or file path)."""
+        if image.startswith("data:image") and "," in image:
+            header, payload = image.split(",", 1)
+            mime_type = header[5:].split(";", 1)[0] or "image/jpeg"
+            raw, mime_type = _prepare_image_bytes(base64.b64decode(payload), mime_type)
+            return self._image_block(raw, mime_type)
 
-        # Process Base64 encoded image
-        if image.startswith("data:image"):
-            return {"type": "image_url", "image_url": {"url": image}}
-
-        # Process URL image
         if image.startswith(("http://", "https://")):
             return {"type": "image_url", "image_url": {"url": image}}
 
-        # Process local file image
         path = Path(image)
         if not path.exists():
             raise FileNotFoundError(f"Image file not found: {image}")
 
         mime_type = mimetypes.guess_type(image)[0] or "image/jpeg"
         with open(path, "rb") as image_file:
-            base64_image = base64.b64encode(image_file.read()).decode("utf-8")
-            image_url = f"data:{mime_type};base64,{base64_image}"
-            return {"type": "image_url", "image_url": {"url": image_url}}
+            raw = image_file.read()
+        raw, mime_type = _prepare_image_bytes(raw, mime_type, source=image)
+        return self._image_block(raw, mime_type)
 
-    def _process_pil_image(self, image) -> Dict[str, Any]:
+    def _process_pil_image(self, image: PILImage) -> Dict[str, Any]:
         """Process PIL Image data."""
-        # Convert image to bytes
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='PNG')
-        img_byte_arr = img_byte_arr.getvalue()
-
-        # Convert to base64
-        base64_image = base64.b64encode(img_byte_arr).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        return {"type": "image_url", "image_url": {"url": image_url}}
+        if max(image.size) > VISION_MAX_IMAGE_EDGE:
+            raw, mime_type = _cap_and_encode(image)
+        else:
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            raw, mime_type = buf.getvalue(), "image/png"
+        return self._image_block(raw, mime_type)
 
     def _process_bytes_image(self, image: bytes) -> Dict[str, Any]:
         """Process bytes image data."""
-        base64_image = base64.b64encode(image).decode("utf-8")
-        image_url = f"data:image/jpeg;base64,{base64_image}"
-        return {"type": "image_url", "image_url": {"url": image_url}}
+        raw, mime_type = _prepare_image_bytes(image, "image/jpeg")
+        return self._image_block(raw, mime_type)
 
     def process_image(self, image: Any) -> Optional[Dict[str, Any]]:
         """Process an image based on the format."""
         if isinstance(image, dict):
+            url = image.get("url")
+            if isinstance(url, str) and url.startswith("data:image"):
+                processed = self._process_string_image(url)
+                payload = dict(image)
+                payload["url"] = processed["image_url"]["url"]
+                return {"type": "image_url", "image_url": payload}
             return {"type": "image_url", "image_url": image}
 
         if isinstance(image, str):

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
+- **内联图片长边超过 2000px 先在本地缩小再发给模型**：token 按解码几何计，视网膜截图每轮原样重发浪费。cap 内原样通过；macOS 剪贴板那种全不透明的假 RGBA 去掉空 alpha；PNG 压不下来的照片才落 JPEG。`data:` URI 和 gateway 的 `{"url": data:...}` 同样走这道。解不出的格式（SVG）仍原样送；编码超过 100MB 或 Pillow 解压炸弹直接报错，不再吞掉后把原图发出去。
 - **Claude 也认 `cache_control_session_header`，值按 CLI 会话换**：聚合型代理不粘路由会打到不同后端，缓存冷、schema 400 也更多。header（如 `X-Session-Id`）注入当前 `session_id`，新开会话换路由；没有会话才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的 id。不再把第一次（还没 session）的 fallback 冻在实例上。`get_model` 不再只给 OpenAI chat 传这个字段；setup 对 anthropic 只问粘路由 header。
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
