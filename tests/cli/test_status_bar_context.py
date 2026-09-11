@@ -239,9 +239,9 @@ class TestCompactingSpinner(unittest.TestCase):
 
 
 class TestAutoCompactEmitsSpinnerEvents(unittest.TestCase):
-    """compact.start/end bracket the summarisation so the CLI can react."""
+    """Layer 2 is a local window cut; the manager itself emits no spinner."""
 
-    def _run_compact(self, summariser):
+    def test_manager_emits_no_spinner_events(self):
         from agentica.compression.manager import CompressionManager
 
         events = []
@@ -256,28 +256,9 @@ class TestAutoCompactEmitsSpinnerEvents(unittest.TestCase):
         msgs = [Message(role="user", content="q1"),
                 Message(role="assistant", content="a1"),
                 Message(role="user", content="q2")]
-        with patch.object(cm, "_summarise_conversation", new=summariser):
-            try:
-                asyncio.run(cm.auto_compact(msgs, model=model, force=True))
-            except RuntimeError:
-                pass
-        return [e["type"] for e in events]
-
-    def test_brackets_the_summarisation(self):
-        types = self._run_compact(AsyncMock(return_value="a summary"))
-        self.assertIn("compact.start", types)
-        self.assertIn("compact.end", types)
-        self.assertLess(types.index("compact.start"), types.index("compact.end"))
-
-    def test_end_fires_when_summarisation_returns_nothing(self):
-        """The realistic failure: the LLM call is swallowed and yields None."""
-        types = self._run_compact(AsyncMock(return_value=None))
-        self.assertIn("compact.end", types)
-
-    def test_end_fires_when_summarisation_raises(self):
-        """Cancellation propagates out; a stuck 'compacting' spinner must not."""
-        types = self._run_compact(AsyncMock(side_effect=RuntimeError("boom")))
-        self.assertIn("compact.end", types)
+        asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+        self.assertEqual(events, [])
+        self.assertTrue(any("<context_window>" in str(m.content) for m in msgs))
 
     def test_concurrent_compactions_keep_the_notice_up(self):
         """Subagents share the callback; the first to finish must not clear it."""
@@ -307,22 +288,6 @@ class TestAutoCompactEmitsSpinnerEvents(unittest.TestCase):
         handler({"type": "compact.start"})
         handler({"type": "compact.end"})
         self.assertEqual(restored[-1], ("tool", "🔧 task"))
-
-    def test_sm_compact_path_stays_silent(self):
-        """Reusing the stored summary is instant — no spinner churn for it."""
-        from agentica.compression.manager import CompressionManager
-
-        events = []
-        agent = SimpleNamespace(_event_callback=lambda e: events.append(e),
-                                name="Agent", _session_log=None)
-        model = SimpleNamespace(id="gpt-4o", context_window=200_000,
-                                _agent_ref=lambda: agent)
-        wm = SimpleNamespace(summary=SimpleNamespace(summary="stored", topics=[]))
-        cm = CompressionManager()
-        msgs = [Message(role="user", content="q1"), Message(role="assistant", content="a1")]
-        asyncio.run(cm.auto_compact(msgs, model=model, force=True, working_memory=wm))
-        self.assertNotIn("compact.start", [e["type"] for e in events])
-
 
 class TestMainAutoCompactionCount(unittest.TestCase):
     """Only successful full compactions of the active main agent are counted."""

@@ -176,7 +176,7 @@ class TestStreamPromptTooLongReactiveCompact(unittest.TestCase):
         self.assertLess(len(second_request), len(calls["msgs"][0]))
         self.assertTrue(
             any(
-                m.role == "user" and "[Context compressed]" in str(m.content)
+                m.role == "user" and "<context_window>" in str(m.content)
                 for m in second_request
             )
         )

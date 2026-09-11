@@ -390,7 +390,7 @@ result = await agent.run("""
 
 **DeepAgent 默认开启**：
 - `enable_agentic_prompt=True`（Soul + Tools Guide + Heartbeat）
-- 两层上下文压缩（淘汰 → LLM 摘要），见 [Compression](../advanced/compression.md)
+- 两层上下文压缩（淘汰 → 空窗换窗），见 [Compression](../advanced/compression.md)
 - Workspace 长期记忆
 - Session Log 会话持久化
 

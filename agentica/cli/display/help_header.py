@@ -126,7 +126,7 @@ def show_help(skills_registry=None):
             "/retry":           "Retry the last message (resend to agent)",
             "/undo":            "Deprecated — use /rewind (code + conversation rollback)",
             "/rewind":          "Roll back code + conversation to a previous turn: list | <n> --yes",
-            "/compact":         "Compact context (summarize history)",
+            "/compact":         "Start a new context window (no summary)",
             "/btw <question>":  "Ephemeral side question (no tools, not saved)",
             "/queue":           "Run prompt as the NEXT turn (plain input steers the current run)",
             "/steer <text>":    "Guide the running agent mid-task (plain input already steers)",

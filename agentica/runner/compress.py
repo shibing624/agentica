@@ -93,11 +93,9 @@ class CompressMixin:
           Layer 1 - Evict (free): drop the bulk of old tool results and shrink
                     oversized tool-call arguments, oldest-first, down to a
                     target. Nothing is dropped while the window has room.
-          Layer 2 - Summarise (costly, irreversible): replace the history with
-                    an LLM summary. Provider-native compaction is the same
-                    layer done server-side, so it is tried first when the model
-                    supports it; the reactive path in ``_call_with_retry``
-                    forces this layer after a ``prompt_too_long`` rejection.
+          Layer 2 - New window (no LLM summary): replace the activity window
+                    with initial context + notes. ``/compact`` uses the same
+                    cut. Prior turns stay in JSONL.
 
         Ahead of both is Layer 0, which is not compression but an output
         policy and does not run here: it bounds a result the moment it is
@@ -117,65 +115,6 @@ class CompressMixin:
         cm = agent.tool_config.compression_manager
         enable_evict = agent.tool_config.enable_evict
         enable_auto_compact = agent.tool_config.enable_auto_compact
-
-        # Layer 2, provider-native variant. Tried before the local layers
-        # because a successful checkpoint leaves the portable transcript
-        # untouched, so cross-provider fallback remains possible while
-        # subsequent Responses calls use the smaller context. Same gate as
-        # local auto-compact: native *is* Layer 2, done server-side.
-        if (
-            enable_auto_compact
-            and cm is not None
-            and cm.should_native_compact(messages, model, tools=model.tools)
-        ):
-            before_tokens = model.estimate_native_compaction_tokens(messages, model.tools)
-            t0 = time.monotonic()
-            await CompressMixin._fire_pre_compact(agent, messages)
-            try:
-                result = await model.compact_context(messages)
-                if result is None:
-                    raise RuntimeError("model advertised native compaction but returned no checkpoint")
-            except Exception as error:
-                logger.warning(
-                    f"Native compact failed for {model.id}; falling back to local compression: {error}"
-                )
-                if cb is not None:
-                    cb(
-                        {
-                            "type": "compact.native_failed",
-                            "agent_name": agent_name,
-                            "is_main_agent": is_main_agent,
-                            "model": model.id,
-                            "error": str(error),
-                            "elapsed": time.monotonic() - t0,
-                        }
-                    )
-            else:
-                messages[-1].provider_checkpoint = result.checkpoint
-                logger.info(f"Native compact complete for {model.id}")
-                CompressMixin._note_compaction(agent)
-                if agent.run_response is not None:
-                    agent.run_response.metrics = agent.run_response.metrics or {}
-                    compression_metrics = agent.run_response.metrics.setdefault("compression", {})
-                    compression_metrics["native"] = {
-                        "model": model.id,
-                        "input_tokens_before": before_tokens,
-                        "usage": result.usage,
-                    }
-                await CompressMixin._fire_post_compact(agent, messages)
-                if cb is not None:
-                    cb(
-                        {
-                            "type": "compact.native",
-                            "agent_name": agent_name,
-                            "is_main_agent": is_main_agent,
-                            "model": model.id,
-                            "input_tokens_before": before_tokens,
-                            "usage": result.usage,
-                            "elapsed": time.monotonic() - t0,
-                        }
-                    )
-                return
 
         # Layer 1: evict (free). Gated on real context pressure: below the
         # threshold there is nothing to buy by dropping a result the window had
@@ -221,44 +160,165 @@ class CompressMixin:
         if not enable_auto_compact or cm is None:
             return
 
-        # Layer 2: LLM summarisation. The threshold is checked *here* rather
-        # than inside auto_compact() because on_pre_compact flushes memory and
-        # experience buffers through an auxiliary LLM: firing it on every turn
-        # would turn a once-per-many-rounds boundary into a per-turn cost.
-        # Deciding once and forcing keeps the gate and the compaction from
-        # disagreeing about the same number.
+        CompressMixin._maybe_inject_token_budget_reminder(
+            messages, agent, cm, context_tokens, _working,
+        )
+
+        # Layer 2: new window. Threshold checked here so on_pre_compact
+        # (memory flush) only runs on turns that actually roll over.
         if not cm.should_auto_compact(
             messages, model, context_tokens=context_tokens if _window else None
         ):
             return
-        await CompressMixin._fire_pre_compact(agent, messages)
+        if CompressMixin._claim_notes_fallback(
+            messages, agent, model, cm, context_tokens, _working,
+        ):
+            return
+        await CompressMixin._install_new_window(
+            messages, agent, model, loop_state, keep_trailing_turn=True,
+        )
+
+    @staticmethod
+    async def _install_new_window(
+        messages: List[Message],
+        agent: "Agent",
+        model: "Model",
+        loop_state: "LoopState",
+        *,
+        keep_trailing_turn: bool,
+    ) -> bool:
+        """Shared new-window cut for auto-compact and reactive compact."""
+        cm = agent.tool_config.compression_manager
+        if cm is None:
+            return False
+        cb = agent._event_callback
         before = len(messages)
         t0 = time.monotonic()
-        compacted = await cm.auto_compact(messages, model=model, force=True)
-        if compacted:
-            loop_state.context_collapsed = True
-            CompressMixin._note_compaction(agent)
-            logger.debug("Layer 2 (auto-compact): conversation summarised by LLM")
-            await CompressMixin._fire_post_compact(agent, messages)
-            if cb is not None:
-                cb(
-                    {
-                        "type": "compact.auto",
-                        "agent_name": agent_name,
-                        "is_main_agent": is_main_agent,
-                        "before": before,
-                        "after": len(messages),
-                        "elapsed": time.monotonic() - t0,
-                    }
-                )
+        await CompressMixin._fire_pre_compact(agent, messages)
+        compacted = await cm.auto_compact(
+            messages,
+            model=model,
+            force=True,
+            keep_trailing_turn=keep_trailing_turn,
+        )
+        if not compacted:
+            return False
+        loop_state.context_collapsed = True
+        CompressMixin._note_compaction(agent)
+        await CompressMixin._fire_post_compact(agent, messages)
+        if cb is not None:
+            cb(
+                {
+                    "type": "compact.auto",
+                    "agent_name": agent.name or "Agent",
+                    "is_main_agent": agent._parent_run_id is None,
+                    "before": before,
+                    "after": len(messages),
+                    "elapsed": time.monotonic() - t0,
+                    "window_id": cm.window_id,
+                    "new_window": True,
+                }
+            )
+        return True
+
+    @staticmethod
+    def _maybe_inject_token_budget_reminder(
+        messages: List[Message],
+        agent: "Agent",
+        cm: Any,
+        context_tokens: int,
+        working_window: int,
+    ) -> None:
+        """Once-per-window remaining-token notice (Codex post-#27438 reminder)."""
+        from agentica.compression.new_window import notes_path_for
+        from agentica.compression.token_budget import (
+            remaining_text,
+            reminder_threshold,
+            tokens_remaining,
+        )
+
+        if cm.reminder_claimed or working_window <= 0:
+            return
+        left = tokens_remaining(context_tokens, working_window)
+        if left > reminder_threshold(working_window):
+            return
+        last = messages[-1] if messages else None
+        if last is None or last.role == "tool":
+            return
+        if last.role == "assistant" and last.tool_calls:
+            return
+        notes = notes_path_for(agent._session_log)
+        text = remaining_text(left, notes)
+        if CompressMixin._fold_budget_fragment(messages, text):
+            cm.reminder_claimed = True
+
+    @staticmethod
+    def _claim_notes_fallback(
+        messages: List[Message],
+        agent: "Agent",
+        model: "Model",
+        cm: Any,
+        context_tokens: int,
+        working_window: int,
+    ) -> bool:
+        """Codex #33255: once per window, ask the model to write notes first.
+
+        Returns True when compact is postponed. ``fallback_claimed is False``
+        so a MagicMock manager (tests) is not treated as due.
+        """
+        from agentica.compression.new_window import notes_path_for
+        from agentica.compression.notes import (
+            can_author_notes,
+            fallback_buffer_tokens,
+            notes_are_ready,
+        )
+        from agentica.compression.token_budget import fallback_text
+
+        if cm.fallback_claimed is not False:
+            return False
+        if working_window > 0 and context_tokens >= working_window:
+            return False
+        notes = notes_path_for(agent._session_log)
+        if notes_are_ready(notes):
+            return False
+        if not can_author_notes(model.functions):
+            return False
+        if not CompressMixin._fold_budget_fragment(messages, fallback_text(notes)):
+            return False
+        cm.fallback_claimed = True
+        cm.compact_token_floor = min(
+            working_window,
+            context_tokens + fallback_buffer_tokens(working_window),
+        )
+        logger.info(
+            "Auto-compact fallback: notes still empty, "
+            f"postpone until {cm.compact_token_floor} tokens"
+        )
+        return True
+
+    @staticmethod
+    def _fold_budget_fragment(messages: List[Message], text: str) -> bool:
+        from agentica.compression.token_budget import is_context_window_message
+
+        target = next(
+            (
+                m for m in reversed(messages)
+                if m.role == "user" and isinstance(m.content, str)
+            ),
+            None,
+        )
+        if target is None or is_context_window_message(target):
+            return False
+        target.content = f"{target.content}\n\n{text}"
+        return True
 
     @staticmethod
     def _note_compaction(agent: "Agent") -> None:
-        """Record on the run that history was summarised.
+        """Record on the run that the activity window was reset.
 
         Without this the only witness is the CLI event callback, so an SDK
-        caller sees a turn that was slow, cost extra, and quietly lost the
-        early transcript, with nothing to attribute it to.
+        caller sees a turn that quietly dropped early transcript from the
+        prompt, with nothing to attribute it to.
         """
         if agent.run_response is not None:
             agent.run_response.context_compactions += 1
@@ -290,7 +350,9 @@ class CompressMixin:
         await CompressMixin._fire_pre_compact(agent, messages)
         before = len(messages)
         t0 = time.monotonic()
-        compacted = await cm.auto_compact(messages, model=model, force=True)
+        compacted = await cm.auto_compact(
+            messages, model=model, force=True, keep_trailing_turn=True,
+        )
         if compacted:
             CompressMixin._note_compaction(agent)
             logger.info("Reactive compact triggered (prompt_too_long) -- retrying")

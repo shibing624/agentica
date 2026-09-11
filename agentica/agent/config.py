@@ -95,9 +95,9 @@ class ToolConfig:
     enable_evict: bool = True
     enable_auto_compact: bool = True
     # Optional working cap in tokens. Does not rewrite model.context_window
-    # (that is the provider hard limit). Unset → Layer 2 at 95% of the window.
-    # Set → Layer 2 at min(this, window×0.95); Layer 1 ratios use
-    # min(this, window) as the working window.
+    # (that is the provider hard limit). Unset → Layer 2 new window at 95%
+    # of the window. Set → Layer 2 at min(this, window×0.95); Layer 1
+    # ratios use min(this, window) as the working window.
     compact_token_limit: Optional[int] = None
     compression_manager: Optional[Any] = None
 

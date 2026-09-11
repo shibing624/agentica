@@ -1035,11 +1035,10 @@ class AgentService:
         owner: Optional[str] = None,
         instructions: str = "",
     ) -> Dict[str, Any]:
-        """Summarise this session's history — the web counterpart of CLI ``/compact``.
+        """Start a new context window — the web counterpart of CLI ``/compact``.
 
-        Same two-step as the CLI: native provider compact first, then
-        ``CompressionManager.auto_compact(force=True)``. A failed compact
-        leaves the transcript unchanged.
+        Same cut as the CLI: no native summarizer, no LLM summary. A failed
+        compact leaves the transcript unchanged.
         """
         await self._ensure_initialized()
         lock = self._get_session_lock(session_id, owner)
@@ -1057,50 +1056,31 @@ class AgentService:
             if msg_count == 0:
                 return {"ok": False, "error": "No messages to compact."}
 
-            custom = instructions.strip() or None
             model = agent.model
             hooks = agent._run_hooks
             if hooks is not None:
                 await hooks.on_pre_compact(agent=agent, messages=messages)
 
-            native_compacted = False
-            if model.supports_native_compaction:
-                try:
-                    result = await model.compact_context(messages, instructions=custom)
-                    if result is None:
-                        raise RuntimeError("model advertised native compaction but returned no checkpoint")
-                except Exception as error:
-                    logger.warning(
-                        "Native compaction failed (%s); falling back to local compaction", error
-                    )
-                else:
-                    messages[-1].provider_checkpoint = result.checkpoint
-                    wm.collapse_runs(messages)
-                    if agent._session_log is not None:
-                        agent._session_log.append_provider_checkpoint(result.checkpoint)
-                    native_compacted = True
-
-            if not native_compacted:
-                cm = agent.tool_config.compression_manager if agent.tool_config else None
-                if cm is None:
-                    return {"ok": False, "error": "No compression manager on this agent; nothing to compact with."}
-                compacted = await cm.auto_compact(
-                    messages,
-                    model=model,
-                    force=True,
-                    working_memory=wm,
-                    custom_instructions=custom,
-                )
-                if not compacted:
-                    return {"ok": False, "error": "Compaction failed; conversation left unchanged."}
-                wm.collapse_runs(messages)
+            cm = agent.tool_config.compression_manager if agent.tool_config else None
+            if cm is None:
+                return {"ok": False, "error": "No compression manager on this agent; nothing to compact with."}
+            compacted = await cm.auto_compact(
+                messages,
+                model=model,
+                force=True,
+                keep_trailing_turn=True,
+            )
+            if not compacted:
+                return {"ok": False, "error": "New context window failed; conversation left unchanged."}
+            wm.collapse_runs(messages)
 
             if hooks is not None:
                 await hooks.on_post_compact(agent=agent, messages=messages)
 
             return {
                 "ok": True,
-                "native": native_compacted,
+                "native": False,
+                "window_id": cm.window_id,
                 "messages_before": msg_count,
                 "messages_after": len(messages),
                 "usage": await usage_payload(agent, model_provider=self.model_provider),

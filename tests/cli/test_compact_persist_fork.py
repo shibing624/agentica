@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -81,29 +81,21 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
             tui_state={"context_tokens": 50_000, "context_window": 128_000},
         )
 
-        with patch.object(
-            cm, "_summarise_conversation", new_callable=AsyncMock, return_value="SUMMARY",
-        ):
-            _cmd_compact(ctx)
+        _cmd_compact(ctx)
 
         pre_compact.assert_called_once()
         lines = Path(slog.path).read_text(encoding="utf-8").splitlines()
         entries = [json.loads(line) for line in lines if line.strip()]
         types = [e["type"] for e in entries]
         self.assertIn("compact_boundary", types)
-        boundary_idx = types.index("compact_boundary")
-        after = types[boundary_idx + 1:]
-        # The preserved trailing turn, and only it: load() rebuilds the summary
-        # turn from the boundary, so persisting it too would send it twice.
-        self.assertEqual(after, ["user", "assistant"])
-        self.assertNotIn(
-            "SUMMARY",
-            " ".join(str(e.get("content") or "") for e in entries[boundary_idx + 1:]),
-        )
+        boundary = next(e for e in entries if e["type"] == "compact_boundary")
+        self.assertEqual(boundary.get("summary"), "")
+        self.assertEqual(boundary.get("window_id"), 1)
 
         resumed = slog.load()
         contents = " ".join(str(m.get("content") or "") for m in resumed)
-        self.assertEqual(contents.count("SUMMARY"), 1)
+        self.assertNotIn("[Resumed session — previous context summary]", contents)
+        self.assertIn("<context_window>", contents)
         self.assertIn("question", contents)
 
     def test_fork_after_compact_keeps_summary_and_tail(self):
@@ -114,15 +106,12 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
             current_agent=agent,
             tui_state={"context_tokens": 50_000, "context_window": 128_000},
         )
-        with patch.object(
-            cm, "_summarise_conversation", new_callable=AsyncMock, return_value="FORK SUMMARY",
-        ):
-            _cmd_compact(ctx)
+        _cmd_compact(ctx)
 
         forked = slog.fork("forked-after-compact")
         resumed = forked.load()
         contents = " ".join(str(m.get("content") or "") for m in resumed)
-        self.assertIn("FORK SUMMARY", contents)
+        self.assertIn("<context_window>", contents)
         self.assertIn("question", contents)
 
 

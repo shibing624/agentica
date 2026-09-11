@@ -10,6 +10,7 @@ from agentica.tools.base import Tool
 from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.builtin.file_tool import BuiltinFileTool
 from agentica.tools.builtin.execute_tool import BuiltinExecuteTool
+from agentica.tools.builtin.context_tool import BuiltinContextTool
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool, BuiltinTodoTool
 from agentica.tools.builtin.web_tools import (
     BuiltinFetchUrlTool,
@@ -29,6 +30,7 @@ __all__ = [
     "BuiltinWebSearchTool",
     "BuiltinTodoTool",
     "BuiltinMemoryTool",
+    "BuiltinContextTool",
     "BuiltinTaskTool",
     "get_builtin_tools",
     "register_web_search_backend",

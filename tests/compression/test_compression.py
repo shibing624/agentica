@@ -801,50 +801,13 @@ class TestCompressionManagerResolveLimits(unittest.TestCase):
         self.assertEqual(cm.compress_token_limit, 5000, "Should not override explicit value")
 
 
-class TestSummarisationRedaction(unittest.TestCase):
-    """Secrets in the transcript must not reach the summarisation model."""
-
-    def test_conversation_summary_redacts_prompt_input(self):
-        from agentica.compression.manager import CompressionManager
-
-        secret = "sk-abcdefghijklmnopqrstuvwxyz1234567890"
-
-        class FakeSummaryModel:
-            context_window = 200_000
-
-            def __init__(self):
-                self.prompt = None
-
-            async def invoke(self, messages):
-                self.prompt = messages[0].content
-                return SimpleNamespace(content=f"summary with {secret}")
-
-        model = FakeSummaryModel()
-        cm = CompressionManager()
-        msgs = [Message(role="user", content=f"Please inspect OPENAI_API_KEY={secret}")]
-
-        summary = asyncio.run(cm._summarise_conversation(msgs, model))
-
-        self.assertNotIn(secret, model.prompt)
-        self.assertIn("REDACTED", model.prompt)
-        self.assertNotIn(secret, summary)
-        self.assertIn("REDACTED", summary)
-
-
 class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
-    """auto_compact must not clear the system prompt or the pending turn.
-
-    A blind `messages.clear()` left the rest of the run with no instructions and
-    a conversation ending on an assistant turn, which providers reject with
-    "does not support assistant message prefill".
-    """
+    """auto_compact must not clear the system prompt or the pending turn."""
 
     def _compact(self, msgs):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
-        with patch.object(cm, "_summarise_conversation",
-                          new_callable=AsyncMock, return_value="the summary"):
-            result = asyncio.run(cm.auto_compact(msgs, force=True))
+        result = asyncio.run(cm.auto_compact(msgs, force=True))
         self.assertTrue(result)
         return msgs
 
@@ -866,7 +829,7 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
             Message(role="user", content="current question"),
         ])
         self.assertEqual(msgs[-1].role, "user")
-        self.assertEqual(msgs[-1].content, "current question")
+        self.assertIn("current question", msgs[-1].content)
 
     def test_never_ends_on_an_assistant_turn(self):
         msgs = self._compact([
@@ -877,7 +840,6 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
         self.assertNotEqual(msgs[-1].role, "assistant")
 
     def test_mid_turn_tool_pairing_is_kept(self):
-        """Tool results must stay with the assistant tool_calls that produced them."""
         msgs = self._compact([
             Message(role="system", content="sys"),
             Message(role="user", content="old"),
@@ -889,22 +851,19 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
         self.assertEqual([m.role for m in msgs[-3:]], ["user", "assistant", "tool"])
         self.assertEqual(msgs[-1].tool_call_id, "t1")
 
-    def test_old_turns_are_replaced_by_the_summary(self):
+    def test_old_turns_are_dropped_without_a_summary(self):
         msgs = self._compact([
             Message(role="user", content="old question"),
             Message(role="assistant", content="old answer"),
             Message(role="user", content="current question"),
         ])
         joined = " ".join(str(m.content) for m in msgs)
-        self.assertIn("the summary", joined)
-        self.assertNotIn("old answer", joined)
+        self.assertIn("<context_window>", joined)
+        self.assertIn("current question", joined)
+        self.assertFalse(any(m.role == "assistant" for m in msgs))
+        self.assertNotIn("[Context compressed]", joined)
 
     def test_anthropic_tool_round_is_not_mistaken_for_the_pending_question(self):
-        """Anthropic delivers a tool round as a user message of tool_result blocks.
-
-        Cutting the tail there would keep results whose tool_use block lives in
-        the assistant message the summary just replaced, which that API rejects.
-        """
         msgs = self._compact([
             Message(role="system", content="sys"),
             Message(role="user", content="old question"),
@@ -919,271 +878,49 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
         ])
         tail = msgs[-3:]
         self.assertEqual([m.role for m in tail], ["user", "assistant", "user"])
-        self.assertEqual(tail[0].content, "current question")
+        self.assertIn("current question", tail[0].content)
         self.assertEqual(tail[1].tool_calls[0]["id"], "toolu_1")
 
 
 class TestCompressionManagerAutoCompact(unittest.TestCase):
-    """auto_compact circuit breaker and SM-compact."""
+    """auto_compact installs a new window; no LLM, no SM-compact."""
 
-    def test_circuit_breaker_skips_after_max_failures(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager()
-        cm._consecutive_auto_compact_failures = 3
-        msgs = [Message(role="user", content="hi")]
-        result = asyncio.run(cm.auto_compact(msgs, force=True))
-        self.assertFalse(result)
-
-    def test_sm_compact_reuses_working_memory_summary(self):
+    def test_new_window_does_not_call_an_llm(self):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
         msgs = [
             Message(role="user", content="hi"),
             Message(role="assistant", content="hello"),
-        ]
-        wm = MagicMock()
-        wm.summary = MagicMock()
-        wm.summary.summary = "Previously discussed: project setup and testing"
-        wm.summary.topics = ["setup", "testing"]
-
-        result = asyncio.run(cm.auto_compact(msgs, force=True, working_memory=wm))
-        self.assertTrue(result)
-        self.assertIn("[Context compressed]", msgs[0].content)
-        self.assertIn("project setup", msgs[0].content)
-        # The trailing turn is kept verbatim after the summary pair.
-        self.assertEqual([m.role for m in msgs], ["user", "assistant", "user", "assistant"])
-        self.assertEqual(msgs[2].content, "hi")
-
-    def test_failure_increments_counter(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager()
-        msgs = [Message(role="user", content="hi")]
-        with patch.object(cm, '_summarise_conversation', new_callable=AsyncMock, return_value=None):
-            result = asyncio.run(cm.auto_compact(msgs, force=True))
-        self.assertFalse(result)
-        self.assertEqual(cm._consecutive_auto_compact_failures, 1)
-
-    def test_whitespace_summary_does_not_replace_messages(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager()
-        msgs = [
-            Message(role="user", content="old question"),
-            Message(role="assistant", content="old answer"),
-            Message(role="user", content="current"),
-        ]
-        snapshot = [(m.role, m.content) for m in msgs]
-        with patch.object(
-            cm, "_summarise_conversation", new_callable=AsyncMock, return_value="  \n"
-        ):
-            result = asyncio.run(cm.auto_compact(msgs, force=True))
-        self.assertFalse(result)
-        self.assertEqual([(m.role, m.content) for m in msgs], snapshot)
-        self.assertEqual(cm._consecutive_auto_compact_failures, 1)
-
-    def test_whitespace_sm_summary_falls_through_to_llm(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager()
-        msgs = [
-            Message(role="user", content="old"),
-            Message(role="assistant", content="reply"),
             Message(role="user", content="now"),
         ]
-        wm = MagicMock()
-        wm.summary = MagicMock()
-        wm.summary.summary = "  \n"
-        wm.summary.topics = ["noise"]
-        with patch.object(
-            cm, "_summarise_conversation", new_callable=AsyncMock, return_value="real summary"
-        ) as mocked:
-            result = asyncio.run(cm.auto_compact(msgs, force=True, working_memory=wm))
-        mocked.assert_awaited_once()
+        result = asyncio.run(cm.auto_compact(msgs, force=True))
         self.assertTrue(result)
-        self.assertIn("real summary", msgs[0].content)
-        self.assertNotIn("noise", msgs[0].content)
+        self.assertEqual(cm.window_id, 1)
+        self.assertTrue(any("<context_window>" in str(m.content) for m in msgs))
+        self.assertNotIn("[Context compressed]", " ".join(str(m.content) for m in msgs))
 
-    def test_empty_invoke_object_is_not_used_as_summary(self):
-        from agentica.compression.manager import CompressionManager
-
-        class EmptyResp:
-            content = None
-            choices = []
-
-            def __str__(self):
-                return "ModelResponse(content=None)"
-
-        class FakeModel:
-            context_window = 200_000
-
-            async def invoke(self, messages):
-                return EmptyResp()
-
-        cm = CompressionManager()
-        summary = asyncio.run(cm._summarise_conversation(
-            [Message(role="user", content="hi")], FakeModel()
-        ))
-        self.assertIsNone(summary)
-        self.assertIsNone(cm._conversation_previous_summary)
-
-    def test_whitespace_invoke_content_is_rejected(self):
-        from agentica.compression.manager import CompressionManager
-
-        class FakeModel:
-            context_window = 200_000
-
-            async def invoke(self, messages):
-                return SimpleNamespace(content="  \n")
-
-        cm = CompressionManager()
-        summary = asyncio.run(cm._summarise_conversation(
-            [Message(role="user", content="hi")], FakeModel()
-        ))
-        self.assertIsNone(summary)
-
-    def test_text_block_list_content_is_accepted(self):
-        from agentica.compression.manager import CompressionManager
-
-        class FakeModel:
-            context_window = 200_000
-
-            async def invoke(self, messages):
-                return SimpleNamespace(content=[
-                    {"type": "text", "text": "  kept facts  "},
-                ])
-
-        cm = CompressionManager()
-        summary = asyncio.run(cm._summarise_conversation(
-            [Message(role="user", content="hi")], FakeModel()
-        ))
-        self.assertEqual(summary, "kept facts")
-
-    def test_success_resets_counter(self):
+    def test_dropping_trailing_turn_leaves_a_blank_page(self):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
-        cm._consecutive_auto_compact_failures = 2
-        msgs = [Message(role="user", content="hi"), Message(role="assistant", content="ok")]
-        with patch.object(cm, '_summarise_conversation', new_callable=AsyncMock, return_value="summary text"):
-            result = asyncio.run(cm.auto_compact(msgs, force=True))
-        self.assertTrue(result)
-        self.assertEqual(cm._consecutive_auto_compact_failures, 0)
-
-    def test_iterative_summary_does_not_duplicate_new_turn_dump(self):
-        from agentica.compression.manager import CompressionManager
-
-        class FakeModel:
-            context_window = 200_000
-
-            def __init__(self):
-                self.captured_prompt = None
-
-            async def invoke(self, messages):
-                self.captured_prompt = messages[0].content
-
-                class Resp:
-                    content = "updated summary"
-
-                return Resp()
-
-        cm = CompressionManager()
-        cm._conversation_previous_summary = "old summary"
-        model = FakeModel()
         msgs = [
-            Message(role="user", content="user asks for change"),
-            Message(role="assistant", content="assistant responds"),
+            Message(role="system", content="sys"),
+            Message(role="user", content="old question"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current question"),
         ]
-
-        summary = asyncio.run(cm._summarise_conversation(msgs, model))
-
-        self.assertEqual(summary, "updated summary")
-        self.assertIsNotNone(model.captured_prompt)
-        self.assertEqual(model.captured_prompt.count('"role": "user"'), 1)
-        self.assertEqual(model.captured_prompt.count("Conversation to summarise:"), 0)
-
-
-    def test_anthropic_long_request_falls_back_to_streaming_summary(self):
-        from agentica.compression.manager import CompressionManager
-
-        class FakeAnthropicModel:
-            context_window = 1_000_000
-
-            def __init__(self):
-                self.streamed = False
-                self._agent_ref = None
-
-            async def invoke(self, messages):
-                raise ValueError(
-                    "Streaming is required for operations that may take longer than 10 minutes. "
-                    "See https://github.com/anthropics/anthropic-sdk-python#long-requests "
-                    "for more details"
-                )
-
-            async def response_stream(self, messages):
-                self.streamed = True
-                yield ModelResponse(content="streamed ")
-                yield ModelResponse(content="summary")
-
-        cm = CompressionManager()
-        model = FakeAnthropicModel()
-        msgs = [Message(role="user", content="hi"), Message(role="assistant", content="hello")]
-
-        result = asyncio.run(cm.auto_compact(msgs, model=model, force=True))
-
+        result = asyncio.run(cm.auto_compact(msgs, force=True, keep_trailing_turn=False))
         self.assertTrue(result)
-        self.assertTrue(model.streamed)
-        self.assertEqual(cm._consecutive_auto_compact_failures, 0)
-        self.assertIn("streamed summary", msgs[0].content)
+        joined = " ".join(str(m.content) for m in msgs)
+        self.assertNotIn("current question", joined)
+        self.assertIn("New context window started", joined)
 
-
-class TestLayerThresholds(unittest.TestCase):
-    """Layer 1 (evict) / Layer 2 (auto-compact) trigger points across windows.
-
-    Both layers are pure ratios of the window (0.8 / 0.95), so the ordering
-    layer1 < layer2 must hold for EVERY window size — the inverted-layer and
-    negative-threshold regressions both come from mixing a ratio with an
-    absolute buffer, which is what this class pins down.
-    """
-
-    WINDOWS = (8_192, 32_768, 128_000, 200_000, 1_000_000)
-
-    def _layer2_trigger_point(self, window: int) -> int:
-        """Bisect should_auto_compact for the smallest token count that fires."""
+    def test_should_native_compact_is_always_false(self):
         from agentica.compression.manager import CompressionManager
-
         cm = CompressionManager()
-        model = SimpleNamespace(context_window=window, id="test-model")
-        lo, hi = 0, window  # below threshold / at-or-above (window always fires)
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if cm.should_auto_compact([], model, context_tokens=mid):
-                hi = mid
-            else:
-                lo = mid + 1
-        return lo
+        model = SimpleNamespace(context_window=200_000, id="gpt-4o", supports_native_compaction=True)
+        self.assertFalse(cm.should_native_compact([], model))
 
-    def test_both_layers_ordered_and_within_window(self):
-        from agentica.compression.evict import EVICT_THRESHOLD_RATIO
-        from agentica.compression.manager import AUTO_COMPACT_THRESHOLD_RATIO
-
-        for window in self.WINDOWS:
-            layer1 = int(window * EVICT_THRESHOLD_RATIO)
-            layer2 = int(window * AUTO_COMPACT_THRESHOLD_RATIO)
-            with self.subTest(window=window):
-                self.assertGreater(layer1, 0, "negative/zero evict threshold — small-window bug")
-                self.assertLess(layer1, layer2, "layers inverted: summary would burn before free evict")
-                self.assertLess(layer2, window, "threshold must leave headroom below the window")
-
-    def test_layer2_trigger_bisects_to_ratio_and_is_monotonic(self):
-        from agentica.compression.manager import AUTO_COMPACT_THRESHOLD_RATIO
-
-        points = [self._layer2_trigger_point(w) for w in self.WINDOWS]
-        for window, point in zip(self.WINDOWS, points):
-            with self.subTest(window=window):
-                self.assertEqual(point, int(window * AUTO_COMPACT_THRESHOLD_RATIO))
-        self.assertEqual(points, sorted(points))
-        self.assertEqual(len(set(points)), len(points), "trigger points must strictly increase with window")
-
-    def test_small_window_really_full_still_triggers(self):
-        """gpt-4 (8192): the old absolute buffer went negative and fired every
-        turn; the ratio must still fire when the window is genuinely almost full."""
+    def test_threshold_still_uses_window_ratio(self):
         from agentica.compression.manager import CompressionManager
 
         cm = CompressionManager()

@@ -527,6 +527,21 @@ class TestCompactBoundary:
         assert messages[2]["content"] == "new question"
         assert messages[3]["content"] == "new answer"
 
+    def test_empty_summary_does_not_synthesise_a_resume_turn(self, tmp_dir):
+        """New-window cut: the post-boundary tail already carries <context_window>."""
+        log = SessionLog("compact-empty", base_dir=tmp_dir)
+        log.append("user", "old message")
+        log.append("assistant", "old answer")
+        log.append_compact_boundary("", window_id=1)
+        log.append("user", "<context_window>\nCurrent context window 1.\n</context_window>\n\nnew question")
+
+        messages = log.load()
+        joined = " ".join(m["content"] for m in messages)
+        assert "old message" not in joined
+        assert "[Resumed session" not in joined
+        assert "<context_window>" in joined
+        assert "new question" in joined
+
     def test_multiple_compact_boundaries(self, tmp_dir):
         """Only the LAST boundary should be used for resume."""
         log = SessionLog("compact2", base_dir=tmp_dir)

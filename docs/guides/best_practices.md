@@ -588,7 +588,7 @@ from agentica.agent.config import ToolConfig
 agent = Agent(
     tool_config=ToolConfig(
         enable_evict=True,           # Layer 1, default on
-        enable_auto_compact=True,    # Layer 2 auto path, default on
+        enable_auto_compact=True,    # Layer 2 new window, default on
         compression_manager=CompressionManager(
             compress_token_limit=50000,
         ),

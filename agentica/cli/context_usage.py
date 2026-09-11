@@ -18,9 +18,9 @@ from agentica.model.message import Message
 from agentica.utils.tokens import count_tokens, count_tool_tokens
 from agentica.compression.evict import evict_context, evict_threshold_ratio
 
-# Marker written by CompressionManager.auto_compact() and the CLI /compact
-# fallback in front of the summary that replaced the compacted turns.
+# Legacy Layer 2 summary marker. New windows use <context_window> instead.
 COMPACT_SUMMARY_PREFIX = "[Context compressed]"
+CONTEXT_WINDOW_PREFIX = "<context_window>"
 
 
 @dataclass
@@ -157,7 +157,9 @@ async def measure_context(agent) -> ContextBreakdown:
 
 def _is_compact_summary(message) -> bool:
     content = message.content
-    return isinstance(content, str) and content.startswith(COMPACT_SUMMARY_PREFIX)
+    if not isinstance(content, str):
+        return False
+    return content.startswith(COMPACT_SUMMARY_PREFIX) or CONTEXT_WINDOW_PREFIX in content
 
 
 def _as_message(text: str) -> Message:

@@ -323,21 +323,17 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
   Switched to deepseek-chat (keep current provider)
 ```
 
-### `/compact [instructions]`
-手动触发上下文压缩，将当前对话历史摘要化以释放上下文空间：
+### `/compact`
+手动开启一个新的上下文窗口（同一 session，不写 LLM 摘要）：
 ```
 > /compact
-  Context compacted. Summary injected.
-
-> /compact 重点保留关于 API 设计的讨论
-  Context compacted with custom instructions.
+  New context window 1: 40 messages -> 6. Prior turns stay in the session log.
 ```
 
 !!! tip "自动压缩"
     占用升高时会先做免费的 Layer 1 淘汰（约 70% 起）；接近窗口上限时再跑 Layer 2
-    （provider-native compact 或本地 LLM summary）。`/compact` 始终强制 Layer 2。
-
-使用 `OpenAIResponses` 且 endpoint 支持 `/responses/compact` 时，`/compact` 会优先生成 provider-native checkpoint，并保留可跨 provider 的普通 transcript。原生请求失败时回退到本地 LLM summary；失败则保持对话不变（已无 rule-based 回退）。
+    换窗。`/compact` 始终强制换窗。旧轮次留在 JSONL，用 `search_session` 查。
+    目标 / 约束 / 进度写到旁边的 `<session>.notes.md`。多余参数不再当摘要指令。
 
 ### `/new` / `/newchat`
 开启全新会话（清除消息历史，保留模型和工具配置）。切换前会显示当前会话的

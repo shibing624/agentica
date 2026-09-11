@@ -125,8 +125,8 @@ profiles:
 settings:
   num_history_turns: 20
   # enable_evict: true         # Layer 1 淘汰旧工具结果（默认开）
-  # enable_auto_compact: true  # Layer 2 窗口满时自动摘要（默认开；/compact 仍可用）
-  # compact_token_limit: 300000  # 可选工作阈值；不配 = 窗口×0.95 才摘要
+  # enable_auto_compact: true  # Layer 2 窗口满时自动换窗（默认开；/compact 仍可用）
+  # compact_token_limit: 300000  # 可选工作阈值；不配 = 窗口×0.95 才换窗
   # gateway 入站图片/语音/视频：底模看不了时用这个 Gemini 描述/转写
   # media_model:
   #   model_provider: openai

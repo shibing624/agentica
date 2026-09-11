@@ -552,7 +552,7 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 | GET | `/api/memory` | 当前账号的 `MEMORY.md` 索引条目（只读）。没有 PUT——旧前端往这里写 AGENTS.md 会拿到 405 |
 | GET | `/api/sessions` | 当前账号的会话列表（含尚未写出 jsonl 的进行中 run） |
 | GET | `/api/sessions/{id}/usage` | 本会话 Context Window 拆分（与 CLI `/usage` 同一套 `measure_context`：system prompt / 规则 / 技能 / 工具定义 / 对话的 token 数）以及消息数、API 调用、费用 |
-| POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套 native + Layer 2 摘要 |
+| POST | `/api/sessions/{id}/compact` | Web `/compact`：与 CLI 同一套空窗换窗 |
 | POST | `/api/goal` | Web `/goal`：standing-goal 循环。body：`objective`、`session_id`、`token_budget`（默认 `-1` = 不限；不传 turns / wall） |
 | POST | `/api/fs/temp` | 为新建对话创建一个临时工作目录（`$AGENTICA_HOME/tmp/web-chats`） |
 | POST | `/api/chat` | 触发一轮 agent 对话（JSON body：`message`, `session_id`，可选 `images`） |

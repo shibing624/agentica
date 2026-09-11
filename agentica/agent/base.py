@@ -675,6 +675,15 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 else:
                     self.tools = list(self.tools) + [memory_tool]
 
+        from agentica.tools.builtin.context_tool import BuiltinContextTool
+        has_context_tool = any(isinstance(t, BuiltinContextTool) for t in (self.tools or []))
+        if not has_context_tool:
+            context_tool = BuiltinContextTool()
+            if self.tools is None:
+                self.tools = [context_tool]
+            else:
+                self.tools = list(self.tools) + [context_tool]
+
         # Inject generated-skill dirs into any SkillTool BEFORE first use.
         self._inject_generated_skill_dirs()
 
@@ -690,9 +699,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # skills are not advertised in the frozen session guidance.
         self._merge_tool_system_prompts()
 
-        # Layer 2 is always constructed so /compact and cross-provider
-        # fallback have a manager. The automatic path (runner / native /
-        # reactive) is gated by ToolConfig.enable_auto_compact, default on.
+        # Layer 2 is always constructed so /compact has a
+        # manager. The automatic path (runner / reactive) is gated by
+        # ToolConfig.enable_auto_compact, default on.
         if self.tool_config.compression_manager is None:
             self.tool_config.compression_manager = CompressionManager(
                 model=self.resolve_auxiliary_model("compression"),
@@ -779,6 +788,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         if not self.tools:
             return
         from agentica.tools.builtin import BuiltinTodoTool, BuiltinMemoryTool
+        from agentica.tools.builtin.context_tool import BuiltinContextTool
         from agentica.tools.builtin.file_tool import BuiltinFileTool
         from agentica.tools.builtin_task_tool import BuiltinTaskTool
         from agentica.tools.skill_tool import SkillTool
@@ -796,6 +806,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 tool.set_parent_agent(self)
             elif isinstance(tool, BuiltinMemoryTool):
                 tool.set_workspace(self.workspace)
+            elif isinstance(tool, BuiltinContextTool):
+                tool.set_agent(self)
             elif isinstance(tool, SkillTool):
                 tool._agent = self
 

@@ -45,14 +45,29 @@ class TestMeasureContext(unittest.TestCase):
 
         bare = _measure(_agent())
         withtool = _measure(_agent(tools=[sample_tool]))
-        self.assertEqual(_row(bare, "Tool definitions"), 0)
-        self.assertGreater(_row(withtool, "Tool definitions"), 0)
+        self.assertGreater(_row(bare, "Tool definitions"), 0, "BuiltinContextTool is always on")
+        self.assertGreater(_row(withtool, "Tool definitions"), _row(bare, "Tool definitions"))
         self.assertGreater(withtool.total, bare.total)
 
     def test_compacted_summary_is_split_from_ordinary_conversation(self):
         agent = _agent(add_history_to_context=True)
         agent.working_memory.add_run(AgentRun(response=RunResponse(messages=[
             Message(role="user", content=f"{COMPACT_SUMMARY_PREFIX}\n\nearlier turns " * 50),
+            Message(role="assistant", content="Understood."),
+            Message(role="user", content="and now the live question " * 50),
+        ])))
+        b = _measure(agent)
+        self.assertGreater(_row(b, "Summarized conversation"), 0)
+        self.assertGreater(_row(b, "Conversation"), 0)
+
+    def test_new_window_preamble_is_split_from_ordinary_conversation(self):
+        agent = _agent(add_history_to_context=True)
+        agent.working_memory.add_run(AgentRun(response=RunResponse(messages=[
+            Message(
+                role="user",
+                content="<context_window>\nCurrent context window 1.\n</context_window>\n\n"
+                + ("earlier turns " * 50),
+            ),
             Message(role="assistant", content="Understood."),
             Message(role="user", content="and now the live question " * 50),
         ])))

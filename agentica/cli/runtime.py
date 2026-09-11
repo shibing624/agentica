@@ -89,6 +89,8 @@ BUILTIN_TOOLS = [
     "delegate",
     "save_memory",
     "search_memory",
+    "search_session",
+    "read_session_item",
     "get_skill_info",
     "list_skills",
     "ask_user_question",
@@ -482,7 +484,7 @@ def parse_args():
         action=argparse.BooleanOptionalAction,
         default=None,
         dest="auto_compact",
-        help="Layer 2: auto-summarise when the context window fills "
+        help="Layer 2: start a new context window when the window fills "
         "(default: on; --no-auto-compact disables). /compact still works. "
         "config.yaml settings.enable_auto_compact also applies.",
     )

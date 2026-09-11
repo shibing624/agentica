@@ -7,6 +7,7 @@ import re
 
 from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.builtin import (
+    BuiltinContextTool,
     BuiltinExecuteTool,
     BuiltinFetchUrlTool,
     BuiltinFileTool,
@@ -61,6 +62,14 @@ _FOREIGN = {
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
         "task", "delegate",
     }),
+    "search_session": frozenset({
+        "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
+        "task", "delegate", "web_search", "fetch_url",
+    }),
+    "read_session_item": frozenset({
+        "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
+        "task", "delegate", "web_search", "fetch_url",
+    }),
 }
 
 
@@ -96,6 +105,7 @@ def _tools():
         BuiltinFetchUrlTool(),
         BuiltinTodoTool(),
         BuiltinMemoryTool(),
+        BuiltinContextTool(),
     ]
 
 

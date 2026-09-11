@@ -3,14 +3,11 @@
 
 The prompt builder reads history from ``working_memory.runs`` via
 ``get_messages_from_last_n_runs()``, not from ``working_memory.messages``.
-Compaction that rewrites only the latter shrinks the archive while leaving the
-next request as large as before, so these tests assert on the ``runs``-derived
-list rather than on ``messages``.
 """
 import os
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -20,13 +17,11 @@ from agentica.cli.context_usage import measure_context
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
-from agentica.model.base import NativeCompactionResult
 from agentica.model.openai import OpenAIChat
 from agentica.run_response import RunResponse
 
 
 def _fat_run(turn: int) -> AgentRun:
-    """An AgentRun roughly the shape of a real tool-using turn."""
     user = Message(role="user", content=f"question {turn} " + "detail " * 200)
     assistant = Message(role="assistant", content=f"answer {turn} " + "prose " * 200)
     tool = Message(role="tool", tool_call_id=f"c{turn}", content="tool output " * 400)
@@ -62,15 +57,14 @@ class TestCollapseRuns(unittest.TestCase):
             wm.add_run(_fat_run(i))
         before = len(wm.get_messages_from_last_n_runs())
 
-        wm.collapse_runs([Message(role="user", content="[Context compressed] summary")])
+        wm.collapse_runs([Message(role="user", content="<context_window>\nCurrent context window 1.\n</context_window>")])
 
         after = wm.get_messages_from_last_n_runs()
         self.assertEqual(len(wm.runs), 1)
         self.assertLess(len(after), before)
-        self.assertIn("[Context compressed]", after[0].content)
+        self.assertIn("<context_window>", after[0].content)
 
     def test_collapse_deep_copies_messages(self):
-        """Later mutation of the caller's list must not rewrite stored history."""
         wm = WorkingMemory()
         wm.add_run(_fat_run(0))
         source = [Message(role="user", content="summary")]
@@ -91,70 +85,34 @@ class TestCollapseRuns(unittest.TestCase):
 class TestCmdCompactShrinksNextRequest(unittest.TestCase):
     """/compact must reduce the history the next request carries."""
 
-    def _run_compact(self, agent):
+    def _run_compact(self, agent, args=""):
         ctx = CommandContext(
             agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
             current_agent=agent,
             tui_state={"context_tokens": 120000, "context_window": 128000},
         )
-        _cmd_compact(ctx)
+        _cmd_compact(ctx, args)
         return ctx
 
-    def _summary(self, agent, text="the summary"):
-        """Stub the one LLM call /compact makes; None means it failed."""
-        cm = agent.tool_config.compression_manager
-        return patch.object(
-            cm, "_summarise_conversation", new_callable=AsyncMock, return_value=text,
-        )
-
-    def test_llm_summary_shrinks_runs_history(self):
+    def test_new_window_shrinks_runs_history(self):
         agent = _build_agent(num_runs=5)
         before = asyncio.run(measure_context(agent)).total
-
-        with self._summary(agent):
-            self._run_compact(agent)
-
+        self._run_compact(agent)
         self.assertLess(asyncio.run(measure_context(agent)).total, before)
+        joined = " ".join(str(m.content) for m in agent.working_memory.get_messages_from_last_n_runs())
+        self.assertIn("<context_window>", joined)
+        self.assertNotIn("[Context compressed]", joined)
 
-    def test_llm_summary_lowers_status_bar_context(self):
+    def test_new_window_lowers_status_bar_context(self):
         agent = _build_agent(num_runs=5)
-        with self._summary(agent):
-            ctx = self._run_compact(agent)
+        ctx = self._run_compact(agent)
         self.assertLess(ctx.tui_state["context_tokens"], 120000)
-
-    def test_failed_summary_leaves_the_conversation_untouched(self):
-        """The rule-based fallback this replaces "succeeded" by clearing the
-        message list — system prompt included — so a failed /compact used to
-        destroy more than it saved. Failing loudly and changing nothing is the
-        only honest outcome."""
-        agent = _build_agent(num_runs=5)
-        agent._session_log = MagicMock()
-        messages_before = list(agent.working_memory.messages)
-        runs_before = len(agent.working_memory.runs)
-        tokens_before = asyncio.run(measure_context(agent)).total
-        console = MagicMock()
-
-        with (
-            self._summary(agent, text=None),
-            patch("agentica.cli.commands.session.get_console", return_value=console),
-        ):
-            self._run_compact(agent)
-
-        self.assertEqual(agent.working_memory.messages, messages_before)
-        self.assertEqual(len(agent.working_memory.runs), runs_before)
-        self.assertEqual(asyncio.run(measure_context(agent)).total, tokens_before)
-        agent._session_log.append_compact_boundary.assert_not_called()
-        rendered = "\n".join(str(call) for call in console.print.call_args_list)
-        self.assertIn("Compaction failed", rendered)
 
     def test_compact_still_runs_when_auto_compact_is_off(self):
         agent = _build_agent(num_runs=5)
         agent.tool_config.enable_auto_compact = False
         before = asyncio.run(measure_context(agent)).total
-
-        with self._summary(agent):
-            self._run_compact(agent)
-
+        self._run_compact(agent)
         self.assertLess(asyncio.run(measure_context(agent)).total, before)
 
     def test_compact_is_noop_on_empty_history(self):
@@ -165,67 +123,17 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         ctx = self._run_compact(agent)
         self.assertEqual(ctx.tui_state["context_tokens"], 120000)
 
-    def test_responses_compact_uses_native_checkpoint_before_local_summary(self):
+    def test_compact_ignores_native_endpoint_and_instructions(self):
         from agentica.model.openai import OpenAIResponses
 
         agent = _build_agent(num_runs=2)
         model = OpenAIResponses(id="gpt-5.6-sol", api_key="fake_openai_key")
-        checkpoint = {
-            "type": "openai_responses_compaction",
-            "provider": "OpenAI",
-            "model": model.id,
-            "base_url": "https://api.openai.com/v1",
-            "output": [{"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}],
-        }
-        model.compact_context = AsyncMock(
-            return_value=NativeCompactionResult(
-                checkpoint=checkpoint,
-                usage={"total_tokens": 100},
-            )
-        )
+        model.compact_context = AsyncMock(side_effect=AssertionError("native compact is deleted"))
         agent.model = model
-        ctx = CommandContext(
-            agent_config={"model_provider": "openai", "model_name": model.id},
-            current_agent=agent,
-            tui_state={"context_tokens": 120000, "context_window": 200000},
-        )
-
-        _cmd_compact(ctx, "Keep decisions")
-
-        model.compact_context.assert_awaited_once_with(
-            agent.working_memory.messages,
-            instructions="Keep decisions",
-        )
-        assert agent.working_memory.messages[-1].provider_checkpoint == checkpoint
-        assert agent.working_memory.get_messages_from_last_n_runs()[-1].provider_checkpoint == checkpoint
-
-    def test_native_failure_logs_warning_without_printing_fallback_error(self):
-        from agentica.model.openai import OpenAIResponses
-
-        agent = _build_agent(num_runs=5)
-        model = OpenAIResponses(id="missing-compact-model", api_key="fake_openai_key")
-        model.compact_context = AsyncMock(side_effect=RuntimeError("503 model_not_found"))
-        agent.model = model
-        ctx = CommandContext(
-            agent_config={"model_provider": "openai", "model_name": model.id},
-            current_agent=agent,
-            tui_state={"context_tokens": 120000, "context_window": 200000},
-        )
-        console = MagicMock()
-
-        with (
-            self._summary(agent),
-            patch("agentica.cli.commands.session.get_console", return_value=console),
-            patch("agentica.cli.commands.session.logger") as logger,
-        ):
-            _cmd_compact(ctx)
-
-        rendered = "\n".join(str(call) for call in console.print.call_args_list)
-        self.assertNotIn("Native compaction failed", rendered)
-        self.assertNotIn("Falling back to local compaction", rendered)
-        logger.warning.assert_called_once()
-        self.assertIn("Native compaction failed", logger.warning.call_args.args[0])
+        ctx = self._run_compact(agent, "Keep decisions")
+        model.compact_context.assert_not_called()
         self.assertLess(ctx.tui_state["context_tokens"], 120000)
+
 
 if __name__ == "__main__":
     unittest.main()

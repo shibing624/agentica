@@ -31,7 +31,7 @@ agent = Agent(
 )
 ```
 
-会话摘要会注入到 System Prompt 末尾，同时被 `CompressionManager.auto_compact()` 直接复用——压缩时无需额外 LLM 调用。
+会话摘要会注入到 System Prompt 末尾。Layer 2 compact 不再复用这份摘要：满窗时换空窗，历史用 `search_session` 从 JSONL 取。
 
 ---
 

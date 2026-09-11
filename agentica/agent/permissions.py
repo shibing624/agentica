@@ -44,6 +44,8 @@ READ_ONLY_TOOLS: Set[str] = frozenset({
     "write_todos", "task",
     "list_agents",
     "search_memory",
+    "search_session",
+    "read_session_item",
 })
 
 

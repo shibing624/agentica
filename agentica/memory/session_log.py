@@ -450,11 +450,13 @@ class SessionLog:
         *,
         model: Optional[str] = None,
         covered_prefix_hash: Optional[str] = None,
+        window_id: Optional[int] = None,
     ) -> str:
         """Mark a compaction boundary. Breaks the UUID chain (parent_uuid=null).
 
         On resume, all entries before the last boundary are discarded.
-        The summary becomes the starting context.
+        An empty ``summary`` is a new-window cut (no synthesised summary turn).
+        A non-empty summary is legacy Layer 2 and still replayed as a pair.
 
         ``model`` and ``covered_prefix_hash`` attach projection lineage data:
         the boundary records the identity it was compacted under (see
@@ -472,6 +474,7 @@ class SessionLog:
             "version": self._version,
             "git_branch": self._git_branch,
             "summary": summary,
+            "window_id": window_id,
             "lineage_key": self.lineage_key(model),
             "model": model,
             "covered_prefix_hash": covered_prefix_hash,
@@ -767,6 +770,60 @@ class SessionLog:
                     last_boundary_idx = len(entries) - 1
         return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
 
+    def search_entries(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
+        """Keyword search over conversation rows, including pre-boundary.
+
+        History retrieval must see what ``load()`` skips. Event / goal /
+        compact_boundary rows are not hits. Terms are matched independently
+        and ranked (see ``agentica.memory.session_search``).
+        """
+        from agentica.memory.session_search import rank_entries
+
+        rows: List[Dict[str, Any]] = []
+        for entry in self._iter_entries():
+            if entry.get("type", "") not in ("user", "assistant", "tool"):
+                continue
+            rows.append(entry)
+        return rank_entries(rows, query, limit=min(20, max(1, int(limit))))
+
+    def read_entry(self, uuid: str) -> Optional[Dict[str, Any]]:
+        """Return one conversation row by uuid, or None."""
+        key = uuid.strip()
+        if not key:
+            return None
+        for entry in self._iter_entries():
+            if entry.get("uuid") == key:
+                return entry
+        return None
+
+    def format_entry(
+        self,
+        entry: Dict[str, Any],
+        limit: int = 8000,
+        offset_chars: int = 0,
+        limit_chars: Optional[int] = None,
+    ) -> str:
+        """Render one JSONL row for the model (Codex read_item slice)."""
+        entry_type = entry.get("type", "")
+        uuid = entry.get("uuid", "")
+        content = entry.get("content", "")
+        if not isinstance(content, str):
+            content = str(content)
+        start = max(0, int(offset_chars))
+        if start:
+            content = content[start:]
+        cap = limit if limit_chars is None else max(1, int(limit_chars))
+        if len(content) > cap:
+            content = content[:cap] + "\n…[truncated]"
+        lines = [f"item_id={uuid}", f"type={entry_type}"]
+        if entry.get("tool_name"):
+            lines.append(f"tool_name={entry['tool_name']}")
+        if entry.get("timestamp"):
+            lines.append(f"timestamp={entry['timestamp']}")
+        lines.append("")
+        lines.append(content)
+        return "\n".join(lines)
+
     def cache_warmth_hint(
         self,
         model: Optional[str] = None,
@@ -960,7 +1017,10 @@ class SessionLog:
         """Build message list from parsed entries."""
         messages: List[Dict[str, Any]] = []
 
-        if last_boundary_summary is not None:
+        # Empty summary is a new-window cut: the post-boundary tail already
+        # carries <context_window> / notes. Do not synthesise a fake summary
+        # turn (legacy Layer 2 used a non-empty summary here).
+        if last_boundary_summary:
             messages.append({
                 "role": "user",
                 "content": f"[Resumed session — previous context summary]\n\n{last_boundary_summary}",

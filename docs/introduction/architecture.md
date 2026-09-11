@@ -84,7 +84,7 @@ Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，
 
 ## 核心执行引擎（Agentic Loop）
 
-单体 Agent 跑在一个纯控制流的 `while(true)` 引擎里，严格由工具调用驱动，内置防死循环、成本追踪、[两层上下文压缩](../advanced/compression.md)（免费淘汰 → LLM 摘要）和四层安全护栏：
+单体 Agent 跑在一个纯控制流的 `while(true)` 引擎里，严格由工具调用驱动，内置防死循环、成本追踪、[两层上下文压缩](../advanced/compression.md)（免费淘汰 → 空窗换窗）和四层安全护栏：
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Agent Loop 架构图" />
@@ -108,7 +108,7 @@ Runner._run_impl()
     │
     ├─► 上下文压缩检查       (Runner._maybe_compress_messages)
     │       ├── Layer 1: evict_context() — 淘汰旧结果 + 收缩参数（免费；`enable_evict`）
-    │       └── Layer 2: CompressionManager.auto_compact() — LLM 摘要（`enable_auto_compact`）
+    │       └── Layer 2: CompressionManager.auto_compact() — 空窗换窗（`enable_auto_compact`）
     │
     ├─► LLM API 调用         (Model.response / response_stream)
     │
@@ -148,12 +148,12 @@ Layer 1 淘汰（免费，无 LLM）:
     同时收缩过大的 tool_call 参数字符串（JSON 仍然合法）
     降回 context_window × 0.5 就停；模型还没看过的当前批次永不淘汰
 
-Layer 2 摘要（一次 LLM 调用，不可逆）:
+Layer 2 换窗（免费，无 LLM）:
     淘汰兜不住时才走这层
-    整个对话历史 → LLM 摘要 → [Context compressed]\n{summary}
-    保留 system prompt 和从最后一条 user 消息起的整个尾部
-    CompactBoundary 写入 Session Log，恢复时从此处开始
-    provider 支持时优先用服务端原生 compact 做同一件事
+    活动窗 → <context_window> + session notes 摘录
+    auto / /compact 保留 system prompt 和正在问的尾巴
+    空 summary 的 compact_boundary 写入 Session Log，恢复时不合成假摘要轮
+    旧轮次用 search_session / read_session_item 从 JSONL 取回
 ```
 
 淘汰没有「保留最近 N 条」这类计数参数：任何固定条数都会输给 N+1 大小的并行批次，最近的结果靠「够到之前就停」自然幸存。

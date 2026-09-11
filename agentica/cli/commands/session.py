@@ -807,65 +807,41 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         con.print("[yellow]No messages to compact.[/yellow]")
         return
 
-    custom_instructions = cmd_args.strip() if cmd_args else None
+    extra = cmd_args.strip() if cmd_args else ""
     model = agent.model
     wm = agent.working_memory
+    if extra:
+        con.print(
+            "[dim]/compact no longer takes summariser instructions — "
+            "write them to the session notes file instead.[/dim]"
+        )
 
-    # Same data-loss boundary as the runner: flush memory/experience buffers
-    # before the transcript is replaced by a summary.
     hooks = agent._run_hooks
     if hooks is not None:
         _run_async_safe(hooks.on_pre_compact(agent=agent, messages=messages))
 
-    native_compacted = False
-    if model.supports_native_compaction:
-        con.print(f"[dim]Compacting {msg_count} messages with the provider-native endpoint...[/dim]")
-        try:
-            result = _run_async_safe(
-                model.compact_context(messages, instructions=custom_instructions)
-            )
-            if result is None:
-                raise RuntimeError("model advertised native compaction but returned no checkpoint")
-        except Exception as error:
-            logger.warning(
-                "Native compaction failed (%s); falling back to local compaction", error
-            )
-        else:
-            messages[-1].provider_checkpoint = result.checkpoint
-            wm.collapse_runs(messages)
-            if agent._session_log is not None:
-                agent._session_log.append_provider_checkpoint(result.checkpoint)
-            native_compacted = True
-            con.print(
-                f"[green]Context compacted with {model.id}; portable history remains available.[/green]"
-            )
-
     cm = agent.tool_config.compression_manager if agent.tool_config else None
-    if not native_compacted:
-        if cm is None:
-            con.print("[red]No compression manager on this agent; nothing to compact with.[/red]")
-            return
-        con.print(f"[dim]Compacting {msg_count} messages with LLM summary...[/dim]")
-        compacted = _run_async_safe(
-            cm.auto_compact(
-                messages,
-                model=model,
-                force=True,
-                working_memory=wm,
-                custom_instructions=custom_instructions,
-            )
+    if cm is None:
+        con.print("[red]No compression manager on this agent; nothing to compact with.[/red]")
+        return
+    con.print(f"[dim]Starting a new context window ({msg_count} messages)...[/dim]")
+    compacted = _run_async_safe(
+        cm.auto_compact(
+            messages,
+            model=model,
+            force=True,
+            keep_trailing_turn=True,
         )
-        if not compacted:
-            # auto_compact only rewrites the list once it holds a summary, so a
-            # False return means nothing moved. Saying so and stopping is the
-            # whole answer: the fallback this replaces "succeeded" by clearing
-            # the message list — system prompt included — and stitching a
-            # 300-char-per-message digest back in its place, which is a worse
-            # transcript than the one it destroyed.
-            con.print("[red]Compaction failed; conversation left unchanged.[/red]")
-            return
-        wm.collapse_runs(messages)
-        con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} summary.[/green]")
+    )
+    if not compacted:
+        con.print("[red]New context window failed; conversation left unchanged.[/red]")
+        return
+    wm.collapse_runs(messages)
+    con.print(
+        f"[green]New context window {cm.window_id}: "
+        f"{msg_count} messages -> {len(messages)}. "
+        f"Prior turns stay in the session log.[/green]"
+    )
 
     if hooks is not None:
         _run_async_safe(hooks.on_post_compact(agent=agent, messages=messages))

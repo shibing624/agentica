@@ -68,7 +68,7 @@ COMMAND_REGISTRY = {
     "/save": (_cmd_export, "Save session JSONL (alias for /export)"),
     "/retry": (_cmd_retry, "Retry the last message (resend to agent)"),
     "/undo": (_cmd_undo, "Deprecated — use /rewind (code + conversation rollback)"),
-    "/compact": (_cmd_compact, "Compact context (summarize history)"),
+    "/compact": (_cmd_compact, "Start a new context window (no summary)"),
     "/rename": (_cmd_rename, "Rename the current session for easy resume"),
     "/resume": (_cmd_resume, "Resume by number, name, or id prefix"),
     "/sessions": (_cmd_resume, "List sessions and resume optionally (alias for /resume)"),

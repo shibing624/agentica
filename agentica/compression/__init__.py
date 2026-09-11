@@ -22,6 +22,22 @@ from agentica.compression.manager import (
     auto_compact_threshold,
     AUTO_COMPACT_THRESHOLD_RATIO,
 )
+from agentica.compression.new_window import (
+    notes_path_for,
+    start_new_context_window,
+)
+from agentica.compression.notes import (
+    compose_transcript_digest,
+    ensure_rollover_notes,
+    notes_are_ready,
+)
+from agentica.compression.token_budget import (
+    REMINDER_REMAINING_RATIO,
+    fallback_text,
+    full_window_text,
+    remaining_text,
+    reminder_threshold,
+)
 from agentica.compression.tool_result_storage import (
     maybe_persist_result,
     enforce_tool_batch_budget,
@@ -41,6 +57,16 @@ __all__ = [
     "working_context_window",
     "auto_compact_threshold",
     "AUTO_COMPACT_THRESHOLD_RATIO",
+    "notes_path_for",
+    "start_new_context_window",
+    "compose_transcript_digest",
+    "ensure_rollover_notes",
+    "notes_are_ready",
+    "REMINDER_REMAINING_RATIO",
+    "fallback_text",
+    "full_window_text",
+    "remaining_text",
+    "reminder_threshold",
     "evict_context",
     "evict_tool_results",
     "shrink_tool_call_arguments",

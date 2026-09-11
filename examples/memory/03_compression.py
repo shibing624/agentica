@@ -5,7 +5,7 @@
 
 This example shows:
 1. Token counting for messages, tools, and multi-modal content
-2. Two-layer context compression: free eviction, then LLM summarisation
+2. Two-layer context compression: free eviction, then an empty new window
 """
 import os
 import sys
@@ -120,7 +120,7 @@ def demo_layer1_eviction():
 
 
 def demo_agent_with_compression():
-    """Both layers are on by default; only Layer 2 is configurable."""
+    """Both layers are on by default; Layer 2 no longer calls an LLM."""
     print("\n" + "=" * 60)
     print("Agent with Compression Demo")
     print("=" * 60)

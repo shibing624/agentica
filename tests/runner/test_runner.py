@@ -484,9 +484,7 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         return agent, cm
 
     def _run_with_compaction(self, agent, cm):
-        with patch.object(cm, "should_auto_compact", return_value=True), \
-             patch.object(cm, "_summarise_conversation",
-                          new_callable=AsyncMock, return_value="a summary of earlier turns"):
+        with patch.object(cm, "should_auto_compact", return_value=True):
             return agent.run_sync("current question")
 
     def test_turns_own_answer_is_not_lost(self):
@@ -513,7 +511,7 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         history = agent.working_memory.get_messages_from_last_n_runs()
         joined = " ".join(str(m.content) for m in history)
         self.assertLessEqual(len(history), before)
-        self.assertIn("a summary of earlier turns", joined)
+        self.assertIn("<context_window>", joined)
         self.assertNotIn("old answer 0", joined)
 
     def test_uncompacted_run_still_uses_the_prefix_slice(self):
@@ -633,6 +631,8 @@ class TestRunnerEvictionGate(unittest.TestCase):
 
 
 class TestRunnerNativeCompaction(unittest.TestCase):
+    """Native summarizer compact is no longer a Layer 2 path."""
+
     def _agent(self):
         from agentica.agent import Agent
         from agentica.compression.manager import CompressionManager
@@ -644,35 +644,27 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         agent.tool_config.compression_manager = cm
         return agent, model, cm
 
-    def test_native_success_skips_destructive_local_stages(self):
-        from agentica.model.base import NativeCompactionResult
+    def test_native_endpoint_is_not_invoked(self):
+        from agentica.compression import EvictionResult
         from agentica.runner import Runner
 
         agent, model, cm = self._agent()
         messages = [Message(role="user", content="long context")]
-        result = NativeCompactionResult(
-            checkpoint={
-                "type": "openai_responses_compaction",
-                "provider": "OpenAI",
-                "model": model.id,
-                "base_url": "https://api.openai.com/v1",
-                "output": [{"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}],
-            },
-            usage={"total_tokens": 123},
+        model.compact_context = AsyncMock(
+            side_effect=AssertionError("native compact is no longer a Layer 2 path")
         )
-        model.estimate_native_compaction_tokens = MagicMock(return_value=160_000)
-        model.compact_context = AsyncMock(return_value=result)
 
-        with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.compress.evict_context") as evict, \
+        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
+             patch.object(cm, "should_auto_compact", return_value=False), \
              patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        self.assertEqual(messages[-1].provider_checkpoint, result.checkpoint)
-        evict.assert_not_called()
-        local_auto.assert_not_called()
+        model.compact_context.assert_not_called()
+        evict.assert_called_once()
+        local_auto.assert_not_awaited()
+        self.assertIsNone(messages[-1].provider_checkpoint)
 
-    def test_auto_compact_off_skips_native(self):
+    def test_auto_compact_off_skips_layer2(self):
         from agentica.runner import Runner
 
         agent, model, cm = self._agent()
@@ -682,27 +674,22 @@ class TestRunnerNativeCompaction(unittest.TestCase):
             side_effect=AssertionError("native compact must not run when auto-compact is off")
         )
 
-        with patch.object(cm, "should_native_compact", return_value=True) as native_gate, \
-             patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
+        with patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        native_gate.assert_not_called()
         model.compact_context.assert_not_called()
         local_auto.assert_not_awaited()
 
-    def test_native_failure_falls_back_to_local_pipeline(self):
+    def test_layer2_installs_local_new_window(self):
         from agentica.compression import EvictionResult
         from agentica.runner import Runner
 
         agent, model, cm = self._agent()
         messages = [Message(role="user", content="long context")]
-        model.estimate_native_compaction_tokens = MagicMock(return_value=160_000)
-        model.compact_context = AsyncMock(side_effect=RuntimeError("404 compact unsupported"))
 
-        with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
+        with patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
              patch.object(cm, "should_auto_compact", return_value=True), \
-             patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as local_auto:
+             patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=True) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
         evict.assert_called_once()
