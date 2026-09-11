@@ -108,7 +108,18 @@ class TestSearchEntriesRank(unittest.TestCase):
             sum(len(h["snippet"]) for h in hits),
             USER_QUESTION_BUDGET_CHARS + 1,
         )
-        self.assertTrue(hits[0]["snippet"].endswith("…"))
+        self.assertIn(" … ", hits[0]["snippet"])
+
+    def test_long_question_keeps_its_closing_ask(self):
+        """The ask is at the end; the index must not show only the paste."""
+        rows = [{
+            "uuid": "1",
+            "type": "user",
+            "content": ("贴一段无关日志 " * 100) + "前面问了啥，咋办？",
+        }]
+        snippet = list_user_questions(rows)[0]["snippet"]
+        self.assertIn("前面问了啥，咋办？", snippet)
+        self.assertIn("贴一段无关日志", snippet)
 
     def test_role_filters_keyword_hits(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -195,6 +206,7 @@ class TestSearchEntriesRank(unittest.TestCase):
             log.append("assistant", "旧回答")
             # an in-turn flush wrote this turn's row before the window filled
             log.append("user", "现在怎么办？")
+            log.append("assistant", "先查 JSONL")
             log.append("tool", "hit evict.py", tool_name="grep", tool_call_id="c1")
             log.append_compact_boundary("", window_id=1)
             log.append(
@@ -202,20 +214,24 @@ class TestSearchEntriesRank(unittest.TestCase):
                 "<context_window>\nCurrent context window 1.\n"
                 "</context_window>\n\n现在怎么办？",
             )
+            log.append("assistant", "先查 JSONL")
             log.append("tool", "hit evict.py", tool_name="grep", tool_call_id="c1")
 
             questions = [h["snippet"] for h in log.list_user_questions()]
             pending = log.search_entries("现在怎么办")
+            assistant = log.search_entries("先查 JSONL")
             tool_hit = log.search_entries("hit evict.py")
             old = log.search_entries("ZX-41827")
+            prior = log.search_entries("旧回答")
         self.assertEqual(
             len([q for q in questions if "现在怎么办" in q]), 1,
             "the re-logged pending question must be listed once",
         )
         self.assertEqual(len(pending), 1)
+        self.assertEqual(len(assistant), 1)
         self.assertEqual(len(tool_hit), 1)
-        # Pre-boundary history is not collateral damage.
         self.assertEqual(len(old), 1)
+        self.assertEqual(len(prior), 1)
 
     def test_zero_hit_keyword_stays_empty(self):
         with tempfile.TemporaryDirectory() as tmp:

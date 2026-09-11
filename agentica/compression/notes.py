@@ -91,17 +91,27 @@ def _is_pad(text: str) -> bool:
     return head.startswith(_PAD_MARK_PREFIX) or _PAD_MARK_PREFIX in head
 
 
-def _clip(text: str, head: int, tail: int) -> str:
+def _clip(text: str, head: int, tail: int, marker: str = "\n…\n") -> str:
     if len(text) <= head + tail:
         return text
-    return text[:head].rstrip() + "\n…\n" + text[-tail:].lstrip()
+    return text[:head].rstrip() + marker + text[-tail:].lstrip()
+
+
+def clip_head_tail(text: str, limit: int, marker: str = "\n…\n") -> str:
+    """Keep both ends of an over-long block. The tail carries the ask.
+
+    Head-only clipping lost it: an assistant turn that reasoned out loud and
+    ended with 「要我把行号一并订正吗？」 reached the next window as reasoning
+    with no question, so the user's "ok" had no visible antecedent. Tool
+    results already kept both ends (``_clip``); turns did not.
+    """
+    head = max(1, limit * 2 // 3)
+    return _clip(text, head, max(1, limit - head), marker)
 
 
 def _one_line(text: str, limit: int) -> str:
     line = " ".join(text.split())
-    if len(line) > limit:
-        return line[:limit] + "…"
-    return line
+    return clip_head_tail(line, limit, marker=" … ")
 
 
 def _line(body: str) -> str:

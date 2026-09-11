@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from agentica.compression.evict import trailing_user_turn_start
+from agentica.compression.notes import clip_head_tail
 from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK, full_window_text
 from agentica.model.message import Message
 
@@ -56,8 +57,7 @@ def notes_excerpt(
         return None
     if not text.strip():
         return None
-    if len(text) > limit:
-        text = text[:limit] + "\n…[truncated]"
+    text = clip_head_tail(text, limit, marker="\n…[truncated]…\n")
     label = notes_path or "session.notes.md"
     return f"<session_notes path=\"{label}\">\n{text}\n</session_notes>"
 
@@ -69,8 +69,7 @@ def dropped_span_excerpt(
     """One-shot skim of what left the window. Not written to notes.md."""
     if not text or not text.strip():
         return None
-    if len(text) > limit:
-        text = text[:limit] + "\n…[truncated]"
+    text = clip_head_tail(text, limit, marker="\n…[truncated]…\n")
     return f"<dropped_span>\n{text}\n</dropped_span>"
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.compression.new_window import (
+    dropped_span_excerpt,
     notes_excerpt,
     notes_path_for,
     start_new_context_window,
@@ -42,6 +43,29 @@ class TestNotesExcerpt(unittest.TestCase):
             excerpt = notes_excerpt(path)
         self.assertIn("Goal: finish auth", excerpt)
         self.assertIn(path, excerpt)
+
+    def test_long_file_keeps_both_ends(self):
+        """Over the cap, keep the tail too — the newest state is written last."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "s.notes.md")
+            Path(path).write_text(
+                "Goal: finish auth\n" + ("padding\n" * 700) + "Pending: 订正行号\n",
+                encoding="utf-8",
+            )
+            excerpt = notes_excerpt(path)
+        self.assertIn("Goal: finish auth", excerpt)
+        self.assertIn("Pending: 订正行号", excerpt)
+
+
+class TestDroppedSpanExcerpt(unittest.TestCase):
+    def test_long_digest_keeps_the_newest_turns(self):
+        text = (
+            "# Dropped span\n"
+            + ("- assistant: 旧结论\n" * 800)
+            + "- assistant: 现在怎么办？\n"
+        )
+        excerpt = dropped_span_excerpt(text)
+        self.assertIn("现在怎么办？", excerpt)
 
 
 class TestStartNewContextWindow(unittest.TestCase):

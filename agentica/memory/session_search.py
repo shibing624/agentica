@@ -81,36 +81,20 @@ def is_window_preamble(content: str) -> bool:
 _INJECTED_CLOSERS = ("</context_window>", "</session_notes>", "</dropped_span>")
 
 
-def _preamble_identity(content: str) -> str:
-    """The window preamble that a ``user`` row carries, or "" when it carries none.
-
-    ``<context_window>`` is written by us and is byte-identical for a given
-    window (window id + token count), so it identifies which cut a row belongs
-    to without depending on message counts (which the tail may reorder).
-    """
-    if not content or not is_window_preamble(content):
-        return ""
-    for closer in _INJECTED_CLOSERS:
-        idx = content.find(closer)
-        if idx >= 0:
-            return content[: idx + len(closer)]
-    return content
-
-
 def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
     """Drop pre-boundary rows that its own preserved tail re-logged.
 
     ``append_post_compact_messages`` re-appends the preserved tail after a
     ``compact_boundary`` — including a turn the runner already flushed
     mid-flight. ``load()`` replays only post-boundary rows, so the duplicate is
-    invisible there, but both copies sit in this list and the question index
-    would list the pending question twice.
+    invisible there, but both copies sit in this list.
 
     The shadowed row is the last ``user`` row before the boundary whose prose
-    matches the first ``user`` row after it and which carries no preamble; its
-    ``tool`` rows are the ones the tail re-logged for the same span. The
-    pre-boundary copy stays in the JSONL and is still reachable by
-    ``offset_chars`` paging — this drops it from search/index only.
+    matches the first ``user`` row after it and which carries no preamble;
+    ``assistant`` / ``tool`` rows in that same span were re-logged with the
+    tail. The pre-boundary copies stay in the JSONL; this drops them from
+    search/index only. Call this while ``compact_boundary`` rows are still
+    in the list (``_conversation_rows``), not again after they are filtered.
     """
     drop: set = set()
     for pos, entry in enumerate(entries):
@@ -132,7 +116,7 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
                 i
                 for i in range(pos - 1, -1, -1)
                 if entries[i].get("type") == "user"
-                and not _preamble_identity(_entry_text(entries[i]))
+                and not is_window_preamble(_entry_text(entries[i]))
                 and _entry_text(entries[i]).strip() == tail_prose
             ),
             None,
@@ -141,7 +125,7 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
             continue
         drop.add(shadow)
         for i in range(shadow + 1, pos):
-            if entries[i].get("type") == "tool":
+            if entries[i].get("type") in ("assistant", "tool"):
                 drop.add(i)
     if not drop:
         return entries
@@ -186,10 +170,19 @@ def format_turn_stamp(value) -> str:
 
 
 def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:
+    """One-line snippet that keeps both ends. The ask sits at the end.
+
+    A long user turn is usually pasted material first and the question last
+    (「…贴了一大段日志… 咋办？」). Head-only clipping left the paste and threw
+    the question away, so the index that answers 「前面问了啥」 listed the
+    setup instead of what was actually asked.
+    """
     flat = content.strip().replace("\n", " ")
     if len(flat) <= width:
         return flat
-    return flat[:width] + "…"
+    head = max(1, width * 2 // 3)
+    tail = max(1, width - head)
+    return flat[:head].rstrip() + " … " + flat[-tail:].lstrip()
 
 
 def score_content(content: str, query: str, terms: Iterable[str]) -> int:
@@ -235,7 +228,6 @@ def rank_entries(
     terms = search_terms(q)
     if not q or not terms:
         return []
-    entries = drop_shadowed_by_boundary(entries)
     scored: List[tuple] = []
     for i, entry in enumerate(entries):
         content = strip_window_preamble(_entry_text(entry))
@@ -268,7 +260,7 @@ def list_user_questions(
     cap = min(USER_QUESTION_LIMIT, max(1, int(limit)))
     hits: List[Dict] = []
     used = 0
-    for entry in reversed(drop_shadowed_by_boundary(entries)):
+    for entry in reversed(entries):
         if entry.get("type") != "user":
             continue
         text = strip_window_preamble(_entry_text(entry))

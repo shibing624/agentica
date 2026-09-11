@@ -66,6 +66,28 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         self.assertLess(text.index("现在怎么办？"), text.index("先查 JSONL"))
         self.assertEqual(text.count("ZX-41827"), 0)
 
+    def test_long_assistant_turn_keeps_its_closing_ask(self):
+        """The tail of an assistant turn is the ask the next request answers.
+
+        Head-only clipping dropped it: the model reasoned out loud, ended with
+        「要我把 notes.md 里对应的行号一并订正吗？」, the user replied "ok", and
+        the new window showed neither the question nor what "ok" agreed to.
+        """
+        ask = "要我把 notes.md 里对应的行号一并订正吗？"
+        text = compose_transcript_digest([
+            Message(role="assistant", content="全部核对完毕。结论：" + ("细节 " * 300) + ask),
+        ])
+        self.assertIn(ask, text)
+        self.assertIn("全部核对完毕", text)
+
+    def test_long_user_turn_keeps_its_closing_ask(self):
+        ask = "先答这一条，别的不急。"
+        text = compose_transcript_digest([
+            Message(role="user", content=("把日志贴一下 " * 200) + ask),
+        ])
+        self.assertIn(ask, text)
+        self.assertIn("把日志贴一下", text)
+
     def test_records_tool_args_and_results(self):
         text = compose_transcript_digest([
             Message(role="user", content="查一下", created_at=100),
