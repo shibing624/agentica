@@ -77,6 +77,35 @@ class TestContextTool(unittest.TestCase):
         self.assertIn("工单号", q)
         self.assertIn("ranked", q)
         self.assertIn("limit", props)
+        self.assertIn("role", props)
+        self.assertEqual(props["role"]["enum"], ["user", "assistant", "tool"])
+        self.assertNotIn("query", fn.parameters.get("required") or [])
+        self.assertIn("user questions", q.lower())
+
+    def test_empty_query_returns_user_question_index(self):
+        tool, _, slog = self._agent()
+        slog.append("user", "所以现在敲、compact就是写note.md文件吗？")
+        out = asyncio.run(tool.search_session(query=""))
+        self.assertIn("Recent user questions", out)
+        self.assertIn("compact就是写note.md", out)
+        self.assertIn("we decided the token budget is 300k", out)
+        self.assertNotIn("<context_window>", out)
+
+    def test_keyword_miss_still_includes_user_questions(self):
+        tool, _, slog = self._agent()
+        slog.append("user", "那当前的note.md在哪里？")
+        out = asyncio.run(tool.search_session("前面问了啥"))
+        self.assertIn("No session-log matches", out)
+        self.assertIn("Recent user questions", out)
+        self.assertIn("那当前的note.md在哪里？", out)
+
+    def test_keyword_hit_also_includes_user_questions(self):
+        tool, _, slog = self._agent()
+        out = asyncio.run(tool.search_session("token budget"))
+        self.assertIn("hit(s) for", out)
+        self.assertIn("300k", out)
+        self.assertIn("Recent user questions", out)
+        self.assertIn("we decided the token budget is 300k", out)
 
     def test_read_schema_matches_codex_read_item(self):
         tool, _, slog = self._agent()

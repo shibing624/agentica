@@ -798,21 +798,42 @@ class SessionLog:
                     last_boundary_idx = len(entries) - 1
         return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
 
-    def search_entries(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
-        """Keyword search over conversation rows, including pre-boundary.
-
-        History retrieval must see what ``load()`` skips. Event / goal /
-        compact_boundary rows are not hits. Terms are matched independently
-        and ranked (see ``agentica.memory.session_search``).
-        """
-        from agentica.memory.session_search import rank_entries
-
+    def _conversation_rows(self) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         for entry in self._iter_entries():
             if entry.get("type", "") not in ("user", "assistant", "tool"):
                 continue
             rows.append(entry)
-        return rank_entries(rows, query, limit=min(20, max(1, int(limit))))
+        return rows
+
+    def search_entries(
+        self,
+        query: str,
+        limit: int = 8,
+        role: str = "",
+    ) -> List[Dict[str, Any]]:
+        """Keyword search over conversation rows, including pre-boundary.
+
+        History retrieval must see what ``load()`` skips. Event / goal /
+        compact_boundary rows are not hits. Empty query returns no keyword
+        hits — use ``list_user_questions`` for the user-question index.
+        """
+        from agentica.memory.session_search import normalize_role, rank_entries
+
+        q = (query or "").strip()
+        if not q:
+            return []
+        want = normalize_role(role)
+        rows = self._conversation_rows()
+        if want:
+            rows = [e for e in rows if e.get("type") == want]
+        return rank_entries(rows, q, limit=min(20, max(1, int(limit))))
+
+    def list_user_questions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Newest user turns across compact_boundary, preamble skipped."""
+        from agentica.memory.session_search import list_user_questions
+
+        return list_user_questions(self._conversation_rows(), limit=limit)
 
     def read_entry(self, uuid: str) -> Optional[Dict[str, Any]]:
         """Return one conversation row by uuid, or None."""

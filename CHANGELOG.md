@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
+- **`search_session` 每次都带最近用户问题**：换窗后「前面问了啥」对不上关键词，不该靠中/英套话表猜意图。每次结果附带 `role=user` 倒序最多 20 条（单条截断、总长封顶，跳过 `<context_window>` preamble）；空 `query` 只返回这份索引。关键词路径不变（`工单号` 仍打中 `工单 ZX-41827`）。
 - **每个 Agent 自动挂 `BuiltinContextTool`**：只挂 `search_session` / `read_session_item`，能搜到 `compact_boundary` **之前**的 JSONL。不再挂 `new_context`（人用 `/compact`，省掉每轮 ~90 token 的 schema）。
 - **换窗必落 `<session_id>.notes.md`**：对齐 Codex `#33255`——notes 由模型写（已有文件工具 + 满窗前 fallback 催写），不是正则抽 facts。文件已有内容则不覆盖；仍空才落一份 transcript digest（user / assistant 原文 + 超长消息头尾），避免第一跳只有路径（`#43335`）。
 - **`search_session` / `read_session_item` 契约对齐 Codex `history.search_contents` / `history.read_item`**：`query` 先按字面子串，中文问法再叠字（`工单号` 能打中 `工单 ZX-41827`），命中按相关度排序；`read` 的参数是 `item_id` + `offset_chars` / `limit_chars`。不照抄纯字面搜（整句问题 0/10）。

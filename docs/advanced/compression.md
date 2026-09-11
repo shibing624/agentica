@@ -71,7 +71,7 @@ Context Messages
 ~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
 ```
 
-- `search_session` / `read_session_item` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。契约对齐 Codex `history.search_contents` / `history.read_item`：`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），命中按相关度排序；`read` 的参数是 `item_id` + `offset_chars` / `limit_chars`
+- `search_session` / `read_session_item` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词路径对齐 Codex `history.search_contents`：`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），命中按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断；跳过 `<context_window>` preamble）。空 query 只返回这份索引。不要扫 JSONL。`read` 的参数是 `item_id` + `offset_chars` / `limit_chars`
 - 交接写旁边的 `<session-id>.notes.md`（已有文件工具，不新建目录）。对齐 Codex：模型自己写 goals / constraints / IDs；第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口。真正切窗时文件已有内容则原样注入，仍空才落 transcript digest（user / assistant 原文 + 超长消息头尾，**不是**正则抽 facts）。新窗注入摘录，避免第一跳只有路径没有正文
 
 油表是 `<context_window>` user 片段：新窗写满窗身份；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。

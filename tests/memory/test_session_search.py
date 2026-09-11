@@ -6,7 +6,11 @@ import unittest
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.memory.session_log import SessionLog
-from agentica.memory.session_search import search_terms
+from agentica.memory.session_search import (
+    USER_QUESTION_BUDGET_CHARS,
+    list_user_questions,
+    search_terms,
+)
 
 
 class TestSearchTerms(unittest.TestCase):
@@ -52,6 +56,77 @@ class TestSearchEntriesRank(unittest.TestCase):
             hits = log.search_entries("token budget")
         self.assertTrue(hits)
         self.assertIn("300k", hits[0]["snippet"])
+
+    def _compacted_log(self, tmp: str) -> SessionLog:
+        log = SessionLog("s", base_dir=tmp)
+        log.append(
+            "user",
+            "所以现在敲、compact就是写note.md文件吗？ 本质也是llm summary吧，"
+            "我没特别get到比之前强很大吗?",
+        )
+        log.append("assistant", "/compact is an empty-window cut, not a note write.")
+        log.append("user", "那当前的note.md在哪里？")
+        log.append("assistant", "notes_path_for next to the jsonl.")
+        log.append_compact_boundary("", window_id=1)
+        log.append(
+            "user",
+            "<context_window>\nCurrent context window 1.\n"
+            "You have 512000 tokens left in this context window.\n"
+            "</context_window>\n\n",
+        )
+        log.append("user", "h")
+        log.append("user", "hi")
+        log.append("user", "前面问了啥")
+        return log
+
+    def test_empty_query_is_not_a_keyword_search(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = self._compacted_log(tmp)
+            self.assertEqual(log.search_entries("", limit=8), [])
+
+    def test_list_user_questions_newest_first_skips_preamble(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = self._compacted_log(tmp)
+            hits = log.list_user_questions(limit=8)
+        texts = [h["snippet"] for h in hits]
+        self.assertTrue(all(h["type"] == "user" for h in hits))
+        self.assertIn("前面问了啥", texts)
+        self.assertIn("那当前的note.md在哪里？", texts)
+        self.assertTrue(any("compact就是写note.md" in t for t in texts))
+        self.assertFalse(any("<context_window>" in t for t in texts))
+        self.assertLess(texts.index("前面问了啥"), texts.index("那当前的note.md在哪里？"))
+
+    def test_list_user_questions_caps_and_truncates(self):
+        rows = [
+            {"uuid": str(i), "type": "user", "content": "Q" * 400}
+            for i in range(40)
+        ]
+        hits = list_user_questions(rows, limit=20)
+        self.assertLessEqual(len(hits), 20)
+        self.assertLessEqual(
+            sum(len(h["snippet"]) for h in hits),
+            USER_QUESTION_BUDGET_CHARS + 1,
+        )
+        self.assertTrue(hits[0]["snippet"].endswith("…"))
+
+    def test_role_filters_keyword_hits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "工单 ZX-41827 是这次唯一的追踪号")
+            log.append("assistant", "记下了 ZX-41827")
+            user_hits = log.search_entries("ZX-41827", role="user")
+            toolish = log.search_entries("ZX-41827", role="assistant")
+        self.assertEqual(len(user_hits), 1)
+        self.assertEqual(user_hits[0]["type"], "user")
+        self.assertEqual(toolish[0]["type"], "assistant")
+
+    def test_zero_hit_keyword_stays_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "那当前的note.md在哪里？")
+            self.assertEqual(log.search_entries("为什么", limit=5), [])
+            self.assertEqual(log.search_entries("ZX-99999", limit=5), [])
+            self.assertIn("note.md", log.list_user_questions()[0]["snippet"])
 
 
 if __name__ == "__main__":

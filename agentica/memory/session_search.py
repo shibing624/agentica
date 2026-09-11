@@ -1,13 +1,25 @@
 # -*- coding: utf-8 -*-
-"""Keyword search over session-log rows (not first-N substring).
+"""Keyword search over session-log rows, plus a user-question index.
 
-``search_session`` used to require the exact query string and returned the
-earliest hits in file order. A question like 工单号 then missed
-「工单 ZX-41827」, and a generic word drowned in filler. Terms are split,
-CJK runs become overlapping bigrams, and hits are scored.
+``search_session`` ranks by independent terms: CJK runs become overlapping
+bigrams so 工单号 hits 「工单 ZX-41827」. That is search, not intent
+detection — do not add language phrase lists to decide "the caller wants
+a browse".
+
+User questions are the index. Every search result carries the newest
+user turns (cap + char budget). Empty query returns only that index.
+Window preambles (``<context_window>``) are skipped because we injected
+them, not because of the words they contain.
 """
 import re
 from typing import Dict, Iterable, List, Sequence, Set
+
+ITEM_ROLES = ("user", "assistant", "tool")
+
+# Newest-first user-question index attached to every search_session result.
+USER_QUESTION_LIMIT = 20
+USER_QUESTION_SNIPPET_CHARS = 160
+USER_QUESTION_BUDGET_CHARS = 2400
 
 _TOKEN = re.compile(r"[A-Za-z0-9_./:-]+|[\u4e00-\u9fff]+")
 _CJK = re.compile(r"^[\u4e00-\u9fff]+$")
@@ -17,6 +29,7 @@ _STOP = frozenset({
     "dump", "read", "background", "unrelated", "noted",
     "什么", "多少", "哪个", "哪些", "怎么", "如何", "这次", "只答",
 })
+_CONTEXT_WINDOW_OPEN = "<context_window>"
 
 
 def search_terms(query: str) -> Set[str]:
@@ -40,6 +53,33 @@ def search_terms(query: str) -> Set[str]:
 
 def _distinctive(term: str) -> bool:
     return any(ch.isdigit() for ch in term) or "/" in term or "_" in term or "-" in term
+
+
+def normalize_role(role: str) -> str:
+    want = (role or "").strip().lower()
+    if not want:
+        return ""
+    if want not in ITEM_ROLES:
+        raise ValueError(f"role must be one of {', '.join(ITEM_ROLES)}")
+    return want
+
+
+def _entry_text(entry: Dict) -> str:
+    content = entry.get("content", "")
+    if not isinstance(content, str):
+        return str(content)
+    return content
+
+
+def is_window_preamble(content: str) -> bool:
+    return content.lstrip().startswith(_CONTEXT_WINDOW_OPEN)
+
+
+def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:
+    flat = content.strip().replace("\n", " ")
+    if len(flat) <= width:
+        return flat
+    return flat[:width] + "…"
 
 
 def score_content(content: str, query: str, terms: Iterable[str]) -> int:
@@ -87,9 +127,7 @@ def rank_entries(
         return []
     scored: List[tuple] = []
     for i, entry in enumerate(entries):
-        content = entry.get("content", "")
-        if not isinstance(content, str):
-            content = str(content)
+        content = _entry_text(entry)
         sc = score_content(content, q, terms)
         if sc <= 0:
             continue
@@ -103,4 +141,34 @@ def rank_entries(
             "snippet": snippet_for(content, q, list(terms)),
             "score": sc,
         })
+    return hits
+
+
+def list_user_questions(
+    entries: List[Dict],
+    limit: int = USER_QUESTION_LIMIT,
+    snippet_width: int = USER_QUESTION_SNIPPET_CHARS,
+    budget_chars: int = USER_QUESTION_BUDGET_CHARS,
+) -> List[Dict]:
+    """Newest user turns. Skip only the window preamble we inject."""
+    cap = min(USER_QUESTION_LIMIT, max(1, int(limit)))
+    hits: List[Dict] = []
+    used = 0
+    for entry in reversed(entries):
+        if entry.get("type") != "user":
+            continue
+        text = _entry_text(entry)
+        if not text.strip() or is_window_preamble(text):
+            continue
+        snippet = snippet_head(text, snippet_width)
+        if hits and used + len(snippet) > budget_chars:
+            break
+        hits.append({
+            "uuid": entry.get("uuid", ""),
+            "type": "user",
+            "snippet": snippet,
+        })
+        used += len(snippet)
+        if len(hits) >= cap:
+            break
     return hits
