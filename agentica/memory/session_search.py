@@ -12,10 +12,10 @@ Window preambles (``<context_window>``) are skipped because we injected
 them, not because of the words they contain.
 """
 import re
-from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Sequence, Set
 
 from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK
+from agentica.memory.session_log import local_turn_stamp
 
 ITEM_ROLES = ("user", "assistant", "tool")
 
@@ -153,22 +153,6 @@ def strip_window_preamble(content: str) -> str:
     return rest.lstrip()
 
 
-def format_turn_stamp(value) -> str:
-    """Compact UTC stamp for search_session hits (JSONL ``timestamp``)."""
-    if value is None or value == "":
-        return ""
-    if isinstance(value, (int, float)):
-        if value <= 0:
-            return ""
-        return datetime.fromtimestamp(float(value), timezone.utc).strftime(
-            "%Y-%m-%d %H:%M"
-        )
-    text = str(value).strip().replace("T", " ")
-    if text.endswith("Z"):
-        text = text[:-1]
-    return text[:16]
-
-
 def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:
     """One-line snippet that keeps both ends. The ask sits at the end.
 
@@ -180,8 +164,9 @@ def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:
     flat = content.strip().replace("\n", " ")
     if len(flat) <= width:
         return flat
-    head = max(1, width * 2 // 3)
-    tail = max(1, width - head)
+    body = max(2, width - len(" … "))
+    head = max(1, body * 2 // 3)
+    tail = max(1, body - head)
     return flat[:head].rstrip() + " … " + flat[-tail:].lstrip()
 
 

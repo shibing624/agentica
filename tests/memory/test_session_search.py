@@ -109,6 +109,7 @@ class TestSearchEntriesRank(unittest.TestCase):
             USER_QUESTION_BUDGET_CHARS + 1,
         )
         self.assertIn(" … ", hits[0]["snippet"])
+        self.assertLessEqual(len(hits[0]["snippet"]), 160)
 
     def test_long_question_keeps_its_closing_ask(self):
         """The ask is at the end; the index must not show only the paste."""

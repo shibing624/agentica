@@ -41,7 +41,7 @@ from agentica.agent.history_filter import (
 from agentica.compression.manager import apply_idle_compact
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
-from agentica.memory.session_log import SessionLog
+from agentica.memory.session_log import SessionLog, local_turn_stamp
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 from agentica.utils.log import logger
@@ -479,8 +479,7 @@ def _print_session_list(
     con.print(f"\n[bold]{title}[/bold]\n")
     for i, s in enumerate(shown, 1):
         ts_str = s.get("last_timestamp", "") or ""
-        if ts_str:
-            ts_str = ts_str[:16].replace("T", " ")
+        ts_str = local_turn_stamp(ts_str)
         size_label = format_file_size(s["size_bytes"])
         sid = s["session_id"]
         # Show a clean, copy-pasteable 8-char prefix that /resume accepts

@@ -22,6 +22,7 @@ from agentica.cli.display import (
 )
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
+from agentica.memory.session_log import local_turn_stamp
 from agentica.peers import PeerMessageRefused
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
@@ -236,7 +237,7 @@ def _print_fork_points(con, session_log, session_id: str) -> None:
         return
     con.print(f"  [bold]Fork points in {session_id}[/bold] [dim](newest first)[/dim]\n")
     for i, message in enumerate(messages, 1):
-        stamp = (message.get("timestamp") or "")[:16].replace("T", " ")
+        stamp = local_turn_stamp(message.get("timestamp"))
         preview = " ".join((message.get("content") or "").split())[:76]
         con.print(f"    [cyan]{i:>2}[/cyan]  [dim]{message['uuid'][:8]}[/dim]  {stamp}")
         con.print(f"        {preview}")

@@ -10,7 +10,11 @@ import tempfile
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from agentica.memory.session_log import SessionLog, assert_trajectory_equivalent
+from agentica.memory.session_log import (
+    SessionLog,
+    assert_trajectory_equivalent,
+    local_turn_stamp,
+)
 from agentica.model.message import Message
 from agentica.runner import Runner
 
@@ -1754,6 +1758,43 @@ class TestTrajectoryStats:
         assert stats["turns"] == 1
         assert (stats["input_tokens"], stats["output_tokens"], stats["total_tokens"]) == (0, 0, 0)
         assert stats["cached_tokens"] == 0
+
+
+class TestLocalTurnStamp:
+    """One stamp must mean one wall-clock instant everywhere.
+
+    The log stores UTC and the CLI prints local. Rendering the stored text
+    verbatim showed one turn two ways: ``16:43`` in a list or tool result,
+    ``00:43`` in the transcript.
+    """
+
+    def test_zulu_row_is_rendered_in_local_time(self):
+        from datetime import datetime
+
+        row = "2026-09-11T16:43:13.420Z"
+        expected = (
+            datetime.fromisoformat(row.replace("Z", "+00:00"))
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M")
+        )
+        assert local_turn_stamp(row) == expected
+
+    def test_matches_the_cli_wall_clock(self):
+        import time
+        from datetime import datetime
+
+        epoch = time.time()
+        assert local_turn_stamp(epoch) == datetime.fromtimestamp(epoch).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+
+    def test_missing_and_zero_are_blank(self):
+        assert local_turn_stamp(None) == ""
+        assert local_turn_stamp("") == ""
+        assert local_turn_stamp(0) == ""
+
+    def test_unparseable_text_is_passed_through_not_dropped(self):
+        assert local_turn_stamp("not-a-date") == "not-a-date"
 
 
 if __name__ == "__main__":

@@ -14,11 +14,11 @@ from typing import Optional
 
 from agentica.compression.new_window import notes_path_for
 from agentica.memory.session_search import (
-    format_turn_stamp,
     score_content,
     search_terms,
     snippet_for,
 )
+from agentica.memory.session_log import local_turn_stamp
 from agentica.tools.base import Tool
 
 _SEARCH_QUERY_DESC = (
@@ -93,7 +93,7 @@ class BuiltinContextTool(Tool):
         return agent._session_log
 
     def _format_hit_line(self, hit: dict, *, with_type: bool) -> str:
-        stamp = format_turn_stamp(hit.get("timestamp"))
+        stamp = local_turn_stamp(hit.get("timestamp"))
         body = hit["snippet"]
         if with_type:
             body = f"{hit.get('type', '')}: {body}"

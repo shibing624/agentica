@@ -135,6 +135,32 @@ def _parse_iso_timestamp(value: Any) -> Optional[float]:
         return None
 
 
+def local_turn_stamp(value: Any) -> str:
+    """A JSONL ``timestamp`` as the user's wall clock, ``YYYY-MM-DD HH:MM``.
+
+    The log stores UTC and the CLI prints local, so rendering the stored text
+    verbatim showed the same turn two ways: ``16:43`` in a tool result or a
+    list, ``00:43`` in the transcript. Every user- or model-facing stamp that
+    comes from a log row must go through here.
+
+    ``Z`` / epoch values are instants and are converted; a naive string is
+    taken as already-local; anything unparseable is returned trimmed rather
+    than dropped, so a legacy row is still legible.
+    """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return ""
+        return datetime.fromtimestamp(float(value)).strftime("%Y-%m-%d %H:%M")
+    text = str(value).strip()
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text[:16].replace("T", " ")
+    return moment.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
 def is_session_unread(last_timestamp: Any, last_read_at: Any) -> bool:
     """True when the log has a later event than the last time the user opened it.
 

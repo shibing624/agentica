@@ -104,9 +104,13 @@ def clip_head_tail(text: str, limit: int, marker: str = "\n…\n") -> str:
     ended with 「要我把行号一并订正吗？」 reached the next window as reasoning
     with no question, so the user's "ok" had no visible antecedent. Tool
     results already kept both ends (``_clip``); turns did not.
+
+    The marker is charged against ``limit``, so the result is never longer
+    than the caller asked for.
     """
-    head = max(1, limit * 2 // 3)
-    return _clip(text, head, max(1, limit - head), marker)
+    body = max(2, limit - len(marker))
+    head = max(1, body * 2 // 3)
+    return _clip(text, head, max(1, body - head), marker)
 
 
 def _one_line(text: str, limit: int) -> str:
