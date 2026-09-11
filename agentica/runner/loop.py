@@ -720,10 +720,6 @@ class LoopMixin:
                 if agent.model is not None:
                     agent.model._cost_tracker = _cost_tracker
 
-                # Reset compression circuit breaker for this run
-                if agent.tool_config.compression_manager is not None:
-                    agent.tool_config.compression_manager.reset_run_state()
-
                 # Add introduction if provided
                 if agent.prompt_config.introduction is not None:
                     agent.add_introduction(agent.prompt_config.introduction)

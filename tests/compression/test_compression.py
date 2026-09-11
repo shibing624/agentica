@@ -771,34 +771,6 @@ class TestCompressionManagerInit(unittest.TestCase):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
         self.assertIsNone(cm.model)
-        self.assertIsNone(cm.compress_token_limit)
-        self.assertIsNone(cm.compress_target_token_limit)
-
-    def test_target_from_trigger(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(compress_token_limit=10000)
-        self.assertEqual(cm.compress_target_token_limit, 6000)  # 60% of trigger
-
-
-class TestCompressionManagerResolveLimits(unittest.TestCase):
-    """_resolve_limits auto-derives thresholds from model.context_window."""
-
-    def test_resolve_from_model(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager()
-        mock_model = MagicMock()
-        mock_model.context_window = 100_000
-        cm._resolve_limits(mock_model)
-        self.assertEqual(cm.compress_token_limit, 80_000)
-        self.assertEqual(cm.compress_target_token_limit, 50_000)
-
-    def test_no_resolve_when_already_set(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(compress_token_limit=5000)
-        mock_model = MagicMock()
-        mock_model.context_window = 200_000
-        cm._resolve_limits(mock_model)
-        self.assertEqual(cm.compress_token_limit, 5000, "Should not override explicit value")
 
 
 class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):

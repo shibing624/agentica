@@ -11,6 +11,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.agent import Agent
+from agentica.tools.builtin.context_tool import BuiltinContextTool
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig
 from agentica.memory import WorkingMemory
 from agentica.model.message import Message
@@ -56,10 +57,11 @@ class TestAgentTools(unittest.TestCase):
     """Test cases for Agent tool management."""
 
     def test_agent_with_no_tools(self):
-        """Test Agent without tools."""
+        """A bare Agent auto-attaches BuiltinContextTool (search_session)."""
         agent = Agent()
         tools = agent.get_tools()
-        self.assertEqual(tools, [])
+        self.assertEqual(len(tools), 1)
+        self.assertIsInstance(tools[0], BuiltinContextTool)
 
     def test_agent_with_function_tool(self):
         """Test Agent with a function as tool."""
@@ -69,7 +71,10 @@ class TestAgentTools(unittest.TestCase):
 
         agent = Agent(tools=[my_tool])
         tools = agent.get_tools()
-        self.assertEqual(len(tools), 1)
+        # user tool + auto-attached BuiltinContextTool
+        self.assertEqual(len(tools), 2)
+        self.assertEqual(tools[0], my_tool)
+        self.assertIsInstance(tools[1], BuiltinContextTool)
 
     def test_agent_with_tool_class(self):
         """Test Agent with Tool class."""

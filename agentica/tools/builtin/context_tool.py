@@ -8,7 +8,9 @@ JSONL row is usually shorter than the snippet; a second tool that
 reprints type/timestamp/content is schema tax that invites reading
 「hi」. Notes stay on the filesystem; this tool does not write them.
 """
+import weakref
 from pathlib import Path
+from typing import Optional
 
 from agentica.compression.new_window import notes_path_for
 from agentica.memory.session_search import (
@@ -61,7 +63,12 @@ class BuiltinContextTool(Tool):
 
     def __init__(self):
         super().__init__(name="builtin_context_tool")
-        self._agent = None
+        # Weak, like every other tool-held agent back-reference. A plain
+        # attribute keeps Agent alive through
+        # Agent -> Model -> functions -> Function.entrypoint -> tool -> Agent
+        # (``Function.entrypoint`` is a bound method, so it holds the tool),
+        # which the memory-leak tests pin.
+        self._agent_ref: Optional[weakref.ReferenceType] = None
         self.register(
             self.search_session,
             concurrency_safe=True,
@@ -70,7 +77,11 @@ class BuiltinContextTool(Tool):
         )
 
     def set_agent(self, agent) -> None:
-        self._agent = agent
+        self._agent_ref = weakref.ref(agent) if agent is not None else None
+
+    @property
+    def _agent(self):
+        return self._agent_ref() if self._agent_ref is not None else None
 
     def clone(self) -> "BuiltinContextTool":
         return BuiltinContextTool()

@@ -10,18 +10,20 @@ Two files, two jobs — do not copy the transcript into notes.md.
   transcript into it.
 
 A local digest exists only for Codex #43335: the first hop after a cut
-must not be an empty path. It is injected as ``<dropped_span>`` and is
-**not** persisted. Writing it into notes.md made the file a lossy JSONL,
-flipped ``notes_are_ready``, and froze window-1's skim for every later
-cut. ``search_session`` may still hit model-authored notes — those are
-not a second log.
+must not be an empty path. It is injected as ``<dropped_span>``, not
+written to notes.md. Writing it there flipped ``notes_are_ready``
+(no more fallback nudge). The same skim still rides the preserved
+tail into JSONL; ``rank_entries`` scores ``strip_window_preamble``
+so that chrome is not a second hit. Digest lines have no timestamp
+— ``Message.created_at`` is not the JSONL ``timestamp`` after
+``load()``. ``search_session`` may still hit model-authored notes.
 """
 import json
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from agentica.compression.evict import carries_tool_results, tool_result_blocks
-from agentica.memory.session_search import format_turn_stamp, is_window_preamble
+from agentica.memory.session_search import strip_window_preamble
 from agentica.model.message import Message
 
 
@@ -102,13 +104,7 @@ def _one_line(text: str, limit: int) -> str:
     return line
 
 
-def _stamp_of(message: Message) -> str:
-    return format_turn_stamp(message.created_at)
-
-
-def _prefix(stamp: str, body: str) -> str:
-    if stamp:
-        return f"- {stamp} {body}"
+def _line(body: str) -> str:
     return f"- {body}"
 
 
@@ -139,35 +135,31 @@ def _collect(messages: Sequence[Message]) -> Tuple[List[str], List[str]]:
     for message in messages:
         if message.role == "system":
             continue
-        stamp = _stamp_of(message)
         if carries_tool_results(message):
             if message.role == "tool":
                 text = _content(message)
                 if text.strip() and not _is_pad(text):
-                    tools.append(_prefix(
-                        stamp,
+                    tools.append(_line(
                         _tool_result_line(message.tool_name or "tool", text),
                     ))
             for block in tool_result_blocks(message):
                 text = _block_text(block)
                 if not text.strip() or _is_pad(text):
                     continue
-                tools.append(_prefix(stamp, _tool_result_line("tool", text)))
+                tools.append(_line(_tool_result_line("tool", text)))
             continue
         if message.role == "user":
-            text = _content(message)
-            if not text.strip() or _is_pad(text) or is_window_preamble(text):
+            text = strip_window_preamble(_content(message))
+            if not text.strip() or _is_pad(text):
                 continue
-            turns.append(_prefix(stamp, f"user: {_one_line(text, _USER_LINE)}"))
+            turns.append(_line(f"user: {_one_line(text, _USER_LINE)}"))
             continue
         if message.role == "assistant":
             text = _content(message)
             if text.strip() and not _is_pad(text):
-                turns.append(_prefix(
-                    stamp, f"assistant: {_one_line(text, _ASSISTANT_LINE)}",
-                ))
+                turns.append(_line(f"assistant: {_one_line(text, _ASSISTANT_LINE)}"))
             for row in _tool_call_rows(message):
-                tools.append(_prefix(stamp, row))
+                tools.append(_line(row))
     return turns, tools
 
 

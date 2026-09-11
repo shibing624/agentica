@@ -799,9 +799,29 @@ class SessionLog:
         return entries[:last_boundary_idx] if last_boundary_idx >= 0 else entries
 
     def _conversation_rows(self) -> List[Dict[str, Any]]:
+        from agentica.memory.session_search import (
+            drop_shadowed_by_boundary,
+            strip_window_preamble,
+        )
+
+        # Keep compact_boundary in this pass: it is what tells
+        # ``drop_shadowed_by_boundary`` where a preserved tail begins, and the
+        # tail re-logs rows an in-turn flush already wrote. The boundary itself
+        # is not a searchable row and is filtered out below.
+        typed = [
+            e for e in self._iter_entries()
+            if e.get("type", "") in ("user", "assistant", "tool", "compact_boundary")
+        ]
         rows: List[Dict[str, Any]] = []
-        for entry in self._iter_entries():
-            if entry.get("type", "") not in ("user", "assistant", "tool"):
+        for entry in drop_shadowed_by_boundary(typed):
+            if entry.get("type") == "compact_boundary":
+                continue
+            content = entry.get("content", "")
+            if (
+                isinstance(content, str)
+                and content.lstrip().startswith(CONTEXT_WINDOW_OPEN)
+                and not strip_window_preamble(content).strip()
+            ):
                 continue
             rows.append(entry)
         return rows

@@ -10,6 +10,7 @@ from agentica.memory.session_search import (
     USER_QUESTION_BUDGET_CHARS,
     list_user_questions,
     search_terms,
+    strip_window_preamble,
 )
 
 
@@ -119,6 +120,102 @@ class TestSearchEntriesRank(unittest.TestCase):
         self.assertEqual(len(user_hits), 1)
         self.assertEqual(user_hits[0]["type"], "user")
         self.assertEqual(toolish[0]["type"], "assistant")
+
+    def test_search_does_not_hit_dropped_span_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "工单 ZX-41827 是这次唯一的追踪号")
+            log.append("assistant", "记下了")
+            log.append("user", "现在怎么办？")
+            log.append_compact_boundary("", window_id=1)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 1.\n"
+                "</context_window>\n\n"
+                "<dropped_span>\n# Dropped span\n"
+                "- user: 工单 ZX-41827 是这次唯一的追踪号\n"
+                "- assistant: 记下了\n</dropped_span>\n\n"
+                "现在怎么办？",
+            )
+            ticket = log.search_entries("ZX-41827")
+            nxt = log.search_entries("现在怎么办")
+            questions = [h["snippet"] for h in log.list_user_questions()]
+        self.assertEqual(len(ticket), 1)
+        self.assertNotIn("dropped_span", ticket[0]["snippet"])
+        # The pending question sits on both sides of the boundary: the original
+        # pre-boundary row and the post-boundary row that carries it inside the
+        # window preamble. Only the second survives — one hit, not two.
+        self.assertEqual(len(nxt), 1)
+        self.assertNotIn("<context_window>", nxt[0]["snippet"])
+        self.assertTrue(any("现在怎么办" in t for t in questions))
+        self.assertFalse(any("<context_window>" in t for t in questions))
+        self.assertFalse(any("dropped_span" in t for t in questions))
+        self.assertEqual(
+            [t for t in questions if "现在怎么办" in t].__len__(), 1,
+            "the pending question must be listed once, not twice",
+        )
+
+    def test_chrome_only_preamble_is_not_a_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 1.\n"
+                "</context_window>\n\n"
+                "New context window started without a conversation summary. "
+                "Continue from session notes and search_session.",
+            )
+            log.append("user", "hi")
+            self.assertEqual(log.search_entries("context window"), [])
+            self.assertEqual(
+                [h["snippet"] for h in log.list_user_questions()],
+                ["hi"],
+            )
+
+    def test_strip_window_preamble_keeps_tail_prose(self):
+        folded = (
+            "<context_window>\nCurrent context window 1.\n"
+            "</context_window>\n\n"
+            "<dropped_span>\n- user: old\n</dropped_span>\n\n"
+            "现在怎么办？"
+        )
+        self.assertEqual(strip_window_preamble(folded), "现在怎么办？")
+        self.assertEqual(strip_window_preamble("plain"), "plain")
+
+    def test_tail_relog_does_not_duplicate_the_pending_question(self):
+        """A mid-turn compact re-appends the tail the runner already flushed.
+
+        The write is required — ``load()`` replays only post-boundary rows — so
+        the pre-boundary copy must be dropped from search/index instead. Both
+        copies used to be scored, listing the pending question twice.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "旧问题 ZX-41827")
+            log.append("assistant", "旧回答")
+            # an in-turn flush wrote this turn's row before the window filled
+            log.append("user", "现在怎么办？")
+            log.append("tool", "hit evict.py", tool_name="grep", tool_call_id="c1")
+            log.append_compact_boundary("", window_id=1)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 1.\n"
+                "</context_window>\n\n现在怎么办？",
+            )
+            log.append("tool", "hit evict.py", tool_name="grep", tool_call_id="c1")
+
+            questions = [h["snippet"] for h in log.list_user_questions()]
+            pending = log.search_entries("现在怎么办")
+            tool_hit = log.search_entries("hit evict.py")
+            old = log.search_entries("ZX-41827")
+        self.assertEqual(
+            len([q for q in questions if "现在怎么办" in q]), 1,
+            "the re-logged pending question must be listed once",
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(len(tool_hit), 1)
+        # Pre-boundary history is not collateral damage.
+        self.assertEqual(len(old), 1)
 
     def test_zero_hit_keyword_stays_empty(self):
         with tempfile.TemporaryDirectory() as tmp:

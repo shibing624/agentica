@@ -17,8 +17,13 @@ class TestContextTool(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.base = self._tmpdir.name
+        # The tool holds its agent weakly (so Agent -> Model -> functions ->
+        # tool does not pin Agent alive). Production keeps the Agent in scope;
+        # this fixture must too, or the fake is collected mid-test.
+        self._agents: list = []
 
     def tearDown(self):
+        self._agents.clear()
         self._tmpdir.cleanup()
 
     def _agent(self, with_log=True):
@@ -39,6 +44,7 @@ class TestContextTool(unittest.TestCase):
         )()
         tool = BuiltinContextTool()
         tool.set_agent(agent)
+        self._agents.append(agent)
         return tool, cm, slog
 
     def test_only_search_is_registered(self):

@@ -71,8 +71,8 @@ Context Messages
 ~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
 ```
 
-- `search_session` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词路径对齐 Codex `history.search_contents`：`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），命中按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断；跳过 `<context_window>` preamble）。空 query 只返回这份索引。不要扫 JSONL。不提供 `read_session_item`（Codex `read_item` 是服务端大条目分页，本地一行通常短于 snippet）
-- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），模型用已有文件工具写，不是第二份 transcript。第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口。真正切窗时：文件已有内容则注入 `<session_notes>`；仍空则把丢掉的那一段按时间交织成 skim（user/assistant，其次 tool args/result，带时间戳）注入 `<dropped_span>`，**不写进 notes.md**。写进去会让 notes 变成 JSONL 缩写，第二次换窗还冻住第一窗的 skim。`search_session` 搜 JSONL，并搜模型手写的 notes（措辞可能和原文不同）
+- `search_session` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词打在 `strip_window_preamble` 之后的正文上：油表 / `<dropped_span>` 不是命中，折在 preamble 后面的那句 user 问题还在。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断、带 JSONL 时间戳）。空 query 只返回这份索引。不要扫 JSONL。不提供 `read_session_item`
+- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），模型用已有文件工具写，不是第二份 transcript。第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口。真正切窗时：文件已有内容则注入 `<session_notes>`；仍空则把丢掉的那一段按时间交织成 skim（user/assistant，其次 tool args/result，**不写时间戳**）注入 `<dropped_span>`，**不写进 notes.md**。写进去会让 `notes_are_ready` 变真、之后不再催写。skim 会随 preserved tail 进 JSONL，靠 search 剥 preamble，不靠再抄一份。`search_session` 搜 JSONL，并搜模型手写的 notes
 
 油表是 `<context_window>` user 片段：新窗写满窗身份；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
 

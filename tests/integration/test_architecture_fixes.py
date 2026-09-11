@@ -362,24 +362,6 @@ class TestLangfuseContextManagers(unittest.TestCase):
                     raise ValueError("root cause")
 
 
-class TestCompressionManagerResetRun(unittest.TestCase):
-    """CompressionManager.reset_run_state() should reset circuit breaker."""
-
-    def test_reset_clears_failure_counter(self):
-        from agentica.compression import CompressionManager
-        cm = CompressionManager()
-        cm._consecutive_auto_compact_failures = 5
-        cm.reset_run_state()
-        self.assertEqual(cm._consecutive_auto_compact_failures, 0)
-
-    def test_reset_clears_iterative_summary(self):
-        from agentica.compression import CompressionManager
-        cm = CompressionManager()
-        cm._conversation_previous_summary = "summary from previous run"
-        cm.reset_run_state()
-        self.assertIsNone(cm._conversation_previous_summary)
-
-
 class TestGetLastAssistantMessage(unittest.TestCase):
     """Test Runner._get_last_assistant_message helper."""
 

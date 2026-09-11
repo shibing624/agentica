@@ -36,7 +36,7 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         self.assertNotIn("## Facts", text)
         self.assertIn("search_session", text)
 
-    def test_keeps_order_and_timestamps(self):
+    def test_keeps_order_without_timestamps(self):
         text = compose_transcript_digest([
             Message(role="user", content="先问工单", created_at=1_725_000_000),
             Message(role="assistant", content="答工单", created_at=1_725_000_060),
@@ -44,7 +44,27 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         ])
         self.assertLess(text.index("先问工单"), text.index("答工单"))
         self.assertLess(text.index("答工单"), text.index("再问路经"))
-        self.assertIn("2024-08-30", text)
+        self.assertNotIn("2024-08-30", text)
+        self.assertNotIn("1970", text)
+
+    def test_strips_preamble_and_keeps_the_folded_question(self):
+        text = compose_transcript_digest([
+            Message(
+                role="user",
+                content=(
+                    "<context_window>\nCurrent context window 1.\n"
+                    "</context_window>\n\n"
+                    "<dropped_span>\n# Dropped span\n"
+                    "- user: 工单 ZX-41827\n</dropped_span>\n\n"
+                    "现在怎么办？"
+                ),
+            ),
+            Message(role="assistant", content="先查 JSONL"),
+        ])
+        self.assertIn("现在怎么办？", text)
+        self.assertIn("先查 JSONL", text)
+        self.assertLess(text.index("现在怎么办？"), text.index("先查 JSONL"))
+        self.assertEqual(text.count("ZX-41827"), 0)
 
     def test_records_tool_args_and_results(self):
         text = compose_transcript_digest([

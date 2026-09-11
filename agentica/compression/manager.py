@@ -94,9 +94,7 @@ class CompressionManager:
     Args:
         model: Unused. Kept so existing ``CompressionManager(model=...)``
             construction does not break. Layer 2 no longer calls an LLM.
-        compress_token_limit: Legacy native-compact threshold field.
         compact_token_limit: Optional user working cap (absolute tokens).
-        compress_target_token_limit: Unused legacy field.
 
     Example:
         ```python
@@ -107,8 +105,6 @@ class CompressionManager:
         ```
     """
     model: Optional[Any] = None
-    compress_token_limit: Optional[int] = None
-    compress_target_token_limit: Optional[int] = None
     compact_token_limit: Optional[int] = None
 
     stats: Dict[str, Any] = field(default_factory=dict)
@@ -116,23 +112,6 @@ class CompressionManager:
     reminder_claimed: bool = False
     fallback_claimed: bool = False
     compact_token_floor: Optional[int] = None
-
-    def reset_run_state(self) -> None:
-        """Per-run hook. Window id and notes-fallback state survive the turn."""
-        return
-
-    def __post_init__(self):
-        if self.compress_target_token_limit is None and self.compress_token_limit is not None:
-            self.compress_target_token_limit = int(self.compress_token_limit * 0.6)
-
-    def _resolve_limits(self, model: Optional[Any] = None) -> None:
-        """Auto-resolve compress_token_limit from model.context_window if not set."""
-        if self.compress_token_limit is not None:
-            return
-        context_window = model.context_window if model is not None else None
-        if context_window:
-            self.compress_token_limit = int(context_window * 0.8)
-            self.compress_target_token_limit = int(context_window * 0.5)
 
     def should_native_compact(
         self,

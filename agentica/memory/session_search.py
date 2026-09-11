@@ -15,6 +15,8 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Sequence, Set
 
+from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK
+
 ITEM_ROLES = ("user", "assistant", "tool")
 
 # Newest-first user-question index attached to every search_session result.
@@ -76,8 +78,99 @@ def is_window_preamble(content: str) -> bool:
     return content.lstrip().startswith(_CONTEXT_WINDOW_OPEN)
 
 
+_INJECTED_CLOSERS = ("</context_window>", "</session_notes>", "</dropped_span>")
+
+
+def _preamble_identity(content: str) -> str:
+    """The window preamble that a ``user`` row carries, or "" when it carries none.
+
+    ``<context_window>`` is written by us and is byte-identical for a given
+    window (window id + token count), so it identifies which cut a row belongs
+    to without depending on message counts (which the tail may reorder).
+    """
+    if not content or not is_window_preamble(content):
+        return ""
+    for closer in _INJECTED_CLOSERS:
+        idx = content.find(closer)
+        if idx >= 0:
+            return content[: idx + len(closer)]
+    return content
+
+
+def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
+    """Drop pre-boundary rows that its own preserved tail re-logged.
+
+    ``append_post_compact_messages`` re-appends the preserved tail after a
+    ``compact_boundary`` — including a turn the runner already flushed
+    mid-flight. ``load()`` replays only post-boundary rows, so the duplicate is
+    invisible there, but both copies sit in this list and the question index
+    would list the pending question twice.
+
+    The shadowed row is the last ``user`` row before the boundary whose prose
+    matches the first ``user`` row after it and which carries no preamble; its
+    ``tool`` rows are the ones the tail re-logged for the same span. The
+    pre-boundary copy stays in the JSONL and is still reachable by
+    ``offset_chars`` paging — this drops it from search/index only.
+    """
+    drop: set = set()
+    for pos, entry in enumerate(entries):
+        if entry.get("type") != "compact_boundary":
+            continue
+        tail: List[Dict] = []
+        for later in entries[pos + 1:]:
+            if later.get("type") == "compact_boundary":
+                break
+            tail.append(later)
+        tail_user = next((e for e in tail if e.get("type") == "user"), None)
+        if tail_user is None:
+            continue
+        tail_prose = strip_window_preamble(_entry_text(tail_user))
+        if not tail_prose.strip():
+            continue
+        shadow = next(
+            (
+                i
+                for i in range(pos - 1, -1, -1)
+                if entries[i].get("type") == "user"
+                and not _preamble_identity(_entry_text(entries[i]))
+                and _entry_text(entries[i]).strip() == tail_prose
+            ),
+            None,
+        )
+        if shadow is None:
+            continue
+        drop.add(shadow)
+        for i in range(shadow + 1, pos):
+            if entries[i].get("type") == "tool":
+                drop.add(i)
+    if not drop:
+        return entries
+    return [e for i, e in enumerate(entries) if i not in drop]
+
+
+def strip_window_preamble(content: str) -> str:
+    """User prose after a folded new-window prefix. Unchanged otherwise.
+
+    ``start_new_context_window`` puts ``<context_window>`` / notes / dropped
+    span in front of the preserved user turn. The whole string starts with
+    the oil-gauge, so a startswith skip throws away the question. Search
+    scores this remainder; a chrome-only row (idle ``/compact``) is empty.
+    """
+    if not content or not is_window_preamble(content):
+        return content
+    rest = content
+    for closer in _INJECTED_CLOSERS:
+        idx = rest.find(closer)
+        if idx >= 0:
+            rest = rest[idx + len(closer):]
+    mark_at = rest.find(WINDOW_CONTINUATION_MARK)
+    if mark_at >= 0:
+        rest = rest[mark_at + len(WINDOW_CONTINUATION_MARK):]
+    return rest.lstrip()
+
+
 def format_turn_stamp(value) -> str:
-    """Compact UTC stamp shared by notes digest and search_session."""
+    """Compact UTC stamp for search_session hits (JSONL ``timestamp``)."""
     if value is None or value == "":
         return ""
     if isinstance(value, (int, float)):
@@ -142,9 +235,12 @@ def rank_entries(
     terms = search_terms(q)
     if not q or not terms:
         return []
+    entries = drop_shadowed_by_boundary(entries)
     scored: List[tuple] = []
     for i, entry in enumerate(entries):
-        content = _entry_text(entry)
+        content = strip_window_preamble(_entry_text(entry))
+        if not content.strip():
+            continue
         sc = score_content(content, q, terms)
         if sc <= 0:
             continue
@@ -172,11 +268,11 @@ def list_user_questions(
     cap = min(USER_QUESTION_LIMIT, max(1, int(limit)))
     hits: List[Dict] = []
     used = 0
-    for entry in reversed(entries):
+    for entry in reversed(drop_shadowed_by_boundary(entries)):
         if entry.get("type") != "user":
             continue
-        text = _entry_text(entry)
-        if not text.strip() or is_window_preamble(text):
+        text = strip_window_preamble(_entry_text(entry))
+        if not text.strip():
             continue
         snippet = snippet_head(text, snippet_width)
         if hits and used + len(snippet) > budget_chars:

@@ -206,7 +206,8 @@ class TestIntegration(unittest.TestCase):
             ],
         )
         self.assertIsNotNone(orchestrator.tools)
-        self.assertEqual(len(orchestrator.tools), 1)
+        # one agent tool + auto-attached BuiltinContextTool
+        self.assertEqual(len(orchestrator.tools), 2)
         tool = orchestrator.tools[0]
         self.assertIsInstance(tool, Function)
         self.assertEqual(tool.name, "translate_to_chinese")
@@ -225,7 +226,8 @@ class TestIntegration(unittest.TestCase):
                 analyzer.as_tool(tool_name="analyze", tool_description="Analyze"),
             ],
         )
-        self.assertEqual(len(orchestrator.tools), 3)
+        # three agent tools + auto-attached BuiltinContextTool
+        self.assertEqual(len(orchestrator.tools), 4)
         tool_names = [t.name for t in orchestrator.tools]
         self.assertIn("translate", tool_names)
         self.assertIn("summarize", tool_names)
