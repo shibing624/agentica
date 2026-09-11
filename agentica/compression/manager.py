@@ -203,8 +203,11 @@ class CompressionManager:
         slog = agent._session_log if agent is not None else None
         notes_path = notes_path_for(slog)
 
-        tail_start = trailing_user_turn_start(messages)
-        covered = [m for m in messages[:tail_start] if m.role != "system"]
+        if keep_trailing_turn:
+            tail_start = trailing_user_turn_start(messages)
+            covered = [m for m in messages[:tail_start] if m.role != "system"]
+        else:
+            covered = [m for m in messages if m.role != "system"]
         covered_hash = _covered_prefix_hash(covered)
         notes_text = ensure_rollover_notes(covered, notes_path, self.window_id)
 
@@ -248,3 +251,31 @@ class CompressionManager:
     def get_stats(self) -> Dict[str, Any]:
         """Get compression statistics."""
         return dict(self.stats)
+
+
+async def apply_idle_compact(agent: Any) -> bool:
+    """CLI / Web ``/compact``: empty window; preamble waits for the next turn.
+
+    Mid-turn auto / reactive compact keeps the pending question
+    (``keep_trailing_turn=True``). An idle slash/Web compact has no pending
+    question — keeping the last answered turn would leave the oil-gauge on
+    yesterday's user message, not on the next request.
+    """
+    wm = agent.working_memory
+    if wm is None:
+        return False
+    messages = wm.messages
+    if not messages:
+        return False
+    cm = agent.tool_config.compression_manager if agent.tool_config else None
+    if cm is None:
+        return False
+    compacted = await cm.auto_compact(
+        messages,
+        model=agent.model,
+        force=True,
+        keep_trailing_turn=False,
+    )
+    if compacted:
+        wm.collapse_runs(messages)
+    return compacted

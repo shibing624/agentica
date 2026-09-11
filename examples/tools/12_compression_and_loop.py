@@ -86,34 +86,27 @@ def demo_evict_tool_results():
 
 
 # ============================================================================
-# Demo 2: CompressionManager.auto_compact 演示（无需 LLM）
+# Demo 2: CompressionManager.auto_compact 演示（空窗换窗，无需 LLM）
 # ============================================================================
 
 def demo_auto_compact_config():
-    """展示 CompressionManager 的三层压缩配置方式。"""
+    """展示 CompressionManager 的空窗换窗配置。"""
     from agentica.compression.manager import CompressionManager
 
     print("=" * 60)
-    print("Demo 2: Layer 2 — CompressionManager（LLM 摘要）")
+    print("Demo 2: Layer 2 — CompressionManager（空窗换窗）")
     print("=" * 60)
-    print("  淘汰兜不住时才走这层：花一次 LLM 调用把历史换成摘要，不可逆\n")
+    print("  淘汰兜不住时才走这层：丢掉活动窗旧轮次，装上 <context_window> + notes")
+    print("  不调用 LLM，也不走 /responses/compact。原文留在 session JSONL。\n")
 
-    # 显式阈值
-    cm = CompressionManager(
-        compress_token_limit=80_000,
-        compress_target_token_limit=40_000,
-    )
-    print(f"  触发阈值: {cm.compress_token_limit:,} tokens")
-    print(f"  目标阈值: {cm.compress_target_token_limit:,} tokens")
+    cm = CompressionManager(compact_token_limit=80_000)
+    print(f"  工作阈值 compact_token_limit: {cm.compact_token_limit:,} tokens")
 
-    # 不传阈值时从 model.context_window 推导（80% 触发 / 50% 目标）
     auto = CompressionManager()
-    print(f"\n  零配置: {auto.compress_token_limit} → 运行时按 context_window 推导")
+    print(f"  零配置 compact_token_limit: {auto.compact_token_limit} → 运行时按窗口×0.95 换窗")
 
-    print(f"\n  Auto-compact circuit-breaker:")
-    print(f"    最大连续失败次数: {cm._max_auto_compact_failures}")
     from agentica.compression.manager import AUTO_COMPACT_THRESHOLD_RATIO
-    print(f"    触发比例: context_window 的 {AUTO_COMPACT_THRESHOLD_RATIO:.0%}（距窗顶 5% 余量）\n")
+    print(f"  触发比例: context_window 的 {AUTO_COMPACT_THRESHOLD_RATIO:.0%}（距窗顶 5% 余量）\n")
 
 
 # ============================================================================

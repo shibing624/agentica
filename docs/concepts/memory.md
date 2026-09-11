@@ -245,4 +245,4 @@ workspace = Workspace(path="./workspace", config=config)
 
 - [Agent 核心概念](agent.md) — Agent 如何使用记忆
 - [Hooks](../advanced/hooks.md) — ConversationArchiveHooks 详解
-- [Context Compression](../advanced/compression.md) — 上下文压缩与会话摘要复用
+- [Context Compression](../advanced/compression.md) — 空窗换窗；旧轮次用 `search_session` 从 JSONL 取回

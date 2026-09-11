@@ -4,7 +4,7 @@
 
 ## 两个模型概念：main + auxiliary
 
-每个 profile 顶部是 main model 字段，可选一个 `auxiliary_model` 子块。auxiliary model 是便宜/快速模型，用于**所有**非用户面对的 LLM 工作：记忆抽取、上下文压缩、用户纠正分类、goal 判断、skill 升级，以及 `task` subagent 工具。省略 `auxiliary_model` 则复用 main model。CLI 只暴露 `--auxiliary_model_*`（没有 `--task_model_*`）；`cli/runtime.py::create_agent` 把 auxiliary model 同时作为 `auxiliary_model=` 和 `task_model=` 传入。
+每个 profile 顶部是 main model 字段，可选一个 `auxiliary_model` 子块。auxiliary model 是便宜/快速模型，用于**所有**非用户面对的 LLM 工作：记忆抽取、用户纠正分类、goal 判断、skill 升级，以及 `task` subagent 工具。Layer 2 compact 已改为空窗换窗，不再走 auxiliary。省略 `auxiliary_model` 则复用 main model。CLI 只暴露 `--auxiliary_model_*`（没有 `--task_model_*`）；`cli/runtime.py::create_agent` 把 auxiliary model 同时作为 `auxiliary_model=` 和 `task_model=` 传入。
 
 ## SDK 契约
 

@@ -236,7 +236,7 @@ class TestCLIStreamDisplay(unittest.TestCase):
         })
 
         self.assertIn("auto-compacted 2 times", output)
-        self.assertIn("summaries accumulate", output)
+        self.assertIn("Earlier turns left the window", output)
 
 
     def test_subagent_auto_compact_keeps_technical_notice(self):
@@ -248,7 +248,7 @@ class TestCLIStreamDisplay(unittest.TestCase):
             "elapsed": 1.0,
         })
 
-        self.assertIn("auto / LLM-summarised", output)
+        self.assertIn("auto / new window", output)
         self.assertNotIn("/new", output)
 
 

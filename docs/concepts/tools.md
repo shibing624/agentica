@@ -327,6 +327,8 @@ tools = get_builtin_tools(work_dir="./")
 | `task` | `BuiltinTaskTool` | 同进程启动子 Agent（subagent，默认 auxiliary、偏只读） |
 | `delegate` | `BuiltinDelegateTool` | **交互 CLI 专用**：另起完整 `agentica --query --print` 进程；不阻塞，经 `/ps`/`wait`/`/stop` 托管 |
 | `list_agents` / `send_message` | `PeerMessagingTool` | **交互 CLI 专用**：跨终端对等会话发现与纯文本消息 |
+| `search_session` | `BuiltinContextTool` | 搜本会话 JSONL（含最近一条 `compact_boundary` **之前**）。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序 |
+| `read_session_item` | `BuiltinContextTool` | 按 `search_session` 返回的 `item_id` 读一条原文；`offset_chars` / `limit_chars` 切片 |
 
 #### `task` vs `delegate` vs peer
 

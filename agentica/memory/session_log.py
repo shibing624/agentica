@@ -31,6 +31,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Union, runtime_checkable
 from uuid import uuid4
 
+from agentica.compression.token_budget import (
+    CONTEXT_WINDOW_OPEN,
+    WINDOW_CONTINUATION_MARK,
+)
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_text_tokens
 
@@ -47,6 +51,30 @@ class _ToDict(Protocol):
 
 # Large file optimization threshold (5MB, same as CC's SKIP_PRECOMPACT_THRESHOLD)
 _LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
+
+
+def _drop_consumed_window_preamble(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop an idle-/compact placeholder that the next user turn already folded in.
+
+    JSONL is append-only, so the placeholder stays on disk after the next
+    request carries it. Replaying both would be consecutive user roles.
+    """
+    kept: List[Dict[str, Any]] = []
+    n = len(messages)
+    for i, msg in enumerate(messages):
+        content = msg.get("content") or ""
+        nxt = messages[i + 1] if i + 1 < n else None
+        if (
+            nxt is not None
+            and nxt.get("role") == "user"
+            and msg.get("role") == "user"
+            and isinstance(content, str)
+            and content.startswith(CONTEXT_WINDOW_OPEN)
+            and WINDOW_CONTINUATION_MARK in content
+        ):
+            continue
+        kept.append(msg)
+    return kept
 
 # Marker file written once per project directory. ``sanitize_path`` hashes the
 # work_dir into the directory name and cannot be reversed, so without this the
@@ -1065,6 +1093,7 @@ class SessionLog:
                 if isinstance(checkpoint, dict):
                     messages[-1]["provider_checkpoint"] = checkpoint
 
+        messages = _drop_consumed_window_preamble(messages)
         logger.debug(
             f"SessionLog.load({self.session_id}): "
             f"{len(entries)} post-boundary entries, "

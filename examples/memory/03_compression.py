@@ -131,17 +131,14 @@ def demo_agent_with_compression():
     print(f"   enable_evict={agent1.tool_config.enable_evict} "
           f"enable_auto_compact={agent1.tool_config.enable_auto_compact}")
 
-    custom_compression = CompressionManager(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        compress_token_limit=5000,
-    )
+    custom_compression = CompressionManager(compact_token_limit=5000)
     Agent(
         model=OpenAIChat(id="gpt-4o"),
         tool_config=ToolConfig(compression_manager=custom_compression),
         name="CustomCompressedAgent",
     )
     print("\n2. Agent with custom CompressionManager:")
-    print(f"   Token limit: {custom_compression.compress_token_limit}")
+    print(f"   compact_token_limit: {custom_compression.compact_token_limit}")
 
 
 if __name__ == "__main__":

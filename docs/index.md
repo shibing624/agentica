@@ -56,14 +56,14 @@
 | [RunConfig](advanced/run-config.md) | 运行时配置（超时、成本、白名单） |
 | [Standing Goal Loop](advanced/goals.md) | `/goal` 长任务循环：自动判断、续跑、token / wall-clock 预算 |
 | [Guardrails](advanced/guardrails.md) | 4 层安全守卫 |
-| [Context Compression](advanced/compression.md) | 上下文压缩 |
+| [Context Compression](advanced/compression.md) | 两层压缩：淘汰旧 tool result → 空窗换窗；`search_session` 找回旧轮次 |
 | [Skills](advanced/skills.md) | Markdown Skill 系统 |
 | [Daily Tasks](advanced/daily-tasks.md) | 定时任务、失败可见性与运行历史 |
 | [MCP](advanced/mcp.md) | Model Context Protocol |
 | [ACP](advanced/acp.md) | Agent Client Protocol |
 | **参考** | |
 | [模型提供商](guides/models.md) | 全部模型配置指南 |
-| [OpenAI Responses API](guides/openai-responses.md) | reasoning、工具调用、原生 compact 及 CLI/Gateway 配置 |
+| [OpenAI Responses API](guides/openai-responses.md) | reasoning、工具调用、空窗换窗及 CLI/Gateway 配置 |
 | [最佳实践](guides/best_practices.md) | 设计原则与生产部署 |
 | [Agent API](api/agent.md) | 完整 API 参考 |
 | [依赖分层 RFC](rfcs/dependency-layering.md) | `agentica-core` / extras 的延后方案 |

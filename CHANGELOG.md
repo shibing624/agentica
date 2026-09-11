@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
 #### fixes
+- **CLI / Web `/compact` 改为空窗，提示折进下一轮用户请求**：空闲换窗不再 `keep_trailing_turn`（那会把油表叠在上一轮已答完的 user 上）。`<context_window>` + notes 作为 preamble 留下，下一句用户输入折叠进去，避免连续两条 user。自动 / reactive compact 仍保留正在问的尾巴。
+- **CLI 换窗提示不再写「LLM-summarised」**：Layer 2 已是空窗，重复换窗的警告改为 earlier turns left the window / `search_session`。
 - **`ask_user_question` 第一次调用不再因 `options` 是字符串而失败**：模型常把选项收成 `'["A", "B"]'`，pydantic 报 `Input should be a valid list`，重试才过。schema 写明 `options` 是 string 数组而不是一段 JSON；docstring / system prompt 去掉会诱使模型照抄的 Python `options=[...]`。字符串化的数组在进 `validate_call` 之前解开（含 XML `<parameter>` 和带 fence 的 JSON）。
 - **带日期的模型快照按自己的单价计，不再套父模型**：`CostTracker._lookup_pricing` 以前取 catalog 里第一个 `startswith` 命中，`_FALLBACK_PRICING` 又是宽名在前（`gpt-4o` 先于 `gpt-4o-mini`），于是 `gpt-4o-mini-2024-07-18` 按 2.50/10.00 而不是 0.15/0.60，状态栏和 `RunResponse.cost_summary` 都偏。现在前缀查找复用 `_get_model_entry` 的最长分隔符锚定规则，和 `context_window` 对同一个 id 不再各算各的。
 - **Langfuse 不再把 SSE 的 `data: {...}` 当媒体**：MediaManager 见 `data:` 就当 base64 data URI，会话里的流式帧和源码片段会打 `Error parsing base64 data URI` / `Data is not base64 encoded`。只有 `data:...;base64,...` 才解析。

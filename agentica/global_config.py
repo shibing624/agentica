@@ -581,7 +581,7 @@ settings:
 #  cli_markdown: auto        # off|auto|on — Markdown the assistant reply; complete blocks stream live
 #  num_history_turns: 20     # conversation turns kept in the prompt window
 #  enable_evict: true        # Layer 1: drop old tool results under pressure
-#  enable_auto_compact: true # Layer 2: LLM-summarise when the window fills
+#  enable_auto_compact: true # Layer 2: open an empty window when full
 #                            # (/compact still works when this is false)
 #  compact_token_limit:      # optional working cap (absolute tokens). Does
 #                            # not rewrite the model's context_window. Layer 2

@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from pydantic import BaseModel, ConfigDict
 
 from agentica.db.base import BASE64_PLACEHOLDER, clean_media_placeholders
+from agentica.compression.token_budget import is_pending_window_preamble
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.run_response import RunResponse
@@ -296,6 +297,22 @@ class WorkingMemory(BaseModel):
         self.runs = [
             AgentRun(response=RunResponse(messages=[m.model_copy(deep=True) for m in messages]))
         ]
+
+    def drop_pending_window_preamble(self) -> None:
+        """Remove the idle-/compact placeholder once the next turn carries it."""
+        if self.messages:
+            self.messages[:] = [
+                m for m in self.messages if not is_pending_window_preamble(m)
+            ]
+        kept = []
+        for run in self.runs:
+            msgs = run.response.messages if run.response else []
+            filtered = [m for m in msgs if not is_pending_window_preamble(m)]
+            if run.response is not None:
+                run.response.messages = filtered
+            if any(_is_history_message(m) for m in filtered):
+                kept.append(run)
+        self.runs = kept
 
     def hydrate_runs_from_history(self, history_messages: List[Dict[str, Any]]) -> int:
         """Rebuild `runs` from a flat list of persisted messages (session resume).

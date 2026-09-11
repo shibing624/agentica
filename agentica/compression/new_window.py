@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from agentica.compression.evict import trailing_user_turn_start
-from agentica.compression.token_budget import full_window_text
+from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK, full_window_text
 from agentica.model.message import Message
 
 
@@ -73,10 +73,7 @@ def _preamble(
     if excerpt:
         parts.append(excerpt)
     if continuation:
-        parts.append(
-            "New context window started without a conversation summary. "
-            "Continue from session notes and search_session."
-        )
+        parts.append(WINDOW_CONTINUATION_MARK)
     return "\n\n".join(parts)
 
 

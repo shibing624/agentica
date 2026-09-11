@@ -64,11 +64,15 @@ Context Messages
 
 淘汰兜不住时才走这层。不再调用摘要模型，也不再走 provider-native `/responses/compact`。`ToolConfig.compression_manager` 留空时自动创建（给 `/compact` 和跨 provider fallback 用）。自动触发由 `ToolConfig.enable_auto_compact` 控制（默认开）；关掉后 runner / `prompt_too_long` 后的 reactive 都不跑，超窗就把 provider 错误抛出。`/compact` 不受此开关影响。
 
-每个 Agent 会挂上 `BuiltinContextTool`：
+每个 Agent 会挂上 `BuiltinContextTool`。换了几个窗也只扫**同一份** JSONL，不按窗建第二套档案。
 
-- `search_session` / `read_session_item` — 查 JSONL，**包括**最近一条 `compact_boundary` 之前
-- 交接写 `<session_id>.notes.md`（和 jsonl 同目录）。对齐 Codex：模型用已有文件工具写 notes；第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口。真正切窗时文件已有内容则原样注入，仍空才落 transcript digest（不是正则抽 facts）。新窗注入摘录，避免第一跳只有路径没有正文
-- `search_session` 对齐 Codex `history.search_contents`：`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。`read_session_item` 对齐 `history.read_item`：`item_id` + `offset_chars` / `limit_chars`
+```
+~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.jsonl
+~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
+```
+
+- `search_session` / `read_session_item` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。契约对齐 Codex `history.search_contents` / `history.read_item`：`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），命中按相关度排序；`read` 的参数是 `item_id` + `offset_chars` / `limit_chars`
+- 交接写旁边的 `<session-id>.notes.md`（已有文件工具，不新建目录）。对齐 Codex：模型自己写 goals / constraints / IDs；第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口。真正切窗时文件已有内容则原样注入，仍空才落 transcript digest（user / assistant 原文 + 超长消息头尾，**不是**正则抽 facts）。新窗注入摘录，避免第一跳只有路径没有正文
 
 油表是 `<context_window>` user 片段：新窗写满窗身份；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
 

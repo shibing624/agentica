@@ -592,7 +592,7 @@ async def compact_session(
     body: Optional[CompactRequest] = None,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """Web ``/compact``: summarise this session the same way the CLI does."""
+    """Web ``/compact``: open a new empty window the same way the CLI does."""
     try:
         result = await svc.compact_session(
             session_id,

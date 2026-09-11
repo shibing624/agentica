@@ -910,9 +910,11 @@ class TestCompressionManagerAutoCompact(unittest.TestCase):
         ]
         result = asyncio.run(cm.auto_compact(msgs, force=True, keep_trailing_turn=False))
         self.assertTrue(result)
-        joined = " ".join(str(m.content) for m in msgs)
-        self.assertNotIn("current question", joined)
-        self.assertIn("New context window started", joined)
+        self.assertEqual([m.role for m in msgs], ["system", "user"])
+        self.assertIn("New context window started", msgs[-1].content)
+        self.assertFalse(
+            any(m.role == "user" and m.content == "current question" for m in msgs)
+        )
 
     def test_should_native_compact_is_always_false(self):
         from agentica.compression.manager import CompressionManager

@@ -10,7 +10,7 @@ DeepAgent enables the product defaults users expect from an unattended assistant
 - built-in tools (read_file / write_file / apply_patch / grep / glob, execute, web search, subagent task, todos; long HTML reports via write_file)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
 - Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
-  native/LLM summarise; reactive compact on prompt_too_long)
+  empty window; reactive compact on prompt_too_long)
 - Death spiral detection + cost tracking + cost budget
 - Repeated tool-call detection (inject "change strategy" at 3 repeats)
 - Workspace memory (AGENTS.md standing rules, MEMORY.md index, topic files on demand)

@@ -160,8 +160,8 @@ def _refresh_live_status(
 def _make_compact_phase_handler(set_phase, tui_state: dict):
     """Bridge ``compact.start`` / ``compact.end`` onto the spinner phase.
 
-    Auto-compact blocks the turn on an LLM summarisation that routinely runs
-    10-20s; without a phase change the spinner keeps saying "thinking" and the
+    Auto-compact blocks the turn while the activity window is replaced;
+    without a phase change the spinner keeps saying "thinking" and the
     turn looks hung.
 
     The interrupted phase is restored afterwards rather than assumed to be
@@ -320,7 +320,7 @@ def _process_stream_response(
           reasoning  — streaming reasoning content
           tool       — running a tool (pass its label as ``base``)
           answering  — streaming the final response
-          compacting — summarising the context to free room
+          compacting — opening a new context window
           idle       — clear the spinner (run ended / cancelled / errored)
 
         The spinner thread renders a continuously spinning braille glyph +

@@ -1435,8 +1435,8 @@ class StreamDisplayManager:
                         f"{prefix}[bold yellow]⚠ Context has been auto-compacted {count} times.[/bold yellow]"
                     )
                     self._assistant_console.print(
-                        f"{prefix}[yellow]Accuracy may degrade as summaries accumulate; "
-                        "consider /new for a focused fresh session.[/yellow]"
+                        f"{prefix}[yellow]Earlier turns left the window; use search_session, "
+                        "or /new for a focused fresh session.[/yellow]"
                     )
                 else:
                     self._assistant_console.print(
@@ -1449,7 +1449,7 @@ class StreamDisplayManager:
                     )
                 return
             self._assistant_console.print(
-                f"{prefix}[dim yellow]🗜 compact (auto / LLM-summarised)[/dim yellow] "
+                f"{prefix}[dim yellow]🗜 compact (auto / new window)[/dim yellow] "
                 f"[dim]{before} → {after} msgs ({elapsed:.1f}s)[/dim]"
             )
         elif et == "compact.reactive":

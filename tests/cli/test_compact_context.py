@@ -99,9 +99,37 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         before = asyncio.run(measure_context(agent)).total
         self._run_compact(agent)
         self.assertLess(asyncio.run(measure_context(agent)).total, before)
-        joined = " ".join(str(m.content) for m in agent.working_memory.get_messages_from_last_n_runs())
+        history = agent.working_memory.get_messages_from_last_n_runs()
+        joined = " ".join(str(m.content) for m in history)
         self.assertIn("<context_window>", joined)
         self.assertNotIn("[Context compressed]", joined)
+        self.assertTrue(
+            any("New context window started" in str(m.content) for m in history),
+            "idle /compact must leave a preamble for the next request",
+        )
+        self.assertFalse(
+            any(m.role == "assistant" for m in history),
+            "idle /compact must drop the last answered turn",
+        )
+
+    def test_next_request_folds_preamble_into_the_user_turn(self):
+        agent = _build_agent(num_runs=3)
+        self._run_compact(agent)
+        agent.run_response = RunResponse()
+        _, user_messages, messages_for_model = asyncio.run(
+            agent.get_messages_for_run(message="what is the ticket id?")
+        )
+        self.assertEqual(len(user_messages), 1)
+        self.assertIn("<context_window>", user_messages[0].content)
+        self.assertIn("what is the ticket id?", user_messages[0].content)
+        roles = [m.role for m in messages_for_model if m.role != "system"]
+        self.assertNotIn(("user", "user"), list(zip(roles, roles[1:])))
+        self.assertFalse(
+            any(
+                "New context window started" in str(m.content)
+                for m in agent.working_memory.get_messages_from_last_n_runs()
+            )
+        )
 
     def test_new_window_lowers_status_bar_context(self):
         agent = _build_agent(num_runs=5)

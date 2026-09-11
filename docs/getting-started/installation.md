@@ -133,7 +133,7 @@ export ZAI_API_KEY="your-api-key"          # 推荐：智谱免费 glm-4.7-flash
 
 `auxiliary_model` 和 `fallback_models` 是**对象传参**，不是 env，所以多 provider 协作时只需各自 export 自己的 key，构造时分别注入：
 
-**A. Auxiliary Model — 用便宜小模型跑副任务**（context 压缩、记忆抽取、用户纠正分类等）
+**A. Auxiliary Model — 用便宜小模型跑副任务**（记忆抽取、用户纠正分类、goal 判断等；Layer 2 compact 不再走 auxiliary）
 
 ```python
 from agentica import Agent, OpenAIChat, DeepSeekChat

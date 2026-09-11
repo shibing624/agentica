@@ -512,7 +512,9 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         joined = " ".join(str(m.content) for m in history)
         self.assertLessEqual(len(history), before)
         self.assertIn("<context_window>", joined)
-        self.assertNotIn("old answer 0", joined)
+        self.assertFalse(
+            any(m.role == "assistant" and "old answer 0" in str(m.content) for m in history)
+        )
 
     def test_uncompacted_run_still_uses_the_prefix_slice(self):
         """No compaction: the existing slice behaviour must be untouched."""

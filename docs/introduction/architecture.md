@@ -176,12 +176,21 @@ Layer 2 换窗（免费，无 LLM）:
 {"type":"user","uuid":"a1b2...","parent_uuid":null,"session_id":"sess-001","timestamp":"2026-04-05T10:00:00.000Z","content":"分析这段代码"}
 {"type":"assistant","uuid":"c3d4...","parent_uuid":"a1b2...","timestamp":"...","content":"好的...","model":"gpt-4o","usage":{"input_tokens":1024,"output_tokens":256}}
 {"type":"tool","uuid":"e5f6...","parent_uuid":"c3d4...","tool_name":"read_file","content":"..."}
-{"type":"compact_boundary","uuid":"g7h8...","parent_uuid":null,"summary":"...会话摘要..."}
+{"type":"compact_boundary","uuid":"g7h8...","parent_uuid":null,"summary":""}
 ```
+
+`summary` 为空：换窗不再合成假摘要轮。旧轮次仍在这条 boundary **之前**的 JSONL 里，用 `search_session` / `read_session_item` 取。
 
 **恢复机制**：重新创建相同 `session_id` 的 Agent 时，从最后一个 `compact_boundary` 开始加载消息，跳过历史数据（大文件优化）。
 
-**存储路径**：`~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.jsonl`
+**存储路径**：
+
+```
+~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.jsonl
+~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
+```
+
+notes 和 jsonl 同目录。模型用已有文件工具写交接；切窗时注入摘录。
 
 同一份文件的三个出口：Web `/traces`、CLI `/trace` / `/export`、SDK `agent.session_log.analyze()` / `.export()`。`type=event` 行只给观测，`load()` 不回放它们。
 

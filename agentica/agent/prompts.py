@@ -12,6 +12,10 @@ from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.agent.history_filter import apply_history_pipeline
+from agentica.compression.token_budget import (
+    fold_window_preamble,
+    is_pending_window_preamble,
+)
 from agentica.document import Document
 from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
@@ -704,6 +708,7 @@ class PromptsMixin:
         if system_message is not None:
             messages_for_model.append(system_message)
 
+        pending_preamble: Optional[str] = None
         if messages is None and self.add_history_to_context:
             history: List[Message] = self.working_memory.get_messages_from_last_n_runs(
                 last_n=self.num_history_turns, skip_role=pc.system_message_role
@@ -713,6 +718,11 @@ class PromptsMixin:
                 config=self.history_config,
                 user_filter=self.history_filter,
             )
+            if history:
+                last = history[-1]
+                if is_pending_window_preamble(last):
+                    pending_preamble = last.content if isinstance(last.content, str) else None
+                    history = history[:-1]
             if len(history) > 0:
                 logger.debug(f"Adding {len(history)} messages from history")
                 if self.run_response.extra_data is None:
@@ -749,6 +759,10 @@ class PromptsMixin:
 
         if any(user_message.images for user_message in user_messages):
             self.model.validate_image_input()
+
+        if pending_preamble and user_messages:
+            fold_window_preamble(user_messages[0], pending_preamble)
+            self.working_memory.drop_pending_window_preamble()
 
         messages_for_model.extend(user_messages)
         self.run_response.messages = messages_for_model

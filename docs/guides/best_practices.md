@@ -401,7 +401,8 @@ agent = Agent(
     ),
 )
 
-# 长对话会自动生成摘要，减少 token 使用
+# WorkingMemory 的会话摘要会注入 System Prompt 末尾。
+# Layer 2 满窗换空窗，不再复用这份摘要；旧轮次用 search_session 从 JSONL 取。
 ```
 
 ---
@@ -588,9 +589,9 @@ from agentica.agent.config import ToolConfig
 agent = Agent(
     tool_config=ToolConfig(
         enable_evict=True,           # Layer 1, default on
-        enable_auto_compact=True,    # Layer 2 new window, default on
+        enable_auto_compact=True,    # Layer 2 空窗换窗，默认开
         compression_manager=CompressionManager(
-            compress_token_limit=50000,
+            compact_token_limit=50000,
         ),
     ),
 )
@@ -907,9 +908,9 @@ agent = Agent(
 ### Q: Token 超限？
 
 **A:** 解决方案：
-1. 启用压缩
+1. 启用压缩（Layer 1 淘汰 + Layer 2 空窗换窗，默认开）
 2. 减少历史消息
-3. 使用会话摘要
+3. 旧事实用 `search_session` 从 JSONL 取，不要指望 prompt 里还留着
 4. 分块处理长文本
 
 ### Q: 结果不准确？

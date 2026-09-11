@@ -15,6 +15,13 @@ from agentica.model.message import Message
 CONTEXT_WINDOW_OPEN = "<context_window>\n"
 CONTEXT_WINDOW_CLOSE = "\n</context_window>"
 
+# Idle /compact leaves this mark so the next user turn can fold the preamble
+# into that request (avoids consecutive user roles on Bedrock / some gateways).
+WINDOW_CONTINUATION_MARK = (
+    "New context window started without a conversation summary. "
+    "Continue from session notes and search_session."
+)
+
 # Reminder fires once per window when remaining tokens drop to this share
 # of the working window (Codex: reminder_threshold_tokens; we derive it).
 REMINDER_REMAINING_RATIO = 0.25
@@ -98,3 +105,16 @@ def is_context_window_message(message: Message) -> bool:
     if not isinstance(content, str):
         return False
     return content.startswith(CONTEXT_WINDOW_OPEN)
+
+
+def is_pending_window_preamble(message: Message) -> bool:
+    """True for the idle-/compact placeholder that must ride the next request."""
+    if not is_context_window_message(message):
+        return False
+    return WINDOW_CONTINUATION_MARK in message.content
+
+
+def fold_window_preamble(message: Message, preamble: str) -> None:
+    """Put the new-window prompt on the next user turn, in place."""
+    content = message.content if isinstance(message.content, str) else str(message.content or "")
+    message.content = f"{preamble}\n\n{content}" if content.strip() else preamble

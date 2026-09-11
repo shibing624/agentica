@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
 import inspect
 
+from agentica.compression.manager import apply_idle_compact
 from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
@@ -1056,7 +1057,6 @@ class AgentService:
             if msg_count == 0:
                 return {"ok": False, "error": "No messages to compact."}
 
-            model = agent.model
             hooks = agent._run_hooks
             if hooks is not None:
                 await hooks.on_pre_compact(agent=agent, messages=messages)
@@ -1064,15 +1064,9 @@ class AgentService:
             cm = agent.tool_config.compression_manager if agent.tool_config else None
             if cm is None:
                 return {"ok": False, "error": "No compression manager on this agent; nothing to compact with."}
-            compacted = await cm.auto_compact(
-                messages,
-                model=model,
-                force=True,
-                keep_trailing_turn=True,
-            )
+            compacted = await apply_idle_compact(agent)
             if not compacted:
                 return {"ok": False, "error": "New context window failed; conversation left unchanged."}
-            wm.collapse_runs(messages)
 
             if hooks is not None:
                 await hooks.on_post_compact(agent=agent, messages=messages)

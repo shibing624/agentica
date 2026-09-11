@@ -110,7 +110,7 @@ profiles:
       max_tokens: 4096
 ```
 
-这样主对话使用较高推理强度，资料搜索、上下文压缩和默认 Subagent 等辅助任务使用单独模型。Subagent 的 `model_tier` 配置见 [Subagent 文档](../multi-agent/subagent.md)。
+这样主对话使用较高推理强度，资料搜索和默认 Subagent 等辅助任务使用单独模型。Layer 2 compact 不再走 auxiliary。Subagent 的 `model_tier` 配置见 [Subagent 文档](../multi-agent/subagent.md)。
 
 ## Chat Completions 还是 Responses
 

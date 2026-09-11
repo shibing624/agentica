@@ -96,7 +96,9 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
         contents = " ".join(str(m.get("content") or "") for m in resumed)
         self.assertNotIn("[Resumed session — previous context summary]", contents)
         self.assertIn("<context_window>", contents)
-        self.assertIn("question", contents)
+        self.assertIn("New context window started", contents)
+        self.assertEqual([m.get("role") for m in resumed], ["user"])
+        self.assertIn("<session_notes", contents)
 
     def test_fork_after_compact_keeps_summary_and_tail(self):
         agent, slog = self._agent_with_log()
@@ -112,7 +114,8 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
         resumed = forked.load()
         contents = " ".join(str(m.get("content") or "") for m in resumed)
         self.assertIn("<context_window>", contents)
-        self.assertIn("question", contents)
+        self.assertIn("New context window started", contents)
+        self.assertEqual([m.get("role") for m in resumed], ["user"])
 
 
 class TestMemoryExtractFitsAuxWindow(unittest.TestCase):

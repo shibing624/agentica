@@ -38,6 +38,7 @@ from agentica.agent.history_filter import (
     strip_elided_notice,
     strip_tool_artifacts_from_memory,
 )
+from agentica.compression.manager import apply_idle_compact
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
@@ -808,7 +809,6 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         return
 
     extra = cmd_args.strip() if cmd_args else ""
-    model = agent.model
     wm = agent.working_memory
     if extra:
         con.print(
@@ -825,21 +825,13 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         con.print("[red]No compression manager on this agent; nothing to compact with.[/red]")
         return
     con.print(f"[dim]Starting a new context window ({msg_count} messages)...[/dim]")
-    compacted = _run_async_safe(
-        cm.auto_compact(
-            messages,
-            model=model,
-            force=True,
-            keep_trailing_turn=True,
-        )
-    )
+    compacted = _run_async_safe(apply_idle_compact(agent))
     if not compacted:
         con.print("[red]New context window failed; conversation left unchanged.[/red]")
         return
-    wm.collapse_runs(messages)
     con.print(
         f"[green]New context window {cm.window_id}: "
-        f"{msg_count} messages -> {len(messages)}. "
+        f"{msg_count} messages -> {len(wm.messages)}. "
         f"Prior turns stay in the session log.[/green]"
     )
 
