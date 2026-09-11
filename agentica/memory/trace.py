@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from agentica.cost_tracker import CostTracker
 from agentica.model.usage import cache_hit_percent
+from agentica.utils.string import format_file_size
 from agentica.utils.tokens import count_text_tokens
 
 
@@ -815,7 +816,7 @@ def format_trace_text(analysis: Dict[str, Any], *, round_n: Optional[int] = None
     path = file_info.get("path") or ""
     size = file_info.get("sizeBytes")
     if path:
-        size_s = f"  ({size:,} B)" if isinstance(size, int) and size else ""
+        size_s = f"  ({format_file_size(size)})" if isinstance(size, int) and size else ""
         lines.append(f"  File: {path}{size_s}")
     meta = analysis.get("meta") or {}
     model = " / ".join(str(x) for x in (meta.get("provider"), meta.get("model")) if x)

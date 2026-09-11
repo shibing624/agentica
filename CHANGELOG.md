@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
-- **`/status` 在 `<session>.notes.md` 非空时显示路径和大小**：跟 Session log 并列。文件不存在或还是空的不占一行（切窗后没写过 notes 就不要一条空路径）。
+- **`/status` 在 `<session>.notes.md` 非空时显示路径和大小**：跟 Session log 并列。文件不存在或还是空的不占一行。
 - **`search_session` 每次都带最近用户问题**：换窗后「前面问了啥」对不上关键词，不该靠中/英套话表猜意图。每次结果附带 `role=user` 倒序最多 20 条（单条截断、总长封顶，跳过 `<context_window>` preamble）；空 `query` 只返回这份索引。关键词路径不变（`工单号` 仍打中 `工单 ZX-41827`）。
 - **每个 Agent 自动挂 `BuiltinContextTool`**：只挂 `search_session`，能搜到 `compact_boundary` **之前**的 JSONL。不再挂 `new_context`（人用 `/compact`，省掉每轮 ~90 token 的 schema）。
 - **`notes.md` 只留给模型写 standing state，不再落 transcript digest**：对齐 Codex `#33255`——goals / constraints / IDs / decisions，不是第二份 JSONL。空窗 digest 只注入 `<dropped_span>`（`#43335` 第一跳不能只有路径），**不写进 notes.md**。写进去会让 `notes_are_ready` 变真，之后不再催写。
@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。
 
 #### fixes
+- **CLI 文件体积不再甩原始字节**：`/status`、`/trace`、`/resume` 列表共用 `format_file_size`（`4.1MB` / `4.8KB`）。以前 `/status` 和 `/trace` 打 `4,141,579 B`，`/resume` 一律按 KB，4MB 会话会写成 `4044KB`。
 - **换窗交接不再把长 user / assistant 轮的结尾截掉**：digest 里的一行以前只保留开头（`head-only`），而结尾往往正是那句在问的话——模型自问自答式收尾的「要我把行号一并订正吗？」被砍掉后，下一窗只看到一串推理，用户回的那句 `ok` 就没有可指的对象。改为两端都留（`clip_head_tail`，与长 tool 结果的 `_clip` 一致）；`<session_notes>` / `<dropped_span>` 超过 4000 字符时同样保留尾部（notes 的最新状态写在最后）。`search_session` 用户问题索引的 `snippet_head`（空 query / 「前面问了啥」）同一处：长问题先贴素材、最后才问，以前索引里只剩开头。
 - **中途换窗不再把「正在问的那句」在 `search_session` 里列两遍**：本轮 tool round 若已被 in-turn flush 写盘，`append_post_compact_messages` 会随 preserved tail 再写一份（这份是必需的，`load()` 只回放 boundary 之后的行）。两条都在搜索面上，问题索引于是出现两条同样的 user 问句。改为读取侧去重：boundary 后第一条 user 行的正文与 boundary 前最近一条**不带 preamble** 的 user 行相同，就丢掉前置那份，以及同 span 里被重写的 `assistant` / `tool`；原始行仍在 JSONL 里。只在 `_conversation_rows` 做这一趟（需要看见 `compact_boundary`）。
 - **`BuiltinContextTool` 改为弱引用持有 agent**：跟 `Function._agent` 一致。强引用会经 `Agent -> Model -> functions -> Function.entrypoint -> tool -> Agent` 成环（`Function.entrypoint` 是 bound method，本身就扣着 tool），`test_model_functions_agent_weakref` 因此失败。

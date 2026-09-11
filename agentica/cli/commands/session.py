@@ -49,6 +49,7 @@ from agentica.cli.context_usage import measure_context
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.helpers import _run_async_safe
+from agentica.utils.string import format_file_size
 
 
 @dataclass(frozen=True)
@@ -480,7 +481,7 @@ def _print_session_list(
         ts_str = s.get("last_timestamp", "") or ""
         if ts_str:
             ts_str = ts_str[:16].replace("T", " ")
-        size_kb = s["size_bytes"] / 1024
+        size_label = format_file_size(s["size_bytes"])
         sid = s["session_id"]
         # Show a clean, copy-pasteable 8-char prefix that /resume accepts
         # directly. Avoid the old "abc...wxyz" form which users would copy
@@ -507,7 +508,7 @@ def _print_session_list(
         current_marker = "  [green](current)[/green]" if is_current else ""
         con.print(
             f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
-            f"({size_kb:.0f}KB, {turns} turns){current_marker}"
+            f"({size_label}, {turns} turns){current_marker}"
         )
         if user_name:
             con.print(f"     [bold]{summary}[/bold]")

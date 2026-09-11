@@ -55,6 +55,7 @@ from agentica.cli.commands.helpers import (
     format_cli_log_location,
     format_path_for_display,
 )
+from agentica.utils.string import format_file_size
 from agentica.cli.commands.cron_cmd import _confirm_via_tui
 from agentica.compression.new_window import notes_path_for
 from agentica.compression.notes import notes_are_ready
@@ -146,7 +147,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
             try:
                 p = Path(path_str)
                 if p.is_file():
-                    size_bit = f"  [dim]({p.stat().st_size:,} B)[/dim]"
+                    size_bit = f"  [dim]({format_file_size(p.stat().st_size)})[/dim]"
             except (OSError, TypeError, ValueError):
                 pass
             con.print(
@@ -157,7 +158,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
                 notes_bit = ""
                 try:
                     np = Path(notes)
-                    notes_bit = f"  [dim]({np.stat().st_size:,} B)[/dim]"
+                    notes_bit = f"  [dim]({format_file_size(np.stat().st_size)})[/dim]"
                 except (OSError, TypeError, ValueError):
                     pass
                 con.print(

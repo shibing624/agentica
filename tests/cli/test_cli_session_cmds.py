@@ -31,6 +31,7 @@ from agentica.cli.commands import session as cli_session
 from agentica.cli import setup as cli_setup
 from agentica.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
+from agentica.utils.string import format_file_size
 
 
 
@@ -131,6 +132,14 @@ class TestRenameCommand(unittest.TestCase):
             COMMAND_REGISTRY["/sessions"][0],
             cli_session._cmd_resume,
         )
+
+
+class TestFormatFileSize(unittest.TestCase):
+    def test_kb_and_mb(self):
+        self.assertEqual(format_file_size(4900), "4.8KB")
+        self.assertEqual(format_file_size(4_141_579), "3.9MB")
+        self.assertEqual(format_file_size(512), "512B")
+        self.assertEqual(format_file_size(10 * 1024), "10KB")
 
 
 class TestStatusSessionIdentity(unittest.TestCase):
@@ -248,6 +257,7 @@ class TestStatusSessionIdentity(unittest.TestCase):
             printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
             self.assertIn("Session notes:", printed)
             self.assertIn("sess-notes.notes.md", printed)
+            self.assertNotIn(" B)", printed)
 
 
 class TestPeerRecordAdvertisesTheCliLog(unittest.TestCase):

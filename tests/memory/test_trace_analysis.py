@@ -3,7 +3,7 @@
 import json
 
 from agentica.memory.session_log import SessionLog
-from agentica.memory.trace import analyze_entries, last_completed_round
+from agentica.memory.trace import analyze_entries, format_trace_text, last_completed_round
 
 
 def _e(ts, **fields):
@@ -554,6 +554,7 @@ def test_session_log_analyze_and_export(tmp_path):
     text = log.format_trace()
     assert "Totals:" in text
     assert "hello" in text
+    assert " B)" not in text
     dest = tmp_path / "copy.jsonl"
     out = log.export(dest)
     assert out == dest
@@ -564,3 +565,24 @@ def test_session_log_analyze_and_export(tmp_path):
     round_text = log.format_trace(round_n=1)
     assert "Round 1:" in round_text
     assert "[user]" in round_text
+
+
+def test_format_trace_uses_human_file_size():
+    text = format_trace_text(
+        {
+            "session_id": "s",
+            "file": {"name": "s.jsonl", "path": "/tmp/s.jsonl", "sizeBytes": 4_141_579},
+            "meta": {},
+            "totals": {
+                "rounds": 0,
+                "tokens": {},
+                "costUsd": 0,
+                "toolCalls": 0,
+                "toolErrors": 0,
+                "elapsedMs": 0,
+            },
+            "rounds": [],
+        }
+    )
+    assert "3.9MB" in text
+    assert "4,141,579" not in text

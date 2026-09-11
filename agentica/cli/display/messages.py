@@ -18,6 +18,7 @@ from rich.text import Text
 
 from agentica.cli.runtime import get_console
 from agentica.peers import PeerMessage
+from agentica.utils.string import format_file_size
 
 from .console import (
     COLORS,
@@ -68,12 +69,7 @@ def inject_file_contents(prompt_text: str, mentioned_files: List[Path]) -> str:
 
 def _format_attachment_size(path: Path) -> str:
     """Return a compact file size for an attachment label."""
-    size = path.stat().st_size
-    if size < 1024:
-        return f"{size}B"
-    if size < 1024 * 1024:
-        return f"{round(size / 1024)}KB"
-    return f"{size / (1024 * 1024):.1f}MB"
+    return format_file_size(path.stat().st_size)
 
 
 def display_user_message(

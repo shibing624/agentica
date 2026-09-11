@@ -150,6 +150,20 @@ def _extract_outermost_json(text: str) -> Optional[str]:
     return None
 
 
+def format_file_size(n: int) -> str:
+    """Human size: 4900 → 4.8KB, 4141579 → 3.9MB."""
+    if n < 1024:
+        return f"{n}B"
+    value = float(n)
+    for unit in ("KB", "MB", "GB"):
+        value /= 1024.0
+        if value < 1024 or unit == "GB":
+            if value >= 10 or abs(value - round(value)) < 0.05:
+                return f"{value:.0f}{unit}"
+            return f"{value:.1f}{unit}"
+    return f"{value:.0f}GB"
+
+
 def truncate_if_too_long(result: list[str] | str) -> list[str] | str:
     """Truncate list or string result if it exceeds the token limit."""
     if isinstance(result, list):
