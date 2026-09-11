@@ -89,12 +89,20 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
     mid-flight. ``load()`` replays only post-boundary rows, so the duplicate is
     invisible there, but both copies sit in this list.
 
-    The shadowed row is the last ``user`` row before the boundary whose prose
-    matches the first ``user`` row after it and which carries no preamble;
+    The shadowed row is the last ``user`` row **in the window being closed**
+    whose *stripped* prose matches the first ``user`` row after the boundary;
     ``assistant`` / ``tool`` rows in that same span were re-logged with the
     tail. The pre-boundary copies stay in the JSONL; this drops them from
     search/index only. Call this while ``compact_boundary`` rows are still
     in the list (``_conversation_rows``), not again after they are filtered.
+
+    Two things make this work past the first cut. Compare *stripped* prose on
+    both sides, because from the second cut on the row being shadowed is
+    itself a previously-folded preamble row (``is_window_preamble`` was true,
+    and its raw text no longer equals the bare question). And stop the
+    backward scan at the previous boundary, because the preserved tail comes
+    from the current window — a byte-identical question in an *older* window
+    is a real repeat, not a shadow, and must stay in the index.
     """
     drop: set = set()
     for pos, entry in enumerate(entries):
@@ -111,13 +119,19 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
         tail_prose = strip_window_preamble(_entry_text(tail_user))
         if not tail_prose.strip():
             continue
+        # Same window only: scan back to the previous boundary.
+        window_start = 0
+        for i in range(pos - 1, -1, -1):
+            if entries[i].get("type") == "compact_boundary":
+                window_start = i + 1
+                break
         shadow = next(
             (
                 i
-                for i in range(pos - 1, -1, -1)
+                for i in range(pos - 1, window_start - 1, -1)
                 if entries[i].get("type") == "user"
-                and not is_window_preamble(_entry_text(entries[i]))
-                and _entry_text(entries[i]).strip() == tail_prose
+                and strip_window_preamble(_entry_text(entries[i])).strip()
+                == tail_prose.strip()
             ),
             None,
         )
@@ -139,18 +153,30 @@ def strip_window_preamble(content: str) -> str:
     span in front of the preserved user turn. The whole string starts with
     the oil-gauge, so a startswith skip throws away the question. Search
     scores this remainder; a chrome-only row (idle ``/compact``) is empty.
+
+    Peels **every** layer. Back-to-back cuts with no answered turn between
+    them fold a second preamble in front of a row that already carried one;
+    stripping only the outermost left an inner ``<context_window>`` in the
+    prose, so that row could not be recognised as a repeat of the bare
+    question and the index listed it twice.
     """
     if not content or not is_window_preamble(content):
         return content
     rest = content
-    for closer in _INJECTED_CLOSERS:
-        idx = rest.find(closer)
-        if idx >= 0:
-            rest = rest[idx + len(closer):]
-    mark_at = rest.find(WINDOW_CONTINUATION_MARK)
-    if mark_at >= 0:
-        rest = rest[mark_at + len(WINDOW_CONTINUATION_MARK):]
-    return rest.lstrip()
+    while is_window_preamble(rest):
+        peeled = rest
+        for closer in _INJECTED_CLOSERS:
+            idx = peeled.find(closer)
+            if idx >= 0:
+                peeled = peeled[idx + len(closer):]
+        mark_at = peeled.find(WINDOW_CONTINUATION_MARK)
+        if mark_at >= 0:
+            peeled = peeled[mark_at + len(WINDOW_CONTINUATION_MARK):]
+        peeled = peeled.lstrip()
+        if peeled == rest:
+            break  # no closer found — leave as-is rather than loop
+        rest = peeled
+    return rest
 
 
 def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:

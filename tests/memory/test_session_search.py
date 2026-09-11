@@ -194,6 +194,87 @@ class TestSearchEntriesRank(unittest.TestCase):
         self.assertEqual(strip_window_preamble(folded), "现在怎么办？")
         self.assertEqual(strip_window_preamble("plain"), "plain")
 
+    def test_strip_window_preamble_peels_nested_layers(self):
+        """Back-to-back cuts fold a second preamble onto an already-folded row.
+
+        Stripping only the outermost layer left an inner ``<context_window>``
+        in the prose, so the row could not be matched against the bare
+        question and the index listed it once per cut.
+        """
+        one = (
+            "<context_window>\nCurrent context window 2.\n</context_window>\n\n"
+            "现在怎么办？"
+        )
+        two = (
+            "<context_window>\nCurrent context window 3.\n</context_window>\n\n"
+            + one
+        )
+        self.assertEqual(strip_window_preamble(one), "现在怎么办？")
+        self.assertEqual(strip_window_preamble(two), "现在怎么办？")
+
+    def test_second_cut_before_an_answer_lists_the_question_once(self):
+        """N>=2 cuts with no answered turn between them must not duplicate.
+
+        The preserved tail of cut 1 is itself a preamble-bearing row, so cut 2
+        nests: ``strip_window_preamble`` has to peel both layers before the
+        comparison in ``drop_shadowed_by_boundary`` can match.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "先问工单 ZX-41827")
+            log.append("assistant", "答了")
+            log.append("user", "现在怎么办？")
+            log.append_compact_boundary("", window_id=1)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 2.\n"
+                "</context_window>\n\n现在怎么办？",
+            )
+            log.append_compact_boundary("", window_id=2)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 3.\n"
+                "</context_window>\n\n"
+                "<context_window>\nCurrent context window 2.\n"
+                "</context_window>\n\n现在怎么办？",
+            )
+            questions = [h["snippet"] for h in log.list_user_questions()]
+        self.assertEqual(
+            len([q for q in questions if "现在怎么办" in q]), 1,
+            "the pending question must survive N>=2 cuts exactly once",
+        )
+        self.assertFalse(any("<context_window>" in q for q in questions))
+
+    def test_a_real_repeat_in_an_older_window_is_kept(self):
+        """Only the tail of *this* window shadows; an older ask is real.
+
+        The identical question answered in window 1 and asked again in window 3
+        is two turns. An unbounded backward scan found the window-1 copy, byte
+        equal, and wrongly dropped it.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "缓存该用哪个")
+            log.append("assistant", "Redis")
+            log.append_compact_boundary("", window_id=1)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 2.\n"
+                "</context_window>\n\n另一个话题",
+            )
+            log.append("assistant", "好")
+            log.append_compact_boundary("", window_id=2)
+            log.append(
+                "user",
+                "<context_window>\nCurrent context window 3.\n"
+                "</context_window>\n\n缓存该用哪个",
+            )
+            questions = [h["snippet"] for h in log.list_user_questions()]
+        self.assertEqual(
+            len([q for q in questions if "缓存该用哪个" in q]), 2,
+            "an answered question from an older window is a real repeat",
+        )
+
     def test_tail_relog_does_not_duplicate_the_pending_question(self):
         """A mid-turn compact re-appends the tail the runner already flushed.
 
