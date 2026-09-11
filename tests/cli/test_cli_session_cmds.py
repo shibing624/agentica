@@ -219,6 +219,35 @@ class TestStatusSessionIdentity(unittest.TestCase):
             printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
             self.assertIn("Session log:", printed)
             self.assertIn("sess-trace.jsonl", printed)
+            self.assertNotIn("Session notes:", printed)
+
+    def test_status_shows_notes_only_when_the_file_has_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session_log = SessionLog("sess-notes", base_dir=directory)
+            session_log.append("user", "hello")
+            notes = Path(session_log.path).with_name("sess-notes.notes.md")
+            notes.write_text("Constraint: do not rewrite auth\n", encoding="utf-8")
+            agent = MagicMock()
+            agent.session_id = "sess-notes"
+            agent._session_log = session_log
+            agent.tools = []
+            agent.tool_config.permission_mode = "allow-all"
+            agent.run_response.cost_tracker = None
+            context = CommandContext(
+                agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+                current_agent=agent,
+                tui_state={},
+            )
+            console = MagicMock()
+            with (
+                patch("agentica.cli.commands.model_config.get_console", return_value=console),
+                patch("agentica.cli.commands.model_config.resolve_active_profile_name", return_value=("default", "default")),
+                patch("agentica.cli.commands.model_config.get_subagent_configs", return_value={}),
+            ):
+                cli_model_config._cmd_status(context)
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("Session notes:", printed)
+            self.assertIn("sess-notes.notes.md", printed)
 
 
 class TestPeerRecordAdvertisesTheCliLog(unittest.TestCase):

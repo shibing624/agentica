@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
+- **`/status` 在 `<session>.notes.md` 非空时显示路径和大小**：跟 Session log 并列。文件不存在或还是空的不占一行（切窗后没写过 notes 就不要一条空路径）。
 - **`search_session` 每次都带最近用户问题**：换窗后「前面问了啥」对不上关键词，不该靠中/英套话表猜意图。每次结果附带 `role=user` 倒序最多 20 条（单条截断、总长封顶，跳过 `<context_window>` preamble）；空 `query` 只返回这份索引。关键词路径不变（`工单号` 仍打中 `工单 ZX-41827`）。
 - **每个 Agent 自动挂 `BuiltinContextTool`**：只挂 `search_session`，能搜到 `compact_boundary` **之前**的 JSONL。不再挂 `new_context`（人用 `/compact`，省掉每轮 ~90 token 的 schema）。
 - **`notes.md` 只留给模型写 standing state，不再落 transcript digest**：对齐 Codex `#33255`——goals / constraints / IDs / decisions，不是第二份 JSONL。空窗 digest 只注入 `<dropped_span>`（`#43335` 第一跳不能只有路径），**不写进 notes.md**。写进去会让 `notes_are_ready` 变真，之后不再催写。

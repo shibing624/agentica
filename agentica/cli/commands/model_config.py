@@ -56,6 +56,8 @@ from agentica.cli.commands.helpers import (
     format_path_for_display,
 )
 from agentica.cli.commands.cron_cmd import _confirm_via_tui
+from agentica.compression.new_window import notes_path_for
+from agentica.compression.notes import notes_are_ready
 
 
 def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
@@ -150,6 +152,17 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
             con.print(
                 f"  Session log: [cyan]{format_path_for_display(path_str)}[/cyan]{size_bit}"
             )
+            notes = notes_path_for(slog)
+            if notes_are_ready(notes):
+                notes_bit = ""
+                try:
+                    np = Path(notes)
+                    notes_bit = f"  [dim]({np.stat().st_size:,} B)[/dim]"
+                except (OSError, TypeError, ValueError):
+                    pass
+                con.print(
+                    f"  Session notes: [cyan]{format_path_for_display(notes)}[/cyan]{notes_bit}"
+                )
     peers = ctx.peer_session
     if peers is not None:
         con.print(
