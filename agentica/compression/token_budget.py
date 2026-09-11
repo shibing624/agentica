@@ -50,7 +50,7 @@ def full_window_text(
         f"Current context window {window_id}.",
         f"You have {tokens_left} tokens left in this context window.",
         "This window starts without a conversation summary.",
-        "Recover prior facts with search_session / read_session_item.",
+        "Recover prior facts with search_session.",
         "Keep the session notes file current: goals, constraints, IDs, decisions.",
     ]
     if notes_path:

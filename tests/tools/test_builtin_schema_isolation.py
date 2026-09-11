@@ -66,10 +66,6 @@ _FOREIGN = {
         "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
         "task", "delegate", "web_search", "fetch_url",
     }),
-    "read_session_item": frozenset({
-        "execute", "read_file", "write_file", "apply_patch", "grep", "glob",
-        "task", "delegate", "web_search", "fetch_url",
-    }),
 }
 
 

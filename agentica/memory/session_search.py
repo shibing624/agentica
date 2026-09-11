@@ -12,6 +12,7 @@ Window preambles (``<context_window>``) are skipped because we injected
 them, not because of the words they contain.
 """
 import re
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Sequence, Set
 
 ITEM_ROLES = ("user", "assistant", "tool")
@@ -73,6 +74,22 @@ def _entry_text(entry: Dict) -> str:
 
 def is_window_preamble(content: str) -> bool:
     return content.lstrip().startswith(_CONTEXT_WINDOW_OPEN)
+
+
+def format_turn_stamp(value) -> str:
+    """Compact UTC stamp shared by notes digest and search_session."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return ""
+        return datetime.fromtimestamp(float(value), timezone.utc).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+    text = str(value).strip().replace("T", " ")
+    if text.endswith("Z"):
+        text = text[:-1]
+    return text[:16]
 
 
 def snippet_head(content: str, width: int = USER_QUESTION_SNIPPET_CHARS) -> str:
@@ -140,6 +157,7 @@ def rank_entries(
             "type": entry.get("type", ""),
             "snippet": snippet_for(content, q, list(terms)),
             "score": sc,
+            "timestamp": entry.get("timestamp", ""),
         })
     return hits
 
@@ -167,6 +185,7 @@ def list_user_questions(
             "uuid": entry.get("uuid", ""),
             "type": "user",
             "snippet": snippet,
+            "timestamp": entry.get("timestamp", ""),
         })
         used += len(snippet)
         if len(hits) >= cap:

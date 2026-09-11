@@ -85,7 +85,22 @@ class TestStartNewContextWindow(unittest.TestCase):
             )
         self.assertEqual(len(msgs), 1)
         self.assertIn("Constraint: do not rewrite auth", msgs[0].content)
+        self.assertIn("<session_notes", msgs[0].content)
+        self.assertNotIn("<dropped_span", msgs[0].content)
         self.assertIn("keep going", msgs[0].content)
+
+    def test_dropped_span_is_not_wrapped_as_session_notes(self):
+        msgs = [Message(role="user", content="keep going")]
+        start_new_context_window(
+            msgs,
+            window_id=1,
+            tokens_left=1000,
+            notes_path="/tmp/s.notes.md",
+            dropped_span="# Dropped span\n- user: 工单 ZX-41827",
+        )
+        self.assertIn("<dropped_span", msgs[0].content)
+        self.assertIn("ZX-41827", msgs[0].content)
+        self.assertNotIn("<session_notes", msgs[0].content)
 
 
 class TestRunnerNewWindow(unittest.TestCase):

@@ -233,7 +233,7 @@ class TestClassifyAndGrants(unittest.TestCase):
     def test_benign_tools_never_park(self):
         for name in (
             "write_todos", "ask_user_question", "save_memory",
-            "search_memory", "search_session", "read_session_item",
+            "search_memory", "search_session",
             "list_skills", "get_skill_info",
             "self_manage", "list_agents", "task", "delegate",
         ):

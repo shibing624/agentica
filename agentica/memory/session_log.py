@@ -835,44 +835,6 @@ class SessionLog:
 
         return list_user_questions(self._conversation_rows(), limit=limit)
 
-    def read_entry(self, uuid: str) -> Optional[Dict[str, Any]]:
-        """Return one conversation row by uuid, or None."""
-        key = uuid.strip()
-        if not key:
-            return None
-        for entry in self._iter_entries():
-            if entry.get("uuid") == key:
-                return entry
-        return None
-
-    def format_entry(
-        self,
-        entry: Dict[str, Any],
-        limit: int = 8000,
-        offset_chars: int = 0,
-        limit_chars: Optional[int] = None,
-    ) -> str:
-        """Render one JSONL row for the model (Codex read_item slice)."""
-        entry_type = entry.get("type", "")
-        uuid = entry.get("uuid", "")
-        content = entry.get("content", "")
-        if not isinstance(content, str):
-            content = str(content)
-        start = max(0, int(offset_chars))
-        if start:
-            content = content[start:]
-        cap = limit if limit_chars is None else max(1, int(limit_chars))
-        if len(content) > cap:
-            content = content[:cap] + "\n…[truncated]"
-        lines = [f"item_id={uuid}", f"type={entry_type}"]
-        if entry.get("tool_name"):
-            lines.append(f"tool_name={entry['tool_name']}")
-        if entry.get("timestamp"):
-            lines.append(f"timestamp={entry['timestamp']}")
-        lines.append("")
-        lines.append(content)
-        return "\n".join(lines)
-
     def cache_warmth_hint(
         self,
         model: Optional[str] = None,

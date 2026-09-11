@@ -40,10 +40,12 @@ def notes_excerpt(
     limit: int = 4000,
     notes_text: Optional[str] = None,
 ) -> Optional[str]:
-    """Inject existing notes into a new window so the first request is not empty.
+    """Inject model-authored notes. Not a transcript skim.
 
     Codex issue #43335: a new window that only names the notes file leaves
-    the first LLM call with no task state.
+    the first LLM call with no task state. The skim for an empty file is
+    ``dropped_span_excerpt``, not this tag — wrapping a digest as
+    ``<session_notes>`` tells the model the file already has that content.
     """
     text = notes_text
     if not text and notes_path:
@@ -60,6 +62,18 @@ def notes_excerpt(
     return f"<session_notes path=\"{label}\">\n{text}\n</session_notes>"
 
 
+def dropped_span_excerpt(
+    text: Optional[str],
+    limit: int = 4000,
+) -> Optional[str]:
+    """One-shot skim of what left the window. Not written to notes.md."""
+    if not text or not text.strip():
+        return None
+    if len(text) > limit:
+        text = text[:limit] + "\n…[truncated]"
+    return f"<dropped_span>\n{text}\n</dropped_span>"
+
+
 def _preamble(
     window_id: int,
     tokens_left: int,
@@ -67,11 +81,15 @@ def _preamble(
     *,
     continuation: bool,
     notes_text: Optional[str] = None,
+    dropped_span: Optional[str] = None,
 ) -> str:
     parts = [full_window_text(window_id, tokens_left, notes_path)]
     excerpt = notes_excerpt(notes_path, notes_text=notes_text)
     if excerpt:
         parts.append(excerpt)
+    span = dropped_span_excerpt(dropped_span)
+    if span:
+        parts.append(span)
     if continuation:
         parts.append(WINDOW_CONTINUATION_MARK)
     return "\n\n".join(parts)
@@ -84,6 +102,7 @@ def start_new_context_window(
     tokens_left: int,
     notes_path: Optional[str] = None,
     notes_text: Optional[str] = None,
+    dropped_span: Optional[str] = None,
     keep_trailing_turn: bool = True,
 ) -> List[Message]:
     """Rewrite ``messages`` in place into the new window. Returns the tail kept."""
@@ -99,6 +118,7 @@ def start_new_context_window(
         notes_path,
         continuation=not keep_trailing_turn,
         notes_text=notes_text,
+        dropped_span=dropped_span,
     )
 
     rebuilt = list(preserved_system)

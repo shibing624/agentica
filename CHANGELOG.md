@@ -11,14 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### breaking
-- **Layer 2 compact 不再做 LLM / native 摘要，改为空窗换窗（Codex TokenBudget / `#29743`）**：窗口满、`/compact`、`prompt_too_long` 后的 reactive 都只切同一 `session_id` 的新活动窗，写空 `summary` 的 `compact_boundary`。旧对话留在 JSONL，用 `search_session` / `read_session_item` 查；交接写旁边的 `<session_id>.notes.md`（已有文件工具，不新建目录）。`/compact [instructions]` 不再把指令交给摘要模型。`should_native_compact` 恒为 False，runner 不再调 `/responses/compact`。油表是独立的 `<context_window>` user 片段（每窗一次剩余提醒，不进冻结的 system 前缀）。
+- **Layer 2 compact 不再做 LLM / native 摘要，改为空窗换窗（Codex TokenBudget / `#29743`）**：窗口满、`/compact`、`prompt_too_long` 后的 reactive 都只切同一 `session_id` 的新活动窗，写空 `summary` 的 `compact_boundary`。旧对话留在 JSONL，用 `search_session` 查；交接写旁边的 `<session_id>.notes.md`（已有文件工具，不新建目录）。`/compact [instructions]` 不再把指令交给摘要模型。`should_native_compact` 恒为 False，runner 不再调 `/responses/compact`。油表是独立的 `<context_window>` user 片段（每窗一次剩余提醒，不进冻结的 system 前缀）。
+- **删除 `read_session_item`**：抄了 Codex `history.read_item` 的 `item_id` + `offset_chars` / `limit_chars` 分页，但本地 JSONL 一行通常短于 search snippet；模型拿着 id 去读「hi」只得到 type/timestamp/content。换窗后靠 `search_session` 的关键词命中 + 用户问题索引即可。
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
 - **`search_session` 每次都带最近用户问题**：换窗后「前面问了啥」对不上关键词，不该靠中/英套话表猜意图。每次结果附带 `role=user` 倒序最多 20 条（单条截断、总长封顶，跳过 `<context_window>` preamble）；空 `query` 只返回这份索引。关键词路径不变（`工单号` 仍打中 `工单 ZX-41827`）。
-- **每个 Agent 自动挂 `BuiltinContextTool`**：只挂 `search_session` / `read_session_item`，能搜到 `compact_boundary` **之前**的 JSONL。不再挂 `new_context`（人用 `/compact`，省掉每轮 ~90 token 的 schema）。
-- **换窗必落 `<session_id>.notes.md`**：对齐 Codex `#33255`——notes 由模型写（已有文件工具 + 满窗前 fallback 催写），不是正则抽 facts。文件已有内容则不覆盖；仍空才落一份 transcript digest（user / assistant 原文 + 超长消息头尾），避免第一跳只有路径（`#43335`）。
-- **`search_session` / `read_session_item` 契约对齐 Codex `history.search_contents` / `history.read_item`**：`query` 先按字面子串，中文问法再叠字（`工单号` 能打中 `工单 ZX-41827`），命中按相关度排序；`read` 的参数是 `item_id` + `offset_chars` / `limit_chars`。不照抄纯字面搜（整句问题 0/10）。
+- **每个 Agent 自动挂 `BuiltinContextTool`**：只挂 `search_session`，能搜到 `compact_boundary` **之前**的 JSONL。不再挂 `new_context`（人用 `/compact`，省掉每轮 ~90 token 的 schema）。
+- **`notes.md` 只留给模型写 standing state，不再落 transcript digest**：对齐 Codex `#33255`——goals / constraints / IDs / decisions，不是第二份 JSONL。空窗 digest 只注入 `<dropped_span>`（`#43335` 第一跳不能只有路径），**不写进 notes.md**。写进去会让 `notes_are_ready` 变真、第二次换窗冻住第一窗的 skim，`search_session` 也会搜到同一段对话的缩写。
+- **空窗 fallback digest 按时间线写，不再拆成 User / Assistant 两个列表**：旧写法丢掉问答顺序，也不记 tool。对齐 Codex `list_items` 的时间序：先 user/assistant 正文（带时间戳），再 tool 参数和结果；超长 result 仍留头尾。这是新窗第一跳的 skim，不是 notes 文件。`search_session` 用户问题索引用同一套时间戳，并搜模型手写的 notes。
+- **`search_session` 契约对齐 Codex `history.search_contents`**：`query` 先按字面子串，中文问法再叠字（`工单号` 能打中 `工单 ZX-41827`），命中按相关度排序。不照抄纯字面搜（整句问题 0/10）。不照抄 `history.read_item` 分页器。
 - **内联图片长边超过 2000px 先在本地缩小再发给模型**：token 按解码几何计，视网膜截图每轮原样重发浪费。cap 内原样通过；macOS 剪贴板那种全不透明的假 RGBA 去掉空 alpha；PNG 压不下来的照片才落 JPEG。`data:` URI 和 gateway 的 `{"url": data:...}` 同样走这道。解不出的格式（SVG）仍原样送；编码超过 100MB 或 Pillow 解压炸弹直接报错，不再吞掉后把原图发出去。
 - **Claude 也认 `cache_control_session_header`，值按 CLI 会话换**：聚合型代理不粘路由会打到不同后端，缓存冷、schema 400 也更多。header（如 `X-Session-Id`）注入当前 `session_id`，新开会话换路由；没有会话才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的 id。不再把第一次（还没 session）的 fallback 冻在实例上。`get_model` 不再只给 OpenAI chat 传这个字段；setup 对 anthropic 只问粘路由 header。
 - **`config.yaml` 文档补上 prompt cache 与粘性路由**：`guides/config.md` 的 Profile schema 表原来缺 `enable_cache_control` / `cache_control_session_header` / `cache_control_messages` / `cache_keepalive` / `default_headers` 五项（`extra_headers` 也没写明对 anthropic 不生效）。新增「代理网关的粘性路由」一节：账号级（`default_headers` 写死）与会话级（`cache_control_session_header` 按会话取值）的取舍、两者同配时显式值优先、以及换项目目录会重写缓存。

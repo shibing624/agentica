@@ -54,7 +54,6 @@ BENIGN_ALWAYS_ALLOW = frozenset({
     "save_memory",
     "search_memory",
     "search_session",
-    "read_session_item",
     "list_skills",
     "get_skill_info",
     "self_manage",

@@ -1,25 +1,33 @@
 # -*- coding: utf-8 -*-
-"""Local analogue of Codex history.search_contents + a user-question index.
+"""Search this session's JSONL, including rows before compact_boundary.
 
-The history-notes extension (ChatGPT + Codex backend) exposes search and
-list against a server store. We have the session JSONL, including rows
-before the last compact_boundary. Notes stay on the filesystem; this
-tool does not write them.
-
-Keyword search keeps a CJK bigram path so 工单号 hits 工单 ZX-41827.
-Every result also carries the newest user questions (role=user, newest
-first, capped). That is the browse — not a phrase list that guesses
-intent. Empty query returns only the index.
+Codex's history-notes extension (ChatGPT backend, default off) has
+search_contents plus a read_item pager for huge server-side items. We
+keep search only: snippets plus a newest-user-question index. A local
+JSONL row is usually shorter than the snippet; a second tool that
+reprints type/timestamp/content is schema tax that invites reading
+「hi」. Notes stay on the filesystem; this tool does not write them.
 """
+from pathlib import Path
+
+from agentica.compression.new_window import notes_path_for
+from agentica.memory.session_search import (
+    format_turn_stamp,
+    score_content,
+    search_terms,
+    snippet_for,
+)
 from agentica.tools.base import Tool
 
 _SEARCH_QUERY_DESC = (
-    "Literal substring to find in item content (history.search_contents). "
+    "Literal substring to find in item content. "
     "A Chinese question is also split into overlapping bigrams: 工单号 matches "
     "工单 ZX-41827. Prefer distinctive tokens — ticket ids, file paths, numbers. "
     "Generic words (the, dump, 什么) are ignored. Hits are ranked by relevance; "
-    "equal scores prefer later turns. Every result also includes the newest "
-    "user questions (up to 20, truncated). Empty query returns only that index."
+    "equal scores prefer later turns. Also searches model-authored "
+    "<session>.notes.md (standing state, not a transcript copy). "
+    "Every result includes the newest user questions (up to 20, truncated, "
+    "with timestamps). Empty query returns only that index."
 )
 
 _SEARCH_ROLE_DESC = (
@@ -47,34 +55,6 @@ _SEARCH_SCHEMA = {
     },
 }
 
-_READ_ITEM_ID_DESC = (
-    "Item id from a search_session hit (the item_id= field). Pass unchanged."
-)
-
-_READ_OFFSET_DESC = (
-    "Zero-based character offset at which reading starts."
-)
-
-_READ_LIMIT_DESC = (
-    "Maximum number of characters to return from the item body."
-)
-
-_READ_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "item_id": {"type": "string", "description": _READ_ITEM_ID_DESC},
-        "offset_chars": {
-            "type": "integer",
-            "description": _READ_OFFSET_DESC,
-        },
-        "limit_chars": {
-            "type": "integer",
-            "description": _READ_LIMIT_DESC,
-        },
-    },
-    "required": ["item_id"],
-}
-
 
 class BuiltinContextTool(Tool):
     """JSONL history across compact_boundary. Not a second conversation store."""
@@ -87,12 +67,6 @@ class BuiltinContextTool(Tool):
             concurrency_safe=True,
             is_read_only=True,
             parameters_override=_SEARCH_SCHEMA,
-        )
-        self.register(
-            self.read_session_item,
-            concurrency_safe=True,
-            is_read_only=True,
-            parameters_override=_READ_SCHEMA,
         )
 
     def set_agent(self, agent) -> None:
@@ -107,13 +81,38 @@ class BuiltinContextTool(Tool):
             return None
         return agent._session_log
 
+    def _format_hit_line(self, hit: dict, *, with_type: bool) -> str:
+        stamp = format_turn_stamp(hit.get("timestamp"))
+        body = hit["snippet"]
+        if with_type:
+            body = f"{hit.get('type', '')}: {body}"
+        if stamp:
+            return f"- {stamp} {body}"
+        return f"- {body}"
+
     def _format_user_questions(self, questions) -> str:
         if not questions:
             return ""
         lines = [f"Recent user questions (newest first, {len(questions)}):"]
         for hit in questions:
-            lines.append(f"- item_id={hit['uuid']}: {hit['snippet']}")
+            lines.append(self._format_hit_line(hit, with_type=False))
         return "\n".join(lines)
+
+    def _notes_hit(self, query: str):
+        slog = self._session_log()
+        path = notes_path_for(slog)
+        if not path:
+            return None
+        file = Path(path)
+        if not file.is_file():
+            return None
+        text = file.read_text(encoding="utf-8")
+        if not text.strip():
+            return None
+        terms = search_terms(query)
+        if score_content(text, query, terms) <= 0:
+            return None
+        return snippet_for(text, query, list(terms))
 
     async def search_session(
         self,
@@ -126,7 +125,7 @@ class BuiltinContextTool(Tool):
         query: literal substring, plus CJK bigrams so 工单号 matches 工单 ZX-41827.
         Prefer ticket ids, paths, numbers. Hits ranked by relevance.
         Every result includes the newest user questions (up to 20, truncated).
-        Empty query returns only that index.
+        Also searches the session notes file. Empty query returns only the index.
         role: restrict keyword hits to user | assistant | tool.
         limit: max keyword hits 1-20.
         """
@@ -140,39 +139,17 @@ class BuiltinContextTool(Tool):
         if not q:
             return q_block or "No user questions in this session log."
         hits = slog.search_entries(q, limit=cap, role=role)
-        if not hits:
+        notes = None if (role or "").strip() else self._notes_hit(q)
+        if not hits and not notes:
             head = f"No session-log matches for {q!r}."
             return f"{head}\n\n{q_block}" if q_block else head
-        lines = [f"{len(hits)} hit(s) for {q!r}:"]
+        total = len(hits) + (1 if notes else 0)
+        lines = [f"{total} hit(s) for {q!r}:"]
         for hit in hits:
-            lines.append(
-                f"- item_id={hit['uuid']} type={hit['type']}: {hit['snippet']}"
-            )
+            lines.append(self._format_hit_line(hit, with_type=True))
+        if notes:
+            lines.append(f"- notes: {notes}")
         if q_block:
             lines.append("")
             lines.append(q_block)
         return "\n".join(lines)
-
-    async def read_session_item(
-        self,
-        item_id: str,
-        offset_chars: int = 0,
-        limit_chars: int = 8000,
-    ) -> str:
-        """Read one session-log entry by item_id, including pre-boundary rows.
-
-        item_id: id from a search_session hit. Pass unchanged.
-        offset_chars / limit_chars: slice the body (Codex history.read_item).
-        """
-        slog = self._session_log()
-        if slog is None:
-            return "No session log on this agent; nothing to read."
-        key = (item_id or "").strip()
-        if not key:
-            raise ValueError("item_id cannot be empty.")
-        entry = slog.read_entry(key)
-        if entry is None:
-            return f"No session-log entry {key!r}."
-        start = max(0, int(offset_chars))
-        cap = max(1, int(limit_chars))
-        return slog.format_entry(entry, offset_chars=start, limit_chars=cap)

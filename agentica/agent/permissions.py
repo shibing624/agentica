@@ -45,7 +45,6 @@ READ_ONLY_TOOLS: Set[str] = frozenset({
     "list_agents",
     "search_memory",
     "search_session",
-    "read_session_item",
 })
 
 

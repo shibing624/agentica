@@ -1,16 +1,27 @@
 # -*- coding: utf-8 -*-
-"""Session notes that survive a context-window rollover.
+"""Standing session notes vs the one-shot dropped-span skim.
 
-Codex TokenBudget (#33255 / history-notes) does not regex-extract a summary.
-The model authors notes (here: the existing file tools, path in
-``<context_window>``). Auto-compact first injects a fallback prompt and
-gives a short buffer so that write can happen. Only if the file is still
-empty at the cut do we persist a local transcript digest — a skim of the
-dropped span, not a fact list — so the first hop is not Codex #43335.
+Two files, two jobs — do not copy the transcript into notes.md.
+
+- ``<session>.jsonl`` is the log. ``search_session`` reads it.
+- ``<session>.notes.md`` is standing state the model writes with the
+  existing file tools (goals, constraints, IDs, decisions). Codex
+  TokenBudget (#33255) never regex-extracts this and never writes a
+  transcript into it.
+
+A local digest exists only for Codex #43335: the first hop after a cut
+must not be an empty path. It is injected as ``<dropped_span>`` and is
+**not** persisted. Writing it into notes.md made the file a lossy JSONL,
+flipped ``notes_are_ready``, and froze window-1's skim for every later
+cut. ``search_session`` may still hit model-authored notes — those are
+not a second log.
 """
+import json
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
+from agentica.compression.evict import carries_tool_results, tool_result_blocks
+from agentica.memory.session_search import format_turn_stamp, is_window_preamble
 from agentica.model.message import Message
 
 
@@ -19,9 +30,12 @@ _LONG_HEAD = 400
 _LONG_TAIL = 400
 _USER_LINE = 300
 _ASSISTANT_LINE = 400
-_MAX_USERS = 30
-_MAX_ASSISTANTS = 15
-_MAX_LONG = 8
+_TOOL_ARGS_LINE = 200
+_TOOL_RESULT_LINE = 300
+_MAX_TURNS = 40
+_MAX_TOOLS = 20
+# Stay under notes_excerpt's 4000-char inject cap.
+_DIGEST_BUDGET = 3600
 
 # After the 0.95 Layer 2 trigger, wait this extra share of the working
 # window for the model to write notes (Codex auto_compact_fallback_buffer).
@@ -54,7 +68,20 @@ def _content(message: Message) -> str:
     raw = message.content
     if isinstance(raw, str):
         return raw
-    return str(raw or "")
+    return ""
+
+
+def _block_text(block) -> str:
+    if isinstance(block, str):
+        return block
+    if isinstance(block, dict):
+        inner = block.get("content", block.get("text", ""))
+        if isinstance(inner, str):
+            return inner
+        if isinstance(inner, list):
+            return " ".join(_block_text(x) for x in inner)
+        return str(inner or "")
+    return str(block or "")
 
 
 def _is_pad(text: str) -> bool:
@@ -75,82 +102,122 @@ def _one_line(text: str, limit: int) -> str:
     return line
 
 
-def compose_transcript_digest(messages: Sequence[Message]) -> str:
-    """Local skim of the span a window cut is about to drop. Not a summary."""
-    users: List[str] = []
-    assistants: List[str] = []
-    long_excerpts: List[str] = []
-    for m in messages:
-        if m.role == "system":
-            continue
-        text = _content(m)
-        if not text.strip() or _is_pad(text):
-            continue
-        if m.role == "user":
-            line = _one_line(text, _USER_LINE)
-            if line and line not in users:
-                users.append(line)
-        elif m.role == "assistant" and not m.tool_calls:
-            line = _one_line(text, _ASSISTANT_LINE)
-            if line and line not in assistants:
-                assistants.append(line)
-        if len(text) > _LONG_HEAD + _LONG_TAIL:
-            excerpt = _clip(text, _LONG_HEAD, _LONG_TAIL)
-            long_excerpts.append(
-                f"### {m.role} chars={len(text)}\n{excerpt}"
-            )
+def _stamp_of(message: Message) -> str:
+    return format_turn_stamp(message.created_at)
 
-    parts = [
-        "# Session notes (transcript digest)",
+
+def _prefix(stamp: str, body: str) -> str:
+    if stamp:
+        return f"- {stamp} {body}"
+    return f"- {body}"
+
+
+def _tool_call_rows(message: Message) -> List[str]:
+    rows: List[str] = []
+    for call in message.tool_calls or []:
+        fn = call.get("function") if isinstance(call, dict) else None
+        if not isinstance(fn, dict):
+            fn = call if isinstance(call, dict) else {}
+        name = fn.get("name") or "tool"
+        args = fn.get("arguments", "")
+        if not isinstance(args, str):
+            args = json.dumps(args, ensure_ascii=False)
+        rows.append(f"{name} args: {_one_line(args, _TOOL_ARGS_LINE)}")
+    return rows
+
+
+def _tool_result_line(name: str, text: str) -> str:
+    label = name or "tool"
+    if len(text) > _LONG_HEAD + _LONG_TAIL:
+        return f"{label} result chars={len(text)}:\n{_clip(text, _LONG_HEAD, _LONG_TAIL)}"
+    return f"{label} result: {_one_line(text, _TOOL_RESULT_LINE)}"
+
+
+def _collect(messages: Sequence[Message]) -> Tuple[List[str], List[str]]:
+    turns: List[str] = []
+    tools: List[str] = []
+    for message in messages:
+        if message.role == "system":
+            continue
+        stamp = _stamp_of(message)
+        if carries_tool_results(message):
+            if message.role == "tool":
+                text = _content(message)
+                if text.strip() and not _is_pad(text):
+                    tools.append(_prefix(
+                        stamp,
+                        _tool_result_line(message.tool_name or "tool", text),
+                    ))
+            for block in tool_result_blocks(message):
+                text = _block_text(block)
+                if not text.strip() or _is_pad(text):
+                    continue
+                tools.append(_prefix(stamp, _tool_result_line("tool", text)))
+            continue
+        if message.role == "user":
+            text = _content(message)
+            if not text.strip() or _is_pad(text) or is_window_preamble(text):
+                continue
+            turns.append(_prefix(stamp, f"user: {_one_line(text, _USER_LINE)}"))
+            continue
+        if message.role == "assistant":
+            text = _content(message)
+            if text.strip() and not _is_pad(text):
+                turns.append(_prefix(
+                    stamp, f"assistant: {_one_line(text, _ASSISTANT_LINE)}",
+                ))
+            for row in _tool_call_rows(message):
+                tools.append(_prefix(stamp, row))
+    return turns, tools
+
+
+def _fit(lines: List[str], limit: int, budget: int) -> List[str]:
+    chosen = lines[-limit:] if len(lines) > limit else list(lines)
+    used = sum(len(x) + 1 for x in chosen)
+    while chosen and used > budget:
+        used -= len(chosen[0]) + 1
+        chosen.pop(0)
+    return chosen
+
+
+def compose_transcript_digest(messages: Sequence[Message]) -> str:
+    """Local chronological skim of the span a window cut is about to drop."""
+    turns, tools = _collect(messages)
+    header = [
+        "# Dropped span",
         "",
-        "The model did not update this file before the window reset. "
-        "This is a local skim of the dropped span, not a summary. "
-        "Search the session log for anything missing.",
+        "Not session notes — that file is still empty. "
+        "Chronological skim of what left this window. "
+        "Write goals, constraints, IDs, and decisions to the notes file. "
+        "Use search_session for anything missing.",
         "",
     ]
-    if users:
-        parts.append("## User turns")
-        parts.extend(f"- {x}" for x in users[-_MAX_USERS:])
+    header_size = sum(len(x) + 1 for x in header)
+    turn_budget = max(800, _DIGEST_BUDGET - header_size)
+    turns = _fit(turns, _MAX_TURNS, turn_budget)
+    leftover = max(400, _DIGEST_BUDGET - header_size - sum(len(x) + 1 for x in turns))
+    tools = _fit(tools, _MAX_TOOLS, leftover)
+
+    parts = list(header)
+    if turns:
+        parts.append("## Turns")
+        parts.extend(turns)
         parts.append("")
-    if assistants:
-        parts.append("## Assistant")
-        parts.extend(f"- {x}" for x in assistants[-_MAX_ASSISTANTS:])
+    if tools:
+        parts.append("## Tools")
+        parts.extend(tools)
         parts.append("")
-    if long_excerpts:
-        parts.append("## Long excerpts")
-        parts.extend(long_excerpts[-_MAX_LONG:])
-        parts.append("")
-    if not users and not assistants and not long_excerpts:
-        parts.append("No dropped turns to skim. Search the session log.")
+    if not turns and not tools:
+        parts.append("No dropped turns to skim. Use search_session.")
         parts.append("")
     return "\n".join(parts)
 
 
-def persist_notes(notes_path: str, notes_text: str) -> None:
-    """Write a digest only when the model left the file empty. Never clobber."""
-    path = Path(notes_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    incoming = notes_text.strip()
-    if not incoming:
-        return
-    if path.is_file() and path.read_text(encoding="utf-8").strip():
-        return
-    path.write_text(incoming + "\n", encoding="utf-8")
-
-
-def ensure_rollover_notes(
+def rollover_handover(
     messages: Sequence[Message],
     notes_path: Optional[str],
-    window_id: int,
-) -> str:
-    """Prefer model-authored notes; otherwise persist and return a digest."""
-    del window_id  # kept so call sites stay a single signature
+) -> Tuple[Optional[str], Optional[str]]:
+    """``(model_notes, dropped_span)``. Never writes the digest to disk."""
     if notes_are_ready(notes_path):
-        return Path(notes_path).read_text(encoding="utf-8")
-    text = compose_transcript_digest(messages)
-    if notes_path:
-        persist_notes(notes_path, text)
-        path = Path(notes_path)
-        if path.is_file():
-            return path.read_text(encoding="utf-8")
-    return text
+        return Path(notes_path).read_text(encoding="utf-8"), None
+    return None, compose_transcript_digest(messages)

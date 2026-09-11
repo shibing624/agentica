@@ -28,8 +28,8 @@ from agentica.compression.new_window import (
 )
 from agentica.compression.notes import (
     compose_transcript_digest,
-    ensure_rollover_notes,
     notes_are_ready,
+    rollover_handover,
 )
 from agentica.compression.token_budget import (
     REMINDER_REMAINING_RATIO,
@@ -60,8 +60,8 @@ __all__ = [
     "notes_path_for",
     "start_new_context_window",
     "compose_transcript_digest",
-    "ensure_rollover_notes",
     "notes_are_ready",
+    "rollover_handover",
     "REMINDER_REMAINING_RATIO",
     "fallback_text",
     "full_window_text",

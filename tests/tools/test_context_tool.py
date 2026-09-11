@@ -41,20 +41,15 @@ class TestContextTool(unittest.TestCase):
         tool.set_agent(agent)
         return tool, cm, slog
 
-    def test_only_search_and_read_are_registered(self):
+    def test_only_search_is_registered(self):
         tool, _, _ = self._agent(with_log=False)
-        self.assertEqual(
-            set(tool.functions),
-            {"search_session", "read_session_item"},
-        )
+        self.assertEqual(set(tool.functions), {"search_session"})
 
     def test_search_sees_rows_before_the_boundary(self):
         tool, _, slog = self._agent()
         out = asyncio.run(tool.search_session("token budget"))
         self.assertIn("300k", out)
-        item_id = slog.search_entries("token budget")[0]["uuid"]
-        body = asyncio.run(tool.read_session_item(item_id))
-        self.assertIn("we decided the token budget is 300k", body)
+        self.assertIn("we decided the token budget is 300k", out)
 
     def test_search_without_a_log_says_so(self):
         tool, _, _ = self._agent(with_log=False)
@@ -65,7 +60,7 @@ class TestContextTool(unittest.TestCase):
         slog.append("user", "工单 ZX-41827 是这次唯一的追踪号")
         out = asyncio.run(tool.search_session("工单号"))
         self.assertIn("ZX-41827", out)
-        self.assertIn("item_id=", out)
+        self.assertNotIn("item_id=", out)
 
     def test_search_schema_matches_codex_search_contents(self):
         tool, _, _ = self._agent(with_log=False)
@@ -107,20 +102,16 @@ class TestContextTool(unittest.TestCase):
         self.assertIn("Recent user questions", out)
         self.assertIn("we decided the token budget is 300k", out)
 
-    def test_read_schema_matches_codex_read_item(self):
+    def test_search_session_hits_notes_file(self):
         tool, _, slog = self._agent()
-        fn = tool.functions["read_session_item"]
-        fn.process_entrypoint()
-        props = fn.parameters["properties"]
-        self.assertIn("item_id", props)
-        self.assertIn("offset_chars", props)
-        self.assertIn("limit_chars", props)
-        item_id = slog.search_entries("300k")[0]["uuid"]
-        sliced = asyncio.run(
-            tool.read_session_item(item_id, offset_chars=0, limit_chars=12)
+        from agentica.compression.new_window import notes_path_for
+        Path(notes_path_for(slog)).write_text(
+            "Constraint: do not rewrite auth. Ticket HV-9917.\n",
+            encoding="utf-8",
         )
-        self.assertIn("item_id=", sliced)
-        self.assertIn("…[truncated]", sliced)
+        out = asyncio.run(tool.search_session("HV-9917"))
+        self.assertIn("notes:", out)
+        self.assertIn("HV-9917", out)
 
     def test_notes_file_is_next_to_the_jsonl(self):
         _, _, slog = self._agent()

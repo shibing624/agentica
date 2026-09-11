@@ -98,7 +98,8 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
         self.assertIn("<context_window>", contents)
         self.assertIn("New context window started", contents)
         self.assertEqual([m.get("role") for m in resumed], ["user"])
-        self.assertIn("<session_notes", contents)
+        self.assertIn("<dropped_span", contents)
+        self.assertFalse(Path(slog.path).with_suffix(".notes.md").exists())
 
     def test_fork_after_compact_keeps_summary_and_tail(self):
         agent, slog = self._agent_with_log()

@@ -6,7 +6,7 @@
 Layer 1 (``agentica.compression.evict``) shrinks the request for free by
 evicting old tool results. When that is not enough, the activity window is
 replaced by initial context + session-notes pointer. Prior turns stay in the
-session JSONL and are retrieved with ``search_session`` / ``read_session_item``.
+session JSONL and are retrieved with ``search_session``.
 
 This is Codex TokenBudget compact (#29743): same lifecycle name, no summarizer.
 """
@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from agentica.compression.evict import trailing_user_turn_start
 from agentica.compression.new_window import notes_path_for, start_new_context_window
-from agentica.compression.notes import ensure_rollover_notes
+from agentica.compression.notes import rollover_handover
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_tokens
@@ -209,7 +209,7 @@ class CompressionManager:
         else:
             covered = [m for m in messages if m.role != "system"]
         covered_hash = _covered_prefix_hash(covered)
-        notes_text = ensure_rollover_notes(covered, notes_path, self.window_id)
+        notes_text, dropped_span = rollover_handover(covered, notes_path)
 
         start_new_context_window(
             messages,
@@ -217,6 +217,7 @@ class CompressionManager:
             tokens_left=tokens_left,
             notes_path=notes_path,
             notes_text=notes_text,
+            dropped_span=dropped_span,
             keep_trailing_turn=keep_trailing_turn,
         )
 

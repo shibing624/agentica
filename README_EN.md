@@ -231,7 +231,7 @@ agent = DeepAgent()
 **Memory & evolution**
 
 - **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense; standing rules live in `AGENTS.md`
-- **Context compression** — Layer 1 evicts old tool results; a full window opens an empty new one (no LLM summary). Prior turns stay in the JSONL; `search_session` / `read_session_item` retrieve them; handover goes in `<session>.notes.md`
+- **Context compression** — Layer 1 evicts old tool results; a full window opens an empty new one (no LLM summary). Prior turns stay in the JSONL; `search_session` retrieves them; handover goes in `<session>.notes.md`
 - **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
 - **Self-Evolution** — Experience cards auto-compile into reusable `SKILL.md` across sessions
 
@@ -284,7 +284,7 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 
 ## 🔥 News
 
-- [2026/09/11] **Unreleased**: Layer 2 compact now opens an empty window (Codex TokenBudget). It no longer calls an LLM or `/responses/compact`. Prior turns stay in the session JSONL and are retrieved with `search_session` / `read_session_item`; handover is `<session>.notes.md`. See [Context Compression](https://shibing624.github.io/agentica/advanced/compression)
+- [2026/09/11] **Unreleased**: Layer 2 compact now opens an empty window (Codex TokenBudget). It no longer calls an LLM or `/responses/compact`. Prior turns stay in the session JSONL and are retrieved with `search_session`; handover is `<session>.notes.md`. See [Context Compression](https://shibing624.github.io/agentica/advanced/compression)
 - [2026/09/01] **v1.4.15**: Adds the `@agentica-ai/sdk` TypeScript client and a Gateway Docker image; `/export` now writes the session JSONL; `apply_patch` matches context exactly; CLI no longer treats `[/path]` in tool output as Rich markup. See [Release-v1.4.15](https://github.com/shibing624/agentica/releases/tag/v1.4.15)
 - [2026/08/25] **v1.4.14**: Permissions match Codex (ask keeps write tools visible; deny-similar); true multi-account Web/Desktop; file tools narrowed to `apply_patch` + `write_file` with `read_file` tail; worktrees live inside the repo; bundled skills load in-place; desktop first-launch bootstraps a Python runtime. See [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
 - [2026/08/20] **v1.4.13**: The web UI is a Vite + React SPA with a new traces page; the UI ships in English with Simplified Chinese in settings; and there are now **desktop installers** (macOS dmg / Windows NSIS / Linux AppImage and deb). See [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)

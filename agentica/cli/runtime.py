@@ -90,7 +90,6 @@ BUILTIN_TOOLS = [
     "save_memory",
     "search_memory",
     "search_session",
-    "read_session_item",
     "get_skill_info",
     "list_skills",
     "ask_user_question",

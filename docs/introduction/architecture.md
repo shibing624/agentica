@@ -153,7 +153,7 @@ Layer 2 换窗（免费，无 LLM）:
     活动窗 → <context_window> + session notes 摘录
     auto / /compact 保留 system prompt 和正在问的尾巴
     空 summary 的 compact_boundary 写入 Session Log，恢复时不合成假摘要轮
-    旧轮次用 search_session / read_session_item 从 JSONL 取回
+    旧轮次用 search_session 从 JSONL 取回
 ```
 
 淘汰没有「保留最近 N 条」这类计数参数：任何固定条数都会输给 N+1 大小的并行批次，最近的结果靠「够到之前就停」自然幸存。
@@ -179,7 +179,7 @@ Layer 2 换窗（免费，无 LLM）:
 {"type":"compact_boundary","uuid":"g7h8...","parent_uuid":null,"summary":""}
 ```
 
-`summary` 为空：换窗不再合成假摘要轮。旧轮次仍在这条 boundary **之前**的 JSONL 里，用 `search_session` / `read_session_item` 取。
+`summary` 为空：换窗不再合成假摘要轮。旧轮次仍在这条 boundary **之前**的 JSONL 里，用 `search_session` 取。
 
 **恢复机制**：重新创建相同 `session_id` 的 Agent 时，从最后一个 `compact_boundary` 开始加载消息，跳过历史数据（大文件优化）。
 
@@ -190,7 +190,7 @@ Layer 2 换窗（免费，无 LLM）:
 ~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
 ```
 
-notes 和 jsonl 同目录。模型用已有文件工具写交接；切窗时注入摘录。
+jsonl 是对话档案（`search_session` 的主库）。notes 是模型手写的 standing state，不是第二份 log。切窗时已有 notes 注入 `<session_notes>`；仍空只注入 `<dropped_span>`，不把 skim 写进 notes.md。
 
 同一份文件的三个出口：Web `/traces`、CLI `/trace` / `/export`、SDK `agent.session_log.analyze()` / `.export()`。`type=event` 行只给观测，`load()` 不回放它们。
 
