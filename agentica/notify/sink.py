@@ -372,6 +372,12 @@ def install_sink(
         if not cfg.enabled:
             _sink = None
             return None
+        # A local socket is still an attack surface: without a shared secret,
+        # any process on this machine could forge a "needs.approval" and collect
+        # an "allow". Established once, here, because both sides read the file.
+        from agentica.notify.token import ensure_token
+
+        ensure_token(cfg)
         _sink = NotifySink(cfg, transport_factory=transport_factory)
         return _sink
 

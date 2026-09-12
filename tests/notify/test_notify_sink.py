@@ -252,6 +252,33 @@ class TestNonBlockingEvents:
         # Oldest went first, so the newest event is still there.
         assert queued[-1]["payload"]["i"] == total - 1
 
+    def test_emitting_never_blocks_the_caller_even_when_the_app_hangs(self):
+        """The caller-side contract: emit is queue-and-return, always.
+
+        A consumer watching "when did I last hear anything" (a desktop app's
+        inactivity timer) is only correct if a wedged peer delays *delivery*
+        and never *the run*. A full queue drops events; it must not turn into a
+        wait. Measured, not asserted by inspection.
+        """
+        from agentica.notify.config import QUEUE_MAXSIZE
+
+        desktop = _FakeDesktop(hang=True)  # accepts, never answers
+        try:
+            sink = _sink(desktop, timeout_seconds=55)
+            worst = 0.0
+            # Well past the queue capacity, so drops definitely happen.
+            for i in range(QUEUE_MAXSIZE * 4):
+                started = time.monotonic()
+                sink.emit_event("run.started", payload={"i": i})
+                worst = max(worst, time.monotonic() - started)
+            sink.stop()
+            # Delivery timeout is 2s; if emit ever waited on it this would blow
+            # past this bound.
+            assert worst < 0.5, f"emit_event blocked for {worst:.3f}s"
+            assert sink._dropped > 0, "expected the queue to have overflowed"
+        finally:
+            desktop.close()
+
 
 class TestAwaitDecision:
     def test_a_decision_comes_back_verbatim(self):
