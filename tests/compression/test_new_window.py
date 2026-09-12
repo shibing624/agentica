@@ -128,17 +128,32 @@ class TestStartNewContextWindow(unittest.TestCase):
 
 
 class TestRunnerNewWindow(unittest.TestCase):
-    def _agent(self):
+    def _agent(self, session_id=None):
+        """An agent that can write notes, unless ``session_id`` is None.
+
+        Without a session_id there is no notes path, so the runner has nothing
+        to ask the model to write — see the two postpone tests below.
+        """
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
 
         model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
-        return Agent(model=model, enable_session_log=False)
+        if session_id is None:
+            return Agent(model=model, enable_session_log=False)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        return Agent(
+            model=model,
+            session_id=session_id,
+            session_base_dir=self._tmp.name,
+        )
 
     def test_empty_notes_postpone_compact_once(self):
         from agentica.runner import Runner
 
-        agent = self._agent()
+        # With a session_id the notes file has a path, so asking for it is
+        # actionable and the cut is postponed once.
+        agent = self._agent(session_id="postpone-once")
         cm = agent.tool_config.compression_manager
         agent.model.functions = {"write_file": object(), "read_file": object()}
         msgs = [
@@ -167,6 +182,34 @@ class TestRunnerNewWindow(unittest.TestCase):
         self.assertEqual(cm.window_id, 1)
         self.assertFalse(cm.fallback_claimed)
         self.assertIsNone(cm.compact_token_floor)
+
+    def test_no_session_id_does_not_postpone_for_an_unwritable_file(self):
+        """No notes path => nothing to ask for => do not postpone the cut.
+
+        This is the SDK shape: tools exist but there is no session_id, so
+        ``notes_path_for`` returns None. The runner used to postpone anyway,
+        telling the model to write a file it could not name — and the delay
+        bought nothing.
+        """
+        from agentica.runner import Runner
+
+        agent = self._agent(session_id=None)
+        cm = agent.tool_config.compression_manager
+        agent.model.functions = {"write_file": object(), "read_file": object()}
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="current question"),
+        ]
+        self.assertIsNone(notes_path_for(agent._session_log))
+        postponed = Runner._claim_notes_fallback(
+            msgs, agent, agent.model, cm,
+            context_tokens=960, working_window=1000,
+        )
+        self.assertFalse(postponed)
+        self.assertFalse(cm.fallback_claimed)
+        self.assertIsNone(cm.compact_token_floor)
+        self.assertEqual(len(msgs), 2, "no nudge should be folded in")
+        self.assertNotIn("about to reset", msgs[-1].content)
 
     def test_reminder_folds_once_into_the_last_user_message(self):
         from agentica.runner import Runner

@@ -48,6 +48,14 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         self.assertNotIn("1970", text)
 
     def test_strips_preamble_and_keeps_the_folded_question(self):
+        """The question survives, and so does what a previous cut skimmed.
+
+        It used to assert the opposite for ``ZX-41827`` (count == 0): the
+        strip treated the prior digest body as chrome. That discarded the only
+        copy of those turns on the next cut — fatal for an SDK agent with no
+        session log, where the prompt is the history. The chrome
+        (``<context_window>`` markers, headers) still must not survive.
+        """
         text = compose_transcript_digest([
             Message(
                 role="user",
@@ -55,6 +63,7 @@ class TestComposeTranscriptDigest(unittest.TestCase):
                     "<context_window>\nCurrent context window 1.\n"
                     "</context_window>\n\n"
                     "<dropped_span>\n# Dropped span\n"
+                    "## Turns\n"
                     "- user: 工单 ZX-41827\n</dropped_span>\n\n"
                     "现在怎么办？"
                 ),
@@ -63,8 +72,15 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         ])
         self.assertIn("现在怎么办？", text)
         self.assertIn("先查 JSONL", text)
+        self.assertLess(text.index("ZX-41827"), text.index("现在怎么办？"))
         self.assertLess(text.index("现在怎么办？"), text.index("先查 JSONL"))
-        self.assertEqual(text.count("ZX-41827"), 0)
+        # Carried forward, not dropped: the prompt is the only copy.
+        self.assertEqual(text.count("ZX-41827"), 1)
+        # Chrome still goes: markers and section titles are not content.
+        self.assertNotIn("<context_window>", text)
+        self.assertNotIn("<dropped_span>", text)
+        self.assertEqual(text.count("# Dropped span"), 1)
+        self.assertEqual(text.count("## Turns"), 1)
 
     def test_long_assistant_turn_keeps_its_closing_ask(self):
         """The tail of an assistant turn is the ask the next request answers.
@@ -123,6 +139,93 @@ class TestComposeTranscriptDigest(unittest.TestCase):
 
 
 class TestRolloverHandover(unittest.TestCase):
+    @staticmethod
+    def _folded(question: str, prior_digest: str = "", window_id: int = 1) -> str:
+        """The user row a window cut actually produces.
+
+        ``_preamble`` builds this from ``full_window_text`` +
+        ``dropped_span_excerpt`` + the preserved turn, so the test uses those
+        same pieces instead of hand-writing tags that could drift from them.
+        """
+        from agentica.compression.new_window import dropped_span_excerpt
+        from agentica.compression.token_budget import full_window_text
+
+        parts = [full_window_text(window_id, 512000, None)]
+        span = dropped_span_excerpt(prior_digest) if prior_digest else None
+        if span:
+            parts.append(span)
+        return "\n\n".join(parts + [question])
+
+    def test_carried_rows_survive_a_second_cut(self):
+        """What cut 1 skimmed must still be there after cut 2.
+
+        Cut 2's dropped span is cut 1's preamble row, so the prior digest body
+        arrives as an injected tag. ``strip_window_preamble`` peels it (the
+        search index wants the chrome gone) — the digest must carry the rows
+        forward instead, or every fact leaves one cut after it arrived.
+        """
+        prior = compose_transcript_digest([
+            Message(role="user", content="工单 ZX-41827，泄漏在 evict.py:412"),
+            Message(role="assistant", content="记下了，改用 KeyDB"),
+        ])
+        text = compose_transcript_digest([
+            Message(role="user", content=self._folded("现在怎么办？", prior)),
+            Message(role="assistant", content="先查 JSONL"),
+        ])
+        self.assertIn("ZX-41827", text)
+        self.assertIn("evict.py:412", text)
+        self.assertIn("KeyDB", text)
+        self.assertIn("现在怎么办？", text)
+        self.assertIn("先查 JSONL", text)
+        # Carried rows stay chronological and do not nest the other headers.
+        self.assertLess(text.index("ZX-41827"), text.index("现在怎么办？"))
+        self.assertEqual(text.count("# Dropped span"), 1)
+        self.assertEqual(text.count("## Turns"), 1)
+
+    def test_carrying_is_flat_not_nested_over_many_cuts(self):
+        """Ten cuts must not stack ten headers — that is header soup.
+
+        Re-emitting the previous header/titles each time grew the digest by a
+        full copy per cut. Only the ``- `` rows are carried, so the structure
+        stays flat and the length stays linear and bounded.
+        """
+        text = compose_transcript_digest([
+            Message(role="user", content="工单 ZX-41827"),
+            Message(role="assistant", content="记下了，改用 KeyDB"),
+        ])
+        for _ in range(10):
+            text = compose_transcript_digest([
+                Message(role="user", content=self._folded("继续？", text)),
+            ])
+        self.assertEqual(text.count("# Dropped span"), 1)
+        self.assertEqual(text.count("## Turns"), 1)
+        self.assertIn("ZX-41827", text)
+        self.assertIn("KeyDB", text)
+        self.assertLess(len(text), 8000, "digest must stay bounded")
+
+    def test_user_notes_body_is_carried_too(self):
+        """A model-authored <session_notes> body is real content, not chrome."""
+        from agentica.compression.new_window import notes_excerpt
+
+        notes = notes_excerpt(None, notes_text=(
+            "- Constraint: do not rewrite auth\n- Ticket ZX-41827\n"
+        ))
+        # Order matches _preamble: context_window, session_notes, span, turn.
+        from agentica.compression.new_window import dropped_span_excerpt
+        from agentica.compression.token_budget import full_window_text
+
+        folded = "\n\n".join([
+            full_window_text(1, 512000, None),
+            notes,
+        ]) + "\n\n继续？"
+        text = compose_transcript_digest([
+            Message(role="user", content=folded),
+        ])
+        self.assertIn("do not rewrite auth", text)
+        self.assertIn("ZX-41827", text)
+        self.assertIn("继续？", text)
+        self.assertNotIn("<session_notes", text)
+
     def test_model_authored_notes_are_kept_and_digest_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "s.notes.md")

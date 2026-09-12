@@ -281,9 +281,14 @@ class CompressMixin:
         notes = notes_path_for(agent._session_log)
         if notes_are_ready(notes):
             return False
-        if not can_author_notes(model.functions):
+        # No notes path (SDK without session_id) => nothing to ask for, and
+        # postponing the cut would only delay it for a file we cannot name.
+        if not can_author_notes(model.functions, notes):
             return False
-        if not CompressMixin._fold_budget_fragment(messages, fallback_text(notes)):
+        nudge = fallback_text(notes)
+        if not nudge:
+            return False
+        if not CompressMixin._fold_budget_fragment(messages, nudge):
             return False
         cm.fallback_claimed = True
         cm.compact_token_floor = min(

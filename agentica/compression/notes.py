@@ -39,9 +39,60 @@ _MAX_TOOLS = 20
 # Stay under notes_excerpt's 4000-char inject cap.
 _DIGEST_BUDGET = 3600
 
+# These two tags are *injected by us* and carry no user prose: a previous
+# digest, and the model's own notes. ``strip_window_preamble`` deliberately
+# peels them so the search index does not score our chrome as a second hit.
+# The digest needs the opposite — what a previous cut already skimmed is the
+# only copy of those turns when there is no session log, so it is carried
+# forward instead of discarded.
+_DROPPED_SPAN_OPEN = "<dropped_span>"
+_DROPPED_SPAN_CLOSE = "</dropped_span>"
+_SESSION_NOTES_OPEN = "<session_notes"
+_SESSION_NOTES_CLOSE = "</session_notes>"
+
 # After the 0.95 Layer 2 trigger, wait this extra share of the working
 # window for the model to write notes (Codex auto_compact_fallback_buffer).
 AUTO_COMPACT_FALLBACK_BUFFER_RATIO = 0.04
+
+
+def _tag_body(text: str, open_tag: str, close_tag: str) -> str:
+    start = text.find(open_tag)
+    if start < 0:
+        return ""
+    end = text.find(close_tag, start)
+    if end < 0:
+        return ""
+    return text[start + len(open_tag):end]
+
+
+def carried_rows(content: str) -> List[str]:
+    """Digest rows a previous cut already skimmed, for carry-forward.
+
+    Both bodies are ours, not the user's: ``<dropped_span>`` is the prior
+    digest and ``<session_notes>`` the model's file. ``strip_window_preamble``
+    peels them on purpose (the search index must not score our chrome), but
+    the digest must not, or the only surviving copy of those turns is thrown
+    away on the next cut — for an SDK agent with no session log, the copy in
+    the prompt *is* the history.
+
+    Only the ``- `` rows are taken, dropping the previous header and section
+    titles: re-emitting those would nest one digest inside the next and the
+    text would drift into header soup within a few cuts. The rows come back in
+    their original order, so prepending keeps the span chronological.
+    """
+    rows: List[str] = []
+    for open_tag, close_tag in (
+        (_DROPPED_SPAN_OPEN, _DROPPED_SPAN_CLOSE),
+        (_SESSION_NOTES_OPEN, _SESSION_NOTES_CLOSE),
+    ):
+        body = _tag_body(content, open_tag, close_tag)
+        if not body:
+            continue
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- ") and stripped != "- ":
+                rows.append(stripped)
+    return rows
 
 
 def fallback_buffer_tokens(working_window: int) -> int:
@@ -50,9 +101,16 @@ def fallback_buffer_tokens(working_window: int) -> int:
     return max(1, int(working_window * AUTO_COMPACT_FALLBACK_BUFFER_RATIO))
 
 
-def can_author_notes(functions) -> bool:
-    """True when this agent can write the notes file itself."""
-    if not functions:
+def can_author_notes(functions, notes_path: Optional[str] = None) -> bool:
+    """True when this agent can actually write the notes file.
+
+    Two conditions, not one. The tools must exist (``write_file`` /
+    ``apply_patch``), **and** there must be a path to write them to — the path
+    comes from ``notes_path_for(agent._session_log)``, which is None for an
+    SDK agent built without ``session_id``. Checking only the tools made the
+    runner postpone a window cut to ask for a file that had nowhere to go.
+    """
+    if not functions or not notes_path:
         return False
     return "write_file" in functions or "apply_patch" in functions
 
@@ -163,7 +221,11 @@ def _collect(messages: Sequence[Message]) -> Tuple[List[str], List[str]]:
                 tools.append(_line(_tool_result_line("tool", text)))
             continue
         if message.role == "user":
-            text = strip_window_preamble(_content(message))
+            raw = _content(message)
+            # Carried rows ride in front of this turn's own prose, keeping the
+            # span chronological: earlier windows, then this row's question.
+            turns.extend(carried_rows(raw))
+            text = strip_window_preamble(raw)
             if not text.strip() or _is_pad(text):
                 continue
             turns.append(_line(f"user: {_one_line(text, _USER_LINE)}"))

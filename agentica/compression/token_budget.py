@@ -45,15 +45,24 @@ def full_window_text(
     tokens_left: int,
     notes_path: Optional[str] = None,
 ) -> str:
-    """Full-context metadata for a freshly opened window."""
+    """Full-context metadata for a freshly opened window.
+
+    Only advertises the recovery paths that exist. Without a session log there
+    is no notes file to keep current and ``search_session`` has nothing to
+    read (``context_tool`` answers "No session log on this agent"), so naming
+    either one sends the model after a tool that cannot help. What remains is
+    the carried digest, which is self-contained.
+    """
     lines = [
         f"Current context window {window_id}.",
         f"You have {tokens_left} tokens left in this context window.",
         "This window starts without a conversation summary.",
-        "Recover prior facts with search_session.",
-        "Keep the session notes file current: goals, constraints, IDs, decisions.",
     ]
     if notes_path:
+        lines.append("Recover prior facts with search_session.")
+        lines.append(
+            "Keep the session notes file current: goals, constraints, IDs, decisions."
+        )
         lines.append(f"Session notes: {notes_path}")
     return CONTEXT_WINDOW_OPEN + "\n".join(lines) + CONTEXT_WINDOW_CLOSE
 
@@ -69,14 +78,19 @@ def remaining_text(tokens_left: int, notes_path: Optional[str] = None) -> str:
 
 
 def fallback_text(notes_path: Optional[str] = None) -> str:
-    """Codex auto-compact fallback: write notes now, window is about to reset."""
+    """Codex auto-compact fallback: write notes now, window is about to reset.
+
+    Returns "" when there is no notes path — there is nothing to ask for, and
+    the caller must not postpone a cut for an unactionable instruction.
+    """
+    if not notes_path:
+        return ""
     lines = [
         "This context window is about to reset.",
         "Write goals, constraints, IDs, paths, and decisions to the "
         "session notes file now, then continue the task.",
+        f"Session notes: {notes_path}",
     ]
-    if notes_path:
-        lines.append(f"Session notes: {notes_path}")
     return CONTEXT_WINDOW_OPEN + "\n".join(lines) + CONTEXT_WINDOW_CLOSE
 
 
