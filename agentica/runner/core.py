@@ -85,6 +85,27 @@ class Runner(CompressMixin, RetryMixin, PersistMixin, SteerMixin, StreamMixin, L
                     f"event callback failed for {event_type.value}: {e}",
                     exc_info=True,
                 )
+        # Side-mounted, NOT part of the branch above: the external notify sink
+        # is an independent consumer, so a broken sink and a broken callback
+        # cannot take each other down. Dispatch queues and returns — it never
+        # blocks a run, and it swallows its own failures.
+        #
+        # Only the four lifecycle events reach here. ``goal.*`` deliberately
+        # does not: GoalManager emits those on its own callback, and the
+        # desktop app has no use for the goal loop. Leaving it out is a
+        # decision, not an oversight.
+        try:
+            from agentica.notify import notify_sink_dispatch
+
+            notify_sink_dispatch(
+                record,
+                session_id=getattr(agent, "session_id", None),
+                work_dir=getattr(agent, "work_dir", None),
+            )
+        except Exception as e:
+            # Import errors and any sink-level surprise land here. Debug, not
+            # warning: observation must not add noise to a working run.
+            logger.debug(f"notify sink dispatch failed for {event_type.value}: {e}")
 
     @staticmethod
     def _serialize_langfuse_data(value: Any) -> Any:

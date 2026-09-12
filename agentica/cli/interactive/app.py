@@ -50,6 +50,7 @@ from agentica import git_state
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
 from agentica.cli.worktree_binding import WorktreeBinder
 from agentica.global_config import get_setting, set_project_profile
+from agentica.notify import install_sink as install_notify_sink
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_system_skills
@@ -721,6 +722,12 @@ def run_interactive(
     # mid-turn, a cron job, a regression) routes through the TUI instead of
     # deadlocking on bare input() while pt owns stdin.
     set_default_ask_user_question_callback(_cli_ask_user_question_callback)
+
+    # External notify sink: this is the interactive CLI, so there *is* a person
+    # at the terminal — the only surface where waiting on a desktop decision is
+    # meaningful. Installed once here; the decision is made once, not per turn.
+    # It is off unless the user turned it on (`settings.notify.enabled`).
+    install_notify_sink()
 
     # ── Background thread: process input queue and run agent ──
 
