@@ -153,11 +153,12 @@ class BuiltinDelegateTool(Tool):
                 on the command line. Supplied by the caller when it has a real
                 model; model_provider/model_name are the CLI's split form of
                 the same thing.
-            auxiliary_model: the caller's cheap-tier model. The CLI exposes only
-                two models to the user — the session profile's main and
-                auxiliary — so ``model`` may name either and nothing else. Kept
-                as a Model object rather than a name because both the id and the
-                base_url identify it (two profiles can share a model name).
+            auxiliary_model: the caller's cheap-tier model. Together with
+                ``model`` this is the whole allow-list: ``model`` may name one
+                of these two or nothing, because switching models is the user's
+                call and happens by switching the session — in every front end,
+                not just the CLI. Both are handed over as Model objects so the
+                id and base_url identify them (two profiles can share a name).
             session_profile: the config.yaml profile this session is actually
                 running on. An omitted ``model`` launches the child on this
                 profile, not on the first profile that happens to share a
@@ -235,15 +236,14 @@ class BuiltinDelegateTool(Tool):
                 A value that is already your model id — including ids that
                 contain a slash, like "openai/glm-5" — is kept whole; only
                 when that string is not an id does it split on the first "/".
-                Omit it to inherit the session's own model, which is what you
-                normally want: the session's profile carries the endpoint and
-                the key the user chose, and a worker started elsewhere spends
-                their money somewhere they did not pick. Inside a session the
-                two models available are your own and the auxiliary one
-                (``--auxiliary_model_name``); both are launched on the session
-                profile so they stay on that endpoint. A provider nothing on
-                this machine is configured for is refused instead of launched
-                into an authentication failure.
+                Only two models exist for you: your own, and the auxiliary one
+                (``--auxiliary_model_name``). Naming anything else is refused —
+                the model decides the endpoint and the bill, and changing it is
+                the user's call, not a per-call one, in the CLI and the SDK
+                alike. Omit it to inherit your own model, which is what you
+                normally want. Both available models are launched on the
+                session's profile, so the worker stays on the endpoint the user
+                chose.
 
         Returns:
             str: The worker's id and how to reach its result, or why it was refused.
@@ -282,19 +282,16 @@ class BuiltinDelegateTool(Tool):
             self._permission_mode(),
         ]
         child_env: dict = {}
+        refusal = self._refuse_model_change(model)
+        if refusal:
+            return refusal
         provider, model_name = self._resolve_model(model)
         inherited = (provider, model_name) == (self._model_provider, self._model_name)
         requested = (model or "").strip()
-        # Which of the session's two models was asked for — None when the
-        # caller named some other model, or when this is an SDK session with
-        # no profile to launch on.
-        if requested:
-            session_choice = self._canonical(requested)
-        else:
-            session_choice = (
-                (self._model_provider, self._model_name) if self._model_name else None
-            )
-        if self._session_profile and session_choice is not None:
+        # Which of the session's two models was asked for; everything else was
+        # refused above. Empty still means the session's own model.
+        session_choice = self._own_model_choice(requested) if requested else self._model_name
+        if self._session_profile and session_choice:
             # Either of the session's two models is launched on the session
             # profile — including the auxiliary one, which rides as a
             # ``--model_name`` override. The profile is what carries the
@@ -302,8 +299,7 @@ class BuiltinDelegateTool(Tool):
             # session does instead of inheriting the parent's base_url, which
             # would break as soon as the auxiliary model lives on another one.
             argv += ["--profile", self._session_profile]
-            if session_choice[1]:
-                argv += ["--model_name", session_choice[1]]
+            argv += ["--model_name", session_choice]
         elif provider and model_name:
             profile = self._profile_for_choice(model, provider, model_name, inherited)
             if profile:
@@ -328,17 +324,6 @@ class BuiltinDelegateTool(Tool):
                     argv += ["--base_url", str(base_url)]
                 if api_key and key_var:
                     child_env[key_var] = api_key
-            elif provider != self._model_provider:
-                # No profile runs this model and the provider is not the one
-                # this session runs on: the child would fall back to that
-                # provider's public endpoint plus an env key that likely does
-                # not exist — a guaranteed 401 six seconds later.
-                return (
-                    f"Nothing delegated: no config.yaml profile runs '{model_name}' on provider "
-                    f"'{provider}', and a worker never receives credentials on the command line, "
-                    f"so it would fail authentication. Pick a model one of your profiles runs, "
-                    f"or add a profile for it first."
-                )
             else:
                 argv += ["--model_provider", provider, "--model_name", model_name]
         if target_dir:
@@ -363,46 +348,17 @@ class BuiltinDelegateTool(Tool):
         )
 
     def _resolve_model(self, model: str) -> tuple[Optional[str], Optional[str]]:
-        """Resolve a caller-supplied model against the session defaults.
+        """Provider and id of the model the worker should run.
 
-        A slash is first treated as part of a model id (proxy-style
-        ``openai/glm-5``, or the environment-context form
-        ``provider/<id>``). Only when that string is not the caller's own
-        id and not a profile's ``model_name`` does it split as
-        ``provider/name``.
+        Whatever the caller named was already narrowed to one of this
+        session's own models by ``_refuse_model_change``, so this only has to
+        say which: an empty argument means the session's own, and anything else
+        is one of the two the session offers.
         """
         choice = (model or "").strip()
         if not choice:
             return self._model_provider, self._model_name
-        known = self._canonical(choice)
-        if known is not None:
-            return known
-        if self._profile_lookup(choice, provider=None, base_url=None):
-            return self._model_provider, choice
-        provider, _, name = choice.partition("/")
-        if name:
-            return provider, name
-        return self._model_provider, choice
-
-    def _canonical(self, choice: str) -> Optional[tuple[Optional[str], str]]:
-        """``(provider, id)`` of a session model ``choice`` names, else None.
-
-        Both of the session's models are matched on the whole id, and a
-        ``provider/id`` spelling of one is folded back onto it, so naming your
-        own model with a provider prefix still counts as naming your own model
-        rather than a switch to somewhere else.
-        Compared rather than string-parsed because a model id may itself
-        contain a slash (proxy-style ``openai/glm-5``).
-        """
-        for candidate in (self._model_name, self._auxiliary_model_id()):
-            if not candidate:
-                continue
-            if choice == candidate or (
-                self._model_provider
-                and choice == f"{self._model_provider}/{candidate}"
-            ):
-                return self._model_provider, candidate
-        return None
+        return self._model_provider, self._own_model_choice(choice)
 
     def _auxiliary_model_id(self) -> Optional[str]:
         """Model id of the session's cheap tier, if the caller passed one."""
@@ -411,15 +367,83 @@ class BuiltinDelegateTool(Tool):
             return None
         return str(getattr(auxiliary, "id", "") or "").strip() or None
 
+    def _own_model_ids(self) -> List[str]:
+        """Ids of the models this session offers: its main one, then its aux.
+
+        This is the whole allow-list. Whichever tier the caller wired up is
+        what the session runs on, and nothing outside it is available.
+        """
+        ids: List[str] = []
+        main = str(getattr(self._model, "id", "") or "").strip() or (self._model_name or "").strip()
+        if main:
+            ids.append(main)
+        auxiliary = self._auxiliary_model_id()
+        if auxiliary and auxiliary not in ids:
+            ids.append(auxiliary)
+        return ids
+
+    def _own_model_choice(self, choice: str) -> Optional[str]:
+        """Session model id that ``choice`` names, or None when it names another.
+
+        Identity, not string splitting: an id may itself contain a slash
+        (proxy-style ``openai/glm-5``), so a ``provider/id`` spelling of one of
+        this session's models is compared whole rather than taken apart — that
+        is the same model, not a switch.
+        """
+        choice = (choice or "").strip()
+        if not choice:
+            return None
+        for model_id in self._own_model_ids():
+            if choice == model_id:
+                return model_id
+            if self._model_provider and choice == f"{self._model_provider}/{model_id}":
+                return model_id
+        return None
+
+    def _refuse_model_change(self, model: str) -> Optional[str]:
+        """Refuse a ``model`` that would move the worker off this session's models.
+
+        Only the user changes the model, by switching the session's profile —
+        in every front end (CLI, SDK, gateway), because the rule is about who
+        owns the choice, not about config.yaml. So a call may name the session's
+        main model or its auxiliary one, or nothing at all to inherit, and
+        nothing else: naming a third model is how a worker once ran on another
+        profile's ``claude-opus-5``, spending the user's money on an endpoint
+        they never picked.
+
+        Checked before any process starts, and the refusal names the real
+        choices so the caller can correct itself instead of retrying blind.
+        """
+        requested = (model or "").strip()
+        if not requested or self._own_model_choice(requested):
+            return None
+        offered = self._own_model_ids()
+        listing = ", ".join(f"'{name}'" for name in offered) or "none configured"
+        return (
+            f"Nothing delegated: this session runs on {listing}. '{requested}' is not "
+            f"one of them, and only the user changes the model — switching the session's "
+            f"profile is theirs to do, not a per-call choice. Leave the model empty to "
+            f"inherit the session's own, or name the session model or its auxiliary one."
+        )
+
+    def _model_for_id(self, model_id: str) -> Optional["Model"]:
+        """The session Model object with this id, if it is one of the two."""
+        for candidate in (self._model, self._auxiliary_model):
+            if candidate is None:
+                continue
+            if str(getattr(candidate, "id", "") or "").strip() == model_id:
+                return candidate
+        return None
+
     def _profile_for_choice(
         self, requested: str, provider: Optional[str], model_name: Optional[str],
         inherited: bool,
     ) -> Optional[str]:
         """config.yaml profile the worker would be launched on, or None.
 
-        Single source of truth for the launch decision, so the model label
-        shown on the call line and the ``--profile`` flag the child actually
-        receives can never disagree about the endpoint.
+        Only reached by a caller with no session profile — inside a session the
+        worker always launches on that profile. Here it lets an SDK caller's
+        model pick up the endpoint and key of a profile that runs it.
         """
         if not model_name:
             return None
@@ -433,31 +457,21 @@ class BuiltinDelegateTool(Tool):
     def model_label_for(self, tool_args: Optional[dict] = None) -> Optional[str]:
         """Which model the worker this call would start actually runs.
 
-        The same resolution ``delegate()`` uses, so the label on the call line
-        cannot disagree with the child's argv. Shown to the user because
-        "delegated" alone does not say whether the work left the session's own
-        model: an omitted ``model`` inherits it, a name that hits a config.yaml
-        profile moves to that profile's endpoint, and an explicit
-        ``provider/name`` can move further still.
-
-        ``provider`` is omitted from the label when the worker inherits the
-        session profile — the profile, not a provider flag, is then what picks
-        the endpoint, so printing the caller's provider key would be a guess.
-        A ``model`` argument that names a config.yaml profile is labelled with
-        that profile's name for the same reason: the worker moves to the
-        profile's provider, not the session's.
+        Always one of the session's own two models, so this only says which —
+        it cannot disagree with the argv ``delegate()`` builds. A call that is
+        about to be refused gets no label: it will not run, and naming a model
+        for it would advertise the very switch that is being turned down.
         """
         args = tool_args or {}
-        requested = str(args.get("model") or "")
-        provider, model_name = self._resolve_model(requested)
-        if not model_name:
-            return self._model.id if self._model is not None else None
-        inherited = (provider, model_name) == (self._model_provider, self._model_name)
-        if inherited:
-            if self._model is not None:
-                return model_display_label(self._model)
-            return f"{self._model_provider}/{model_name}" if self._model_provider else model_name
-        profile = self._profile_for_choice(requested, provider, model_name, inherited)
-        if profile:
-            return f"{model_name} (profile {profile})"
-        return f"{provider}/{model_name}" if provider else model_name
+        requested = str(args.get("model") or "").strip()
+        if self._refuse_model_change(requested):
+            return None
+        chosen = self._own_model_choice(requested) if requested else None
+        if chosen is None:
+            chosen = str(getattr(self._model, "id", "") or "").strip() or self._model_name
+        if not chosen:
+            return None
+        label = model_display_label(self._model_for_id(chosen))
+        if label:
+            return label
+        return f"{self._model_provider}/{chosen}" if self._model_provider else chosen

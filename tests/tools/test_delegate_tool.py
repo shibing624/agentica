@@ -175,17 +175,31 @@ class TestWhatItStarts:
         assert argv[argv.index("--profile") + 1] == "deepseek-main"
         assert "--model_provider" not in argv
 
-    def test_a_model_that_matches_a_profile_runs_on_it(self):
+    def test_the_sessions_own_model_may_be_named_explicitly(self):
         registry = _FakeRegistry()
-        _delegate(
-            _tool(registry, profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name)),
+        _delegate(_tool(registry), task="port the parser", model="deepseek-chat")
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_name") + 1] == "deepseek-chat"
+
+    def test_another_profiles_model_is_refused_not_relaunched(self):
+        """Only the user switches profiles. A call may not borrow another
+        profile's model — that moves the endpoint and the bill with it."""
+        registry = _FakeRegistry()
+        result = _delegate(
+            _tool(
+                registry,
+                profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
+            ),
             task="port the parser",
             model="anthropic/claude-opus-5",
         )
 
-        argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "opus-5-anthropic"
-        assert "--model_provider" not in argv
+        assert result.startswith("Nothing delegated")
+        assert registry.started == []
+        # The refusal names what is actually available, so the caller can pick.
+        assert "'deepseek-chat'" in result
+        assert "claude-opus-5" in result
 
     def test_an_sdk_model_sends_its_endpoint_as_a_flag_and_its_key_in_the_env(self):
         registry = _FakeRegistry()
@@ -265,13 +279,12 @@ class TestWhatItStarts:
         argv = _argv(registry.started[0])
         assert argv[argv.index("--profile") + 1] == "glm-5.3"
 
-    def test_a_bare_model_name_keeps_the_callers_provider(self):
+    def test_a_model_outside_the_session_is_refused(self):
         registry = _FakeRegistry()
-        _delegate(_tool(registry), task="port the parser", model="deepseek-reasoner")
+        result = _delegate(_tool(registry), task="port the parser", model="deepseek-reasoner")
 
-        argv = _argv(registry.started[0])
-        assert argv[argv.index("--model_provider") + 1] == "deepseek"
-        assert argv[argv.index("--model_name") + 1] == "deepseek-reasoner"
+        assert result.startswith("Nothing delegated")
+        assert registry.started == []
 
     def test_it_runs_where_the_caller_runs_unless_told_otherwise(self, tmp_path):
         registry = _FakeRegistry()
@@ -407,9 +420,11 @@ class TestWhatItStarts:
         argv = _argv(registry.started[0])
         assert argv[argv.index("--model_name") + 1] == "openai/glm-5"
 
-    def test_a_slashed_id_that_a_profile_runs_is_kept_whole(self):
+    def test_a_slashed_id_is_still_just_a_name_that_must_be_the_sessions(self):
+        """A slash in the id does not earn an exception, even when a profile
+        runs it: it is another model, so the call is refused."""
         registry = _FakeRegistry()
-        _delegate(
+        result = _delegate(
             _tool(
                 registry,
                 provider="deepseek",
@@ -420,9 +435,8 @@ class TestWhatItStarts:
             model="openai/glm-5",
         )
 
-        argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "openai-glm"
-        assert "--model_provider" not in argv
+        assert result.startswith("Nothing delegated")
+        assert registry.started == []
 
 
 class TestProfileForModel:
@@ -547,15 +561,18 @@ class TestToolSurface:
         assert "cannot ask anyone anything" in description
 
 
-class TestSessionModelsStayOnTheSessionProfile:
-    """The session's own two models run on the session's profile.
+class TestOnlyTheUserChangesTheModel:
+    """A call may name the session's two models, never a third one.
 
-    ``model`` stays a free string — guessing which names are "wrong" is a
-    boundary the tool has no basis to draw. What it does decide is *where* the
-    two models the session actually offers are launched: main and auxiliary
-    both go out on the session profile, so the worker lands on the endpoint
-    and key the user chose rather than inheriting the parent's base_url (which
-    is wrong as soon as the auxiliary model lives somewhere else).
+    This is a repo-level rule, not a CLI one: it holds in the SDK and the
+    gateway too, because it is about who owns the choice. The session's main
+    model and its auxiliary model are what the caller wired up; swapping to
+    anything else — another profile's model included — spends the user's money
+    on an endpoint they never picked. Switching the profile is the user's move.
+
+    Both offered models launch on the session profile, so they land on that
+    endpoint and key rather than inheriting the parent's base_url (which is
+    wrong as soon as the auxiliary model lives somewhere else).
     """
 
     def _session_tool(self, registry, **kw):
@@ -571,17 +588,13 @@ class TestSessionModelsStayOnTheSessionProfile:
             **kw,
         )
 
-    def test_another_profiles_model_is_still_honoured(self):
-        """No allow-list. The tool cannot know which other model names are
-        "wrong", and the description steers the model toward its own — a hard
-        refusal would also break the SDK's documented cross-profile use."""
+    def test_another_profiles_model_is_refused(self):
         registry = _FakeRegistry()
 
         result = _delegate(self._session_tool(registry), task="research it", model="claude-opus-5")
 
-        assert result.startswith("Delegated")
-        argv = _argv(registry.started[0])
-        assert argv[argv.index("--model_name") + 1] == "claude-opus-5"
+        assert result.startswith("Nothing delegated")
+        assert registry.started == []
 
     def test_the_sessions_main_model_is_allowed(self):
         registry = _FakeRegistry()
@@ -624,12 +637,13 @@ class TestSessionModelsStayOnTheSessionProfile:
         argv = _argv(registry.started[0])
         assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
 
-    def test_an_sdk_session_has_no_profile_to_protect_and_keeps_its_freedom(self):
-        """No profile means no user choice to violate: the SDK caller passes
-        its own model, so a third model stays available."""
+    def test_an_sdk_session_obeys_the_same_rule(self):
+        """No profile involved, and the rule still holds: the SDK caller picked
+        main + auxiliary when it built the agent, so a third model is refused
+        here too. Only the user changes the model, in every front end."""
         registry = _FakeRegistry()
 
-        _delegate(
+        result = _delegate(
             _tool(
                 registry,
                 profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
@@ -638,15 +652,16 @@ class TestSessionModelsStayOnTheSessionProfile:
             model="claude-opus-5",
         )
 
-        argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "opus-5-anthropic"
+        assert result.startswith("Nothing delegated")
+        assert registry.started == []
 
-    def test_the_label_still_names_what_was_asked_for(self):
+    def test_the_label_names_which_session_model_will_run(self):
         tool = self._session_tool(_FakeRegistry())
 
-        assert tool.model_label_for({"model": "gpt-4o-mini"}) == "openai/gpt-4o-mini"
-        assert tool.model_label_for({"model": "claude-opus-5"}) == "openai/claude-opus-5"
+        assert tool.model_label_for({"model": "gpt-4o-mini"}) == "gpt-4o-mini"
         assert tool.model_label_for({}) == "deepseek-v4.1-flash-official"
+        # A refused model will not run, so it gets no label at all.
+        assert tool.model_label_for({"model": "claude-opus-5"}) is None
 
     def test_switching_profile_in_place_moves_both_choices(self):
         """``/model`` rewrites the live agent without rebuilding it; the tool
@@ -658,18 +673,18 @@ class TestSessionModelsStayOnTheSessionProfile:
 
         tool.refresh_session_models(model=new_main, auxiliary_model=new_aux)
 
-        assert _delegate(tool, task="a", model="glm-5.3-external").startswith("Delegated")
-        assert _delegate(tool, task="b", model="gpt-4o").startswith("Delegated")
-        # The new profile's models run on the session profile...
-        for task, model in (("c", "glm-5.3-external"), ("d", "gpt-4o")):
+        # The new profile's two models are now the offered ones, and both run
+        # on the session profile.
+        for task, model in (("a", "glm-5.3-external"), ("b", "gpt-4o")):
+            assert _delegate(tool, task=task, model=model).startswith("Delegated")
             argv = _argv(registry.started[-1])
+            assert argv[argv.index("--model_name") + 1] == model
             assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
-        # ...while a model outside it is not mistaken for one of them.
-        _delegate(tool, task="e", model="deepseek-v4.1-flash-official")
-        argv = _argv(registry.started[-1])
-        assert "--profile" not in argv or argv[argv.index("--model_name") + 1] == (
-            "deepseek-v4.1-flash-official"
-        )
+        # The profile that was switched away from is no longer available.
+        assert _delegate(
+            tool, task="c", model="deepseek-v4.1-flash-official",
+        ).startswith("Nothing delegated")
+        assert _delegate(tool, task="d", model="gpt-4o-mini").startswith("Nothing delegated")
 
 
 class TestModelLabel:
@@ -677,49 +692,37 @@ class TestModelLabel:
 
     These pin the label against the argv of the very same call, because a
     label that drifts from the launch decision is worse than no label: the
-    user reads it to decide whether delegating leaves their endpoint.
+    user reads it to see which of the session's models is about to run.
     """
 
     def test_no_model_arg_labels_the_callers_own_model(self):
         tool = _tool(_FakeRegistry())
         assert tool.model_label_for({}) == "deepseek/deepseek-chat"
 
-    def test_an_explicit_provider_prefixed_model_is_labelled_as_itself(self):
-        tool = _tool(_FakeRegistry())
-        assert tool.model_label_for({"model": "zhipuai/glm-4.7"}) == "zhipuai/glm-4.7"
+    def test_an_auxiliary_model_is_labelled_as_itself(self):
+        tool = _tool(_FakeRegistry(), sdk_auxiliary_model=SimpleNamespace(id="gpt-4o-mini"))
+        assert tool.model_label_for({"model": "gpt-4o-mini"}) == "gpt-4o-mini"
 
-    def test_a_bare_model_name_keeps_the_session_provider(self):
+    def test_naming_a_model_outside_the_session_gets_no_label(self):
+        """Nothing will run, so there is no model to name — and naming one
+        would advertise the switch that is about to be turned down."""
         tool = _tool(_FakeRegistry())
-        assert tool.model_label_for({"model": "glm-4.7-flash"}) == "deepseek/glm-4.7-flash"
+        assert tool.model_label_for({"model": "zhipuai/glm-4.7"}) is None
+        assert tool.model_label_for({"model": "glm-4.7-flash"}) is None
 
     def test_restating_the_callers_own_id_is_not_a_switch(self):
         tool = _tool(_FakeRegistry())
         assert tool.model_label_for({"model": "deepseek-chat"}) == "deepseek/deepseek-chat"
+        # The provider-prefixed spelling of the same id is still the same model.
+        assert tool.model_label_for({"model": "deepseek/deepseek-chat"}) == "deepseek/deepseek-chat"
 
-    def test_a_model_that_matches_a_profile_names_that_profile(self):
-        """"anthropic/claude-opus-5" is not where the worker runs: the profile
-        carries its own endpoint and key, so the label must not claim the
-        session's provider."""
+    def test_the_label_never_points_at_another_profile(self):
         tool = _tool(
             _FakeRegistry(),
             profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
         )
-        assert tool.model_label_for({"model": "anthropic/claude-opus-5"}) == (
-            "claude-opus-5 (profile opus-5-anthropic)"
-        )
-
-    def test_the_label_matches_the_profile_flag_the_worker_is_started_with(self):
-        registry = _FakeRegistry()
-        tool = _tool(
-            registry,
-            profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
-        )
-
-        label = tool.model_label_for({"model": "anthropic/claude-opus-5"})
-        _delegate(tool, task="port the parser", model="anthropic/claude-opus-5")
-
-        argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] in label
+        assert tool.model_label_for({"model": "anthropic/claude-opus-5"}) is None
+        assert tool.model_label_for({"model": "claude-opus-5"}) is None
 
     def test_an_inherited_model_on_a_session_profile_labels_the_real_model(self):
         """The session's own profile is not spelled out as a provider — the
