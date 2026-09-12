@@ -184,7 +184,7 @@ class _MissingDesktop:
 
 
 def _cfg(socket_path: str, **kw) -> NotifyConfig:
-    base = dict(enabled=True, socket=socket_path, approve_from_desktop=True)
+    base = dict(enabled=True, socket=socket_path)
     base.update(kw)
     return NotifyConfig(**base)
 
@@ -300,7 +300,7 @@ class TestNonBlockingEvents:
 
         desktop = _FakeDesktop(hang=True)  # accepts, never answers
         try:
-            sink = _sink(desktop, timeout_seconds=55)
+            sink = _sink(desktop)
             worst = 0.0
             # Well past the queue capacity, so drops definitely happen.
             for i in range(QUEUE_MAXSIZE * 4):
@@ -324,6 +324,7 @@ class TestAwaitDecision:
             out = sink.await_decision(
                 "needs.approval",
                 payload={"approval_id": "call_1", "kind": "permission", "question": "run it?"},
+                timeout=5,
             )
             sink.stop()
             assert out == {"decision": "allow"}
@@ -338,7 +339,7 @@ class TestAwaitDecision:
         desktop = _FakeDesktop(decision_body={"answer": "the second one"})
         try:
             sink = _sink(desktop)
-            out = sink.await_decision("needs.input", payload={"kind": "question", "question": "which?"})
+            out = sink.await_decision("needs.input", payload={"kind": "question", "question": "which?"}, timeout=5)
             sink.stop()
             assert out == {"answer": "the second one"}
         finally:
@@ -348,8 +349,8 @@ class TestAwaitDecision:
         """The headline risk: no answer must mean 'ask the human', not 'yes'."""
         desktop = _FakeDesktop(hang=True)
         try:
-            sink = _sink(desktop, timeout_seconds=0.4)
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
+            sink = _sink(desktop)
+            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=0.4)
             sink.stop()
             assert out is None
         finally:
@@ -357,9 +358,9 @@ class TestAwaitDecision:
 
     def test_a_missing_app_falls_back_immediately_not_after_the_timeout(self):
         """Level 2 again, on the blocking path: connect failure is a fast fail."""
-        sink = _sink(_MissingDesktop(), timeout_seconds=55)
+        sink = _sink(_MissingDesktop())
         started = time.monotonic()
-        out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
+        out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
         elapsed = time.monotonic() - started
         sink.stop()
         assert out is None
@@ -379,7 +380,7 @@ class TestAwaitDecision:
         desktop = _FakeDesktop(decision_body=body)
         try:
             sink = _sink(desktop)
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
+            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
             sink.stop()
             assert out is None
         finally:
@@ -389,30 +390,49 @@ class TestAwaitDecision:
         desktop = _FakeDesktop(decision_body={"decision": "allow"}, status=500)
         try:
             sink = _sink(desktop)
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
+            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
             sink.stop()
             assert out is None
         finally:
             desktop.close()
 
-    def test_approve_from_desktop_off_means_no_blocking_call_is_made(self):
-        """The switch gates deciding. With it off the app is still told (via
-        /event), but it can never answer — so nothing waits."""
+    def test_an_answer_is_taken_as_the_users_own_input(self):
+        """The desktop reply is the user's input, not the app's decision.
+
+        With the sink installed there is no separate "may the app answer?"
+        switch: the app is an input surface, and what the user presses there
+        counts the same as typing it in the terminal.
+        """
         desktop = _FakeDesktop(decision_body={"decision": "allow"})
         try:
-            sink = _sink(desktop, approve_from_desktop=False)
-            started = time.monotonic()
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
-            assert out is None
-            assert time.monotonic() - started < 1.0
+            sink = _sink(desktop)
+            out = sink.await_decision(
+                "needs.approval", payload={"approval_id": "c1"}, timeout=5
+            )
             sink.stop()
-            assert desktop.requests == [], "must not even ask when deciding is off"
+            assert out == {"decision": "allow"}
         finally:
             desktop.close()
+
+    def test_no_timeout_is_baked_into_this_layer(self):
+        """How long the user may take belongs to the caller, not to us.
+
+        A number here would hold a desktop answer to a stricter clock than a
+        typed one. ``None`` means "as long as the interaction lives", which is
+        what the terminal prompt already does.
+        """
+        import inspect
+
+        from agentica.notify.sink import NotifySink
+
+        sig = inspect.signature(NotifySink.await_decision)
+        assert sig.parameters["timeout"].default is inspect.Parameter.empty, (
+            "await_decision must require the caller to pass a timeout"
+        )
 
     def test_a_disabled_sink_never_awaits(self):
         sink = _sink(_MissingDesktop(), enabled=False)
-        assert sink.await_decision("needs.approval", payload={}) is None
+        assert sink.await_decision("needs.approval", payload={}, timeout=5) is None
 
 
 class TestToken:
@@ -420,7 +440,7 @@ class TestToken:
         desktop = _FakeDesktop(decision_body={"decision": "deny"}, require_token="tok-abc")
         try:
             sink = _sink(desktop, token="tok-abc")
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
+            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
             sink.stop()
             assert out == {"decision": "deny"}
             assert desktop.requests[0]["headers"]["authorization"] == "Bearer tok-abc"
@@ -432,7 +452,7 @@ class TestToken:
         desktop = _FakeDesktop(decision_body={"decision": "allow"}, require_token="tok-abc")
         try:
             sink = _sink(desktop, token="")
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"})
+            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
             sink.stop()
             assert out is None
         finally:
@@ -444,11 +464,11 @@ class TestToken:
         try:
             # File does not exist yet: request should be unauthorized.
             sink = _sink(desktop, token="", token_file=token_path)
-            assert sink.await_decision("needs.approval", payload={}) is None
+            assert sink.await_decision("needs.approval", payload={}, timeout=5) is None
             # The app writes the token afterwards; the next call must pick it up.
             with open(token_path, "w", encoding="utf-8") as fh:
                 fh.write("from-file\n")
-            out = sink.await_decision("needs.approval", payload={})
+            out = sink.await_decision("needs.approval", payload={}, timeout=5)
             sink.stop()
             assert out == {"decision": "allow"}
         finally:
@@ -464,7 +484,7 @@ class TestFailuresDoNotBecomeTheAgentsFailures:
         sink = NotifySink(cfg, transport_factory=boom)
         sink.emit_event("run.started")       # must not raise
         _flush(sink, timeout=1.0)
-        assert sink.await_decision("needs.approval", payload={}) is None
+        assert sink.await_decision("needs.approval", payload={}, timeout=5) is None
         sink.stop()
 
     def test_a_raising_emit_does_not_escape_and_dispatch_still_works(self):
@@ -496,8 +516,6 @@ class TestConfigLoading:
     def test_defaults_are_off(self):
         cfg = load_notify_config({})
         assert cfg.enabled is False
-        assert cfg.approve_from_desktop is False
-        assert cfg.timeout_seconds == 55
         assert all(cfg.events[e] for e in
                    ("run.started", "run.completed", "run.failed", "run.cancelled"))
 
@@ -505,14 +523,10 @@ class TestConfigLoading:
         cfg = load_notify_config({"settings": {"notify": {
             "enabled": True,
             "socket": "/tmp/x.sock",
-            "approve_from_desktop": True,
-            "timeout_seconds": 12,
             "events": {"run.started": False},
         }}})
         assert cfg.enabled is True
         assert cfg.resolved_socket == "/tmp/x.sock"
-        assert cfg.approve_from_desktop is True
-        assert cfg.timeout_seconds == 12
         assert cfg.event_enabled("run.started") is False
         assert cfg.event_enabled("run.completed") is True
 
@@ -527,10 +541,21 @@ class TestConfigLoading:
         cfg = load_notify_config({"settings": {"notify": "nonsense"}})
         assert cfg.enabled is False
 
-    def test_a_non_numeric_timeout_is_ignored(self, monkeypatch):
-        monkeypatch.setenv("AGENTICA_NOTIFY_TIMEOUT_SECONDS", "soon")
-        cfg = load_notify_config({})
-        assert cfg.timeout_seconds == 55
+    def test_removed_options_in_an_existing_config_are_ignored(self):
+        """A user's config.yaml may still name the switch and the timeout.
+
+        Both were removed — there is no "may the app decide" concept, and how
+        long a person may take is not this layer's call. Loading has to tolerate
+        the leftovers rather than fail.
+        """
+        cfg = load_notify_config({"settings": {"notify": {
+            "enabled": True,
+            "approve_from_desktop": True,
+            "timeout_seconds": 12,
+        }}})
+        assert cfg.enabled is True
+        assert not hasattr(cfg, "approve_from_desktop")
+        assert not hasattr(cfg, "timeout_seconds")
 
 
 class TestInstall:

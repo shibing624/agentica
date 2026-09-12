@@ -1,9 +1,22 @@
 # 外部通知汇（notify sink）
 
 把 agentica 一轮跑到什么节点告诉本机的一个 app（目前是 [VPet](https://github.com/shibingtan/VPet) 桌宠），
-并且可选地让它**替你在终端里按 y/n** —— 解的是「终端埋在窗口底下、agent 停在等你」这个场景。
+并且让用户**在桌宠上也能回答**（按 y/n、输入文本）—— 解的是「终端埋在窗口底下、agent 停在等你」这个场景。
 
-**默认关闭，两个开关分开。** 见下面「开关」。
+**默认关闭。** 见下面「开关」。
+
+### 三件事，别混
+
+这三条是这个通道的全部语义，写文档、写代码、写测试时都要分清：
+
+1. **桌宠不替用户做决定。** 它没有策略、没有自动批准、没有 YOLO，任何路径都不会
+   auto-allow。没有「桌宠被允许决定吗」这种开关 —— 那等于承认它有自己的权限。
+2. **用户在桌宠上的输入 = 用户在终端上的输入。** 同一个 session、同一个交互，
+   在桌宠上按的 y 和自己在终端敲的 y 效力完全相同，都是**用户本人**的答复。
+3. **用户自己担责。** 桌宠只是一个输入面；谁按的、按了什么，责任在用户。
+
+推论：**「用户还没答」不是事件**。终端里用户不答 CLI 就一直等，所以桌宠这边也
+不设等候上限 —— 由终端语义决定等多久，不由我们这层写一个数。
 
 ## 它是什么
 
@@ -12,9 +25,12 @@
 | 路径 | 语义 | 超时 | 响应 |
 |---|---|---:|---|
 | `POST /event` | 通知，不等回话 | 2s | 不解析 |
-| `POST /await` | 阻塞，等一个决定 | 55s | `{"decision": ...}` / `{"answer": ...}` / `{"reject": true}` |
+| `POST /await` | 等用户回答 | 调用方给定 | `{"decision": ...}` / `{"answer": ...}` / `{"reject": true}` |
 
 **阻塞与否由路径决定，不从 body 推断** —— 否则一条写错的 body 就能让 agent 挂 300 秒。
+
+`/await` 的等候时长**由调用方传入，本层不写死**：CLI 传 `None`，因为终端 prompt 本来就
+等到用户回答为止；给桌宠更短的时限就等于「在终端能慢慢想，在桌宠必须秒答」。
 
 装上的都是**并挂**，不是替换：`AgentHooks` / `RunHooks` 的语义不变，终端 prompt 也原样保留。
 
@@ -27,23 +43,21 @@ settings:
     enabled: false                 # 要不要让桌宠知道
     socket: "~/Library/Application Support/VPet/notify.sock"
     token: ""                      # 留空则读 ~/Library/Application Support/VPet/notify.token
-    approve_from_desktop: false    # 能不能替用户决定
     events:                        # 逐事件开关，默认全开
       run.started: true
       run.completed: true
       run.failed: true
       run.cancelled: true
-    timeout_seconds: 55
 ```
 
 环境变量覆盖同名项，前缀 `AGENTICA_NOTIFY_`（如 `AGENTICA_NOTIFY_ENABLED=true`、`AGENTICA_NOTIFY_SOCKET`）。
 
-两个开关**风险完全不同**，所以分开：
+`enabled` 只管「要不要接这个通道」。关掉时**什么都不装** —— 不建队列、不起线程、
+不注册回调。
 
-- `enabled` 只管「让桌宠知道」。关掉时**什么都不装** —— 不建队列、不起线程、不注册回调。
-- `approve_from_desktop` 管「能不能替你决定」，默认关。打开后桌宠可以回一个 `allow`，
-  那等于它在终端里按了 y。误判一次的代价是替用户放行了一条危险命令，
-  所以这个开关必须是人**明确知道自己在开什么**时打开的。
+> 曾经还有 `approve_from_desktop` 和 `timeout_seconds`。两个都已删除：前者是
+> 「桌宠被允许决定吗」这个不该存在的概念（桌宠只是输入面），后者是这层不该有的
+> 等候定数（等多久由终端语义决定）。旧配置里留着这两项**不会报错**，只是不再生效。
 
 ## 事件
 
@@ -53,8 +67,8 @@ settings:
 | `run.completed` | 一轮成功结束**且没有后续** | 否 |
 | `run.failed` | 一轮抛错 | 否 |
 | `run.cancelled` | 用户 Ctrl+C | 否 |
-| `needs.approval` | 工具调用被 park 等批准 | **是** |
-| `needs.input` | `ask_user_question` | **是** |
+| `needs.approval` | 工具调用被 park 等批准 | **是**（`/await`） |
+| `needs.input` | `ask_user_question` | **是**（`/await`） |
 
 `needs.approval` 与 `needs.input` 是**两种状态**（急切 / 平静），用 `payload.kind`
 区分（`"permission"` vs `"question"`），别混。
@@ -89,21 +103,26 @@ goal 状态**从 session log 读**，不读 `agent.goal_manager`：CLI 自己持
 `state.goal_manager`，而 agent 上那份懒加载一次后就缓存，若在 goal 设定之前被创建
 会永远报「没有 goal」（实测确认）。读日志永远是最新的。
 
-不接 `goal.*`：目标循环由 `GoalManager` 走自己的回调，桌宠不需要它。
+不接 `goal.*`：桌宠是通用灵动岛，同时要接 Claude Code / opencode / codex，那三家没有
+goal 概念，把 agentica 独有的内部事件放进通用协议是把实现细节泄漏给协议。但**不上
+wire ≠ 不影响协议**——上面那条扣住规则就是 goal 对协议的影响。
 
 ## 降级阶梯
 
-**任何一环出问题，都回落终端 prompt，绝不替用户放行。**
+**任何一环出问题，都回落终端 prompt。**
 
 | 级 | 情况 | 行为 |
 |---|---|---|
 | 1 | socket 连得上 | 正常往返 |
 | 2 | 连不上（桌宠没开） | **立刻**回落，不等超时 |
-| 3 | 连上但没响应 | 55s 超时后回落 |
-| 4 | 解析不了 / 字段不认识 | 当作「没有决定」，回落。不猜、不默认 allow |
+| 3 | 连上但没响应 | 等到调用方给的时限，然后回落 |
+| 4 | 解析不了 / 字段不认识 | 当作「没有答复」，回落。不猜、不默认 allow |
 
 第 2 级最重要：**桌宠没开着的用户不该感到任何差别**。connect 失败确实是 fast fail
 （实测 ~0ms 返回），所以这里不能等满超时。
+
+第 2/3/4 级是「桌宠那边没有答复」，与「用户在桌宠上还没按」不是一回事：前者要回落，
+后者要继续等（跟终端里的等待一样久）。
 
 非阻塞投递是**队列 + 专用 daemon 线程**，调用方只入队就返回：桌宠卡住只会让事件
 被丢（队列 256，满则丢最旧），**绝不会拖住 run**。
@@ -112,8 +131,9 @@ goal 状态**从 session log 读**，不读 `agent.goal_manager`：CLI 自己持
 
 - **socket 是本机攻击面，需要 token。** 随机 32 字节 hex，`0600` 落在
   `notify.token`，请求带 `Authorization: Bearer <token>`。
-  没有 token 的请求一律 401。理由是：一条任何本机进程都能伪造的「等批准」通道，
-  等于把审批权交给本机任何进程。
+  没有 token 的请求一律 401。理由是：一条任何本机进程都能连的通道，不该能让本机
+  任何进程**冒充用户**回答 approve/question —— 那等于把「用户本人按的 y」交给
+  任何进程伪造。
 - token 文件**只在不存在时创建，绝不覆盖** —— 两边谁先跑谁定，覆盖会把另一边
   用 401 锁在门外。
 - **只连本机**（socket 路径）。不要配成 `http://远程`。
@@ -128,10 +148,13 @@ goal 状态**从 session log 读**，不读 `agent.goal_manager`：CLI 自己持
 （`get_registry` 为 `None`），**一律没有阻塞 sink** —— 给一个没人在场的运行装
 「等用户批准」是纯粹的挂死。非阻塞的 `/event` 可以装。
 
+这不是「桌宠被禁了」，而是**没有用户在场可等**：没有 registry 就没有「用户在等」这个
+状态，答复也无处可落。
+
 ## 用起来
 
 1. 装 VPet，让它把 `notify.sock` 和 `notify.token` 建起来。
-2. 在 `config.yaml` 打开 `settings.notify.enabled: true`（只想看状态就到这儿）。
-3. 想让它能替你按 y，再打开 `approve_from_desktop: true`。
+2. 在 `config.yaml` 打开 `settings.notify.enabled: true`。
 
-跑一轮就能验证：桌宠应该从 working 走到 done。
+跑一轮就能验证：桌宠应该从 working 走到 done。桌宠上应该也能直接按 y/n 或输回答 ——
+和你在终端里敲是同一回事。

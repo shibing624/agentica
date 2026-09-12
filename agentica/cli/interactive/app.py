@@ -313,15 +313,18 @@ def run_interactive(
         # list the user was looking at.
         return answer_text
 
-    # The desktop app may answer a question too (see agentica/notify). Wrapped
-    # here, at the definition, so every consumer gets it: the agent built below,
-    # the agent rebuilt by /model or /resume, and the process-wide default that
-    # covers subagents and cron. With the sink off — the default — the wrapper
-    # falls straight through to the TUI callback above.
+    # The user may answer a question from the desktop app too (see
+    # agentica/notify): the same answer, applied the same way, as typing it
+    # here. Wrapped at the definition so every consumer gets it: the agent built
+    # below, the agent rebuilt by /model or /resume, and the process-wide
+    # default that covers subagents and cron. ``timeout=None`` because the TUI
+    # callback below waits as long as the user takes — the desktop side gets the
+    # same patience. With no sink installed this is a pass-through.
     from agentica.notify.questions import wrap_ask_callback
 
     _cli_ask_user_question_callback = wrap_ask_callback(
         _tui_ask_user_question_callback,
+        timeout=None,
         session_id_getter=lambda: getattr(
             getattr(_ui_holder.get("state"), "current_agent", None), "session_id", None
         ),

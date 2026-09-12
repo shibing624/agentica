@@ -16,8 +16,11 @@ from typing import Any, Dict, Optional
 from agentica.global_config import get_setting
 from agentica.utils.log import logger
 
-#: The four run lifecycle events, all non-blocking. ``needs.*`` is not in here:
-#: those are two-way and gated by their own switches.
+#: The four run lifecycle events, all non-blocking fire-and-forget notices.
+#:
+#: ``needs.*`` is not in here because those take the other path (``/await``),
+#: which is a request with a reply rather than a queued event: they are not
+#: gated by ``events`` and never go through the delivery queue.
 RUN_EVENTS = (
     "run.started",
     "run.completed",
@@ -27,11 +30,14 @@ RUN_EVENTS = (
 
 DEFAULT_SOCKET = "~/Library/Application Support/VPet/notify.sock"
 DEFAULT_TOKEN_FILE = "~/Library/Application Support/VPet/notify.token"
-DEFAULT_TIMEOUT_SECONDS = 55
 
-#: Non-blocking delivery is a fire-and-forget observation: it must never hold a
-#: run up, so its timeout is a couple of seconds even though a decision may wait
-#: a minute.
+#: The only timeout that belongs to this layer. Delivery is fire-and-forget and
+#: must never hold a run up, so it is a couple of seconds.
+#:
+#: There is deliberately no ``DEFAULT_TIMEOUT_SECONDS`` any more: how long a
+#: person may take to answer is the *terminal's* business, not ours. The caller
+#: passes whatever timeout it already uses (see ``await_decision``), so a
+#: desktop reply and a typed reply are governed by the same rule.
 DELIVERY_TIMEOUT_SECONDS = 2.0
 
 #: Bounded on purpose. A wedged desktop app must not let the queue grow until
@@ -63,9 +69,7 @@ class NotifyConfig:
     socket: str = DEFAULT_SOCKET
     token: str = ""
     token_file: str = DEFAULT_TOKEN_FILE
-    approve_from_desktop: bool = False
     events: Dict[str, bool] = field(default_factory=lambda: {e: True for e in RUN_EVENTS})
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
 
     def event_enabled(self, event: str) -> bool:
         return bool(self.events.get(event, False))
@@ -114,11 +118,6 @@ def load_notify_config(config: Optional[Dict[str, Any]] = None) -> NotifyConfig:
     cfg.token = str(block.get("token") or "")
     if block.get("token_file"):
         cfg.token_file = str(block["token_file"])
-    cfg.approve_from_desktop = bool(block.get("approve_from_desktop", False))
-    timeout = block.get("timeout_seconds")
-    if isinstance(timeout, (int, float)) and timeout > 0:
-        cfg.timeout_seconds = float(timeout)
-
     events = block.get("events")
     if isinstance(events, dict):
         # Per-event opt-out; an unlisted event keeps its default (on).
@@ -128,19 +127,9 @@ def load_notify_config(config: Optional[Dict[str, Any]] = None) -> NotifyConfig:
 
     if _env_bool("ENABLED") is not None:
         cfg.enabled = bool(_env_bool("ENABLED"))
-    if _env_bool("APPROVE_FROM_DESKTOP") is not None:
-        cfg.approve_from_desktop = bool(_env_bool("APPROVE_FROM_DESKTOP"))
     for key, attr in (("SOCKET", "socket"), ("TOKEN", "token"), ("TOKEN_FILE", "token_file")):
         value = _env(key)
         if value is not None:
             setattr(cfg, attr, value)
-    timeout_env = _env("TIMEOUT_SECONDS")
-    if timeout_env:
-        try:
-            parsed = float(timeout_env)
-            if parsed > 0:
-                cfg.timeout_seconds = parsed
-        except ValueError:
-            logger.debug(f"notify sink: ignoring non-numeric timeout_seconds={timeout_env!r}")
 
     return cfg
