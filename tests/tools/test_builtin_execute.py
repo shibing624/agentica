@@ -67,7 +67,12 @@ class TestBuiltinExecuteTool:
         assert "sed -i" not in doc
         assert "Bad examples" not in doc
         assert "| head" in doc or "| rg" in doc
-        assert "rg -g '*.py' -n TODO src || grep -n TODO src" in doc
+        assert "grep -rn TODO src || rg -g '*.py' -n TODO src" in doc
+        # `-r` is grep's; on rg it is --replace and corrupts output silently.
+        assert "grep -n PAT path" not in doc
+        assert "grep -n TODO src ||" not in doc
+        assert "--replace" in doc
+        assert "``-r`` is ``--replace`` there, not recursive" in doc
         assert "-g '*.py'" in doc
         assert "2>/dev/null" in doc
         assert "apply_patch" not in doc

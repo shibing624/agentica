@@ -511,9 +511,9 @@ class BuiltinExecuteTool(Tool):
         and ``2>/dev/null``.
 
         Search with ``rg`` (``rg -g '*.py' -n PAT`` or ``rg -t py``);
-        if ``rg`` is missing, ``grep``
-        (``rg -g '*.py' -n PAT -- path || grep -n PAT path``). Bound noisy
-        output with ``| head`` / ``| tail``. Newlines stay, so a
+        ``-r`` is ``--replace`` there, not recursive. If ``rg`` is
+        missing, ``grep -rn PAT path``. Bound noisy output with
+        ``| head`` / ``| tail``. Newlines stay, so a
         ``python3 - <<'EOF'`` … ``EOF`` heredoc works.
 
         Do not dump a whole source file through the shell
@@ -577,7 +577,7 @@ class BuiltinExecuteTool(Tool):
             - execute(command="API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8")
             - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
             - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
-            - execute(command="rg -g '*.py' -n TODO src || grep -n TODO src")
+            - execute(command="grep -rn TODO src || rg -g '*.py' -n TODO src")
             - execute(command="git diff --stat | tail -5")
             - execute(command="npm install && npm test", timeout=300)
             - execute(command="pytest tests/unit -q", parallel_safe=True)
