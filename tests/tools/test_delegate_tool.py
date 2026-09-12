@@ -547,14 +547,15 @@ class TestToolSurface:
         assert "cannot ask anyone anything" in description
 
 
-class TestSessionModelsOnly:
-    """A session offers the profile's two models and nothing else.
+class TestSessionModelsStayOnTheSessionProfile:
+    """The session's own two models run on the session's profile.
 
-    The profile is the user's choice and it is what fixes the endpoint, the
-    credentials and the bill. ``model`` may name that profile's main or
-    auxiliary model, or nothing — never a third model, which is how a worker
-    once ended up on a different profile's ``claude-opus-5`` (and its cost)
-    while the session itself was running deepseek.
+    ``model`` stays a free string — guessing which names are "wrong" is a
+    boundary the tool has no basis to draw. What it does decide is *where* the
+    two models the session actually offers are launched: main and auxiliary
+    both go out on the session profile, so the worker lands on the endpoint
+    and key the user chose rather than inheriting the parent's base_url (which
+    is wrong as soon as the auxiliary model lives somewhere else).
     """
 
     def _session_tool(self, registry, **kw):
@@ -570,19 +571,17 @@ class TestSessionModelsOnly:
             **kw,
         )
 
-    def test_a_third_model_from_another_profile_is_refused(self):
+    def test_another_profiles_model_is_still_honoured(self):
+        """No allow-list. The tool cannot know which other model names are
+        "wrong", and the description steers the model toward its own — a hard
+        refusal would also break the SDK's documented cross-profile use."""
         registry = _FakeRegistry()
 
         result = _delegate(self._session_tool(registry), task="research it", model="claude-opus-5")
 
-        assert result.startswith("Nothing delegated")
-        assert registry.started == []
-        # The refusal names the profile and both real choices, so the caller
-        # can correct itself instead of retrying blind.
-        assert "venus-ds-v4-1-flash" in result
-        assert "deepseek-v4.1-flash-official" in result
-        assert "gpt-4o-mini" in result
-        assert "claude-opus-5" in result
+        assert result.startswith("Delegated")
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_name") + 1] == "claude-opus-5"
 
     def test_the_sessions_main_model_is_allowed(self):
         registry = _FakeRegistry()
@@ -642,13 +641,11 @@ class TestSessionModelsOnly:
         argv = _argv(registry.started[0])
         assert argv[argv.index("--profile") + 1] == "opus-5-anthropic"
 
-    def test_a_refused_model_gets_no_label(self):
-        """The call line must not advertise the model the call is about to be
-        rejected for."""
+    def test_the_label_still_names_what_was_asked_for(self):
         tool = self._session_tool(_FakeRegistry())
 
-        assert tool.model_label_for({"model": "claude-opus-5"}) is None
         assert tool.model_label_for({"model": "gpt-4o-mini"}) == "openai/gpt-4o-mini"
+        assert tool.model_label_for({"model": "claude-opus-5"}) == "openai/claude-opus-5"
         assert tool.model_label_for({}) == "deepseek-v4.1-flash-official"
 
     def test_switching_profile_in_place_moves_both_choices(self):
@@ -663,11 +660,16 @@ class TestSessionModelsOnly:
 
         assert _delegate(tool, task="a", model="glm-5.3-external").startswith("Delegated")
         assert _delegate(tool, task="b", model="gpt-4o").startswith("Delegated")
-        # The old profile's models went with the old profile.
-        assert _delegate(tool, task="c", model="gpt-4o-mini").startswith("Nothing delegated")
-        assert _delegate(
-            tool, task="d", model="deepseek-v4.1-flash-official",
-        ).startswith("Nothing delegated")
+        # The new profile's models run on the session profile...
+        for task, model in (("c", "glm-5.3-external"), ("d", "gpt-4o")):
+            argv = _argv(registry.started[-1])
+            assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
+        # ...while a model outside it is not mistaken for one of them.
+        _delegate(tool, task="e", model="deepseek-v4.1-flash-official")
+        argv = _argv(registry.started[-1])
+        assert "--profile" not in argv or argv[argv.index("--model_name") + 1] == (
+            "deepseek-v4.1-flash-official"
+        )
 
 
 class TestModelLabel:
