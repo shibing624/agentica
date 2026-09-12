@@ -40,7 +40,7 @@ import os
 import queue
 import sys
 import threading
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 
 import httpx
 
@@ -113,6 +113,10 @@ class NotifySink:
         return self._cfg
 
     def _start_worker(self) -> None:
+        # A thread, not an asyncio task, and deliberately so: the CLI drives
+        # each turn through its own ``asyncio.run()``, so a task created from
+        # one turn's loop is dead by the next turn. This thread spans the whole
+        # session. See the module docstring.
         self._worker = threading.Thread(
             target=self._drain_queue, name="agentica-notify-sink", daemon=True
         )
