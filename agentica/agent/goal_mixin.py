@@ -25,9 +25,38 @@ from agentica.model.message import Message
 from agentica.run_response import RunResponse
 from agentica.run_context import TaskAnchor
 from agentica.memory.session_log import SessionLog
+from agentica.utils.log import logger
 
 if TYPE_CHECKING:
     from agentica.goals import GoalRunResult, GoalStepResult
+
+
+#: The agent's own state that says "a completion is held back". Mirror of
+#: ``agentica.notify.sink._DEFERRED_FLAG``; duplicated as a literal so the goal
+#: loop can check it without importing the notify package on every run.
+_NOTIFY_DEFERRED_FLAG = "_notify_completion_deferred"
+
+
+def _release_notify_completion(agent: Any) -> None:
+    """Tell the notify sink this goal has stopped, if a sink is even installed.
+
+    ``goal_finished`` is imported lazily and every failure is swallowed: the
+    sink is an optional observer, and its bookkeeping must never break a goal
+    loop. Guarded on the flag first so the common no-sink process pays only an
+    attribute read.
+    """
+    if agent is None or not getattr(agent, _NOTIFY_DEFERRED_FLAG, False):
+        return
+    try:
+        from agentica.notify import goal_finished
+
+        goal_finished(
+            agent,
+            session_id=getattr(agent, "session_id", None),
+            work_dir=getattr(agent, "work_dir", None),
+        )
+    except Exception as exc:
+        logger.debug(f"notify sink: completion release failed: {exc}")
 
 
 class GoalMixin:
@@ -294,6 +323,7 @@ class GoalMixin:
 
                 if not step.decision.should_continue:
                     final_state = mgr.load()
+                    _release_notify_completion(agent)
                     return GoalRunResult(
                         status=step.decision.status,
                         reason=step.decision.reason,
@@ -303,6 +333,11 @@ class GoalMixin:
                     )
                 prompt = step.decision.continuation_prompt
         finally:
+            # Also on the way out: a loop that raises, or that the caller
+            # cancels mid-lap, has still stopped. Without this a SDK process
+            # running a goal would leave the desktop app on "working" forever —
+            # the goal is over, but nothing said so.
+            _release_notify_completion(agent)
             if not isolate and attach_goal_tool:
                 agent.detach_goal_tool()
 

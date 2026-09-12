@@ -30,6 +30,43 @@ from agentica.notify.config import NotifyConfig, load_notify_config
 from agentica.notify.sink import NotifySink, get_sink, install_sink, reset_sink_for_tests
 
 
+async def _read_one_request(reader) -> tuple:
+    """Read exactly one HTTP request, honouring Content-Length.
+
+    A single ``reader.read()`` is not enough: a stream socket may hand back
+    only part of the request, so the body can be truncated depending on how
+    the kernel split the write. When that happened the JSON failed to parse,
+    ``json`` came back ``None``, and a test reading ``body["payload"]`` raised
+    KeyError — about one run in five. That is worse than a plain bug: the
+    suite goes red at random and a real failure gets waved off as "that flaky
+    test". Frame on Content-Length instead.
+    """
+    raw = b""
+    while b"\r\n\r\n" not in raw:
+        chunk = await reader.read(65536)
+        if not chunk:
+            break
+        raw += chunk
+    head, _, body = raw.partition(b"\r\n\r\n")
+    length = None
+    for line in head.decode(errors="replace").splitlines()[1:]:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            if k.strip().lower() == "content-length":
+                try:
+                    length = int(v.strip())
+                except ValueError:
+                    length = None
+    if length is not None:
+        while len(body) < length:
+            chunk = await reader.read(65536)
+            if not chunk:
+                break
+            body += chunk
+        body = body[:length]
+    return head, body
+
+
 class _FakeDesktop:
     """An in-process stand-in for the desktop app's UDS server."""
 
@@ -54,8 +91,7 @@ class _FakeDesktop:
     def _run(self) -> None:
         async def handler(reader, writer):
             try:
-                raw = await reader.read(65536)
-                head, _, body = raw.partition(b"\r\n\r\n")
+                head, body = await _read_one_request(reader)
                 lines = head.decode(errors="replace").splitlines()
                 request_line = lines[0] if lines else ""
                 headers = {}

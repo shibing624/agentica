@@ -470,7 +470,7 @@ def notify_sink_dispatch(
                 # Remember on the agent itself, not in a process registry: this
                 # is per-session state, it dies with the agent, and Agent is not
                 # hashable so a set/dict keyed by it would raise outright.
-                _mark_deferred(agent)
+                _mark_deferred(agent, _run_event_payload(record))
                 return
             _emit_completion(sink, record, session_id=session_id, work_dir=work_dir)
             return
@@ -484,9 +484,15 @@ def notify_sink_dispatch(
         logger.debug(f"notify sink: dispatch failed: {exc}")
 
 
-def _emit_completion(sink: NotifySink, record: Any, *, session_id, work_dir) -> None:
-    """Report one completed run, once."""
-    payload = _run_event_payload(record)
+def _emit_completion(sink: NotifySink, source: Any, *, session_id, work_dir) -> None:
+    """Report one completed run, once.
+
+    ``source`` is either a ``RunEventRecord`` (the run reporting itself) or an
+    already-extracted payload dict (a completion released later). Both produce
+    the same event shape — a consumer must not have to know which path it came
+    from.
+    """
+    payload = dict(source) if isinstance(source, dict) else _run_event_payload(source)
     payload.setdefault("title", "run completed")
     sink.emit_event("run.completed", session_id=session_id, work_dir=work_dir, payload=payload)
 
@@ -495,8 +501,9 @@ def goal_finished(agent: Any, *, session_id: Optional[str] = None,
                   work_dir: Optional[str] = None) -> None:
     """A goal drove this agent and has now stopped. Report the held completion.
 
-    Called by the CLI's goal hook on its exit path, which is the one place that
-    knows whether another lap is coming.
+    Called from every place that knows no further lap is coming: the CLI's goal
+    hook (each of its exit paths), ``Agent.run_goal`` (the SDK / Gateway driver),
+    and the interactive loop's failure path.
 
     Only fires when a completion was actually held back: a session with no goal,
     or one whose goal never ran a lap, reports nothing extra.
@@ -508,7 +515,12 @@ def goal_finished(agent: Any, *, session_id: Optional[str] = None,
         if not getattr(agent, _DEFERRED_FLAG, False):
             return
         setattr(agent, _DEFERRED_FLAG, False)
-        _emit_completion(sink, None, session_id=session_id, work_dir=work_dir)
+        # The held payload, not an empty one: a completion that carries no
+        # duration or agent name would be a different shape from every other
+        # completion on this wire, and the consumer has no way to know why.
+        held = getattr(agent, _DEFERRED_PAYLOAD, None) or {}
+        setattr(agent, _DEFERRED_PAYLOAD, None)
+        _emit_completion(sink, held, session_id=session_id, work_dir=work_dir)
     except Exception as exc:
         logger.debug(f"notify sink: could not report the deferred completion: {exc}")
 
@@ -518,17 +530,53 @@ def goal_finished(agent: Any, *, session_id: Optional[str] = None,
 #: set would raise) and because this is per-session state that should die with
 #: the agent.
 _DEFERRED_FLAG = "_notify_completion_deferred"
+#: Metadata of the held completion(s), so the released event has the same shape
+#: as a normal one. See ``_accumulate_held`` for what "the held metadata" means
+#: when several laps were held.
+_DEFERRED_PAYLOAD = "_notify_completion_held"
 
 
-def _mark_deferred(agent: Any) -> None:
+def _mark_deferred(agent: Any, payload: Optional[Dict[str, Any]] = None) -> None:
     if agent is None:
         return
     try:
         setattr(agent, _DEFERRED_FLAG, True)
+        setattr(agent, _DEFERRED_PAYLOAD, _accumulate_held(
+            getattr(agent, _DEFERRED_PAYLOAD, None), payload or {}
+        ))
     except Exception as exc:
         # An agent that refuses attributes just means no deferred release; the
         # completion stays suppressed for that session, which is the safe side.
         logger.debug(f"notify sink: could not mark a deferred completion: {exc}")
+
+
+def _accumulate_held(held: Optional[Dict[str, Any]],
+                     lap: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold one held lap's metadata into the completion that will be released.
+
+    ``duration_seconds`` sums, deliberately: the released event ends a *goal*,
+    and what the reader wants from it is "how long was it busy while I was away",
+    which is every lap rather than whichever one happened to finish last. The
+    single-run path keeps meaning "this run", so the two agree on the field's
+    reading — total busy time for the thing that just ended.
+
+    ``had_response`` is sticky: if any lap produced a response, the goal did.
+    ``agent_name`` takes the first non-empty value; it does not vary per lap.
+    """
+    out = dict(held or {})
+    if lap.get("agent_name") and not out.get("agent_name"):
+        out["agent_name"] = lap["agent_name"]
+    if lap.get("had_response"):
+        out["had_response"] = True
+    duration = lap.get("duration_seconds")
+    if isinstance(duration, (int, float)):
+        out["duration_seconds"] = round(
+            float(out.get("duration_seconds") or 0) + float(duration), 2
+        )
+    for key in ("reason", "error"):
+        if lap.get(key) and not out.get(key):
+            out[key] = lap[key]
+    return out
 
 
 def goal_is_driving(agent: Any) -> bool:
