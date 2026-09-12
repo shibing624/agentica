@@ -13,6 +13,7 @@ from agentica.notify.config import NotifyConfig, load_notify_config
 from agentica.notify.sink import (
     NotifySink,
     get_sink,
+    goal_finished,
     install_sink,
     notify_sink_dispatch,
     reset_sink_for_tests,
@@ -23,6 +24,7 @@ __all__ = [
     "NotifyConfig",
     "NotifySink",
     "get_sink",
+    "goal_finished",
     "install_sink",
     "load_notify_config",
     "notify_sink_dispatch",

@@ -129,8 +129,15 @@ class TestAGoalDoesNotReportDonePerLap:
         finally:
             desktop.close()
 
-    def test_the_completion_goes_out_once_the_goal_is_done(self, tmp_path):
-        """The whole point: the real last run must still report done."""
+    def test_the_held_completion_is_released_when_the_goal_is_done(self, tmp_path):
+        """The whole point: the real last run must still report done.
+
+        No second ``run.completed`` arrives to carry it — the goal stops *after*
+        the last lap, and a stopped goal never queues another one. So the held
+        completion is released explicitly, by the hook that decides there is no
+        next lap. Driving that hook is what ``test_notify_goal_loop_e2e`` does;
+        this pins the sink's half of the contract.
+        """
         desktop = _FakeDesktop()
         try:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
@@ -139,13 +146,55 @@ class TestAGoalDoesNotReportDonePerLap:
             from agentica.goals import GoalManager
             mgr = GoalManager(agent._session_log)
             mgr.set("目标")
-            notify_sink_dispatch(_record(), agent=agent)   # suppressed
-            # The model calls verify_completion and the goal closes.
-            mgr.complete(reason="verified") if hasattr(mgr, "complete") else mgr.clear()
-            notify_sink_dispatch(_record(), agent=agent)   # must get through
+            notify_sink_dispatch(_record(), agent=agent)   # held: a goal is driving
+            time.sleep(0.2)
+            assert _events(desktop) == []
+
+            # The goal ends for real (the model verified completion).
+            mgr.mark_complete_from_tool(reason="verified")
+            from agentica.notify import goal_finished
+
+            goal_finished(agent, session_id="sess-1")
             time.sleep(0.3)
 
             assert _events(desktop) == ["run.completed"]
+        finally:
+            desktop.close()
+
+    def test_the_release_happens_once_even_if_called_again(self, tmp_path):
+        """A second release must not invent a second 'you can come back'."""
+        desktop = _FakeDesktop()
+        try:
+            install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
+            agent = _agent(tmp_path)
+            from agentica.goals import GoalManager
+            from agentica.notify import goal_finished
+
+            mgr = GoalManager(agent._session_log)
+            mgr.set("目标")
+            notify_sink_dispatch(_record(), agent=agent)
+            mgr.mark_complete_from_tool(reason="verified")
+
+            goal_finished(agent, session_id="sess-1")
+            goal_finished(agent, session_id="sess-1")
+            time.sleep(0.3)
+
+            assert _events(desktop) == ["run.completed"]
+        finally:
+            desktop.close()
+
+    def test_a_release_with_nothing_held_is_a_no_op(self, tmp_path):
+        """No goal ever ran, so there is nothing to release."""
+        desktop = _FakeDesktop()
+        try:
+            install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
+            agent = _agent(tmp_path)
+            from agentica.notify import goal_finished
+
+            goal_finished(agent, session_id="sess-1")
+            time.sleep(0.3)
+
+            assert _events(desktop) == []
         finally:
             desktop.close()
 

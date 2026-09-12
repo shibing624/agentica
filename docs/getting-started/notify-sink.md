@@ -70,9 +70,20 @@ settings:
   分辨。
 - **排队输入**：一次粘贴多条消息时，每条各自成为一轮，同样会连发。
 
-所以 goal 活跃时、或宿主还有排队输入时，sink **不发** `run.completed`。
+所以 goal 活跃时、或宿主还有排队输入时，sink **扣住** `run.completed`；等到 goal
+真正结束（`decision.status` 不再是 `active`）的那一刻再补发一次，所以整场恰好一次。
 `run.started` / `run.failed` / `run.cancelled` 一律照发——只有「完成」需要延后，
 否则显示会一直卡在「干活中」。
+
+**扣住和补发必须成对**，这是踩过两次的坑，方向相反：
+
+- 只扣不发 = 桌宠**永远**停在 working。goal 停止发生在最后一轮**之后**，而停止了的
+  goal 不会再排下一轮，所以没有任何 `run.completed` 会来「顺便」把它带出去。
+- 每轮都发 = 一个 N 轮 goal 报 N 次完成。
+
+补发的时机在 CLI 的 goal hook（它才知道还有没有下一轮），判断依据是
+`decision.status != "active"`；**不能**用「队列里还有没有排队的 continuation」代替——
+排队的 continuation 仍要经过它自己的评估才决定是否真的再来一轮。
 
 goal 状态**从 session log 读**，不读 `agent.goal_manager`：CLI 自己持有
 `state.goal_manager`，而 agent 上那份懒加载一次后就缓存，若在 goal 设定之前被创建

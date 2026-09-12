@@ -363,6 +363,7 @@ _installed = False
 _idle_provider: Optional[Callable[[], bool]] = None
 
 
+
 def set_idle_provider(provider: Optional[Callable[[], bool]]) -> None:
     """Register a probe for "is there more work queued for this session?".
 
@@ -460,9 +461,18 @@ def notify_sink_dispatch(
     try:
         event = getattr(record, "event_type", None)
         name = getattr(event, "value", None) or str(event)
-        if name == "run.completed" and (
-            _goal_still_running(agent) or not _nothing_more_queued()
-        ):
+        if name == "run.completed":
+            # Deferred while a goal is driving this agent: the run that just
+            # ended is one lap of several, so "you can come back now" is not
+            # true yet. The signal is two-sided on purpose — see
+            # ``goal_finished`` for why one point in time cannot answer this.
+            if _goal_is_driving(agent) or not _nothing_more_queued():
+                # Remember on the agent itself, not in a process registry: this
+                # is per-session state, it dies with the agent, and Agent is not
+                # hashable so a set/dict keyed by it would raise outright.
+                _mark_deferred(agent)
+                return
+            _emit_completion(sink, record, session_id=session_id, work_dir=work_dir)
             return
         sink.emit_event(
             name,
@@ -474,8 +484,60 @@ def notify_sink_dispatch(
         logger.debug(f"notify sink: dispatch failed: {exc}")
 
 
-def _goal_still_running(agent: Any) -> bool:
-    """Is a standing goal still driving this session?
+def _emit_completion(sink: NotifySink, record: Any, *, session_id, work_dir) -> None:
+    """Report one completed run, once."""
+    payload = _run_event_payload(record)
+    payload.setdefault("title", "run completed")
+    sink.emit_event("run.completed", session_id=session_id, work_dir=work_dir, payload=payload)
+
+
+def goal_finished(agent: Any, *, session_id: Optional[str] = None,
+                  work_dir: Optional[str] = None) -> None:
+    """A goal drove this agent and has now stopped. Report the held completion.
+
+    Called by the CLI's goal hook on its exit path, which is the one place that
+    knows whether another lap is coming.
+
+    Only fires when a completion was actually held back: a session with no goal,
+    or one whose goal never ran a lap, reports nothing extra.
+    """
+    sink = _sink
+    if sink is None or agent is None:
+        return
+    try:
+        if not getattr(agent, _DEFERRED_FLAG, False):
+            return
+        setattr(agent, _DEFERRED_FLAG, False)
+        _emit_completion(sink, None, session_id=session_id, work_dir=work_dir)
+    except Exception as exc:
+        logger.debug(f"notify sink: could not report the deferred completion: {exc}")
+
+
+#: Set on an agent whose ``run.completed`` was held back mid-goal. On the agent
+#: rather than in a module-level registry because ``Agent`` is unhashable (so a
+#: set would raise) and because this is per-session state that should die with
+#: the agent.
+_DEFERRED_FLAG = "_notify_completion_deferred"
+
+
+def _mark_deferred(agent: Any) -> None:
+    if agent is None:
+        return
+    try:
+        setattr(agent, _DEFERRED_FLAG, True)
+    except Exception as exc:
+        # An agent that refuses attributes just means no deferred release; the
+        # completion stays suppressed for that session, which is the safe side.
+        logger.debug(f"notify sink: could not mark a deferred completion: {exc}")
+
+
+def goal_is_driving(agent: Any) -> bool:
+    """Is a standing goal still driving this session? (public wrapper)"""
+    return _goal_is_driving(agent)
+
+
+def _goal_is_driving(agent: Any) -> bool:
+    """Is a standing goal driving this session, as of right now?
 
     ``run.completed`` is read by the desktop app as "you can come back now",
     which is only true when the work is actually over. A standing goal turns one

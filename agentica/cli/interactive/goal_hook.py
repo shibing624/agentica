@@ -37,16 +37,44 @@ def _maybe_continue_goal(
       pre-turn baseline; elapsed comes from tui_state["last_turn_seconds"].
     """
     mgr = state.goal_manager
-    if mgr is None or not mgr.is_active():
+    agent = state.current_agent
+
+    # This hook is the one place that knows whether another lap is coming, so it
+    # is also the place that can say "the goal has stopped, the work is over".
+    # The notify sink defers a goal-driven ``run.completed`` (a lap ending is
+    # not the work ending) and needs to be told when the stopping point is
+    # reached — see ``_release_deferred_completion``. Everything below can
+    # return early; all of those returns mean "no more laps", so the release
+    # must happen on every one of them.
+    goal_was_active = mgr is not None and mgr.is_active()
+
+    def _release_deferred_completion() -> None:
+        if not goal_was_active:
+            return
+        try:
+            from agentica.notify import goal_finished
+
+            goal_finished(
+                agent,
+                session_id=getattr(agent, "session_id", None),
+                work_dir=getattr(agent, "work_dir", None),
+            )
+        except Exception as exc:
+            # Observation only: never let the sink's bookkeeping break the loop.
+            from agentica.utils.log import logger
+
+            logger.debug(f"notify sink: completion release failed: {exc}")
+
+    if mgr is None or not goal_was_active:
         return
 
-    agent = state.current_agent
     if agent is None:
         return
 
     if agent._cancelled:
         mgr.pause(reason="user-interrupted")
         _cprint("  ⊙ Goal paused (user interrupted).")
+        _release_deferred_completion()
         return
 
     # User real input takes priority.
@@ -62,6 +90,9 @@ def _maybe_continue_goal(
         if is_goal_generated_prompt(text):
             loop_prompt_pending = True
             continue
+        # A real user message outranks the next lap, so the goal is not driving
+        # this session any more: the deferred "come back" is now true.
+        _release_deferred_completion()
         return  # real user message waiting — let it run first
 
     # Extract per-turn signals (final text, token delta, tool pairs) via the
@@ -75,6 +106,8 @@ def _maybe_continue_goal(
         agent.run_response, state.goal_tokens_baseline
     )
     if not final_text.strip():
+        # Nothing to judge, so no continuation is queued either.
+        _release_deferred_completion()
         return
     state.goal_tokens_baseline = new_baseline
 
@@ -92,6 +125,7 @@ def _maybe_continue_goal(
             )
         except Exception as exc:
             _cprint(f"  [goal] evaluator failed: {exc}")
+            _release_deferred_completion()
             return
 
     # Replace the live mid-turn estimate with the charged total the manager
@@ -114,6 +148,16 @@ def _maybe_continue_goal(
     # a second one would run the same next step twice.
     if decision.should_continue and decision.continuation_prompt and not loop_prompt_pending:
         pending_queue.put(decision.continuation_prompt)
+
+    # Has the goal stopped for good? ``decision.status`` answers it, and nothing
+    # else here can: "is another lap queued" is unreliable, because a queued
+    # continuation still has to survive its own evaluation. Deliberately
+    # pessimistic — the status is treated as "the goal may continue" unless it
+    # is one of the terminal values, so an unrecognised status leaves the
+    # completion held rather than announcing "you can come back" mid-goal.
+    goal_has_ended = decision.status != "active"
+    if goal_has_ended or not decision.should_continue:
+        _release_deferred_completion()
 
 
 __all__ = ['_maybe_continue_goal']

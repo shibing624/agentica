@@ -638,6 +638,19 @@ def _process_stream_response(
             )
         )
     except Exception as e:
+        # The turn died, so no goal hook will run for it: release any deferred
+        # "you can come back" now, or a goal that fails with the run leaves the
+        # desktop app on "working" forever.
+        try:
+            from agentica.notify import goal_finished
+
+            goal_finished(
+                current_agent,
+                session_id=getattr(current_agent, "session_id", None),
+                work_dir=getattr(current_agent, "work_dir", None),
+            )
+        except Exception:
+            pass
         _set_phase("idle")
         if display is not None:
             display.abandon_live()
