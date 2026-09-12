@@ -468,6 +468,32 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """
         return self.auxiliary_task_models.get(task) or self.auxiliary_model or self.model
 
+    def describe_tool_model(self, tool_name: str, tool_args: Optional[dict] = None) -> Optional[str]:
+        """Which model a tool call will actually run, or None if not knowable.
+
+        Display-only. The CLI renders tool calls through
+        ``format_tool_display``, which sees arguments but not the agent; a
+        delegation tool knows its own resolved model, so the label is fetched
+        from the tool instance and passed to the formatter. Only ``task``
+        (subagent model tier) and ``delegate`` (session model / profile /
+        explicit override) can answer — everything else returns None and no
+        label is printed.
+
+        Resolved fresh on every call: ``/model`` and ``/permissions`` mutate
+        the live agent without rebuilding it, so a cached label would go stale
+        the moment the user switches models.
+        """
+        for tool in self.tools or []:
+            functions = getattr(tool, "functions", None)
+            if not isinstance(functions, dict) or tool_name not in functions:
+                continue
+            label_for = getattr(tool, "model_label_for", None)
+            if not callable(label_for):
+                return None
+            label = label_for(tool_args)
+            return str(label) if label else None
+        return None
+
     def _init_execution(
         self,
         *,

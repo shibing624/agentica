@@ -248,10 +248,10 @@ mcp, skill, ...
 > 把 ../service-a 和 ../service-b 这两个仓库分别做一遍依赖升级，做完告诉我结果
 
   🔧 delegate
-      label='upgrade service-a'
+      model=openai/deepseek-v4.1-flash-official, label='upgrade service-a'
       把 ../service-a 做一遍依赖升级……（全文，不截断）
   🔧 delegate
-      label='upgrade service-b'
+      model=openai/deepseek-v4.1-flash-official, label='upgrade service-b'
       ……
   …主会话继续做自己的事…
 
@@ -259,6 +259,8 @@ mcp, skill, ...
 ```
 
 CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任务正文（含换行），不再用 `...` 省略——这是你审计「派了什么活」的依据。
+
+`task` / `delegate` 的调用行还会把**这次实际会跑的模型**放在最前面（上例的 `model=...`）。它不是模型传的参数，而是 CLI 现算出来的：`task` 按 `subagent_type` 的 `model_tier` 定（`auxiliary` 用便宜模型，`main` 用主会话模型），`delegate` 按会话 profile 加上调用里的 `model` 参数定。`/model` 换过模型之后，下一行的标签立刻跟着变。走 `config.yaml` profile 的委托会写成 `model=<模型名> (profile <profile>)`，因为真正决定端点的是 profile 而不是会话的 provider。其它工具的调用行不会出现这个标签——它们没有「会跑哪个模型」可言，硬凑一个只是噪音。
 
 要点：
 

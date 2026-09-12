@@ -144,6 +144,32 @@ class BuiltinTaskTool(Tool):
         """Bind to the parent agent so ``task()`` can spawn through the registry."""
         self._parent_agent = agent
 
+    def model_label_for(self, tool_args: Optional[dict] = None) -> Optional[str]:
+        """Which model the subagent this call would spawn actually runs.
+
+        Mirrors ``SubagentRegistry.spawn``'s tier selection exactly: a type
+        declared ``model_tier: main`` runs the parent's own model, everything
+        else runs the auxiliary model this tool was handed (or the parent's
+        ``resolve_auxiliary_model("task")``). The user is told because "task"
+        on its own does not say whether the work went to the cheap model or
+        back to the main one.
+        """
+        from agentica.model.defaults import model_display_label
+        from agentica.subagents import get_subagent_config
+
+        args = tool_args or {}
+        agent_type = str(args.get("subagent_type") or "explore").strip().lower()
+        config = get_subagent_config(agent_type)
+        # An unknown type is refused by spawn() anyway; label the tier it would
+        # have resolved to so the call line does not go blank with the error.
+        tier = getattr(config, "model_tier", "auxiliary")
+        if tier == "main":
+            return model_display_label(getattr(self._parent_agent, "model", None))
+        auxiliary = self._auxiliary_model
+        if auxiliary is None and self._parent_agent is not None:
+            auxiliary = self._parent_agent.resolve_auxiliary_model("task")
+        return model_display_label(auxiliary)
+
     def clone(self) -> "BuiltinTaskTool":
         """Fresh instance so each agent owns its ``_parent_agent`` slot.
 

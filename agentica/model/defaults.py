@@ -49,6 +49,49 @@ def provider_env_var(provider_key: str) -> Optional[str]:
     return pair[0] if pair else None
 
 
+# Model class name → provider key. Only the base classes appear: the
+# agentica.DeepSeekChat / MoonshotChat / ... factories all return plain
+# OpenAIChat instances (with their own base_url), so every OpenAI-compatible
+# provider lands on "openai" and a delegated child gets the base_url + api_key
+# as one pair. AzureOpenAIChat subclasses OpenAIChat but stands EARLIER in the
+# MRO, so it is detected first and correctly refused (Azure credentials have no
+# environment variable a child process could read). A third-party Model class
+# agentica does not know maps to nothing.
+_MODEL_CLASS_PROVIDERS = {
+    "OpenAIChat": "openai",
+    "AzureOpenAIChat": "azure",
+    "Claude": "anthropic",
+}
+
+
+def provider_for_model(model: Model) -> Optional[str]:
+    """The provider key a Model instance belongs to, or None if unrecognized."""
+    for klass in type(model).__mro__:
+        provider = _MODEL_CLASS_PROVIDERS.get(klass.__name__)
+        if provider:
+            return provider
+    return None
+
+
+def model_display_label(model: Optional[Model]) -> Optional[str]:
+    """Short ``provider/id`` label for a Model, or None when there is none.
+
+    Used where the user needs to see which model is about to run rather than a
+    Model object: ``task`` prints the subagent's tier model on the call line.
+    An id that already carries a slash (a proxy-style ``openai/glm-5``) is left
+    whole instead of gaining a second provider prefix.
+    """
+    if model is None:
+        return None
+    model_id = str(getattr(model, "id", "") or "").strip()
+    if not model_id or model_id == "not-provided":
+        return None
+    provider = provider_for_model(model)
+    if provider and "/" not in model_id:
+        return f"{provider}/{model_id}"
+    return model_id
+
+
 def _create_model(provider_key: str) -> Model:
     if provider_key == "openai":
         from agentica.model.openai import OpenAIChat

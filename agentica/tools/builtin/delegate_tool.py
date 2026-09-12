@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Optional
 
-from agentica.model.defaults import provider_env_var
+from agentica.model.defaults import model_display_label, provider_env_var, provider_for_model
 from agentica.global_config import get_profiles
 from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.base import Tool
@@ -76,30 +76,6 @@ def profile_for_model(
         matches.append(name)
     return matches[0] if len(matches) == 1 else None
 
-
-# Model class name → provider key. Only the base classes appear: the
-# agentica.DeepSeekChat / MoonshotChat / ... factories all return plain
-# OpenAIChat instances (with their own base_url), so every OpenAI-compatible
-# provider lands on "openai" and the child gets the base_url + api_key as one
-# pair. AzureOpenAIChat subclasses OpenAIChat but stands EARLIER in the MRO,
-# so it is detected first and correctly refused (Azure credentials have no
-# environment variable the child could read). A third-party Model class that
-# agentica does not know maps to nothing; the worker then resolves its own
-# model from config.yaml / the environment.
-_MODEL_CLASS_PROVIDERS = {
-    "OpenAIChat": "openai",
-    "AzureOpenAIChat": "azure",
-    "Claude": "anthropic",
-}
-
-
-def provider_for_model(model: "Model") -> Optional[str]:
-    """The provider key a Model instance belongs to, or None if unrecognized."""
-    for klass in type(model).__mro__:
-        provider = _MODEL_CLASS_PROVIDERS.get(klass.__name__)
-        if provider:
-            return provider
-    return None
 
 # Same ceiling as SubagentRegistry.MAX_CONCURRENT: three parallel workers is
 # already more than a person can follow, and each one here is a full model.
@@ -274,17 +250,13 @@ class BuiltinDelegateTool(Tool):
         provider, model_name = self._resolve_model(model)
         inherited = (provider, model_name) == (self._model_provider, self._model_name)
         if inherited and self._session_profile:
+            # The session profile wins outright; looking a profile up here
+            # would only be to throw the answer away.
             argv += ["--profile", self._session_profile]
             if model_name:
                 argv += ["--model_name", model_name]
         elif provider and model_name:
-            if inherited:
-                parent_url = self._model.base_url if self._model is not None else None
-                profile = self._profile_lookup(model_name, provider=None, base_url=parent_url)
-            elif (model or "").strip() == model_name:
-                profile = self._profile_lookup(model_name, provider=None, base_url=None)
-            else:
-                profile = self._profile_lookup(model_name, provider=provider, base_url=None)
+            profile = self._profile_for_choice(model, provider, model_name, inherited)
             if profile:
                 argv += ["--profile", profile]
             elif self._model is not None:
@@ -367,3 +339,54 @@ class BuiltinDelegateTool(Tool):
         if name:
             return provider, name
         return self._model_provider, choice
+
+    def _profile_for_choice(
+        self, requested: str, provider: Optional[str], model_name: Optional[str],
+        inherited: bool,
+    ) -> Optional[str]:
+        """config.yaml profile the worker would be launched on, or None.
+
+        Single source of truth for the launch decision, so the model label
+        shown on the call line and the ``--profile`` flag the child actually
+        receives can never disagree about the endpoint.
+        """
+        if not model_name:
+            return None
+        if inherited:
+            parent_url = self._model.base_url if self._model is not None else None
+            return self._profile_lookup(model_name, provider=None, base_url=parent_url)
+        if (requested or "").strip() == model_name:
+            return self._profile_lookup(model_name, provider=None, base_url=None)
+        return self._profile_lookup(model_name, provider=provider, base_url=None)
+
+    def model_label_for(self, tool_args: Optional[dict] = None) -> Optional[str]:
+        """Which model the worker this call would start actually runs.
+
+        The same resolution ``delegate()`` uses, so the label on the call line
+        cannot disagree with the child's argv. Shown to the user because
+        "delegated" alone does not say whether the work left the session's own
+        model: an omitted ``model`` inherits it, a name that hits a config.yaml
+        profile moves to that profile's endpoint, and an explicit
+        ``provider/name`` can move further still.
+
+        ``provider`` is omitted from the label when the worker inherits the
+        session profile — the profile, not a provider flag, is then what picks
+        the endpoint, so printing the caller's provider key would be a guess.
+        A ``model`` argument that names a config.yaml profile is labelled with
+        that profile's name for the same reason: the worker moves to the
+        profile's provider, not the session's.
+        """
+        args = tool_args or {}
+        requested = str(args.get("model") or "")
+        provider, model_name = self._resolve_model(requested)
+        if not model_name:
+            return self._model.id if self._model is not None else None
+        inherited = (provider, model_name) == (self._model_provider, self._model_name)
+        if inherited:
+            if self._model is not None:
+                return model_display_label(self._model)
+            return f"{self._model_provider}/{model_name}" if self._model_provider else model_name
+        profile = self._profile_for_choice(requested, provider, model_name, inherited)
+        if profile:
+            return f"{model_name} (profile {profile})"
+        return f"{provider}/{model_name}" if provider else model_name

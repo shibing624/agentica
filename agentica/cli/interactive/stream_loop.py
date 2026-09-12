@@ -421,10 +421,17 @@ def _process_stream_response(
         # view by default.
         subagent_verbosity = "verbose" if tui_state.get("debug") else "all"
         display_work_dir = Path(work_dir) if work_dir is not None else None
+        # Names the model a ``task`` / ``delegate`` call will run, resolved from
+        # the live agent at print time so a mid-session ``/model`` switch shows
+        # up immediately. Looked up rather than read directly: an embedded /
+        # stubbed agent need not be a full Agent, and a missing label must not
+        # cost the turn its tool lines.
+        model_resolver = getattr(current_agent, "describe_tool_model", None)
         display = StreamDisplayManager(
             con,
             subagent_verbosity=subagent_verbosity,
             work_dir=display_work_dir,
+            model_resolver=model_resolver if callable(model_resolver) else None,
         )
         tui_state["live_display"] = display
 

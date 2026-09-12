@@ -90,6 +90,10 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
     return `'${pattern.slice(0, 40)}' in ${shortenPath(path, cwd)}`;
   }
   if (name === "task") {
+    // No ``model=`` label here, unlike the CLI. It is resolved from the live
+    // session (``Agent.describe_tool_model``) and the chat row has no agent to
+    // ask: the arguments alone cannot say which model a subagent runs, so the
+    // raw ``model`` argument is the only honest thing this formatter can show.
     return formatHandoff(args, "description", ["subagent_type", "timeout", "max_turns", "resume_from_run_id"]);
   }
   if (name === "delegate") {
