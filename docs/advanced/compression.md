@@ -76,6 +76,13 @@ Context Messages
 
 油表是 `<context_window>` user 片段：新窗写满窗身份；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
 
+#### 无 session log 时的换窗交接
+
+`session_id` 决定有没有 JSONL 与 notes 文件。SDK 不传时两者都没有（`notes_path_for` 返回 `None`），这时**注入 prompt 的那份 skim 就是那些轮次的唯一副本**：
+
+- skim **可累积**：`_collect` 会把上一轮 `<dropped_span>` / `<session_notes>` 里的 `- ` 行继承进本轮（只取正文行，丢掉旧 header 与分区标题，否则每轮叠一层变成 header 汤）。连续换窗因此不会逐轮丢事实，长度线性有界，最老的先被 `_fit` 淘汰。`strip_window_preamble` 仍照常剥这些标签——搜索索引不该把我们的 chrome 当第二次命中；两处需求相反，所以在 `_collect` 里分开处理。
+- 提醒**只说做得到的事**：没有 notes 路径时不注入催写、也不推迟换窗（`can_author_notes` 现在同时要求工具与路径）；`<context_window>` 里不提 `search_session` 与 notes 文件（没有 log 时前者只会回「No session log on this agent」）。有 `session_id` 时以上提示与能力完全不变。
+
 ## CompressionManager 配置
 
 ```python
