@@ -5,6 +5,7 @@ import unittest
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
+from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK
 from agentica.memory.session_log import SessionLog
 from agentica.memory.session_search import (
     USER_QUESTION_BUDGET_CHARS,
@@ -174,8 +175,7 @@ class TestSearchEntriesRank(unittest.TestCase):
                 "user",
                 "<context_window>\nCurrent context window 1.\n"
                 "</context_window>\n\n"
-                "New context window started without a conversation summary. "
-                "Continue from session notes and search_session.",
+                + WINDOW_CONTINUATION_MARK,
             )
             log.append("user", "hi")
             self.assertEqual(log.search_entries("context window"), [])

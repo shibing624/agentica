@@ -7,6 +7,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.compression.token_budget import (
     REMINDER_REMAINING_RATIO,
+    WINDOW_CONTINUATION_MARK,
     full_window_text,
     is_context_window_message,
     remaining_text,
@@ -43,6 +44,16 @@ class TestTokenBudget(unittest.TestCase):
             is_context_window_message(Message(role="system", content=full_window_text(1, 1)))
         )
         self.assertFalse(is_context_window_message(Message(role="user", content="hello")))
+
+    def test_window_fragments_do_not_explain_a_missing_summary(self):
+        """A fresh window reports facts, not the absence of a digest.
+
+        The cut no longer runs a summarizer, so neither fragment may tell the
+        model a summary was skipped — that reads as a loss it should look for.
+        """
+        for text in (full_window_text(2, 512_000), full_window_text(2, 512_000, "/tmp/s.notes.md")):
+            self.assertNotIn("summar", text.lower())
+        self.assertNotIn("summar", WINDOW_CONTINUATION_MARK.lower())
 
 
 if __name__ == "__main__":

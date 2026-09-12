@@ -326,7 +326,7 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
 ```
 
 ### `/compact`
-手动开启一个新的上下文窗口（同一 session，不写 LLM 摘要）：
+手动开启一个新的上下文窗口（同一 session）：
 ```
 > /compact
   New context window 1: 40 messages -> 6. Prior turns stay in the session log.

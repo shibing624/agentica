@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### breaking
+- **`/compact` 与换窗前言不再提「摘要」**：帮助文本由 `Start a new context window (no summary)` 收敛为 `Start a new context window`；`WINDOW_CONTINUATION_MARK` 由 `New context window started without a conversation summary.` 改为 `New context window started.`（哨兵作用不变——空闲 `/compact` 留下的 preamble 仍靠它被下一轮用户输入折叠），`full_window_text` 删掉 `This window starts without a conversation summary.`。旧行向模型解释一段并不存在的历史；新窗第一句只报事实。副作用：磁盘上带旧句子的行，其 preamble 不再被剥净，搜索索引会多出一行 chrome。
 - **Layer 2 compact 不再做 LLM / native 摘要，改为空窗换窗（Codex TokenBudget / `#29743`）**：窗口满、`/compact`、`prompt_too_long` 后的 reactive 都只切同一 `session_id` 的新活动窗，写空 `summary` 的 `compact_boundary`。旧对话留在 JSONL，用 `search_session` 查；交接写旁边的 `<session_id>.notes.md`（已有文件工具，不新建目录）。`/compact [instructions]` 不再把指令交给摘要模型。`should_native_compact` 恒为 False，runner 不再调 `/responses/compact`。油表是独立的 `<context_window>` user 片段（每窗一次剩余提醒，不进冻结的 system 前缀）。
 - **删除 `read_session_item`**：抄了 Codex `history.read_item` 的 `item_id` + `offset_chars` / `limit_chars` 分页，但本地 JSONL 一行通常短于 search snippet；模型拿着 id 去读「hi」只得到 type/timestamp/content。换窗后靠 `search_session` 的关键词命中 + 用户问题索引即可。
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。

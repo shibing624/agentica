@@ -833,7 +833,7 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
     wm = agent.working_memory
     if extra:
         con.print(
-            "[dim]/compact no longer takes summariser instructions — "
+            "[dim]/compact takes no instructions — "
             "write them to the session notes file instead.[/dim]"
         )
 
