@@ -34,7 +34,29 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         self.assertNotIn("monsoon", text)
         self.assertNotIn("background dump", text)
         self.assertNotIn("## Facts", text)
-        self.assertIn("search_session", text)
+
+    def test_header_only_names_paths_that_exist(self):
+        """The header may not advertise tools the agent does not have.
+
+        With a notes path the model can write notes and search the log. With
+        no session log, ``search_session`` answers "No session log on this
+        agent" — naming it sends the model after nothing, on the one window
+        whose skim is the only copy of those turns.
+        """
+        msgs = [
+            Message(role="user", content="工单 ZX-41827"),
+            Message(role="assistant", content="记下了，改用 KeyDB"),
+        ]
+        with_path = compose_transcript_digest(msgs, notes_path="/tmp/s.notes.md")
+        without = compose_transcript_digest(msgs)
+        self.assertIn("search_session", with_path)
+        self.assertIn("notes file", with_path)
+        self.assertNotIn("search_session", without)
+        self.assertNotIn("notes file", without)
+        # Both keep the content; only the instructions differ.
+        for text in (with_path, without):
+            self.assertIn("ZX-41827", text)
+            self.assertIn("KeyDB", text)
 
     def test_keeps_order_without_timestamps(self):
         text = compose_transcript_digest([

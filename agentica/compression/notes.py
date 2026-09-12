@@ -248,18 +248,38 @@ def _fit(lines: List[str], limit: int, budget: int) -> List[str]:
     return chosen
 
 
-def compose_transcript_digest(messages: Sequence[Message]) -> str:
-    """Local chronological skim of the span a window cut is about to drop."""
+def compose_transcript_digest(
+    messages: Sequence[Message],
+    notes_path: Optional[str] = None,
+) -> str:
+    """Local chronological skim of the span a window cut is about to drop.
+
+    ``notes_path`` decides which instructions are honest. With one, the model
+    can write notes and search the log, so say so. Without one (SDK built
+    without ``session_id``) there is no notes file and ``search_session``
+    answers "No session log on this agent" — pointing at either would send the
+    model after something that cannot help, and this skim is the only copy of
+    those turns. Say only what is true.
+    """
     turns, tools = _collect(messages)
-    header = [
-        "# Dropped span",
-        "",
-        "Not session notes — that file is still empty. "
-        "Chronological skim of what left this window. "
-        "Write goals, constraints, IDs, and decisions to the notes file. "
-        "Use search_session for anything missing.",
-        "",
-    ]
+    if notes_path:
+        header = [
+            "# Dropped span",
+            "",
+            "Not session notes — that file is still empty. "
+            "Chronological skim of what left this window. "
+            "Write goals, constraints, IDs, and decisions to the notes file. "
+            "Use search_session for anything missing.",
+            "",
+        ]
+    else:
+        header = [
+            "# Dropped span",
+            "",
+            "Chronological skim of what left this window. This is the only "
+            "copy — no session log is attached to this agent.",
+            "",
+        ]
     header_size = sum(len(x) + 1 for x in header)
     turn_budget = max(800, _DIGEST_BUDGET - header_size)
     turns = _fit(turns, _MAX_TURNS, turn_budget)
@@ -276,7 +296,11 @@ def compose_transcript_digest(messages: Sequence[Message]) -> str:
         parts.extend(tools)
         parts.append("")
     if not turns and not tools:
-        parts.append("No dropped turns to skim. Use search_session.")
+        parts.append(
+            "No dropped turns to skim. Use search_session."
+            if notes_path
+            else "No dropped turns to skim."
+        )
         parts.append("")
     return "\n".join(parts)
 
@@ -288,4 +312,4 @@ def rollover_handover(
     """``(model_notes, dropped_span)``. Never writes the digest to disk."""
     if notes_are_ready(notes_path):
         return Path(notes_path).read_text(encoding="utf-8"), None
-    return None, compose_transcript_digest(messages)
+    return None, compose_transcript_digest(messages, notes_path=notes_path)
