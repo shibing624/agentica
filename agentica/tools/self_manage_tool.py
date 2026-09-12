@@ -44,8 +44,8 @@ Actions:
 - action='show'                 -> return current config.yaml profiles + settings (cron scheduler
                                    enabled/interval, etc.) + .env vars (secrets masked)
 - action='set_config'           -> edit a config.yaml profile field.
-                                   Requires key + value. Optional profile (defaults to active).
-                                   Editable keys: model_provider, model_name, base_url, api_key,
+                                   Requires key + value + 'profile' (name it
+                                   explicitly — see below). Editable keys: model_provider, model_name, base_url, api_key,
                                    wire_api, max_tokens, temperature, reasoning,
                                    reasoning_effort, top_p, context_window, compact_token_limit,
                                    extra_body, extra_headers (value must be a JSON object string
@@ -57,8 +57,13 @@ Actions:
 - action='install_skill'        -> install a skill from a git URL or local path. Requires value=<source>.
                                    Optional force=confirm-style via confirm=True to overwrite existing.
 
-Use this to optimize your own setup, e.g. raise max_tokens, switch model, or add an API key.
+Use this to optimize your own setup, e.g. raise max_tokens or add an API key.
 Config file edits persist; model changes take effect on next agent rebuild/restart.
+
+The profile the current session is running on is NOT editable here: a stored
+profile can be prepared for later, but changing the model this session bills to
+is the user's decision, made with /model <profile>. If that is what is wanted,
+say so and let them run it.
 
 Standing instructions ("remember: always X") are not a config setting — they live in
 AGENTS.md. See the agentica skill for where that file is and how to edit it."""
@@ -97,7 +102,10 @@ def _do_self_manage(
         if not key or value is None:
             return tool_error("set_config requires 'key' and 'value'.")
         try:
-            updated = sm.set_profile_field(key, value, profile)
+            # allow_active=False: a stored profile can be prepared for later,
+            # but the one this session is running on is the user's to change —
+            # see the description below.
+            updated = sm.set_profile_field(key, value, profile, allow_active=False)
         except ValueError as e:
             return tool_error(str(e))
         return tool_result(

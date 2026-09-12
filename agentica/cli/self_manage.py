@@ -190,11 +190,19 @@ def set_profile_field(
     field: str,
     value: str,
     profile_name: Optional[str] = None,
+    *,
+    allow_active: bool = True,
 ) -> Dict[str, Any]:
     """Set a single field on a config.yaml profile (comment-preserving write).
 
     Returns the updated (masked) profile dict. Raises ValueError on an
     unknown/forbidden field so the caller surfaces a clear error.
+
+    ``allow_active=False`` refuses the profile currently in effect and requires
+    an explicit ``profile_name``. The agent-facing tool passes it: editing a
+    *stored* profile prepares a model for later, but editing the active one
+    changes which model this session bills to, and switching that is the user's
+    move (``/model <profile>``). The user's own commands leave the default on.
     """
     if field not in _EDITABLE_PROFILE_FIELDS:
         raise ValueError(
@@ -205,10 +213,25 @@ def set_profile_field(
     # for the current work_dir (respecting any project-scoped override), NOT
     # the global default. Otherwise the agent tool would happily edit some
     # other profile while the user sees no change in their session.
+    active_name = resolve_active_profile_name(work_dir=os.getcwd())[0]
+    if not allow_active:
+        if not profile_name:
+            raise ValueError(
+                f"This is the profile in effect for the current session ('{active_name}'), "
+                f"so it is not editable here. Pass an explicit 'profile' to prepare a "
+                f"different one, or ask the user to switch with /model <profile> — "
+                f"changing the model this session runs on is theirs to do."
+            )
+        if profile_name == active_name:
+            raise ValueError(
+                f"Profile '{profile_name}' is the one in effect for the current session, "
+                f"so it is not editable here. Prepare a different profile, or ask the "
+                f"user to switch with /model <profile>."
+            )
     if profile_name:
         name = profile_name
     else:
-        name = resolve_active_profile_name(work_dir=os.getcwd())[0]
+        name = active_name
     profile = dict(get_profile(name))
     coerced = _coerce_profile_value(field, value)
     if coerced is None:

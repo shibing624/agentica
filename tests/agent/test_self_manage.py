@@ -248,5 +248,110 @@ class TestSelfManageTool(unittest.TestCase):
         self.assertIn(CLI_RESTART_HINT, tool.description)
 
 
+class TestTheAgentCannotChangeItsOwnModel(unittest.TestCase):
+    """``self_manage`` may prepare a stored profile, never the active one.
+
+    Editing the profile in effect would let the agent move this session onto
+    another model — and its cost — on its own, which is the user's decision
+    (``/model <profile>``). A stored profile is fine to prepare: that is not
+    what this session is spending on.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig_home = os.environ.get("AGENTICA_HOME")
+        self._orig_dotenv = os.environ.get("AGENTICA_DOTENV_PATH")
+        self._orig_cwd = os.getcwd()
+        os.environ["AGENTICA_HOME"] = self._tmp
+        os.environ["AGENTICA_DOTENV_PATH"] = os.path.join(self._tmp, ".env")
+        # A project override would answer "which profile is active?" instead of
+        # config.yaml, so the working directory has to be clean too.
+        self._work = tempfile.mkdtemp()
+        os.chdir(self._work)
+        import importlib
+        from agentica import config as cfg
+        importlib.reload(cfg)
+        from agentica import global_config as gc
+        importlib.reload(gc)
+        from agentica.cli import self_manage as sm
+        importlib.reload(sm)
+        from agentica.tools.self_manage_tool import self_manage
+        self.self_manage = self_manage
+        self.gc = gc
+        import yaml
+        with open(gc.global_config_path(), "w", encoding="utf-8") as f:
+            yaml.safe_dump({
+                "active_profile": "mine",
+                "profiles": {
+                    "mine": {"model_provider": "openai", "model_name": "deepseek-chat",
+                             "base_url": "http://v1/", "api_key": "sk-mine"},
+                    "stored": {"model_provider": "openai", "model_name": "gpt-4o-mini",
+                               "base_url": "http://v1/", "api_key": "sk-stored"},
+                },
+            }, f)
+
+    def tearDown(self):
+        os.chdir(self._orig_cwd)
+        for key, orig in (("AGENTICA_HOME", self._orig_home),
+                          ("AGENTICA_DOTENV_PATH", self._orig_dotenv)):
+            if orig is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = orig
+        import importlib
+        from agentica import config as cfg
+        from agentica import global_config as gc
+        from agentica.cli import self_manage as sm
+        importlib.reload(cfg)
+        importlib.reload(gc)
+        importlib.reload(sm)
+
+    def _model_of(self, name):
+        return self.gc.get_profiles()[name]["model_name"]
+
+    def test_changing_the_active_profile_is_refused(self):
+        out = json.loads(self.self_manage(
+            action="set_config", key="model_name", value="claude-opus-5",
+        ))
+
+        self.assertIn("error", out)
+        self.assertEqual(self._model_of("mine"), "deepseek-chat")
+
+    def test_naming_the_active_profile_explicitly_is_refused_too(self):
+        out = json.loads(self.self_manage(
+            action="set_config", key="model_name", value="claude-opus-5", profile="mine",
+        ))
+
+        self.assertIn("error", out)
+        self.assertEqual(self._model_of("mine"), "deepseek-chat")
+
+    def test_an_api_key_on_the_active_profile_is_refused_too(self):
+        """The blind spot: a wrong key with the right base_url fails silently
+        at the next call, and the key is masked on every read."""
+        out = json.loads(self.self_manage(
+            action="set_config", key="api_key", value="sk-wrong",
+        ))
+
+        self.assertIn("error", out)
+        self.assertEqual(self.gc.get_profiles()["mine"]["api_key"], "sk-mine")
+
+    def test_preparing_a_stored_profile_is_allowed(self):
+        out = json.loads(self.self_manage(
+            action="set_config", key="model_name", value="glm-5.3", profile="stored",
+        ))
+
+        self.assertTrue(out["success"])
+        self.assertEqual(self._model_of("stored"), "glm-5.3")
+
+    def test_the_users_own_command_still_edits_the_active_profile(self):
+        """The guard is the tool's, not the primitive's: `/config set` is the
+        user typing, so it keeps full access."""
+        from agentica.cli import self_manage as sm
+
+        sm.set_profile_field("temperature", "0.3")
+
+        self.assertEqual(self.gc.get_profiles()["mine"]["temperature"], 0.3)
+
+
 if __name__ == "__main__":
     unittest.main()
