@@ -285,6 +285,10 @@ class DeepAgent(Agent):
                     model=model,
                     model_provider=provider_for_model(model),
                     model_name=model.id,
+                    # The other model this session offers. `delegate`'s
+                    # ``model`` arg may name either one and nothing else — the
+                    # profile is the user's choice and fixes endpoint + bill.
+                    auxiliary_model=auxiliary_model,
                     session_profile=session_profile,
                 ),
             )

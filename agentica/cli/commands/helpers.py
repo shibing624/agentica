@@ -235,6 +235,27 @@ def _update_task_tool_auxiliary_model(agent, auxiliary_model) -> None:
             return
 
 
+def _update_delegate_tool_models(agent) -> None:
+    """Repoint the delegate tool's models after an in-place model switch.
+
+    ``/model`` changes ``agent.model`` / ``agent.auxiliary_model`` without
+    rebuilding the agent, and the delegate tool holds its own copies of both —
+    they are what decides whether a ``model`` arg is inside the session and
+    which one it labels. Left stale, the tool would judge a call against the
+    profile the user just left.
+    """
+    from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool
+
+    if not agent or not agent.tools:
+        return
+    for tool in agent.tools:
+        if isinstance(tool, BuiltinDelegateTool):
+            tool.refresh_session_models(
+                model=agent.model,
+                auxiliary_model=getattr(agent, "auxiliary_model", None),
+            )
+
+
 
 def _safe_tool_module_name(name: str) -> Optional[str]:
     """Sanitize a /tools add-from name to a plain module basename.

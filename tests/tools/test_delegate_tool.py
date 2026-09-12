@@ -76,6 +76,7 @@ def _tool(
     work_dir="/tmp/proj",
     profile_lookup=None,
     sdk_model=None,
+    sdk_auxiliary_model=None,
     session_profile: Optional[str] = None,
 ):
     return BuiltinDelegateTool(
@@ -85,6 +86,7 @@ def _tool(
         model_provider=provider,
         model_name=model,
         model=sdk_model,
+        auxiliary_model=sdk_auxiliary_model,
         session_profile=session_profile,
         # Default "no profile matches" so argv tests never depend on the
         # machine's real config.yaml.
@@ -543,6 +545,129 @@ class TestToolSurface:
         tool = _tool(_FakeRegistry())
         description = tool.functions["delegate"].description or ""
         assert "cannot ask anyone anything" in description
+
+
+class TestSessionModelsOnly:
+    """A session offers the profile's two models and nothing else.
+
+    The profile is the user's choice and it is what fixes the endpoint, the
+    credentials and the bill. ``model`` may name that profile's main or
+    auxiliary model, or nothing — never a third model, which is how a worker
+    once ended up on a different profile's ``claude-opus-5`` (and its cost)
+    while the session itself was running deepseek.
+    """
+
+    def _session_tool(self, registry, **kw):
+        main = SimpleNamespace(id="deepseek-v4.1-flash-official", api_key="sk", base_url=None)
+        aux = SimpleNamespace(id="gpt-4o-mini", api_key="sk", base_url=None)
+        return _tool(
+            registry,
+            provider="openai",
+            model=main.id,
+            sdk_model=main,
+            sdk_auxiliary_model=aux,
+            session_profile="venus-ds-v4-1-flash",
+            **kw,
+        )
+
+    def test_a_third_model_from_another_profile_is_refused(self):
+        registry = _FakeRegistry()
+
+        result = _delegate(self._session_tool(registry), task="research it", model="claude-opus-5")
+
+        assert result.startswith("Nothing delegated")
+        assert registry.started == []
+        # The refusal names the profile and both real choices, so the caller
+        # can correct itself instead of retrying blind.
+        assert "venus-ds-v4-1-flash" in result
+        assert "deepseek-v4.1-flash-official" in result
+        assert "gpt-4o-mini" in result
+        assert "claude-opus-5" in result
+
+    def test_the_sessions_main_model_is_allowed(self):
+        registry = _FakeRegistry()
+
+        _delegate(
+            self._session_tool(registry),
+            task="research it",
+            model="deepseek-v4.1-flash-official",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_name") + 1] == "deepseek-v4.1-flash-official"
+
+    def test_the_sessions_auxiliary_model_is_allowed(self):
+        registry = _FakeRegistry()
+
+        _delegate(self._session_tool(registry), task="research it", model="gpt-4o-mini")
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--model_name") + 1] == "gpt-4o-mini"
+
+    def test_the_auxiliary_model_rides_the_session_profile_not_the_parents_endpoint(self):
+        """The aux model may live on another endpoint. Flags alone would send
+        the child to the parent's base_url, so it launches on the session
+        profile with the model overridden — the shape an inherited main model
+        already uses."""
+        registry = _FakeRegistry()
+
+        _delegate(self._session_tool(registry), task="research it", model="gpt-4o-mini")
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
+        assert "--base_url" not in argv
+
+    def test_an_empty_model_still_inherits_the_session(self):
+        registry = _FakeRegistry()
+
+        _delegate(self._session_tool(registry), task="research it")
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
+
+    def test_an_sdk_session_has_no_profile_to_protect_and_keeps_its_freedom(self):
+        """No profile means no user choice to violate: the SDK caller passes
+        its own model, so a third model stays available."""
+        registry = _FakeRegistry()
+
+        _delegate(
+            _tool(
+                registry,
+                profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
+            ),
+            task="research it",
+            model="claude-opus-5",
+        )
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] == "opus-5-anthropic"
+
+    def test_a_refused_model_gets_no_label(self):
+        """The call line must not advertise the model the call is about to be
+        rejected for."""
+        tool = self._session_tool(_FakeRegistry())
+
+        assert tool.model_label_for({"model": "claude-opus-5"}) is None
+        assert tool.model_label_for({"model": "gpt-4o-mini"}) == "openai/gpt-4o-mini"
+        assert tool.model_label_for({}) == "deepseek-v4.1-flash-official"
+
+    def test_switching_profile_in_place_moves_both_choices(self):
+        """``/model`` rewrites the live agent without rebuilding it; the tool
+        must judge the next call against the profile just switched to."""
+        registry = _FakeRegistry()
+        tool = self._session_tool(registry)
+        new_main = SimpleNamespace(id="glm-5.3-external", api_key="sk", base_url=None)
+        new_aux = SimpleNamespace(id="gpt-4o", api_key="sk", base_url=None)
+
+        tool.refresh_session_models(model=new_main, auxiliary_model=new_aux)
+
+        assert _delegate(tool, task="a", model="glm-5.3-external").startswith("Delegated")
+        assert _delegate(tool, task="b", model="gpt-4o").startswith("Delegated")
+        # The old profile's models went with the old profile.
+        assert _delegate(tool, task="c", model="gpt-4o-mini").startswith("Nothing delegated")
+        assert _delegate(
+            tool, task="d", model="deepseek-v4.1-flash-official",
+        ).startswith("Nothing delegated")
 
 
 class TestModelLabel:

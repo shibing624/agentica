@@ -53,6 +53,7 @@ from agentica.cli.commands.helpers import (
     _run_async_safe,
     _sanitize_history_for_model_switch,
     _update_task_tool_auxiliary_model,
+    _update_delegate_tool_models,
     format_cli_log_location,
     format_path_for_display,
 )
@@ -609,6 +610,9 @@ def _apply_profile(
         # model (None = fall back to the parent's main model, matching
         # create_agent's default).
         _update_task_tool_auxiliary_model(ctx.current_agent, new_auxiliary_model)
+        # delegate judges a ``model`` arg against the session's own models, so
+        # it has to be looking at the profile just switched to.
+        _update_delegate_tool_models(ctx.current_agent)
         _sanitize_history_for_model_switch(ctx.current_agent)
         # Refresh the self-description block so the agent reports its new
         # model/auxiliary model on the next turn.
