@@ -100,7 +100,7 @@ class Runner(CompressMixin, RetryMixin, PersistMixin, SteerMixin, StreamMixin, L
         # Not emitting goal events is NOT the same as goal not affecting the
         # wire: a standing goal makes one request into N runs, so the sink holds
         # back ``run.completed`` while one is active. Do not "simplify" that
-        # check away — see ``notify.sink._goal_still_running``.
+        # check away — see ``notify.sink._goal_is_driving``.
         try:
             from agentica.notify import notify_sink_dispatch
 

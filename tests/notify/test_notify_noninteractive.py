@@ -53,8 +53,7 @@ class TestNonInteractiveNeverBlocks:
         """The strongest statement: turning the sink on changes nothing here."""
         desktop = _FakeDesktop(decision_body={"decision": "allow"})
         try:
-            install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path,
-                                      approve_from_desktop=True))
+            install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             from agentica.cli.approvals import build_noninteractive_approve
 
             approve = build_noninteractive_approve(_StubAgent())

@@ -2,11 +2,13 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: The shared secret that keeps the notify socket from being a way
-for any local process to forge an approval.
+for any local process to answer as the user.
 
-The socket is local, but "local" is not "trusted": without a token, any process
-on the machine could send a ``needs.approval`` and collect an ``allow``. The
-token lives in a file both sides read, mode ``0600``.
+The socket is local, but "local" is not "trusted": the desktop reply to
+``needs.approval`` / ``needs.input`` is applied as the *user's* answer, so
+without a token any process on the machine could approve a command or answer a
+question while claiming to be the person at the keyboard. The token lives in a
+file both sides read, mode ``0600``.
 
 Creation rule: **only create it when it is absent, never overwrite.** Either
 side may be the first to run, and whoever gets there first defines the secret;

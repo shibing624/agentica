@@ -1,26 +1,36 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: The notify sink — a one-way observation channel plus an optional
-two-way decision channel to a local desktop app.
+@description: The notify sink — report run state to a local desktop app, and let
+the user answer approvals / questions from there.
 
 Talks HTTP over a Unix domain socket. Two paths, and which one blocks is decided
 by the *path*, never by a body field — a malformed body must not be able to hang
 a run:
 
-    POST /event   fire and forget    2s     non-blocking run lifecycle
-    POST /await   waits for a human 55s    approval / question
+    POST /event   fire and forget    2s            run lifecycle + "it needs you"
+    POST /await   waits for the user caller's budget  approval / question reply
+
+The app is an **input surface, not an authority**: a reply from it is applied as
+the user's own answer for that session and interaction, with the same effect as
+typing it in the terminal. Nothing here has a policy, nothing auto-approves, and
+there is no "may the app answer?" switch — that would imply the app had
+authority of its own.
 
 **The degradation ladder is the whole point.** Any failure at any stage falls
-back to the terminal prompt and never returns "allow":
+back to the terminal prompt:
 
     1. socket reachable            -> normal round trip
     2. connect fails               -> fall back *immediately*, do not wait out
                                       the timeout (the desktop app is not
                                       running; that user must see no difference)
-    3. connected but no answer     -> timeout, then fall back
-    4. unparseable / unknown body  -> "no decision", fall back. Never guess,
+    3. connected but no answer     -> wait out the caller's budget, then fall back
+    4. unparseable / unknown body  -> "no answer", fall back. Never guess,
                                       never default to allow.
+
+Note the distinction behind levels 2-4: "the app gave no answer" falls back, while
+"the user has not pressed anything yet" keeps waiting — as long as the terminal
+would have waited.
 
 Non-blocking delivery runs on a dedicated daemon thread with a bounded queue
 rather than an asyncio task: the CLI runs each turn through its own
@@ -188,28 +198,36 @@ class NotifySink:
                 # Observation only: a dead desktop app is debug noise, not a fault.
                 logger.debug(f"notify sink: /event delivery failed: {exc}")
 
-    # ------------------------------------------------------------ two-way send
+    # ------------------------------------------------- answer-from-the-app path
 
     def await_decision(
         self,
         event: str,
         *,
         payload: Dict[str, Any],
+        timeout: float,
         session_id: Optional[str] = None,
         work_dir: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Block for a desktop decision. ``None`` means "fall back to terminal".
 
+        Same request, same reply, as typing the answer in the terminal: the
+        desktop reply is applied as *the user's* input, on the user's authority.
+        It is not the app deciding, and the app has no policy of its own.
+
         Returns ``{"decision": ...}`` or ``{"answer": ...}`` only when the
         desktop app gave a usable answer. Every other outcome — disabled,
-        not permitted, connect failure, timeout, HTTP error, unparseable body —
-        returns None so the caller falls through to the terminal prompt.
+        connect failure, timeout, HTTP error, unparseable body — returns None so
+        the caller falls through to the terminal prompt.
+
+        ``timeout`` is required, and deliberately has no default here: how long a
+        person may take is the caller's business (the terminal already has its
+        own rule for that), and a number baked into this layer would mean a
+        desktop answer was allowed less time than a typed one. ``None`` means
+        "as long as the caller's interaction is alive", which is what the
+        terminal prompt does.
         """
         if not self._cfg.enabled:
-            return None
-        # The switch gates *deciding*, not *knowing*. With it off the app may
-        # still be told a decision is pending; it just cannot make one.
-        if not self._cfg.approve_from_desktop:
             return None
         try:
             envelope = self._envelope(
@@ -222,14 +240,14 @@ class NotifySink:
             response = self._post(
                 "/await",
                 envelope,
-                timeout=self._cfg.timeout_seconds,
+                timeout=timeout,
                 wait=True,
                 raise_transport=True,
             )
         except httpx.TimeoutException:
             logger.debug(
-                f"notify sink: {event} not answered within "
-                f"{self._cfg.timeout_seconds:g}s; falling back to the terminal"
+                f"notify sink: {event} not answered within {timeout:g}s; "
+                f"falling back to the terminal"
             )
             return None
         except httpx.ConnectError:

@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Offer a parked approval to the desktop app, and hand its answer
-back to the loop that is waiting for it.
+@description: Offer a parked approval to the desktop app, and hand the user's
+answer back to the loop that is waiting for it.
+
+The desktop app is an **input surface**, not an authority. A ``y`` pressed there
+is applied as the user's own answer, with exactly the effect of typing ``y`` in
+the terminal for this session and this interaction. The app has no policy of its
+own: it never auto-approves, and nothing is ever decided without the user having
+said so somewhere.
 
 The terminal prompt and the desktop app race on purpose: whoever answers first
 wins, and the loser gets ``decide() -> False``, which is a normal outcome rather
@@ -64,25 +70,26 @@ def publish_approval(
     *,
     session_id: Optional[str] = None,
     work_dir: Optional[str] = None,
+    timeout: Optional[float] = None,
 ) -> None:
-    """Ask the desktop app about ``pending``. Returns immediately.
+    """Offer ``pending`` to the desktop app. Returns immediately.
 
-    Does nothing at all when the sink is absent, disabled, or not allowed to
-    decide — in which case the terminal prompt is the only path, which is the
-    pre-existing behaviour.
+    The desktop app is an *input surface*, not an authority: a ``y`` there is
+    applied as the user's own answer, exactly as if they had typed it in the
+    terminal. The app has no policy, never auto-approves, and is never asked
+    whether it is "allowed" to answer — if the sink is installed, the user can
+    answer from either place.
+
+    Does nothing when no sink is installed, or when there is no registry to
+    decide into (the non-interactive paths), which leaves the terminal prompt as
+    the only path — the pre-existing behaviour.
+
+    ``timeout`` is the caller's, not ours: it should be the same budget the
+    terminal already gives the user, so a desktop answer is not held to a
+    stricter clock than a typed one.
     """
     sink = get_sink()
     if sink is None or registry is None:
-        return
-    if not sink.config.approve_from_desktop:
-        # Switch off = the app is still told a decision is pending (a /event
-        # goes out below), but it can never answer.
-        sink.emit_event(
-            "needs.approval",
-            session_id=session_id,
-            work_dir=work_dir,
-            payload=_approval_payload(pending),
-        )
         return
 
     payload = _approval_payload(pending)
@@ -97,6 +104,7 @@ def publish_approval(
             result = sink.await_decision(
                 "needs.approval",
                 payload=payload,
+                timeout=timeout,
                 session_id=session_id,
                 work_dir=work_dir,
             )

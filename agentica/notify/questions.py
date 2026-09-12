@@ -29,8 +29,12 @@ def ask_via_desktop(
     *,
     session_id: Optional[str] = None,
     work_dir: Optional[str] = None,
+    timeout: Optional[float] = None,
 ) -> Optional[str]:
     """Ask the desktop app. ``None`` means "use the terminal instead".
+
+    The answer is the user's, typed in the desktop app instead of the terminal —
+    the same input with the same effect for this session and this interaction.
 
     Never raises: the caller's fallback is the terminal prompt, and an exception
     here would skip straight past it.
@@ -49,6 +53,7 @@ def ask_via_desktop(
         result = sink.await_decision(
             "needs.input",
             payload=payload,
+            timeout=timeout,
             session_id=session_id,
             work_dir=work_dir,
         )
@@ -68,24 +73,27 @@ def wrap_ask_callback(
     *,
     session_id_getter: Optional[Callable[[], Optional[str]]] = None,
     work_dir_getter: Optional[Callable[[], Optional[str]]] = None,
+    timeout: Optional[float] = None,
 ) -> Callable[..., str]:
-    """Wrap an ask callback so the desktop app gets first refusal.
+    """Wrap an ask callback so the user may answer from the desktop app instead.
 
-    The terminal implementation is called unchanged when the desktop app does
-    not answer, so the pre-existing behaviour is the fallback rather than
-    something to be reimplemented here.
+    An answer from the app is the user's answer, applied as this interaction's
+    result — not a substitute authority. The terminal implementation is called
+    unchanged whenever the app does not answer (not running, gave up, replied
+    with something unusable), so the pre-existing behaviour is the fallback
+    rather than something reimplemented here.
     """
 
     def bridging(prompt: str, options: Optional[List[str]] = None) -> str:
         session_id = session_id_getter() if session_id_getter else None
         work_dir = work_dir_getter() if work_dir_getter else None
         answer = ask_via_desktop(
-            prompt, options, session_id=session_id, work_dir=work_dir
+            prompt, options, session_id=session_id, work_dir=work_dir, timeout=timeout
         )
         if answer is not None:
-            # Logged because the terminal never saw this question: an answer
-            # that appears from nowhere must still be traceable in the log.
-            logger.info("[ask] answered from the desktop app")
+            # Logged because the terminal never saw this question: the user
+            # answered elsewhere, and that must be traceable in the log.
+            logger.info("[ask] answered from the desktop app (the user's own answer)")
             return answer
         return inner(prompt, options)
 

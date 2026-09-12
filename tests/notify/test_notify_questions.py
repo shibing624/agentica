@@ -31,7 +31,7 @@ def _clean_process_sink():
 
 def _install(desktop, **kw):
     install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path,
-                              approve_from_desktop=True, **kw))
+                              **kw))
 
 
 class TestTheDesktopCanAnswer:
@@ -100,8 +100,8 @@ class TestFallbacksGoToTheTerminal:
     def test_a_timeout_falls_back_to_the_terminal(self):
         desktop = _FakeDesktop(hang=True)
         try:
-            _install(desktop, timeout_seconds=0.4)
-            wrapped = wrap_ask_callback(lambda p, o=None: "from terminal")
+            _install(desktop)
+            wrapped = wrap_ask_callback(lambda p, o=None: "from terminal", timeout=0.4)
             started = time.monotonic()
             assert wrapped("which?") == "from terminal"
             # It waited for the desktop, then handed over control.
@@ -109,16 +109,17 @@ class TestFallbacksGoToTheTerminal:
         finally:
             desktop.close()
 
-    def test_with_the_switch_off_the_terminal_answers(self):
-        """approve_from_desktop gates answering questions too: deciding is one
-        capability, whether it is a y/n or a typed answer."""
-        desktop = _FakeDesktop(decision_body={"answer": "from desktop"})
+    def test_an_answer_from_the_app_is_the_users_answer(self):
+        """The app is an input surface: the user's reply there is the reply.
+
+        There is no "may the app answer?" switch any more — that concept said the
+        app had authority of its own, which it does not. The user simply gets to
+        answer from either place, for this session and this interaction.
+        """
+        desktop = _FakeDesktop(decision_body={"answer": "the user's reply"})
         try:
-            install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path,
-                                      approve_from_desktop=False))
-            assert ask_via_desktop("which?") is None
-            time.sleep(0.2)
-            assert desktop.requests == []
+            _install(desktop)
+            assert ask_via_desktop("which?", timeout=5) == "the user's reply"
         finally:
             desktop.close()
 
@@ -139,9 +140,10 @@ class TestTheWrapperNeverFailsTheCall:
 
         from agentica.notify.sink import NotifySink
         import agentica.notify.sink as sink_mod
-        sink_mod._sink = NotifySink(NotifyConfig(enabled=True, socket="/tmp/x.sock",
-                                                 approve_from_desktop=True),
-                                    transport_factory=boom)
+        sink_mod._sink = NotifySink(
+            NotifyConfig(enabled=True, socket="/tmp/x.sock"),
+            transport_factory=boom,
+        )
         wrapped = wrap_ask_callback(lambda p, o=None: "from terminal")
         assert wrapped("which?") == "from terminal"
         sink_mod._sink.stop()

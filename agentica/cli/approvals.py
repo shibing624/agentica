@@ -256,9 +256,16 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         if app is not None:
             app.invalidate()
         # Side-mounted, so the terminal prompt above is unchanged and still
-        # wins whenever the user answers first. The sink only offers the same
-        # decision to the desktop app; it never decides on its own, and with
-        # the sink absent (or off) this is a no-op.
+        # wins whenever the user answers first. The sink offers the same
+        # question to the desktop app, where the user may answer instead — the
+        # same answer, applied the same way. The app has no authority of its
+        # own, and with no sink installed this is a no-op.
+        #
+        # ``timeout=None``: the terminal prompt here waits as long as the user
+        # takes (``registry.wait`` has no deadline), so the desktop side gets
+        # the same patience rather than a shorter clock of our own invention.
+        # When the request stops being wanted — the user answers here, or the
+        # turn is cancelled — ``deny_all`` resolves it and the wait is over.
         try:
             from agentica.notify.approvals import publish_approval
 
@@ -267,6 +274,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
                 pending,
                 state.approval_registry,
                 loop,
+                timeout=None,
                 session_id=getattr(agent, "session_id", None),
                 work_dir=getattr(agent, "work_dir", None),
             )
