@@ -73,6 +73,36 @@ settings:
 `needs.approval` 与 `needs.input` 是**两种状态**（急切 / 平静），用 `payload.kind`
 区分（`"permission"` vs `"question"`），别混。
 
+### payload 字段
+
+run 类事件的 `payload` 只带元数据（**没有** prompt、无工具输出、无文件内容——
+这个通道即使在本机 socket 上也保持窄）：
+
+| 字段 | 出现于 | 含义 |
+|---|---|---|
+| `agent_name` | 全部 run 类 | 哪个 agent 跑的 |
+| `duration_seconds` | `run.completed` / `run.failed` | 时长 |
+| `had_response` | `run.completed` | 这一场是否产出过回复 |
+| `reason` | `run.cancelled` | 为什么被取消 |
+| `error` | `run.failed` | 错误文本（`类型: 信息`） |
+
+`payload` 是**白名单过滤**产物：loop 层可以带更多键，sink 只放行上表这几个。
+例如 `run.failed` 的 loop 事件里有 `exception_type`，但**不过线**——消费端要判断
+错误种类请解析 `error` 的前缀（`"ValueError: ..."`）。缺失即「没有这个信息」，
+**不要推断**（没有 `duration_seconds` 不代表 0）。
+
+`needs.*` 的 payload 在 `/await` 的请求体里，另有 `kind` 与 `options`：
+
+- `needs.input`（`kind: "question"`）：`options` 是任意选项，回传 `answer` 是任意字符串；
+- `needs.approval`（`kind: "permission"`）：回传 `decision` 只接受
+  `allow` / `allow_prefix` / `deny` / `deny_prefix` 四个值，`options` 列出这次**实际
+  给出**的（可能少于四个）。对应终端里的 `y` / `p` / `n` / `x`——桌宠的按钮应照着
+  `options` 渲染，不要写死两个。
+
+**多个字段在补发的 `run.completed` 上会合并**：一场 goal 只补发一次，若中间发生过
+多轮，`duration_seconds` 是各轮**累加**（用户关心的是「我离开这段时间它跑了多久」，
+不是最后一轮），`had_response` 只要有一轮产出过就为真，`agent_name` 取首个非空值。
+
 ### `run.completed` 的准确含义
 
 它是「**你可以回来看了**」，不是「一次 run 结束了」。两者只在「后面没有别的活」时
