@@ -642,6 +642,27 @@ agentica
 agentica --debug 1
 ```
 
+## 外部通知汇（notify sink）
+
+把「这一轮跑到什么节点」告诉本机的一个 app（目前是 VPet 桌宠），可选地让它**替你在终端里按 y/n**：
+
+```yaml
+# ~/.agentica/config.yaml
+settings:
+  notify:
+    enabled: true                  # 让桌宠知道状态
+    socket: "~/Library/Application Support/VPet/notify.sock"
+    approve_from_desktop: false    # 先只提醒；想让它替你做决定再开
+```
+
+**两个开关分开，默认都关**，因为风险不同：`enabled` 只发通知；`approve_from_desktop`
+打开后桌宠回的 `allow` 等于它在终端里按了 y。**任何一个环节出问题都回落终端 prompt，
+绝不替用户放行**：桌宠没开着就地回落（不等超时），超时/响应看不懂也回落。
+`--print` / cron / SDK 这类没人在场的运行一律不装（装了就是挂死）。
+
+只连本机、只发元数据（标题 / 工具名 / 问题 / 预览），不发 prompt 与工具输出原文。
+细节见 [notify sink](notify-sink.md)。
+
 ## 下一步
 
 - [快速入门](quickstart.md) -- Agent 基础 API

@@ -50,6 +50,7 @@ from agentica import git_state
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
 from agentica.cli.worktree_binding import WorktreeBinder
 from agentica.global_config import get_setting, set_project_profile
+from agentica.notify import install_sink as install_notify_sink
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_system_skills
@@ -229,7 +230,7 @@ def run_interactive(
     # deadlocks against prompt_toolkit's stdin ownership.
     _ui_holder: dict = {}
 
-    def _cli_ask_user_question_callback(prompt: str, options: Optional[List[str]] = None) -> str:
+    def _tui_ask_user_question_callback(prompt: str, options: Optional[List[str]] = None) -> str:
         state_ref = _ui_holder.get("state")
         app_ref = _ui_holder.get("app")
         # Fallback to bare input if the TUI isn't up yet (shouldn't happen in
@@ -311,6 +312,23 @@ def run_interactive(
         # resolves "3", "C", "the last one" and "the cheap one" from the same
         # list the user was looking at.
         return answer_text
+
+    # The desktop app may answer a question too (see agentica/notify). Wrapped
+    # here, at the definition, so every consumer gets it: the agent built below,
+    # the agent rebuilt by /model or /resume, and the process-wide default that
+    # covers subagents and cron. With the sink off — the default — the wrapper
+    # falls straight through to the TUI callback above.
+    from agentica.notify.questions import wrap_ask_callback
+
+    _cli_ask_user_question_callback = wrap_ask_callback(
+        _tui_ask_user_question_callback,
+        session_id_getter=lambda: getattr(
+            getattr(_ui_holder.get("state"), "current_agent", None), "session_id", None
+        ),
+        work_dir_getter=lambda: getattr(
+            getattr(_ui_holder.get("state"), "current_agent", None), "work_dir", None
+        ),
+    )
 
     # The process registry belongs to the CLI session and must exist before
     # the first agent is built because ExecuteTool receives this shared
@@ -721,6 +739,12 @@ def run_interactive(
     # mid-turn, a cron job, a regression) routes through the TUI instead of
     # deadlocking on bare input() while pt owns stdin.
     set_default_ask_user_question_callback(_cli_ask_user_question_callback)
+
+    # External notify sink: this is the interactive CLI, so there *is* a person
+    # at the terminal — the only surface where waiting on a desktop decision is
+    # meaningful. Installed once here; the decision is made once, not per turn.
+    # It is off unless the user turned it on (`settings.notify.enabled`).
+    install_notify_sink()
 
     # ── Background thread: process input queue and run agent ──
 
