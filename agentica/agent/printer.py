@@ -8,6 +8,8 @@ All core print methods are async. Synchronous wrappers use run_sync().
 
 from typing import (
     Any,
+    Callable,
+    cast,
     Dict,
     List,
     Optional,
@@ -27,20 +29,38 @@ _HIDE_RESULT_TOOLS = frozenset({"read_file", "glob", "grep"})
 _RESULT_PREVIEW_CHARS = 200
 
 
-def _tool_call_line(tool_info, work_dir: Optional[str] = None) -> str:
-    """CLI ``format_tool_display`` copy on one stdout line."""
+def _tool_call_line(
+    tool_info, work_dir: Optional[str] = None,
+    model_resolver: Optional[Callable[[str, Dict[str, Any]], Optional[str]]] = None,
+) -> str:
+    """CLI ``format_tool_display`` copy on one stdout line.
+
+    ``model_resolver`` is the owning agent's ``describe_tool_model``, so a
+    ``task`` / ``delegate`` line names the model it will run here too — the
+    SDK / ``--print`` path is often the one being piped into a log.
+    """
     from pathlib import Path
 
-    from agentica.cli.display.tool_format import format_tool_display
+    from agentica.cli.display.tool_format import HANDOFF_TOOLS, format_tool_display
 
     name = tool_info.tool_name or "unknown"
+    args = tool_info.tool_args or {}
+    model_label: Optional[str] = None
+    # Only the handoff tools carry the label, and resolving it reads
+    # config.yaml — do not pay for it on every other call.
+    if model_resolver is not None and name in HANDOFF_TOOLS:
+        try:
+            model_label = model_resolver(name, args)
+        except Exception:
+            model_label = None
     # Without work_dir the formatter falls back to os.getcwd(), which is the
     # wrong root whenever the agent runs against another directory
     # (delegate(work_dir=...), SDK embedding).
     display = format_tool_display(
         name,
-        tool_info.tool_args or {},
+        args,
         work_dir=Path(work_dir) if work_dir else None,
+        model_label=model_label,
     )
     if display:
         return f"  🔧 {name} {display}"
@@ -64,6 +84,15 @@ def _tool_result_line(tool_info) -> Optional[str]:
 
 class PrinterMixin:
     """Mixin class containing print response methods for Agent."""
+
+    def _tool_model_resolver(self) -> Optional[Callable[[str, Dict[str, Any]], Optional[str]]]:
+        """The host Agent's ``describe_tool_model``, if it has one.
+
+        Looked up rather than called directly so the mixin still works on a
+        host that does not mix in Agent (tests, third-party reuse).
+        """
+        resolver = getattr(self, "describe_tool_model", None)
+        return cast(Any, resolver) if callable(resolver) else None
 
     async def print_response(
         self,
@@ -107,7 +136,10 @@ class PrinterMixin:
             print()
             for tool in run_response.tools:
                 info = tool if isinstance(tool, ToolCallInfo) else ToolCallInfo.from_dict(tool)
-                print(_tool_call_line(info, getattr(self, "work_dir", None)))
+                print(_tool_call_line(
+                    info, getattr(self, "work_dir", None),
+                    model_resolver=self._tool_model_resolver(),
+                ))
                 result_line = _tool_result_line(info)
                 if result_line:
                     print(result_line)
@@ -203,7 +235,10 @@ class PrinterMixin:
                     continue
                 if kind == RunDisplayEventKind.TOOL_STARTED:
                     print(
-                        f"\n{_tool_call_line(tool_info, getattr(self, 'work_dir', None))}",
+                        f"\n{_tool_call_line(
+                            tool_info, getattr(self, 'work_dir', None),
+                            model_resolver=self._tool_model_resolver(),
+                        )}",
                         flush=True,
                     )
                     _need_answer_header = True

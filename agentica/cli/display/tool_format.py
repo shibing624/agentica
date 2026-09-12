@@ -162,20 +162,40 @@ def _display_execute_command(
         )
 
 
+# The only tools whose call line carries a resolved ``model=``. Kept here so
+# the display layer can decide whether asking is worth it: resolving a label
+# reads config.yaml, and the live window repaints several times a second, so
+# asking on behalf of ``grep`` would be pure cost for no output.
+HANDOFF_TOOLS = frozenset({"task", "delegate"})
+
+
 def _format_handoff_display(
     tool_args: dict,
     *,
     body_key: str,
     meta_keys: tuple,
+    model_label: Optional[str] = None,
 ) -> str:
     """Format a work-handoff tool (task / delegate) with no truncation.
 
     Meta args stay on the first line as ``key=value``; the instruction body
     follows on its own lines so newlines in the brief stay readable.
+    ``model_label`` is the model the handoff will actually run — resolved by
+    the tool, not a call argument — and leads the meta line: the live window
+    keeps only the first line and truncates it, and on a line whose ``label``
+    can be a whole sentence the model is exactly what must survive.
     """
     body = str(tool_args.get(body_key, "") or "")
     meta: List[str] = []
+    if model_label:
+        meta.append(f"model={model_label}")
     for key in meta_keys:
+        # A resolved label supersedes the raw ``model`` argument: the two say
+        # the same thing, but the label is what the worker will really run
+        # (an argument naming a config.yaml profile resolves to that profile's
+        # provider). Printing both makes the line read as two different models.
+        if key == "model" and model_label:
+            continue
         value = tool_args.get(key)
         if value is None or value == "":
             continue
@@ -188,8 +208,21 @@ def _format_handoff_display(
     return ", ".join(meta)
 
 
-def format_tool_display(tool_name: str, tool_args: dict, work_dir: Optional[Path] = None) -> str:
-    """Format tool call for user-friendly display."""
+def format_tool_display(
+    tool_name: str,
+    tool_args: dict,
+    work_dir: Optional[Path] = None,
+    model_label: Optional[str] = None,
+) -> str:
+    """Format tool call for user-friendly display.
+
+    ``model_label`` is the model this call will run, when the caller knows it
+    (``Agent.describe_tool_model``). It is display metadata, not an argument:
+    it must never be read back out of ``tool_args`` as if the model had sent
+    it. Only ``task`` / ``delegate`` print it — for those, "which model" is the
+    user's actual question and the arguments cannot answer it (an omitted
+    ``model`` means inherit, a subagent's model comes from its definition).
+    """
     # File reading tools - show filename and line range
     if tool_name == "read_file":
         file_path = tool_args.get("file_path", "")
@@ -268,6 +301,7 @@ def format_tool_display(tool_name: str, tool_args: dict, work_dir: Optional[Path
             tool_args,
             body_key="description",
             meta_keys=("subagent_type", "timeout", "max_turns", "resume_from_run_id"),
+            model_label=model_label,
         )
 
     if tool_name == "delegate":
@@ -275,6 +309,7 @@ def format_tool_display(tool_name: str, tool_args: dict, work_dir: Optional[Path
             tool_args,
             body_key="task",
             meta_keys=("label", "work_dir", "model"),
+            model_label=model_label,
         )
 
     # Peer messaging — show the full body; truncating here hides the handoff.
@@ -318,10 +353,13 @@ def format_tool_display(tool_name: str, tool_args: dict, work_dir: Optional[Path
 
 def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
                        tool_count: int = 0, tool_call_id: Optional[str] = None,
-                       work_dir: Optional[Path] = None) -> None:
+                       work_dir: Optional[Path] = None,
+                       model_label: Optional[str] = None) -> None:
     """Shared implementation for displaying a tool call."""
     icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-    display_str = format_tool_display(tool_name, tool_args, work_dir=work_dir)
+    display_str = format_tool_display(
+        tool_name, tool_args, work_dir=work_dir, model_label=model_label,
+    )
 
     # Add blank line between tools for readability
     if tool_count > 1:

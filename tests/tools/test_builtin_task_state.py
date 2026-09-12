@@ -259,6 +259,65 @@ class TestBuiltinTaskTool:
         assert captured["auxiliary_model_override"] is custom_model
 
 
+class TestTaskModelLabel:
+    """The ``task`` call line names the model the subagent will run.
+
+    "task" alone does not say whether the work went to the cheap auxiliary
+    model or back to the main one, and that follows from the subagent type's
+    ``model_tier`` — not from anything the model passed.
+    """
+
+    def _tool_with_models(self):
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        main = OpenAIChat(id="main-model", api_key="fake")
+        aux = OpenAIChat(id="aux-model", api_key="fake")
+        tool = BuiltinTaskTool(auxiliary_model=aux)
+        tool.set_parent_agent(Agent(model=main, auxiliary_model=aux))
+        return tool
+
+    def test_an_auxiliary_tier_type_names_the_auxiliary_model(self):
+        tool = self._tool_with_models()
+        assert tool.model_label_for({"subagent_type": "explore"}) == "openai/aux-model"
+
+    def test_a_main_tier_type_names_the_parents_own_model(self):
+        from agentica.subagents import register_custom_subagent, unregister_custom_subagent
+
+        register_custom_subagent(
+            name="label-probe", description="probe", system_prompt="x", model_tier="main",
+        )
+        try:
+            tool = self._tool_with_models()
+            assert tool.model_label_for({"subagent_type": "label-probe"}) == "openai/main-model"
+        finally:
+            unregister_custom_subagent("label-probe")
+
+    def test_no_subagent_type_defaults_to_the_explore_tier(self):
+        tool = self._tool_with_models()
+        assert tool.model_label_for({}) == tool.model_label_for({"subagent_type": "explore"})
+
+    def test_an_unknown_type_still_labels_the_tier_spawn_would_pick(self):
+        """A bad type is refused by spawn; the call line should not go blank
+        with the error, so it still reports the auxiliary model."""
+        tool = self._tool_with_models()
+        assert tool.model_label_for({"subagent_type": "no-such-type"}) == "openai/aux-model"
+
+    def test_without_a_parent_agent_there_is_no_label(self):
+        tool = BuiltinTaskTool()
+        assert tool.model_label_for({"subagent_type": "explore"}) is None
+
+    def test_the_label_follows_a_live_auxiliary_model_switch(self):
+        """``/model`` repoints the tool's cheap-tier model in place; the next
+        call line must show the new one."""
+        from agentica.model.openai import OpenAIChat
+
+        tool = self._tool_with_models()
+        assert tool.model_label_for({"subagent_type": "explore"}) == "openai/aux-model"
+        tool._auxiliary_model = OpenAIChat(id="switched-model", api_key="fake")
+        assert tool.model_label_for({"subagent_type": "explore"}) == "openai/switched-model"
+
+
 # ===========================================================================
 # Agent auto-wire tests (Agent.__init__ wires TodoTool / TaskTool)
 # ===========================================================================

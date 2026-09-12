@@ -735,6 +735,95 @@ class TestCLIToolRender(unittest.TestCase):
             dm.display_tool(name, {"file_path": "x.py"})
             fake.print.assert_not_called(), f"{name} call line must be deferred"
 
+    def test_task_and_delegate_call_lines_name_the_model(self):
+        """The call line says which model the handoff will run.
+
+        ``model=`` is the user's actual question for these two: an omitted
+        ``model`` inherits the session's, and a subagent's model comes from its
+        definition — neither is visible in the arguments.
+        """
+        from agentica.cli.display import StreamDisplayManager
+
+        resolver = lambda name, args: {
+            "task": "openai/gpt-4o-mini",
+            "delegate": "zhipuai/glm-4.7",
+        }.get(name)
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake, model_resolver=resolver)
+
+        dm.display_tool("task", {"subagent_type": "explore", "description": "find it"})
+        dm.display_tool_result(
+            "task", '{"success": true, "result": "x"}', is_error=False, elapsed=1.0,
+        )
+        dm.display_tool("delegate", {"task": "do the thing", "label": "thing"})
+        dm.display_tool_result("delegate", "Delegated to term_1", is_error=False, elapsed=0.1)
+
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn("model=openai/gpt-4o-mini", rendered)
+        self.assertIn("model=zhipuai/glm-4.7", rendered)
+
+    def test_the_model_needs_no_argument_and_other_tools_gain_none(self):
+        """No ``model`` arg is needed to show one, and no other tool shows one."""
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake, model_resolver=lambda name, args: "openai/gpt-4o-mini")
+
+        dm.display_tool("read_file", {"file_path": "a.py"})
+        dm.display_tool_result("read_file", "1 line", is_error=False, elapsed=0.1)
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertNotIn("model=", rendered)
+
+    def test_a_failing_model_resolver_never_breaks_the_call_line(self):
+        """Rendering must survive a resolver that raises — a missing label is
+        acceptable, a missing call line is not."""
+        from agentica.cli.display import StreamDisplayManager
+
+        def boom(name, args):
+            raise RuntimeError("no model today")
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake, model_resolver=boom)
+        dm.display_tool("task", {"subagent_type": "explore", "description": "find it"})
+        dm.display_tool_result(
+            "task", '{"success": true, "result": "x"}', is_error=False, elapsed=1.0,
+        )
+
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn("task", rendered)
+        self.assertIn("find it", rendered)
+        self.assertNotIn("model=", rendered)
+
+    def test_the_model_resolver_is_asked_only_for_the_handoff_tools(self):
+        """Resolving a label reads config.yaml, and the live window repaints
+        several times a second — asking on behalf of ``grep`` is pure cost."""
+        from agentica.cli.display import StreamDisplayManager
+
+        asked = []
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(
+            fake, model_resolver=lambda name, args: asked.append(name) or "openai/x",
+        )
+
+        dm.compose_live()  # the repaint path, before any tool starts
+        dm.display_tool("grep", {"pattern": "x"})
+        dm.compose_live()
+        self.assertEqual(asked, [])
+
+        dm.display_tool("delegate", {"task": "do it"})
+        dm.compose_live()
+        self.assertEqual(asked, ["delegate"])
+
 
     def test_display_tool_result_merged_single_line_for_read_ops(self):
         """Read-only tools collapse call + result into one line with elapsed."""

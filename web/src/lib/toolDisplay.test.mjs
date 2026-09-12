@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { layoutToolDisplay } = await vite.ssrLoadModule("/src/lib/toolDisplay.ts");
+const { formatToolDisplay, layoutToolDisplay } = await vite.ssrLoadModule("/src/lib/toolDisplay.ts");
 after(() => vite.close());
 
 test("execute keeps the complete command in the expanded call body", () => {
@@ -39,4 +39,20 @@ test("headless multi-line displays remain in the expanded body", () => {
     body: display,
     bodyKind: "args",
   });
+});
+
+test("handoff rows show the model argument the caller passed", () => {
+  // Unlike the CLI, no resolved ``model=`` label is added: that needs the live
+  // session, which the chat row does not have. An explicit argument still
+  // shows, and an omitted one stays omitted rather than being invented.
+  const withModel = formatToolDisplay("delegate", {
+    task: "port the parser",
+    label: "parser port",
+    model: "zhipuai/glm-4.7",
+  });
+  assert.equal(withModel.split("\n")[0], "label='parser port', model='zhipuai/glm-4.7'");
+
+  const inherited = formatToolDisplay("task", { subagent_type: "explore", description: "find it" });
+  assert.equal(inherited.split("\n")[0], "subagent_type='explore'");
+  assert.ok(!inherited.includes("model="));
 });

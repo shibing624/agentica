@@ -37,6 +37,7 @@ from .console import (
 )
 from .messages import _has_markdown
 from .tool_format import (
+    HANDOFF_TOOLS,
     _display_tool_impl,
     format_execute_expand,
     format_tool_display,
@@ -166,8 +167,14 @@ class StreamDisplayManager:
 
     def __init__(self, console_instance, subagent_verbosity: str = "all",
                  work_dir: Optional[Path] = None,
-                 on_live_change: Optional[Callable[[], None]] = None):
+                 on_live_change: Optional[Callable[[], None]] = None,
+                 model_resolver: Optional[Callable[[str, dict], Optional[str]]] = None):
         self.console = console_instance
+        # Display-only: maps (tool_name, tool_args) to the model the call will
+        # run, so the ``task`` / ``delegate`` call lines can name it. Supplied
+        # by the CLI (``Agent.describe_tool_model``); None in tests and in the
+        # SDK path, where the label is simply left off.
+        self._model_resolver = model_resolver
         configured_work_dir = (work_dir or Path.cwd()).expanduser().absolute()
         self._work_dir_input = configured_work_dir
         self._work_dir = configured_work_dir.resolve()
@@ -397,9 +404,7 @@ class StreamDisplayManager:
         for block in self._live.blocks():
             spin = spinner if not block.finished else "✓"
             icon = TOOL_ICONS.get(block.tool_name, TOOL_ICONS["default"])
-            params = format_tool_display(
-                block.tool_name, block.tool_args, work_dir=self._work_dir_input,
-            )
+            params = self._format_call(block.tool_name, block.tool_args)
             if "\n" in params:
                 params = params.split("\n", 1)[0] + "…"
             if len(params) > 80:
@@ -421,6 +426,31 @@ class StreamDisplayManager:
     def _notify_live(self) -> None:
         if self.on_live_change is not None:
             self.on_live_change()
+
+    def _format_call(self, tool_name: str, tool_args: dict) -> str:
+        """``format_tool_display`` plus the model this call will run.
+
+        The resolver is optional and one call line must never fail because a
+        model could not be named — a raising resolver would take the whole
+        turn's rendering with it, so a miss just means no label.
+        """
+        return format_tool_display(
+            tool_name, tool_args, work_dir=self._work_dir_input,
+            model_label=self._model_label(tool_name, tool_args),
+        )
+
+    def _model_label(self, tool_name: str, tool_args: dict) -> Optional[str]:
+        """Model this call will run, when the session can say.
+
+        Asked only for the tools that print it. Resolution is not free — it
+        reads config.yaml — and this runs on every live-window repaint.
+        """
+        if self._model_resolver is None or tool_name not in HANDOFF_TOOLS:
+            return None
+        try:
+            return self._model_resolver(tool_name, tool_args or {})
+        except Exception:
+            return None
 
     def _match_live(self, tool_name: str, tool_call_id: Optional[str]) -> Optional[str]:
         if tool_call_id and tool_call_id in self._live:
@@ -454,6 +484,7 @@ class StreamDisplayManager:
             _display_tool_impl(
                 self._assistant_console, tool_name, tool_args, self.tool_count,
                 tool_call_id=block.tool_call_id, work_dir=self._work_dir_input,
+                model_label=self._model_label(tool_name, tool_args),
             )
             return
         result = block.result
@@ -461,6 +492,7 @@ class StreamDisplayManager:
             _display_tool_impl(
                 self._assistant_console, tool_name, tool_args, self.tool_count,
                 tool_call_id=block.tool_call_id, work_dir=self._work_dir_input,
+                model_label=self._model_label(tool_name, tool_args),
             )
             return
         elapsed_str = self._fmt_elapsed(result.elapsed, tool_name=tool_name)
@@ -487,6 +519,7 @@ class StreamDisplayManager:
         _display_tool_impl(
             self._assistant_console, tool_name, tool_args, self.tool_count,
             tool_call_id=block.tool_call_id, work_dir=self._work_dir_input,
+            model_label=self._model_label(tool_name, tool_args),
         )
         for line in block.sub_lines:
             self._assistant_console.print(line)
@@ -660,7 +693,7 @@ class StreamDisplayManager:
         (errors surface a truncated message instead of the count).
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        params = format_tool_display(tool_name, tool_args, work_dir=self._work_dir_input)
+        params = self._format_call(tool_name, tool_args)
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
         if params:
             line += f" [dim]{rich_escape(params)}[/dim]"
@@ -1046,9 +1079,7 @@ class StreamDisplayManager:
             self._assistant_console.print(
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+O to expand)", style="dim italic"
             )
-            brief = format_tool_display(
-                tool_name, tool_args or {}, work_dir=self._work_dir_input,
-            )
+            brief = self._format_call(tool_name, tool_args or {})
             header = f"{tool_name} {brief}".rstrip()
             remember_truncated(
                 f"Tool output · {tool_name}",

@@ -545,5 +545,76 @@ class TestToolSurface:
         assert "cannot ask anyone anything" in description
 
 
+class TestModelLabel:
+    """The model the call line names must be the model the worker gets.
+
+    These pin the label against the argv of the very same call, because a
+    label that drifts from the launch decision is worse than no label: the
+    user reads it to decide whether delegating leaves their endpoint.
+    """
+
+    def test_no_model_arg_labels_the_callers_own_model(self):
+        tool = _tool(_FakeRegistry())
+        assert tool.model_label_for({}) == "deepseek/deepseek-chat"
+
+    def test_an_explicit_provider_prefixed_model_is_labelled_as_itself(self):
+        tool = _tool(_FakeRegistry())
+        assert tool.model_label_for({"model": "zhipuai/glm-4.7"}) == "zhipuai/glm-4.7"
+
+    def test_a_bare_model_name_keeps_the_session_provider(self):
+        tool = _tool(_FakeRegistry())
+        assert tool.model_label_for({"model": "glm-4.7-flash"}) == "deepseek/glm-4.7-flash"
+
+    def test_restating_the_callers_own_id_is_not_a_switch(self):
+        tool = _tool(_FakeRegistry())
+        assert tool.model_label_for({"model": "deepseek-chat"}) == "deepseek/deepseek-chat"
+
+    def test_a_model_that_matches_a_profile_names_that_profile(self):
+        """"anthropic/claude-opus-5" is not where the worker runs: the profile
+        carries its own endpoint and key, so the label must not claim the
+        session's provider."""
+        tool = _tool(
+            _FakeRegistry(),
+            profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
+        )
+        assert tool.model_label_for({"model": "anthropic/claude-opus-5"}) == (
+            "claude-opus-5 (profile opus-5-anthropic)"
+        )
+
+    def test_the_label_matches_the_profile_flag_the_worker_is_started_with(self):
+        registry = _FakeRegistry()
+        tool = _tool(
+            registry,
+            profile_lookup=lambda name, **_k: {"claude-opus-5": "opus-5-anthropic"}.get(name),
+        )
+
+        label = tool.model_label_for({"model": "anthropic/claude-opus-5"})
+        _delegate(tool, task="port the parser", model="anthropic/claude-opus-5")
+
+        argv = _argv(registry.started[0])
+        assert argv[argv.index("--profile") + 1] in label
+
+    def test_an_inherited_model_on_a_session_profile_labels_the_real_model(self):
+        """The session's own profile is not spelled out as a provider — the
+        profile is what picks the endpoint, so the label reports the model."""
+        sdk_model = SimpleNamespace(
+            id="internal-only-model", api_key="sk-sdk-key", base_url="http://llm.internal/v1"
+        )
+        tool = _tool(
+            _FakeRegistry(),
+            provider="openai",
+            model=sdk_model.id,
+            sdk_model=sdk_model,
+        )
+        assert tool.model_label_for({}) == "internal-only-model"
+
+    def test_an_empty_model_id_has_no_label_rather_than_a_blank_one(self):
+        tool = BuiltinDelegateTool(
+            background_process_registry=_FakeRegistry(),
+            permission_mode=lambda: "allow-all",
+        )
+        assert tool.model_label_for({}) is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
