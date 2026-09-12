@@ -746,6 +746,17 @@ def run_interactive(
     # It is off unless the user turned it on (`settings.notify.enabled`).
     install_notify_sink()
 
+    # "Done" on the notify wire means "you can come back now", which is only
+    # true when nothing else is queued. Several messages typed in a row each run
+    # as their own turn, so without this the display announces the first one
+    # finished while the rest are still going to run.
+    from agentica.notify import set_idle_provider
+
+    # peek_all() rather than len(): PendingQueue exposes no __len__, and the
+    # sink treats a raising probe as "idle" — so getting this wrong would
+    # disable the check silently instead of failing loudly.
+    set_idle_provider(lambda: not pending_queue.peek_all())
+
     # ── Background thread: process input queue and run agent ──
 
     def process_loop():

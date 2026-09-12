@@ -35,6 +35,15 @@ def _approval_payload(pending: Any) -> dict:
     """
     payload = {
         "approval_id": getattr(pending, "tool_call_id", "") or "",
+        # ``kind`` distinguishes this from a question, and the two must not be
+        # merged even though both are "a human decides something". They differ
+        # in the *shape of the reply*: an approval comes back as one of four
+        # fixed enum values (``registry.decide(id, "allow"|"deny"|...)``), while
+        # a question comes back as an arbitrary string. The desktop app renders
+        # them differently for that reason — fixed buttons vs N custom ones —
+        # and without ``kind`` it would have to guess from the payload, which is
+        # exactly the "infer meaning from body fields" pattern that splitting
+        # ``/event`` from ``/await`` by path exists to avoid.
         "kind": "permission",
         "tool": getattr(pending, "name", "") or "",
     }

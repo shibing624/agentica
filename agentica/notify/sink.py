@@ -357,6 +357,38 @@ _lock = threading.Lock()
 #: Install-time decision: ``False`` means "this process never wires a sink".
 _installed = False
 
+#: Optional caller-supplied "nothing more is queued" probe. The CLI sets it to
+#: look at its pending-input queue, which the sink cannot see. When unset, or
+#: when it raises, completion is reported — suppress only on a confident False.
+_idle_provider: Optional[Callable[[], bool]] = None
+
+
+def set_idle_provider(provider: Optional[Callable[[], bool]]) -> None:
+    """Register a probe for "is there more work queued for this session?".
+
+    Segregated from the sink because only the host knows: the CLI's
+    ``pending_queue`` lives in the interactive app, not on the agent. Called at
+    install time; a process with no queue simply never sets it.
+    """
+    global _idle_provider
+    _idle_provider = provider
+
+
+def _nothing_more_queued() -> bool:
+    """True only when the host is confident nothing else is waiting.
+
+    False on absent provider or any exception: this gates reporting, so an
+    unanswerable question must not silence a real completion.
+    """
+    provider = _idle_provider
+    if provider is None:
+        return True
+    try:
+        return bool(provider())
+    except Exception as exc:
+        logger.debug(f"notify sink: idle probe failed: {exc}")
+        return True
+
 
 def install_sink(
     config: Optional[NotifyConfig] = None,
@@ -406,6 +438,7 @@ def notify_sink_dispatch(
     *,
     session_id: Optional[str] = None,
     work_dir: Optional[str] = None,
+    agent: Any = None,
 ) -> None:
     """Hand one ``RunEventRecord`` to the sink. Never raises, never blocks.
 
@@ -415,6 +448,11 @@ def notify_sink_dispatch(
     ``goal.*`` events deliberately do not come through here: they are emitted by
     ``GoalManager`` on its own callback, and the desktop app has no use for the
     goal loop. Wiring them is a future decision, not an oversight.
+
+    But "no goal events" is not the same as "goal does not affect the protocol":
+    a standing goal turns one user request into N runs, so ``run.completed`` is
+    held back while a goal is still active (see ``_goal_still_running``). The
+    agent is passed for that one check.
     """
     sink = _sink
     if sink is None:
@@ -422,6 +460,10 @@ def notify_sink_dispatch(
     try:
         event = getattr(record, "event_type", None)
         name = getattr(event, "value", None) or str(event)
+        if name == "run.completed" and (
+            _goal_still_running(agent) or not _nothing_more_queued()
+        ):
+            return
         sink.emit_event(
             name,
             session_id=session_id,
@@ -430,6 +472,38 @@ def notify_sink_dispatch(
         )
     except Exception as exc:
         logger.debug(f"notify sink: dispatch failed: {exc}")
+
+
+def _goal_still_running(agent: Any) -> bool:
+    """Is a standing goal still driving this session?
+
+    ``run.completed`` is read by the desktop app as "you can come back now",
+    which is only true when the work is actually over. A standing goal turns one
+    request into N runs (``loop.py`` emits ``run.completed`` at the end of every
+    one, then the CLI's goal hook queues the next continuation), so without this
+    check a 5-lap goal reports "done" five times. The same repeat happens when
+    several user messages are queued: each is its own run.
+
+    Read from the session log rather than ``agent.goal_manager``, and that is
+    deliberate: the CLI keeps its own ``GoalManager`` (``state.goal_manager``)
+    and a second instance on the agent caches the log once, lazily, on first
+    touch. Measured: set a goal through the CLI's manager and the agent's copy
+    still reports ``is_active() == False`` forever, because it read the log
+    before the goal existed. Asking the log is always current and cannot go
+    stale that way. Returns False on any doubt — this gates reporting, so
+    "not sure" must stay quiet rather than suppress a real completion.
+    """
+    try:
+        session_log = getattr(agent, "_session_log", None)
+        if session_log is None:
+            return False
+        from agentica.goals import GoalManager
+
+        state = GoalManager(session_log).load()
+        return state is not None and state.status == "active"
+    except Exception as exc:
+        logger.debug(f"notify sink: could not read goal state: {exc}")
+        return False
 
 
 def _run_event_payload(record: Any) -> Dict[str, Any]:
