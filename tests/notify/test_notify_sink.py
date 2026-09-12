@@ -46,6 +46,7 @@ class _FakeDesktop:
         self._server = None
         self._ready = threading.Event()
         self._closing: Optional[asyncio.Event] = None
+        self._hang_stop: Optional[asyncio.Event] = None
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         self._ready.wait(timeout=5)
@@ -72,8 +73,11 @@ class _FakeDesktop:
                     "json": parsed,
                 })
                 if self._hang:
-                    # Connected but silent: exercises the timeout path.
-                    await asyncio.sleep(3600)
+                    # Connected but silent: exercises the timeout path. Waits on
+                    # an event rather than a long sleep so teardown can end it
+                    # cleanly instead of destroying a pending task.
+                    while not (self._hang_stop is not None and self._hang_stop.is_set()):
+                        await asyncio.sleep(0.05)
                     return
                 if self._require_token is not None:
                     if headers.get("authorization") != f"Bearer {self._require_token}":
@@ -105,6 +109,7 @@ class _FakeDesktop:
         async def main():
             self._server = await asyncio.start_unix_server(handler, path=self.socket_path)
             self._closing = asyncio.Event()
+            self._hang_stop = asyncio.Event()
             self._ready.set()
             # Wait to be told to stop, then close cleanly. Killing the loop while
             # a coroutine is suspended in sleep() is what produces the
@@ -124,6 +129,8 @@ class _FakeDesktop:
         if self._loop is None:
             return
         if self._closing is not None:
+            if self._hang_stop is not None:
+                self._loop.call_soon_threadsafe(self._hang_stop.set)
             self._loop.call_soon_threadsafe(self._closing.set)
             self._thread.join(timeout=5)
         self._loop.call_soon_threadsafe(self._loop.stop)

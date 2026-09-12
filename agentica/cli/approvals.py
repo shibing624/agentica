@@ -22,6 +22,7 @@ from agentica.agent.approvals import (
     command_class_display,
     make_approve,
 )
+from agentica.utils.log import logger
 
 _DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
     "allow",
@@ -254,6 +255,23 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         app = ui_holder.get("app")
         if app is not None:
             app.invalidate()
+        # Side-mounted, so the terminal prompt above is unchanged and still
+        # wins whenever the user answers first. The sink only offers the same
+        # decision to the desktop app; it never decides on its own, and with
+        # the sink absent (or off) this is a no-op.
+        try:
+            from agentica.notify.approvals import publish_approval
+
+            agent = state.current_agent
+            publish_approval(
+                pending,
+                state.approval_registry,
+                loop,
+                session_id=getattr(agent, "session_id", None),
+                work_dir=getattr(agent, "work_dir", None),
+            )
+        except Exception as exc:
+            logger.debug(f"notify sink: approval offer failed: {exc}")
 
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",
