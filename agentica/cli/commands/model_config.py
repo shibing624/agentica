@@ -47,6 +47,7 @@ from agentica.cli.usage_display import ProviderUsageSummary, format_cost_usd
 from agentica.project_store import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
+from agentica.cli.prefs import record_cli_prefs
 from agentica.cli.commands.helpers import (
     _count_enabled_skills,
     _run_async_safe,
@@ -807,6 +808,10 @@ def _cmd_debug(ctx: CommandContext, cmd_args: str = ""):
 
     ``/debug`` with no argument flips the current state; ``on`` / ``off`` set it
     explicitly. The session facts this command used to print live in ``/status``.
+
+    The choice is persisted (session sidecar + this work_dir's ``project.json``)
+    so the next CLI here starts verbose without a flag; ``--debug`` at startup
+    still wins for that run.
     """
     con = get_console()
     arg = cmd_args.strip().lower()
@@ -823,6 +828,7 @@ def _cmd_debug(ctx: CommandContext, cmd_args: str = ""):
         return
 
     ctx.agent_config["debug"] = enable
+    record_cli_prefs(ctx.agent_config, ctx.current_agent, {"debug": enable})
     if ctx.tui_state is not None:
         ctx.tui_state["debug"] = enable
     if ctx.current_agent is not None:
@@ -973,6 +979,12 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_reasoning(ctx: CommandContext, cmd_args: str = ""):
+    """Toggle whether the model's reasoning stream is shown.
+
+    Saved, unlike the old in-process flag: reasoning display is a property of
+    how this session is read, and typing ``/reasoning off`` once used to be
+    undone by the next launch (or agent rebuild) with no hint that it had been.
+    """
     con = get_console()
     if ctx.tui_state is None:
         return
@@ -984,9 +996,11 @@ def _cmd_reasoning(ctx: CommandContext, cmd_args: str = ""):
         return
     if arg in ("show", "on", "true", "1"):
         ctx.tui_state["show_reasoning"] = True
+        record_cli_prefs(ctx.agent_config, ctx.current_agent, {"show_reasoning": True})
         con.print("  [green]Reasoning display: ON[/green]")
     elif arg in ("hide", "off", "false", "0"):
         ctx.tui_state["show_reasoning"] = False
+        record_cli_prefs(ctx.agent_config, ctx.current_agent, {"show_reasoning": False})
         con.print("  [green]Reasoning display: OFF[/green]")
     else:
         con.print(f"  [dim]Unknown argument: {arg}. Use: on, off[/dim]")
@@ -994,10 +1008,12 @@ def _cmd_reasoning(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_statusbar(ctx: CommandContext, cmd_args: str = ""):
+    """Toggle the status bar. Persisted for the same reason as ``/reasoning``."""
     con = get_console()
     if ctx.tui_state is None:
         return
     current = ctx.tui_state.get("statusbar_visible", True)
     ctx.tui_state["statusbar_visible"] = not current
+    record_cli_prefs(ctx.agent_config, ctx.current_agent, {"statusbar_visible": not current})
     state = "OFF" if current else "ON"
     con.print(f"  [green]Status bar: {state}[/green]")

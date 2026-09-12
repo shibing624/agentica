@@ -30,6 +30,7 @@ from agentica.cli.commands.session import (
     hydrate_resumed_session,
 )
 from agentica.cli.session_resume import enter_work_dir, prepare_startup_resume
+from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.cli.display import (
     display_peer_messages,
     display_user_message,
@@ -115,6 +116,29 @@ def _cli_log_file() -> Tuple[Optional[str], Optional[str]]:
     """
     path = config.AGENTICA_LOG_FILE or None
     return path, config.AGENTICA_LOG_LEVEL if path else None
+
+
+def _resume_session_cli_prefs(agent_config: dict) -> dict:
+    """Read the ``cli`` block of the session being resumed, or ``{}``.
+
+    Called after :func:`prepare_startup_resume` has settled the id and the
+    directory its transcript lives in, so a session resumed from elsewhere
+    still finds its own sidecar. A missing sidecar (an older session, or one
+    that never had a toggle changed) is not an error — it means "fall back to
+    this work_dir's preferences", which the caller already applied.
+    """
+    session_id = agent_config.get("session_id")
+    if not session_id or not agent_config.get("_resume_requested"):
+        return {}
+    from agentica.memory.session_log import SessionLog
+
+    log = SessionLog(
+        str(session_id),
+        base_dir=agent_config.get("session_base_dir"),
+        work_dir=agent_config.get("work_dir"),
+        user_id=agent_config.get("user_id"),
+    )
+    return log.get_cli_prefs()
 
 
 def _visible_peer_name_for_status_bar(peer_session: Optional[PeerSession], agent) -> str:
@@ -319,6 +343,28 @@ def run_interactive(
         else:
             set_project_profile(agent_config.get("work_dir") or os.getcwd(), resume_profile)
 
+    # Saved CLI toggles for the session we just settled on. The sidecar wins
+    # over this work_dir's project.json: a resumed session is a specific view
+    # of the code, and one directory can hold several sessions that disagreed.
+    # A flag the user typed for *this* run still beats both (see apply_cli_prefs).
+    if agent_config.get("_resume_requested"):
+        resumed_prefs = _resume_session_cli_prefs(agent_config)
+        if resumed_prefs:
+            apply_session_cli_prefs(agent_config, resumed_prefs)
+        # The tier handed to create_agent below was read before the merge, and
+        # passing a stale one freezes the session at the startup default.
+        perm_mode = agent_config.get("permissions", perm_mode)
+        # Same reason for the tools, except that the agent below is still to be
+        # built — so extending the list is enough. Only the names this run did
+        # not already load are instantiated, or configure_tools would print
+        # "Loaded additional tool" for something already in the schema. Names
+        # outside the registry were filtered out by normalize_cli_prefs.
+        resumed_tools = (agent_config.get("_cli_prefs") or {}).get("extra_tools") or []
+        new_tool_names = [name for name in resumed_tools if name not in (extra_tool_names or [])]
+        if new_tool_names:
+            extra_tool_names = list(extra_tool_names or []) + new_tool_names
+            extra_tools = list(extra_tools or []) + configure_tools(new_tool_names)
+
     # `--worktree <task>`: start this session in its own checkout. Settled after
     # resume (which may have moved us) and before anything derives state from the
     # directory — the peer record, the profile and the session storage all read
@@ -445,6 +491,11 @@ def run_interactive(
         if skill_cmds:
             cmds_str = ", ".join(skill_cmds.keys())
             con.print(f"  Skills: [cyan]{len(skills_registry)} loaded[/cyan] (commands: {cmds_str})")
+    if extra_tool_names:
+        # A tool that joined the schema because project.json remembered it must
+        # say so, or the user cannot tell an inherited `/tools add` from a
+        # built-in appearing out of nowhere.
+        con.print(f"  Extra tools: [cyan]{', '.join(extra_tool_names)}[/cyan]")
     if perm_mode != "allow-all":
         con.print(f"  Permissions: [yellow]{perm_mode}[/yellow]")
     con.print()
@@ -464,6 +515,9 @@ def run_interactive(
         "active_seconds": 0.0,
         "last_turn_seconds": 0.0,
         "spinner_text": "",
+        # Overwritten below from the saved preferences. Seeded with the
+        # defaults so the status bar and the reasoning stream never read a
+        # missing key.
         "show_reasoning": True,
         "statusbar_visible": True,
         "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -474,6 +528,7 @@ def run_interactive(
         "goal_token_budget": None,
         "goal_tokens_used": 0,
     }
+    sync_view_prefs_to_tui(tui_state, agent_config)
     _seed_context_tokens(current_agent, tui_state)
 
     # Cron control surface for the /cron daemon on|off command. We expose

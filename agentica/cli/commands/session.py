@@ -19,6 +19,7 @@ from uuid import UUID
 
 from agentica.cli.runtime import (
     get_console,
+    configure_tools,
     create_agent,
 )
 from agentica.cli.display import (
@@ -33,6 +34,7 @@ from agentica.cli.session_resume import (
     find_sessions_by_id,
 )
 from agentica.cli.setup import apply_named_profile_to_agent_config
+from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.global_config import set_project_profile
 from agentica.agent.history_filter import (
     strip_elided_notice,
@@ -657,6 +659,25 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 )
             else:
                 set_project_profile(agent_config.get("work_dir") or os.getcwd(), profile_name)
+
+        # The resumed session's own CLI toggles (`/reasoning`, `/statusbar`,
+        # `/debug`, `/permissions`) beat this work_dir's, the same way its
+        # profile beats the project's active profile: one directory holds
+        # sessions that were read differently, and resuming is a request for
+        # the session as it was.
+        apply_session_cli_prefs(agent_config, chosen.get("cli") or {})
+        # `tui_state` is built once, at startup, so a resume has to push the
+        # view preferences itself or the status bar keeps showing the previous
+        # session's choice for the rest of the process.
+        sync_view_prefs_to_tui(ctx.tui_state, agent_config)
+        # `/tools add` history travels with the session too. Only the names
+        # this process does not already have are instantiated.
+        resumed_tools = (agent_config.get("_cli_prefs") or {}).get("extra_tools") or []
+        new_tool_names = [name for name in resumed_tools if name not in (ctx.extra_tool_names or [])]
+        if new_tool_names:
+            ctx.extra_tool_names = list(ctx.extra_tool_names or []) + new_tool_names
+            ctx.extra_tools = list(ctx.extra_tools or []) + configure_tools(new_tool_names)
+            con.print(f"[dim]Extra tools from this session: {', '.join(new_tool_names)}[/dim]")
         current_agent = create_agent(
             agent_config,
             ctx.extra_tools,

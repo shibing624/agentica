@@ -6,8 +6,8 @@
 Owns the ``<projects>/<user>/<sanitize(work_dir)>/`` layout used by sessions,
 tool-result spill, and per-project metadata. One ``project.json`` in that
 directory holds directory-level fields (``work_dir``, ``active_profile``,
-``approvals``). Session-level sidecars (``<id>.meta.json``) stay next to
-their ``.jsonl``.
+``approvals``, ``cli``). Session-level sidecars (``<id>.meta.json``) stay next
+to their ``.jsonl``.
 """
 
 from __future__ import annotations
@@ -131,3 +131,40 @@ def clear_project_active_profile(base_dir: Any) -> bool:
     del data["active_profile"]
     write_project_file(base_dir, data)
     return True
+
+
+# ---------- Project-scoped CLI preferences ----------
+#
+# The four CLI toggles that are not model config (reasoning display, status
+# bar, debug logging, permission tier) live in ``project.json``'s ``cli``
+# block, next to ``active_profile``: they are "how I work in this directory",
+# so a new CLI here inherits them. Shape is validated by
+# ``agentica.cli.prefs.normalize_cli_prefs``; this layer only round-trips JSON.
+
+
+def get_project_cli_prefs(base_dir: Any) -> Dict[str, Any]:
+    value = read_project_file(base_dir).get("cli")
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def update_project_cli_prefs(base_dir: Any, updates: Dict[str, Any]) -> None:
+    """Merge ``updates`` into ``project.json``'s ``cli`` block.
+
+    ``{key: None}`` drops a key, which is how a preference returns to its
+    built-in default instead of being stuck at whatever was saved once.
+    """
+    if not isinstance(updates, dict) or not updates:
+        return
+    data = read_project_file(base_dir)
+    merged = data.get("cli")
+    merged = dict(merged) if isinstance(merged, dict) else {}
+    for key, value in updates.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    if merged:
+        data["cli"] = merged
+    else:
+        data.pop("cli", None)
+    write_project_file(base_dir, data)

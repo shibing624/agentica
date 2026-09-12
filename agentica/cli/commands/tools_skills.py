@@ -34,6 +34,22 @@ from agentica.cli.commands.helpers import (
 from agentica.cli.commands.cron_cmd import _ask_text_via_tui, _confirm_via_tui
 
 
+def _persist_extra_tools(ctx: CommandContext) -> None:
+    """Save this session's extra-tool set so the next CLI here loads it.
+
+    Only registry names (`/tools add`) can reach this list: an `add-from`
+    module is never recorded, because replaying it at startup would execute a
+    user .py file that this very command asks a human to confirm first.
+    """
+    from agentica.cli.prefs import record_cli_prefs
+
+    record_cli_prefs(
+        ctx.agent_config,
+        ctx.current_agent,
+        {"extra_tools": list(ctx.extra_tool_names or [])},
+    )
+
+
 
 
 def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
@@ -175,6 +191,7 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
                 if name not in ctx.extra_tool_names:
                     ctx.extra_tool_names.append(name)
                 con.print(f"  [green]{name} loaded.[/green]")
+        _persist_extra_tools(ctx)
         return {"extra_tool_names": ctx.extra_tool_names}
 
     # ── /tools add-from <name> — load a custom tool from .agentica/tools/<name>.py ──
@@ -243,6 +260,7 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
                 con.print(f"  [green]{name} removed.[/green]")
             else:
                 con.print(f"  [dim]{name} is not currently active.[/dim]")
+        _persist_extra_tools(ctx)
         return {"extra_tool_names": ctx.extra_tool_names}
 
     # ── /tools info <name> ──
@@ -696,6 +714,7 @@ def _cmd_reload_skills(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     from agentica.agent.permissions import PERMISSION_MODES
+    from agentica.cli.prefs import record_cli_prefs
 
     if cmd_args.strip():
         new_mode = cmd_args.strip().lower()
@@ -704,6 +723,12 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
             return
         if ctx.current_agent:
             ctx.current_agent.set_permission_mode(new_mode)
+            # Keep the tier on agent_config as well: every rebuild path
+            # (`/resume`, `/model`, `/newchat`, `/clear`) builds the next agent
+            # from that dict, and without this the tier silently snapped back
+            # to allow-all — a real downgrade of the approval guard.
+            ctx.agent_config["permissions"] = new_mode
+            record_cli_prefs(ctx.agent_config, ctx.current_agent, {"permissions": new_mode})
             con.print(f"[green]Permission mode set to: {new_mode}[/green]")
         return
 

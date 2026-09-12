@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
+- **CLI 开关落盘：`/reasoning`、`/statusbar`、`/debug`、`/permissions`、`/tools add` 下次启动继续生效**。这五项以前只活在当前进程里：下次开 CLI 回到默认，`/permissions` 更早就失效——`/resume`、`/model`、`/newchat` 从 `agent_config` 重建 agent，而 `/permissions` 只改了 live agent，档位于是静默回落到 `allow-all`（等于把审批护栏降级）。现在写两处：session sidecar `<id>.meta.json` 的 `cli` 块（记「这个会话」）和该 work_dir `project.json` 的 `cli` 块（记「这个目录」）。启动优先级：命令行 flag > 被 resume 的 session sidecar > 本 work_dir `project.json` > 默认值；`/reasoning`、`/statusbar`、`/debug`、`/permissions` 与 `/tools add|remove` 都走这一条。`--permissions` 默认值由 `allow-all` 改为 `None`，否则「用户显式要 allow-all」与「只是没写」无法区分，saved `ask` 会被默认值盖掉。`/tools add-from` 的模块**不落盘**（它在加载时执行任意 .py，且本来要人确认），`/tools remove` 会写回新集合，所以删掉最后一个工具不会再被下次启动复活；`--tools` 与 saved 集合取并集、不互相覆盖。`/fork` 把 `cli` 块带给新分支（同一段对话换个窗看，视角设置跟着走）。
 - **`/status` 在 `<session>.notes.md` 非空时显示路径和大小**：跟 Session log 并列。文件不存在或还是空的不占一行。
 - **`search_session` 每次都带最近用户问题**：换窗后「前面问了啥」对不上关键词，不该靠中/英套话表猜意图。每次结果附带 `role=user` 倒序最多 20 条（单条截断、总长封顶，跳过 `<context_window>` preamble）；空 `query` 只返回这份索引。关键词路径不变（`工单号` 仍打中 `工单 ZX-41827`）。
 - **每个 Agent 自动挂 `BuiltinContextTool`**：只挂 `search_session`，能搜到 `compact_boundary` **之前**的 JSONL。不再挂 `new_context`（人用 `/compact`，省掉每轮 ~90 token 的 schema）。

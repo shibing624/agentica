@@ -1398,6 +1398,7 @@ class SessionLog:
             "profile_name": cls._meta_profile_name(meta),
             "profile_source": cls._meta_profile_source(meta),
             "last_read_at": cls._meta_last_read_at(meta),
+            "cli": cls._meta_cli(meta),
         }
 
     @classmethod
@@ -1624,6 +1625,19 @@ class SessionLog:
             return value.strip()
         return None
 
+    @staticmethod
+    def _meta_cli(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the sidecar's ``cli`` block (saved CLI toggles), or ``{}``.
+
+        Shape is validated by :func:`agentica.cli.prefs.normalize_cli_prefs`,
+        deliberately not here: the sidecar is a plain JSON blob and
+        ``session_log`` must not grow a dependency on the CLI package. What
+        this method guarantees is only that callers get a dict, never a
+        string or ``None``.
+        """
+        value = data.get("cli")
+        return dict(value) if isinstance(value, dict) else {}
+
     def _write_meta(self, updates: Dict[str, Any]) -> None:
         """Merge sidecar metadata updates and persist atomically."""
         from datetime import datetime, timezone
@@ -1689,6 +1703,34 @@ class SessionLog:
     def get_forked_from(self) -> Optional[str]:
         """Return the session this one was branched from, if it was a fork."""
         return self._read_meta(self.meta_path).get("forked_from")
+
+    def get_cli_prefs(self) -> Dict[str, Any]:
+        """Return this session's saved CLI toggles (``{}`` when never set).
+
+        Unlike the model profile — which names a body that lives in
+        ``config.yaml`` — these are values with no other home, so the sidecar
+        holds them directly. Resume prefers them over ``project.json``: one
+        work_dir can hold several sessions that disagreed about, say, whether
+        reasoning should be streamed.
+        """
+        return self._meta_cli(self._read_meta(self.meta_path))
+
+    def set_cli_prefs(self, updates: Dict[str, Any]) -> None:
+        """Merge CLI toggles into the ``cli`` block of the sidecar.
+
+        Merging (rather than replacing) is what lets ``/reasoning off`` keep a
+        previously saved ``/statusbar`` choice; ``{key: None}`` removes a key
+        so a preference can go back to its default.
+        """
+        if not isinstance(updates, dict) or not updates:
+            return
+        merged = self.get_cli_prefs()
+        for key, value in updates.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        self._write_meta({"cli": merged})
 
     def set_archived(self, archived: bool = True) -> None:
         """Set the archived flag in sidecar metadata."""
@@ -1843,6 +1885,11 @@ class SessionLog:
             for key in ("profile_name", "profile_source")
             if isinstance(source_meta.get(key), str) and source_meta[key].strip()
         }
+        # A branch is the same conversation seen from a second window; the view
+        # preferences travel with it, or the fork would silently start on the
+        # defaults while its source still hides reasoning.
+        if SessionLog._meta_cli(source_meta):
+            fork_meta["cli"] = SessionLog._meta_cli(source_meta)
         fork_meta.update({"forked_from": self.session_id, "forked_at_uuid": at_uuid})
         new_log._write_meta(fork_meta)
 

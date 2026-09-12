@@ -4,11 +4,13 @@
 @description: CLI main entry point
 """
 
+import os
 import sys
 import time
 
 from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.display import display_agent_execution_error, format_session_summary, resumable_session_id
+from agentica.cli.prefs import apply_cli_prefs, read_project_prefs
 from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.cost_tracker import refresh_model_catalog_in_background
 from agentica.run_response import AgentCancelledError
@@ -144,6 +146,12 @@ def main():
             else 2
         ),
         "debug": args.debug > 0,
+        # Whether the user named these on the command line. Saved CLI
+        # preferences (project.json `cli`, and the resumed session's sidecar)
+        # fill them in below, but a flag is a decision for this run only and
+        # must not be silently overridden by what was saved last time.
+        "_debug_explicit": bool(args.debug),
+        "_permissions_explicit": bool(args.allow_all) or args.permissions is not None,
         "work_dir": args.work_dir,
         # Resolved by the interactive app after `resume` has settled the
         # directory, because both compete to decide where this session works.
@@ -153,7 +161,7 @@ def main():
         "enable_auto_compact": args.auto_compact,
         "enable_skill_upgrade": args.enable_skill_upgrade,
         "skill_upgrade_mode": args.skill_upgrade_mode,
-        "permissions": "allow-all" if args.allow_all else args.permissions,
+        "permissions": "allow-all" if args.allow_all else (args.permissions or "allow-all"),
         "enable_diagnostics": args.enable_diagnostics,
         "diagnostics_servers": args.diagnostics_servers,
         "_model_config_explicit": any(
@@ -185,6 +193,25 @@ def main():
         agent_config["_resume_at_uuid"] = args.resume_at_uuid
         agent_config["_resume_requested"] = True
     extra_tool_names = list(args.tools) if args.tools else None
+
+    # Preferences this work_dir was last driven with (`/reasoning off`,
+    # `/statusbar`, `/debug`, `/permissions`, `/tools add`). Read here rather
+    # than in create_agent so the very first prompt — and the header the user
+    # reads before it — already reflect them, and again after `/resume`, which
+    # may have moved us to a session saved in another directory (see
+    # `cli/commands/session.py::_cmd_resume`).
+    saved_prefs = read_project_prefs(agent_config.get("work_dir") or os.getcwd())
+    apply_cli_prefs(agent_config, saved_prefs)
+    if saved_prefs.get("extra_tools"):
+        # Union, not replace: `--tools` says "also give me these", and dropping
+        # a tool the user saved for this directory would answer a question they
+        # did not ask. To drop one, `/tools remove` it — that writes the new
+        # set, which is what the next launch reads.
+        saved = list(saved_prefs["extra_tools"])
+        if extra_tool_names:
+            extra_tool_names = list(dict.fromkeys(extra_tool_names + saved))
+        else:
+            extra_tool_names = saved
 
     # Initialize workspace with default user
     workspace = None

@@ -38,6 +38,17 @@ SDK 仍读纯环境变量。import 时 `agentica/config.py` 调 `apply_global_co
 
 profile 之外的顶层块：`settings`（CLI 行为开关，与 model 无关，如 `num_history_turns`，经 `get_setting`/`set_setting` 读写）和 `env`（任意 key-value，注入 `os.environ`）。
 
+### CLI 开关存在项目目录 / session sidecar，不在 config.yaml
+
+`/reasoning`、`/statusbar`、`/debug`、`/permissions`、`/tools add|remove` 属于"我怎么用这个目录/这段对话"，写两处（都在 `~/.agentica/projects/<user>/<slug>/` 下，不进用户 git 工作区）：
+
+| 位置 | 记什么 | 谁读 |
+| --- | --- | --- |
+| `project.json` 的 `cli` 块 | 这个 work_dir 最近一次的开关 | 该目录新开的 CLI |
+| `<session_id>.meta.json` 的 `cli` 块 | 这个 session 自己的开关 | `/resume`（跨目录也对） |
+
+启动取值优先级：命令行 flag（`--debug`、`--permissions`）> 被 resume 的 session sidecar > 本 work_dir `project.json` > 内置默认。不用 `config.yaml.settings` 的原因同 session profile：`settings` 是机器级、与目录无关的默认，而这些是"这个项目/这段对话"的选择，且 `/reasoning off` 换到另一个项目通常不该跟着走。`/tools add-from` 加载的模块不落盘——它在加载时执行用户 .py，且该命令本来就要人确认；只有 `--tools` 认识的 registry 名字会被记下并复现（手改坏的文件名会被过滤掉）。
+
 ## 代理网关的粘性路由（prompt cache 的前提）
 
 prompt cache 只在**连续请求落到同一台上游**时才有意义。多数聚合型代理网关为了吞吐会把请求扇出到多个上游，缓存不会跟着走——于是每一轮都是 cache write，账单反而更高。这类网关通常允许用一个请求头把路由钉住，agentica 有两种配法，区别只在**粘性的粒度**。

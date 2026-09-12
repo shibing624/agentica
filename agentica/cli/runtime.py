@@ -519,7 +519,10 @@ def parse_args():
     parser.add_argument(
         "--permissions",
         type=str,
-        default="allow-all",
+        # None, not "allow-all", so `main.py` can tell "the user asked for
+        # allow-all" (which must beat a saved `ask`) from "it is just the
+        # default". The default itself is applied there.
+        default=None,
         choices=["ask", "auto", "allow-all"],
         help="Permission mode: ask (reads anywhere; confirm writes/network), "
         "auto (also writes inside work_dir), "
