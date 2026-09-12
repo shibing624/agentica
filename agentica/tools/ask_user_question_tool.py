@@ -102,7 +102,10 @@ and only blocks until it times out."""
                 "description": (
                     "Choices as a JSON array of strings, not a string. "
                     'Example: ["Keep current (recommended)", "Rewrite", "Skip"]. '
-                    "Omit for a free-form answer. Put the recommended choice first."
+                    "Omit for a free-form answer. When you recommend one, put it "
+                    "first AND mark it in the label — the user picks it by position, "
+                    'and only the label says which one you meant, e.g. "（推荐）" '
+                    'or "(recommended)".'
                 ),
             },
         },

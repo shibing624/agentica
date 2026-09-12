@@ -115,6 +115,30 @@ class TestAskUserQuestionTool:
         assert shown["options"] == options
         assert result["response"] == "1"
 
+    def test_schema_asks_for_both_position_and_a_label(self):
+        """Ordering alone does not survive the readback.
+
+        The user picks by position, so "put your recommendation first" is not
+        enough: when the answer arrives the model sees "1", not which choice it
+        meant. The tool deliberately does not add or reorder anything (the
+        label is the model's own words), so the schema has to ask for it —
+        dropping "and say so in its label" is what let the recommended marker
+        disappear from real option lists.
+        """
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "1")
+        fn = tool.functions["ask_user_question"]
+        fn.process_entrypoint()
+        description = fn.parameters["properties"]["options"]["description"]
+
+        assert "first" in description
+        # The marker must be asked for by example, and the examples must match
+        # what this repo's own tests/prompts actually use.
+        assert "label" in description
+        assert "（推荐）" in description
+        assert "(recommended)" in description
+
     def test_schema_says_options_is_an_array_not_a_string(self):
         """The first call used to stringify the list because the schema had
         no property description and the docstring showed a Python list."""
