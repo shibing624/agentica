@@ -91,9 +91,16 @@ class Runner(CompressMixin, RetryMixin, PersistMixin, SteerMixin, StreamMixin, L
         # blocks a run, and it swallows its own failures.
         #
         # Only the four lifecycle events reach here. ``goal.*`` deliberately
-        # does not: GoalManager emits those on its own callback, and the
-        # desktop app has no use for the goal loop. Leaving it out is a
-        # decision, not an oversight.
+        # does not, for a protocol reason rather than a "we don't need it" one:
+        # the sink feeds a generic agent status display that also serves Claude
+        # Code / opencode / codex, none of which have a goal loop. Putting an
+        # agentica-only event on that wire leaks an implementation detail into
+        # the contract.
+        #
+        # Not emitting goal events is NOT the same as goal not affecting the
+        # wire: a standing goal makes one request into N runs, so the sink holds
+        # back ``run.completed`` while one is active. Do not "simplify" that
+        # check away — see ``notify.sink._goal_still_running``.
         try:
             from agentica.notify import notify_sink_dispatch
 
@@ -101,6 +108,7 @@ class Runner(CompressMixin, RetryMixin, PersistMixin, SteerMixin, StreamMixin, L
                 record,
                 session_id=getattr(agent, "session_id", None),
                 work_dir=getattr(agent, "work_dir", None),
+                agent=agent,
             )
         except Exception as e:
             # Import errors and any sink-level surprise land here. Debug, not

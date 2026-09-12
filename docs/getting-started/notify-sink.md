@@ -50,7 +50,7 @@ settings:
 | event | 触发点 | 阻塞 |
 |---|---|---|
 | `run.started` | 一轮开始 | 否 |
-| `run.completed` | 一轮成功结束 | 否 |
+| `run.completed` | 一轮成功结束**且没有后续** | 否 |
 | `run.failed` | 一轮抛错 | 否 |
 | `run.cancelled` | 用户 Ctrl+C | 否 |
 | `needs.approval` | 工具调用被 park 等批准 | **是** |
@@ -58,6 +58,25 @@ settings:
 
 `needs.approval` 与 `needs.input` 是**两种状态**（急切 / 平静），用 `payload.kind`
 区分（`"permission"` vs `"question"`），别混。
+
+### `run.completed` 的准确含义
+
+它是「**你可以回来看了**」，不是「一次 run 结束了」。两者只在「后面没有别的活」时
+才重合：
+
+- **goal 循环**：一个 N 轮 goal 会跑 N 次 run，每次 run 结束都自然 emit
+  `run.completed`，而 CLI 的 goal hook 随后又排下一轮。若照发，桌宠会误报 N 次
+  「跑完了」——两次 run 之间夹着 judge LLM 调用，间隔不可控，消费端**无法**靠防抖
+  分辨。
+- **排队输入**：一次粘贴多条消息时，每条各自成为一轮，同样会连发。
+
+所以 goal 活跃时、或宿主还有排队输入时，sink **不发** `run.completed`。
+`run.started` / `run.failed` / `run.cancelled` 一律照发——只有「完成」需要延后，
+否则显示会一直卡在「干活中」。
+
+goal 状态**从 session log 读**，不读 `agent.goal_manager`：CLI 自己持有
+`state.goal_manager`，而 agent 上那份懒加载一次后就缓存，若在 goal 设定之前被创建
+会永远报「没有 goal」（实测确认）。读日志永远是最新的。
 
 不接 `goal.*`：目标循环由 `GoalManager` 走自己的回调，桌宠不需要它。
 

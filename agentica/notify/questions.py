@@ -39,6 +39,10 @@ def ask_via_desktop(
         sink = get_sink()
         if sink is None:
             return None
+        # ``kind`` tells the desktop app this is not an approval: the reply is
+        # free text, not one of the approval enum values, and ``options`` may be
+        # an arbitrary list rather than allow/deny. See the note in
+        # ``approvals.py`` for why the two are kept apart on the wire.
         payload: dict = {"kind": "question", "question": str(prompt)}
         if options:
             payload["options"] = [str(o) for o in options]
