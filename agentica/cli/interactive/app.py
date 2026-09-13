@@ -68,6 +68,7 @@ from .attachments import (
     _detect_file_drop,
     unpack_queue_payload,
 )
+from .ask_hook import start_hook_ask
 from .btw import (
     _background_result_for_agent,
     _print_background_completion,
@@ -265,6 +266,20 @@ def run_interactive(
             armed_during_run = state_ref.agent_running
         app_ref.invalidate()
 
+        # Offer the same question to the user's hook command, if one is
+        # configured. Armed *after* the slot above, deliberately: the widget only
+        # polls `state_ref.input_request`, so a hook offered the question first
+        # would not be shown while it ran. Polled from the watchdog loop below,
+        # which also means the terminal's own answer is checked first every
+        # cycle — a typed line and a hook answer arriving together are settled by
+        # the slot, exactly as two typed lines would be.
+        hook = start_hook_ask(
+            prompt,
+            options,
+            session_id=getattr(state_ref.current_agent, "session_id", None),
+            work_dir=getattr(state_ref.current_agent, "work_dir", None),
+        )
+
         # Block the agent thread until the user submits a line, or Ctrl+C
         # puts the CANCELLED sentinel on the queue to release us. We poll with
         # a short timeout (watchdog) instead of a bare get(): a bare get()
@@ -288,8 +303,20 @@ def run_interactive(
                         logger.info("[ask] watchdog: re-arming after overwrite")
                         state_ref.input_request = req
                         app_ref.invalidate()
+                    if hook is not None:
+                        # `poll` delivers into the slot, so the answer is taken
+                        # from the slot rather than from the hook directly — one
+                        # delivery path for a typed answer and a hook answer.
+                        if hook.poll(req):
+                            answer = req.result.get_nowait()
+                            break
+                        if not hook.still_useful:
+                            hook.stop()
+                            hook = None
                     continue
         finally:
+            if hook is not None:
+                hook.stop()
             with _ask_state_lock:
                 _ask_active[0] = False
                 if state_ref.input_request is req:
@@ -313,25 +340,15 @@ def run_interactive(
         # list the user was looking at.
         return answer_text
 
-    # The user may answer a question from the desktop app too (see
-    # agentica/notify): the same answer, applied the same way, as typing it
-    # here. Wrapped at the definition so every consumer gets it: the agent built
-    # below, the agent rebuilt by /model or /resume, and the process-wide
-    # default that covers subagents and cron. ``timeout=None`` because the TUI
-    # callback below waits as long as the user takes — the desktop side gets the
-    # same patience. With no sink installed this is a pass-through.
-    from agentica.notify.questions import wrap_ask_callback
-
-    _cli_ask_user_question_callback = wrap_ask_callback(
-        _tui_ask_user_question_callback,
-        timeout=None,
-        session_id_getter=lambda: getattr(
-            getattr(_ui_holder.get("state"), "current_agent", None), "session_id", None
-        ),
-        work_dir_getter=lambda: getattr(
-            getattr(_ui_holder.get("state"), "current_agent", None), "work_dir", None
-        ),
-    )
+    # Both answer paths are the same callback: the user's hook command is offered
+    # the question from inside it (see the watchdog loop above), so a hook answer
+    # and a typed answer are delivered through one slot and one delivery path.
+    #
+    # This used to be a ``wrap_ask_callback`` around the TUI callback. That
+    # wrapper asked the desktop first and only then called the terminal, so a
+    # desktop that did not answer blocked the typed prompt out entirely — the
+    # terminal could not be used while the desktop was thinking.
+    _cli_ask_user_question_callback = _tui_ask_user_question_callback
 
     # The process registry belongs to the CLI session and must exist before
     # the first agent is built because ExecuteTool receives this shared
