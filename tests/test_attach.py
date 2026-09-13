@@ -87,54 +87,90 @@ class _Client:
 
 
 def _server(tmp_path, **kw):
-    """A server with a recording injector; defaults to an idle session."""
+    """A server whose injector records the text and reports where it went.
+
+    **The default injector does not start a turn.** That is the whole point: a
+    fixture that poked the run state on every injection manufactured a turn right
+    where the interesting case has none, so the ``queued``-while-running bug (the
+    run in flight will never see this text) passed no matter what the wait did.
+    Tests script turns explicitly through ``session``.
+    """
     injected = kw.pop("injected", None)
     if injected is None:
         injected = []
-    running = kw.pop("running", None)
-    if running is None:
-        running = _FlipFlop()
-    disposition = kw.pop("disposition", None)
+    session = kw.pop("session", None)
+    if session is None:
+        session = _Session()
+    disposition = kw.pop("disposition", "queued")
 
     def inject(text):
         injected.append(text)
-        running.poke()
-        # Default: what ``hand_to_agent`` reports for an idle session with a run
-        # starting right after — the text became the next turn.
-        return disposition if disposition is not None else "queued"
+        return disposition
 
     server = AttachServer(
         kw.pop("peer_id", "abcd1234"),
         inject=inject,
-        is_running=running.is_running,
+        is_running=session.is_running,
         session_id=kw.pop("session_id", "sess-1234"),
         **kw,
     )
     assert server.start() is True, "the server must be listening"
-    return server, injected, running
+    return server, injected, session
 
 
-class _FlipFlop:
-    """Stands in for the session's run state: poke() means "a turn is happening"."""
+def _run_one_turn_soon(session: "_Session", *, delay: float = 0.1,
+                       duration: float = 0.15) -> None:
+    """Script the turn a ``session/prompt`` will become.
 
-    def __init__(self, start_running=False):
+    Needed by every test that expects a *completed* prompt: the default injector
+    no longer invents a turn, so a test that wants one has to say so.
+    """
+    session.start_after(delay, duration)
+
+
+class _Session:
+    """The CLI's run state, scripted by the test.
+
+    ``start`` / ``end`` are the test driving turns; ``is_running`` is what the
+    server polls. Kept explicit so a test can reproduce "a run is finishing and
+    this text did *not* go into it".
+    """
+
+    def __init__(self, start_running: bool = False):
         self._running = start_running
         self._lock = threading.Lock()
+        self.turns_started = 0
 
-    def poke(self, seconds=0.15):
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._running
+
+    def start(self) -> None:
         with self._lock:
             self._running = True
+            self.turns_started += 1
+
+    def end(self) -> None:
+        with self._lock:
+            self._running = False
+
+    def run_for(self, seconds: float) -> None:
+        """Start a turn that ends itself after ``seconds``."""
+        self.start()
 
         def _end():
             time.sleep(seconds)
-            with self._lock:
-                self._running = False
+            self.end()
 
         threading.Thread(target=_end, daemon=True).start()
 
-    def is_running(self):
-        with self._lock:
-            return self._running
+    def start_after(self, delay: float, seconds: float) -> None:
+        """Start a turn after ``delay``, running for ``seconds``."""
+        def _go():
+            time.sleep(delay)
+            self.run_for(seconds)
+
+        threading.Thread(target=_go, daemon=True).start()
 
 
 class TestHandshake:
@@ -309,14 +345,14 @@ class TestAddressing:
 class TestPrompt:
     def test_a_steered_prompt_waits_for_the_run_in_flight(self, tmp_path):
         """Steered: the run already going is the one carrying this text."""
-        running = _FlipFlop(start_running=True)
-        server, injected, _ = _server(tmp_path, running=running, disposition="steered")
+        session = _Session(start_running=True)
+        server, injected, _ = _server(tmp_path, session=session, disposition="steered")
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
 
             def _end():
                 time.sleep(0.25)
-                running.poke(0.05)
+                session.end()
 
             threading.Thread(target=_end, daemon=True).start()
             reply = client.call(
@@ -329,62 +365,77 @@ class TestPrompt:
         finally:
             server.stop()
 
-    def test_a_queued_prompt_waits_for_the_new_turn_not_the_current_one(self, tmp_path):
-        """The bug this pins: injected while a run was still going, but the text
-        was queued because the run ended in the check-then-act window.
+    def test_a_queued_prompt_waits_for_its_own_turn(self, tmp_path):
+        """The bug this pins, and why the earlier test could not catch it.
 
-        Waiting on the *current* run would return as soon as it ended — reporting
-        a completion for a message that had not been delivered yet, and (with an
-        answer attached) handing back the previous turn's text.
+        Text queued while a run is still finishing: that run will never see it, so
+        the prompt must outlive it and wait for the *next* turn. The assertion is
+        on the script, not on elapsed time — "it took at least N seconds" is
+        satisfied by any slow machine, which is how this stayed green while the
+        wait still returned on the wrong run's end.
         """
-        running = _FlipFlop(start_running=True)
-        server, _, _ = _server(tmp_path, running=running, disposition="queued")
+        session = _Session(start_running=True)
+        # ``settle`` is set below the gap between the two turns on purpose. At the
+        # default settle the window happened to span the gap, so the next turn
+        # starting inside it made the old logic look correct — the test passed with
+        # the queued phase deleted. A gap wider than the window is what makes the
+        # phase load-bearing.
+        server, _, _ = _server(tmp_path, session=session, disposition="queued",
+                               settle=0.2)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
+            events = []
 
-            def _finish_current_then_run_next():
-                time.sleep(0.15)
-                running.poke(0.0)  # current run ends…
-                time.sleep(0.15)
-                running.poke(0.4)  # …then the queued turn runs
+            def _script():
+                time.sleep(0.2)
+                session.end()            # the run that does NOT carry it ends
+                events.append("current_ended")
+                time.sleep(0.6)          # longer than the settle window
+                session.start()          # the queued turn starts
+                events.append("next_started")
+                time.sleep(0.3)
+                session.end()
+                events.append("next_ended")
 
-            threading.Thread(target=_finish_current_then_run_next, daemon=True).start()
-            started = time.monotonic()
+            threading.Thread(target=_script, daemon=True).start()
             reply = client.call(
                 "session/prompt",
                 {"prompt": [{"type": "text", "text": "after this run"}]},
             )
-            elapsed = time.monotonic() - started
             assert "error" not in reply, reply
-            # It must have outlived the first run's end (else it took that end as
-            # its completion).
-            assert elapsed >= 0.3, f"returned after {elapsed:.2f}s — it took the wrong turn"
+            # The reply must not have come before its own turn ran. This is the
+            # assertion the old test was missing: the server returns only after
+            # the second turn has started *and* ended.
+            assert events == ["current_ended", "next_started", "next_ended"], (
+                f"returned with {events!r} — it settled on a run that never carried "
+                f"this message"
+            )
             client.close()
         finally:
             server.stop()
 
-    def test_a_queued_prompt_that_never_runs_reports_pending(self, tmp_path):
-        """Queued and no run ever starts (the session is quitting, say).
-
-        Built directly rather than via ``_server``: its injector pokes the
-        run-state to model "a turn is happening", which would make this look like
-        a completed turn.
-        """
-        server = AttachServer(
-            "abcd1234",
-            inject=lambda text: "queued",
-            is_running=lambda: False,
-            session_id="sess-1234",
-            grace=0.5,
-        )
-        assert server.start()
+    def test_a_queued_prompt_reports_pending_when_its_turn_never_starts(self, tmp_path):
+        """Queued and the session never runs it (it is shutting down): that is
+        ``agenticaPending``, not a completion, and not a 600s silent hang."""
+        session = _Session(start_running=True)
+        server, _, _ = _server(tmp_path, session=session, disposition="queued",
+                               grace=0.6, settle=0.0)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
-            result = client.call(
-                "session/prompt", {"prompt": [{"type": "text", "text": "queued forever"}]}
-            )["result"]
-            assert result.get("agenticaPending") is True
-            assert result["stopReason"] == "end_turn"
+
+            def _script():
+                time.sleep(0.15)
+                session.end()  # and nothing ever starts
+
+            threading.Thread(target=_script, daemon=True).start()
+            started = time.monotonic()
+            reply = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "into the void"}]},
+            )
+            elapsed = time.monotonic() - started
+            assert reply["result"].get("agenticaPending") is True, reply
+            assert elapsed < 5, f"waited {elapsed:.1f}s instead of giving up"
             client.close()
         finally:
             server.stop()
@@ -401,8 +452,90 @@ class TestPrompt:
         finally:
             server.stop()
 
+    def test_a_cancelled_turn_reports_cancelled_not_end_turn(self, tmp_path):
+        """The docs promise a caller can tell "interrupted" from "finished".
+
+        Without this, ``session/cancel`` was only ``Agent.cancel()``: the run ended,
+        the prompt returned ``end_turn``, and the two outcomes were indistinguish-
+        able to a client. This test did not exist, which is why that could ship.
+        """
+        session = _Session(start_running=True)
+        server, _, _ = _server(tmp_path, session=session, disposition="steered",
+                               grace=5.0, settle=0.0, cancel=lambda: None)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+
+            def _cancel_soon():
+                time.sleep(0.3)
+                # As ``session/cancel`` does, on its own connection: the server
+                # holds one prompt at a time, so a client cannot send it while its
+                # prompt is blocked.
+                canceller = _Client(server.path, token=server.token_file.read_text().strip())
+                canceller.call("session/cancel", {})
+                canceller.close()
+                time.sleep(0.2)
+                session.end()  # the run stops because of the cancel
+
+            threading.Thread(target=_cancel_soon, daemon=True).start()
+            result = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "long job"}]},
+                request_id=1,
+            )["result"]
+            assert result.get("stopReason") == "cancelled", result
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_cancel_that_ends_the_run_shortens_the_wait(self, tmp_path):
+        """A cancel ends the turn it names, so the wait must not sit out the grace.
+
+        The run is left *running* here on purpose: that is the only version of this
+        test that can fail. If the script also ends the run, the wait returns on its
+        own and the cancel check is never load-bearing — it passed with that check
+        disabled before this was changed.
+        """
+        session = _Session(start_running=True)
+        server, _, _ = _server(tmp_path, session=session, disposition="steered",
+                               grace=8.0, settle=0.0)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+
+            def _cancel():
+                time.sleep(0.3)
+                server._cancel_current({})  # as session/cancel would
+                # deliberately no session.end(): the run keeps going, so only the
+                # cancel can end the wait.
+
+            threading.Thread(target=_cancel, daemon=True).start()
+            started = time.monotonic()
+            result = client.call(
+                "session/prompt", {"prompt": [{"type": "text", "text": "job"}]}
+            )["result"]
+            elapsed = time.monotonic() - started
+            assert result.get("stopReason") == "cancelled", result
+            assert elapsed < 3, f"waited {elapsed:.1f}s despite the cancel"
+            client.close()
+        finally:
+            server.stop()
+
+        server, _, _ = _server(tmp_path, disposition="")
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            result = client.call(
+                "session/prompt", {"prompt": [{"type": "text", "text": "x"}]}
+            )["result"]
+            assert result.get("agenticaPending") is True
+            client.close()
+        finally:
+            server.stop()
+
     def test_the_text_reaches_the_agent(self, tmp_path):
-        server, injected, _ = _server(tmp_path)
+        """A turn must actually happen for this to be a round trip at all."""
+        session = _Session()
+        server, injected, _ = _server(tmp_path, session=session, disposition="queued",
+                                      settle=0.0)
+        session.start_after(0.1, 0.15)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
             reply = client.call(
@@ -416,7 +549,9 @@ class TestPrompt:
             server.stop()
 
     def test_the_stop_reason_is_reported(self, tmp_path):
-        server, _, _ = _server(tmp_path)
+        session = _Session()
+        server, _, _ = _server(tmp_path, session=session, settle=0.0)
+        session.start_after(0.1, 0.15)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
             result = client.call(
@@ -431,29 +566,50 @@ class TestPrompt:
     def test_an_idle_session_waits_for_the_turn_it_started(self, tmp_path):
         """The injected line becomes the next turn; the reply must not come back
         before that turn has run, or the client would report an answer that has
-        not been produced yet."""
-        server, _, running = _server(tmp_path, running=_FlipFlop(start_running=False))
+        not been produced yet.
+
+        Asserted on the script, not on elapsed time: a duration alone passes on a
+        slow machine while the wait still settled on the wrong run.
+        """
+        session = _Session()
+        server, _, _ = _server(tmp_path, session=session, settle=0.0)
+        finished = []
+
+        def _script():
+            time.sleep(0.25)
+            session.start()
+
+            def _end():
+                time.sleep(0.25)
+                session.end()
+                finished.append("turn_done")
+
+            threading.Thread(target=_end, daemon=True).start()
+
+        threading.Thread(target=_script, daemon=True).start()
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
-            started = time.monotonic()
             client.call(
                 "session/prompt",
                 {"sessionId": "sess-1234", "prompt": [{"type": "text", "text": "hi"}]},
             )
-            assert time.monotonic() - started >= 0.1
+            assert finished == ["turn_done"], "replied before its own turn finished"
             client.close()
         finally:
             server.stop()
 
     def test_a_running_session_is_steered_not_queued(self, tmp_path):
-        running = _FlipFlop(start_running=True)
-        server, injected, _ = _server(tmp_path, running=running)
+        """The disposition the injector reports decides the wait; scripted here as
+        the real ``hand_to_agent`` reports it for a run that takes the text."""
+        session = _Session(start_running=True)
+        server, injected, _ = _server(tmp_path, session=session, disposition="steered",
+                                      settle=0.0)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
 
             def _finish():
                 time.sleep(0.2)
-                running.poke(0.05)
+                session.end()
 
             threading.Thread(target=_finish, daemon=True).start()
             reply = client.call(
@@ -561,9 +717,10 @@ class TestPrompt:
 
     def test_the_answer_can_be_reported_back(self, tmp_path):
         """Optional: a host that can read the last answer may report it."""
-        server, _, _ = _server(tmp_path, answer=lambda: "the final answer")
+        server, _, session = _server(tmp_path, answer=lambda: "the final answer")
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
+            _run_one_turn_soon(session)
             result = client.call(
                 "session/prompt",
                 {"sessionId": "sess-1234", "prompt": [{"type": "text", "text": "hi"}]},
@@ -628,13 +785,14 @@ class TestRobustness:
             server.stop()
 
     def test_a_client_that_vanishes_does_not_stop_the_server(self, tmp_path):
-        server, injected, _ = _server(tmp_path)
+        server, injected, session = _server(tmp_path)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
             client.close()
             time.sleep(0.2)
             # A second client still works.
             client2 = _Client(server.path, token=server.token_file.read_text().strip())
+            _run_one_turn_soon(session)
             client2.call(
                 "session/prompt", {"sessionId": "sess-1234", "prompt": [{"type": "text", "text": "after"}]}
             )
@@ -644,10 +802,11 @@ class TestRobustness:
             server.stop()
 
     def test_several_messages_on_one_connection(self, tmp_path):
-        server, injected, _ = _server(tmp_path)
+        server, injected, session = _server(tmp_path)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
             for n in range(3):
+                _run_one_turn_soon(session)
                 client.call(
                     "session/prompt",
                     {"sessionId": "sess-1234", "prompt": [{"type": "text", "text": f"m{n}"}]},
@@ -659,12 +818,14 @@ class TestRobustness:
             server.stop()
 
     def test_two_clients_can_both_prompt(self, tmp_path):
-        server, injected, _ = _server(tmp_path)
+        server, injected, session = _server(tmp_path)
         try:
             token = server.token_file.read_text().strip()
             a = _Client(server.path, token=token)
             b = _Client(server.path, token=token)
+            _run_one_turn_soon(session)
             a.call("session/prompt", {"sessionId": "sess-1234", "prompt": [{"type": "text", "text": "a"}]})
+            _run_one_turn_soon(session)
             b.call("session/prompt", {"sessionId": "sess-1234", "prompt": [{"type": "text", "text": "b"}]})
             assert injected == ["a", "b"]
             a.close()

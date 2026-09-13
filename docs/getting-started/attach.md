@@ -69,6 +69,13 @@ TUI 自己占着 stdin/stdout，所以 ACP 标准的 stdio 传输在这里用不
 > 也没有「列出所有 attach socket」的独立子命令 —— 会话列表就是 `live/*.json`
 > 这一份数据，`/list-agents` 与 `list_agents` 读的是同一份。
 
+**`AGENTICA_HOME` 会连带把 cache 一起搬走。** presence 记录写在
+`AGENTICA_CACHE_DIR` 下，而它的默认值是 `$AGENTICA_HOME/cache`。所以一个
+`AGENTICA_HOME=<临时目录>` 起来的会话，会把自己的记录写进**那个** home；如果
+发现方还在默认位置找，结果就是「没有开着 attach 的会话」，而那个会话明明开着 ——
+报出来的现象和真实原因毫无关系。用 `AGENTICA_HOME` 做隔离时，让发现方和会话
+读**同一个** `AGENTICA_CACHE_DIR`（或干脆两边都设 `AGENTICA_CACHE_DIR`）。
+
 ## 方法
 
 连上后**第一条消息必须先 `initialize` 并带上 token**，否则任何方法都回 -32000。

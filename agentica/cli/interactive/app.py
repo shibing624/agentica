@@ -1111,8 +1111,9 @@ def run_interactive(
         nothing to hand back to a client that asked a question.
         """
         agent = session_state.current_agent
-        response = getattr(agent, "run_response", None) if agent is not None else None
-        content = getattr(response, "content", None) if response is not None else None
+        if agent is None:
+            return None
+        content = agent.run_response.content
         if content is None:
             return None
         text = str(content).strip()
@@ -1259,8 +1260,12 @@ def run_interactive(
             # A getter, not a snapshot: ``/resume`` and ``/fork`` swap the session
             # underneath this CLI, and a value captured here would reject the id
             # the client just read from the presence record.
-            session_id=lambda: getattr(state.current_agent, "session_id", None),
-            # Ctrl+C's handler, so ``session/cancel`` does what the key does.
+            session_id=lambda: (
+                state.current_agent.session_id if state.current_agent else None
+            ),
+            # ``session/cancel`` calls ``Agent.cancel()``, which stops the turn.
+            # It is not Ctrl+C's whole handler: the key also prints an interrupt
+            # notice and arms the double-press that exits the CLI.
             cancel=_request_cancel,
             # The last answer, for a client that would otherwise have to read the
             # transcript to see what its prompt produced.

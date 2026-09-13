@@ -207,6 +207,7 @@ class AttachServer:
         cancel: Optional[Callable[[], None]] = None,
         answer: Optional[Callable[[], Optional[str]]] = None,
         grace: float = 600.0,
+        settle: float = 1.0,
     ):
         self._peer_id = peer_id
         self._inject = inject
@@ -219,6 +220,15 @@ class AttachServer:
         # legitimately takes minutes and the alternative is claiming an answer
         # that is still being produced. Injectable so tests do not sit for it.
         self._grace = grace
+        # How long to watch for a re-queued turn right after the one that just
+        # ended: a line steered into a run's final inference is parked and
+        # re-queued by ``promote_late_steer``, so the turn carrying it has not
+        # happened yet even though ``steer()`` said yes. Not a correctness
+        # guarantee (see ``_wait_for_turn``) — a window, and 0 disables it.
+        self._settle = settle
+        # Set by ``session/cancel`` so the prompt it interrupted reports
+        # ``cancelled`` rather than looking like a normal completion.
+        self._cancelled = threading.Event()
         # One blocking prompt at a time. Two prompts in flight would both read the
         # same ``is_running`` and each would take the other's turn end as its own,
         # so a second client waits here instead of being told about a completion
@@ -510,6 +520,9 @@ class AttachServer:
             )
 
         with self._prompt_lock:
+            # A cancel from an earlier prompt must not label this one. Cleared
+            # under the lock so it cannot be cleared by a concurrent cancel.
+            self._cancelled.clear()
             # ``inject`` reports where the text went, which decides what to wait
             # for. Reading ``is_running`` before injecting cannot: ``hand_to_agent``
             # queues when a run is ending inside its check-then-act window, so a
@@ -541,41 +554,106 @@ class AttachServer:
     def _wait_for_turn(self, disposition: str, grace: Optional[float] = None) -> str:
         """Wait for the turn that **carries this text** to finish.
 
-        ``disposition`` is what the injector reported:
+        The question is never "is it busy right now" — that is what the previous
+        version got wrong. A run in flight at this moment may be one that will
+        never see this text, so which run counts has to be reasoned from where the
+        text actually went:
 
-        * ``"steered"`` — a run in flight took it, so that run ending is this
-          text's turn ending.
-        * ``"queued"`` — it is a pending line. The turn that carries it has not
-          started, so this first waits for a run to *begin* and only then for it
-          to end. Waiting on the current run instead would report a completion
-          that never included this message (and, with an answer, would hand back
-          the previous turn's text).
+        * ``"steered"`` — a run in flight accepted it, so *that* run is its turn.
+          ``steer()`` returning True is not proof it was read before the final
+          inference, though: text accepted after the last drain is parked on the
+          agent and re-queued as a fresh turn by ``promote_late_steer``
+          (``Agent.steer`` documents this). That is what the settle window below
+          covers.
+        * ``"queued"`` — nothing took it, so its turn has not started. Waiting for
+          the run that happens to be finishing would report a completion that
+          never included this message — and would hand back the *previous* turn's
+          answer. Three phases instead: let the run in flight end, wait for a run
+          to begin, wait for that one to end.
         """
         deadline = time.monotonic() + (self._grace if grace is None else grace)
+        # A cancel names a specific turn, so it is checked before anything else:
+        # the session stopping and an external cancel both end the turn early,
+        # and both mean "not a normal completion".
+        if self._stop.is_set() or self._cancelled.is_set():
+            return "cancelled"
+
         if disposition == "queued":
-            started = False
-            while time.monotonic() < deadline:
-                if self._stop.is_set():
-                    return "cancelled"
-                if self._is_running():
-                    started = True
-                    break
-                time.sleep(0.05)
-            if not started:
-                # Queued and never ran: the session is quitting, or the line was
-                # consumed by something that does not start a fresh run.
-                return "timeout"
-        while time.monotonic() < deadline:
-            if self._stop.is_set():
+            # 1. The run in flight (whose end is now) did not carry this text.
+            if self._is_running() and not self._await(lambda: not self._is_running(), deadline):
+                return self._gave_up()
+            if self._stop.is_set() or self._cancelled.is_set():
                 return "cancelled"
-            if not self._is_running():
-                # Give the response a beat to be recorded before reading it.
-                time.sleep(0.2)
-                return "completed"
-            time.sleep(0.05)
+            # 2. The turn that does carry it has to start first.
+            if not self._await(self._is_running, deadline):
+                # Never started: the session is quitting, or the line was consumed
+                # by something that does not begin a fresh run.
+                return self._gave_up()
+
+        # 3. Wait out the run that carries it.
+        if not self._await(lambda: not self._is_running(), deadline):
+            return self._gave_up()
+
+        # Settle: a line steered into the final inference is re-queued as the next
+        # turn, so a run starting right after this one may be the one carrying it.
+        # Deliberately a window rather than a guarantee — this cannot tell that
+        # run apart from the user typing something else at the same moment, and
+        # both mean work is under way that must not be reported as finished.
+        if self._await(self._is_running, min(deadline, time.monotonic() + self._settle),
+                       quiet=True):
+            if not self._await(lambda: not self._is_running(), deadline):
+                return self._gave_up()
+
+        if self._stop.is_set():
+            return "cancelled"
+        if self._cancelled.is_set():
+            return "cancelled"
+        # Give the response a beat to be recorded before the caller reads it.
+        time.sleep(0.2)
+        return "completed"
+
+    def _gave_up(self) -> str:
+        """Why a wait ended without the turn finishing.
+
+        A cancel is not a timeout: it names this turn, so a caller told
+        ``stopReason: cancelled`` can tell "interrupted" from "the session went
+        quiet". Reporting a plain timeout here would lose that distinction at
+        exactly the moment the docs promise it.
+        """
+        if self._cancelled.is_set() or self._stop.is_set():
+            return "cancelled"
         return "timeout"
 
+    def _await(self, predicate: Callable[[], bool], deadline: float,
+               *, quiet: bool = False) -> bool:
+        """Poll ``predicate`` until it holds or time runs out.
+
+        ``quiet`` is for the settle window, where not becoming true is the normal
+        outcome rather than a timeout.
+        """
+        while time.monotonic() < deadline:
+            if self._stop.is_set():
+                return False
+            # A cancel ends the turn it names, so a wait for that turn is over the
+            # moment it arrives — no point burning the rest of the grace window.
+            # Only when not already satisfied: a cancel and the run ending together
+            # is a completion that was interrupted, still worth reporting as one.
+            if self._cancelled.is_set() and not predicate():
+                return False
+            if predicate():
+                return True
+            time.sleep(0.05)
+        return bool(predicate()) if not quiet else False
+
     def _cancel_current(self, params: Dict[str, Any]) -> None:
+        """Interrupt the running turn, and make the waiting prompt say so.
+
+        The flag is the part that matters to a client: without it the prompt for
+        the cancelled turn would come back ``end_turn`` and a caller could not
+        tell "interrupted" from "finished on its own", which is what the docs
+        promise it can. Set before the cancel so the wait cannot miss it.
+        """
+        self._cancelled.set()
         if self._cancel is not None:
             self._cancel()
 
