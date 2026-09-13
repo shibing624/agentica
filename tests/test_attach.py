@@ -469,6 +469,10 @@ class TestPrompt:
                 "session/prompt", {"prompt": [{"type": "text", "text": "x"}]}
             )["result"]
             assert result.get("agenticaPending") is True
+            # Not ``end_turn``: "we accepted it but cannot say when it ends" is
+            # not "the turn finished". A client reading only ``stopReason``
+            # would otherwise read this as a completed turn.
+            assert result["stopReason"] == "agentica_pending", result
             client.close()
         finally:
             server.stop()

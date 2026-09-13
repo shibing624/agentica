@@ -540,8 +540,9 @@ class AttachServer:
             disposition = self._inject(text)
             if disposition not in ("steered", "queued"):
                 # An injector that reports nothing usable: do not claim to know
-                # when the work ends.
-                return {"stopReason": "end_turn", "agenticaPending": True}
+                # when the work ends. ``end_turn`` would be that claim, so this
+                # is the same "accepted, end unknown" answer as a timeout.
+                return {"stopReason": "agentica_pending", "agenticaPending": True}
             completed = self._wait_for_turn(disposition)
             answer = None
             if self._answer is not None:

@@ -114,14 +114,25 @@ try:
         "peers.AGENTICA_CACHE_DIR = cfg.AGENTICA_CACHE_DIR\n"
         "for p in peers.list_live_peers():\n"
         "    print(json.dumps({'peer_id': p.peer_id, 'name': p.name,"
-        " 'attach': p.attach_socket, 'session_id': p.session_id}))\n"
+        " 'attach': p.attach_socket, 'session_id': p.session_id,"
+        " 'cwd': p.cwd}))\n"
     )
     while time.monotonic() < deadline:
         out = subprocess.run(
             [sys.executable, "-c", probe_code], env=env, capture_output=True, text=True
         ).stdout.strip()
         rows = [json.loads(line) for line in out.splitlines() if line.strip()]
-        if rows and rows[0].get("attach"):
+        # An isolated AGENTICA_HOME makes this session the only peer visible
+        # here, so there is nothing to disambiguate; pick by the recorded cwd
+        # anyway so the script does not depend on "there is exactly one".
+        # Both sides through realpath: the record publishes the resolved cwd,
+        # and on macOS /var and /private/var are the same directory.
+        want = os.path.realpath(work)
+        rows = [
+            r for r in rows
+            if r.get("attach") and os.path.realpath(r.get("cwd") or "") == want
+        ]
+        if rows:
             peer_id = rows[0]["peer_id"]
             socket_path = rows[0]["attach"]
             break
