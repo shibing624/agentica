@@ -63,11 +63,20 @@ def patch_file_paths(patch: str) -> List[str]:
     return [m.group(1).strip() for m in _PATCH_FILE_RE.finditer(patch or "") if m.group(1).strip()]
 
 
-def _shorten_paths_in_command(command: str) -> str:
-    """Shorten absolute paths embedded in a shell command."""
-    cwd = str(Path.cwd())
-    if cwd in command:
-        command = command.replace(cwd + "/", "").replace(cwd, ".")
+# Live window: wrap the running execute command instead of an 80-char head cut.
+LIVE_EXECUTE_WRAP_ROWS = 6
+
+
+def _shorten_paths_in_command(command: str, work_dir: Optional[Path] = None) -> str:
+    """Shorten work-dir and home paths embedded in a shell command."""
+    command = str(command or "")
+    root = Path(work_dir).expanduser() if work_dir is not None else Path.cwd()
+    root_s = os.path.normpath(str(root))
+    if root_s in command:
+        command = command.replace(root_s + "/", "").replace(root_s, ".")
+    home = os.path.normpath(str(Path.home()))
+    if home and home in command:
+        command = command.replace(home, "~")
     return command
 
 
@@ -118,6 +127,7 @@ def format_execute_expand(command: str, output: str = "") -> str:
 def _display_execute_command(
     console_instance, command: str, *, full: bool = False,
     tool_call_id: Optional[str] = None,
+    work_dir: Optional[Path] = None,
 ) -> None:
     """Render an execute command.
 
@@ -126,7 +136,7 @@ def _display_execute_command(
     the detached job and must not hide behind a fold.
     """
     raw_command = str(command or "")
-    display_command = _shorten_paths_in_command(raw_command)
+    display_command = _shorten_paths_in_command(raw_command, work_dir)
     icon = TOOL_ICONS.get("execute", TOOL_ICONS["default"])
     header = f" {icon} execute "
     continuation = "   │ "
@@ -251,7 +261,7 @@ def format_tool_display(
     # Execute command - shorten absolute paths in command
     if tool_name == "execute":
         command = tool_args.get("command", "")
-        return _shorten_paths_in_command(command)
+        return _shorten_paths_in_command(command, work_dir)
     
     # Todo tools - list the todo items (show ALL todos, no truncation)
     if tool_name == "write_todos":
@@ -375,6 +385,7 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
         _display_execute_command(
             console_instance, tool_args.get("command", ""), full=full,
             tool_call_id=tool_call_id,
+            work_dir=work_dir,
         )
     # Special handling for write_todos - multi-line display.
     # Note: in this repo "task" is the dedicated subagent-spawn tool, so we

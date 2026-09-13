@@ -40,7 +40,7 @@ profile 之外的顶层块：`settings`（CLI 行为开关，与 model 无关，
 
 ### CLI 开关存在项目目录 / session sidecar，不在 config.yaml
 
-`/reasoning`、`/statusbar`、`/debug`、`/permissions`、`/tools add|remove` 属于"我怎么用这个目录/这段对话"，写两处（都在 `~/.agentica/projects/<user>/<slug>/` 下，不进用户 git 工作区）：
+`/reasoning`、`/statusbar`、`/debug`、`/peername`、`/permissions`、`/tools add|remove` 属于"我怎么用这个目录/这段对话"，写两处（都在 `~/.agentica/projects/<user>/<slug>/` 下，不进用户 git 工作区）：
 
 | 位置 | 记什么 | 谁读 |
 | --- | --- | --- |

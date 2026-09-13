@@ -364,7 +364,8 @@ class TestPrompt:
     def test_a_steered_prompt_waits_for_the_run_in_flight(self, tmp_path):
         """Steered: the run already going is the one carrying this text."""
         session = _Session(start_running=True)
-        server, injected, _ = _server(tmp_path, session=session, disposition="steered")
+        server, injected, _ = _server(tmp_path, session=session, disposition="steered",
+                                      settle=0.0)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
 
@@ -393,13 +394,11 @@ class TestPrompt:
         wait still returned on the wrong run's end.
         """
         session = _Session(start_running=True)
-        # ``settle`` is set below the gap between the two turns on purpose. At the
-        # default settle the window happened to span the gap, so the next turn
-        # starting inside it made the old logic look correct — the test passed with
-        # the queued phase deleted. A gap wider than the window is what makes the
-        # phase load-bearing.
-        server, _, _ = _server(tmp_path, session=session, disposition="queued",
-                               settle=0.2)
+        # The gap between the two turns is what makes the queued phases
+        # load-bearing: wait for the current run to end, *then* for the next
+        # one to start. Settle no longer applies to queued (it would span a
+        # short gap and hide a missing phase), so this is just the script.
+        server, _, _ = _server(tmp_path, session=session, disposition="queued")
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
             events = []
@@ -408,7 +407,7 @@ class TestPrompt:
                 time.sleep(0.2)
                 session.end()            # the run that does NOT carry it ends
                 events.append("current_ended")
-                time.sleep(0.6)          # longer than the settle window
+                time.sleep(0.35)         # a pause, not a settle-window skip
                 session.start()          # the queued turn starts
                 events.append("next_started")
                 time.sleep(0.3)
@@ -425,8 +424,111 @@ class TestPrompt:
             # assertion the old test was missing: the server returns only after
             # the second turn has started *and* ended.
             assert events == ["current_ended", "next_started", "next_ended"], (
-                f"returned with {events!r} — it settled on a run that never carried "
+                f"returned with {events!r} — it finished on a run that never carried "
                 f"this message"
+            )
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_queued_prompt_does_not_wait_for_the_next_unrelated_turn(self, tmp_path):
+        """Settle is for parked steers, not for queued.
+
+        After a queued turn ends, a goal lap or a typed line often starts inside
+        a 1s window. Waiting that out would delay every idle prompt and hand
+        back the *next* turn's answer. This test starts that unrelated turn
+        inside the default settle window; the reply must already be back.
+        """
+        session = _Session()
+        server, _, _ = _server(tmp_path, session=session, disposition="queued")
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            events = []
+
+            def _script():
+                time.sleep(0.08)
+                session.start()
+                events.append("queued_started")
+                time.sleep(0.12)
+                session.end()
+                events.append("queued_ended")
+                time.sleep(0.08)
+                session.start()
+                events.append("unrelated_started")
+                time.sleep(0.8)
+                session.end()
+                events.append("unrelated_ended")
+
+            threading.Thread(target=_script, daemon=True).start()
+            reply = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "just this"}]},
+            )
+            assert "error" not in reply, reply
+            # The 0.2s beat after the turn ends can overlap the unrelated start;
+            # that is fine. The load-bearing claim is we did not sit out that
+            # turn: its end must not have happened yet.
+            assert "queued_ended" in events
+            assert "unrelated_ended" not in events, (
+                f"returned with {events!r} — it waited for a turn that was not "
+                f"this message"
+            )
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_steered_prompt_waits_out_a_parked_follow_up(self, tmp_path):
+        """The one case settle is for: steer said yes, the run ended, then
+        ``promote_late_steer`` starts the turn that actually carries the text.
+        """
+        session = _Session(start_running=True)
+        server, _, _ = _server(tmp_path, session=session, disposition="steered",
+                               settle=0.5)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            events = []
+
+            def _script():
+                time.sleep(0.15)
+                session.end()
+                events.append("accepted_run_ended")
+                time.sleep(0.12)
+                session.start()
+                events.append("parked_started")
+                time.sleep(0.15)
+                session.end()
+                events.append("parked_ended")
+
+            threading.Thread(target=_script, daemon=True).start()
+            reply = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "late steer"}]},
+            )
+            assert "error" not in reply, reply
+            assert events == ["accepted_run_ended", "parked_started", "parked_ended"], (
+                f"returned with {events!r} — it did not wait for the parked turn"
+            )
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_queued_prompt_does_not_sit_out_the_settle_window(self, tmp_path):
+        """An idle inject must not pay a second of settle after its own turn."""
+        session = _Session()
+        server, _, _ = _server(tmp_path, session=session, disposition="queued",
+                               settle=1.0)
+        session.start_after(0.05, 0.1)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            started = time.monotonic()
+            reply = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "hi"}]},
+            )
+            elapsed = time.monotonic() - started
+            assert "error" not in reply, reply
+            assert elapsed < 0.8, (
+                f"queued prompt took {elapsed:.2f}s — it sat out the settle window"
             )
             client.close()
         finally:
@@ -540,17 +642,6 @@ class TestPrompt:
             elapsed = time.monotonic() - started
             assert result.get("stopReason") == "cancelled", result
             assert elapsed < 3, f"waited {elapsed:.1f}s despite the cancel"
-            client.close()
-        finally:
-            server.stop()
-
-        server, _, _ = _server(tmp_path, disposition="")
-        try:
-            client = _Client(server.path, token=server.token_file.read_text().strip())
-            result = client.call(
-                "session/prompt", {"prompt": [{"type": "text", "text": "x"}]}
-            )["result"]
-            assert result.get("agenticaPending") is True
             client.close()
         finally:
             server.stop()

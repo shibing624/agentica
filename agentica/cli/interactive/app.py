@@ -143,16 +143,23 @@ def _resume_session_cli_prefs(agent_config: dict) -> dict:
     return log.get_cli_prefs()
 
 
-def _visible_peer_name_for_status_bar(peer_session: Optional[PeerSession], agent) -> str:
-    """Return this session's short peer name only when it disambiguates windows.
+def _visible_peer_name_for_status_bar(
+    peer_session: Optional[PeerSession],
+    agent,
+    show_peer_name: Optional[bool] = None,
+) -> str:
+    """Return this session's short peer name for the status bar.
 
-    A single ordinary CLI does not need another always-on identifier. The name
-    becomes useful when another live session is in the same working directory,
-    or when this session is a forked conversation that the user is likely to
-    compare side-by-side with its source.
+    ``/peername on`` always shows it; ``off`` hides it. Unset keeps the
+    automatic rule: only when another live session shares this cwd, or this
+    session is a fork the user is likely to compare with its source.
     """
     if peer_session is None:
         return ""
+    if show_peer_name is False:
+        return ""
+    if show_peer_name is True:
+        return peer_session.name
 
     if agent is not None and agent._session_log is not None:
         if agent._session_log.get_forked_from():
@@ -547,7 +554,7 @@ def run_interactive(
         "thinking_mode": _status_thinking_mode(current_agent, agent_config),
         "work_dir": status_work_dir,
         "git_branch": _read_git_branch(status_work_dir),
-        "peer_name": _visible_peer_name_for_status_bar(state.peer_session, current_agent),
+        "peer_name": "",
         "context_tokens": 0,
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
@@ -568,6 +575,9 @@ def run_interactive(
         "goal_tokens_used": 0,
     }
     sync_view_prefs_to_tui(tui_state, agent_config)
+    tui_state["peer_name"] = _visible_peer_name_for_status_bar(
+        state.peer_session, current_agent, tui_state.get("show_peer_name"),
+    )
     _seed_context_tokens(current_agent, tui_state)
 
     # Cron control surface for the /cron daemon on|off command. We expose
@@ -698,7 +708,7 @@ def run_interactive(
                 peer_updates["cwd"] = result["work_dir"]
             state.peer_session.publish(**peer_updates)
             tui_state["peer_name"] = _visible_peer_name_for_status_bar(
-                state.peer_session, state.current_agent
+                state.peer_session, state.current_agent, tui_state.get("show_peer_name"),
             )
         if "session_started_at" in result:
             tui_state["session_started_at"] = result["session_started_at"]
@@ -1203,7 +1213,9 @@ def run_interactive(
                     dirty_files=list(git.dirty_files),
                     dirty_count=git.dirty_count,
                 )
-                tui_state["peer_name"] = _visible_peer_name_for_status_bar(peers, agent)
+                tui_state["peer_name"] = _visible_peer_name_for_status_bar(
+                    peers, agent, tui_state.get("show_peer_name"),
+                )
             except OSError:
                 logger.warning("peer heartbeat failed", exc_info=True)
             if state.agent_running:
@@ -1326,6 +1338,12 @@ def run_interactive(
                 attach_server.stop()
             except Exception:
                 pass
+            # The notify envelope must not keep advertising a socket that is
+            # gone: a consumer that connects after teardown would hit a dead
+            # path and read that as "the session is not running".
+            from agentica.notify import set_attach_endpoint
+
+            set_attach_endpoint(None, None)
         # Kick Langfuse's ~2s atexit shutdown (span flush + consumer-thread
         # joins) onto a daemon thread NOW so it overlaps with our own teardown
         # (_stop_cron, background_processes.stop, summary print) instead of

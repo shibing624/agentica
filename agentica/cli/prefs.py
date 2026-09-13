@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: CLI preferences that outlive one process.
 
-``/reasoning``, ``/statusbar``, ``/debug``, ``/permissions`` and ``/tools add``
+``/reasoning``, ``/statusbar``, ``/debug``, ``/peername``, ``/permissions`` and ``/tools add``
 used to live only in the process that set them: the change was gone at the next
 launch and, for ``/permissions``, even earlier than that — an agent rebuild
 (``/resume``, ``/model``) re-reads ``agent_config`` rather than the live agent,
@@ -39,13 +39,16 @@ from agentica.utils.log import logger
 # Read/written as a group: the CLI settings that are not model config. Adding a
 # key here is the only change needed for it to be persisted, read back, and (if
 # it is a view toggle) pushed to the status bar / stream loop.
-CLI_PREF_KEYS = ("show_reasoning", "statusbar_visible", "debug", "permissions", "extra_tools")
+CLI_PREF_KEYS = (
+    "show_reasoning", "statusbar_visible", "debug", "show_peer_name",
+    "permissions", "extra_tools",
+)
 
 # The subset the TUI keeps live in ``tui_state`` for the current process.
-_VIEW_PREF_KEYS = ("show_reasoning", "statusbar_visible", "debug")
+_VIEW_PREF_KEYS = ("show_reasoning", "statusbar_visible", "debug", "show_peer_name")
 
 # Keys whose value must be a plain bool / a known permission tier.
-_BOOL_PREF_KEYS = ("show_reasoning", "statusbar_visible", "debug")
+_BOOL_PREF_KEYS = ("show_reasoning", "statusbar_visible", "debug", "show_peer_name")
 
 _DEFAULTS: Dict[str, Any] = {
     "show_reasoning": True,
@@ -167,8 +170,9 @@ def apply_cli_prefs(
     the TUI seeds from and what survives an agent rebuild; only the settings
     with a startup flag are written through to the fields the rest of the CLI
     reads (``debug``, ``permissions``), and only when that flag was not given.
-    ``show_reasoning`` / ``statusbar_visible`` have no field of their own —
-    they live in ``tui_state`` (see :func:`sync_view_prefs_to_tui`).
+    ``show_reasoning`` / ``statusbar_visible`` / ``show_peer_name`` have no
+    field of their own — they live in ``tui_state`` (see
+    :func:`sync_view_prefs_to_tui`).
 
     ``replace=True`` is for adopting a *different* source of truth — switching
     to a resumed session's sidecar. Merging there would keep whatever the

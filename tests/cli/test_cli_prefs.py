@@ -2,7 +2,7 @@
 """
 @author: XuMing(xuming624@qq.com)
 @description: CLI preferences (`/reasoning`, `/statusbar`, `/debug`,
-`/permissions`) that must survive the process that set them.
+`/peername`, `/permissions`) that must survive the process that set them.
 """
 
 import json
@@ -113,6 +113,39 @@ class TestToggleCommandsPersist(unittest.TestCase):
         self.assertFalse(ctx.agent_config["debug"])
         self.assertEqual(log.get_cli_prefs(), {"debug": False})
 
+    def test_peername_on_persists_in_both_scopes(self):
+        from types import SimpleNamespace
+
+        agent, log = _agent_with_log(self.work.path)
+        tui = {}
+        ctx = _ctx(self.work.path, agent=agent, tui_state=tui)
+        ctx.peer_session = SimpleNamespace(name="vpetmac-c4")
+
+        with patch.object(cli_model_config, "get_console", return_value=MagicMock()):
+            cli_model_config._cmd_peername(ctx, "on")
+
+        self.assertTrue(tui["show_peer_name"])
+        self.assertEqual(tui["peer_name"], "vpetmac-c4")
+        self.assertEqual(log.get_cli_prefs(), {"show_peer_name": True})
+        self.assertEqual(self.work.project_file().get("cli"), {"show_peer_name": True})
+
+    def test_peername_no_arg_toggles_and_persists(self):
+        from types import SimpleNamespace
+
+        agent, log = _agent_with_log(self.work.path)
+        tui = {}
+        ctx = _ctx(self.work.path, agent=agent, tui_state=tui)
+        ctx.peer_session = SimpleNamespace(name="vpetmac-c4")
+
+        with patch.object(cli_model_config, "get_console", return_value=MagicMock()):
+            cli_model_config._cmd_peername(ctx, "")
+            cli_model_config._cmd_peername(ctx, "")
+
+        self.assertFalse(tui["show_peer_name"])
+        self.assertEqual(tui["peer_name"], "")
+        self.assertEqual(log.get_cli_prefs(), {"show_peer_name": False})
+        self.assertEqual(self.work.project_file().get("cli"), {"show_peer_name": False})
+
     def test_permissions_also_updates_agent_config(self):
         """A rebuild reads agent_config, not the live agent — without this the
         tier snapped back to allow-all on `/resume` or `/model`."""
@@ -181,6 +214,18 @@ class TestStartupMerge(unittest.TestCase):
         # Not saved → built-in default, never a missing key.
         self.assertTrue(tui["statusbar_visible"])
         self.assertFalse(tui["debug"])
+        # Never saved → automatic peer-name rule, not a forced off.
+        self.assertNotIn("show_peer_name", tui)
+
+    def test_saved_show_peer_name_applies_to_a_fresh_tui(self):
+        cli_prefs.write_project_prefs(self.work.path, {"show_peer_name": True})
+
+        agent_config = {}
+        cli_prefs.apply_cli_prefs(agent_config, cli_prefs.read_project_prefs(self.work.path))
+
+        tui = {}
+        cli_prefs.sync_view_prefs_to_tui(tui, agent_config)
+        self.assertTrue(tui["show_peer_name"])
 
     def test_explicit_flag_beats_the_saved_value(self):
         cli_prefs.write_project_prefs(self.work.path, {"permissions": "auto", "debug": True})

@@ -138,6 +138,22 @@ class TestPeerNameStatusBarVisibility:
 
         assert _visible_peer_name_for_status_bar(peer_session, agent) == "agentica-aa"
 
+    def test_on_shows_even_when_auto_would_hide(self):
+        from agentica.cli.interactive.app import _visible_peer_name_for_status_bar
+
+        peer_session = _FakePeerSession(peers=[])
+        agent = SimpleNamespace(_session_log=_FakeSessionLog())
+
+        assert _visible_peer_name_for_status_bar(peer_session, agent, True) == "agentica-aa"
+
+    def test_off_hides_even_when_auto_would_show(self):
+        from agentica.cli.interactive.app import _visible_peer_name_for_status_bar
+
+        peer_session = _FakePeerSession(peers=[SimpleNamespace(cwd="/repo")])
+        agent = SimpleNamespace(_session_log=_FakeSessionLog())
+
+        assert _visible_peer_name_for_status_bar(peer_session, agent, False) == ""
+
 
 class TestRelayedTurnsAreNotEchoedTwice:
     def test_queued_relayed_text_is_tagged_so_the_echo_can_be_skipped(self):

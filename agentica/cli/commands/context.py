@@ -184,6 +184,7 @@ CONCURRENT_CMDS = frozenset(
         "/permissions",
         "/statusbar",
         "/sb",
+        "/peername",
         "/reasoning",
         "/status",
         "/agents",

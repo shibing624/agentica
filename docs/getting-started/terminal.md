@@ -487,6 +487,18 @@ Session JSONL 的读时分析，和 Web 对话标题旁「查看轨迹」同一�
   Debug logging: OFF
 ```
 
+### `/peername [on|off]`
+状态栏上显示或隐藏本会话的短 peer 名（如 `vpetmac-c4`）。不带参数翻转当前状态。
+跟 `/debug` 一样写入本目录 `project.json` 和当前 session sidecar，下次启动继续生效。
+从没设过则仍按自动规则：同 cwd 另有 live session、或本 session 是 fork 时才显示。
+
+```text
+> /peername on
+  Peer name display: ON (vpetmac-c4)
+> /peername off
+  Peer name display: OFF
+```
+
 ### `/reload-skills`
 从磁盘重新加载技能文件，适合开发技能时热更新：
 ```

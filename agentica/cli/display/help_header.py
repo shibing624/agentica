@@ -144,6 +144,7 @@ def show_help(skills_registry=None):
             "/debug [on|off]":  "Toggle verbose debug logging",
             "/reasoning":       "Toggle reasoning display: on | off",
             "/statusbar, /sb":  "Toggle the status bar",
+            "/peername":        "Show this session's peer name on the status bar: on | off",
         },
         "Tools & Skills": {
             "/tools":           "Manage tools: add | remove | info | search",

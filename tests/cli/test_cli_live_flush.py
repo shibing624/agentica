@@ -85,6 +85,20 @@ class TestStreamLiveWindow(unittest.TestCase):
         con = Console(file=buf, width=120, force_terminal=False, no_color=True)
         return StreamDisplayManager(con), buf
 
+    def test_compose_live_wraps_long_execute_command(self):
+        """A running execute used to keep the first 80 chars — usually just `cd`."""
+        mgr, _ = self._mgr_and_buf()
+        mgr.console.width = 80
+        command = (
+            "cd /Users/xuming/Documents/Codes/VPetMac && "
+            "swift test --scratch-path .build-ios-arm64 --filter VPetMacTests"
+        )
+        mgr.display_tool("execute", {"command": command}, tool_call_id="e1")
+        live = "\n".join(mgr.compose_live("⠋"))
+        self.assertIn("swift test", live)
+        self.assertIn("--filter VPetMacTests", live)
+        self.assertNotIn("build-...", live)
+
     def test_compose_live_caps_at_live_max_rows(self):
         mgr, _ = self._mgr_and_buf()
         for i in range(LIVE_MAX_ROWS + 5):

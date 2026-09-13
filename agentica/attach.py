@@ -220,11 +220,13 @@ class AttachServer:
         # legitimately takes minutes and the alternative is claiming an answer
         # that is still being produced. Injectable so tests do not sit for it.
         self._grace = grace
-        # How long to watch for a re-queued turn right after the one that just
-        # ended: a line steered into a run's final inference is parked and
-        # re-queued by ``promote_late_steer``, so the turn carrying it has not
-        # happened yet even though ``steer()`` said yes. Not a correctness
-        # guarantee (see ``_wait_for_turn``) — a window, and 0 disables it.
+        # How long a *steered* prompt may watch for a re-queued turn after the
+        # run that accepted it ends. ``steer()`` can park text accepted during
+        # the final inference; ``promote_late_steer`` then starts a fresh turn.
+        # Queued prompts do not use this window — their turn is already the
+        # next one, and sitting it out would tax every idle inject by a second
+        # and swallow a goal lap / typed line as ``agenticaAnswer``. 0 disables
+        # it. See ``_wait_for_turn``.
         self._settle = settle
         # Set by ``session/cancel`` so the prompt it interrupted reports
         # ``cancelled`` rather than looking like a normal completion.
@@ -581,13 +583,14 @@ class AttachServer:
           ``steer()`` returning True is not proof it was read before the final
           inference, though: text accepted after the last drain is parked on the
           agent and re-queued as a fresh turn by ``promote_late_steer``
-          (``Agent.steer`` documents this). That is what the settle window below
-          covers.
+          (``Agent.steer`` documents this). The settle window below covers that
+          case only — not queued, not "anything that starts in the next second".
         * ``"queued"`` — nothing took it, so its turn has not started. Waiting for
           the run that happens to be finishing would report a completion that
           never included this message — and would hand back the *previous* turn's
           answer. Three phases instead: let the run in flight end, wait for a run
-          to begin, wait for that one to end.
+          to begin, wait for that one to end. No settle after that: the turn
+          that just ended *is* the one that carried the text.
         """
         deadline = time.monotonic() + (self._grace if grace is None else grace)
         # A cancel names a specific turn, so it is checked before anything else:
@@ -612,15 +615,19 @@ class AttachServer:
         if not self._await(lambda: not self._is_running(), deadline):
             return self._gave_up()
 
-        # Settle: a line steered into the final inference is re-queued as the next
-        # turn, so a run starting right after this one may be the one carrying it.
-        # Deliberately a window rather than a guarantee — this cannot tell that
-        # run apart from the user typing something else at the same moment, and
-        # both mean work is under way that must not be reported as finished.
-        if self._await(self._is_running, min(deadline, time.monotonic() + self._settle),
-                       quiet=True):
-            if not self._await(lambda: not self._is_running(), deadline):
-                return self._gave_up()
+        # Settle only for steered: a line accepted during the final inference is
+        # parked and re-queued, so the next run may be the one that actually
+        # carries the text. Queued already waited for *its* turn; applying the
+        # window there taxes every idle prompt by a second and, with a goal
+        # loop or a typed line, hands back someone else's answer.
+        if disposition == "steered" and self._settle > 0:
+            if self._await(
+                self._is_running,
+                min(deadline, time.monotonic() + self._settle),
+                quiet=True,
+            ):
+                if not self._await(lambda: not self._is_running(), deadline):
+                    return self._gave_up()
 
         if self._stop.is_set():
             return "cancelled"

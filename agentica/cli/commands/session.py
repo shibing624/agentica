@@ -570,7 +570,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 set_project_profile(agent_config.get("work_dir") or os.getcwd(), profile_name)
 
         # The resumed session's own CLI toggles (`/reasoning`, `/statusbar`,
-        # `/debug`, `/permissions`) beat this work_dir's, the same way its
+        # `/debug`, `/peername`, `/permissions`) beat this work_dir's, the same way its
         # profile beats the project's active profile: one directory holds
         # sessions that were read differently, and resuming is a request for
         # the session as it was.

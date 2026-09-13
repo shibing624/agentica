@@ -1023,3 +1023,40 @@ def _cmd_statusbar(ctx: CommandContext, cmd_args: str = ""):
     record_cli_prefs(ctx.agent_config, ctx.current_agent, {"statusbar_visible": not current})
     state = "OFF" if current else "ON"
     con.print(f"  [green]Status bar: {state}[/green]")
+
+
+def _cmd_peername(ctx: CommandContext, cmd_args: str = ""):
+    """Show or hide this session's short peer name on the status bar.
+
+    Same persistence as ``/debug``: session sidecar + this work_dir's
+    ``project.json``, so the next CLI here starts with the same display.
+    ``/peername`` with no argument flips the current state; ``on`` / ``off``
+    set it explicitly. Unset (never saved) keeps the automatic rule.
+    """
+    con = get_console()
+    if ctx.tui_state is None:
+        return
+    arg = cmd_args.strip().lower()
+    current = bool(ctx.tui_state.get("show_peer_name"))
+
+    if arg == "":
+        enable = not current
+    elif arg in ("on", "true", "1", "show"):
+        enable = True
+    elif arg in ("off", "false", "0", "hide"):
+        enable = False
+    else:
+        con.print(f"  [dim]Unknown argument: {arg}. Use: /peername on|off[/dim]")
+        return
+
+    ctx.tui_state["show_peer_name"] = enable
+    record_cli_prefs(ctx.agent_config, ctx.current_agent, {"show_peer_name": enable})
+    peers = ctx.peer_session
+    name = peers.name if peers is not None else ""
+    ctx.tui_state["peer_name"] = name if enable else ""
+
+    if enable:
+        label = f" ({name})" if name else ""
+        con.print(f"  [green]Peer name display: ON{label}[/green]")
+    else:
+        con.print("  [green]Peer name display: OFF[/green]")

@@ -38,7 +38,9 @@ from .console import (
 from .messages import _has_markdown
 from .tool_format import (
     HANDOFF_TOOLS,
+    LIVE_EXECUTE_WRAP_ROWS,
     _display_tool_impl,
+    _wrap_command_lines,
     format_execute_expand,
     format_tool_display,
     patch_file_paths,
@@ -401,18 +403,32 @@ class StreamDisplayManager:
     def compose_live(self, spinner: str = "⠋") -> List[str]:
         """Plain-text rows for the prompt_toolkit live window (capped)."""
         lines: List[str] = []
+        width = max(40, int(getattr(self.console, "width", 80) or 80))
         for block in self._live.blocks():
             spin = spinner if not block.finished else "✓"
             icon = TOOL_ICONS.get(block.tool_name, TOOL_ICONS["default"])
             params = self._format_call(block.tool_name, block.tool_args)
-            if "\n" in params:
-                params = params.split("\n", 1)[0] + "…"
-            if len(params) > 80:
-                params = params[:77] + "..."
             head = f"  {spin} {icon} {block.tool_name}"
-            if params:
-                head += f" {params}"
-            lines.append(head)
+            if block.tool_name == "execute" and params:
+                wrap_width = max(24, width - len(head) - 1)
+                wrapped = _wrap_command_lines(params, wrap_width)
+                shown = wrapped[:LIVE_EXECUTE_WRAP_ROWS]
+                omitted = len(wrapped) - len(shown)
+                if shown:
+                    lines.append(f"{head} {shown[0]}")
+                    lines.extend(f"     {extra}" for extra in shown[1:])
+                else:
+                    lines.append(head)
+                if omitted:
+                    lines.append(f"     … +{omitted} lines")
+            else:
+                if "\n" in params:
+                    params = params.split("\n", 1)[0] + "…"
+                if len(params) > 80:
+                    params = params[:77] + "..."
+                if params:
+                    head += f" {params}"
+                lines.append(head)
             for sub in block.sub_lines:
                 plain = _strip_rich_markup(sub)
                 if len(plain) > 80:

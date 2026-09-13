@@ -270,6 +270,36 @@ class TestNonBlockingEvents:
             reset_sink_for_tests()
             desktop.close()
 
+    def test_clearing_the_endpoint_stops_advertising_it(self):
+        """The CLI teardown path: socket is gone, so later envelopes must not
+        keep pointing at it. ``set_attach_endpoint(None, None)`` is that clear
+        — not the test-only process reset.
+        """
+        desktop = _FakeDesktop()
+        try:
+            from agentica.notify import set_attach_endpoint
+
+            set_attach_endpoint("/tmp/agentica-501/abc.sock", "abc")
+            sink = _sink(desktop)
+            sink.emit_event("run.started")
+            _flush(sink)
+            set_attach_endpoint(None, None)
+            sink.emit_event("run.completed")
+            _flush(sink)
+            sink.stop()
+
+            started = desktop.requests[0]["json"]["transport"]
+            ended = desktop.requests[1]["json"]["transport"]
+            assert started["attach_socket"] == "/tmp/agentica-501/abc.sock"
+            assert "attach_socket" not in ended
+            assert "peer_id" not in ended
+        finally:
+            from agentica.notify import reset_sink_for_tests, set_attach_endpoint
+
+            set_attach_endpoint(None, None)
+            reset_sink_for_tests()
+            desktop.close()
+
     def test_the_process_reset_also_clears_the_attach_endpoint(self):
         """The autouse fixture calls ``reset_sink_for_tests`` and is the only
         thing stopping one test's attach point from reaching the next. That

@@ -13,6 +13,7 @@ from agentica.cli.commands.model_config import (
     _cmd_model,
     _cmd_reasoning,
     _cmd_status,
+    _cmd_peername,
     _cmd_statusbar,
     _cmd_upgrade,
     _cmd_usage,
@@ -111,6 +112,7 @@ COMMAND_REGISTRY = {
     "/reasoning": (_cmd_reasoning, "Toggle reasoning display: on | off"),
     "/statusbar": (_cmd_statusbar, "Toggle the status bar visibility"),
     "/sb": (_cmd_statusbar, "Toggle the status bar (alias)"),
+    "/peername": (_cmd_peername, "Show this session's peer name on the status bar: on | off"),
     "/status": (_cmd_status, "Show session status overview"),
     # Tools & Skills
     "/tools": (_cmd_tools, "Manage tools: add | remove | info | search"),
