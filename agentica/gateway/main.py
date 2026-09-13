@@ -178,10 +178,33 @@ async def lifespan(app: FastAPI):
         # the same trust boundary, and same ordering — replies are pushed back
         # through the channels. Built before the bridge, which needs its peer
         # ids to keep the gateway agent out of `@list`.
+        async def _queued_mail_starts_a_turn(session_id: str, text: str) -> None:
+            """Leftover ``delivery=queue`` mail becomes this chat's next turn."""
+            if not text.strip() or deps.agent_peers is None:
+                return
+            route = deps.agent_peers.route_for(session_id)
+            if route is None:
+                return
+            from .channels.base import Message
+
+            channel, channel_id = route
+            await _enqueue_session_message(
+                session_id,
+                Message(
+                    channel=channel,
+                    channel_id=channel_id,
+                    sender_id="peer",
+                    sender_name="peer",
+                    content=text,
+                    message_id=f"peer-queue-{session_id}",
+                ),
+            )
+
         deps.agent_peers = GatewayAgentPeers(
             channel_manager=deps.channel_manager,
             is_live=deps.agent_service.has_cached_session,
             is_busy=deps.agent_service.is_session_active,
+            start_turn=_queued_mail_starts_a_turn,
         )
         deps.agent_service.agent_peers = deps.agent_peers
         deps.agent_peers.start()
@@ -548,6 +571,27 @@ _channel_queue_lock = asyncio.Lock()
 _MAX_CHANNEL_QUEUE = 20
 
 
+async def _enqueue_session_message(session_id: str, message) -> None:
+    """Put one inbound line on this session's FIFO; start a worker if needed."""
+    async with _channel_queue_lock:
+        queue = _channel_queues.get(session_id)
+        if queue is None:
+            queue = asyncio.Queue()
+            _channel_queues[session_id] = queue
+        if queue.qsize() >= _MAX_CHANNEL_QUEUE:
+            logger.warning(
+                f"Channel queue full for session {session_id} "
+                f"({queue.qsize()} pending); dropping message"
+            )
+            return
+        queue.put_nowait(message)
+        worker = _channel_workers.get(session_id)
+        if worker is None or worker.done():
+            _channel_workers[session_id] = asyncio.create_task(
+                _channel_queue_worker(session_id, queue)
+            )
+
+
 def _home_account() -> str:
     """The one person this personal-assistant gateway belongs to.
 
@@ -594,23 +638,7 @@ async def _handle_channel_message(message) -> None:
     if deps.agent_peers is not None:
         deps.agent_peers.note_route(session_id, message.channel, message.channel_id)
 
-    async with _channel_queue_lock:
-        queue = _channel_queues.get(session_id)
-        if queue is None:
-            queue = asyncio.Queue()
-            _channel_queues[session_id] = queue
-        if queue.qsize() >= _MAX_CHANNEL_QUEUE:
-            logger.warning(
-                f"Channel queue full for session {session_id} "
-                f"({queue.qsize()} pending); dropping message"
-            )
-            return
-        queue.put_nowait(message)
-        worker = _channel_workers.get(session_id)
-        if worker is None or worker.done():
-            _channel_workers[session_id] = asyncio.create_task(
-                _channel_queue_worker(session_id, queue)
-            )
+    await _enqueue_session_message(session_id, message)
 
 
 async def _channel_queue_worker(session_id: str, queue: asyncio.Queue) -> None:

@@ -13,7 +13,7 @@ from agentica.shell_hooks.config import (
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in ("ENABLED", "COMMAND", "TIMEOUT"):
+    for name in ("ENABLED", "COMMAND"):
         monkeypatch.delenv(f"AGENTICA_HOOKS_{name}", raising=False)
 
 
@@ -81,12 +81,7 @@ class TestEnvOverrides:
         assert cfg.command == ["/from/config"]
 
 
-class TestTimeout:
-    def test_default_is_none_meaning_no_cap_of_ours(self):
-        assert _cfg({"enabled": True}).timeout is None
-
-    def test_a_number_is_read(self):
-        assert _cfg({"timeout": 12}).timeout == 12.0
-
-    def test_junk_is_no_cap(self):
-        assert _cfg({"timeout": "soon"}).timeout is None
+class TestRemovedTimeoutIsIgnored:
+    def test_a_leftover_timeout_key_does_not_become_a_field(self):
+        cfg = _cfg({"enabled": True, "timeout": 12})
+        assert not hasattr(cfg, "timeout")

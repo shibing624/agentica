@@ -241,7 +241,9 @@ def _anchor_text(agent: Any) -> Optional[str]:
     return getattr(anchor, "source_query", None)
 
 
-def _offer_approval_to_hook(pending: PendingApproval, state: Any, loop: Any) -> None:
+def _offer_approval_to_hook(
+    pending: PendingApproval, state: Any, loop: Any, ui_holder: Optional[dict] = None
+) -> None:
     """Offer ``pending`` to the user's hook command and return immediately.
 
     The process is polled on its own daemon thread. When the user answers in the
@@ -275,8 +277,6 @@ def _offer_approval_to_hook(pending: PendingApproval, state: Any, loop: Any) -> 
             request.kill()
             return
 
-        registry = state.approval_registry
-
         def _poll() -> None:
             try:
                 while request.still_waiting:
@@ -285,10 +285,14 @@ def _offer_approval_to_hook(pending: PendingApproval, state: Any, loop: Any) -> 
                         decision = reply.get("decision")
                         if isinstance(decision, str):
                             loop.call_soon_threadsafe(
-                                _apply_hook_decision, registry, tool_call_id, decision
+                                _apply_hook_decision,
+                                state,
+                                tool_call_id,
+                                decision,
+                                ui_holder,
                             )
                         return
-                    if registry is None or not registry.is_parked(tool_call_id):
+                    if not state.approval_registry.is_parked(tool_call_id):
                         logger.debug(
                             f"shell hooks: approval {tool_call_id} was already "
                             f"decided; the hook answer arrived second"
@@ -308,7 +312,20 @@ def _offer_approval_to_hook(pending: PendingApproval, state: Any, loop: Any) -> 
         logger.debug(f"shell hooks: approval offer failed: {exc}")
 
 
-def _apply_hook_decision(registry: Any, tool_call_id: str, decision: str) -> None:
+def _apply_hook_decision(
+    state: Any,
+    tool_call_id: str,
+    decision: str,
+    ui_holder: Optional[dict] = None,
+) -> None:
+    """Apply a hook answer the same way a keypress does.
+
+    ``registry.decide`` unparks the runner. The card lives in the prompt_toolkit
+    layout, not scrollback, so hiding it without reprinting would drop the
+    command the user just approved — the same remnant ``complete_approval``
+    writes for a typed y / p / esc.
+    """
+    registry = state.approval_registry
     # False means the id is unknown or was already decided — normally the user
     # answered in the terminal first. That is a race, not an error.
     if not registry.decide(tool_call_id, decision):
@@ -316,6 +333,26 @@ def _apply_hook_decision(registry: Any, tool_call_id: str, decision: str) -> Non
             f"shell hooks: approval {tool_call_id} was already decided; "
             f"the hook answer arrived second"
         )
+        return
+    req = state.input_request
+    pending = (
+        req.approval_pending
+        if is_approval_request(req) and req.approval_id == tool_call_id
+        else None
+    )
+    if pending is None:
+        return
+    if state.input_request is req:
+        state.input_request = None
+    from agentica.cli.interactive.console_io import _ask_active, _ask_state_lock
+
+    with _ask_state_lock:
+        _ask_active[0] = False
+    _print_approval_record(pending, decision)
+    req.submit(decision)
+    app = (ui_holder or {}).get("app")
+    if app is not None:
+        app.invalidate()
 
 
 def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
@@ -349,7 +386,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         # offered to a desktop app, where the user may answer instead — the same
         # answer, applied the same way. The app has no authority of its own, and
         # with no hook configured this is a no-op.
-        _offer_approval_to_hook(pending, state, loop)
+        _offer_approval_to_hook(pending, state, loop, ui_holder)
 
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",

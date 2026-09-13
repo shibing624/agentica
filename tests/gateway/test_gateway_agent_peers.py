@@ -211,6 +211,48 @@ class TestReplies:
         assert channel.sent == []
         assert unread_count(gw.peer_id) == 1
 
+    def test_queued_mail_starts_a_turn_after_the_run(self):
+        """``delivery=queue`` is next-turn work, not a toast on the phone.
+
+        Steer still goes to IM (a CLI reply the user should see). Queue is
+        shown *and* handed to ``start_turn`` so the gateway agent runs it.
+        """
+        started = []
+
+        async def start_turn(session_id, text):
+            started.append((session_id, text))
+
+        cli = _cli("payments-a1")
+        service, channel = _gateway_peers(live={"s1"})
+        service._start_turn = start_turn
+        service.note_route("s1", ChannelType.WECOM, "chat-1")
+        gw = service.session_for("s1")
+        cli.send(gw.peer_id, "committed 4f2a1c9")
+        cli.send(gw.peer_id, "do this next", delivery="queue")
+
+        asyncio.run(service._tick())
+
+        assert ("chat-1", "payments-a1 ›\ncommitted 4f2a1c9") in channel.sent
+        assert ("chat-1", "payments-a1 ›\ndo this next") in channel.sent
+        assert len(started) == 1
+        assert started[0][0] == "s1"
+        assert "do this next" in started[0][1]
+        assert "committed 4f2a1c9" not in started[0][1]
+        assert unread_count(gw.peer_id) == 0
+
+    def test_queued_mail_is_still_shown_when_no_turn_starter_is_wired(self):
+        """A test / miswired process must not drop the file."""
+        cli = _cli("payments-a1")
+        service, channel = _gateway_peers(live={"s1"})
+        service.note_route("s1", ChannelType.WECOM, "chat-1")
+        gw = service.session_for("s1")
+        cli.send(gw.peer_id, "do this next", delivery="queue")
+
+        asyncio.run(service._tick())
+
+        assert channel.sent == [("chat-1", "payments-a1 ›\ndo this next")]
+        assert unread_count(gw.peer_id) == 0
+
     def test_a_web_session_keeps_its_mail_until_its_next_turn(self):
         """No IM route to push to; draining here would consume a message with
         nowhere to put it."""

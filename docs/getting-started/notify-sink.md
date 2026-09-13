@@ -27,11 +27,15 @@
 |---|---|---:|---|
 | `POST /event` | 通知，不等回话 | 2s | 不解析 |
 
-> 曾经还有 `POST /await`（等用户回答的阻塞路径）。它和它的两个调用点
-> （`notify/questions.py`、`notify/approvals.py`）已经**删除**：回答现在由用户自己
+> 曾经还有 `POST /await`（等用户回答的阻塞路径）。**删的是 agentica 这一侧的
+> 调用**（`notify/questions.py`、`notify/approvals.py`）：回答现在由用户自己
 > 配置的 hook 命令承载（[shell-hooks.md](shell-hooks.md)）。删除的理由是
 > 「一条回答通道，两套实现」—— 桌宠要为 agentica 单独实现一遍协议，而
 > hook 命令是每个 CLI 都有的形态，桌宠不必为 agentica 写任何东西。
+>
+> **桌宠的 `POST /await` 端点还活着。** Claude Code 的 `PermissionRequest`
+> （`blocking: true`）仍走它，挂起队列 / held-connection 也是那条活路。
+> 不要因为 agentica 不再调用就去删端点或超时逻辑。
 
 装上的都是**并挂**，不是替换：`AgentHooks` / `RunHooks` 的语义不变，hook 那条通道
 也各自独立（一个挂了不影响另一个）。

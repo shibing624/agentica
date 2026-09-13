@@ -23,14 +23,15 @@ phone without knowing anything about the gateway.
 Two things this module owns beyond publishing:
 
 **Replies have to find their way back to the phone.** A CLI answers into this
-session's mailbox. Mid-turn the Runner drains it (``agent.peer_session``) and
-the model sees it; between turns nobody would, so the poll loop drains and
-pushes it to the IM conversation this session belongs to. The route is
-*recorded* by the caller that already knows it
-(``main.py::_process_channel_message``) rather than parsed back out of a
-session id — ``agent:{agent_id}:{channel}:{channel_id}`` is unambiguous to
-build and not to split. A web-UI session has no IM route, so its mail is left
-in the mailbox for the next turn rather than dropped.
+session's mailbox. Mid-turn the Runner drains ``steer`` (``agent.peer_session``)
+and the model sees it; ``queue`` stays until the run ends. Between turns the
+poll loop pushes ``steer`` to the IM conversation (a reply the user should
+see) and hands leftover ``queue`` to ``start_turn`` so it becomes the next
+agent turn — the same split the CLI idle loop uses. The route is *recorded*
+by the caller that already knows it (``main.py::_process_channel_message``)
+rather than parsed back out of a session id. A web-UI session has no IM
+route, so its mail is left in the mailbox for the next turn rather than
+dropped.
 
 **A live record must not outlive the session it describes.** Agents are cached
 LRU, so eviction, session deletion and shutdown all end sessions without
@@ -48,9 +49,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
-from agentica.peers import PeerMessage, PeerSession, default_peer_name
+from agentica.peers import (
+    DELIVERY_QUEUE,
+    DELIVERY_STEER,
+    PeerMessage,
+    PeerSession,
+    default_peer_name,
+    format_for_model,
+)
 from agentica.utils.log import logger
 
 from ..channels.base import Channel, ChannelType
@@ -116,11 +124,13 @@ class GatewayAgentPeers:
         channel_manager=None,
         is_live: Optional[Callable[[str], bool]] = None,
         is_busy: Optional[Callable[[str], bool]] = None,
+        start_turn: Optional[Callable[[str, str], Awaitable[None]]] = None,
         poll_interval: float = POLL_INTERVAL,
     ) -> None:
         self._channel_manager = channel_manager
         self._is_live = is_live
         self._is_busy = is_busy
+        self._start_turn = start_turn
         self._poll_interval = poll_interval
         self._sessions: Dict[str, PeerSession] = {}
         self._routes: Dict[str, Tuple[ChannelType, str]] = {}
@@ -182,6 +192,10 @@ class GatewayAgentPeers:
         self._sessions[session_id] = session
         logger.info(f"Gateway agent peer {session.name} [peer={session.peer_id}] published")
         return session
+
+    def route_for(self, session_id: str) -> Optional[Tuple[ChannelType, str]]:
+        """The IM conversation this session's replies go to, if any."""
+        return self._routes.get(session_id)
 
     def note_route(self, session_id: str, channel: ChannelType, channel_id: str) -> None:
         """Remember where this session's replies go, before its agent exists.
@@ -252,28 +266,44 @@ class GatewayAgentPeers:
                 self._unpublish(session_id)
                 continue
             route = self._routes.get(session_id)
-            messages = await asyncio.to_thread(self._refresh_and_drain, session, busy, route)
-            for message in messages:
+            to_push, to_run = await asyncio.to_thread(
+                self._refresh_and_drain, session, busy, route
+            )
+            for message in to_push:
                 await self._push(route, message)
+            if to_run:
+                # The user sees who spoke (same remnant the CLI prints), then
+                # the leftover ``queue`` mail becomes the next turn.
+                for message in to_run:
+                    await self._push(route, message)
+                if self._start_turn is not None:
+                    await self._start_turn(session_id, format_for_model(to_run))
 
     @staticmethod
     def _refresh_and_drain(
         session: PeerSession,
         busy: bool,
         route: Optional[Tuple[ChannelType, str]],
-    ) -> List[PeerMessage]:
+    ) -> Tuple[List[PeerMessage], List[PeerMessage]]:
         """Republish presence and, when it is ours to deliver, take the mail.
 
-        Two cases leave the mailbox alone. **Mid-turn**: the Runner drains it
-        between tool batches and the model acts on it, which is strictly better
-        than telling the user something the agent it is talking to has not
-        seen. **No IM route** (a web-UI session): draining here would consume a
-        message with nowhere to put it, so it waits for the next turn instead.
+        Two cases leave the mailbox alone. **Mid-turn**: the Runner drains
+        ``steer`` between tool batches and the model acts on it, which is
+        strictly better than telling the user something the agent it is talking
+        to has not seen; ``queue`` stays for after this run. **No IM route**
+        (a web-UI session): draining here would consume a message with nowhere
+        to put it, so it waits for the next turn instead.
+
+        Returns ``(to_push, to_run)``. Idle IM: ``steer`` is a reply the user
+        should see; leftover ``queue`` is the next turn's work.
         """
         session.heartbeat(busy=busy)
         if busy or route is None:
-            return []
-        return session.drain()
+            return [], []
+        return (
+            session.drain(delivery=DELIVERY_STEER),
+            session.drain(delivery=DELIVERY_QUEUE),
+        )
 
     async def _push(self, route: Optional[Tuple[ChannelType, str]], message: PeerMessage) -> None:
         if route is None or self._channel_manager is None:

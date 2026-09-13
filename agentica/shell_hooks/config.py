@@ -68,29 +68,12 @@ def _parse_command(raw: Any) -> List[str]:
     return [str(part).strip() for part in raw if str(part).strip()]
 
 
-def _parse_timeout(raw: Any) -> Optional[float]:
-    """Seconds, or None for "no cap of ours".
-
-    None is the honest default and the one that matches the ``needs.*`` rule: a
-    number baked into this layer would mean a desktop answer was allowed less
-    time than a typed one.
-    """
-    if raw is None or isinstance(raw, bool):
-        return None
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
-
-
 @dataclass
 class ShellHooksConfig:
     """Resolved hook egress configuration."""
 
     enabled: bool = False
     command: List[str] = field(default_factory=list)
-    timeout: Optional[float] = None
     events: Dict[str, bool] = field(
         default_factory=lambda: {e: True for e in SHELL_HOOK_EVENTS}
     )
@@ -132,7 +115,6 @@ def load_shell_hooks_config(config: Optional[Dict[str, Any]] = None) -> ShellHoo
     if "enabled" in block:
         cfg.enabled = bool(block["enabled"])
     cfg.command = _parse_command(block.get("command"))
-    cfg.timeout = _parse_timeout(block.get("timeout"))
     events = block.get("events")
     if isinstance(events, dict):
         for name in SHELL_HOOK_EVENTS:
@@ -144,7 +126,5 @@ def load_shell_hooks_config(config: Optional[Dict[str, Any]] = None) -> ShellHoo
     command = _env("COMMAND")
     if command is not None:
         cfg.command = _parse_command(command.split())
-    if _env("TIMEOUT") is not None:
-        cfg.timeout = _parse_timeout(_env("TIMEOUT"))
 
     return cfg

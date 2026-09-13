@@ -12,6 +12,8 @@ that blocked for the user's answer to an approval or a question. Replies no
 longer travel through this channel: the user's own hook command takes them
 (``agentica/shell_hooks``), so there is no HTTP request here that waits on a
 person. Removing that half is why ``needs.*`` no longer appears in this module.
+The desktop's ``POST /await`` endpoint itself stays: Claude Code's
+``PermissionRequest`` still uses it.
 
 **The degradation ladder is the whole point.** Delivery is observation: a
 missing desktop app, a refused socket, a non-2xx response or an unusable body
@@ -61,8 +63,6 @@ _EVENT_TITLES = {
     "run.completed": "run completed",
     "run.failed": "run failed",
     "run.cancelled": "run cancelled",
-    "needs.approval": "waiting for approval",
-    "needs.input": "waiting for your answer",
 }
 
 def _tty_name() -> Optional[str]:
@@ -175,7 +175,6 @@ class NotifySink:
                     "/event",
                     envelope,
                     timeout=DELIVERY_TIMEOUT_SECONDS,
-                    wait=False,
                     raise_transport=True,
                 )
                 self._sent += 1
@@ -191,14 +190,14 @@ class NotifySink:
         envelope: dict,
         *,
         timeout: float,
-        wait: bool,
         raise_transport: bool = False,
-    ) -> Optional[httpx.Response]:
+    ) -> None:
         """One request over a fresh short-lived client.
 
-        A client per request keeps this usable from the worker thread and from
-        whatever thread is parked on a decision, without shared-state questions
-        about a pooled connection the desktop app may have closed.
+        A client per request keeps this usable from the worker thread without
+        shared-state questions about a pooled connection the desktop app may
+        have closed. The reply body is not part of the contract and is not
+        read.
         """
         headers = {"Content-Type": "application/json"}
         token = self._cfg.resolved_token()
@@ -209,16 +208,10 @@ class NotifySink:
             with httpx.Client(
                 transport=transport, base_url="http://localhost", timeout=timeout
             ) as client:
-                response = client.post(path, json=envelope, headers=headers)
+                client.post(path, json=envelope, headers=headers)
         except Exception:
             if raise_transport:
                 raise
-            return None
-        if not wait:
-            # The reply to /event is not part of the contract; reading it only
-            # confirms the app accepted the POST.
-            return None
-        return response
 
     # ---------------------------------------------------------------- envelope
 
@@ -321,8 +314,9 @@ def install_sink(
             _sink = None
             return None
         # A local socket is still an attack surface: without a shared secret,
-        # any process on this machine could forge a "needs.approval" and collect
-        # an "allow". Established once, here, because both sides read the file.
+        # any process on this machine could forge run events. Established once,
+        # here, because both sides read the file. The same token also
+        # authenticates Claude Code's blocking ``POST /await`` on the desktop.
         from agentica.notify.token import ensure_token
 
         ensure_token(cfg)

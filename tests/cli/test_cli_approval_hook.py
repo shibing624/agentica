@@ -50,6 +50,7 @@ class _State:
     def __init__(self, registry):
         self.current_agent = _Agent()
         self.approval_registry = registry
+        self.input_request = None
 
 
 def _pending():
@@ -212,3 +213,47 @@ def test_the_payload_carries_the_anchor_and_the_offered_options(tmp_path, loop):
     assert doc["options"] == ["allow", "deny"]
     assert doc["tool_call_id"] == "call_1"
     assert "arguments" not in doc
+
+
+def test_the_hook_answer_reprints_the_approval_record(tmp_path, loop):
+    """The card is layout, not scrollback. Hiding it without a remnant would
+    drop the command that was just approved."""
+    from agentica.cli.interactive.session_state import _InputRequest
+
+    printed = []
+    done = threading.Event()
+
+    def _capture(pending, decision):
+        printed.append((pending.tool_call_id, decision))
+        done.set()
+
+    import agentica.cli.approvals as approvals_mod
+
+    original = approvals_mod._print_approval_record
+    approvals_mod._print_approval_record = _capture
+    try:
+        install_hook_egress(
+            ShellHooksConfig(
+                enabled=True,
+                command=_script(
+                    tmp_path, "import json;print(json.dumps({'decision':'allow'}))"
+                ),
+            )
+        )
+        pending = _pending()
+        registry = ApprovalRegistry()
+        state = _State(registry)
+        state.input_request = _InputRequest(
+            prompt="ok",
+            kind="approval",
+            approval_id="call_1",
+            approval_pending=pending,
+        )
+        future = _park(loop, registry, pending)
+        _offer_approval_to_hook(pending, state, loop)
+        assert future.result(timeout=10) == "allow"
+        assert done.wait(5)
+        assert printed == [("call_1", "allow")]
+        assert state.input_request is None
+    finally:
+        approvals_mod._print_approval_record = original

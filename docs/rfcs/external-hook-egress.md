@@ -59,7 +59,6 @@ settings:
   hooks:
     enabled: false            # default off: this runs the user's command on every run
     command: ["/abs/path/to/notifier", "--from-agentica"]
-    timeout: null             # per-command wait, seconds; null = no cap (see below)
     events:
       run.started: true
       run.completed: true
@@ -166,11 +165,10 @@ user has not answered.
 
 1. **No wait cap invented by us.** The harness never imposes a deadline on a
    `needs.*` reply. This is the rule already written at `notify-sink.md:18`
-   ("用户还没答不是事件") and implemented as a required, default-less `timeout`
-   parameter on `NotifySink.await_decision` (`notify/sink.py:223-228`): a number
-   baked into this layer would mean a desktop answer got less time than a typed
-   one. A command may set its own internal limit (the VPet bridge does); that is
-   the command's business and it is visible in the user's own config.
+   ("用户还没答不是事件"). A number baked into this layer would mean a desktop
+   answer got less time than a typed one, so there is no `settings.hooks.timeout`
+   either. A command may set its own internal limit (the VPet bridge does); that
+   is the command's business and it is visible in the user's own config.
 2. **The terminal and the hook race; whoever answers first wins.** The tool call
    is *not* parked on the hook process. `publish` offers the request and returns;
    the approval machinery parks on the `ApprovalRegistry` future as it does today.
@@ -274,9 +272,9 @@ mean "no decision", and the terminal prompt remains. **Never synthesize `allow`.
   every lap?** The sink holds it back (`notify/sink.py:482`). Keeping the same
   behaviour is the conservative choice and is what VPet already expects; a
   consumer that wants laps can be given a separate event later.
-- **`timeout: null` default vs. a very large number.** `null` is honest ("no cap");
-  a number invites the exact off-by-one that cc-beeper hit with milliseconds vs
-  seconds. Keep `null`.
+- **No `settings.hooks.timeout`.** A field that is parsed but never applied is a
+  lie; a number that *is* applied would give a desktop answer less time than a
+  typed one. The command sets its own limit if it wants one.
 - **Does the replied-to question need correlation for `needs.input`?** The sink
   keys questions by position and applies the first usable answer
   (`notify/questions.py:53`); the approval path has `tool_call_id`. If a consumer
