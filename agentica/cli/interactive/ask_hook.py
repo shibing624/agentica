@@ -19,7 +19,6 @@ the one surface that has no future to wait on.
 
 from __future__ import annotations
 
-import time
 from typing import Any, List, Optional
 
 from agentica.utils.log import logger

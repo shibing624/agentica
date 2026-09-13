@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from agentica.run_events import RunEventRecord, RunEventType
 from agentica.shell_hooks.config import ShellHooksConfig
 from agentica.shell_hooks.egress import (
     get_hook_egress,
@@ -17,7 +18,6 @@ from agentica.shell_hooks.egress import (
     install_hook_egress,
     reset_hook_egress_for_tests,
 )
-from agentica.run_events import RunEventRecord, RunEventType
 
 
 @pytest.fixture(autouse=True)
@@ -51,9 +51,13 @@ def _wait_for(path, count, timeout=10.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.exists():
-            lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            lines = [
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
             if len(lines) >= count:
-                return [json.loads(l) for l in lines]
+                return [json.loads(line) for line in lines]
         time.sleep(0.05)
     raise AssertionError(f"{path} never reached {count} payloads")
 
@@ -153,8 +157,6 @@ class TestTheSinkStillWorks:
         """The goal deferral is shared, so the hook sees the same one release the
         sink does — not one event per lap."""
         import agentica.notify.sink as sink_mod
-        from agentica.notify import set_idle_provider
-
         command, out = _recorder(tmp_path)
         install_hook_egress(ShellHooksConfig(enabled=True, command=command))
         monkeypatch.setattr(sink_mod, "_sink", None)

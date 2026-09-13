@@ -8,6 +8,12 @@ Two levels of hooks:
 - RunHooks: global run-level hooks (on_agent_start, on_agent_end, on_llm_start,
   on_llm_end, on_tool_start, on_tool_end, on_agent_transfer), passed to run()
 - ConversationArchiveHooks: auto-archives conversations to workspace after each run
+
+These are **in-process Python observers**. Do not confuse them with the other
+thing called "hooks": the *executable* kind the user declares in
+``settings.hooks`` and we run as a subprocess with JSON on stdin
+(``agentica/shell_hooks``, ``docs/getting-started/shell-hooks.md``). Different
+mechanism, different config key, different failure modes.
 """
 import asyncio
 import inspect
