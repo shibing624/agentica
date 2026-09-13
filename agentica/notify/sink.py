@@ -60,6 +60,13 @@ from agentica.notify.config import (
     NotifyConfig,
     load_notify_config,
 )
+#: The payload discipline lives in ``wire`` because the hook egress puts the
+#: same strings on its own wire. Aliased to the old private names so the call
+#: sites below read unchanged.
+from agentica.notify.wire import (
+    ALLOWED_DECISIONS as _ALLOWED_DECISIONS,
+    clip_text as _clip_text,
+)
 from agentica.utils.log import logger
 
 SOURCE = "agentica"
@@ -74,11 +81,6 @@ _EVENT_TITLES = {
     "needs.approval": "waiting for approval",
     "needs.input": "waiting for your answer",
 }
-
-#: Decisions the contract allows back. Anything else is treated as "no
-#: decision" rather than being coerced — guessing here would approve a command.
-_ALLOWED_DECISIONS = frozenset({"allow", "deny", "allow_prefix", "deny_prefix"})
-
 
 def _tty_name() -> Optional[str]:
     """The controlling terminal name, best effort. Used only to jump back."""
@@ -643,26 +645,6 @@ def _goal_is_driving(agent: Any) -> bool:
     except Exception as exc:
         logger.debug(f"notify sink: could not read goal state: {exc}")
         return False
-
-
-#: How much of a prompt / answer goes on the wire. The desktop app renders a
-#: bubble, not a reader: a 40k-character answer would bloat every event and
-#: still not be more useful there. The marker makes the cut visible, so a
-#: consumer can tell "it said this much" from "it said 500 chars and more".
-_TEXT_LIMIT = 500
-_ELLIPSIS = "…"
-
-
-def _clip_text(value: Any) -> Optional[str]:
-    """A short, wire-safe slice of user-visible text, or None."""
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    if len(text) <= _TEXT_LIMIT:
-        return text
-    return text[:_TEXT_LIMIT] + _ELLIPSIS
 
 
 def _run_event_payload(record: Any) -> Dict[str, Any]:
