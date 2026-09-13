@@ -39,6 +39,8 @@ export type ChatMsg = {
   previews?: string[];
   aborted?: boolean;
   error?: string;
+  /** Wall clock when a blocking run error was set; used for the on-screen stamp. */
+  errorTs?: number;
   /** Mid-run interrupt (CLI steer), not a new turn. */
   steer?: boolean;
 };

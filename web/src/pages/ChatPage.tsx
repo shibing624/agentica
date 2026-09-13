@@ -8,7 +8,7 @@ import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { promptRename } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
 import { getStrings, useStrings } from "../i18n";
-import { fmtCost, fmtDurationMs, fmtN, fmtTps, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
+import { fmtCost, fmtDurationMs, fmtN, fmtTps, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
 import { createSession, hydrateSession, markSessionRead, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
@@ -629,7 +629,12 @@ function MessageView({ idx, m, workspace, onOpenFile, live, pendingToolCallId }:
           live={!!live}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}
-        {m.error && <div className="msg-error">{S.chat.error(m.error)}</div>}
+        {m.error && (
+          <div className="msg-error">
+            {S.chat.error(m.error)}
+            {` - ${formatErrorStamp(m.errorTs ?? m.ts)}`}
+          </div>
+        )}
         <MessageFooter m={m} live={!!live} />
       </div>
     </div>
@@ -954,6 +959,11 @@ async function drainQueue(sessId: string) {
   await sendMessage(sessId, next.text, next.files);
 }
 
+function markChatError(m: ChatMsg, text: string): void {
+  m.error = text;
+  m.errorTs = Date.now();
+}
+
 function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
   if (evt.event === "thinking") {
     appendThink(aiMsg, evt.data);
@@ -985,7 +995,7 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
   }
   if (evt.event === "error") {
     settleWork(aiMsg, Date.now());
-    aiMsg.error = String(evt.data);
+    markChatError(aiMsg, String(evt.data));
     flushStream();
     return true;
   }
@@ -1146,7 +1156,7 @@ async function watchRun(
           const j = await resp.json();
           if (j?.detail) detail = String(j.detail);
         } catch { /* not json */ }
-        aiMsg.error = detail;
+        markChatError(aiMsg, detail);
         return false;
       }
       if (live) live.reconnecting = false;
@@ -1167,7 +1177,7 @@ async function watchRun(
       }
       if (pageUnloading) return true;
       if (!isDisconnectErr(e)) {
-        aiMsg.error = String(e?.message || e);
+        markChatError(aiMsg, String(e?.message || e));
         return false;
       }
       await new Promise((r) => setTimeout(r, Math.min(4000, 300 * (attempt + 1))));
@@ -1251,7 +1261,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     userMsg.files = uploaded;
     userMsg.previews = previews;
     if (!message && !images.length) {
-      aiMsg.error = S.chat.uploadFailed(files[0]?.name || "file");
+      markChatError(aiMsg, S.chat.uploadFailed(files[0]?.name || "file"));
       return;
     }
     const live = getState().streams[sessId];
@@ -1271,7 +1281,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     });
     if (!created.ok || !created.data?.run_id) {
       const detail = (created.data && (created.data as any).detail) || `HTTP ${created.status}`;
-      aiMsg.error = String(detail);
+      markChatError(aiMsg, String(detail));
       return;
     }
     if (live) live.runId = created.data.run_id;
@@ -1286,7 +1296,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     const stopped = getState().streams[sessId]?.userStopped;
     if (stopped) aiMsg.aborted = true;
     else if (isDisconnectErr(e) || pageUnloading) disconnected = true;
-    else aiMsg.error = String(e?.message || e);
+    else markChatError(aiMsg, String(e?.message || e));
   } finally {
     await finishLive(sessId, aiMsg, t0, disconnected);
   }
@@ -1375,13 +1385,13 @@ async function runCompact(sessId: string, instructions: string) {
     const { ok, data, status } = await api.compactSessionApi(sessId, instructions);
     if (!ok) {
       const detail = (data && (data.detail || data.error)) || `HTTP ${status}`;
-      aiMsg.error = S.chat.compactFailed(String(detail));
+      markChatError(aiMsg, S.chat.compactFailed(String(detail)));
     } else {
       aiMsg.content = S.chat.compactOk(data.messages_before, data.messages_after);
       if (data.usage) applySessionUsage(sessId, data.usage);
     }
   } catch (e: any) {
-    aiMsg.error = S.chat.compactFailed(String(e?.message || e));
+    markChatError(aiMsg, S.chat.compactFailed(String(e?.message || e)));
   } finally {
     sess.msgs.push(aiMsg);
     endCommand(sessId);
@@ -1423,7 +1433,7 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
         const j = await resp.json();
         if (j?.detail) detail = String(j.detail);
       } catch { /* not json */ }
-      aiMsg.error = detail;
+      markChatError(aiMsg, detail);
       return;
     }
     const found = await api.fetchActiveRun(sessId);
@@ -1472,7 +1482,7 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
       } else {
         disconnected = true;
       }
-    } else aiMsg.error = String(e?.message || e);
+    } else markChatError(aiMsg, String(e?.message || e));
   } finally {
     clearGoalRun(sessId);
     await finishLive(sessId, aiMsg, t0, disconnected);

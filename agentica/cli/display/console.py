@@ -7,6 +7,7 @@
 import ast
 import json
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from rich.text import Text
@@ -265,6 +266,11 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
     }
 
 
+def _error_display_stamp() -> str:
+    """Local wall clock on the ``● Error:`` line, for correlating with provider traces."""
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def display_agent_execution_error(console_instance, error: BaseException) -> Dict[str, Any]:
     """Render a structured agent error, log it, and retain raw for Ctrl+O.
 
@@ -274,13 +280,16 @@ def display_agent_execution_error(console_instance, error: BaseException) -> Dic
     copy, and it is the only one an unattended run leaves behind at all.
     """
     view = _format_agent_execution_error(error)
+    stamp = _error_display_stamp()
+    view["stamp"] = stamp
+    headline_text = f"{view['summary']} - {stamp}"
     if view["raw"]:
         remember_truncated("Agent error · raw", view["raw"])
         # One log record per error, so the raw text is greppable as a unit.
-        logger.error("%s: %s", view["summary"], " ".join(view["raw"].split()))
+        logger.error("%s: %s", headline_text, " ".join(view["raw"].split()))
 
     headline = Text("● Error: ", style="bold red")
-    headline.append(view["summary"], style="bold red")
+    headline.append(headline_text, style="bold red")
     console_instance.print()
     console_instance.print(headline)
     if view["detail"]:
