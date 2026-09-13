@@ -225,6 +225,12 @@ class PeerInfo:
     busy: bool = False
     context_tokens: Optional[int] = None
     context_window: Optional[int] = None
+    # The path of this session's attach socket, when it is serving one. Published
+    # because the alternative is every client reconstructing it from the peer id,
+    # the uid and TMPDIR — and getting that wrong looks like "the session isn't
+    # running" rather than "you computed the wrong path". Absent = this session
+    # is not attachable.
+    attach_socket: Optional[str] = None
     updated_at: float = 0.0
 
     @property
@@ -315,6 +321,7 @@ class PeerInfo:
             busy=bool(data.get("busy")),
             context_tokens=data.get("context_tokens") or None,
             context_window=data.get("context_window") or None,
+            attach_socket=data.get("attach_socket") or None,
             updated_at=float(data.get("updated_at") or 0.0),
         )
 

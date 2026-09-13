@@ -166,6 +166,23 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
             _echo_panel(body, marker="", marker_style=f"bold {COLORS['tool']}")
 
 
+def display_attached_user_message(text: str, *, from_name: str = "") -> None:
+    """Show a line that arrived from outside this terminal, before the answer.
+
+    The same "the human spoke, from elsewhere" panel the peer path uses, because
+    it is the same thing: a line handed to this session as the user's own input.
+    It exists because such input is deliberately not echoed the way typed text is
+    (the host normally prints its own arrival block) — and a caller that prints
+    nothing would leave the terminal showing an answer to a question that is
+    nowhere on screen.
+    """
+    body = Text()
+    if from_name:
+        body.append(f"via {from_name}  ", style="dim")
+    body.append(text, style=f"bold {COLORS['user']}")
+    _echo_panel(body)
+
+
 def get_file_completions(document_text: str) -> List[str]:
     """Get file completions for @ mentions."""
     import glob as glob_module

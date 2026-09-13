@@ -1067,6 +1067,26 @@ def run_interactive(
     def _hand_to_agent(text: str) -> None:
         hand_to_agent(state, pending_queue, text)
 
+    def _inject_from_outside(text: str) -> None:
+        """Take a line handed in by an external client (the attach socket).
+
+        Echoed first, and that is not decoration: relayed input is deliberately
+        not echoed the way typed text is (``hand_to_agent`` tags it
+        ``__RELAYED__``), which is right when the caller prints its own arrival
+        block — but this caller is another program, so without this the terminal
+        would show an answer to a question that is nowhere on screen.
+        """
+        try:
+            from agentica.cli.display.messages import display_attached_user_message
+
+            display_attached_user_message(text)
+            if app.is_running:
+                app.invalidate()
+        except Exception as exc:
+            # Display must never be the reason an injected line is lost.
+            logger.debug(f"attach: could not echo the incoming line: {exc}")
+        _hand_to_agent(text)
+
     # A background command's result is the agent's own pending work, so it is
     # delivered by default; set `deliver_background_results: false` in
     # config.yaml for a session that must never wake up on its own.
@@ -1182,6 +1202,45 @@ def run_interactive(
     )
     peer_message_thread.start()
 
+    # Attach point: let an external program (a desktop app, a pet, a script the
+    # user runs) send a message into *this* session as the user. JSON-RPC over a
+    # unix socket, because the TUI owns stdin/stdout so ACP's stdio transport
+    # cannot be used here. One socket per session, so connecting to it names the
+    # session — no names to collide, no prefixes to be ambiguous about, and no
+    # cwd matching (which symlinks make treacherous).
+    #
+    # Off unless switched on, and every failure is non-fatal: without the
+    # socket the terminal behaves exactly as before, there is just no attach
+    # point.
+    attach_server = None
+    try:
+        from agentica.attach import AttachServer, attach_enabled
+
+        # No config dict passed: this is a global settings toggle, read the same
+        # way the CLI's other toggles are (see _maybe_start_cron above).
+        if not attach_enabled():
+            raise RuntimeError("settings.attach_enabled is off")
+
+        attach_server = AttachServer(
+            state.peer_session.peer_id,
+            inject=_inject_from_outside,
+            is_running=lambda: state.agent_running,
+            session_id=agent_config.get("session_id"),
+            snapshot=lambda: {
+                "cwd": state.current_agent.work_dir if state.current_agent else None,
+                "busy": state.agent_running,
+            },
+        )
+        attach_server.start()
+        if attach_server.listening:
+            # Publish the path so a client reads it from the presence record
+            # instead of recomputing it (uid / TMPDIR / override) and silently
+            # looking in the wrong place.
+            state.peer_session.publish(attach_socket=str(attach_server.path))
+    except Exception as exc:
+        logger.debug(f"attach: not serving ({exc})")
+        attach_server = None
+
     # ── Run the TUI ──
     # Install a SIGQUIT hard-escape. When the main prompt_toolkit event loop is
     # blocked (the ask_user_question freeze bug: background run_in_terminal
@@ -1207,6 +1266,15 @@ def run_interactive(
         pass
     finally:
         state.should_exit = True
+        # Close the attach point first: it hands the user's own text into this
+        # session, so it must stop accepting before the session starts tearing
+        # down. Leaving the socket behind would let a client connect and write
+        # into a session that is going away.
+        if attach_server is not None:
+            try:
+                attach_server.stop()
+            except Exception:
+                pass
         # Kick Langfuse's ~2s atexit shutdown (span flush + consumer-thread
         # joins) onto a daemon thread NOW so it overlaps with our own teardown
         # (_stop_cron, background_processes.stop, summary print) instead of

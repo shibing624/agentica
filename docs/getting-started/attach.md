@@ -1,0 +1,153 @@
+# 外部程序往会话里发一条用户消息（attach）
+
+让**别的进程**（桌宠、快捷键脚本、通知程序、你自己的工具）往一个**正在跑的**
+agentica 会话里说一句话 —— 效果等同于**你自己在那个终端里敲**。
+
+**默认关闭**，见下面「开关」。设计取舍见 `docs/rfcs/` 里的相关记录。
+
+### 它解决的是哪件事
+
+会话的输入只有一个写者：坐在键盘前面的人。这条通道给了第二个入口，但它送进去的
+仍然是**用户本人**的输入，不是另一个 agent 的话（那是 `send-message`，见
+[terminal.md](terminal.md)）。
+
+所以它走的正是你敲一行所走的那条路（`hand_to_agent`）：会话在跑就**插到下一次
+tool 边界**（和 `/steer` 一样），空闲就**作为下一轮**。
+
+## 开关
+
+```yaml
+# ~/.agentica/config.yaml
+settings:
+  attach_enabled: false   # 默认关：开了就等于多一个「用户输入」的入口
+```
+
+环境变量 `AGENTICA_ATTACH_ENABLED=1` 覆盖它。关掉时**不建 socket、不起线程**，
+行为与此前完全一致；socket 在会话启动时创建，所以这一项**读了就是读了**，
+中途改要重启会话。
+
+## 它是什么：一条本机 socket + JSON-RPC
+
+**一个会话一个 socket，连上它就是点名了这个会话。** 没有 `--to`、没有第二个寻址
+方式：不会重名、不会有前缀歧义、也**不按 cwd 匹配**（符号链接会让同一条路径有两种
+写法，那是真踩过的坑）。
+
+TUI 自己占着 stdin/stdout，所以 ACP 标准的 stdio 传输在这里用不了；这条通道用 ACP
+允许的**自定义传输**，并保持它的消息格式与生命周期 —— 也就是 JSON-RPC 2.0，
+**一行一个 JSON 文档**（`\n` 分隔，文档内不能有换行）。
+
+### 发现它
+
+socket 路径在会话的 presence 记录里（`agentica peers list` / `list_agents` 能看到
+那个会话，`attach_socket` 字段就是路径）。**直接读它，不要自己拼** —— 路径由 uid 和
+`TMPDIR` 决定，拼错的症状是「那个会话好像没在跑」，与真实原因毫不相干。
+
+## 方法
+
+连上后**第一条消息必须先 `initialize` 并带上 token**，否则任何方法都回 -32000。
+没有 token 的客户端**什么都问不出来**（连方法列表都不给）。
+
+| 方法 | 作用 |
+|---|---|
+| `initialize` | 鉴权 + 版本协商。`params.authToken` 必填 |
+| `session/load` | 附着到这个会话；返回 `sessionId`、`cwd`、`busy` |
+| `session/prompt` | **把用户的话送进去**，等这一轮结束再回 |
+| `session/cancel` | 中断当前这一轮（等同 Ctrl+C） |
+| `ping` | 健康检查 |
+
+**没有 `session/new`**：会话已经存在（就是这个 socket 的主人），在这里凭空造一个新
+的会让客户端对着一个**没有终端在驱动**的对话说话。
+
+### `initialize`
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize",
+ "params":{"authToken":"<socket 同目录的 <peer_id>.token>","clientCapabilities":{}}}
+```
+
+返回 `protocolVersion`、`agentCapabilities`、`agentInfo`。token 在
+`<socket 同目录>/<peer_id>.token`，`0600`。
+
+### `session/prompt`
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"session/prompt",
+ "params":{"sessionId":"<可选>","prompt":[{"type":"text","text":"把测试跑一遍"}]}}
+```
+
+返回：
+
+```json
+{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn","agenticaAnswer":"…"}}
+```
+
+- **`stopReason`**：`end_turn`（这一轮跑完了）/ `cancelled`（被 `session/cancel`
+  中断）。若一轮**已被接受但本层没等到它结束**（例如会话正在退出），会额外带
+  `agenticaPending: true` —— 如实说明，而不是假装拿到了结果。
+- **`agenticaAnswer`**（可选）：这一轮的最后一段回答。客户端要它就能省掉一次读取。
+- **只收文本块**。带图片等非文本块会被**拒绝**（-32602）而不是被悄悄丢掉 —— 丢掉
+  等于把用户问的东西换成了另一个问题。
+- `sessionId` 若给出且与会话不符，**拒绝**（-32000），并告知这个 socket 服务于哪个
+  会话。
+
+### 鉴权与安全
+
+- socket 是 **unix domain socket**，只连本机；目录 `0700`、socket `0600`、token `0600`。
+- **这条通道的效力等于「用户本人输入」**，所以比只读的 notify sink 危险一档：
+  每条连接都要 token，`initialize` 也不例外。
+- 会话退出时 socket 与 token **一起删掉**：留着 token 会让后来的读者对着一个已经不
+  存在的会话通过鉴权。
+
+### 失败会怎样
+
+**任何一环出问题都只是「这条通道不可用」，终端行为不变**：
+
+| 情况 | 行为 |
+|---|---|
+| `enabled: false` | 不建 socket、不起线程 |
+| socket 建不起来（路径过长、权限） | 记一条日志，没有 attach 点，会话照常 |
+| 没有 token / token 不符 | -32000，连接可用但什么都做不了 |
+| 报文不是 JSON | -32700，**连接继续可用** |
+| 方法不认识 | -32601 |
+| 注入时抛异常 | -32603，连接继续可用 |
+| 客户端半路消失 | 服务端不受影响，其他客户端照常 |
+
+## 用起来
+
+```bash
+# 1. 起一个交互会话（要开 settings.attach.enabled）
+agentica
+
+# 2. 另一个终端里，列出会话并读出它的 socket 路径
+agentica peers list
+
+# 3. 用一行 python 发一句（真实客户端就是这样）
+python - <<'PY'
+import json, socket
+path = "/var/folders/.../agentica-501/<peer_id>.sock"   # 从 presence 记录读
+token = open(path.replace(".sock", ".token")).read().strip()
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(path)
+def call(method, params=None, i=1):
+    s.sendall(json.dumps({"jsonrpc":"2.0","id":i,"method":method,
+                          "params":params or {}}).encode() + b"\n")
+    buf = b""
+    while b"\n" not in buf: buf += s.recv(65536)
+    print(json.loads(buf.split(b"\n")[0]))
+call("initialize", {"authToken": token})
+call("session/prompt", {"prompt": [{"type":"text","text":"说一句 PONG"}]}, i=2)
+PY
+```
+
+那个终端里应该**先看到这句话被回显**（标注来自外部），然后看到它对这句话的回答。
+
+验收脚本：`python scripts/verify_attach_e2e.py` —— 真 tmux 起一个会话、真 JSON-RPC
+客户端连上去、断言会话真的把它当用户输入并回答了。
+
+## 与另外两条通道的分工
+
+| | 谁在说话 | 方向 | 用途 |
+|---|---|---|---|
+| **attach**（本文） | **用户**（从别的程序） | 进 | 让外部程序替用户在这个会话里说一句 |
+| `shell hooks`（[shell-hooks.md](shell-hooks.md)） | agentica | 出 | 把 run 的状态告诉外部；审批/提问的回话 |
+| `notify sink`（[notify-sink.md](notify-sink.md)） | agentica | 出，只看 | 把 run 的状态告诉桌宠（单向） |
+| `send-message` / `/n`（[terminal.md](terminal.md)） | **另一个 agent 会话** | 双向 | agent 之间交接 |
