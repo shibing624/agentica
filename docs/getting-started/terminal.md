@@ -488,9 +488,7 @@ Session JSONL 的读时分析，和 Web 对话标题旁「查看轨迹」同一�
 ```
 
 ### `/peername [on|off]`
-状态栏上显示或隐藏本会话的短 peer 名（如 `vpetmac-c4`）。不带参数翻转当前状态。
-跟 `/debug` 一样写入本目录 `project.json` 和当前 session sidecar，下次启动继续生效。
-从没设过则仍按自动规则：同 cwd 另有 live session、或本 session 是 fork 时才显示。
+状态栏上显示或隐藏本会话的短 peer 名。
 
 ```text
 > /peername on
@@ -515,7 +513,7 @@ Session JSONL 的读时分析，和 Web 对话标题旁「查看轨迹」同一�
 |--------|------|
 | `Ctrl+C` | 中止当前响应；空输入时连续按两次退出 |
 | `Ctrl+D` | 退出 CLI，并显示恢复命令 |
-| `Tab` | 补全 `@filename` 路径 |
+| `Tab` | 补全 `@filename` 路径；输入 `/` 时列出 slash 命令（支持模糊匹配） |
 | `↑` / `↓` | 历史命令浏览 |
 | `Ctrl+R` | 搜索历史命令 |
 | `Esc + Enter` | 多行输入 |

@@ -63,7 +63,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     console.print()
     # Input features
     console.print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files (images auto-attach)")
-    console.print("  [bright_green]/command[/bright_green]    Type / to see available commands (try /help)")
+    console.print("  [bright_green]/command[/bright_green]    Type / to list slash commands (fuzzy match; try /help)")
     console.print()
 
 
@@ -205,7 +205,7 @@ def show_help(skills_registry=None):
     console.print("  [bold]Input Features[/bold]")
     console.print()
     console.print("    [bright_green]@filename[/bright_green]           Reference a file - content injected into prompt")
-    console.print("    [bright_green]/command[/bright_green]            Type / to see slash commands with auto-complete")
+    console.print("    [bright_green]/command[/bright_green]            Type / to list slash commands (fuzzy match)")
     console.print()
     console.print("  [dim]Tip: type your message and press Enter to chat![/dim]")
     console.print()

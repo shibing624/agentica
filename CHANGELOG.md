@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **删除 Serply 搜索（`SearchSerplyTool` / `web_search` 的 `serply` 引擎 / extra `[serply]` / CLI `--tools search_serply`）**：厂商自己合入的 vendor 营销，Google 搜索继续用 Serper。`SERPLY_API_KEY` 和 `AGENTICA_SERPLY_SEARCH_TYPE` 不再被读取。
 
 #### features
+- **CLI 输入 `/` 列出全部 slash 命令，并做模糊匹配**：以前补全只认前缀（`/pn` 对不上 `/peername`）。现在打 `/` 就弹出命令清单（带说明）；继续打字按前缀 / 名字子串 / 子序列 / 说明里的词排序（说明匹配至少 3 个字，避免 `/s` 刷屏）。技能 auto-command 仍跟在后面。
 - **`/peername on|off` 手动开关状态栏上的短 peer 名**（如 `vpetmac-c4`）。以前只在同 cwd 另有 live session、或本 session 是 fork 时自动出现，没法强制显示/关掉。无参翻转，跟 `/debug` 一样写 session sidecar + 本 work_dir `project.json`，下次启动继续生效；从没设过则仍走自动规则。
 - **CLI 正在跑的 `execute` 不再只留开头 80 字**：live 窗口按终端宽度折行（最多 6 行），`cd /很长的路径 && swift test …` 这种以前只看得见 `cd`。Spinner 仍是 `execute (996s)`。工作目录和 `$HOME` 在命令里缩成 `.` / `~`。
 - **CLI 会话/技能列表多展示一点正文**：`/resume` 列表每个 session 给出最近 5 条用户请求（各前 250 字），不然只看第一条/名称看不出眼下在干什么；`/rewind list` 的 question 同样给前 250 字（以前截到 48）。`/history` 和 `/resume <n>` 回放只留问答，去掉 tool call 摘要。`/tools` 先列内置再按名排序外部工具。`/skills` 的 desc 展示开头 250 字。

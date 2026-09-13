@@ -38,6 +38,7 @@ from agentica.cli.approvals import (
 )
 from agentica.cli.commands.context import CONCURRENT_CMDS, PendingQueue
 from agentica.cli.commands.registry import COMMAND_REGISTRY
+from agentica.cli.interactive.complete import rank_slash_commands, slash_command_rows
 from agentica.cli.display import (
     build_status_bar_fragments,
     display_user_message,
@@ -303,17 +304,22 @@ def _setup_tui(
                                 display_meta="argument",
                             )
                     return
-                q = text.lower()
-                for cmd_name, (_, desc) in COMMAND_REGISTRY.items():
-                    if cmd_name.startswith(q):
-                        yield Completion(cmd_name, start_position=-len(text), display=cmd_name, display_meta=desc)
+                skill_rows = []
                 if skills_registry:
                     for slug, skill in skills_registry.auto_commands().items():
-                        if slug.startswith(q) and slug not in COMMAND_REGISTRY:
-                            desc = skill.description[:50] if skill.description else ""
-                            yield Completion(
-                                slug, start_position=-len(text), display=f"{slug} ({skill.name})", display_meta=desc
-                            )
+                        desc = skill.description[:50] if skill.description else ""
+                        skill_rows.append((slug, f"{slug} ({skill.name})", desc))
+                rows = slash_command_rows(
+                    ((name, desc) for name, (_, desc) in COMMAND_REGISTRY.items()),
+                    skill_rows,
+                )
+                for name, display, meta in rank_slash_commands(text, rows):
+                    yield Completion(
+                        name,
+                        start_position=-len(text),
+                        display=display,
+                        display_meta=meta,
+                    )
                 return
             m = re.search(r"@([\w./-]*)$", text)
             if m:
@@ -946,7 +952,7 @@ def _setup_tui(
     layout = Layout(
         FloatContainer(
             content=body,
-            floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=12))],
+            floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=16))],
         )
     )
 
