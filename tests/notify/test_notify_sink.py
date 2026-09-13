@@ -270,6 +270,29 @@ class TestNonBlockingEvents:
             reset_sink_for_tests()
             desktop.close()
 
+    def test_the_process_reset_also_clears_the_attach_endpoint(self):
+        """The autouse fixture calls ``reset_sink_for_tests`` and is the only
+        thing stopping one test's attach point from reaching the next. That
+        holds only because this reset happens to cover the endpoint as well as
+        the sink — nothing states it: the name mentions the sink, so trimming
+        it to "just the sink" leaves the fixture looking intact while the
+        endpoint starts leaking between tests.
+        """
+        from agentica.notify import set_attach_endpoint
+
+        set_attach_endpoint("/tmp/agentica-501/abc.sock", "abc")
+        reset_sink_for_tests()
+        desktop = _FakeDesktop()
+        try:
+            sink = _sink(desktop)
+            sink.emit_event("run.started")
+            _flush(sink)
+            sink.stop()
+
+            assert "attach_socket" not in desktop.requests[0]["json"]["transport"]
+        finally:
+            desktop.close()
+
     def test_a_process_without_an_attach_point_says_nothing_about_one(self):
         """Absent, not null: a consumer must be able to tell "no attach point"
         from "there is one and here it is"."""
