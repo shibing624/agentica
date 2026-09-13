@@ -70,11 +70,8 @@ async def _read_one_request(reader) -> tuple:
 class _FakeDesktop:
     """An in-process stand-in for the desktop app's UDS server."""
 
-    def __init__(self, *, decision_body: Optional[Any] = None, status: int = 200,
-                 hang: bool = False, require_token: Optional[str] = None):
+    def __init__(self, *, hang: bool = False, require_token: Optional[str] = None):
         self.requests: List[Dict[str, Any]] = []
-        self._decision_body = decision_body if decision_body is not None else {"ok": True}
-        self._status = status
         self._hang = hang
         self._require_token = require_token
         self._dir = tempfile.mkdtemp()
@@ -125,12 +122,11 @@ class _FakeDesktop:
                         await writer.drain()
                         writer.close()
                         return
-                if isinstance(self._decision_body, str):
-                    payload = self._decision_body.encode()
-                else:
-                    payload = json.dumps(self._decision_body).encode()
+                # The sink is observe-only: the reply body is not part of any
+                # contract, so the double just acknowledges the POST.
+                payload = json.dumps({"ok": True}).encode()
                 writer.write(
-                    f"HTTP/1.1 {self._status} OK\r\nContent-Type: application/json\r\n"
+                    f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                     f"Content-Length: {len(payload)}\r\n\r\n".encode() + payload
                 )
                 await writer.drain()
@@ -204,6 +200,19 @@ def _flush(sink: NotifySink, timeout: float = 3.0) -> None:
             time.sleep(0.05)
             if sink._queue.empty():
                 return
+        time.sleep(0.02)
+
+
+def _wait_requests(desktop, count: int, timeout: float = 3.0) -> None:
+    """Wait until the double has recorded ``count`` requests.
+
+    ``_flush`` only means "the queue was drained", which happens before the
+    in-flight POST is recorded on the server side.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if len(desktop.requests) >= count:
+            return
         time.sleep(0.02)
 
 
@@ -316,161 +325,113 @@ class TestNonBlockingEvents:
             desktop.close()
 
 
-class TestAwaitDecision:
-    def test_a_decision_comes_back_verbatim(self):
-        desktop = _FakeDesktop(decision_body={"decision": "allow", "message": "ok"})
-        try:
-            sink = _sink(desktop)
-            out = sink.await_decision(
-                "needs.approval",
-                payload={"approval_id": "call_1", "kind": "permission", "question": "run it?"},
-                timeout=5,
-            )
-            sink.stop()
-            assert out == {"decision": "allow"}
-            assert desktop.requests[0]["request_line"].startswith("POST /await")
-            body = desktop.requests[0]["json"]
-            assert body["event"] == "needs.approval"
-            assert body["payload"]["approval_id"] == "call_1"
-        finally:
-            desktop.close()
+class TestTheSinkIsObserveOnly:
+    """The reply half is gone: it lives in the hook egress now.
 
-    def test_an_answer_comes_back_for_a_question(self):
-        desktop = _FakeDesktop(decision_body={"answer": "the second one"})
-        try:
-            sink = _sink(desktop)
-            out = sink.await_decision("needs.input", payload={"kind": "question", "question": "which?"}, timeout=5)
-            sink.stop()
-            assert out == {"answer": "the second one"}
-        finally:
-            desktop.close()
+    What has to stay true of what is left: nothing on this channel waits for a
+    person, and nothing on it can be mistaken for an answer.
+    """
 
-    def test_a_timeout_falls_back_and_never_allows(self):
-        """The headline risk: no answer must mean 'ask the human', not 'yes'."""
-        desktop = _FakeDesktop(hang=True)
-        try:
-            sink = _sink(desktop)
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=0.4)
-            sink.stop()
-            assert out is None
-        finally:
-            desktop.close()
+    def test_the_reply_methods_are_gone(self):
+        assert not hasattr(NotifySink, "await_decision")
+        assert not hasattr(NotifySink, "_parse_decision")
 
-    def test_a_missing_app_falls_back_immediately_not_after_the_timeout(self):
-        """Level 2 again, on the blocking path: connect failure is a fast fail."""
-        sink = _sink(_MissingDesktop())
-        started = time.monotonic()
-        out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
-        elapsed = time.monotonic() - started
-        sink.stop()
-        assert out is None
-        assert elapsed < 5.0, f"waited {elapsed:.1f}s for an app that is not running"
+    def test_no_reply_path_is_left_on_the_sink(self):
+        """A regression here would reintroduce a second answer channel.
 
-    @pytest.mark.parametrize("body", [
-        {"decision": "maybe"},          # not a decision we know
-        {"decision": "yes"},            # plausible-looking, still not ours
-        {"reject": True},               # explicit rejection
-        {"ok": True},                   # an /event-shaped body
-        {},                             # empty
-        "not json at all",              # unparseable
-        [1, 2, 3],                      # wrong shape
-    ])
-    def test_an_unusable_body_is_never_an_allow(self, body):
-        """Level 4: unparseable or unknown means 'no decision', never approval."""
-        desktop = _FakeDesktop(decision_body=body)
-        try:
-            sink = _sink(desktop)
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
-            sink.stop()
-            assert out is None
-        finally:
-            desktop.close()
-
-    def test_an_http_error_is_not_a_decision(self):
-        desktop = _FakeDesktop(decision_body={"decision": "allow"}, status=500)
-        try:
-            sink = _sink(desktop)
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
-            sink.stop()
-            assert out is None
-        finally:
-            desktop.close()
-
-    def test_an_answer_is_taken_as_the_users_own_input(self):
-        """The desktop reply is the user's input, not the app's decision.
-
-        With the sink installed there is no separate "may the app answer?"
-        switch: the app is an input surface, and what the user presses there
-        counts the same as typing it in the terminal.
+        Checked on the class rather than by scanning the source: the module
+        docstring legitimately mentions the removed path, and a prose match would
+        make this test fail for the wrong reason.
         """
-        desktop = _FakeDesktop(decision_body={"decision": "allow"})
+        names = [n for n in dir(NotifySink) if not n.startswith("__")]
+        assert not [n for n in names if "await" in n or "decision" in n]
+
+    def test_the_sink_only_ever_posts_to_event(self):
+        desktop = _FakeDesktop()
         try:
             sink = _sink(desktop)
-            out = sink.await_decision(
-                "needs.approval", payload={"approval_id": "c1"}, timeout=5
-            )
+            for event in ("run.started", "run.completed", "run.failed", "run.cancelled"):
+                sink.emit_event(event)
+            _flush(sink)
+            _wait_requests(desktop, 4)
             sink.stop()
-            assert out == {"decision": "allow"}
+            assert desktop.requests, "expected the events to be delivered"
+            for request in desktop.requests:
+                assert request["request_line"].startswith("POST /event")
         finally:
             desktop.close()
 
-    def test_no_timeout_is_baked_into_this_layer(self):
-        """How long the user may take belongs to the caller, not to us.
-
-        A number here would hold a desktop answer to a stricter clock than a
-        typed one. ``None`` means "as long as the interaction lives", which is
-        what the terminal prompt already does.
-        """
-        import inspect
-
-        from agentica.notify.sink import NotifySink
-
-        sig = inspect.signature(NotifySink.await_decision)
-        assert sig.parameters["timeout"].default is inspect.Parameter.empty, (
-            "await_decision must require the caller to pass a timeout"
-        )
-
-    def test_a_disabled_sink_never_awaits(self):
-        sink = _sink(_MissingDesktop(), enabled=False)
-        assert sink.await_decision("needs.approval", payload={}, timeout=5) is None
+    def test_an_unusable_body_is_never_read_as_a_decision(self):
+        """A desktop that answers with a decision gets it ignored: there is no
+        code path from a reply body to an action any more."""
+        desktop = _FakeDesktop()
+        try:
+            sink = _sink(desktop)
+            sink.emit_event("run.started")
+            _flush(sink)
+            _wait_requests(desktop, 1)
+            sink.stop()
+            assert desktop.requests[0]["json"]["event"] == "run.started"
+        finally:
+            desktop.close()
 
 
 class TestToken:
     def test_the_bearer_token_is_sent(self):
-        desktop = _FakeDesktop(decision_body={"decision": "deny"}, require_token="tok-abc")
+        desktop = _FakeDesktop(require_token="tok-abc")
         try:
             sink = _sink(desktop, token="tok-abc")
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
+            sink.emit_event("run.started")
+            _flush(sink)
+            _wait_requests(desktop, 1)
             sink.stop()
-            assert out == {"decision": "deny"}
             assert desktop.requests[0]["headers"]["authorization"] == "Bearer tok-abc"
         finally:
             desktop.close()
 
-    def test_a_missing_token_is_a_401_and_yields_no_decision(self):
-        """A channel any local process could forge must not be trusted."""
-        desktop = _FakeDesktop(decision_body={"decision": "allow"}, require_token="tok-abc")
+    def test_no_token_means_no_authorization_header(self):
+        """A channel any local process could reach must present the token.
+
+        With no decision coming back any more, "unauthenticated" means the notice
+        was not shown — which is the only consequence this channel can have.
+
+        ``token_file`` points at an absent path on purpose: the default is a real
+        file on a machine that runs the desktop app, and reading it here would
+        make the test depend on the developer's own setup.
+        """
+        desktop = _FakeDesktop(require_token="tok-abc")
         try:
-            sink = _sink(desktop, token="")
-            out = sink.await_decision("needs.approval", payload={"approval_id": "c1"}, timeout=5)
+            sink = _sink(
+                desktop,
+                token="",
+                token_file=os.path.join(tempfile.mkdtemp(), "absent.token"),
+            )
+            sink.emit_event("run.started")
+            _flush(sink)
+            _wait_requests(desktop, 1)
             sink.stop()
-            assert out is None
+            assert "authorization" not in desktop.requests[0]["headers"]
         finally:
             desktop.close()
 
     def test_the_token_file_is_read_lazily(self):
-        desktop = _FakeDesktop(decision_body={"decision": "allow"}, require_token="from-file")
+        desktop = _FakeDesktop(require_token="from-file")
         token_path = os.path.join(tempfile.mkdtemp(), "notify.token")
         try:
-            # File does not exist yet: request should be unauthorized.
+            # File does not exist yet: the request goes out unauthorized.
             sink = _sink(desktop, token="", token_file=token_path)
-            assert sink.await_decision("needs.approval", payload={}, timeout=5) is None
+            sink.emit_event("run.started")
+            _flush(sink)
+            _wait_requests(desktop, 1)
+            assert "authorization" not in desktop.requests[0]["headers"]
             # The app writes the token afterwards; the next call must pick it up.
             with open(token_path, "w", encoding="utf-8") as fh:
                 fh.write("from-file\n")
-            out = sink.await_decision("needs.approval", payload={}, timeout=5)
+            sink.emit_event("run.failed")
+            _flush(sink)
+            _wait_requests(desktop, 2)
             sink.stop()
-            assert out == {"decision": "allow"}
+            assert desktop.requests[1]["headers"]["authorization"] == "Bearer from-file"
         finally:
             desktop.close()
 
@@ -484,7 +445,6 @@ class TestFailuresDoNotBecomeTheAgentsFailures:
         sink = NotifySink(cfg, transport_factory=boom)
         sink.emit_event("run.started")       # must not raise
         _flush(sink, timeout=1.0)
-        assert sink.await_decision("needs.approval", payload={}, timeout=5) is None
         sink.stop()
 
     def test_a_raising_emit_does_not_escape_and_dispatch_still_works(self):

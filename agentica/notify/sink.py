@@ -1,36 +1,22 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: The notify sink — report run state to a local desktop app, and let
-the user answer approvals / questions from there.
+@description: The notify sink — report run state to a local desktop app.
 
-Talks HTTP over a Unix domain socket. Two paths, and which one blocks is decided
-by the *path*, never by a body field — a malformed body must not be able to hang
-a run:
+One path, fire and forget, over HTTP on a Unix domain socket:
 
-    POST /event   fire and forget    2s            run lifecycle + "it needs you"
-    POST /await   waits for the user caller's budget  approval / question reply
+    POST /event   fire and forget    2s    run lifecycle notices
 
-The app is an **input surface, not an authority**: a reply from it is applied as
-the user's own answer for that session and interaction, with the same effect as
-typing it in the terminal. Nothing here has a policy, nothing auto-approves, and
-there is no "may the app answer?" switch — that would imply the app had
-authority of its own.
+**The sink is observe-only.** It used to have a second path, ``POST /await``,
+that blocked for the user's answer to an approval or a question. Replies no
+longer travel through this channel: the user's own hook command takes them
+(``agentica/shell_hooks``), so there is no HTTP request here that waits on a
+person. Removing that half is why ``needs.*`` no longer appears in this module.
 
-**The degradation ladder is the whole point.** Any failure at any stage falls
-back to the terminal prompt:
-
-    1. socket reachable            -> normal round trip
-    2. connect fails               -> fall back *immediately*, do not wait out
-                                      the timeout (the desktop app is not
-                                      running; that user must see no difference)
-    3. connected but no answer     -> wait out the caller's budget, then fall back
-    4. unparseable / unknown body  -> "no answer", fall back. Never guess,
-                                      never default to allow.
-
-Note the distinction behind levels 2-4: "the app gave no answer" falls back, while
-"the user has not pressed anything yet" keeps waiting — as long as the terminal
-would have waited.
+**The degradation ladder is the whole point.** Delivery is observation: a
+missing desktop app, a refused socket, a non-2xx response or an unusable body
+are all "the notice was not shown", and none of them may affect a run. This is
+also why nothing here reads a reply body any more — there is nothing to read.
 
 Non-blocking delivery runs on a dedicated daemon thread with a bounded queue
 rather than an asyncio task: the CLI runs each turn through its own
@@ -61,12 +47,9 @@ from agentica.notify.config import (
     load_notify_config,
 )
 #: The payload discipline lives in ``wire`` because the hook egress puts the
-#: same strings on its own wire. Aliased to the old private names so the call
+#: same strings on its own wire. Aliased to the old private name so the call
 #: sites below read unchanged.
-from agentica.notify.wire import (
-    ALLOWED_DECISIONS as _ALLOWED_DECISIONS,
-    clip_text as _clip_text,
-)
+from agentica.notify.wire import clip_text as _clip_text
 from agentica.utils.log import logger
 
 SOURCE = "agentica"
@@ -199,98 +182,6 @@ class NotifySink:
             except Exception as exc:
                 # Observation only: a dead desktop app is debug noise, not a fault.
                 logger.debug(f"notify sink: /event delivery failed: {exc}")
-
-    # ------------------------------------------------- answer-from-the-app path
-
-    def await_decision(
-        self,
-        event: str,
-        *,
-        payload: Dict[str, Any],
-        timeout: float,
-        session_id: Optional[str] = None,
-        work_dir: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """Block for a desktop decision. ``None`` means "fall back to terminal".
-
-        Same request, same reply, as typing the answer in the terminal: the
-        desktop reply is applied as *the user's* input, on the user's authority.
-        It is not the app deciding, and the app has no policy of its own.
-
-        Returns ``{"decision": ...}`` or ``{"answer": ...}`` only when the
-        desktop app gave a usable answer. Every other outcome — disabled,
-        connect failure, timeout, HTTP error, unparseable body — returns None so
-        the caller falls through to the terminal prompt.
-
-        ``timeout`` is required, and deliberately has no default here: how long a
-        person may take is the caller's business (the terminal already has its
-        own rule for that), and a number baked into this layer would mean a
-        desktop answer was allowed less time than a typed one. ``None`` means
-        "as long as the caller's interaction is alive", which is what the
-        terminal prompt does.
-        """
-        if not self._cfg.enabled:
-            return None
-        try:
-            envelope = self._envelope(
-                event, session_id=session_id, payload=payload, work_dir=work_dir
-            )
-        except Exception as exc:
-            logger.debug(f"notify sink: could not build {event} envelope: {exc}")
-            return None
-        try:
-            response = self._post(
-                "/await",
-                envelope,
-                timeout=timeout,
-                wait=True,
-                raise_transport=True,
-            )
-        except httpx.TimeoutException:
-            logger.debug(
-                f"notify sink: {event} not answered within {timeout:g}s; "
-                f"falling back to the terminal"
-            )
-            return None
-        except httpx.ConnectError:
-            # Level 2 of the ladder: the desktop app is not running. Fall back
-            # now — making the user wait out a timeout for an app that is off
-            # is how a feature like this gets switched off for good.
-            logger.debug(f"notify sink: no desktop app at {self._cfg.resolved_socket}")
-            return None
-        except Exception as exc:
-            logger.debug(f"notify sink: {event} transport failed: {exc}")
-            return None
-        if response is None:
-            return None
-        return self._parse_decision(response, event)
-
-    @staticmethod
-    def _parse_decision(response: httpx.Response, event: str) -> Optional[Dict[str, Any]]:
-        """Validate a decision body. Anything unrecognized means "no decision"."""
-        if response.status_code != 200:
-            logger.debug(
-                f"notify sink: {event} answered HTTP {response.status_code}; "
-                f"falling back to the terminal"
-            )
-            return None
-        try:
-            body = response.json()
-        except Exception:
-            logger.debug(f"notify sink: {event} response was not JSON; falling back")
-            return None
-        if not isinstance(body, dict):
-            return None
-        decision = body.get("decision")
-        if isinstance(decision, str) and decision in _ALLOWED_DECISIONS:
-            return {"decision": decision}
-        answer = body.get("answer")
-        if isinstance(answer, str) and answer.strip():
-            return {"answer": answer}
-        # Includes {"reject": true} and anything malformed: no decision is a
-        # valid outcome, and it must not be confused with approval.
-        logger.debug(f"notify sink: {event} returned no usable decision; falling back")
-        return None
 
     # --------------------------------------------------------------- transport
 

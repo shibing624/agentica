@@ -18,9 +18,9 @@ from agentica.utils.log import logger
 
 #: The four run lifecycle events, all non-blocking fire-and-forget notices.
 #:
-#: ``needs.*`` is not in here because those take the other path (``/await``),
-#: which is a request with a reply rather than a queued event: they are not
-#: gated by ``events`` and never go through the delivery queue.
+#: ``needs.*`` is not in here because this channel does not take replies at all
+#: any more: the user's hook command does (``agentica/shell_hooks``), and the
+#: sink only reports what a run is doing.
 RUN_EVENTS = (
     "run.started",
     "run.completed",
@@ -34,10 +34,8 @@ DEFAULT_TOKEN_FILE = "~/Library/Application Support/VPet/notify.token"
 #: The only timeout that belongs to this layer. Delivery is fire-and-forget and
 #: must never hold a run up, so it is a couple of seconds.
 #:
-#: There is deliberately no ``DEFAULT_TIMEOUT_SECONDS`` any more: how long a
-#: person may take to answer is the *terminal's* business, not ours. The caller
-#: passes whatever timeout it already uses (see ``await_decision``), so a
-#: desktop reply and a typed reply are governed by the same rule.
+#: There is deliberately no ``DEFAULT_TIMEOUT_SECONDS`` here: nothing on this
+#: channel waits for a person any more, so the only clock is delivery's.
 DELIVERY_TIMEOUT_SECONDS = 2.0
 
 #: Bounded on purpose. A wedged desktop app must not let the queue grow until

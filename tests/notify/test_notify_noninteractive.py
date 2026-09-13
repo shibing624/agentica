@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: The non-interactive paths must never get a blocking sink.
+@description: The non-interactive paths must never get a blocking answer path.
 
 ``build_noninteractive_approve`` covers ``--print`` / SDK / cron / unattended
 POST — runs with nobody at a terminal. Wiring "wait for a human to approve" into
@@ -10,8 +10,8 @@ would sit there. Its ``publish`` is a no-op and ``get_registry`` is ``None``
 (so the manual path denies immediately).
 
 These tests pin that contract from the outside, so a future edit cannot quietly
-give those paths a blocking call. The sink itself is not to blame — what matters
-is that nothing on these paths asks it anything.
+give those paths a blocking call. Neither external egress is to blame — what
+matters is that nothing on these paths ever offers the approval to one.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class _StubAgent:
 class TestNonInteractiveNeverBlocks:
     def test_its_publish_is_a_no_op_even_with_the_sink_on(self):
         """The strongest statement: turning the sink on changes nothing here."""
-        desktop = _FakeDesktop(decision_body={"decision": "allow"})
+        desktop = _FakeDesktop()
         try:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             from agentica.cli.approvals import build_noninteractive_approve
