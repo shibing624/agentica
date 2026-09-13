@@ -400,8 +400,8 @@ def parse_args():
     parser.add_argument(
         "--reasoning_effort",
         type=str,
-        choices=["low", "medium", "high", "max"],
-        help="Reasoning/thinking depth for thinking models; DeepSeek CLI defaults to max",
+        help="Reasoning/thinking depth for thinking models; passed through as-is "
+        "(no enum). DeepSeek CLI defaults to max when unset.",
     )
 
     # Auxiliary model: the cheap/fast model for all non-user-facing LLM work — memory

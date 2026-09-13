@@ -970,6 +970,23 @@ class TestProfileValidation(_CliSetupTestBase):
         })
         self.assertEqual(errors, [])
 
+    def test_validate_profile_accepts_any_reasoning_effort_string(self):
+        errors = cli_setup._validate_profile({
+            "model_provider": "openai",
+            "model_name": "openai/Kimi-k3",
+            "base_url": "https://example/v1",
+            "reasoning_effort": "max",
+        })
+        self.assertEqual(errors, [])
+
+        errors = cli_setup._validate_profile({
+            "model_provider": "openai",
+            "model_name": "openai/Kimi-k3",
+            "base_url": "https://example/v1",
+            "reasoning_effort": "extra-high",
+        })
+        self.assertEqual(errors, [])
+
     def test_validate_profile_accepts_claude_opus_5_effort_levels(self):
         for effort in ("off", "low", "medium", "high", "extra-high", "max"):
             with self.subTest(effort=effort):
@@ -1026,7 +1043,7 @@ class TestProfileValidation(_CliSetupTestBase):
             "model_provider": "not-a-provider",
             "model_name": "",
             "base_url": "no-scheme",
-            "reasoning_effort": "ultra",
+            "reasoning_effort": 123,
             "max_tokens": 0,
             "context_window": -1,
             "compact_token_limit": 0,

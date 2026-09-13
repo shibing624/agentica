@@ -49,7 +49,7 @@ def create_model(
             value. NOT sent to the API — set on the instance for budget /
             compression / status display only.
         reasoning: Responses API effort: none|minimal|low|medium|high|xhigh|max.
-        reasoning_effort: low|medium|high|max (OpenAI/DeepSeek); ignored for
+        reasoning_effort: passed through as-is (no enum). Ignored for
             Anthropic-family providers which use a thinking budget instead.
         thinking: enabled|disabled|auto — Anthropic-family providers use a
             ``thinking`` dict; others get it via ``extra_body``.
@@ -95,15 +95,12 @@ def create_model(
             params["extra_body"] = {"thinking": {"type": thinking}}
         logger.info(f"Model thinking mode: {thinking} (provider={model_provider})")
 
-    # Reasoning effort — low/medium/high/max. Anthropic-family skips it
-    # (uses thinking budget instead); DeepSeek/OpenAI/o-series accept it
-    # directly; other OpenAI-compatible providers get it via extra_body.
+    # Reasoning effort — any string the endpoint accepts. Anthropic-family
+    # skips it (uses thinking budget instead); DeepSeek/OpenAI/o-series
+    # take it as a top-level field; other OpenAI-compatible providers get
+    # it via extra_body.
     effort = reasoning_effort
     if effort:
-        if effort not in ("low", "medium", "high", "max"):
-            raise ValueError(
-                f"reasoning_effort must be one of: low, medium, high, max (got {effort!r})"
-            )
         if model_provider not in _ANTHROPIC_PROVIDERS:
             if model_provider in ("deepseek", "openai", "openrouter"):
                 params["reasoning_effort"] = effort

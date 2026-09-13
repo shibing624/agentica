@@ -20,7 +20,7 @@ SDK 仍读纯环境变量。import 时 `agentica/config.py` 调 `apply_global_co
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `reasoning_effort` | low/medium/high/max | 思考深度（OpenAI/DeepSeek；Claude 用独立 thinking budget，`wire_api: responses` 用 `reasoning`，均跳过此项） |
+| `reasoning_effort` | str | 思考深度，**原样发给** Chat Completions（CLI / setup / gateway 不再白名单拦截）。常见 `low`/`medium`/`high`/`max`；Kimi K3 是 `low`/`high`/`max`。Claude 用独立 thinking budget，`wire_api: responses` 用 `reasoning`，均跳过此项 |
 | `wire_api` | chat_completions/responses | 线协议（仅 `model_provider: openai`）；省略默认 `chat_completions`，`responses` 启用 OpenAI Responses API |
 | `reasoning` | str | Responses API 的 reasoning 配置（仅 `wire_api: responses` 时生效） |
 | `max_tokens` | int | 输出 token 上限 |

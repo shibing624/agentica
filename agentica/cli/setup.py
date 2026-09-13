@@ -386,9 +386,8 @@ def _validate_profile(data: dict) -> List[str]:
     # api_key is optional (env-var fallback).
 
     eff = data.get("reasoning_effort")
-    effort_choices = _reasoning_effort_choices(str(provider or ""), data.get("model_name"))
-    if eff is not None and eff not in effort_choices:
-        errors.append(f"reasoning_effort must be one of {list(effort_choices)}, got {eff!r}.")
+    if eff is not None and not isinstance(eff, str):
+        errors.append(f"reasoning_effort must be a string, got {type(eff).__name__}.")
     wire_api = data.get("wire_api")
     if wire_api is not None and wire_api not in _WIRE_API_CHOICES:
         errors.append(f"wire_api must be one of {list(_WIRE_API_CHOICES)}, got {wire_api!r}.")
@@ -468,16 +467,10 @@ def _validate_profile(data: dict) -> List[str]:
                 )
             if auxiliary_reasoning is not None and auxiliary_wire_api != "responses":
                 errors.append("auxiliary_model.reasoning requires wire_api: responses.")
-            auxiliary_provider = auxiliary.get("model_provider")
-            auxiliary_model_name = auxiliary.get("model_name")
-            auxiliary_effort_choices = _reasoning_effort_choices(
-                auxiliary_provider if isinstance(auxiliary_provider, str) else "",
-                auxiliary_model_name if isinstance(auxiliary_model_name, str) else None,
-            )
-            if auxiliary_effort is not None and auxiliary_effort not in auxiliary_effort_choices:
+            if auxiliary_effort is not None and not isinstance(auxiliary_effort, str):
                 errors.append(
-                    f"auxiliary_model.reasoning_effort must be one of {list(auxiliary_effort_choices)}, "
-                    f"got {auxiliary_effort!r}."
+                    f"auxiliary_model.reasoning_effort must be a string, "
+                    f"got {type(auxiliary_effort).__name__}."
                 )
             if auxiliary_wire_api == "responses" and auxiliary_effort is not None:
                 errors.append("auxiliary_model.wire_api: responses uses reasoning, not reasoning_effort.")
@@ -598,16 +591,14 @@ def _prompt_advanced_params(
     else:
         params.pop("reasoning", None)
         cur_effort = existing.get("reasoning_effort")
-        effort_choices = _reasoning_effort_choices(provider, model_name)
-        eff_label = _label(f"Reasoning effort {list(effort_choices)}", cur_effort)
-        while True:
-            effort = pt_prompt(eff_label).strip().lower()
-            if not effort:
-                break
-            if effort in effort_choices:
-                params["reasoning_effort"] = effort
-                break
-            console.print(f"  [red]Invalid choice. Pick one of {list(effort_choices)}.[/red]")
+        effort_hints = _reasoning_effort_choices(provider, model_name)
+        eff_label = _label(
+            f"Reasoning effort (any string; e.g. {list(effort_hints)})",
+            cur_effort,
+        )
+        effort = pt_prompt(eff_label).strip()
+        if effort:
+            params["reasoning_effort"] = effort
 
     # Output limit.
     cur_mt = existing.get("max_tokens")
