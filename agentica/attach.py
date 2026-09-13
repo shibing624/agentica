@@ -460,8 +460,6 @@ class AttachServer:
         speaking, not a side channel into the run.
         """
         text = _prompt_text(params.get("prompt"))
-        if not text:
-            raise AttachError(ERR_INVALID_PARAMS, "prompt is empty")
         wanted = params.get("sessionId")
         if wanted and self._session_id and str(wanted) != str(self._session_id):
             raise AttachError(
@@ -552,18 +550,50 @@ class AttachError(Exception):
 def _prompt_text(prompt: Any) -> str:
     """The user's text out of an ACP prompt.
 
-    ACP sends a list of content blocks; this channel accepts text only. Anything
-    else is refused rather than degraded, because silently dropping an image the
-    user attached would change what they asked for.
+    ACP sends a list of content blocks; this channel accepts text only. **Any
+    block this channel cannot deliver is refused, not skipped** — dropping an
+    image out of ``[text, image]`` would hand the agent "describe this image"
+    with no image, i.e. a different question than the user asked, and nothing
+    downstream could tell.
+
+    Raises ``AttachError`` (``-32602``) with the offending block types, so the
+    client learns what was not delivered instead of inferring it from an answer
+    that looks merely unhelpful.
     """
     if isinstance(prompt, str):
-        return prompt.strip()
+        text = prompt.strip()
+        if not text:
+            raise AttachError(ERR_INVALID_PARAMS, "prompt is empty")
+        return text
     if not isinstance(prompt, list):
-        return ""
+        raise AttachError(
+            ERR_INVALID_PARAMS,
+            f"prompt must be a string or a list of content blocks, got "
+            f"{type(prompt).__name__}",
+        )
+
     parts: List[str] = []
+    refused: List[str] = []
     for block in prompt:
         if not isinstance(block, dict):
+            refused.append(type(block).__name__)
             continue
-        if block.get("type") == "text":
+        block_type = block.get("type")
+        if block_type == "text":
             parts.append(str(block.get("text") or ""))
-    return "\n".join(part for part in parts if part).strip()
+        else:
+            refused.append(str(block_type or "untyped"))
+
+    if refused:
+        unique = sorted(set(refused))
+        raise AttachError(
+            ERR_INVALID_PARAMS,
+            f"this channel delivers text only; refused prompt containing "
+            f"{', '.join(unique)} block(s). The text was NOT delivered — "
+            f"resend it as text, or tell the user this surface cannot send that.",
+        )
+
+    text = "\n".join(part for part in parts if part).strip()
+    if not text:
+        raise AttachError(ERR_INVALID_PARAMS, "prompt is empty")
+    return text

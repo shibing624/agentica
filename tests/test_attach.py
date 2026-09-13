@@ -337,8 +337,7 @@ class TestPrompt:
         finally:
             server.stop()
 
-    def test_a_non_text_block_is_not_silently_dropped(self, tmp_path):
-        """An image the user attached must not turn into a different request."""
+    def test_a_lone_non_text_block_is_refused(self, tmp_path):
         server, injected, _ = _server(tmp_path)
         try:
             client = _Client(server.path, token=server.token_file.read_text().strip())
@@ -348,6 +347,58 @@ class TestPrompt:
             )
             assert reply["error"]["code"] == -32602
             assert injected == []
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_mixed_prompt_is_refused_whole_not_partially_delivered(self, tmp_path):
+        """The case that actually bites: text *and* an image.
+
+        Skipping the image would deliver "describe this image" with no image —
+        a different question than the user asked, with nothing downstream able
+        to notice. The earlier test only covered a lone image, which errored
+        incidentally as "prompt is empty" and hid this.
+        """
+        server, injected, _ = _server(tmp_path)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            reply = client.call(
+                "session/prompt",
+                {
+                    "sessionId": "sess-1234",
+                    "prompt": [
+                        {"type": "text", "text": "describe this image"},
+                        {"type": "image", "data": "AAAA"},
+                    ],
+                },
+            )
+            assert reply["error"]["code"] == -32602
+            # The text must NOT have gone through on its own.
+            assert injected == []
+            assert "image" in reply["error"]["message"]
+            client.close()
+        finally:
+            server.stop()
+
+    def test_the_refusal_names_the_block_type(self, tmp_path):
+        """The client must learn what was not delivered, not guess."""
+        server, _, _ = _server(tmp_path)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            reply = client.call(
+                "session/prompt",
+                {
+                    "sessionId": "sess-1234",
+                    "prompt": [
+                        {"type": "text", "text": "look"},
+                        {"type": "resource", "uri": "file:///a"},
+                        {"type": "image", "data": "x"},
+                    ],
+                },
+            )
+            message = reply["error"]["message"]
+            assert "resource" in message and "image" in message
+            assert "NOT delivered" in message
             client.close()
         finally:
             server.stop()
@@ -553,10 +604,31 @@ class TestPromptText:
     def test_a_bare_string_is_accepted(self):
         assert attach._prompt_text("  hello  ") == "hello"
 
-    def test_nothing_usable_gives_an_empty_string(self):
-        assert attach._prompt_text([{"type": "image", "uri": "x"}]) == ""
-        assert attach._prompt_text(None) == ""
-        assert attach._prompt_text(123) == ""
+    def test_an_undeliverable_block_raises_rather_than_being_dropped(self):
+        from agentica.attach import AttachError
+
+        with pytest.raises(AttachError) as mixed:
+            attach._prompt_text([{"type": "text", "text": "look"}, {"type": "image", "data": "x"}])
+        assert "image" in str(mixed.value)
+        assert "NOT delivered" in str(mixed.value)
+
+        with pytest.raises(AttachError):
+            attach._prompt_text([{"type": "image", "uri": "x"}])
+
+    def test_a_non_list_non_string_is_refused(self):
+        from agentica.attach import AttachError
+
+        for bad in (None, 123, {"type": "text", "text": "x"}):
+            with pytest.raises(AttachError):
+                attach._prompt_text(bad)
+
+    def test_an_empty_prompt_raises(self):
+        from agentica.attach import AttachError
+
+        with pytest.raises(AttachError):
+            attach._prompt_text("   ")
+        with pytest.raises(AttachError):
+            attach._prompt_text([{"type": "text", "text": "  "}])
 
 
 class TestTheIncomingLineIsEchoed:
