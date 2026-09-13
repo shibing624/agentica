@@ -75,6 +75,32 @@ class TestInstall:
         assert cfg is not None
         assert get_hook_egress() is not None
 
+    def test_disabled_forks_nothing_even_when_events_are_dispatched(self, monkeypatch):
+        """Verified by process count, not by reading the config.
+
+        Reading the config would only prove the config says "off"; what must hold
+        is that no ``Popen`` happens, on either path, even when the dispatch
+        points are called as they are in a real run.
+        """
+        import subprocess
+
+        from agentica.shell_hooks.requests import start_hook_request
+
+        calls = []
+        real_popen = subprocess.Popen
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return real_popen(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "Popen", spy)
+        install_hook_egress(ShellHooksConfig(enabled=True, command=[]))
+        hook_egress_dispatch("run.started", {}, session_id="s")
+        hook_egress_dispatch("run.completed", {}, session_id="s")
+        assert start_hook_request("needs.approval", {}) is None
+        assert start_hook_request("needs.input", {}) is None
+        assert calls == []
+
 
 class TestDispatch:
     def test_an_event_reaches_the_command(self, tmp_path):
