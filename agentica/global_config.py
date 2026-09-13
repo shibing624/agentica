@@ -53,7 +53,7 @@ Schema (``~/.agentica/config.yaml``)::
         # optional model tuning (omit to use model/factory defaults)
         # wire_api: responses        # OpenAI only; omit for Chat Completions
         # reasoning: high            # Responses API: none|minimal|low|medium|high|xhigh|max
-        # reasoning_effort: max      # Chat Completions: low|medium|high|max
+        # reasoning_effort: max      # Chat Completions: any string, passed through
         # max_tokens: 8192           # output token limit
         # context_window: 1000000    # context limit; overrides catalog value
         # temperature: 0.7
@@ -517,7 +517,7 @@ active_profile: default
 #     # optional tuning (omit to use model/factory defaults):
 #     #   wire_api: responses        # OpenAI only; omit for Chat Completions
 #     #   reasoning: high            # OpenAI Responses API
-#     #   reasoning_effort: max      # OpenAI-compatible Chat Completions
+#     #   reasoning_effort: max      # Chat Completions: any string, passed through
 #     #   max_tokens: 8192           # output token limit
 #     #   context_window: 1000000    # context limit; overrides catalog value
 #     #   temperature: 0.7

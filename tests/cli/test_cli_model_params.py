@@ -48,6 +48,18 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.max_tokens, 4096)
         self.assertEqual(model.reasoning_effort, "high")
 
+    def test_get_model_passes_kimi_max_reasoning_effort(self):
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "openai",
+            "openai/Kimi-k3",
+            api_key="fake_key",
+            reasoning_effort="max",
+        )
+        self.assertEqual(model.reasoning_effort, "max")
+        self.assertEqual(model.request_kwargs.get("reasoning_effort"), "max")
+
     def test_get_model_context_window_overrides_catalog(self):
         from agentica.cli.runtime import get_model
 
@@ -281,6 +293,18 @@ class TestCLIModelParams(unittest.TestCase):
         with patch.object(sys, "argv", ["agentica", "--reasoning_effort", "low"]):
             args = parse_args()
         self.assertEqual(args.reasoning_effort, "low")
+
+    def test_reasoning_effort_flag_is_not_an_enum(self):
+        import sys
+        from agentica.cli.runtime import parse_args
+
+        with patch.object(sys, "argv", ["agentica", "--reasoning_effort", "max"]):
+            args = parse_args()
+        self.assertEqual(args.reasoning_effort, "max")
+
+        with patch.object(sys, "argv", ["agentica", "--reasoning_effort", "extra-high"]):
+            args = parse_args()
+        self.assertEqual(args.reasoning_effort, "extra-high")
 
     def test_compact_token_limit_flag(self):
         import sys

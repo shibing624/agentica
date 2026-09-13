@@ -330,7 +330,7 @@ active: default              # CLI `/model default` 也是改这个指针
 | `AGENTICA_MODEL_THINKING` | 继承 config.yaml `active` profile 的 `thinking`（缺省空） | CLI 等入口的思维链开关。**网页 / 桌面版始终启用 thinking**（设置里已无此开关），不支持的模型会忽略 |
 | `AGENTICA_MODEL_BASE_URL` | 继承 profile 的 `base_url` | 自定义/兼容端点 |
 | `AGENTICA_MODEL_API_KEY` | 继承 profile 的 `api_key` | 主模型 key |
-| `AGENTICA_REASONING_EFFORT` | 继承 profile 的 `reasoning_effort` | low/medium/high/max |
+| `AGENTICA_REASONING_EFFORT` | 继承 profile 的 `reasoning_effort` | 任意字符串，原样透传（常见 low/medium/high/max） |
 | `AGENTICA_AUXILIARY_MODEL_PROVIDER` / `_NAME` | 继承 profile 的 `auxiliary_model` | 后台/子 agent 用的廉价模型，留空则复用主模型 |
 
 ### 工作目录（Project Work Dir）

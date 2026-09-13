@@ -504,7 +504,7 @@ function ProfileForm() {
              value={f.api_key} onChange={(e) => patch({ api_key: e.target.value })} />
       <div className="pf-section">{S.settings.tuning}</div>
       <div className="pf-row">
-        <input className="pf-input" placeholder="reasoning_effort（low/medium/high）" value={f.reasoning_effort} onChange={(e) => patch({ reasoning_effort: e.target.value })} />
+        <input className="pf-input" placeholder="reasoning_effort（原样透传，如 max）" value={f.reasoning_effort} onChange={(e) => patch({ reasoning_effort: e.target.value })} />
         <input className="pf-input" type="number" placeholder="max_tokens" value={f.max_tokens} onChange={(e) => patch({ max_tokens: e.target.value })} />
       </div>
       <div className="pf-row">

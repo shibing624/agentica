@@ -1404,6 +1404,19 @@ class TestModelFactory:
 
         assert model.reasoning_effort == "max"
 
+    def test_gateway_reasoning_effort_is_not_an_enum(self):
+        from agentica.gateway.services.model_factory import create_model
+
+        model = create_model(
+            "openai", "openai/Kimi-k3", api_key="sk-x", reasoning_effort="max",
+        )
+        assert model.reasoning_effort == "max"
+
+        model = create_model(
+            "openai", "openai/Kimi-k3", api_key="sk-x", reasoning_effort="extra-high",
+        )
+        assert model.reasoning_effort == "extra-high"
+
     def test_cron_tools_returns_list(self):
         from agentica.gateway.services.model_factory import get_cron_tools
         tools = get_cron_tools()
