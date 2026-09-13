@@ -152,6 +152,18 @@ try:
     client = Client(socket_path, token)
     loaded = client.call("session/load", {}).get("result", {})
     check("session/load attaches to this session", bool(loaded.get("sessionId")), str(loaded)[:120])
+    # The session id must be the live one, not the peer id or a startup snapshot:
+    # /resume changes it underneath a running CLI.
+    check(
+        "session/load reports the real session id",
+        isinstance(loaded.get("sessionId"), str) and len(loaded["sessionId"]) > 8,
+        str(loaded.get("sessionId")),
+    )
+    check(
+        "and the published socket is in the listing",
+        bool(loaded.get("cwd")),
+        str(loaded.get("cwd")),
+    )
 
     started = time.monotonic()
     reply = client.call(
@@ -164,6 +176,13 @@ try:
     check("the prompt was accepted", "error" not in reply, json.dumps(reply)[:200])
     if "result" in reply:
         check("the turn reported completion", reply["result"].get("stopReason") == "end_turn")
+        # The answer comes back with the reply, so a client need not read the
+        # transcript to see what its prompt produced.
+        check(
+            "the answer comes back with the reply",
+            EXPECTED in (reply["result"].get("agenticaAnswer") or ""),
+            str(reply["result"].get("agenticaAnswer"))[:60],
+        )
 
     text = pane()
     print("\n== receiving pane (tail) ==")
