@@ -6,6 +6,7 @@ its parent)."""
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 
@@ -79,10 +80,48 @@ class TestKilling:
         time.sleep(0.3)
         assert _group_empty(proc.pid)
 
+    def test_kill_leaves_no_zombie(self):
+        """A killed child whose status is never collected stays ``<defunct>``.
+
+        The acceptance for this feature is "no zombie after the terminal
+        answered first", and ``os.kill(pid, 0)`` cannot see the difference, so
+        this reads the process table.
+        """
+        proc = HookProcess(_py("import time; time.sleep(60)"), {})
+        assert proc.start() is True
+        pid = proc.pid
+        proc.kill()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if _is_gone_from_ps(pid):
+                return
+            time.sleep(0.1)
+        state = _ps_line(pid)
+        raise AssertionError(f"process {pid} is still in the table: {state!r}")
+
 
 def _group_empty(pgid: int) -> bool:
     try:
         os.killpg(pgid, 0)
     except OSError:
         return True
+    return False
+
+
+def _ps_line(pid) -> str:
+    out = subprocess.run(
+        ["ps", "-eo", "pid=,stat=,command="], capture_output=True, text=True
+    ).stdout
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if parts and parts[0] == str(pid):
+            return line.strip()
+    return ""
+
+
+def _is_gone_from_ps(pid) -> bool:
+    line = _ps_line(pid)
+    if not line:
+        return True
+    # ``Z`` is a zombie: killed, but its status was never collected.
     return False

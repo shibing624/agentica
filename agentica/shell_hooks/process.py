@@ -175,11 +175,29 @@ class HookProcess:
             return
         self._killed = True
         kill_process_group(self._proc)
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            # SIGKILL is immediate, but the exit status still has to be
+            # collected or the child stays a ``<defunct>`` zombie in the
+            # process table — and "no zombie left behind" is part of this
+            # feature's acceptance. Reaped on a throwaway daemon thread so no
+            # caller (including CLI shutdown) ever blocks on it.
+            threading.Thread(
+                target=_reap, args=(proc,), name="agentica-hook-reaper", daemon=True
+            ).start()
         try:
             if self._proc is not None and self._proc.stdout is not None:
                 self._proc.stdout.close()
         except Exception:  # closing an already-closed pipe
             pass
+
+
+def _reap(proc: subprocess.Popen) -> None:
+    """Collect a killed child's exit status so it does not linger as a zombie."""
+    try:
+        proc.wait(timeout=10)
+    except Exception:  # already collected, or refusing to die
+        pass
 
 
 def _is_json_document(buf: bytes) -> bool:
