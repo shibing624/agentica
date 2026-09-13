@@ -751,6 +751,14 @@ def run_interactive(
     # It is off unless the user turned it on (`settings.notify.enabled`).
     install_notify_sink()
 
+    # External hook egress: run the user's own command at lifecycle points, the
+    # way every other coding CLI does. Off unless `settings.hooks.enabled` and a
+    # command are both set; the two egresses are independent and can run at once
+    # (see `notify.sink._fan_out_event`).
+    from agentica.shell_hooks import install_hook_egress
+
+    install_hook_egress()
+
     # "Done" on the notify wire means "you can come back now", which is only
     # true when nothing else is queued. Several messages typed in a row each run
     # as their own turn, so without this the display announces the first one

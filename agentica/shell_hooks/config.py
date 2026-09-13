@@ -95,6 +95,20 @@ class ShellHooksConfig:
         default_factory=lambda: {e: True for e in SHELL_HOOK_EVENTS}
     )
 
+    def __post_init__(self) -> None:
+        """Treat ``events`` as a partial override over the full default set.
+
+        ``event_enabled`` reads an absent key as off, which is right for a
+        resolved config. Applied to a hand-written ``{"run.started": False}``
+        that rule would silently switch off the other five as well, so the
+        mapping is completed against the defaults here, once.
+        """
+        merged = {e: True for e in SHELL_HOOK_EVENTS}
+        merged.update(
+            {k: bool(v) for k, v in (self.events or {}).items() if k in merged}
+        )
+        self.events = merged
+
     def event_enabled(self, event: str) -> bool:
         return bool(self.events.get(event, False))
 

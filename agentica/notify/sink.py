@@ -454,6 +454,38 @@ def reset_sink_for_tests() -> None:
         _installed = False
 
 
+def _fan_out_event(
+    name: str,
+    payload: Dict[str, Any],
+    *,
+    session_id: Optional[str],
+    work_dir: Optional[str],
+    agent: Any = None,
+) -> None:
+    """Deliver one event to every installed external egress.
+
+    Both are observation channels: neither may break the other, and neither may
+    break the run. The hook egress is imported lazily because it imports this
+    package's ``wire`` helpers — a module-level import would be a cycle.
+    """
+    sink = _sink
+    if sink is not None:
+        try:
+            sink.emit_event(
+                name, session_id=session_id, work_dir=work_dir, payload=payload
+            )
+        except Exception as exc:
+            logger.debug(f"notify sink: could not emit {name}: {exc}")
+    try:
+        from agentica.shell_hooks.egress import hook_egress_dispatch
+
+        hook_egress_dispatch(
+            name, payload, session_id=session_id, work_dir=work_dir, agent=agent
+        )
+    except Exception as exc:
+        logger.debug(f"shell hooks: could not send {name}: {exc}")
+
+
 def notify_sink_dispatch(
     record: Any,
     *,
@@ -461,23 +493,21 @@ def notify_sink_dispatch(
     work_dir: Optional[str] = None,
     agent: Any = None,
 ) -> None:
-    """Hand one ``RunEventRecord`` to the sink. Never raises, never blocks.
+    """Hand one ``RunEventRecord`` to every installed external egress.
 
     Called from ``Runner._emit_event`` alongside (not instead of) the in-process
-    callback, so a broken sink and a broken callback cannot take each other down.
+    callback, so a broken egress and a broken callback cannot take each other
+    down.
+
+    This is also the shared home of the ``run.completed`` deferral below: both
+    egresses must agree on whether a run is really over, so that decision is
+    taken once here rather than once per transport.
 
     ``goal.*`` events deliberately do not come through here: they are emitted by
-    ``GoalManager`` on its own callback, and the desktop app has no use for the
-    goal loop. Wiring them is a future decision, not an oversight.
-
-    But "no goal events" is not the same as "goal does not affect the protocol":
-    a standing goal turns one user request into N runs, so ``run.completed`` is
-    held back while a goal is still active (see ``_goal_still_running``). The
-    agent is passed for that one check.
+    ``GoalManager`` on its own callback, and an external consumer has no use for
+    the goal loop — one request becoming N runs is an agentica implementation
+    detail, not part of the contract.
     """
-    sink = _sink
-    if sink is None:
-        return
     try:
         event = getattr(record, "event_type", None)
         name = getattr(event, "value", None) or str(event)
@@ -495,21 +525,32 @@ def notify_sink_dispatch(
                 # last one, not whatever the agent happens to hold later.
                 _mark_deferred(agent, _completion_payload(agent, record))
                 return
-            _emit_completion(sink, _completion_payload(agent, record),
-                             session_id=session_id, work_dir=work_dir)
+            _emit_completion(
+                _completion_payload(agent, record),
+                session_id=session_id,
+                work_dir=work_dir,
+                agent=agent,
+            )
             return
-        sink.emit_event(
+        _fan_out_event(
             name,
+            _run_event_payload(record),
             session_id=session_id,
             work_dir=work_dir,
-            payload=_run_event_payload(record),
+            agent=agent,
         )
     except Exception as exc:
         logger.debug(f"notify sink: dispatch failed: {exc}")
 
 
-def _emit_completion(sink: NotifySink, source: Any, *, session_id, work_dir) -> None:
-    """Report one completed run, once.
+def _emit_completion(
+    source: Any,
+    *,
+    session_id: Optional[str],
+    work_dir: Optional[str],
+    agent: Any = None,
+) -> None:
+    """Report one completed run, once, to every egress.
 
     ``source`` is either a ``RunEventRecord`` (the run reporting itself) or an
     already-extracted payload dict (a completion released later). Both produce
@@ -518,7 +559,13 @@ def _emit_completion(sink: NotifySink, source: Any, *, session_id, work_dir) -> 
     """
     payload = dict(source) if isinstance(source, dict) else _run_event_payload(source)
     payload.setdefault("title", "run completed")
-    sink.emit_event("run.completed", session_id=session_id, work_dir=work_dir, payload=payload)
+    _fan_out_event(
+        "run.completed",
+        payload,
+        session_id=session_id,
+        work_dir=work_dir,
+        agent=agent,
+    )
 
 
 def goal_finished(agent: Any, *, session_id: Optional[str] = None,
@@ -532,8 +579,7 @@ def goal_finished(agent: Any, *, session_id: Optional[str] = None,
     Only fires when a completion was actually held back: a session with no goal,
     or one whose goal never ran a lap, reports nothing extra.
     """
-    sink = _sink
-    if sink is None or agent is None:
+    if agent is None:
         return
     try:
         if not getattr(agent, _DEFERRED_FLAG, False):
@@ -544,7 +590,9 @@ def goal_finished(agent: Any, *, session_id: Optional[str] = None,
         # completion on this wire, and the consumer has no way to know why.
         held = getattr(agent, _DEFERRED_PAYLOAD, None) or {}
         setattr(agent, _DEFERRED_PAYLOAD, None)
-        _emit_completion(sink, held, session_id=session_id, work_dir=work_dir)
+        _emit_completion(
+            held, session_id=session_id, work_dir=work_dir, agent=agent
+        )
     except Exception as exc:
         logger.debug(f"notify sink: could not report the deferred completion: {exc}")
 
