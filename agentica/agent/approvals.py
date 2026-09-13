@@ -112,6 +112,16 @@ class ApprovalRegistry:
     def size(self) -> int:
         return len(self._pending)
 
+    def is_parked(self, tool_call_id: str) -> bool:
+        """Is this id still waiting for someone to decide it?
+
+        The hook path polls this. The terminal's answer is applied through
+        ``decide``, so a ``False`` here means the user already answered
+        elsewhere and the hook's process should be killed rather than awaited.
+        """
+        entry = self._pending.get(tool_call_id)
+        return entry is not None and not entry.future.done()
+
     def list(self) -> List[PendingApproval]:
         return [entry.pending for entry in self._pending.values()]
 

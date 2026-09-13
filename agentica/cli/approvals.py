@@ -9,6 +9,7 @@ sessions resolve that wait through ``_InputRequest`` + prompt_toolkit keys
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 from agentica.agent.approvals import (
@@ -229,6 +230,94 @@ def build_noninteractive_approve(agent: Any) -> Callable:
     )
 
 
+def _anchor_text(agent: Any) -> Optional[str]:
+    """The run's anchor text: the user's message, or the goal objective.
+
+    Read from the anchor rather than from the last message so a goal-driven
+    session shows what started the work instead of whichever lap is running. This
+    is the same text the notify sink sends as ``prompt`` for run events.
+    """
+    anchor = getattr(agent, "task_anchor", None)
+    return getattr(anchor, "source_query", None)
+
+
+def _offer_approval_to_hook(pending: PendingApproval, state: Any, loop: Any) -> None:
+    """Offer ``pending`` to the user's hook command and return immediately.
+
+    The process is polled on its own daemon thread. When the user answers in the
+    terminal first, ``is_parked`` goes False and the process is killed — the
+    hook's answer would be second, which is a race rather than an error.
+
+    No timeout is passed anywhere: the terminal prompt this races waits as long
+    as the user takes (``registry.wait`` has no deadline), so the hook gets the
+    same patience rather than a shorter clock of our own invention.
+    """
+    try:
+        from agentica.shell_hooks.requests import approval_payload, start_hook_request
+
+        agent = state.current_agent
+        request = start_hook_request(
+            "needs.approval",
+            approval_payload(
+                pending,
+                session_id=getattr(agent, "session_id", None),
+                work_dir=getattr(agent, "work_dir", None),
+                prompt=_anchor_text(agent),
+            ),
+        )
+        if request is None:
+            return
+
+        tool_call_id = pending.tool_call_id
+        if not tool_call_id:
+            # Without a correlation id the answer could not be applied to
+            # anything, so there is nothing to wait for.
+            request.kill()
+            return
+
+        registry = state.approval_registry
+
+        def _poll() -> None:
+            try:
+                while request.still_waiting:
+                    reply = request.wait_for_reply(timeout=0.2)
+                    if reply is not None:
+                        decision = reply.get("decision")
+                        if isinstance(decision, str):
+                            loop.call_soon_threadsafe(
+                                _apply_hook_decision, registry, tool_call_id, decision
+                            )
+                        return
+                    if registry is None or not registry.is_parked(tool_call_id):
+                        logger.debug(
+                            f"shell hooks: approval {tool_call_id} was already "
+                            f"decided; the hook answer arrived second"
+                        )
+                        return
+            except Exception as exc:
+                # An observation channel must not raise on a thread nobody is
+                # waiting to see. The terminal prompt is still the answer path.
+                logger.debug(f"shell hooks: approval wait failed: {exc}")
+            finally:
+                request.kill()
+
+        threading.Thread(
+            target=_poll, name="agentica-hook-approval", daemon=True
+        ).start()
+    except Exception as exc:
+        logger.debug(f"shell hooks: approval offer failed: {exc}")
+
+
+def _apply_hook_decision(registry: Any, tool_call_id: str, decision: str) -> None:
+    # False means the id is unknown or was already decided — normally the user
+    # answered in the terminal first. That is a race, not an error.
+    if not registry.decide(tool_call_id, decision):
+        logger.debug(
+            f"shell hooks: approval {tool_call_id} was already decided; "
+            f"the hook answer arrived second"
+        )
+
+
 def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
     """Park on ``_InputRequest``; y/p/esc on the prompt_toolkit thread decide."""
     from agentica.cli.interactive.console_io import _ask_active, _ask_state_lock
@@ -255,31 +344,12 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         app = ui_holder.get("app")
         if app is not None:
             app.invalidate()
-        # Side-mounted, so the terminal prompt above is unchanged and still
-        # wins whenever the user answers first. The sink offers the same
-        # question to the desktop app, where the user may answer instead — the
-        # same answer, applied the same way. The app has no authority of its
-        # own, and with no sink installed this is a no-op.
-        #
-        # ``timeout=None``: the terminal prompt here waits as long as the user
-        # takes (``registry.wait`` has no deadline), so the desktop side gets
-        # the same patience rather than a shorter clock of our own invention.
-        # When the request stops being wanted — the user answers here, or the
-        # turn is cancelled — ``deny_all`` resolves it and the wait is over.
-        try:
-            from agentica.notify.approvals import publish_approval
-
-            agent = state.current_agent
-            publish_approval(
-                pending,
-                state.approval_registry,
-                loop,
-                timeout=None,
-                session_id=getattr(agent, "session_id", None),
-                work_dir=getattr(agent, "work_dir", None),
-            )
-        except Exception as exc:
-            logger.debug(f"notify sink: approval offer failed: {exc}")
+        # Side-mounted, so the terminal prompt above is unchanged and still wins
+        # whenever the user answers first. The hook command is the same question
+        # offered to a desktop app, where the user may answer instead — the same
+        # answer, applied the same way. The app has no authority of its own, and
+        # with no hook configured this is a no-op.
+        _offer_approval_to_hook(pending, state, loop)
 
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",
