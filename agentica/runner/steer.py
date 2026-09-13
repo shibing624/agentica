@@ -79,7 +79,12 @@ class SteerMixin:
         if peers is None:
             return
         try:
-            drained = peers.drain()
+            # Urgent mail only. ``queue`` stays in the mailbox until this run
+            # ends (CLI idle drain) or the next run's first inject claims it.
+            drained = peers.drain(delivery="steer")
+            if agent._claim_queued_peer_mail is True:
+                agent._claim_queued_peer_mail = False
+                drained = list(drained) + peers.drain(delivery="queue")
         except OSError:
             logger.warning("draining the peer mailbox failed", exc_info=True)
             return

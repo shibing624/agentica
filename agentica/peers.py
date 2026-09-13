@@ -51,6 +51,27 @@ STALE_AFTER = 150.0
 # unbounded work for whenever it finally does.
 MAX_UNREAD = 50
 
+# How the receiver should take the message. ``steer`` (default) is the current
+# run: inject between tool batches, same as a local ``/steer``. ``queue`` waits
+# until that run finishes and becomes the next turn, same as a local ``/queue``.
+# Missing / legacy mailbox files are ``steer``.
+DELIVERY_STEER = "steer"
+DELIVERY_QUEUE = "queue"
+DELIVERIES = frozenset({DELIVERY_STEER, DELIVERY_QUEUE})
+
+
+def normalize_delivery(value: Optional[str]) -> str:
+    """Return ``steer`` or ``queue``; anything else is a send-time refusal."""
+    if value is None or value == "":
+        return DELIVERY_STEER
+    delivery = str(value).strip().lower()
+    if delivery in DELIVERIES:
+        return delivery
+    raise PeerMessageRefused(
+        f"delivery must be '{DELIVERY_STEER}' (inject between tool calls) or "
+        f"'{DELIVERY_QUEUE}' (next turn after the current run); got {value!r}"
+    )
+
 # Two agents left alone will keep replying to each other, and neither of them is
 # the user whose windows they are spending. Counting the exchange and cutting it
 # off at N is the wrong brake: a handoff that legitimately needs a few more
@@ -560,8 +581,12 @@ class PeerSession:
         """
         self._recent_sends.clear()
 
-    def drain(self) -> List[PeerMessage]:
-        """Take every pending message and notify ``on_drain`` about them.
+    def drain(self, *, delivery: Optional[str] = None) -> List[PeerMessage]:
+        """Take pending messages and notify ``on_drain`` about them.
+
+        ``delivery=None`` takes every file (idle CLI / between-turn poll).
+        ``delivery='steer'`` takes only urgent mail so a running turn can
+        inject it between tool batches and leave ``queue`` files for after.
 
         A ``from_kind="user"`` message releases the brakes exactly as a line
         typed here does: the human has joined in — from another terminal, or
@@ -570,7 +595,7 @@ class PeerSession:
         this, answering a relayed instruction hits "you already sent this" from
         an exchange the user has since moved past.
         """
-        messages = drain_inbox(self.peer_id)
+        messages = drain_inbox(self.peer_id, delivery=delivery)
         if any(message.from_user for message in messages):
             self.note_user_turn()
         if messages and self.on_drain is not None:
@@ -610,7 +635,14 @@ class PeerSession:
     def _note_send(self, peer: PeerInfo, text: str) -> None:
         self._recent_sends.setdefault(peer.peer_id, []).append((time.time(), _text_digest(text)))
 
-    def send(self, target: str, text: str, *, from_kind: str = "agent") -> PeerMessage:
+    def send(
+        self,
+        target: str,
+        text: str,
+        *,
+        from_kind: str = "agent",
+        delivery: str = DELIVERY_STEER,
+    ) -> PeerMessage:
         """Resolve ``target`` among live peers and deliver ``text`` to it.
 
         "Nobody by that name" and "be more specific" are different problems
@@ -641,6 +673,7 @@ class PeerSession:
             from_name=self.info.name,
             from_peer_id=self.peer_id,
             from_kind=from_kind,
+            delivery=delivery,
         )
         self._note_send(peer, text)
         return message
@@ -731,6 +764,7 @@ class PeerMessage:
     to_name: str = ""
     created_at: str = ""
     from_kind: str = "agent"
+    delivery: str = DELIVERY_STEER
 
     @property
     def from_user(self) -> bool:
@@ -743,6 +777,7 @@ class PeerMessage:
             f"from_name: {self.from_name}\n"
             f"from_peer_id: {self.from_peer_id}\n"
             f"from_kind: {self.from_kind}\n"
+            f"delivery: {self.delivery}\n"
             f"to_peer_id: {self.to_peer_id}\n"
             f"to_name: {self.to_name}\n"
             f"created_at: {self.created_at}\n"
@@ -783,6 +818,10 @@ class PeerMessage:
             # Anything but an explicit "user" is treated as the unprivileged
             # case, so a malformed or truncated header cannot grant authority.
             from_kind="user" if fields.get("from_kind") == "user" else "agent",
+            # Legacy files have no delivery field; they were injected mid-run.
+            delivery=(
+                DELIVERY_QUEUE if fields.get("delivery") == DELIVERY_QUEUE else DELIVERY_STEER
+            ),
         )
 
 
@@ -800,6 +839,7 @@ def send_message(
     from_name: str,
     from_peer_id: str,
     from_kind: str = "agent",
+    delivery: str = DELIVERY_STEER,
 ) -> PeerMessage:
     """Drop a message into ``target``'s mailbox.
 
@@ -830,6 +870,7 @@ def send_message(
         to_name=target.name,
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         from_kind=from_kind,
+        delivery=normalize_delivery(delivery),
     )
     box = mailbox_dir(target.peer_id)
     _ensure_private_dir(box)
@@ -852,15 +893,18 @@ def send_message(
     return message
 
 
-def drain_inbox(peer_id: str) -> List[PeerMessage]:
-    """Take every pending message for ``peer_id``, oldest first.
+def drain_inbox(peer_id: str, *, delivery: Optional[str] = None) -> List[PeerMessage]:
+    """Take pending messages for ``peer_id``, oldest first.
 
-    Files are removed as they are read: a message is delivered exactly once,
+    Files are removed as they are taken: a message is delivered exactly once,
     and an unparsable file is discarded rather than blocking the mailbox.
+    ``delivery`` restricts which files are taken (``steer`` / ``queue``);
+    others stay so a running turn can leave queued mail for after it ends.
     """
     box = mailbox_dir(peer_id)
     if not box.exists():
         return []
+    wanted = None if delivery is None else normalize_delivery(delivery)
     messages: List[PeerMessage] = []
     for path in sorted(box.glob("*.md")):
         try:
@@ -869,11 +913,14 @@ def drain_inbox(peer_id: str) -> List[PeerMessage]:
             # Leave it in place: a transient read error must not destroy a
             # message that a later drain could still deliver.
             continue
-        path.unlink(missing_ok=True)
         message = PeerMessage.parse(raw)
         if message is None:
+            path.unlink(missing_ok=True)
             logger.warning(f"discarded unparsable peer message: {path}")
             continue
+        if wanted is not None and message.delivery != wanted:
+            continue
+        path.unlink(missing_ok=True)
         messages.append(message)
     return messages
 

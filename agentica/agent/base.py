@@ -662,6 +662,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # the user's other sessions are pulled from it between tool batches, on
         # the same "never interrupt a running tool" boundary as steering.
         self.peer_session: Optional[Any] = None
+        # First inject of a run also takes ``delivery=queue`` mail so a web /
+        # SDK session with no idle peer loop still sees it on the next turn.
+        self._claim_queued_peer_mail = False
 
     def _post_init(self):
         """Post-initialization setup."""
@@ -1076,6 +1079,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         with self._steer_lock:
             self._running = True
             self._pending_steer = []
+            self._claim_queued_peer_mail = True
 
     def _end_steer_window(self) -> None:
         """Close the steering window at run end (called by the Runner).

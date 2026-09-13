@@ -316,9 +316,13 @@ def format_tool_display(
     if tool_name == "send_message":
         target = str(tool_args.get("target", "") or "")
         message = str(tool_args.get("message", "") or "")
+        delivery = str(tool_args.get("delivery", "") or "").strip().lower()
+        dest = f"→ {target}" if target else ""
+        if delivery == "queue":
+            dest = f"{dest} [queue]" if dest else "[queue]"
         if not message:
-            return f"→ {target}" if target else ""
-        return f"→ {target}\n    {message}" if target else message
+            return dest
+        return f"{dest}\n    {message}" if dest else message
 
     if tool_name == "list_agents":
         return ""

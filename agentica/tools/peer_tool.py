@@ -29,7 +29,8 @@ class PeerMessagingTool(Tool):
 
         Returns each session's addressable name (what `send_message` takes),
         peer id, whether it is idle or mid-turn (a mid-turn session still
-        receives: messages land between its tool calls), session id, config
+        receives `delivery=steer` between tool calls; `delivery=queue` waits
+        for that run to finish), session id, config
         profile, model (`provider/name`), context spent out of its window,
         working directory, project storage directory (hash-suffixed, unique),
         session transcript path, CLI runtime log file, workspace / memory
@@ -81,13 +82,11 @@ class PeerMessagingTool(Tool):
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
 
-    async def send_message(self, target: str, message: str) -> str:
+    async def send_message(self, target: str, message: str, delivery: str = "steer") -> str:
         """Sends a short plain-text message to one of the user's other agent sessions.
 
         Use it to hand over a finding, a decision, or a status the other session
-        needs in order to not work from stale assumptions. The receiving agent
-        reads it between its own tool calls, so it never interrupts work in
-        progress.
+        needs in order to not work from stale assumptions.
 
         Args:
             target: The session name, peer id, or session_id (prefix ok) from
@@ -100,21 +99,35 @@ class PeerMessagingTool(Tool):
                 write-up in a file and give its absolute path instead of pasting
                 it, since the machine is shared and the receiver can open it if
                 and when it needs the detail.
+            delivery: How the receiver should take it. ``steer`` (default) is
+                urgent: injected at the next tool-batch boundary of a running
+                turn, same as a local `/steer`. ``queue`` waits until that
+                turn finishes and becomes the next turn, same as a local
+                `/queue`. An idle session starts a turn either way.
 
         Returns:
             Confirmation that the message was queued, or the reason it was refused.
         """
         try:
-            sent = self._peers.send(target, message)
+            sent = self._peers.send(target, message, delivery=delivery)
         except PeerMessageRefused as exc:
             logger.debug(f"peer message refused: {exc}")
             return f"Message not sent: {exc}"
         # Mailbox write succeeded. That is "queued", not "the other agent has
         # read it" — same boundary Claude Code uses for same-machine delivery.
+        if sent.delivery == "queue":
+            when = (
+                "The other session will run it as its next turn after the "
+                "current work finishes (or immediately if idle)."
+            )
+        else:
+            when = (
+                "The other session will accept it between tool calls if it is "
+                "running, or as its next turn if idle."
+            )
         confirmation = (
-            f"Message queued for '{sent.to_name}' [peer={sent.to_peer_id}]. "
-            f"The other session will accept it between tool calls if it is "
-            f"running, or as its next turn if idle. You will not get a read "
+            f"Message queued for '{sent.to_name}' [peer={sent.to_peer_id}] "
+            f"(delivery={sent.delivery}). {when} You will not get a read "
             f"receipt; if a reply is needed, that session sends one back."
         )
         return confirmation

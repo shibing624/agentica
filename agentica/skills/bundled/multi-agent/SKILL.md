@@ -86,8 +86,12 @@ that it was blocked on, or work it handed you that is now done or blocked.
 - **Address by name, never by session id.** A session publishes itself before
   it has a session id, so for the first moments after boot that field is empty.
 - **An idle session acts on your message by itself.** It starts a turn with
-  nobody at the keyboard - that is what makes this work unattended. A busy one
-  picks the message up between tool calls.
+  nobody at the keyboard - that is what makes this work unattended. A busy
+  one: `delivery=steer` (default) injects between tool calls, like `/steer`;
+  `delivery=queue` waits until that run finishes and becomes the next turn,
+  like `/queue`. Use `steer` for something that must cut in (stop, a
+  constraint it is about to violate). Use `queue` for work that should not
+  interrupt the current turn.
 - **Say everything in one message.** Send the goal, the constraints, what is out
   of scope, what to do when finished and when blocked, and where things are. The
   worker cannot see your conversation, so every decision you leave open comes

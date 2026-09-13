@@ -87,7 +87,10 @@ COMMAND_REGISTRY = {
     "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (plain text typed mid-run steers by default)"),
     "/list-agents": (_cmd_list_agents, "List your other live CLI sessions this one can message"),
     "/peers": (_cmd_list_agents, "List messageable live sessions (alias for /list-agents)"),
-    "/send-message": (_cmd_send_message, "Send a message yourself: /send-message <session> <text>"),
+    "/send-message": (
+        _cmd_send_message,
+        "Message another session: /send-message [--steer|--queue] <session> <text>",
+    ),
     "/send": (_cmd_send_message, "Send a message to a session (alias for /send-message)"),
     "/worktree": (
         _cmd_worktree,

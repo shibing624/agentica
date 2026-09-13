@@ -23,7 +23,7 @@ from agentica.cli.display import (
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import local_turn_stamp
-from agentica.peers import PeerMessageRefused
+from agentica.peers import DELIVERY_QUEUE, DELIVERY_STEER, PeerMessageRefused
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 
@@ -367,6 +367,23 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
 
 
 
+def _parse_send_message_args(cmd_args: str) -> tuple[str, str, str]:
+    """Parse ``[--steer|--queue] <session> [--steer|--queue] <text>``.
+
+    The flag is only accepted as the first token or immediately after the
+    session name, so a body that mentions ``--queue`` is not eaten.
+    """
+    tokens = (cmd_args or "").strip().split()
+    delivery = DELIVERY_STEER
+    if tokens and tokens[0] in ("--steer", "--queue"):
+        delivery = tokens.pop(0)[2:]
+    target = tokens.pop(0) if tokens else ""
+    if tokens and tokens[0] in ("--steer", "--queue"):
+        delivery = tokens.pop(0)[2:]
+    text = " ".join(tokens).strip()
+    return target, text, delivery
+
+
 def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
     """Send a message from you to one of your other live sessions.
 
@@ -376,6 +393,9 @@ def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
     it into that terminal. It arrives marked as coming from you, so the
     receiving agent treats it as your instruction rather than another agent's
     information.
+
+    ``--steer`` (default) injects between the receiver's tool calls; ``--queue``
+    waits until that run finishes and becomes its next turn.
     """
     con = get_console()
     peers = ctx.peer_session
@@ -383,28 +403,32 @@ def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
         con.print("  [yellow]Cross-session messaging is not active in this session.[/yellow]")
         return
 
-    # split() rather than partition(" "): extra spaces after the target are
-    # typing, not an empty message.
-    parts = (cmd_args or "").strip().split(maxsplit=1)
-    target = parts[0] if parts else ""
-    text = parts[1].strip() if len(parts) > 1 else ""
+    target, text, delivery = _parse_send_message_args(cmd_args)
     if not target or not text:
-        con.print("  [dim]Usage: /send-message <session> <text>   (see /list-agents for names)[/dim]")
         con.print(
-            "  [dim]e.g. /send-message benchmarks-b read tmp/handoff.md and take over from there[/dim]"
+            "  [dim]Usage: /send-message [--steer|--queue] <session> <text>   "
+            "(see /list-agents for names)[/dim]"
+        )
+        con.print(
+            "  [dim]e.g. /send-message --queue benchmarks-b read tmp/handoff.md "
+            "when you finish[/dim]"
         )
         return
 
     try:
-        sent = peers.send(target, text, from_kind="user")
+        sent = peers.send(target, text, from_kind="user", delivery=delivery)
     except PeerMessageRefused as exc:
         con.print(f"  [red]Not sent: {exc}[/red]")
         return
     # Name the peer it actually resolved to: '/send-message 7e17' should show
     # which session that prefix picked.
+    if sent.delivery == DELIVERY_QUEUE:
+        when = "next turn after its current run (or immediately if idle)"
+    else:
+        when = "between tool calls if running, or as its next turn if idle"
     con.print(
-        f"  [green]Queued for {sent.to_name}.[/green] [dim]The other session accepts it "
-        f"between tool calls if running, or as its next turn if idle.[/dim]"
+        f"  [green]Queued for {sent.to_name} ({sent.delivery}).[/green] "
+        f"[dim]The other session accepts it {when}.[/dim]"
     )
 
 

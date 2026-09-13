@@ -557,7 +557,10 @@ class TestPeerMessagingTool:
 
         assert "queued" in out.lower()
         assert "'receiver'" in out
-        assert [m.text for m in receiver.drain()] == ["schema changed"]
+        assert "delivery=steer" in out
+        received = receiver.drain()
+        assert [m.text for m in received] == ["schema changed"]
+        assert received[0].delivery == "steer"
 
     def test_send_message_reports_a_refusal_instead_of_raising(self):
         tool = PeerMessagingTool(_session("sender"))
@@ -741,6 +744,74 @@ class TestUserRelayedMessages:
 
         received = b.drain()
         assert not received[0].from_user
+
+
+class TestDelivery:
+    def test_default_and_legacy_mailbox_files_are_steer(self):
+        a = _session("alpha")
+        b = _session("beta")
+        a.send("beta", "urgent")
+        received = b.drain()
+        assert received[0].delivery == "steer"
+
+        raw = received[0].render().replace("delivery: steer\n", "")
+        parsed = PeerMessage.parse(raw)
+        assert parsed is not None
+        assert parsed.delivery == "steer"
+
+    def test_queue_survives_the_roundtrip(self):
+        a = _session("alpha")
+        b = _session("beta")
+        a.send("beta", "do this next", delivery="queue")
+        received = b.drain()
+        assert [m.delivery for m in received] == ["queue"]
+        assert received[0].text == "do this next"
+
+    def test_a_running_drain_takes_steer_and_leaves_queue(self):
+        a = _session("alpha")
+        b = _session("beta")
+        a.send("beta", "cut in", delivery="steer")
+        a.send("beta", "after you finish", delivery="queue")
+
+        mid_run = b.drain(delivery="steer")
+        assert [m.text for m in mid_run] == ["cut in"]
+        leftover = b.drain()
+        assert [m.text for m in leftover] == ["after you finish"]
+
+    def test_tool_queue_delivery_is_named_in_the_confirmation(self):
+        tool = PeerMessagingTool(_session("sender"))
+        receiver = _session("receiver")
+        out = asyncio.run(
+            tool.send_message(target="receiver", message="later", delivery="queue")
+        )
+        assert "delivery=queue" in out
+        assert "next turn" in out
+        assert receiver.drain()[0].delivery == "queue"
+
+    def test_invalid_delivery_is_refused(self):
+        tool = PeerMessagingTool(_session("sender"))
+        _session("receiver")
+        out = asyncio.run(
+            tool.send_message(target="receiver", message="x", delivery="interrupt")
+        )
+        assert out.startswith("Message not sent:")
+        assert "steer" in out and "queue" in out
+
+    def test_send_message_cli_parses_queue_flag(self):
+        from agentica.cli.commands.runtime import _parse_send_message_args
+
+        assert _parse_send_message_args("beta do the thing") == (
+            "beta", "do the thing", "steer",
+        )
+        assert _parse_send_message_args("--queue beta do the thing") == (
+            "beta", "do the thing", "queue",
+        )
+        assert _parse_send_message_args("beta --queue do the thing") == (
+            "beta", "do the thing", "queue",
+        )
+        assert _parse_send_message_args("beta please mention --queue in the report") == (
+            "beta", "please mention --queue in the report", "steer",
+        )
 
 
 def test_listing_survives_a_corrupt_record():

@@ -36,6 +36,36 @@ def test_no_peer_channel_is_a_noop():
     assert [m.content for m in messages] == ["hi"]
 
 
+def test_mid_run_inject_asks_only_for_steer_mail():
+    agent = _agent([_message()])
+    agent._claim_queued_peer_mail = False
+    messages = [Message(role="user", content="go")]
+
+    Runner._inject_peer_messages(messages, agent)
+
+    agent.peer_session.drain.assert_called_with(delivery="steer")
+
+
+def test_first_inject_of_a_run_also_claims_queued_mail():
+    steer = _message(text="cut in")
+    queued = _message(text="after")
+    queued.delivery = "queue"
+    agent = MagicMock()
+    agent._claim_queued_peer_mail = True
+    agent.peer_session.drain.side_effect = [[steer], [queued]]
+    messages = [Message(role="user", content="go")]
+
+    Runner._inject_peer_messages(messages, agent)
+
+    assert agent._claim_queued_peer_mail is False
+    injected = messages[-1].content
+    assert "cut in" in injected and "after" in injected
+    assert [c.kwargs for c in agent.peer_session.drain.call_args_list] == [
+        {"delivery": "steer"},
+        {"delivery": "queue"},
+    ]
+
+
 def test_an_empty_mailbox_leaves_the_request_untouched():
     agent = _agent([])
     messages = [Message(role="tool", content="tool output", tool_call_id="t1")]
