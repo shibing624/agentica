@@ -910,6 +910,8 @@ def create_agent(
     extra_tools: Optional[List] = None,
     workspace: Optional[Workspace] = None,
     skills_registry=None,
+    *,
+    include_ask_user_question: bool,
     ask_user_question_callback=None,
     background_process_registry=None,
     enable_cron_immediate_run: bool = True,
@@ -920,6 +922,15 @@ def create_agent(
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
+    include_ask_user_question: whether this agent may ask the user a question.
+        Required, with no default, because the answer is a property of *who is
+        at the terminal for this agent* and only the caller knows that. The tool
+        blocks until a person answers — that is its whole design — so mounting
+        it on a run with nobody to answer is a hang, not a degraded experience.
+        True for the interactive CLI (and everything rebuilding that session on
+        its behalf: /model, /resume, /fork, /clear); False for ``--query`` /
+        ``--print``, cron jobs and ``/bg``. A default here would have silently
+        been right for at most one of those, which is why there is none.
     ask_user_question_callback: optional ``(prompt, options) -> str`` used by the
         ask_user_question/confirm tools. The interactive CLI passes a prompt_toolkit-aware
         callback so the tool reads via the TUI input box instead of a bare
@@ -1114,7 +1125,7 @@ def create_agent(
         enable_experience_capture=agent_config.get("enable_experience_capture", True),
         experience_config=experience_config,
         long_term_memory_config=long_term_memory_config,
-        include_ask_user_question=True,  # CLI is interactive, always enable human-in-the-loop
+        include_ask_user_question=include_ask_user_question,
         ask_user_question_callback=ask_user_question_callback,
         background_process_registry=background_process_registry,
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),

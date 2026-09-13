@@ -201,6 +201,12 @@ wire ≠ 不影响协议**——上面那条扣住规则就是 goal 对协议的
 这不是「桌宠被禁了」，而是**没有用户在场可等**：没有 registry 就没有「用户在等」这个
 状态，答复也无处可落。
 
+同一条道理也管**提问**（`needs.input`）：这几条路径**连工具都不装**。`create_agent` 的
+`include_ask_user_question` 是必填关键字参数，交互 CLI（及其 `/model` / `/resume` /
+`/fork` / `/clear` 重建）传 `True`，`--query`/`--print`、cron、`/bg` 传 `False`。
+`ask_user_question` 会一直等人回答，这是它本来的设计；给了工具再靠超时或假答复兜底，
+既改不了「没人可问」，又等于**替用户说话**。装配期不给，才是说了实话。
+
 ## 用起来
 
 1. 装 VPet，让它把 `notify.sock` 和 `notify.token` 建起来。

@@ -318,6 +318,8 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
         ctx.extra_tools,
         ctx.workspace,
         ctx.skills_registry,
+        # /fork branches this interactive session: a person is still here.
+        include_ask_user_question=True,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
@@ -649,6 +651,14 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
             extra_tools,
             workspace,
             skills_registry,
+            # /bg hands the prompt to a thread and returns to the TUI, and this
+            # call deliberately passes no ``approve=`` — so the bg agent already
+            # gets the non-interactive approver (deny-on-park) rather than the
+            # TUI closer the live agent uses. This is the same judgment for the
+            # sibling gate: the user is not sitting in front of *this* task, and
+            # the question tool has no timeout by design, so a question here
+            # would park the thread with no owner to answer it.
+            include_ask_user_question=False,
             background_process_registry=ctx.background_processes,
         )
         bg_tasks[task_id]["agent"] = bg_agent

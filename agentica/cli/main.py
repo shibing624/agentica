@@ -251,7 +251,16 @@ def main():
             )
 
         extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
-        agent_instance = create_agent(agent_config, extra_tools, workspace, skills_registry)
+        agent_instance = create_agent(
+            agent_config,
+            extra_tools,
+            workspace,
+            skills_registry,
+            # One-shot run: no TUI, so nobody can answer a question. Without a
+            # callback the tool would fall through to a bare input() on a
+            # non-interactive stdin and ask a terminal that is not there.
+            include_ask_user_question=False,
+        )
         started_at = time.monotonic()
         try:
             response = agent_instance.run_stream_sync(query)

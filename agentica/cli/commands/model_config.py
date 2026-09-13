@@ -632,6 +632,8 @@ def _apply_profile(
         ctx.extra_tools,
         ctx.workspace,
         ctx.skills_registry,
+        # /model rebuilds the interactive session in place: a person is still here.
+        include_ask_user_question=True,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,

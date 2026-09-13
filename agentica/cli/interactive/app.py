@@ -453,6 +453,8 @@ def run_interactive(
         worktree_binder.mark_entered()
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
+        # A person is at this terminal, so the question tool belongs here.
+        include_ask_user_question=True,
         ask_user_question_callback=_cli_ask_user_question_callback,
         background_process_registry=state.background_processes,
         permission_mode=perm_mode,

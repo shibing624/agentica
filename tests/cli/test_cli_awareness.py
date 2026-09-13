@@ -92,6 +92,7 @@ class TestCLIAwareness(unittest.TestCase):
                 extra_tools=[self._make_demo_tool()],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         ctx = agent.environment_context
@@ -122,6 +123,7 @@ class TestCLIAwareness(unittest.TestCase):
                 extra_tools=[self._make_demo_tool()],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         ctx = agent.environment_context

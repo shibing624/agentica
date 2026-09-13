@@ -72,6 +72,8 @@ def _refresh_skills_session(ctx: CommandContext):
         ctx.extra_tools,
         ctx.workspace,
         new_registry,
+        # Rebuilding the interactive session: same terminal, same person.
+        include_ask_user_question=True,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,

@@ -157,6 +157,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 extra_tools=[],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         self.assertEqual(captured["model"].reasoning_effort, "max")
@@ -190,6 +191,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 extra_tools=[],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         self.assertTrue(captured["enable_diagnostics"])
@@ -684,6 +686,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 extra_tools=[],
                 workspace=None,
                 skills_registry=registry,
+                include_ask_user_question=True,
             )
 
         self.assertIsNone(agent.instructions)
@@ -721,6 +724,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 },
                 extra_tools=[],
                 workspace=None,
+                include_ask_user_question=True,
                 skills_registry=None,
             )
 
@@ -757,6 +761,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 extra_tools=[],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         tc = captured["tool_config"]
@@ -815,6 +820,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 extra_tools=[],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         self.assertEqual(captured["tool_config"].compact_token_limit, 300_000)
@@ -850,11 +856,15 @@ class TestCLIConfiguration(unittest.TestCase):
                 workspace=workspace,
                 skills_registry=None,
                 background_process_registry=registry,
+                include_ask_user_question=True,
             )
 
         self.assertEqual(registry.user_id, "alice@example.com")
 
     def _tool_names_from_create_agent(self, **create_agent_kwargs):
+        # An interactive session is the default here; a test standing in for an
+        # unattended path passes include_ask_user_question=False to say so.
+        create_agent_kwargs.setdefault("include_ask_user_question", True)
         from agentica.cli.runtime import create_agent
 
         captured = {}
@@ -944,6 +954,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 extra_tools=[],
                 workspace=None,
                 skills_registry=None,
+                include_ask_user_question=True,
             )
 
         self.assertEqual(captured["session_profile"], "main")

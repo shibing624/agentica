@@ -373,6 +373,8 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ctx.extra_tools,
         ctx.workspace,
         ctx.skills_registry,
+        # /new: the fresh session keeps this terminal and its person.
+        include_ask_user_question=True,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
@@ -683,6 +685,8 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             ctx.extra_tools,
             ctx.workspace,
             ctx.skills_registry,
+            # /resume rebuilds the interactive session: a person is still here.
+            include_ask_user_question=True,
             ask_user_question_callback=ctx.ask_user_question_callback,
             background_process_registry=ctx.background_processes,
             peer_session=ctx.peer_session,
@@ -799,6 +803,8 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
         ctx.extra_tools,
         ctx.workspace,
         ctx.skills_registry,
+        # /clear keeps the same interactive session, only the screen changed.
+        include_ask_user_question=True,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,

@@ -62,11 +62,17 @@ class AskUserQuestionTool(Tool):
     The tool uses a callback mechanism to get user input. If no callback is
     provided, it defaults to console input (useful for CLI applications).
 
+    It waits for the user without a deadline. That is the point of the tool
+    rather than a timeout setting: a question is a *user action*, and the
+    answer arriving is what ends it. There is deliberately no timeout to tune —
+    a number here would mean the question expired, and there is no correct
+    value for "how long a person may take". Agents with nobody to answer must
+    therefore not be given this tool at all: see ``include_ask_user_question``
+    in ``agentica/tools/builtin`` and ``agentica/cli/runtime.create_agent``.
+
     Attributes:
         input_callback: Custom callback for getting user input.
             Signature: (prompt: str, options: Optional[List[str]]) -> str
-        timeout: Timeout in seconds for waiting for user input (default: 300)
-        default_on_timeout: Default value to return if timeout occurs
 
     Example:
         ```python
@@ -86,8 +92,8 @@ class AskUserQuestionTool(Tool):
     ASK_USER_QUESTION_SYSTEM_PROMPT = """## `ask_user_question`
 
 This prompt renders in YOUR terminal. Work handed to you by another agent
-session must go back with `send_message` — this box never reaches that person
-and only blocks until it times out."""
+session must go back with `send_message` — this box never reaches that person,
+and it blocks until someone answers it."""
 
     _ASK_PARAMETERS = {
         "type": "object",
@@ -115,8 +121,6 @@ and only blocks until it times out."""
     def __init__(
         self,
         input_callback: Optional[Callable[[str, Optional[List[str]]], str]] = None,
-        timeout: int = 300,
-        default_on_timeout: Optional[str] = None,
     ):
         """
         Initialize AskUserQuestionTool.
@@ -124,13 +128,9 @@ and only blocks until it times out."""
         Args:
             input_callback: Custom callback function for getting user input.
                            If None, uses console input.
-            timeout: Timeout in seconds for waiting for user input.
-            default_on_timeout: Default value to return if timeout occurs.
         """
         super().__init__(name="ask_user_question_tool")
         self.input_callback = input_callback
-        self.timeout = timeout
-        self.default_on_timeout = default_on_timeout
 
         self.register(self.ask_user_question, parameters_override=self._ASK_PARAMETERS)
         # Human-in-the-loop: wait indefinitely for the user (like CC/Cursor),
@@ -154,8 +154,6 @@ and only blocks until it times out."""
                 return callback(prompt, options)
             except Exception as e:
                 logger.error(f"Error in input callback: {e}")
-                if self.default_on_timeout:
-                    return self.default_on_timeout
                 raise
 
         print("\n" + "=" * 60)
@@ -173,9 +171,11 @@ and only blocks until it times out."""
             print("=" * 60 + "\n")
             return user_input
         except EOFError:
+            # Nobody on stdin (a pipe, a closed terminal). "" is the honest
+            # answer here — the caller-visible result is "no answer", not a
+            # substitute for one. Mounting this tool where no user can answer is
+            # the real mistake; see the class docstring.
             logger.warning("Non-interactive environment detected, using default")
-            if self.default_on_timeout:
-                return self.default_on_timeout
             return ""
 
     async def ask_user_question(

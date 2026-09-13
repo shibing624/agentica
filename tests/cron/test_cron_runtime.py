@@ -277,7 +277,10 @@ class TestCronInCliTools(unittest.TestCase):
         cfg = vars(parse_args())
         cfg.update({"model_provider": "openai", "model_name": "gpt-4o",
                     "api_key": "sk-test", "base_url": None})
-        agent = create_agent(cfg, extra_tools=[], workspace=None, skills_registry=None)
+        agent = create_agent(
+            cfg, extra_tools=[], workspace=None, skills_registry=None,
+            include_ask_user_question=True,
+        )
         names = [type(t).__name__ for t in agent.tools]
         self.assertIn("CronTool", names)
         self.assertIn("SelfManageTool", names)
@@ -293,17 +296,27 @@ class TestCronInCliTools(unittest.TestCase):
         cfg = vars(parse_args())
         cfg.update({"model_provider": "openai", "model_name": "gpt-4o",
                     "api_key": "sk-test", "base_url": None})
-        agent = create_agent(cfg, extra_tools=[], workspace=None, skills_registry=None)
+        agent = create_agent(
+            cfg, extra_tools=[], workspace=None, skills_registry=None,
+            include_ask_user_question=True,
+        )
         agent.update_model()
         fns = agent.model.functions or {}
         self.assertIn("cronjob", fns)
         self.assertIn("self_manage", fns)
 
-    def test_cron_agent_ask_tool_is_noninteractive(self):
-        """Regression: a cron job runs unattended on a background scheduler
-        thread, so its ``ask_user_question`` tool must NOT fall back to a bare
-        ``input()`` (which blocks forever / deadlocks prompt_toolkit). The cron
-        factory wires a non-interactive callback that returns immediately."""
+    def test_cron_agent_has_no_ask_tool_at_all(self):
+        """Regression: a cron job runs unattended, so it must not be *given*
+        the question tool.
+
+        The tool waits for a person by design — nobody is at the terminal of a
+        background scheduler thread. An earlier fix left the tool mounted and
+        answered in its place with a canned "no user is available" string, which
+        puts words in the user's mouth at runtime rather than deciding at
+        assembly time that this run has no user to ask. Registering it is what
+        makes the model ask, so the absence has to be asserted where the agent is
+        built.
+        """
         import sys
         sys.argv = ["agentica"]
         from agentica.cli.runtime import parse_args
@@ -317,14 +330,14 @@ class TestCronInCliTools(unittest.TestCase):
             cfg, extra_tools=[], workspace=None, skills_registry=None)
         agent = factory()
 
-        ask_tools = [t for t in agent.tools if isinstance(t, AskUserQuestionTool)]
-        self.assertTrue(ask_tools, "cron agent must include the ask_user_question tool")
-        cb = ask_tools[0].input_callback
-        self.assertIsNotNone(
-            cb, "cron agent's ask tool must have a non-interactive callback, not bare input()")
-        # The callback must return immediately (never block on stdin).
-        result = cb("choose an implementation approach", ["A", "B", "C"])
-        self.assertIn("non-interactive", result.lower())
+        self.assertFalse(
+            [t for t in agent.tools if isinstance(t, AskUserQuestionTool)],
+            "a cron agent must not be given ask_user_question",
+        )
+        # And nothing reached the model's function table either: a tool the
+        # model cannot see is a tool it cannot call.
+        agent.update_model()
+        self.assertNotIn("ask_user_question", agent.model.functions or {})
 
 
 if __name__ == "__main__":

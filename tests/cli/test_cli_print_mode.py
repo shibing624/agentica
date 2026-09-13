@@ -18,7 +18,7 @@ from agentica.model.usage import Usage
 from agentica.run_response import RunResponse
 
 
-def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None):
+def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None, captured=None):
     argv = [
         "agentica",
         "--query",
@@ -47,12 +47,18 @@ def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None):
         _session_log=SimpleNamespace(exists=lambda: True),
     )
     resolved = {"model_provider": "openai", "model_name": "gpt-4o-mini", "base_url": None}
+
+    def fake_create_agent(*args, **kwargs):
+        if captured is not None:
+            captured.update(kwargs)
+        return agent
+
     with (
         patch("agentica.cli.main.parse_args", return_value=args),
         patch("agentica.cli.main._enable_cli_file_logging"),
         patch("agentica.cli.main.refresh_model_catalog_in_background"),
         patch("agentica.cli.main.resolve_model_config", return_value=resolved),
-        patch("agentica.cli.main.create_agent", return_value=agent),
+        patch("agentica.cli.main.create_agent", side_effect=fake_create_agent),
     ):
         main()
 
@@ -87,6 +93,24 @@ class TestPrintMode:
 
         # The delegating caller decides what to do next from this status.
         assert exit_info.value.code == 1
+
+    def test_a_one_shot_run_is_not_given_the_question_tool(self, capsys):
+        """`--query` has no TUI, so there is nobody to answer a question.
+
+        ``ask_user_question`` waits for a person by design, so a run with no
+        person must not be handed it. The previous arrangement mounted it and
+        had a canned "no user is available" string answer in the user's place —
+        the model asked, and got words the user never said.
+
+        This is also the path a ``delegate`` worker takes (``agentica --query
+        ... --print``), so the worker inherits the absence rather than needing
+        its own wiring.
+        """
+        captured = {}
+        _run_one_shot(["done"], print_mode=True, captured=captured)
+        capsys.readouterr()
+
+        assert captured["include_ask_user_question"] is False
 
 
 if __name__ == "__main__":

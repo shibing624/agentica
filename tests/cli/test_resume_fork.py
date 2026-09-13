@@ -45,7 +45,13 @@ def _create_agent(config, work_dir):
         patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
         patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
     ):
-        agent = create_agent(full_config, extra_tools=[], workspace=None, skills_registry=None)
+        agent = create_agent(
+            full_config,
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
+            include_ask_user_question=True,
+        )
     return agent, full_config
 
 
