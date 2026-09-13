@@ -212,6 +212,38 @@ mcp, skill, ...
 自己发消息用 `/send-message [--steer|--queue] <name|id> <text>`（别名 `/send`）。默认 `--steer`：对方正在跑时插到下一次 tool 边界（和本地 `/steer` 一样）；`--queue` 等对方这轮干完再作为下一轮（和本地 `/queue` 一样）。模型侧 `send_message` 的 `delivery` 参数同一套。
 注入到对方会话时，回复地址是对方的短名字（如 `agentica-73`），不是 opaque 的 peer id；本会话自己的短名字可在 `/status` 的 `Peer:` 行确认。`/send-message`（用户转发）在收件端按「用户亲口说的」采纳；agent 发的消息即使正文自称用户决定，也不构成授权。
 
+#### 从终端外发一条消息（`agentica peers`）
+
+`/send-message` 要在**某个 CLI 里**敲。要让**别的进程**（桌宠、快捷键脚本、通知
+程序、你自己的工具）往一个正在跑的会话里说一句，用 shell 命令：
+
+```bash
+agentica peers list
+agentica peers send --to nlp-5f --text '把测试跑一遍'
+agentica peers send --to nlp-5f --text '跑完再合并' --delivery queue
+agentica peers send --to nlp-5f --from-name vpet-desktop --text '停一下'
+```
+
+- `--to` 吃 **name / peer id / session_id 前缀**，解析规则与 `/send-message`、模型侧
+  `send_message` 完全同一条（`peers.match_peers`）。找不到报 `no live session
+  matches ...`；前缀撞车会**列出候选**并让你换更精确的地址。两种都**非零退出**，
+  不会静默不投。
+- `--delivery` 与 `/send-message` 同一套语义（`steer` 默认 / `queue`）。
+- 消息以 **`from_kind: user`** 投递，收件端按「用户亲口说的」采纳 —— 外部进程发来的
+  一句话和你自己在那个终端敲的效果相同。
+- `--from-name` 只用于**标识发送者**（默认取主机名）。它不是会话、没有信箱：
+  收件端看到的 header 不会让你去 `send_message` 回一个不存在的地址，而是直接说明
+  「不在本机、没有回复地址，结果留在终端里」。反过来，如果发送方**确实**有信箱
+  （比如手机中继，`gateway/services/peer_bridge.py` 走的就是这条路），回复地址照旧
+  可用。
+- 长文走文件：消息上限 40k 字符，超了会拒绝并提示把内容写进文件、发路径。收件端
+  未读堆积超过 50 条也会拒发 —— 这条与代码里的 mailbox 上限同一份实现，不是 shell
+  层另写一套。
+
+Python 里等价入口是 `agentica.peers.send_to_live_peer(target, text, from_name=...)`；
+**别自己去拼 mailbox 的 markdown** —— 那是内部格式，改一次就让每个手写它的消费端
+静默坏掉。
+
 这个通道用来传递结论、交接信息，不是让两个 agent 讨论细节的地方。刹车不是「一段对话最多几条」这种硬计数——那会在一次正常的多轮交接中途把消息掐掉，而被拒的往往正是你刚吩咐的那句。真正不该发生的是**把同一件事再说一遍**：同一段文字（忽略大小写和空白差异）在 5 分钟内重复发给同一个对端会被拒绝；同一对端 5 分钟内超过 20 条也会被拒绝。两个限制都只按「对端」分别计算，同时和三个会话协作不受影响。
 
 这两个限制只约束无人值守的循环，不约束你：你在本终端**敲任何一行**（包括「给 temp-30 发条消息」这类指令）都会立即清空计数，对端用 `/send-message` 转发过来的消息同样清空。所以不会出现「你让 agent 发消息、却被限制拦住」的情况。

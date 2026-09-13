@@ -76,6 +76,12 @@ def main():
         run_cron_daemon(args, get_console())
         return
 
+    # `agentica peers list|send` — message a live session from another process.
+    if hasattr(args, "command") and args.command == "peers":
+        from agentica.cli.peers_cmd import run_peers_command
+
+        raise SystemExit(run_peers_command(args, get_console()))
+
     # Keep local catalog reads on the startup path and refresh stale pricing /
     # capability metadata in parallel. The daemon has a hard network timeout
     # and never delays the first prompt.

@@ -22,6 +22,9 @@ from agentica.agent.config import (
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.global_config import get_setting
 from agentica.compression.manager import parse_compact_token_limit
+# `agentica peers send` builds its flag choices from the one definition of what
+# a delivery is, rather than a second literal list that could drift from it.
+from agentica.peers import DELIVERIES, DELIVERY_STEER
 from agentica.skills import load_system_skills
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -287,6 +290,53 @@ def parse_args():
         daemon_parser.add_argument("--verbose", action="store_true", help="Verbose tick logging")
         args = cron_parser.parse_args(sys.argv[2:])
         args.command = "cron"
+        return args
+
+    # `agentica peers list|send` — cross-session messaging from a shell, for
+    # processes that are not themselves sessions (see agentica/peers.py).
+    if len(sys.argv) > 1 and sys.argv[1] == "peers":
+        peers_parser = argparse.ArgumentParser(
+            description="Message an agentica session running in another terminal"
+        )
+        peers_sub = peers_parser.add_subparsers(dest="peers_command", required=True)
+        peers_sub.add_parser("list", help="List live sessions you can message")
+        send_parser = peers_sub.add_parser(
+            "send", help="Send a message to one live session, as the user"
+        )
+        send_parser.add_argument(
+            "--to",
+            required=True,
+            help="Target session: name, peer id, or a unique prefix of either",
+        )
+        # Text by flag is the scripting path; positional is the convenient one.
+        # Either may be used, and a text that looks like a flag (beginning with
+        # '-') must be reachable, which is why the positional cannot be relied
+        # on alone. Both present is a mistake, not an order to concatenate.
+        send_parser.add_argument("text", nargs="?", default=None,
+                                 help="Message text (or use --text)")
+        send_parser.add_argument("--text", dest="text_flag", default=None,
+                                 help="Message text (or pass it positionally)")
+        send_parser.add_argument(
+            "--delivery",
+            choices=sorted(DELIVERIES),
+            default=DELIVERY_STEER,
+            help=(
+                "steer (default): inject between the target's tool calls if it is "
+                "running, else run as its next turn. queue: wait until its current "
+                "run finishes."
+            ),
+        )
+        send_parser.add_argument(
+            "--from-name",
+            default=None,
+            help=(
+                "Name to attribute the message to (default: this hostname). It "
+                "identifies the sender to the receiving session; it is not a peer "
+                "and has no mailbox."
+            ),
+        )
+        args = peers_parser.parse_args(sys.argv[2:])
+        args.command = "peers"
         return args
 
     if len(sys.argv) > 1 and sys.argv[1] in ("skills", "extensions"):

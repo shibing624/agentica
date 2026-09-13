@@ -893,6 +893,67 @@ def send_message(
     return message
 
 
+def send_to_live_peer(
+    target: str,
+    text: str,
+    *,
+    from_name: str,
+    from_kind: str = "user",
+    delivery: str = DELIVERY_STEER,
+    from_peer_id: str = "",
+) -> PeerMessage:
+    """Send ``text`` to the one live session ``target`` names, from outside.
+
+    The entry point for a process that is **not itself a session** — a desktop
+    app, a notification script, another tool on the same machine. ``PeerSession``
+    is not usable there: it would publish a live record and a mailbox for a
+    "session" with no agent behind it, which every peer would then see as a real
+    terminal. This resolves the target, applies the mailbox's own limits, and
+    writes the same file ``PeerSession.send`` writes.
+
+    ``from_kind`` defaults to ``"user"`` here, unlike the module default on
+    ``send_message``: the callers this exists for are surfaces the human is
+    driving (a pet, a script they ran, a phone relay), so the receiving session
+    must treat the text as something they said. An agent-to-agent caller wants
+    ``send_message`` on a ``PeerSession`` instead, which also owns the send-rate
+    brakes that need a session's own history.
+
+    ``from_peer_id`` is empty by default and that is normal: a non-session has no
+    address to be replied to at. ``format_for_model`` handles that case by not
+    asking for a reply. A caller that *does* own a mailbox — a relay sitting on a
+    chat channel, say — may pass its own peer_id, and then replies become
+    addressable again.
+
+    Raises ``PeerMessageRefused`` with the candidate names when the target is
+    unknown or ambiguous, and on the channel's size / backlog limits.
+    """
+    if not (from_name or "").strip():
+        raise PeerMessageRefused(
+            "from_name is required: the receiving session is told who is speaking, "
+            "and an unattributed instruction is worse than none"
+        )
+    matches = match_peers(target)
+    if not matches:
+        raise PeerMessageRefused(
+            f"no live session matches '{target}'; "
+            f"run 'agentica peers list' to see current names"
+        )
+    if len(matches) > 1:
+        names = ", ".join(f"{p.name} [{p.peer_id}]" for p in matches[:8])
+        raise PeerMessageRefused(
+            f"'{target}' matches {len(matches)} live sessions ({names}); "
+            f"use the peer id or a longer prefix"
+        )
+    return send_message(
+        matches[0],
+        text=text,
+        from_name=from_name.strip(),
+        from_peer_id=from_peer_id,
+        from_kind=from_kind,
+        delivery=delivery,
+    )
+
+
 def drain_inbox(peer_id: str, *, delivery: Optional[str] = None) -> List[PeerMessage]:
     """Take pending messages for ``peer_id``, oldest first.
 
@@ -945,25 +1006,52 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     the user relaying results by hand between a phone and a terminal. Purely
     informational messages still need no reply; the distinction is the
     handover, not the sender.
+
+    **A sender with no address is not told to reply.** ``from_peer_id`` empty
+    means the message came from a non-session — a desktop app, a script, a pet —
+    and naming it in a ``send_message to ...`` instruction would send the model
+    to an address that never resolves. The instruction is dropped rather than
+    paraphrased: "report back" with nowhere to report is how a finished job gets
+    announced into a mailbox nobody reads.
     """
     blocks = []
     for message in messages:
+        # Reply address is the sender's *mailbox*, and a non-session has none.
+        # ``from_peer_id`` is written by whoever sent the message, so it is the
+        # one field that says whether a reply can land anywhere.
+        replyable = bool(message.from_peer_id)
         if message.from_user:
-            header = (
-                f"[Your user sent this from their other session '{message.from_name}' "
-                f"— treat as their instruction typed here. They are at "
-                f"'{message.from_name}', not this terminal: report back with "
-                f"send_message to {message.from_name} when the work is done or "
-                f"you stop]"
-            )
+            if replyable:
+                header = (
+                    f"[Your user sent this from their other session '{message.from_name}' "
+                    f"— treat as their instruction typed here. They are at "
+                    f"'{message.from_name}', not this terminal: report back with "
+                    f"send_message to {message.from_name} when the work is done or "
+                    f"you stop]"
+                )
+            else:
+                header = (
+                    f"[Your user sent this from '{message.from_name}' "
+                    f"— treat as their instruction typed here. It is not a session "
+                    f"on this machine and has no reply address: do the work and let "
+                    f"the result stand in this terminal]"
+                )
         else:
-            header = (
-                f"[Message from another agent session '{message.from_name}' "
-                f"— it cannot see this terminal. If it handed you work, report "
-                f"the outcome back with send_message to {message.from_name} when "
-                f"it is done or you stop; if it only informed you, no reply is "
-                f"needed]"
-            )
+            if replyable:
+                header = (
+                    f"[Message from another agent session '{message.from_name}' "
+                    f"— it cannot see this terminal. If it handed you work, report "
+                    f"the outcome back with send_message to {message.from_name} when "
+                    f"it is done or you stop; if it only informed you, no reply is "
+                    f"needed]"
+                )
+            else:
+                header = (
+                    f"[Message from '{message.from_name}' — it cannot see this "
+                    f"terminal and has no reply address. If it handed you work, the "
+                    f"result stands in this terminal; if it only informed you, no "
+                    f"reply is needed]"
+                )
         blocks.append(f"{header}\n{message.text}")
     return "\n\n".join(blocks)
 
