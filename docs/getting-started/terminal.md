@@ -383,7 +383,8 @@ session 展示最近 5 条用户请求，每条截取前 250 个字符：
 ```
 
 恢复时，完整 Session Log 仍会重建到模型上下文中；终端只回放问答，不展示 tool
-call / tool result。需要完整工具记录时用 `/history tools`。
+call / tool result。同一 run 里多轮 tool 之间的旁白和最后一轮回答并成一块。
+需要完整工具记录时用 `/history tools`。
 
 也可以退出 CLI 后直接从 shell 恢复（ID 前缀即可）：
 
@@ -431,7 +432,7 @@ Session Log 里的 tool 轮次统一按 OpenAI 线格式存放，Anthropic 的 `
 
 ### `/history [tools [run-number]]`
 
-`/history` 使用与 `/resume` 相同的问答视图（不展示 tool call）。需要检查完整工具参数和结果时，
+`/history` 使用与 `/resume` 相同的问答视图（不展示 tool call；同一 run 的多轮旁白并成一块）。需要检查完整工具参数和结果时，
 使用 `/history tools` 在 pager 中查看整个 session，或指定从 1 开始的 run 序号：
 
 ```text

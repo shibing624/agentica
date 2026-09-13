@@ -138,6 +138,40 @@ def _history_stats(runs: list[AgentRun]) -> HistoryRenderStats:
 
 
 
+def _visible_text(message: Message) -> str:
+    return strip_elided_notice(message.get_content_string()).strip()
+
+
+def _qa_blocks_for_display(messages: list[Message]) -> list[tuple[str, str]]:
+    """User turns and one merged assistant answer per stretch of tool rounds.
+
+    Mid-turn narration plus the final reply stay visible; they share one
+    block so a long tool loop does not reprint ``Agent - run N`` each hop.
+    """
+    blocks: list[tuple[str, str]] = []
+    pending: list[str] = []
+
+    def flush_assistant() -> None:
+        if pending:
+            blocks.append(("assistant", "\n\n".join(pending)))
+            pending.clear()
+
+    for message in messages:
+        if message.role == "user":
+            flush_assistant()
+            text = _visible_text(message)
+            if text:
+                blocks.append(("user", text))
+            continue
+        if message.role == "assistant":
+            text = _visible_text(message)
+            if text:
+                pending.append(text)
+
+    flush_assistant()
+    return blocks
+
+
 def display_conversation_history(runs: list[AgentRun], title: str) -> HistoryRenderStats:
     """Render user questions and assistant answers only — no tool calls."""
     stats = _history_stats(runs)
@@ -152,14 +186,8 @@ def display_conversation_history(runs: list[AgentRun], title: str) -> HistoryRen
         if not messages:
             continue
 
-        for message in messages:
-            if message.role not in ("user", "assistant"):
-                continue
-
-            content_text = strip_elided_notice(message.get_content_string())
-            if not content_text:
-                continue
-            if message.role == "user":
+        for role, content_text in _qa_blocks_for_display(messages):
+            if role == "user":
                 con.print(f"\n[bold cyan]You - run {run_number}[/bold cyan]")
                 con.print(content_text, markup=False, highlight=False)
                 continue

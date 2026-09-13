@@ -836,7 +836,7 @@ def _setup_tui(
     if input_processors is not None:
         input_processors.append(_PlaceholderProcessor(_get_placeholder))
 
-    from prompt_toolkit.layout.containers import ConditionalContainer, FloatContainer, Float
+    from prompt_toolkit.layout.containers import ConditionalContainer
 
     status_bar = ConditionalContainer(
         Window(content=FormattedTextControl(_get_status_bar), height=1, wrap_lines=False),
@@ -940,6 +940,17 @@ def _setup_tui(
         ),
     )
 
+    # Completions sit in the HSplit *above* the input, not as a ycursor
+    # Float. The TUI is non-fullscreen and pinned to the bottom of the
+    # terminal, so a menu that opens downward has nowhere to go (one status
+    # bar row, or zero) and is clipped. Growing the bottom frame upward is
+    # the same trick the live tool window already uses.
+    completions_menu = CompletionsMenu(
+        max_height=16,
+        display_arrows=True,
+        extra_filter=Condition(lambda: not tui_state.get("_resize_collapsed")),
+    )
+
     # NOTE: no ``input_rule`` and no standalone ``spinner_widget`` here.
     # The transcript already ends with a separator; an extra rule above
     # the input would stack another one. The spinner text is folded into
@@ -947,14 +958,14 @@ def _setup_tui(
     # so we never occupy a full extra row for it. Unfinished tool calls sit
     # in ``live_tool_window`` until their whole block flushes.
     body = HSplit([
-        live_tool_window, input_prompt_widget, queue_bar, input_area, status_bar,
+        live_tool_window,
+        input_prompt_widget,
+        queue_bar,
+        completions_menu,
+        input_area,
+        status_bar,
     ])
-    layout = Layout(
-        FloatContainer(
-            content=body,
-            floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=16))],
-        )
-    )
+    layout = Layout(body)
 
     style = PTStyle.from_dict(
         {

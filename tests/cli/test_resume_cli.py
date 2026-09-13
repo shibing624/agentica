@@ -308,7 +308,7 @@ def test_display_resumed_transcript_omits_tool_activity():
     rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
     assert "You - run 1" in rendered
     assert "I will inspect it." in rendered
-    assert "Agent - run 1" in rendered
+    assert rendered.count("Agent - run 1") == 1
     assert "Done." in rendered
     assert "read_filex1, executex1" not in rendered
     assert "2 results hidden" not in rendered
@@ -320,6 +320,31 @@ def test_display_resumed_transcript_omits_tool_activity():
     assert stats.tool_call_count == 2
     assert stats.tool_result_count == 2
     assert stats.tool_error_count == 1
+
+
+def test_display_resumed_transcript_merges_mid_turn_assistant_text():
+    """A tool loop used to reprint 'Agent - run N' after every hop."""
+    console = MagicMock()
+    run = _history_run(
+        [
+            Message(role="user", content="check the default"),
+            Message(role="assistant", content="c4 says I got a fact backwards."),
+            Message(role="tool", tool_name="read_file", content="hidden"),
+            Message(role="assistant", content="c4 is right — the default is all-True."),
+            Message(role="tool", tool_name="read_file", content="also hidden"),
+            Message(role="assistant", content="Confirmed on a bad path."),
+        ]
+    )
+
+    with patch("agentica.cli.commands.session.get_console", return_value=console):
+        display_resumed_transcript([run], "session-123")
+
+    rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+    assert rendered.count("Agent - run 1") == 1
+    assert "c4 says I got a fact backwards." in rendered
+    assert "c4 is right — the default is all-True." in rendered
+    assert "Confirmed on a bad path." in rendered
+    assert "hidden" not in rendered
 
 
 def test_history_reads_canonical_runs_and_opens_full_tools_in_pager():

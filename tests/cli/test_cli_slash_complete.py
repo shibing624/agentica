@@ -3,7 +3,9 @@
 
 import os
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -78,6 +80,46 @@ class TestSlashCommandScore(unittest.TestCase):
 
     def test_non_slash_query_scores_nothing(self):
         self.assertIsNone(score_slash_command("help", "/help", "Show commands"))
+
+
+class TestCompletionsMenuSitsAboveTheInput(unittest.TestCase):
+    """The TUI is pinned to the bottom of the terminal.
+
+    A ycursor Float opens downward and is clipped to the status-bar row
+    (or nothing). The menu has to live in the HSplit above the input so
+    typing ``/`` actually shows the command list.
+    """
+
+    def test_completions_menu_is_above_the_input_area(self):
+        from prompt_toolkit.layout.containers import HSplit, Window
+        from prompt_toolkit.layout.controls import BufferControl
+        from prompt_toolkit.layout.menus import CompletionsMenu
+
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.session_state import SessionState
+        from agentica.cli.interactive.tui import _setup_tui
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "agentica.cli.interactive.tui.history_file",
+                return_value=os.path.join(tmp, "history"),
+            ):
+                app = _setup_tui(
+                    SessionState(),
+                    skills_registry=None,
+                    tui_state={},
+                    pending_queue=PendingQueue(),
+                    image_counter_ref=[0],
+                )
+
+        body = app.layout.container
+        self.assertIsInstance(body, HSplit)
+        children = list(body.children)
+        menu_at = next(i for i, child in enumerate(children) if isinstance(child, CompletionsMenu))
+        # TextArea unwraps to a Window; it must sit directly under the menu.
+        input_window = children[menu_at + 1]
+        self.assertIsInstance(input_window, Window)
+        self.assertIsInstance(input_window.content, BufferControl)
 
 
 if __name__ == "__main__":
