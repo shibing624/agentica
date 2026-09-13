@@ -24,7 +24,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
 
 from agentica.agent import Agent
@@ -104,6 +104,7 @@ class TestSessionAnchorReuse(unittest.TestCase):
         self.assertIsNot(anchor_a, anchor_b)
         self.assertEqual(anchor_b.source_query, "task B goal")
 
+
     def test_subagent_run_records_parent_run_id(self):
         """Phase 0 lineage: a child agent spawned with `_parent_run_id` set
         must record it on its RunContext and switch source to subagent."""
@@ -117,6 +118,70 @@ class TestSessionAnchorReuse(unittest.TestCase):
         self.assertEqual(child.run_context.parent_run_id, "parent-run-xyz")
         self.assertEqual(child.run_context.source, RunSource.subagent)
 
+
+class TestRunStartedCarriesTheTurnPrompt(unittest.TestCase):
+    """``run.started`` must expose THIS turn's message, not only the anchor.
+
+    The two are different on purpose: ``source_query`` is pinned to the
+    session's first message (see TestSessionAnchorReuse above), so a consumer
+    that shows "what did the user just ask" and reads only ``source_query``
+    keeps displaying question #1 while the agent answers question #3 — and
+    nothing in that display looks stale.
+
+    Driven through ``agent.run`` rather than by building the event by hand:
+    a hand-built dict cannot catch a wiring change, which is precisely how
+    the stale-question behaviour shipped unnoticed.
+    """
+
+    def _capture(self, agent: Agent) -> List[Dict[str, Any]]:
+        """Collect the dict records the runner hands to the event callback.
+
+        Mirrors how any external consumer sees them: ``Runner._emit_event``
+        calls ``agent._event_callback(record.to_dict())``, and ``to_dict``
+        flattens ``payload`` into the top level, so the turn prompt arrives as
+        a top-level ``"prompt"`` beside ``"source_query"``.
+        """
+        captured: List[Dict[str, Any]] = []
+
+        def _cb(record: Dict[str, Any]) -> None:
+            captured.append(record)
+
+        agent._event_callback = _cb
+        return captured
+
+    def test_second_turn_prompt_is_the_second_message(self):
+        agent = _make_agent()
+        _stub_model_response(agent)
+
+        first = "第一问：什么是幂等"
+        second = "第二问：什么是幂等"
+
+        captured = self._capture(agent)
+        asyncio.run(agent.run(message=first))
+        asyncio.run(agent.run(message=second))
+
+        started = [r for r in captured if r.get("type") == "run.started"]
+        self.assertEqual(len(started), 2, "both turns must emit run.started")
+
+        # The point of the change: the turn's own message, not the anchor.
+        self.assertEqual(started[0].get("prompt"), first)
+        self.assertEqual(started[1].get("prompt"), second)
+
+        # And the anchor keeps its documented meaning — the fix must not
+        # "simplify" source_query into the turn prompt.
+        self.assertEqual(started[1].get("source_query"), first)
+
+    def test_the_session_runs_model_is_reported(self):
+        agent = _make_agent()
+        _stub_model_response(agent)
+
+        captured = self._capture(agent)
+        asyncio.run(agent.run(message="hi"))
+
+        started = [r for r in captured if r.get("type") == "run.started"]
+        self.assertTrue(started, "run.started must be emitted")
+        # A desktop labels the card with this. Bound here, so it must be sent.
+        self.assertEqual(started[0].get("model"), "gpt-4o-mini")
 
 class TestEventCallbackFailureIsolation(unittest.TestCase):
     """Issue A: event bus failures must be loud-but-not-fatal."""

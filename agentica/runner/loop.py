@@ -602,14 +602,35 @@ class LoopMixin:
                     max_api_retry=agent._run_max_api_retry,
                 )
                 _run_ctx.mark_running()
-                self._emit_event(
-                    RunEventType.run_started,
-                    {
-                        "agent_name": agent.name or "Agent",
-                        "source_query": _anchor.source_query,
-                        "session_id": agent.session_id,
-                    },
-                )
+                _started_payload: Dict[str, Any] = {
+                    "agent_name": agent.name or "Agent",
+                    "source_query": _anchor.source_query,
+                    "session_id": agent.session_id,
+                }
+                # The user's message **for this turn**, which is NOT
+                # ``source_query``: that one is the session anchor, pinned to the
+                # first message on purpose so retrieval and the "Original Task"
+                # block stay stable across a multi-turn conversation. A consumer
+                # showing "what did the user just ask" needs this one — given
+                # only the anchor, a desktop card keeps displaying the session's
+                # first question while the agent answers the third, and nothing
+                # about that looks stale.
+                #
+                # Extraction is reused from ``from_message`` rather than written
+                # again: it already copes with ``message`` being a str, a dict or
+                # a Message, and a second coercion is the same thing twice.
+                # Empty on a goal-driven turn (there is no user message then),
+                # in which case the key is left out and consumers fall back to
+                # ``source_query`` themselves.
+                _turn_prompt = TaskAnchor.from_message(message).source_query
+                if _turn_prompt:
+                    _started_payload["prompt"] = _turn_prompt
+                # The model this session actually runs, so a desktop can label
+                # the card. ``agent.model`` is None on paths that never bound
+                # one; omitting it is better than sending "unknown".
+                if agent.model is not None:
+                    _started_payload["model"] = agent.model.id
+                self._emit_event(RunEventType.run_started, _started_payload)
 
                 # --- Session resume (CC-style JSONL) ---
                 # On first run, if a session log exists AND working_memory has
