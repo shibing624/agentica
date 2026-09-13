@@ -60,7 +60,11 @@ class TestCLIUserMessage(unittest.TestCase):
 
         rendered = output.getvalue()
         self.assertEqual(view["summary"], "LLM rate limited (429)")
-        self.assertIn("● Error: LLM rate limited (429)", rendered)
+        self.assertRegex(
+            rendered,
+            r"● Error: LLM rate limited \(429\) - \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}",
+        )
+        self.assertRegex(view["stamp"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
         self.assertIn("TPM 限流", rendered)
         self.assertIn("code=4029", rendered)
         self.assertIn("spanId=3a69ffde9353db3f", rendered)
@@ -168,7 +172,10 @@ class TestCLIUserMessage(unittest.TestCase):
 
         logged = "\n".join(captured.output)
         self.assertIn("upstream exploded", logged)
-        self.assertIn("Agent execution failed (500)", logged)
+        self.assertRegex(
+            logged,
+            r"Agent execution failed \(500\) - \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}",
+        )
 
 
     def test_display_agent_execution_error_logs_and_folds_the_same_chunk(self):
