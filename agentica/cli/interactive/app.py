@@ -1281,6 +1281,13 @@ def run_interactive(
             # instead of recomputing it (uid / TMPDIR / override) and silently
             # looking in the wrong place.
             state.peer_session.publish(attach_socket=str(attach_server.path))
+            # Same fact on the notify channel: a consumer reachable over HTTP
+            # gets the path in ``transport`` instead of having to locate and
+            # parse the presence record (which needs a python3 that can import
+            # agentica — a launchd-started .app has none).
+            from agentica.notify import set_attach_endpoint
+
+            set_attach_endpoint(str(attach_server.path), state.peer_session.peer_id)
     except Exception as exc:
         logger.debug(f"attach: not serving ({exc})")
         attach_server = None

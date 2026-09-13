@@ -19,6 +19,7 @@ from agentica.notify.sink import (
     install_sink,
     notify_sink_dispatch,
     reset_sink_for_tests,
+    set_attach_endpoint,
     set_idle_provider,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "load_notify_config",
     "notify_sink_dispatch",
     "reset_sink_for_tests",
+    "set_attach_endpoint",
     "set_idle_provider",
 ]

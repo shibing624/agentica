@@ -52,7 +52,22 @@ TUI 自己占着 stdin/stdout，所以 ACP 标准的 stdio 传输在这里用不
 
 ### 发现它
 
-**发现方式：读 presence 记录里的 `attach_socket`。** 一个会话在跑时会在
+两条路，按你已经连着哪个通道选：
+
+**1（桌面 App 用这条）：notify 事件的 `transport` 块。** 如果你本来就在收
+`run.started` / `run.completed` 这些事件，那么每个 envelope 里已经带着算好的路径：
+
+```json
+{"event":"run.started","transport":{"ppid":1234,"cwd":"…","tty":"ttys004",
+  "attach_socket":"/var/folders/…/agentica-501/<peer_id>.sock","peer_id":"<peer_id>"}}
+```
+
+`attach_socket` / `peer_id` 只在**真的在监听**时出现（没开 attach 就没有这两个键）。
+这条路不需要知道 agentica 把东西放在哪，也不需要能 `import agentica` —— 后一点对
+launchd 起的 `.app` 是硬要求：默认 `PATH` 下的 `/usr/bin/python3` 是 3.9，
+`import agentica` 直接 `ModuleNotFoundError`，而**症状和「没有会话在跑」一模一样**。
+
+**2：presence 记录。** 一个会话在跑时会在
 `<AGENTICA_CACHE_DIR>/peers/live/<peer_id>.json` 写下自己的信息，其中
 `attach_socket` 就是它的 socket 路径（没开 attach 时为 `null`）。
 
@@ -86,8 +101,17 @@ TUI 自己占着 stdin/stdout，所以 ACP 标准的 stdio 传输在这里用不
 | `initialize` | 鉴权 + 版本协商。`params.authToken` 必填 |
 | `session/load` | 附着到这个会话；返回 `sessionId`、`cwd`、`busy` |
 | `session/prompt` | **把用户的话送进去**，等这一轮结束再回 |
-| `session/cancel` | 中断当前这一轮（等同 Ctrl+C） |
+| `session/cancel` | 中断当前这一轮。**必须另开一条连接发**（见下） |
 | `ping` | 健康检查 |
+
+**`session/cancel` 要另开一条连接。** 它和 `session/prompt` 是**同一条连接上的两条
+请求**，而 `session/prompt` 会**阻塞到这一轮结束才返回**（一条连接同时只放一个
+prompt）。所以在同一条连接上「先 prompt 再 cancel」永远不会发生：那句话排在一条
+永远不空出来的连接后面。要中断，另开一条连接发 `session/cancel`，它会打断那一轮；
+原来那条连接上的 `session/prompt` 随即以 `stopReason: "cancelled"` 返回。
+
+这不是文档补充，是**读了会做错设计**的地方：按「同连接」实现出来的客户端，表现为
+取消无效（其实是没发出去）。
 
 **没有 `session/new`**：会话已经存在（就是这个 socket 的主人），在这里凭空造一个新
 的会让客户端对着一个**没有终端在驱动**的对话说话。
@@ -116,9 +140,18 @@ TUI 自己占着 stdin/stdout，所以 ACP 标准的 stdio 传输在这里用不
 ```
 
 - **`stopReason`**：`end_turn`（这一轮跑完了）/ `cancelled`（被 `session/cancel`
-  中断）。若一轮**已被接受但本层没等到它结束**（例如会话正在退出），会额外带
-  `agenticaPending: true` —— 如实说明，而不是假装拿到了结果。
+  中断）/ `agentica_pending`（这一轮**已被接受但本层没等到它结束**，例如会话正在
+  退出），同时带 `agenticaPending: true`。
+
+  受超时这一档**不能复用 `end_turn`**：ACP 里 `end_turn` 就是"正常结束"，只读
+  `stopReason` 的客户端会把超时读成"回答完了"。所以差异放在 `stopReason` 本身，
+  `agenticaPending` 作为并列字段保留（已有消费端在读它）。
 - **`agenticaAnswer`**（可选）：这一轮的最后一段回答。客户端要它就能省掉一次读取。
+  和 notify 的 `run.completed` 里那条 `answer` **读的是同一个字段**
+  （`agent.run_response.content`），只是取的时机不同：attach 在 `session/prompt`
+  返回前取，notify 在那一轮报完成时取。所以两者**可能一个有一个没有**（例如工具轮、
+  或被 goal 接管的轮没有最终文本），这不是两个来源打架，是**同一次读取的两个时刻**。
+  要"一定拿到答案"就自己读 transcript；要"这一轮说了什么"用这两个都行。
 - **只收文本块。任何这一层送不到的块都整条拒绝**（-32602），**不是跳过**：`[文本,
   图片]` 这种混合请求若把图跳过，就等于把「描述这张图」交给 agent 而图不在 ——
   换成了另一个问题，且下游无从察觉。拒绝信息会点明**哪些块类型**没被送出。

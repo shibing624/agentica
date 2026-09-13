@@ -244,6 +244,48 @@ class TestNonBlockingEvents:
         finally:
             desktop.close()
 
+    def test_the_attach_point_is_carried_in_the_transport_block(self):
+        """A consumer that only speaks the notify channel must not have to
+        locate and parse the presence record to find the attach socket — a
+        launchd-started .app cannot even import agentica to do it. The
+        transport block already answers "how do I reach this session".
+        """
+        desktop = _FakeDesktop()
+        try:
+            from agentica.notify import set_attach_endpoint
+
+            set_attach_endpoint("/tmp/agentica-501/abc.sock", "abc")
+            sink = _sink(desktop)
+            sink.emit_event("run.started")
+            _flush(sink)
+            sink.stop()
+
+            transport = desktop.requests[0]["json"]["transport"]
+            assert transport["attach_socket"] == "/tmp/agentica-501/abc.sock"
+            assert transport["peer_id"] == "abc"
+        finally:
+            from agentica.notify import reset_sink_for_tests, set_attach_endpoint
+
+            set_attach_endpoint(None, None)
+            reset_sink_for_tests()
+            desktop.close()
+
+    def test_a_process_without_an_attach_point_says_nothing_about_one(self):
+        """Absent, not null: a consumer must be able to tell "no attach point"
+        from "there is one and here it is"."""
+        desktop = _FakeDesktop()
+        try:
+            sink = _sink(desktop)
+            sink.emit_event("run.started")
+            _flush(sink)
+            sink.stop()
+
+            transport = desktop.requests[0]["json"]["transport"]
+            assert "attach_socket" not in transport
+            assert "peer_id" not in transport
+        finally:
+            desktop.close()
+
     def test_a_disabled_sink_sends_nothing_at_all(self):
         desktop = _FakeDesktop()
         try:

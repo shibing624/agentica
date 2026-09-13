@@ -456,7 +456,17 @@ class AttachServer:
             # needed" about a channel that refuses without one.
             return {
                 "protocolVersion": PROTOCOL_VERSION,
-                "agentCapabilities": {"loadSession": True, "promptCapabilities": {}},
+                # ``loadSession`` is deliberately false. In ACP it means "this
+                # agent can load an existing session's content into the client",
+                # and ``session/load`` here does not do that — it binds to the
+                # live session behind this socket and answers with cwd/busy.
+                # Claiming it would be declaring a capability this transport does
+                # not implement. The meaning it actually has is named for itself.
+                "agentCapabilities": {
+                    "loadSession": False,
+                    "promptCapabilities": {},
+                    "agenticaAttach": True,
+                },
                 "agentInfo": {"name": "agentica", "version": PROTOCOL_VERSION},
                 "agenticaAuth": "token",
             }
@@ -545,7 +555,14 @@ class AttachServer:
                 # The text was accepted but this session did not report the end
                 # within the grace window — say so rather than claiming an answer
                 # we never saw.
-                return {"stopReason": "end_turn", "agenticaPending": True}
+                #
+                # ``end_turn`` is what ACP uses for "finished normally", so a
+                # client reading only ``stopReason`` would take a timeout for a
+                # finished turn. The field itself has to carry the difference;
+                # ``agenticaPending`` alone would make a convention more
+                # authoritative than the protocol field it sits next to. It is
+                # kept as well because consumers in the field already read it.
+                return {"stopReason": "agentica_pending", "agenticaPending": True}
             result: Dict[str, Any] = {"stopReason": "end_turn"}
             if answer:
                 result["agenticaAnswer"] = answer

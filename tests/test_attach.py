@@ -197,6 +197,24 @@ class TestHandshake:
         finally:
             server.stop()
 
+    def test_load_session_is_not_claimed(self, tmp_path):
+        """``loadSession: true`` means "existing session content can be loaded
+        into the client". ``session/load`` here binds to the live session and
+        answers with cwd/busy — it does not load any content. Declaring the ACP
+        capability anyway is the same failure as documenting a feature that was
+        never built: it survives until someone builds against it.
+        """
+        server, _, _ = _server(tmp_path)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            caps = client.call("initialize", {})["result"]["agentCapabilities"]
+            assert caps["loadSession"] is False
+            # What it does do is named for itself instead.
+            assert caps["agenticaAttach"] is True
+            client.close()
+        finally:
+            server.stop()
+
     def test_no_token_is_refused(self, tmp_path):
         server, _, _ = _server(tmp_path)
         try:
@@ -435,6 +453,9 @@ class TestPrompt:
             )
             elapsed = time.monotonic() - started
             assert reply["result"].get("agenticaPending") is True, reply
+            # And the stop reason itself says so: a client reading only
+            # ``stopReason`` must not see a timeout as a finished turn.
+            assert reply["result"]["stopReason"] == "agentica_pending", reply
             assert elapsed < 5, f"waited {elapsed:.1f}s instead of giving up"
             client.close()
         finally:

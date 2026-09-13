@@ -21,6 +21,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 PROMPT = os.getenv("ATTACH_E2E_PROMPT", "Reply with exactly: PONG")
@@ -197,6 +198,60 @@ try:
         request_id=3,
     )
     check("a second prompt works", "error" not in reply2, json.dumps(reply2)[:160])
+
+    # ── cancel needs its own connection ─────────────────────────────────────
+    # The docs say so, and a client that reads the method table without this
+    # would implement cancel on the same connection — where it can never be
+    # sent, because session/prompt is still holding it.
+    print("\n== session/cancel from a second connection ==")
+    waiter = Client(socket_path, token)
+    waiter.call("session/load", {})
+    cancel_reply = {}
+
+    def _prompt_then_hold():
+        cancel_reply["reply"] = waiter.call(
+            "session/prompt",
+            {"prompt": [{"type": "text", "text": "count slowly to one hundred"}]},
+        )
+
+    t = threading.Thread(target=_prompt_then_hold, daemon=True)
+    t.start()
+    time.sleep(1.5)  # let it be accepted and start running
+    other = Client(socket_path, token)
+    other.call("session/cancel", {})
+    other.close()
+    t.join(timeout=30)
+    check(
+        "a cancel sent on another connection ends the prompt",
+        cancel_reply.get("reply", {}).get("result", {}).get("stopReason") == "cancelled",
+        json.dumps(cancel_reply.get("reply"))[:160],
+    )
+    waiter.close()
+
+    # ── the notify transport carries the same fact ──────────────────────────
+    # A launchd-started desktop app has no python3 that can import agentica, so
+    # the presence-record path is closed to it. The envelope's transport block
+    # is not. Runs in the same process, importing the repo we just drove.
+    print("\n== the attach point is also on the notify transport ==")
+    from agentica.notify import reset_sink_for_tests, set_attach_endpoint
+    from agentica.notify.sink import NotifySink, load_notify_config
+
+    set_attach_endpoint(socket_path, peer_id)
+    try:
+        sink = NotifySink(load_notify_config())
+        envelope = sink._envelope("run.started", session_id="s-1", payload=None,
+                                  work_dir=None)
+        transport = envelope["transport"]
+        check(
+            "the envelope advertises the same attach socket",
+            transport.get("attach_socket") == socket_path,
+            json.dumps(transport),
+        )
+        check("and the peer id that goes with it", transport.get("peer_id") == peer_id)
+    finally:
+        set_attach_endpoint(None, None)
+        reset_sink_for_tests()
+
     client.close()
 finally:
     tmux("kill-session", "-t", SESSION)
