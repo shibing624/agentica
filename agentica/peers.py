@@ -379,6 +379,12 @@ class PeerInfo:
         if memory:
             rows.append(("memory", memory))
         rows.append(("mailbox", str(mailbox_dir(self.peer_id))))
+        if self.attach_socket:
+            # Where to talk to this session as the user (``agentica/attach.py``).
+            # Listed here rather than left in the record for a reader to find,
+            # because this is the discovery entrance: without it a client has to
+            # go spelunking in ``live/*.json``, which is not a supported path.
+            rows.append(("attach", self.attach_socket))
         git = self.git_state
         if git.known:
             # One line that answers "where is this session in the repo" —

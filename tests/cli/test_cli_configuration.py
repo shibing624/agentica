@@ -1042,5 +1042,35 @@ class TestDebugToggle(unittest.TestCase):
         self.assertIn("Toggle", description)
 
 
+class TestPreviewHeadAndSkillsDesc(unittest.TestCase):
+    def test_clip_preview_head_keeps_first_250(self):
+        text = "A" * 300
+        clipped = cli_helpers.clip_preview_head(text)
+        self.assertTrue(clipped.startswith("A" * 250))
+        self.assertEqual(clipped[250], "…")
+        self.assertEqual(len(clipped), 251)
+
+    def test_skills_list_shows_description_head(self):
+        long_desc = ("Use this skill to ship a release. " * 16) + "UNIQUE_SKILL_TAIL"
+        skill = MagicMock()
+        skill.name = "release"
+        skill.trigger = "/release"
+        skill.description = long_desc
+        registry = MagicMock()
+        registry.__len__.return_value = 1
+        registry.list_all.return_value = [skill]
+        ctx = CommandContext(agent_config={}, current_agent=None, skills_registry=registry)
+        console = MagicMock()
+        with (
+            patch("agentica.cli.commands.tools_skills.get_console", return_value=console),
+            patch("agentica.cli.commands.tools_skills.list_installed_skills", return_value=[]),
+        ):
+            cli_tools_skills._cmd_skills(ctx, "")
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+        expected = cli_helpers.clip_preview_head(long_desc)
+        self.assertIn(expected, printed)
+        self.assertNotIn("UNIQUE_SKILL_TAIL", printed)
+
+
 if __name__ == "__main__":
     unittest.main()

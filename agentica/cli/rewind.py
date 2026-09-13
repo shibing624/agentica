@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from agentica.checkpoint import TurnCheckpointer
+from agentica.cli.commands.helpers import clip_preview_head
 from agentica.utils.log import logger
 
 # Tool names whose tool_args carry a write target. These are the ones we
@@ -102,9 +103,7 @@ def print_turn_list(con, turns) -> None:
         return
     con.print(f"  [cyan]Rewindable turns ({len(turns)}):[/cyan]")
     for c in turns:
-        prompt_preview = (c.prompt or "").strip().replace("\n", " ")
-        if len(prompt_preview) > 48:
-            prompt_preview = prompt_preview[:48] + "…"
+        prompt_preview = clip_preview_head(c.prompt or "")
         con.print(
             f"    [bold]{c.turn}[/bold]  [dim]{c.created_at}[/dim]  "
             f"{prompt_preview}  ([dim]{len(c.files)} file(s)[/dim])"

@@ -509,14 +509,13 @@ def run_interactive(
             current_agent,
             agent_config.get("_resume_at_uuid"),
         )
-        display_stats = display_resumed_transcript(
+        display_resumed_transcript(
             current_agent.working_memory.runs,
             current_agent.session_id or "",
         )
         con.print(
             f"[green]Resumed session: {current_agent.session_id}"
-            f" — restored {runs_built} runs into context; showing conversation only "
-            f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+            f" — restored {runs_built} runs into context[/green]"
         )
 
     # Always scan installed skills for auto-commands
@@ -1064,10 +1063,10 @@ def run_interactive(
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()
 
-    def _hand_to_agent(text: str) -> None:
-        hand_to_agent(state, pending_queue, text)
+    def _hand_to_agent(text: str) -> str:
+        return hand_to_agent(state, pending_queue, text)
 
-    def _inject_from_outside(text: str) -> None:
+    def _inject_from_outside(text: str) -> str:
         """Take a line handed in by an external client (the attach socket).
 
         Echoed first, and that is not decoration: relayed input is deliberately
@@ -1075,6 +1074,10 @@ def run_interactive(
         ``__RELAYED__``), which is right when the caller prints its own arrival
         block — but this caller is another program, so without this the terminal
         would show an answer to a question that is nowhere on screen.
+
+        Returns where the text went (``steered`` / ``queued``): the attach layer
+        waits for the turn that carries it, and only the injector knows which turn
+        that is.
         """
         try:
             from agentica.cli.display.messages import display_attached_user_message
@@ -1085,7 +1088,35 @@ def run_interactive(
         except Exception as exc:
             # Display must never be the reason an injected line is lost.
             logger.debug(f"attach: could not echo the incoming line: {exc}")
-        _hand_to_agent(text)
+        return _hand_to_agent(text)
+
+    def _request_cancel() -> None:
+        """Cancel the running turn — what ``session/cancel`` means here.
+
+        ``Agent.cancel`` is documented as safe from another thread (it sets the
+        flag and schedules ``task.cancel`` on the run loop), which is exactly the
+        position an attach client is in.
+        """
+        agent = state.current_agent
+        if agent is None:
+            return
+        logger.info("[attach] cancel requested by an external client")
+        agent.cancel()
+
+    def _last_answer_text(session_state) -> Optional[str]:
+        """This session's last answer, or None.
+
+        Read from the run response rather than the transcript: it is the text the
+        model actually produced for that turn, already assembled, and it costs
+        nothing to hand back to a client that asked a question.
+        """
+        agent = session_state.current_agent
+        response = getattr(agent, "run_response", None) if agent is not None else None
+        content = getattr(response, "content", None) if response is not None else None
+        if content is None:
+            return None
+        text = str(content).strip()
+        return text or None
 
     # A background command's result is the agent's own pending work, so it is
     # delivered by default; set `deliver_background_results: false` in
@@ -1225,7 +1256,15 @@ def run_interactive(
             state.peer_session.peer_id,
             inject=_inject_from_outside,
             is_running=lambda: state.agent_running,
-            session_id=agent_config.get("session_id"),
+            # A getter, not a snapshot: ``/resume`` and ``/fork`` swap the session
+            # underneath this CLI, and a value captured here would reject the id
+            # the client just read from the presence record.
+            session_id=lambda: getattr(state.current_agent, "session_id", None),
+            # Ctrl+C's handler, so ``session/cancel`` does what the key does.
+            cancel=_request_cancel,
+            # The last answer, for a client that would otherwise have to read the
+            # transcript to see what its prompt produced.
+            answer=lambda: _last_answer_text(state),
             snapshot=lambda: {
                 "cwd": state.current_agent.work_dir if state.current_agent else None,
                 "busy": state.agent_running,

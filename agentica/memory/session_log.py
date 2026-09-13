@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Union, runtime_checkable
@@ -1521,17 +1522,26 @@ class SessionLog:
         return matches
 
     @classmethod
-    def session_preview(cls, path: str, max_chars: int = 200) -> Dict[str, Any]:
+    def session_preview(
+        cls,
+        path: str,
+        max_chars: int = 250,
+        recent_limit: int = 5,
+    ) -> Dict[str, Any]:
         """Lightweight preview of a session file for the /resume picker.
 
-        Returns ``{"first_user": str, "user_count": int}`` — the first user
-        message (the task that started the session, truncated) and the number
-        of user turns. Reads the file once line-by-line so even multi-MB logs
-        stay cheap; malformed lines are skipped. This is what makes the resume
-        list show *what* a session was about instead of just an opaque id.
+        Returns ``{"first_user": str, "user_count": int, "recent_users": list}``
+        — the first user message (truncated), the number of real user turns,
+        and the last ``recent_limit`` user requests (each truncated). Window
+        preambles are skipped: those are injected oil-gauge text, not requests.
+        Reads the file once line-by-line so even multi-MB logs stay cheap;
+        malformed lines are skipped.
         """
+        from agentica.memory.session_search import strip_window_preamble
+
         first_user = ""
         user_count = 0
+        recent: deque = deque(maxlen=max(1, recent_limit))
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 for line in fh:
@@ -1544,14 +1554,24 @@ class SessionLog:
                         continue
                     if entry.get("type") != "user":
                         continue
+                    content = entry.get("content") or ""
+                    if not isinstance(content, str):
+                        continue
+                    content = strip_window_preamble(content)
+                    if not content.strip():
+                        continue
                     user_count += 1
+                    clipped = content[:max_chars]
                     if not first_user:
-                        content = entry.get("content") or ""
-                        if isinstance(content, str):
-                            first_user = content[:max_chars]
+                        first_user = clipped
+                    recent.append(clipped)
         except Exception:
             pass
-        return {"first_user": first_user, "user_count": user_count}
+        return {
+            "first_user": first_user,
+            "user_count": user_count,
+            "recent_users": list(recent),
+        }
 
     # ---- sidecar metadata (session name) -----------------------------------
     #

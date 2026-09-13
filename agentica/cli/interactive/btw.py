@@ -24,7 +24,7 @@ from agentica.tools.background_processes import (
 from .console_io import _print_boxed_result
 from .session_state import SessionState
 
-def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
+def hand_to_agent(state: SessionState, pending_queue, text: str) -> str:
     """Give the agent text nobody typed, without interrupting its work.
 
     A running agent takes it through ``steer()``, which lands at the next
@@ -42,11 +42,18 @@ def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
     ``relayed=True`` threads the same provenance through the steer buffer: if
     the text is accepted during the run's final inference and never drained,
     ``promote_late_steer`` re-queues it with the tag instead of as plain input.
+
+    Returns ``"steered"`` or ``"queued"`` — where the text actually went. A
+    caller that waits for a reply needs it: after ``"queued"`` the turn that will
+    carry this text has not started, so waiting for the *current* run to end
+    would report a completion that never included it. Existing callers ignore the
+    value, which is why this is a plain return rather than a new function.
     """
     agent = state.current_agent
     if state.agent_running and agent is not None and agent.steer(text, relayed=True):
-        return
+        return "steered"
     pending_queue.put(("__RELAYED__", text))
+    return "queued"
 
 
 def promote_late_steer(state: SessionState, pending_queue) -> List[str]:

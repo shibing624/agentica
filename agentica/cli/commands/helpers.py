@@ -24,6 +24,19 @@ from agentica.skills import (
 from agentica.skills.skill_registry import reset_skill_registry
 
 
+# Head-only clip used by /resume list, /rewind list, and /skills desc.
+PREVIEW_HEAD_CHARS = 250
+SESSION_RECENT_REQUESTS = 5
+
+
+def clip_preview_head(text: str, max_chars: int = PREVIEW_HEAD_CHARS) -> str:
+    """One-line head of ``text`` for picker / list rows."""
+    flat = " ".join((text or "").split())
+    if len(flat) <= max_chars:
+        return flat
+    return flat[:max_chars] + "…"
+
+
 def format_path_for_display(path: str) -> str:
     home = os.path.expanduser("~")
     if path.startswith(home):

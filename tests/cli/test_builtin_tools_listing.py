@@ -66,6 +66,24 @@ class TestBuiltinToolsListing(unittest.TestCase):
         self.assertEqual(active_tool_names(None), [])
         self.assertEqual(active_tool_names(type("A", (), {"tools": None})()), [])
 
+    def test_tools_listing_puts_builtins_before_sorted_extras(self):
+        from agentica.cli.commands.tools_skills import list_tools_for_display
+        from agentica.cli.runtime import TOOL_REGISTRY
+
+        rows = list_tools_for_display({"arxiv"})
+        names = [name for name, _desc, _active, _group in rows]
+        groups = [group for _name, _desc, _active, group in rows]
+        builtin_count = len(BUILTIN_TOOLS)
+        self.assertEqual(names[:builtin_count], list(BUILTIN_TOOLS))
+        self.assertTrue(all(group == "builtin" for group in groups[:builtin_count]))
+        extras = names[builtin_count:]
+        self.assertEqual(extras, sorted(extras))
+        self.assertTrue(all(group == "external" for group in groups[builtin_count:]))
+        self.assertEqual(set(extras), set(TOOL_REGISTRY) - set(BUILTIN_TOOLS))
+        arxiv = next(row for row in rows if row[0] == "arxiv")
+        self.assertTrue(arxiv[2])
+        self.assertEqual(arxiv[3], "external")
+
 
 if __name__ == "__main__":
     unittest.main()

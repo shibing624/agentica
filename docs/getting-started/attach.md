@@ -3,7 +3,21 @@
 让**别的进程**（桌宠、快捷键脚本、通知程序、你自己的工具）往一个**正在跑的**
 agentica 会话里说一句话 —— 效果等同于**你自己在那个终端里敲**。
 
-**默认关闭**，见下面「开关」。设计取舍见 `docs/rfcs/` 里的相关记录。
+**默认关闭**，见下面「开关」。
+
+### 它是 ACP 形态，不是 ACP 兼容
+
+它**借用** [ACP](https://agentclientprotocol.com) 的形态：换行分隔的 JSON-RPC、
+`session/*` 方法名、`session/prompt` 里的 content blocks。但它**不是**一个 ACP
+实现，两点根本差别：
+
+- **传输**：ACP 的 stdio 传输是**客户端新起一个 agent 子进程**；这条是**附着**到一个
+  已经在跑（且 TUI 占着 stdin/stdout）的会话，所以走 unix socket —— ACP 允许自定义
+  传输，但**标准 ACP 客户端（Zed 等）接不上这个 socket**。
+- **方法集**：只实现附着所需的子集，没有 `session/new`；`initialize` 也不做官方的
+  `authMethods` → `auth/login` 协商（这里第一条消息就要 `authToken`，见下）。
+
+所以 `PROTOCOL_VERSION` 是**本通道自己的版本号**，不代表能对上 ACP v1。
 
 ### 它解决的是哪件事
 
@@ -38,9 +52,22 @@ TUI 自己占着 stdin/stdout，所以 ACP 标准的 stdio 传输在这里用不
 
 ### 发现它
 
-socket 路径在会话的 presence 记录里（`agentica peers list` / `list_agents` 能看到
-那个会话，`attach_socket` 字段就是路径）。**直接读它，不要自己拼** —— 路径由 uid 和
-`TMPDIR` 决定，拼错的症状是「那个会话好像没在跑」，与真实原因毫不相干。
+**发现方式：读 presence 记录里的 `attach_socket`。** 一个会话在跑时会在
+`<AGENTICA_CACHE_DIR>/peers/live/<peer_id>.json` 写下自己的信息，其中
+`attach_socket` 就是它的 socket 路径（没开 attach 时为 `null`）。
+
+```bash
+# 人类看：这个会话的 socket 在哪
+#   /list-agents        （交互会话里；每个会话的 "attach" 行）
+#   list_agents         （agent 侧，同一份字段）
+```
+
+**直接读记录里的路径，不要自己拼** —— 它由 uid 和 `TMPDIR` 决定，拼错的症状是
+「那个会话好像没在跑」，与真实原因毫不相干。
+
+> 注意：`attach_socket` 是 presence 记录里的字段；**不要**去 grep 进程或按 cwd 找会话。
+> 也没有「列出所有 attach socket」的独立子命令 —— 会话列表就是 `live/*.json`
+> 这一份数据，`/list-agents` 与 `list_agents` 读的是同一份。
 
 ## 方法
 
@@ -116,11 +143,18 @@ socket 路径在会话的 presence 记录里（`agentica peers list` / `list_age
 ## 用起来
 
 ```bash
-# 1. 起一个交互会话（要开 settings.attach.enabled）
+# 1. 起一个交互会话（要开 settings.attach_enabled）
 agentica
 
-# 2. 另一个终端里，列出会话并读出它的 socket 路径
-agentica peers list
+# 2. 另一个终端/程序里，读会话的 presence 记录拿到 socket 路径
+python -c "
+import json, glob, os
+root = os.path.expanduser(os.environ.get('AGENTICA_CACHE_DIR', '~/.agentica/cache'))
+for f in glob.glob(root + '/peers/live/*.json'):
+    d = json.load(open(f))
+    print(d['name'], d['peer_id'], d.get('attach_socket'))
+"
+# 交互会话里也可以直接 /list-agents，看每个会话的 attach 行
 
 # 3. 用一行 python 发一句（真实客户端就是这样）
 python - <<'PY'

@@ -13,7 +13,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.runtime import _cmd_rewind
-from agentica.cli.rewind import extract_rewrite_paths, truncate_conversation
+from agentica.cli.rewind import extract_rewrite_paths, print_turn_list, truncate_conversation
 
 
 class TestExtractRewritePaths(unittest.TestCase):
@@ -137,6 +137,23 @@ class TestRewindCommand(unittest.TestCase):
 
     def test_rewind_unknown_turn(self):
         _cmd_rewind(self.ctx, "rewind 99 --yes")
+
+    def test_list_shows_250_char_prompt_head(self):
+        long_prompt = ("Please fix the login timeout. " * 12) + "UNIQUE_TAIL_SHOULD_BE_HIDDEN"
+        self.assertGreater(len(long_prompt), 250)
+        turn = types.SimpleNamespace(
+            turn=1,
+            created_at="2026-09-13 10:00",
+            prompt=long_prompt,
+            files=["a.py"],
+        )
+        console = types.SimpleNamespace(printed=[])
+        console.print = lambda text, **kwargs: console.printed.append(text)
+        print_turn_list(console, [turn])
+        rendered = "\n".join(console.printed)
+        self.assertIn(long_prompt[:250], rendered)
+        self.assertNotIn("UNIQUE_TAIL_SHOULD_BE_HIDDEN", rendered)
+        self.assertIn("…", rendered)
 
     def test_rewind_by_number_syntax(self):
         self._seed_turn(1, prompt="break it", msg_index=0)

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import collections
 import json
 import os
 import shlex
@@ -50,7 +49,11 @@ from agentica.utils.log import logger
 from agentica.cli.context_usage import measure_context
 
 from agentica.cli.commands.context import CommandContext
-from agentica.cli.commands.helpers import _run_async_safe
+from agentica.cli.commands.helpers import (
+    SESSION_RECENT_REQUESTS,
+    _run_async_safe,
+    clip_preview_head,
+)
 from agentica.utils.string import format_file_size
 
 
@@ -135,120 +138,34 @@ def _history_stats(runs: list[AgentRun]) -> HistoryRenderStats:
 
 
 
-def _format_char_count(char_count: int) -> str:
-    if char_count < 1000:
-        return f"{char_count} chars"
-    return f"{char_count / 1000:.1f}K chars"
-
-
-
-def _run_tool_activity(
-    messages: list[Message],
-) -> tuple[collections.Counter, list[Message], int]:
-    call_names: list[str] = []
-    tool_results: list[Message] = []
-    for message in messages:
-        if message.role == "assistant":
-            call_names.extend(_tool_call_name(call) for call in (message.tool_calls or []))
-        elif message.role == "tool":
-            tool_results.append(message)
-
-    result_names = [message.tool_name or "tool" for message in tool_results]
-    names = call_names if call_names else result_names
-    return collections.Counter(names), tool_results, len(call_names)
-
-
-
-def _display_run_tool_summary(con, run_number: int, messages: list[Message]) -> None:
-    tool_names, tool_results, tool_call_count = _run_tool_activity(messages)
-    if not tool_names and not tool_results:
-        return
-
-    name_summary = ", ".join(
-        f"{name}x{count}" for name, count in tool_names.most_common()
-    )
-    call_count = tool_call_count or sum(tool_names.values())
-    errors = [message for message in tool_results if message.tool_call_error is True]
-    summary = f"[Tools - run {run_number}] {call_count} calls"
-    if name_summary:
-        summary += f": {name_summary}"
-    summary += f" - {len(tool_results)} results hidden"
-    if errors:
-        summary += f" - {len(errors)} errors"
-    con.print(f"\n  {summary}", style="dim", markup=False, highlight=False)
-
-    for message in errors[:3]:
-        preview = " ".join(message.get_content_string().split()) or "(empty result)"
-        if len(preview) > 160:
-            preview = preview[:157] + "..."
-        con.print(
-            f"    ! {message.tool_name or 'tool'}: {preview}",
-            style="yellow",
-            markup=False,
-            highlight=False,
-        )
-    if len(errors) > 3:
-        con.print(f"    ... {len(errors) - 3} more errors hidden", style="dim")
-
-
-
 def display_conversation_history(runs: list[AgentRun], title: str) -> HistoryRenderStats:
-    """Render conversation text while collapsing persisted tool activity by run."""
+    """Render user questions and assistant answers only — no tool calls."""
     stats = _history_stats(runs)
     if stats.message_count == 0:
         return stats
 
     con = get_console()
     con.print(f"\n[bold cyan]{title}[/bold cyan]")
-    if stats.tool_result_count:
-        summary = (
-            f"Conversation view - {stats.tool_result_count} tool results "
-            f"({_format_char_count(stats.tool_result_chars)}) collapsed"
-        )
-        if stats.tool_error_count:
-            summary += f" - {stats.tool_error_count} errors"
-        summary += " - /history tools [run] for details"
-        con.print(summary, style="dim", markup=False, highlight=False)
 
     for run_number, run in enumerate(runs, start=1):
         messages = _messages_for_run(run)
         if not messages:
             continue
-        has_tool_activity = any(
-            message.role == "tool" or bool(message.tool_calls)
-            for message in messages
-        )
-        tool_activity_seen = False
-        tool_summary_shown = False
 
         for message in messages:
-            if message.role == "system":
-                continue
-            if message.role == "tool":
-                tool_activity_seen = True
+            if message.role not in ("user", "assistant"):
                 continue
 
-            content_text = message.get_content_string()
-            # The <elided-tools> digest is bookkeeping for the next model,
-            # not transcript prose; replay shows the turn the user saw.
-            content_text = strip_elided_notice(content_text)
+            content_text = strip_elided_notice(message.get_content_string())
+            if not content_text:
+                continue
             if message.role == "user":
                 con.print(f"\n[bold cyan]You - run {run_number}[/bold cyan]")
                 con.print(content_text, markup=False, highlight=False)
                 continue
 
-            if message.role == "assistant":
-                if content_text:
-                    if tool_activity_seen and not tool_summary_shown:
-                        _display_run_tool_summary(con, run_number, messages)
-                        tool_summary_shown = True
-                    con.print(f"\n[bold green]Agent - run {run_number}[/bold green]")
-                    render_markdown_response(con, content_text)
-                if message.tool_calls:
-                    tool_activity_seen = True
-
-        if has_tool_activity and not tool_summary_shown:
-            _display_run_tool_summary(con, run_number, messages)
+            con.print(f"\n[bold green]Agent - run {run_number}[/bold green]")
+            render_markdown_response(con, content_text)
 
     con.print()
     return stats
@@ -448,7 +365,7 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
 
 
 def display_resumed_transcript(runs: list[AgentRun], session_label: str) -> HistoryRenderStats:
-    """Display resumed conversation text with tool activity collapsed by run."""
+    """Display resumed user questions and assistant answers only."""
     return display_conversation_history(runs, f"Resumed transcript: {session_label}")
 
 
@@ -494,19 +411,8 @@ def _print_session_list(
         # user message that started the session.
         preview = SessionLog.session_preview(s["path"])
         turns = preview["user_count"]
-        first_user = preview["first_user"]
+        recent_users = preview.get("recent_users") or []
         user_name = s.get("name")
-        if user_name:
-            # Named session: name is the headline, preview is the subline.
-            summary = user_name[:80]
-            subline = " ".join(first_user.split())[:80] if first_user else "(no messages yet)"
-        elif first_user:
-            # Unnamed session: keep the legacy single-line preview.
-            summary = " ".join(first_user.split())[:80]
-            subline = None
-        else:
-            summary = "(empty session)"
-            subline = None
         is_current = ctx.current_agent is not None and sid == ctx.current_agent.session_id
         current_marker = "  [green](current)[/green]" if is_current else ""
         con.print(
@@ -514,11 +420,12 @@ def _print_session_list(
             f"({size_label}, {turns} turns){current_marker}"
         )
         if user_name:
-            con.print(f"     [bold]{summary}[/bold]")
-            if subline:
-                con.print(f"     [dim]> {subline}[/dim]")
-        else:
-            con.print(f"     [dim]> {summary}[/dim]")
+            con.print(f"     [bold]{user_name}[/bold]")
+        if recent_users:
+            for request in recent_users[-SESSION_RECENT_REQUESTS:]:
+                con.print(f"     [dim]> {clip_preview_head(request)}[/dim]")
+        elif not user_name:
+            con.print("     [dim](empty session)[/dim]")
         if show_work_dir and s.get("work_dir"):
             con.print(f"     [dim]{s['work_dir']}[/dim]")
     con.print(f"\n[dim]{usage_hint}[/dim]")
@@ -702,7 +609,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         # view so persisted tool payloads do not flood terminal scrollback.
         session_name = chosen.get("name")
         session_label = f"{session_name} ({chosen['session_id']})" if session_name else chosen["session_id"]
-        display_stats = display_resumed_transcript(current_agent.working_memory.runs, session_label)
+        display_resumed_transcript(current_agent.working_memory.runs, session_label)
         if resume_at_uuid is None and resumed:
             con.print(
                 "[dim]Tip: `/fork` branches this conversation into a new session; "
@@ -714,15 +621,12 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             # continues in a new session and the original branch stays intact.
             con.print(
                 f"[green]Forked {session_label} at {resume_at_uuid[:8]} → new session "
-                f"{current_agent.session_id} — restored {runs_built} runs into context; "
-                f"showing conversation only "
-                f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+                f"{current_agent.session_id} — restored {runs_built} runs into context[/green]"
             )
         else:
             con.print(
                 f"[green]Resumed session: {session_label}"
-                f" — restored {runs_built} runs into context; showing conversation only "
-                f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+                f" — restored {runs_built} runs into context[/green]"
             )
 
         # If the resumed session had an active goal, demote to paused for

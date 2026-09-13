@@ -94,10 +94,14 @@ def _server(tmp_path, **kw):
     running = kw.pop("running", None)
     if running is None:
         running = _FlipFlop()
+    disposition = kw.pop("disposition", None)
 
     def inject(text):
         injected.append(text)
         running.poke()
+        # Default: what ``hand_to_agent`` reports for an idle session with a run
+        # starting right after — the text became the next turn.
+        return disposition if disposition is not None else "queued"
 
     server = AttachServer(
         kw.pop("peer_id", "abcd1234"),
@@ -134,6 +138,19 @@ class _FlipFlop:
 
 
 class TestHandshake:
+    def test_no_auth_methods_are_advertised(self, tmp_path):
+        """Advertising ``authMethods: []`` would tell a spec-aware ACP client
+        "no auth needed" about a channel that refuses without a token."""
+        server, _, _ = _server(tmp_path)
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            result = client.call("initialize", {"clientCapabilities": {}})["result"]
+            assert "authMethods" not in result
+            assert result["agenticaAuth"] == "token"
+            client.close()
+        finally:
+            server.stop()
+
     def test_a_valid_token_is_accepted(self, tmp_path):
         server, _, _ = _server(tmp_path)
         try:
@@ -257,8 +274,133 @@ class TestAddressing:
         finally:
             server.stop()
 
+    def test_a_resumed_session_is_tracked_not_frozen(self, tmp_path):
+        """``/resume`` swaps the session under a running CLI.
+
+        The id must be read per request: a snapshot taken at construction would
+        reject the id the client just read from the presence record.
+        """
+        current = {"session": "before-resume"}
+        server = AttachServer(
+            "abcd1234",
+            inject=lambda t: "queued",
+            is_running=lambda: False,
+            session_id=lambda: current["session"],
+        )
+        assert server.start()
+        try:
+            token = server.token_file.read_text().strip()
+            client = _Client(server.path, token=token)
+
+            assert client.call("session/load", {})["result"]["sessionId"] == "before-resume"
+
+            current["session"] = "after-resume"
+            assert client.call("session/load", {})["result"]["sessionId"] == "after-resume"
+            # And the new id is accepted, the old one is now the mismatch.
+            assert "error" not in client.call("session/load", {"sessionId": "after-resume"})
+            assert client.call("session/load", {"sessionId": "before-resume"})["error"]["code"] == (
+                ERR_REFUSED
+            )
+            client.close()
+        finally:
+            server.stop()
+
 
 class TestPrompt:
+    def test_a_steered_prompt_waits_for_the_run_in_flight(self, tmp_path):
+        """Steered: the run already going is the one carrying this text."""
+        running = _FlipFlop(start_running=True)
+        server, injected, _ = _server(tmp_path, running=running, disposition="steered")
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+
+            def _end():
+                time.sleep(0.25)
+                running.poke(0.05)
+
+            threading.Thread(target=_end, daemon=True).start()
+            reply = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "keep going"}]},
+            )
+            assert "error" not in reply, reply
+            assert injected == ["keep going"]
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_queued_prompt_waits_for_the_new_turn_not_the_current_one(self, tmp_path):
+        """The bug this pins: injected while a run was still going, but the text
+        was queued because the run ended in the check-then-act window.
+
+        Waiting on the *current* run would return as soon as it ended — reporting
+        a completion for a message that had not been delivered yet, and (with an
+        answer attached) handing back the previous turn's text.
+        """
+        running = _FlipFlop(start_running=True)
+        server, _, _ = _server(tmp_path, running=running, disposition="queued")
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+
+            def _finish_current_then_run_next():
+                time.sleep(0.15)
+                running.poke(0.0)  # current run ends…
+                time.sleep(0.15)
+                running.poke(0.4)  # …then the queued turn runs
+
+            threading.Thread(target=_finish_current_then_run_next, daemon=True).start()
+            started = time.monotonic()
+            reply = client.call(
+                "session/prompt",
+                {"prompt": [{"type": "text", "text": "after this run"}]},
+            )
+            elapsed = time.monotonic() - started
+            assert "error" not in reply, reply
+            # It must have outlived the first run's end (else it took that end as
+            # its completion).
+            assert elapsed >= 0.3, f"returned after {elapsed:.2f}s — it took the wrong turn"
+            client.close()
+        finally:
+            server.stop()
+
+    def test_a_queued_prompt_that_never_runs_reports_pending(self, tmp_path):
+        """Queued and no run ever starts (the session is quitting, say).
+
+        Built directly rather than via ``_server``: its injector pokes the
+        run-state to model "a turn is happening", which would make this look like
+        a completed turn.
+        """
+        server = AttachServer(
+            "abcd1234",
+            inject=lambda text: "queued",
+            is_running=lambda: False,
+            session_id="sess-1234",
+            grace=0.5,
+        )
+        assert server.start()
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            result = client.call(
+                "session/prompt", {"prompt": [{"type": "text", "text": "queued forever"}]}
+            )["result"]
+            assert result.get("agenticaPending") is True
+            assert result["stopReason"] == "end_turn"
+            client.close()
+        finally:
+            server.stop()
+
+    def test_an_injector_reporting_nothing_is_not_claimed_as_complete(self, tmp_path):
+        server, _, _ = _server(tmp_path, disposition="")
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            result = client.call(
+                "session/prompt", {"prompt": [{"type": "text", "text": "x"}]}
+            )["result"]
+            assert result.get("agenticaPending") is True
+            client.close()
+        finally:
+            server.stop()
+
     def test_the_text_reaches_the_agent(self, tmp_path):
         server, injected, _ = _server(tmp_path)
         try:
@@ -532,6 +674,38 @@ class TestRobustness:
 
 
 class TestLifecycle:
+    def test_the_socket_is_discoverable_from_the_listing(self, tmp_path, monkeypatch):
+        """The discovery entrance must be one clients actually have.
+
+        Without the row, a client can only go spelunking in ``live/*.json`` —
+        which is what the first version of the e2e script had to do, and is not a
+        supported path. Pinned through ``detail_rows`` because that is the single
+        source both ``describe()`` (the model's ``list_agents``) and
+        ``/list-agents`` render.
+        """
+        monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(tmp_path))
+        session = peers.PeerSession(name="tmux-cli", cwd="/tmp/proj")
+        session.publish()
+        server = AttachServer(
+            session.peer_id, inject=lambda t: "queued", is_running=lambda: False
+        )
+        assert server.start()
+        try:
+            session.publish(attach_socket=str(server.path))
+            info = peers.list_live_peers()[0]
+            rows = dict(info.detail_rows())
+            assert rows["attach"] == str(server.path)
+            assert str(server.path) in info.describe()
+        finally:
+            server.stop()
+
+    def test_no_attach_row_when_not_serving(self, tmp_path, monkeypatch):
+        """A session with attach off must not advertise a socket that is not there."""
+        monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(tmp_path))
+        session = peers.PeerSession(name="tmux-cli", cwd="/tmp/proj")
+        session.publish()
+        assert "attach" not in dict(peers.list_live_peers()[0].detail_rows())
+
     def test_disabled_by_default(self, monkeypatch):
         """Off unless switched on: this channel's effect is the user speaking."""
         monkeypatch.delenv("AGENTICA_ATTACH_ENABLED", raising=False)

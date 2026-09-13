@@ -331,21 +331,20 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
         return
 
     _, runs_built = hydrate_resumed_session(current_agent)
-    display_stats = display_resumed_transcript(
+    display_resumed_transcript(
         current_agent.working_memory.runs, current_agent.session_id or ""
     )
     if chosen is None:
         con.print(
             f"[green]Forked into {current_agent.session_id} — carried over the whole "
-            f"conversation ({runs_built} runs, {display_stats.tool_result_count} tool results "
-            f"collapsed). Keep going; nothing you say now touches the original.[/green]"
+            f"conversation ({runs_built} runs). Keep going; nothing you say now "
+            f"touches the original.[/green]"
         )
     else:
         dropped = " ".join((chosen.get("content") or "").split())[:60]
         con.print(
             f"[green]Forked into {current_agent.session_id} — dropped '{dropped}' and "
-            f"everything after it; restored {runs_built} runs into context "
-            f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+            f"everything after it; restored {runs_built} runs into context[/green]"
         )
     con.print(
         f"  [dim]Forked from {source_session_id} — resume it any time with "

@@ -780,6 +780,10 @@ class TestSessionPreview:
         pv = SessionLog.session_preview(log.path)
         assert pv["first_user"] == "Build a CLI tool for parsing nginx logs"
         assert pv["user_count"] == 2
+        assert pv["recent_users"] == [
+            "Build a CLI tool for parsing nginx logs",
+            "now add tests",
+        ]
 
     def test_empty_session(self, tmp_dir):
         log = SessionLog("p2", base_dir=tmp_dir)
@@ -787,6 +791,7 @@ class TestSessionPreview:
         pv = SessionLog.session_preview(log.path)
         assert pv["first_user"] == ""
         assert pv["user_count"] == 0
+        assert pv["recent_users"] == []
 
     def test_truncates_long_first_user(self, tmp_dir):
         log = SessionLog("p3", base_dir=tmp_dir)
@@ -795,6 +800,7 @@ class TestSessionPreview:
         pv = SessionLog.session_preview(log.path, max_chars=80)
         assert len(pv["first_user"]) == 80
         assert pv["user_count"] == 1
+        assert pv["recent_users"] == [long_msg[:80]]
 
     def test_malformed_lines_skipped(self, tmp_dir):
         log = SessionLog("p4", base_dir=tmp_dir)
@@ -805,6 +811,26 @@ class TestSessionPreview:
         pv = SessionLog.session_preview(log.path)
         assert pv["first_user"] == "real first message"
         assert pv["user_count"] == 1
+        assert pv["recent_users"] == ["real first message"]
+
+    def test_recent_users_keeps_last_five(self, tmp_dir):
+        log = SessionLog("p5", base_dir=tmp_dir)
+        for i in range(7):
+            log.append("user", f"question {i}")
+            log.append("assistant", "ok")
+        pv = SessionLog.session_preview(log.path)
+        assert pv["user_count"] == 7
+        assert pv["first_user"] == "question 0"
+        assert pv["recent_users"] == [f"question {i}" for i in range(2, 7)]
+
+    def test_skips_window_preamble(self, tmp_dir):
+        log = SessionLog("p6", base_dir=tmp_dir)
+        log.append("user", "<context_window>\noil gauge\n</context_window>\n")
+        log.append("user", "actual question")
+        pv = SessionLog.session_preview(log.path)
+        assert pv["user_count"] == 1
+        assert pv["first_user"] == "actual question"
+        assert pv["recent_users"] == ["actual question"]
 
 
 class TestToolResultLogging:

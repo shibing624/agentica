@@ -404,6 +404,31 @@ class TestResumeArchivedFilter(unittest.TestCase):
         current_line = next(line for line in printed.splitlines() if "sess-act" in line and "current" in line)
         self.assertIn("(current)", current_line)
 
+    def test_picker_lists_recent_requests(self):
+        ctx = CommandContext(agent_config={}, current_agent=None)
+        long_q = "Please investigate the login timeout for tenant " + ("x" * 300)
+        with (
+            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch(
+                "agentica.memory.session_log.SessionLog.session_preview",
+                return_value={
+                    "user_count": 3,
+                    "first_user": "first",
+                    "recent_users": ["fix login", "add tests", long_q[:250]],
+                },
+            ),
+            patch("agentica.cli.commands.session.get_console") as mock_console,
+        ):
+            console = MagicMock()
+            mock_console.return_value = console
+            cli_session._cmd_resume(ctx, "")
+
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+        self.assertIn("> fix login", printed)
+        self.assertIn("> add tests", printed)
+        self.assertIn(long_q[:250], printed)
+        self.assertNotIn("x" * 260, printed)
+
     def test_resume_by_name(self):
         create_agent, result = self._resume("release investigation")
 

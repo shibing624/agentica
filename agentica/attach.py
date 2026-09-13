@@ -51,9 +51,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 from agentica.utils.log import logger
 
-#: Framing and protocol version. Matches ACP's stdio framing: one JSON document
-#: per line, no embedded newlines, which is also the natural fit for a stream
-#: socket and keeps a connection readable with ``nc``.
+#: This transport's own version, **not** ACP's protocol version. It borrows ACP's
+#: shaping — newline-delimited JSON-RPC, ``session/*`` method names, content
+#: blocks in ``session/prompt`` — but it is a purpose-built local channel, not an
+#: ACP implementation: stdio ACP spawns a fresh agent, while this attaches to one
+#: already running under a TUI. Do not read this number as "talks ACP v1".
 PROTOCOL_VERSION = 1
 MAX_LINE_BYTES = 8 * 1024 * 1024
 
@@ -198,12 +200,13 @@ class AttachServer:
         self,
         peer_id: str,
         *,
-        inject: Callable[[str], None],
+        inject: Callable[[str], str],
         is_running: Callable[[], bool] = lambda: False,
         snapshot: Optional[Callable[[], Dict[str, Any]]] = None,
-        session_id: Optional[str] = None,
+        session_id: Optional[Callable[[], Optional[str]]] = None,
         cancel: Optional[Callable[[], None]] = None,
         answer: Optional[Callable[[], Optional[str]]] = None,
+        grace: float = 600.0,
     ):
         self._peer_id = peer_id
         self._inject = inject
@@ -212,6 +215,15 @@ class AttachServer:
         self._session_id = session_id
         self._cancel = cancel
         self._answer = answer
+        # How long a prompt may wait for its turn. Generous because a turn
+        # legitimately takes minutes and the alternative is claiming an answer
+        # that is still being produced. Injectable so tests do not sit for it.
+        self._grace = grace
+        # One blocking prompt at a time. Two prompts in flight would both read the
+        # same ``is_running`` and each would take the other's turn end as its own,
+        # so a second client waits here instead of being told about a completion
+        # that belongs to someone else's message.
+        self._prompt_lock = threading.Lock()
         self._token: Optional[str] = None
         self._sock: Optional[socket.socket] = None
         self._stop = threading.Event()
@@ -292,6 +304,14 @@ class AttachServer:
                 sock.close()
             except OSError:
                 pass
+        # Join the accept loop so "stop" means the socket is no longer serving.
+        # A prompt blocked in a long wait is released by ``_stop`` above (its poll
+        # checks it every 50ms), so this does not wait for a turn to finish. The
+        # join is bounded: a wedged thread must not hang session teardown.
+        thread = self._thread
+        self._thread = None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
         try:
             self.path.unlink()
         except OSError:
@@ -419,11 +439,16 @@ class AttachServer:
         if method == "ping":
             return {"status": "ok"}
         if method == "initialize":
+            # No ``authMethods`` key on purpose. The official ACP negotiation is
+            # "here are the methods, then call auth/login"; this transport instead
+            # demands ``params.authToken`` on the first message, so advertising an
+            # empty authMethods list would tell a spec-aware client "no auth
+            # needed" about a channel that refuses without one.
             return {
                 "protocolVersion": PROTOCOL_VERSION,
                 "agentCapabilities": {"loadSession": True, "promptCapabilities": {}},
                 "agentInfo": {"name": "agentica", "version": PROTOCOL_VERSION},
-                "authMethods": [],
+                "agenticaAuth": "token",
             }
         if method == "session/load":
             return self._load(params)
@@ -436,20 +461,36 @@ class AttachServer:
 
     def _load(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Attach to this session. A mismatched id means you are on the wrong socket."""
+        current = self._current_session_id()
         wanted = params.get("sessionId")
-        if wanted and self._session_id and str(wanted) != str(self._session_id):
+        if wanted and current and str(wanted) != str(current):
             raise AttachError(
                 ERR_REFUSED,
-                f"this socket serves session {self._session_id}, not {wanted}; "
+                f"this socket serves session {current}, not {wanted}; "
                 f"connect to the socket of the session you mean",
             )
-        info: Dict[str, Any] = {"sessionId": self._session_id or self._peer_id}
+        info: Dict[str, Any] = {"sessionId": current or self._peer_id}
         if self._snapshot is not None:
             try:
                 info.update(self._snapshot() or {})
             except Exception as exc:
                 logger.debug(f"attach: snapshot failed: {exc}")
         return info
+
+    def _current_session_id(self) -> Optional[str]:
+        """The session this socket serves, read now.
+
+        Called per request rather than captured at construction: ``/resume`` and
+        ``/fork`` swap the session underneath a running CLI, and a value frozen at
+        startup would reject the id the client just read from the presence record.
+        """
+        if callable(self._session_id):
+            try:
+                return self._session_id()
+            except Exception as exc:
+                logger.debug(f"attach: session id lookup failed: {exc}")
+                return None
+        return self._session_id or None
 
     def _prompt(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Inject the user's text and answer when the turn carrying it ends.
@@ -460,48 +501,58 @@ class AttachServer:
         speaking, not a side channel into the run.
         """
         text = _prompt_text(params.get("prompt"))
+        current = self._current_session_id()
         wanted = params.get("sessionId")
-        if wanted and self._session_id and str(wanted) != str(self._session_id):
+        if wanted and current and str(wanted) != str(current):
             raise AttachError(
                 ERR_REFUSED,
-                f"this socket serves session {self._session_id}, not {wanted}",
+                f"this socket serves session {current}, not {wanted}",
             )
 
-        was_running = self._is_running()
-        self._inject(text)
-        # Only wait when this session will report the turn back. A prompt handed
-        # to a session that is idle becomes the next turn; the host's
-        # ``is_running`` flipping True and back is that turn's life. If it never
-        # starts (the session is quitting), say so rather than blocking forever.
-        if self._is_running is None:
-            return {"stopReason": "end_turn"}
-        completed = self._wait_for_turn(was_running)
-        answer = None
-        if self._answer is not None:
-            try:
-                answer = self._answer()
-            except Exception:
-                answer = None
-        if completed == "cancelled":
-            return {"stopReason": "cancelled"}
-        if completed == "timeout":
-            # The turn was accepted but this session did not report an end
-            # within the grace window — report that honestly instead of
-            # claiming an answer we never saw.
-            return {"stopReason": "end_turn", "agenticaPending": True}
-        result: Dict[str, Any] = {"stopReason": "end_turn"}
-        if answer:
-            result["agenticaAnswer"] = answer
-        return result
+        with self._prompt_lock:
+            # ``inject`` reports where the text went, which decides what to wait
+            # for. Reading ``is_running`` before injecting cannot: ``hand_to_agent``
+            # queues when a run is ending inside its check-then-act window, so a
+            # message that looks "steered" may in fact be waiting for the next turn.
+            disposition = self._inject(text)
+            if disposition not in ("steered", "queued"):
+                # An injector that reports nothing usable: do not claim to know
+                # when the work ends.
+                return {"stopReason": "end_turn", "agenticaPending": True}
+            completed = self._wait_for_turn(disposition)
+            answer = None
+            if self._answer is not None:
+                try:
+                    answer = self._answer()
+                except Exception:
+                    answer = None
+            if completed == "cancelled":
+                return {"stopReason": "cancelled"}
+            if completed == "timeout":
+                # The text was accepted but this session did not report the end
+                # within the grace window — say so rather than claiming an answer
+                # we never saw.
+                return {"stopReason": "end_turn", "agenticaPending": True}
+            result: Dict[str, Any] = {"stopReason": "end_turn"}
+            if answer:
+                result["agenticaAnswer"] = answer
+            return result
 
-    def _wait_for_turn(self, was_running: bool, grace: float = 600.0) -> str:
-        """Wait for the turn that carries the injected text to finish.
+    def _wait_for_turn(self, disposition: str, grace: Optional[float] = None) -> str:
+        """Wait for the turn that **carries this text** to finish.
 
-        Starts by waiting for the run to *begin* when the session was idle, so a
-        queued prompt is not mistaken for "already finished".
+        ``disposition`` is what the injector reported:
+
+        * ``"steered"`` — a run in flight took it, so that run ending is this
+          text's turn ending.
+        * ``"queued"`` — it is a pending line. The turn that carries it has not
+          started, so this first waits for a run to *begin* and only then for it
+          to end. Waiting on the current run instead would report a completion
+          that never included this message (and, with an answer, would hand back
+          the previous turn's text).
         """
-        deadline = time.monotonic() + grace
-        if not was_running:
+        deadline = time.monotonic() + (self._grace if grace is None else grace)
+        if disposition == "queued":
             started = False
             while time.monotonic() < deadline:
                 if self._stop.is_set():
@@ -511,6 +562,8 @@ class AttachServer:
                     break
                 time.sleep(0.05)
             if not started:
+                # Queued and never ran: the session is quitting, or the line was
+                # consumed by something that does not start a fresh run.
                 return "timeout"
         while time.monotonic() < deadline:
             if self._stop.is_set():

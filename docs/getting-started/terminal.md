@@ -166,22 +166,25 @@ mcp, skill, ...
 显示所有可用命令列表和说明。
 
 ### `/tools`
-列出当前 Agent 已装载的所有工具及其描述：
+先列内置工具（`BUILTIN_TOOLS` 顺序），再按名字排序外部工具：
 ```
 > /tools
-  read_file    - Read a file from the filesystem
-  write_file   - Write content to a file
-  execute      - Execute shell commands
-  ...
+  Built-in
+    ● read_file            built-in
+    ● write_file           built-in
+    ...
+  External
+    ○ arxiv                Search academic papers on arXiv
+    ...
 ```
 
 ### `/skills`
-列出当前加载的所有技能：
+列出当前加载的所有技能；描述只展示开头 250 个字符：
 ```
 > /skills
-  Loaded skills (3):
-    code-review  - Code review skill
-    paper-digest - Paper digest skill
+  Installed Skills (3):
+    code-review  /code-review
+      Review a diff for correctness...
     ...
 ```
 
@@ -359,26 +362,28 @@ To continue this session, run agentica resume c1392649-f07d-4f05-808b-f852c31902
 ```
 
 ### `/resume [number|name|id-prefix|all]`
-按序号、名称或 ID 前缀恢复之前的会话（基于 Session Log JSONL 机制）：
+按序号、名称或 ID 前缀恢复之前的会话（基于 Session Log JSONL 机制）。列表里每个
+session 展示最近 5 条用户请求，每条截取前 250 个字符：
 ```
 > /resume
   Available sessions:
     1. a8c3f217  2026-07-24 10:20  (48KB, 23 turns)
        前端视觉问题排查
-    2. 91be026d  2026-07-23 18:05  (12KB, 6 turns)
-       修复登录超时
+       > 登录页按钮错位
+       > 再看一遍移动端
+       > 把截图里的间距也一起改
 
 > /resume 前端视觉问题排查
   Resumed transcript: 前端视觉问题排查 (a8c3f217...)
-  Conversation view - 48 tool results (62.4K chars) collapsed - /history tools [run] for details
-  ...
-  Resumed session: 前端视觉问题排查 (a8c3f217...) - restored 6 runs into context;
-  showing conversation only (48 tool results collapsed)
+  You - run 1
+  登录页按钮错位
+  Agent - run 1
+  已改好间距。
+  Resumed session: 前端视觉问题排查 (a8c3f217...) — restored 6 runs into context
 ```
 
-恢复时，完整 Session Log 仍会重建到模型上下文中；终端默认只回放用户消息、Agent
-正文和每轮工具统计，成功的 tool result 不再写入 scrollback。失败结果最多显示 3 条
-单行摘要。
+恢复时，完整 Session Log 仍会重建到模型上下文中；终端只回放问答，不展示 tool
+call / tool result。需要完整工具记录时用 `/history tools`。
 
 也可以退出 CLI 后直接从 shell 恢复（ID 前缀即可）：
 
@@ -426,7 +431,7 @@ Session Log 里的 tool 轮次统一按 OpenAI 线格式存放，Anthropic 的 `
 
 ### `/history [tools [run-number]]`
 
-`/history` 使用与 `/resume` 相同的紧凑对话视图。需要检查完整工具参数和结果时，
+`/history` 使用与 `/resume` 相同的问答视图（不展示 tool call）。需要检查完整工具参数和结果时，
 使用 `/history tools` 在 pager 中查看整个 session，或指定从 1 开始的 run 序号：
 
 ```text

@@ -259,7 +259,7 @@ def _history_run(messages):
     return AgentRun(response=RunResponse(messages=messages))
 
 
-def test_display_resumed_transcript_collapses_tool_results():
+def test_display_resumed_transcript_omits_tool_activity():
     console = MagicMock()
     run = _history_run(
         [
@@ -310,11 +310,12 @@ def test_display_resumed_transcript_collapses_tool_results():
     assert "I will inspect it." in rendered
     assert "Agent - run 1" in rendered
     assert "Done." in rendered
-    assert "read_filex1, executex1" in rendered
-    assert "2 results hidden" in rendered
-    assert "execute: command failed with exit code 1" in rendered
+    assert "read_filex1, executex1" not in rendered
+    assert "2 results hidden" not in rendered
+    assert "command failed with exit code 1" not in rendered
     assert "success output must stay hidden" not in rendered
     assert "Tool result:" not in rendered
+    assert "Conversation view" not in rendered
     assert stats.run_count == 1
     assert stats.tool_call_count == 2
     assert stats.tool_result_count == 2
@@ -375,7 +376,7 @@ def test_history_reads_canonical_runs_and_opens_full_tools_in_pager():
     assert "the complete persisted tool result" in full_content
 
 
-def test_resumed_transcript_limits_error_previews_per_run():
+def test_resumed_transcript_hides_tool_errors():
     messages = [Message(role="user", content="run checks")]
     for index in range(4):
         messages.append(
@@ -386,17 +387,18 @@ def test_resumed_transcript_limits_error_previews_per_run():
                 tool_call_error=True,
             )
         )
+    messages.append(Message(role="assistant", content="checks finished"))
     console = MagicMock()
 
     with patch("agentica.cli.commands.session.get_console", return_value=console):
         display_resumed_transcript([_history_run(messages)], "session-123")
 
     rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
-    assert "tool_0: error 0" in rendered
-    assert "tool_1: error 1" in rendered
-    assert "tool_2: error 2" in rendered
-    assert "tool_3: error 3" not in rendered
-    assert "1 more errors hidden" in rendered
+    assert "run checks" in rendered
+    assert "checks finished" in rendered
+    assert "tool_0: error 0" not in rendered
+    assert "error 0" not in rendered
+    assert "more errors hidden" not in rendered
 
 
 def test_noninteractive_interrupt_prints_resume_summary():

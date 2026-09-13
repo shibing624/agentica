@@ -30,6 +30,7 @@ from agentica.cli.commands.helpers import (
     _refresh_skills_session,
     _safe_tool_module_name,
     _set_skill_runtime_state,
+    clip_preview_head,
 )
 from agentica.cli.commands.cron_cmd import _ask_text_via_tui, _confirm_via_tui
 
@@ -327,30 +328,46 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
     if ctx.extra_tool_names:
         active_names.update(ctx.extra_tool_names)
 
-    all_tools = {}
-    for name in BUILTIN_TOOLS:
-        all_tools[name] = ("built-in", True)
-    for name, (_mod, _cls, _cat, desc) in TOOL_REGISTRY.items():
-        is_active = name in active_names
-        all_tools[name] = (desc, is_active)
+    listed = list_tools_for_display(active_names)
 
     con.print()
-    for name in sorted(all_tools.keys()):
-        desc, is_active = all_tools[name]
+    last_group = None
+    for name, desc, is_active, group in listed:
+        if group != last_group:
+            label = "Built-in" if group == "builtin" else "External"
+            con.print(f"  [bold]{label}[/bold]")
+            last_group = group
         if is_active:
             con.print(f"    [green]●[/green] [bold]{name:<20}[/bold] {desc}")
         else:
             con.print(f"    [dim]○[/dim] [dim]{name:<20}[/dim] [dim]{desc}[/dim]")
     con.print()
-    active_count = sum(1 for _, (_, a) in all_tools.items() if a)
+    active_count = sum(1 for _, _, is_active, _ in listed if is_active)
     con.print(
-        f"  [green]● = active ({active_count})[/green]  [dim]○ = available ({len(all_tools) - active_count})[/dim]"
+        f"  [green]● = active ({active_count})[/green]  [dim]○ = available ({len(listed) - active_count})[/dim]"
     )
     con.print(
         f"  [dim]Commands: /tools add <name> | add-from <name> | remove <name> | info <name> | search <keyword>[/dim]"
     )
     con.print()
 
+
+
+def list_tools_for_display(active_names: set) -> list[tuple[str, str, bool, str]]:
+    """Built-in tools first (registry order), then extra tools sorted by name."""
+    builtin_set = set(BUILTIN_TOOLS)
+    rows: list[tuple[str, str, bool, str]] = []
+    for name in BUILTIN_TOOLS:
+        rows.append((name, "built-in", True, "builtin"))
+    extras = [
+        (name, desc, name in active_names)
+        for name, (_mod, _cls, _cat, desc) in TOOL_REGISTRY.items()
+        if name not in builtin_set
+    ]
+    extras.sort(key=lambda item: item[0])
+    for name, desc, is_active in extras:
+        rows.append((name, desc, is_active, "external"))
+    return rows
 
 
 def _get_active_tool_names(agent) -> set:
@@ -399,7 +416,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
                 f"    [bold]{r.name:<25}[/bold] [{trust_style}]{r.trust_level:<10}[/{trust_style}] [dim]{r.source}[/dim]"
             )
             if r.description:
-                con.print(f"      [dim]{r.description[:70]}{'...' if len(r.description) > 70 else ''}[/dim]")
+                con.print(f"      [dim]{clip_preview_head(r.description)}[/dim]")
             con.print(f"      [dim]identifier: {r.identifier}[/dim]")
         con.print()
         con.print("  [dim]Install: /skills install <name-or-identifier>  |  Preview: /skills inspect <name>[/dim]")
@@ -690,8 +707,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
             loc = f"[dim]({source_type})[/dim]"
             con.print(f"    [bold]{skill.name}[/bold]{trigger_str} {loc}")
             if skill.description:
-                desc = skill.description[:70] + ("..." if len(skill.description) > 70 else "")
-                con.print(f"      [dim]{desc}[/dim]")
+                con.print(f"      [dim]{clip_preview_head(skill.description)}[/dim]")
         con.print()
     else:
         con.print("  No installed skills.")
