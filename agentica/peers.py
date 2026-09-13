@@ -893,67 +893,6 @@ def send_message(
     return message
 
 
-def send_to_live_peer(
-    target: str,
-    text: str,
-    *,
-    from_name: str,
-    from_kind: str = "user",
-    delivery: str = DELIVERY_STEER,
-    from_peer_id: str = "",
-) -> PeerMessage:
-    """Send ``text`` to the one live session ``target`` names, from outside.
-
-    The entry point for a process that is **not itself a session** — a desktop
-    app, a notification script, another tool on the same machine. ``PeerSession``
-    is not usable there: it would publish a live record and a mailbox for a
-    "session" with no agent behind it, which every peer would then see as a real
-    terminal. This resolves the target, applies the mailbox's own limits, and
-    writes the same file ``PeerSession.send`` writes.
-
-    ``from_kind`` defaults to ``"user"`` here, unlike the module default on
-    ``send_message``: the callers this exists for are surfaces the human is
-    driving (a pet, a script they ran, a phone relay), so the receiving session
-    must treat the text as something they said. An agent-to-agent caller wants
-    ``send_message`` on a ``PeerSession`` instead, which also owns the send-rate
-    brakes that need a session's own history.
-
-    ``from_peer_id`` is empty by default and that is normal: a non-session has no
-    address to be replied to at. ``format_for_model`` handles that case by not
-    asking for a reply. A caller that *does* own a mailbox — a relay sitting on a
-    chat channel, say — may pass its own peer_id, and then replies become
-    addressable again.
-
-    Raises ``PeerMessageRefused`` with the candidate names when the target is
-    unknown or ambiguous, and on the channel's size / backlog limits.
-    """
-    if not (from_name or "").strip():
-        raise PeerMessageRefused(
-            "from_name is required: the receiving session is told who is speaking, "
-            "and an unattributed instruction is worse than none"
-        )
-    matches = match_peers(target)
-    if not matches:
-        raise PeerMessageRefused(
-            f"no live session matches '{target}'; "
-            f"run 'agentica peers list' to see current names"
-        )
-    if len(matches) > 1:
-        names = ", ".join(f"{p.name} [{p.peer_id}]" for p in matches[:8])
-        raise PeerMessageRefused(
-            f"'{target}' matches {len(matches)} live sessions ({names}); "
-            f"use the peer id or a longer prefix"
-        )
-    return send_message(
-        matches[0],
-        text=text,
-        from_name=from_name.strip(),
-        from_peer_id=from_peer_id,
-        from_kind=from_kind,
-        delivery=delivery,
-    )
-
-
 def drain_inbox(peer_id: str, *, delivery: Optional[str] = None) -> List[PeerMessage]:
     """Take pending messages for ``peer_id``, oldest first.
 

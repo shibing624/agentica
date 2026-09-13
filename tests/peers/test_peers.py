@@ -746,6 +746,60 @@ class TestUserRelayedMessages:
         assert not received[0].from_user
 
 
+class TestAnUnaddressableSenderIsNotAskedToBeRepliedTo:
+    """`from_peer_id` empty means the writer is not a session on this machine.
+
+    Naming it in a "report back with send_message to X" instruction sends the
+    model to an address that never resolves, so the result lands in a mailbox
+    nobody reads. The instruction is dropped for that case; senders that *can*
+    be reached are unaffected.
+    """
+
+    def test_a_non_session_user_message_does_not_invite_a_reply(self):
+        message = PeerMessage(
+            text="run the tests",
+            from_name="vpet-desktop",
+            from_peer_id="",
+            to_peer_id="beef",
+            from_kind="user",
+        )
+
+        rendered = peers.format_for_model([message])
+
+        assert "send_message to" not in rendered
+        assert "no reply address" in rendered
+        assert "vpet-desktop" in rendered
+        # The authority claim is what makes it an instruction; keep that.
+        assert "treat as their instruction" in rendered
+
+    def test_a_non_session_agent_message_does_not_invite_a_reply(self):
+        message = PeerMessage(
+            text="fyi", from_name="some-script", from_peer_id="", to_peer_id="beef"
+        )
+
+        rendered = peers.format_for_model([message])
+
+        assert "send_message to" not in rendered
+        assert "no reply address" in rendered
+
+    def test_an_addressable_sender_is_still_asked_to_be_replied_to(self):
+        """The regression guard: the fix must not silence the reply instruction
+        for senders that can actually be reached — `/send-message` forwards and
+        the gateway's phone relay both have a mailbox."""
+        from_user = PeerMessage(
+            text="go", from_name="wechat-41", from_peer_id="abcd1234",
+            to_peer_id="beef", from_kind="user",
+        )
+        from_agent = PeerMessage(
+            text="done", from_name="alpha", from_peer_id="abcd1234", to_peer_id="beef"
+        )
+
+        assert "report back with send_message to wechat-41" in peers.format_for_model([from_user])
+        assert "report the outcome back with send_message to alpha" in peers.format_for_model(
+            [from_agent]
+        )
+
+
 class TestDelivery:
     def test_default_and_legacy_mailbox_files_are_steer(self):
         a = _session("alpha")
