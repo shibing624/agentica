@@ -41,7 +41,11 @@ from agentica.global_config import (
 )
 from agentica.memory.session_log import SessionLog, iso_timestamp, is_session_unread
 from agentica.skills import get_skill_registry, load_system_skills
-from agentica.compression.manager import parse_compact_token_limit
+from agentica.compression.manager import (
+    compact_token_limit_of,
+    parse_compact_token_limit,
+    working_context_window,
+)
 
 from ..config import settings
 from .media_understanding import media_understanding
@@ -789,7 +793,10 @@ class AgentService:
                     if agent is not None:
                         break
         if agent and agent.model:
-            return agent.model.context_window
+            return working_context_window(
+                agent.model.context_window,
+                compact_token_limit_of(agent.tool_config) if agent.tool_config else None,
+            )
         return 128000
 
     @staticmethod

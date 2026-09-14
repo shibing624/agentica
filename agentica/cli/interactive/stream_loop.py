@@ -221,6 +221,14 @@ def _record_main_context_usage(event: dict, tui_state: dict) -> None:
         )
     if event["context_window"] > 0:
         tui_state["context_window"] = event["context_window"]
+    # The provider's hard limit, when the emitter names it. The bar divides by
+    # the working window above; this travels on to the peer record so another
+    # session can see the cap is holding the window below the model's limit.
+    # Absent means an emitter that knows only one window, which is then the
+    # honest answer for both.
+    provider_window = event.get("provider_window")
+    if provider_window:
+        tui_state["provider_window"] = provider_window
 
 
 # work_dir -> (.git/HEAD mtime_ns, branch). The status bar re-read the branch
@@ -292,7 +300,13 @@ def _seed_context_tokens(agent, tui_state: dict) -> None:
     if agent is None or agent.model is None:
         return
     try:
-        tui_state["context_tokens"] = run_sync(measure_context(agent)).total
+        breakdown = run_sync(measure_context(agent))
+        tui_state["context_tokens"] = breakdown.total
+        # The denominator comes from the measurement, which already resolved
+        # the working cap. Reading ``model.context_window`` here instead is how
+        # the bar came to divide by 1M while the runner evicted against 512k.
+        tui_state["context_window"] = breakdown.window
+        tui_state["provider_window"] = breakdown.provider_window
     except Exception as e:
         # A status-bar estimate is never worth aborting startup or a command
         # over; leave whatever the bar was showing. Warn rather than whisper:

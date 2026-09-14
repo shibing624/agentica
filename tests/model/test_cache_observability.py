@@ -92,7 +92,10 @@ class TestPrefixBreak:
 class TestEmitContextUsage:
     def _emit(self, prev_usage_ratio, messages, model_extra=None):
         events = []
-        agent = SimpleNamespace(_event_callback=events.append, name="a", _parent_run_id=None)
+        agent = SimpleNamespace(
+            _event_callback=events.append, name="a", _parent_run_id=None,
+            tool_config=SimpleNamespace(compact_token_limit=None),
+        )
         usage = Usage()
         if prev_usage_ratio is not None:
             usage.add(RequestUsage(
@@ -115,7 +118,10 @@ class TestEmitContextUsage:
         try:
             ratio = None
             events, agent_msgs = [], _msgs("a", "b")
-            agent = SimpleNamespace(_event_callback=events.append, name="a", _parent_run_id=None)
+            agent = SimpleNamespace(
+                _event_callback=events.append, name="a", _parent_run_id=None,
+                tool_config=SimpleNamespace(compact_token_limit=None),
+            )
             model = SimpleNamespace(tools=None, context_window=128000, id="gpt-4o", usage=Usage())
             CompressMixin._emit_context_usage(agent, model, agent_msgs)
             changed = _msgs("a", "B-CHANGED")

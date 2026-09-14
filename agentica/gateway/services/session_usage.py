@@ -60,10 +60,14 @@ async def usage_payload(agent: Any, *, model_provider: str = "") -> Dict[str, An
 
     return {
         "model": model,
+        # The working window, so every consumer's ratio matches the policy's.
         "window": breakdown.window,
         "context_tokens": total,
         "percent_full": round(breakdown.percent_full, 1),
-        "messages": len(agent.working_memory.messages),
+        # The same set the Conversation row measured. Counting
+        # ``working_memory.messages`` instead read the whole archive, so the
+        # count and the token total described different sets.
+        "messages": breakdown.history_messages,
         "api_calls": summary.api_calls,
         "cost_usd": round(summary.cost_usd, 6),
         "input_tokens": summary.prompt_tokens,

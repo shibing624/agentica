@@ -225,6 +225,10 @@ class PeerInfo:
     busy: bool = False
     context_tokens: Optional[int] = None
     context_window: Optional[int] = None
+    # The provider's hard limit. ``context_window`` above is the session's
+    # working window (the cap when one is set), so a peer reading
+    # "611,808 / 512,000" cannot tell what the model would actually accept.
+    provider_window: Optional[int] = None
     # The path of this session's attach socket, when it is serving one. Published
     # because the alternative is every client reconstructing it from the peer id,
     # the uid and TMPDIR — and getting that wrong looks like "the session isn't
@@ -321,6 +325,7 @@ class PeerInfo:
             busy=bool(data.get("busy")),
             context_tokens=data.get("context_tokens") or None,
             context_window=data.get("context_window") or None,
+            provider_window=data.get("provider_window") or None,
             attach_socket=data.get("attach_socket") or None,
             updated_at=float(data.get("updated_at") or 0.0),
         )
@@ -365,7 +370,15 @@ class PeerInfo:
             rows.append(("model", self.model_provider))
         if self.context_window:
             used = f"{self.context_tokens:,}" if self.context_tokens else "?"
-            rows.append(("context", f"{used} / {self.context_window:,} tokens"))
+            # The denominator is the session's working window (the cap when one
+            # is set), so the number means the same thing here as on the owner's
+            # status bar. The provider limit rides beside it when it differs,
+            # because that is the figure the provider would quote on an
+            # over-limit error and the cap alone would not explain it.
+            context = f"{used} / {self.context_window:,} tokens"
+            if self.provider_window and self.provider_window > self.context_window:
+                context += f" (model limit {self.provider_window:,})"
+            rows.append(("context", context))
         rows.append(("cwd", self.cwd))
         if project:
             rows.append(("project", project))

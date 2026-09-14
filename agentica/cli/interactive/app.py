@@ -556,7 +556,10 @@ def run_interactive(
         "git_branch": _read_git_branch(status_work_dir),
         "peer_name": "",
         "context_tokens": 0,
+        # Overwritten by the seed below from the measurement itself; this is
+        # only the fallback for a model that never reported a window.
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
+        "provider_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
         "active_seconds": 0.0,
         "last_turn_seconds": 0.0,
@@ -690,6 +693,7 @@ def run_interactive(
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
+            tui_state["provider_window"] = tui_state["context_window"]
             tui_state["cost_usd"] = 0.0
             # A fresh agent (/clear, /model) carries a fresh system prompt and
             # tool set — re-measure rather than dropping the bar to zero.
@@ -731,6 +735,7 @@ def run_interactive(
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
+            tui_state["provider_window"] = tui_state["context_window"]
         if "skills_registry" in result:
             skills_registry = result["skills_registry"]
         if "extra_tool_names" in result:
@@ -1204,6 +1209,7 @@ def run_interactive(
                     busy=state.agent_running,
                     context_tokens=tui_state["context_tokens"],
                     context_window=tui_state["context_window"],
+                    provider_window=tui_state.get("provider_window"),
                     git_branch=git.branch,
                     head_sha=git.head_sha,
                     base_ref=git.base_ref,

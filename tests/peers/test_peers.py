@@ -515,6 +515,23 @@ class TestPeerMessagingTool:
         # A session that has not reported usage yet still advertises its window.
         assert "context: ? / 200,000 tokens" in out
 
+    def test_list_agents_names_the_cap_behind_the_window(self):
+        """A peer seeing "611,808 / 1,000,000" thinks the session is halfway
+        healthy. It may be over the working cap and under active eviction, and
+        nothing in that line says so."""
+        me = _session("me")
+        capped = PeerSession(name="capped-one", cwd="/repos/capped")
+        capped.publish(
+            context_tokens=611_808,
+            context_window=512_000,
+            provider_window=1_000_000,
+        )
+
+        out = asyncio.run(PeerMessagingTool(me).list_agents())
+
+        assert "context: 611,808 / 512,000 tokens" in out
+        assert "1,000,000" in out, "the provider limit must stay visible"
+
     def test_list_agents_fills_paths_when_peer_omitted_them(self):
         """Older live records without project/log/workspace still get a full listing."""
         me = _session("me")

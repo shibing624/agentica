@@ -317,3 +317,103 @@ def test_context_breakdown_lists_token_counts_without_percent_or_bar(monkeypatch
     assert "▓" not in out
     assert "%" not in out
 
+
+def test_context_breakdown_names_the_working_cap_and_the_model_limit(monkeypatch):
+    """/usage must not show one window where the policy uses two.
+
+    ``/config`` already separates them ("Context: 1,000,000" / "Compact at:
+    512,000"). A breakdown that prints only the provider limit says a capped
+    session is at 61% when it is 119% of the budget actually in force.
+    """
+    from agentica.cli.context_usage import ContextBreakdown
+
+    breakdown = ContextBreakdown(
+        sections=[("System prompt", 1800), ("Conversation", 610_008)],
+        window=512_000,
+        provider_window=1_000_000,
+    )
+
+    def _fake_run(coro):
+        coro.close()
+        return breakdown
+
+    monkeypatch.setattr(model_config, "_run_async_safe", _fake_run)
+    agent = SimpleNamespace(working_memory=SimpleNamespace(messages=[1, 2]))
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, color_system=None, width=120)
+    model_config._render_context_breakdown(console, agent)
+    out = buf.getvalue()
+
+    assert "512.0K" in out, "the cap is the denominator and must be shown"
+    assert "1.0M" in out, "the model's hard limit must stay visible"
+
+
+def test_context_breakdown_collapses_to_one_line_without_a_cap(monkeypatch):
+    """No cap means one budget; showing it twice would be noise."""
+    from agentica.cli.context_usage import ContextBreakdown
+
+    breakdown = ContextBreakdown(
+        sections=[("System prompt", 1800)],
+        window=128_000,
+        provider_window=128_000,
+    )
+
+    def _fake_run(coro):
+        coro.close()
+        return breakdown
+
+    monkeypatch.setattr(model_config, "_run_async_safe", _fake_run)
+    agent = SimpleNamespace(working_memory=SimpleNamespace(messages=[1, 2]))
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, color_system=None, width=120)
+    model_config._render_context_breakdown(console, agent)
+    out = buf.getvalue()
+
+    assert out.count("128.0K") == 1
+
+
+def _breakdown_with_history(*, turns, messages, window=128_000, provider_window=128_000):
+    from agentica.cli.context_usage import ContextBreakdown
+
+    return ContextBreakdown(
+        sections=[("Conversation", 1000)],
+        window=window,
+        provider_window=provider_window,
+        history_turns=turns,
+        history_messages=messages,
+    )
+
+
+def _render(monkeypatch, breakdown, agent=None):
+    model_config._run_async_safe = lambda coro: (coro.close(), breakdown)[1]
+    if agent is None:
+        agent = SimpleNamespace(working_memory=SimpleNamespace(messages=[]))
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, color_system=None, width=120)
+    model_config._render_context_breakdown(console, agent)
+    return buf.getvalue()
+
+
+def test_messages_row_counts_what_enters_the_prompt(monkeypatch):
+    """`Messages: 177` next to `Conversation 594.4K` implied the 594K was all
+    177 messages, but the two came from different stores: the count read
+    ``working_memory.messages`` (a raw archive) while the tokens measured the
+    last N runs. On a resumed session the archive is empty, so it printed 0
+    beside a 594K conversation."""
+    breakdown = _breakdown_with_history(turns=20, messages=2556)
+    agent = SimpleNamespace(working_memory=SimpleNamespace(messages=[]))
+
+    out = _render(monkeypatch, breakdown, agent)
+
+    assert "2,556" in out
+    assert "20" in out
+
+
+def test_messages_row_names_the_turn_window_it_counted(monkeypatch):
+    """The window is configurable, so the label must say which one was used
+    rather than implying the whole session."""
+    breakdown = _breakdown_with_history(turns=7, messages=90)
+    out = _render(monkeypatch, breakdown)
+    assert "7" in out
+    assert "last" in out.lower()
+

@@ -102,7 +102,9 @@ class TestRenameCommand(unittest.TestCase):
         with patch("agentica.cli.commands.session.get_console", return_value=console):
             cli_session._cmd_rename(context, "Orphan")
 
-        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+        printed = "\n".join(
+            str(call.args[0]) for call in console.print.call_args_list if call.args
+        )
         self.assertIn("No active session", printed)
 
     def test_rename_reports_metadata_write_failure(self):
@@ -173,6 +175,54 @@ class TestStatusSessionIdentity(unittest.TestCase):
         self.assertIn("Peer:", printed)
         self.assertIn("agentica-73", printed)
         self.assertIn("735ac7e4", printed)
+
+    def test_config_message_count_survives_a_resume(self):
+        """/config must not report an empty session after a resume.
+
+        It counts ``working_memory.messages``, which hydrate left empty, so a
+        resumed session printed ``Messages: 0`` while its prompt carried
+        thousands — the same empty-store trap that made /compact refuse to run.
+        """
+        from agentica.agent import Agent
+        from agentica.memory.working import WorkingMemory
+        from agentica.model.openai import OpenAIChat
+
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            add_history_to_context=True,
+        )
+        # A resumed session: runs hydrated, the flat archive starts empty.
+        memory = WorkingMemory()
+        memory.hydrate_runs_from_history([
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": "a2"},
+        ])
+        agent.working_memory = memory
+        agent.session_id = "sess-current-1234"
+        agent._session_log = None
+        agent.run_response.cost_tracker = None
+
+        context = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+            current_agent=agent,
+            tui_state={},
+        )
+        console = MagicMock()
+
+        with (
+            patch("agentica.cli.commands.model_config.get_console", return_value=console),
+        ):
+            cli_model_config._cmd_config(context, "")
+
+        printed = "\n".join(
+            str(call.args[0]) for call in console.print.call_args_list if call.args
+        )
+        # The row is `<24-wide label> <count>`; pin the count on that row.
+        rows = [ln for ln in printed.splitlines() if "Messages:" in ln]
+        self.assertTrue(rows, "/config must print a Messages row")
+        self.assertEqual(rows[0].split("Messages:")[1].strip(), "4")
 
     def test_status_shows_cli_log_file(self):
         agent = MagicMock()

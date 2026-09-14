@@ -12,6 +12,7 @@ export type UsageSection = {
 
 export type SessionUsage = {
   model: string;
+  /** The budget occupancy is judged against: the compact cap when set. */
   window: number;
   context_tokens: number;
   percent_full: number;
@@ -33,6 +34,9 @@ export function applySessionUsage(sessionId: string, usage: SessionUsage) {
     sess.costUsd = usage.cost_usd;
     saveSessions();
   }
+  // The ring divides occupancy by this, and occupancy is measured against the
+  // working budget — so the working budget is what belongs here. Publishing the
+  // provider limit would put the two halves of the ratio in different units.
   if (usage.window) getState().serverContextWindow = usage.window;
   bump();
 }
@@ -63,6 +67,9 @@ export function ContextUsageTip({ sessionId, fallback }: {
     return () => { cancelled = true; };
   }, [sessionId]);
 
+  // The ratio is against the working budget (the cap when set), because that
+  // is the one that fills and triggers compaction. /config and /usage are
+  // where the model's hard limit is spelled out.
   const windowSize = usage?.window || getState().serverContextWindow || 128000;
   const contextTokens = usage?.context_tokens ?? fallback?.contextTokens ?? fallback?.lastInputTokens ?? 0;
   const messages = usage?.messages ?? fallback?.msgs.length ?? 0;

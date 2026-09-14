@@ -66,6 +66,33 @@ class TestStaticContextSeed(unittest.TestCase):
         _seed_context_tokens(None, tui_state)
         self.assertEqual(tui_state["context_tokens"], 123)
 
+    def test_seed_carries_both_windows_on_a_capped_agent(self):
+        """Before the first API call there is no event to name the cap, and a
+        bar that divides by 1M while the runner evicts against 512k is exactly
+        the mismatch the user sees as "61% and no compaction"."""
+        from agentica.agent.config import ToolConfig
+        from agentica.model.openai import OpenAIChat
+
+        from agentica.agent import Agent
+
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            tool_config=ToolConfig(compact_token_limit=64_000),
+        )
+        agent.model.context_window = 128_000
+        tui_state = {"context_tokens": 0}
+        _seed_context_tokens(agent, tui_state)
+        self.assertEqual(tui_state["context_window"], 64_000)
+        self.assertEqual(tui_state["provider_window"], 128_000)
+
+    def test_seed_without_a_cap_reports_one_window(self):
+        agent = _make_agent()
+        agent.model.context_window = 128_000
+        tui_state = {"context_tokens": 0}
+        _seed_context_tokens(agent, tui_state)
+        self.assertEqual(tui_state["context_window"], 128_000)
+        self.assertEqual(tui_state["provider_window"], 128_000)
+
     def test_resumed_history_counts_on_top_of_the_prefix(self):
         """/resume hydrates a whole conversation before the bar is reseeded."""
         from agentica.agent import Agent
@@ -122,7 +149,8 @@ class TestLiveContextUsage(unittest.TestCase):
     """Only main-agent request context may update the session status bar."""
 
     def test_main_request_replaces_context_and_window(self):
-        state = {"context_tokens": 120000, "context_window": 128000}
+        state = {"context_tokens": 120000, "context_window": 128000,
+                 "provider_window": 128000}
 
         _record_main_context_usage(
             {
@@ -130,21 +158,58 @@ class TestLiveContextUsage(unittest.TestCase):
                 "is_main_agent": True,
                 "context_tokens": 18000,
                 "context_window": 200000,
+                "provider_window": 1000000,
             },
             state,
         )
 
         self.assertEqual(state["context_tokens"], 18000)
         self.assertEqual(state["context_window"], 200000)
+        self.assertEqual(state["provider_window"], 1000000)
+
+    def test_a_capped_request_keeps_the_provider_limit_for_display(self):
+        """The bar divides by the cap, but the provider's hard limit is what a
+        size-limit error will quote, so both must survive the event."""
+        state = {"context_tokens": 0, "context_window": 128000}
+        _record_main_context_usage(
+            {
+                "type": "context.usage",
+                "is_main_agent": True,
+                "context_tokens": 400000,
+                "context_window": 512000,
+                "provider_window": 1000000,
+            },
+            state,
+        )
+        self.assertEqual(state["context_window"], 512000)
+        self.assertEqual(state["provider_window"], 1000000)
+
+    def test_an_older_event_without_a_provider_window_still_lands(self):
+        """A subagent or an older emitter must not strand the bar on stale
+        numbers just because one optional field is absent."""
+        state = {"context_tokens": 120000, "context_window": 128000}
+        _record_main_context_usage(
+            {
+                "type": "context.usage",
+                "is_main_agent": True,
+                "context_tokens": 18000,
+                "context_window": 64000,
+            },
+            state,
+        )
+        self.assertEqual(state["context_window"], 64000)
+        self.assertEqual(state["context_tokens"], 18000)
 
     def test_subagent_and_unrelated_events_do_not_pollute_main_context(self):
-        state = {"context_tokens": 42000, "context_window": 128000}
+        state = {"context_tokens": 42000, "context_window": 128000,
+                 "provider_window": 128000}
         _record_main_context_usage(
             {
                 "type": "context.usage",
                 "is_main_agent": False,
                 "context_tokens": 900,
                 "context_window": 1000,
+                "provider_window": 1000,
             },
             state,
         )
@@ -153,7 +218,8 @@ class TestLiveContextUsage(unittest.TestCase):
             state,
         )
 
-        self.assertEqual(state, {"context_tokens": 42000, "context_window": 128000})
+        self.assertEqual(state, {"context_tokens": 42000, "context_window": 128000,
+                                 "provider_window": 128000})
 
 
 class TestStatusProjectIdentity(unittest.TestCase):

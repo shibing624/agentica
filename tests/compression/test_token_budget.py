@@ -15,7 +15,46 @@ from agentica.compression.token_budget import (
     tokens_remaining,
     window_message,
 )
+from agentica.agent.config import ToolConfig
+from agentica.compression.manager import (
+    auto_compact_threshold,
+    compact_token_limit_of,
+    working_context_window,
+)
 from agentica.model.message import Message
+
+
+class TestWorkingBudgetIsOneSource(unittest.TestCase):
+    """Every surface that reports or decides compression reads the cap here.
+
+    The bug this pins: the runner evicted against ``min(cap, window)`` while
+    the status bar divided by ``model.context_window`` alone, so one session
+    read as "over budget, evicting" in one place and "61%, healthy" in the
+    other. Two derivations of the same policy value is what allowed that.
+    """
+
+    def test_cap_below_the_window_is_the_working_window(self):
+        self.assertEqual(working_context_window(1_000_000, 512_000), 512_000)
+
+    def test_cap_above_the_window_cannot_raise_it(self):
+        self.assertEqual(working_context_window(128_000, 2_000_000), 128_000)
+
+    def test_no_cap_leaves_the_provider_window(self):
+        self.assertEqual(working_context_window(128_000, None), 128_000)
+        self.assertEqual(working_context_window(128_000, 0), 128_000)
+
+    def test_unknown_window_yields_zero_not_a_wrong_budget(self):
+        self.assertEqual(working_context_window(0, 512_000), 0)
+
+    def test_layer2_threshold_uses_the_cap_as_an_absolute_budget(self):
+        """A cap is a working budget, not 95% of one: 512k fires at 512k."""
+        self.assertEqual(auto_compact_threshold(1_000_000, 512_000), 512_000)
+        self.assertEqual(auto_compact_threshold(1_000_000, None), 950_000)
+
+    def test_limit_is_read_from_the_tool_config_field(self):
+        self.assertEqual(compact_token_limit_of(ToolConfig(compact_token_limit=512_000)), 512_000)
+        self.assertIsNone(compact_token_limit_of(ToolConfig()))
+        self.assertIsNone(compact_token_limit_of(ToolConfig(compact_token_limit=0)))
 
 
 class TestTokenBudget(unittest.TestCase):

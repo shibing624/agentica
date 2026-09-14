@@ -7,11 +7,13 @@ import asyncio
 import unittest
 
 from agentica.agent import Agent
+from agentica.agent.config import ToolConfig
 from agentica.cli.context_usage import COMPACT_SUMMARY_PREFIX, measure_context
 from agentica.memory.models import AgentRun
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
 from agentica.run_response import RunResponse
+from agentica.utils.tokens import count_tokens
 
 
 def _agent(**kwargs) -> Agent:
@@ -135,6 +137,118 @@ class TestMeasureContext(unittest.TestCase):
         # ...and the eviction the runner would run is already reflected: the
         # plain-history section shrinks below its raw size.
         self.assertLess(_row(b, "Conversation") + _row(b, "Summarized conversation"), raw)
+
+
+class TestWorkingCapIsTheCompressionReference(unittest.TestCase):
+    """The bar and /usage must judge occupancy by the same window the
+    compression policy uses, or they report "61%, healthy" for a session the
+    runner has already been evicting for hours.
+
+    ``compact_token_limit`` is an absolute working budget (Codex-style 300k on
+    a 1M model). ``model.context_window`` stays the provider hard limit and
+    must keep being reported, because that is what a provider error would say.
+    """
+
+    def _capped_agent(self, *, cap: int, window: int = 1_000_000) -> Agent:
+        agent = _agent(
+            add_history_to_context=True,
+            tool_config=ToolConfig(compact_token_limit=cap),
+        )
+        agent.model.context_window = window
+        # One old tool round: exactly what Layer 1 replaces with placeholders.
+        msgs = [Message(role="user", content="question " * 50)]
+        for i in range(30):
+            msgs.append(Message(
+                role="assistant", content="", tool_calls=[{
+                    "id": f"call_{i}", "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }],
+            ))
+            msgs.append(Message(
+                role="tool", tool_call_id=f"call_{i}",
+                content="file body " * 400,
+            ))
+        agent.working_memory.add_run(AgentRun(response=RunResponse(messages=msgs)))
+        return agent, msgs
+
+    def test_cap_is_the_denominator_not_the_provider_window(self):
+        """Reporting against 1M is what produced "61%" on a session the runner
+        was already evicting: the cap is the budget that actually fills."""
+        agent, _ = self._capped_agent(cap=8_000)
+        b = _measure(agent)
+        self.assertEqual(b.window, 8_000, "bar must divide by the working cap")
+        self.assertEqual(b.provider_window, 1_000_000, "hard limit stays visible")
+
+    def test_no_cap_keeps_the_provider_window_as_the_reference(self):
+        """Unset cap means no working budget — behaviour must not change."""
+        agent = _agent(add_history_to_context=True)
+        agent.model.context_window = 128_000
+        b = _measure(agent)
+        self.assertEqual(b.window, 128_000)
+        self.assertEqual(b.provider_window, 128_000)
+
+    def test_cap_above_the_window_cannot_raise_the_reference(self):
+        """A cap larger than the provider limit is not a bigger budget."""
+        agent = _agent(add_history_to_context=True, tool_config=ToolConfig(
+            compact_token_limit=2_000_000))
+        agent.model.context_window = 128_000
+        self.assertEqual(_measure(agent).window, 128_000)
+
+    def test_eviction_is_reflected_at_the_cap_threshold(self):
+        """The whole point: the reported figure drops to what will ship.
+
+        With the cap in play the pressure line is 0.8 x cap, so a transcript
+        far above it must be reported already-evicted, not raw.
+        """
+        agent, msgs = self._capped_agent(cap=8_000)
+        raw = count_tokens(msgs, None, "gpt-4o-mini")
+        b = _measure(agent)
+        self.assertGreater(raw, 8_000 * 0.8, "fixture must be under real pressure")
+        self.assertLess(b.total, raw, "reported total must be the post-evict size")
+        self.assertLess(b.percent_full, 100.0, "an evicted request is not over budget")
+
+
+class TestReportedHistoryWindow(unittest.TestCase):
+    """The turn window is configurable, so the reported figure must follow the
+    agent's ``num_history_turns`` rather than assume the built-in 20."""
+
+    def _agent_with_runs(self, num_runs: int, **kwargs) -> Agent:
+        agent = _agent(add_history_to_context=True, **kwargs)
+        for i in range(num_runs):
+            agent.working_memory.add_run(AgentRun(response=RunResponse(messages=[
+                Message(role="user", content=f"question {i} " * 20),
+                Message(role="assistant", content=f"answer {i} " * 20),
+            ])))
+        return agent
+
+    def test_reported_turns_is_the_configured_window(self):
+        agent = self._agent_with_runs(30, num_history_turns=7)
+        self.assertEqual(_measure(agent).history_turns, 7)
+
+    def test_a_window_larger_than_the_session_reports_only_what_exists(self):
+        """Claiming "last 50 turns" over six stored runs would overstate."""
+        agent = self._agent_with_runs(6, num_history_turns=50)
+        self.assertEqual(_measure(agent).history_turns, 6)
+
+    def test_reported_messages_are_the_ones_the_prompt_carries(self):
+        """Count and tokens must come from one set: 3 runs x 2 messages."""
+        agent = self._agent_with_runs(3, num_history_turns=20)
+        self.assertEqual(_measure(agent).history_messages, 6)
+
+    def test_none_means_every_run_not_zero(self):
+        """More runs than the built-in default, so "all" and "20" differ."""
+        agent = self._agent_with_runs(25, num_history_turns=None)
+        self.assertEqual(_measure(agent).history_turns, 25)
+
+    def test_history_off_reports_no_turns_however_many_are_stored(self):
+        """Nothing is replayed, so the window covered nothing."""
+        agent = _agent(add_history_to_context=False)
+        agent.working_memory.add_run(AgentRun(response=RunResponse(
+            messages=[Message(role="user", content="stored but not replayed " * 20)]
+        )))
+        b = _measure(agent)
+        self.assertEqual(b.history_turns, 0)
+        self.assertEqual(b.history_messages, 0)
 
 
 class TestMcpToolSplit(unittest.TestCase):

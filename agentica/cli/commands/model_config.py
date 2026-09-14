@@ -873,12 +873,42 @@ def _render_context_breakdown(con, agent) -> None:
     sep = "─" * 46
 
     con.print()
-    con.print(
-        f"  [bold cyan]Context Window[/bold cyan]  "
-        f"[dim]{_fmt_tokens(total)} / {_fmt_tokens(breakdown.window)}[/dim]"
+    # ``breakdown.window`` is the working budget the compression policy uses
+    # (the cap when one is set); ``provider_window`` is the model's hard limit.
+    # They differ exactly when a cap is in force, and then the percentage means
+    # nothing without saying which budget it is a share of. /config already
+    # separates the two ("Context:" vs "Compact at:").
+    capped = bool(
+        breakdown.provider_window
+        and breakdown.provider_window > breakdown.window
     )
+    if capped:
+        con.print(
+            f"  [bold cyan]Context Window[/bold cyan]  "
+            f"[dim]{_fmt_tokens(total)} / {_fmt_tokens(breakdown.window)} "
+            f"({breakdown.percent_full:.0f}% of compact cap)[/dim]"
+        )
+        con.print(
+            f"  [dim]Model limit: {_fmt_tokens(breakdown.provider_window)} "
+            f"({breakdown.provider_percent_full:.0f}% used)[/dim]"
+        )
+    else:
+        con.print(
+            f"  [bold cyan]Context Window[/bold cyan]  "
+            f"[dim]{_fmt_tokens(total)} / {_fmt_tokens(breakdown.window)}[/dim]"
+        )
     con.print(f"  {sep}")
-    con.print(f"  {'Messages:':<24} {len(agent.working_memory.messages):>7}")
+    # "Conversation" measures the last N runs, so the count beside it must be
+    # the messages inside those same runs. ``working_memory.messages`` is a
+    # different set — the whole archive, not the replayed window — so counting
+    # it here printed a total that no conversation row accounted for.
+    if breakdown.history_turns:
+        con.print(
+            f"  {'Messages:':<24} {breakdown.history_messages:>7,}"
+            f"  [dim](last {breakdown.history_turns} turns)[/dim]"
+        )
+    else:
+        con.print(f"  {'Messages:':<24} {breakdown.history_messages:>7,}")
     for label, tokens in sections:
         con.print(f"  {label:<24} {_fmt_tokens(tokens):>7}")
     con.print(f"  {sep}")

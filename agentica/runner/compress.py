@@ -19,7 +19,7 @@ from typing import (
 
 from agentica.utils.log import logger
 from agentica.compression.evict import evict_context
-from agentica.compression.manager import working_context_window
+from agentica.compression.manager import compact_token_limit_of, working_context_window
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
@@ -394,7 +394,12 @@ class CompressMixin:
         if cb is None:
             return
         tools = model.tools if isinstance(model.tools, list) else []
-        window = model.context_window if isinstance(model.context_window, int) else 0
+        provider_window = model.context_window if isinstance(model.context_window, int) else 0
+        # The bar's denominator is the working window the compression policy
+        # acts on. Emitting only the provider limit made the bar divide by 1M
+        # while the runner evicted against a 512k cap on the same session.
+        cap = compact_token_limit_of(agent.tool_config) if agent.tool_config else None
+        window = working_context_window(provider_window, cap)
 
         prev_digests = getattr(model, "_last_prefix_digests", None)
         digests = _prefix_digests(messages)
@@ -414,6 +419,7 @@ class CompressMixin:
                     "is_main_agent": agent._parent_run_id is None,
                     "context_tokens": count_tokens(messages, tools, model.id),
                     "context_window": window,
+                    "provider_window": provider_window,
                     "cache_hit_ratio": hit_ratio,
                     "prefix_break_index": break_index,
                 }

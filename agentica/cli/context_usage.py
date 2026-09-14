@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from agentica.model.message import Message
 from agentica.utils.tokens import count_tokens, count_tool_tokens
 from agentica.compression.evict import evict_context, evict_threshold_ratio
+from agentica.compression.manager import compact_token_limit_of, working_context_window
 
 # Legacy Layer 2 summary marker. New windows use <context_window> instead.
 COMPACT_SUMMARY_PREFIX = "[Context compressed]"
@@ -28,7 +29,20 @@ class ContextBreakdown:
     """Per-section token estimate of the next request's prompt."""
 
     sections: List[tuple] = field(default_factory=list)  # (label, tokens)
+    # The budget occupancy is judged against: ``min(compact_token_limit,
+    # provider window)``. This is the same working window the runner evicts
+    # and compacts against, so "how full am I" means one thing everywhere.
     window: int = 0
+    # The provider's hard limit, kept so a size limit error still points at the
+    # number the provider will quote. Equal to ``window`` when no cap is set.
+    provider_window: int = 0
+    # What the Conversation row actually measured: the last N runs (N is the
+    # agent's ``num_history_turns``, configurable) and the message count inside
+    # them. Kept here because the renderers counted ``working_memory.messages``
+    # instead — the whole archive, not the replayed window — so a count and a
+    # token total describing different sets were printed side by side.
+    history_turns: int = 0
+    history_messages: int = 0
 
     @property
     def total(self) -> int:
@@ -37,6 +51,11 @@ class ContextBreakdown:
     @property
     def percent_full(self) -> float:
         return (self.total / self.window * 100) if self.window > 0 else 0.0
+
+    @property
+    def provider_percent_full(self) -> float:
+        """Occupancy against the provider limit — the other, looser reading."""
+        return (self.total / self.provider_window * 100) if self.provider_window > 0 else 0.0
 
     def visible_sections(self) -> List[tuple]:
         """Sections worth printing — empty ones are noise, not information."""
@@ -92,7 +111,17 @@ async def measure_context(agent) -> ContextBreakdown:
     attributed; Tool definitions are API schemas and are not inside that
     string.
     """
-    breakdown = ContextBreakdown(window=agent.model.context_window or 0)
+    provider_window = agent.model.context_window or 0
+    cap = compact_token_limit_of(agent.tool_config) if agent.tool_config else None
+    # Judge occupancy against the working budget the compression policy uses,
+    # not the provider limit. On a 1M model with a 512k cap these differ by
+    # half, and reporting against 1M showed "61%, healthy" for a session the
+    # runner had been evicting all day.
+    working = working_context_window(provider_window, cap)
+    breakdown = ContextBreakdown(
+        window=working,
+        provider_window=provider_window,
+    )
     model_id = agent.model.id
 
     # Tool schemas are attached by the runner, not at construction time.
@@ -117,6 +146,20 @@ async def measure_context(agent) -> ContextBreakdown:
     history = _history_for_next_run(agent)
     summary_msgs = [m for m in history if _is_compact_summary(m)]
     plain_msgs = [m for m in history if not _is_compact_summary(m)]
+    # Report the window that was actually measured, read from the agent's
+    # config rather than a literal: ``num_history_turns`` comes from the
+    # profile/settings, so a hardcoded 20 would misdescribe a session set to
+    # replay 50. ``None`` means every run; a window wider than the session
+    # covers only what exists.
+    last_n = agent.num_history_turns
+    runs = agent.working_memory.runs
+    if not agent.add_history_to_context:
+        # Nothing is replayed, so the window covers no turns — reporting the
+        # stored runs here would describe a prompt that never carries them.
+        breakdown.history_turns = 0
+    else:
+        breakdown.history_turns = len(runs) if last_n is None else min(last_n, len(runs))
+    breakdown.history_messages = len(history)
 
     # What the next request will ACTUALLY carry. Under pressure (>= 0.8 of the
     # window) the runner evicts old tool results before every request, so the
@@ -124,7 +167,9 @@ async def measure_context(agent) -> ContextBreakdown:
     # the idle bar shows the shipped size, not the pre-compression one — a
     # session can read 144% here while its next request fits at ~75%.
     conv_tokens = count_tokens(plain_msgs, None, model_id)
-    window = agent.model.context_window or 0
+    # Both the pressure line and the eviction target are relative to the
+    # working window: the runner calls evict_context with exactly this value.
+    window = working
     if window > 0 and plain_msgs:
         pre_total = sum(
             [base_tokens, workspace_tokens, skills_tokens, tool_guide_tokens,

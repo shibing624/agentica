@@ -53,6 +53,18 @@ def working_context_window(
     return min(cap, context_window)
 
 
+def compact_token_limit_of(tool_config: Any) -> Optional[int]:
+    """The working cap a runner would act on for this config, or None.
+
+    ``ToolConfig.compact_token_limit`` is the single stored field — the Agent
+    mirrors it onto its CompressionManager at construction (``agent/base.py``),
+    so reading either agrees. Callers that measure or display the budget use
+    this rather than each re-deriving it from ``agent_config``, which is how a
+    status bar and a runner came to disagree about one session.
+    """
+    return parse_compact_token_limit(tool_config.compact_token_limit)
+
+
 def auto_compact_threshold(
     context_window: int,
     compact_token_limit: Optional[int] = None,

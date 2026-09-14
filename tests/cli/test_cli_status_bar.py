@@ -62,7 +62,21 @@ class TestCLIStatusBar(unittest.TestCase):
         self.assertIn("2 tools", rendered)
         self.assertIn("5.32s", rendered)
 
+    def test_context_bar_divides_by_the_cap_and_stays_short(self):
+        """The bar leads with the budget that fills. Which number that is
+        belongs in /config and /usage, not on a one-line bar."""
+        from agentica.cli.display import build_status_bar_fragments
 
+        frags = build_status_bar_fragments(
+            model_name="openai/deepseek-v4.1-flash-official",
+            context_tokens=17_400,
+            context_window=512_000,
+            terminal_width=200,
+        )
+        text = "".join(t for _, t in frags)
+        self.assertIn("17.4K/512K", text)
+        self.assertIn("3%", text)
+        self.assertNotIn("cap of", text, "the bar stays minimal")
     def test_display_token_stats_singular_tool_use(self):
         from agentica.cli.display import display_token_stats
 

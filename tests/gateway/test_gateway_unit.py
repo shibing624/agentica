@@ -435,6 +435,37 @@ class TestAgentServiceNumHistoryTurns:
         assert mock_agent_cls.call_args.kwargs["num_history_turns"] == 12
 
 
+class TestGetContextWindow:
+    """The web ring divides occupancy by this value, so it must be the budget
+    the session actually compacts against — not the model's hard limit."""
+
+    def _svc_with_model(self, tmp_path, *, provider_window, cap):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        model = SimpleNamespace(context_window=provider_window)
+        tool_config = SimpleNamespace(compact_token_limit=cap)
+        agent = SimpleNamespace(model=model, tool_config=tool_config)
+        svc._cache.put(svc._sk("s1", None), agent)
+        return svc
+
+    def test_returns_the_working_window_when_a_cap_is_set(self, tmp_path):
+        svc = self._svc_with_model(tmp_path, provider_window=1_000_000, cap=512_000)
+        assert svc.get_context_window("s1") == 512_000
+
+    def test_returns_the_model_limit_when_no_cap_is_set(self, tmp_path):
+        svc = self._svc_with_model(tmp_path, provider_window=128_000, cap=None)
+        assert svc.get_context_window("s1") == 128_000
+
+    def test_a_cap_above_the_model_limit_cannot_raise_it(self, tmp_path):
+        svc = self._svc_with_model(tmp_path, provider_window=128_000, cap=2_000_000)
+        assert svc.get_context_window("s1") == 128_000
+
+    def test_unknown_session_falls_back_to_the_default(self, tmp_path):
+        svc = self._svc_with_model(tmp_path, provider_window=1_000_000, cap=512_000)
+        assert svc.get_context_window("nope") == 128_000
+
+
 class TestAgentServiceRunCron:
     """run_cron() builds an independent, uncached Agent per job execution and
     is excluded from the chat sidebar (list_sessions())."""

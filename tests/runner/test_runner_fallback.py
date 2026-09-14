@@ -870,6 +870,54 @@ class TestContextUsageEvent(unittest.TestCase):
         self.assertGreater(event["context_tokens"], 100)
         self.assertEqual(event["context_window"], 128000)
 
+    def test_event_reports_the_working_window_not_just_the_provider_limit(self):
+        """The status bar takes its denominator from this event.
+
+        With a working cap set, reporting only ``model.context_window`` makes
+        the bar divide by the provider limit while the runner evicts and
+        compacts against the cap — the two disagree about the same session.
+        """
+        captured = []
+        primary = _fake_model("primary")
+        primary.tools = []
+        primary.context_window = 1_000_000
+        agent = _make_agent()
+        agent.tool_config.compact_token_limit = 512_000
+        agent.tool_config.compression_manager.compact_token_limit = 512_000
+        agent._event_callback = captured.append
+
+        asyncio.run(Runner._call_with_retry(
+            primary,
+            [Message(role="user", content="inspect this repository " * 100)],
+            LoopState(),
+            agent,
+            stream=False,
+        ))
+
+        event = next(e for e in captured if e["type"] == "context.usage")
+        self.assertEqual(event["context_window"], 512_000)
+        self.assertEqual(event["provider_window"], 1_000_000)
+
+    def test_event_without_a_cap_keeps_both_windows_equal(self):
+        captured = []
+        primary = _fake_model("primary")
+        primary.tools = []
+        primary.context_window = 128_000
+        agent = _make_agent()
+        agent._event_callback = captured.append
+
+        asyncio.run(Runner._call_with_retry(
+            primary,
+            [Message(role="user", content="hello")],
+            LoopState(),
+            agent,
+            stream=False,
+        ))
+
+        event = next(e for e in captured if e["type"] == "context.usage")
+        self.assertEqual(event["context_window"], 128_000)
+        self.assertEqual(event["provider_window"], 128_000)
+
     def test_subagent_request_is_explicitly_scoped(self):
         captured = []
         primary = _fake_model("primary")

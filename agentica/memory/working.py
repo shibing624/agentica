@@ -325,7 +325,20 @@ class WorkingMemory(BaseModel):
 
         Pairs consecutive (user, assistant) messages into runs. Tool messages
         following an assistant are bundled into the same run's response.
-        System messages are added via `add_system_message` instead.
+
+        Both stores are filled, because a live session has both: the runner
+        writes every turn to ``runs`` (via ``add_run``) AND to ``messages``
+        (via ``add_messages``), and readers are split across them — the prompt
+        builder and ``/history`` read ``runs``; ``/compact``, ``/config`` and
+        the memory hooks read ``messages``. Hydrating only ``runs`` broke that
+        invariant, so a resumed session looked empty to half its readers:
+        ``/compact`` refused with "No messages to compact" on a session whose
+        prompt carried thousands.
+
+        System entries go through ``add_system_message`` (never a bare append)
+        so the single-system-message-at-front rule holds, and the replay window
+        keeps excluding them — the prompt's system message comes from
+        ``get_system_message``, not from history.
 
         Args:
             history_messages: Ordered list of message dicts (each with at least
@@ -337,6 +350,7 @@ class WorkingMemory(BaseModel):
         if not history_messages:
             return 0
 
+        flat: List[Message] = []
         runs_built = 0
         i = 0
         n = len(history_messages)
@@ -344,16 +358,18 @@ class WorkingMemory(BaseModel):
             rm = history_messages[i]
             role = rm.get("role")
             if role == "system":
-                self.add_system_message(Message(**rm))
+                flat.append(Message(**rm))
                 i += 1
                 continue
             if role != "user":
                 # Orphan assistant/tool message with no preceding user turn;
                 # attach as a synthetic run so it still shows up in history.
                 run_msgs = [Message(**rm)]
+                flat.extend(run_msgs)
                 i += 1
                 while i < n and history_messages[i].get("role") in ("assistant", "tool"):
                     run_msgs.append(Message(**history_messages[i]))
+                    flat.append(Message(**history_messages[i]))
                     i += 1
                 self.runs.append(AgentRun(response=RunResponse(messages=run_msgs)))
                 runs_built += 1
@@ -362,15 +378,26 @@ class WorkingMemory(BaseModel):
             # role == "user": start of a new run
             user_msg = Message(**rm)
             run_msgs: List[Message] = [user_msg]
+            flat.append(user_msg)
             i += 1
             # Collect subsequent assistant / tool messages until the next user turn
             while i < n and history_messages[i].get("role") in ("assistant", "tool", "function"):
-                run_msgs.append(Message(**history_messages[i]))
+                msg = Message(**history_messages[i])
+                run_msgs.append(msg)
+                flat.append(msg)
                 i += 1
             self.runs.append(
                 AgentRun(message=user_msg, response=RunResponse(messages=run_msgs))
             )
             runs_built += 1
+
+        # System entries first (their canonical position), then the turn
+        # messages in order — via add_system_message so a pre-existing system
+        # message is replaced rather than duplicated.
+        for msg in flat:
+            if msg.role == "system":
+                self.add_system_message(msg)
+        self.messages.extend(m for m in flat if m.role != "system")
 
         logger.debug(f"WorkingMemory: hydrated {runs_built} runs from {n} history messages")
         return runs_built

@@ -117,6 +117,77 @@ class TestSessionPersistence:
         assert memory.hydrate_runs_from_history([]) == 0
         assert len(memory.runs) == 0
 
+    def test_hydrate_keeps_both_stores_in_step(self):
+        """A resumed session must look like a live one to every reader.
+
+        The runner writes a turn to BOTH stores (``add_messages`` and
+        ``add_run``), so readers may use either. Hydrating only ``runs`` broke
+        that invariant: ``/compact`` refuses with "No messages to compact",
+        ``/status`` prints 0, and the memory hooks see nothing — on a session
+        whose prompt plainly carries thousands of messages.
+        """
+        memory = WorkingMemory()
+        history = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": "a2"},
+        ]
+
+        memory.hydrate_runs_from_history(history)
+
+        assert [m.content for m in memory.messages] == ["q1", "a1", "q2", "a2"]
+
+    def test_hydrated_flat_messages_match_what_the_prompt_carries(self):
+        """The flat store is what the not-replayed readers count, so it must
+        hold the same conversation the prompt builder does."""
+        memory = WorkingMemory()
+        history = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "tool", "content": "tool_out"},
+            {"role": "user", "content": "q2"},
+        ]
+
+        memory.hydrate_runs_from_history(history)
+
+        prompt_contents = [m.content for m in memory.get_messages_from_last_n_runs(last_n=None)]
+        flat_contents = [m.content for m in memory.messages]
+        assert flat_contents == prompt_contents
+
+    def test_system_messages_reach_the_flat_store_but_not_the_replay_window(self):
+        """System turns live in ``messages`` only.
+
+        The replay window excludes them by design (``_is_history_message``);
+        the prompt's system message comes from ``get_system_message``. Pinned
+        so "make both stores equal" is not over-applied into duplicating the
+        system prompt into every request.
+        """
+        memory = WorkingMemory()
+        memory.hydrate_runs_from_history([
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ])
+
+        assert any(m.role == "system" and m.content == "sys" for m in memory.messages)
+        assert not any(m.role == "system" for m in memory.get_messages_from_last_n_runs(last_n=None))
+
+    def test_hydrating_a_replayed_system_turn_does_not_duplicate_it(self):
+        """A session already holding the system message must not get a second
+        copy, and its position (front) must survive."""
+        memory = WorkingMemory()
+        memory.add_system_message(Message(role="system", content="sys"))
+
+        memory.hydrate_runs_from_history([
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q1"},
+        ])
+
+        systems = [m for m in memory.messages if m.role == "system"]
+        assert len(systems) == 1
+        assert memory.messages[0].role == "system"
+
     def test_get_messages_from_all_runs(self):
         """get_messages_from_last_n_runs(last_n=None) returns all history."""
         memory = WorkingMemory()
