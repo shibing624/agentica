@@ -76,9 +76,9 @@ Context Messages
 ```
 
 - `search_session` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词打在 `strip_window_preamble` 之后的正文上：油表 / `<dropped_span>` 不是命中，折在 preamble 后面的那句 user 问题还在。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断、带 JSONL 时间戳）。空 query 只返回这份索引。不要扫 JSONL。不提供 `read_session_item`
-- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），模型用已有文件工具写，不是第二份 transcript。第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口。真正切窗时：文件已有内容则注入 `<session_notes>`；仍空则把丢掉的那一段按时间交织成 skim（user/assistant，其次 tool args/result，**不写时间戳**）注入 `<dropped_span>`，**不写进 notes.md**。写进去会让 `notes_are_ready` 变真、之后不再催写。skim 会随 preserved tail 进 JSONL，靠 search 剥 preamble，不靠再抄一份。`search_session` 搜 JSONL，并搜模型手写的 notes
+- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），模型用已有文件工具写，不是第二份 transcript。第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口 —— 那段催写只要求「把状态写下来」，**不要求继续干活**（reserve 就是留给这件事的；自动换窗会保留被折入的那一轮，所以任何"别再继续"之类的话都会跨窗残留）。真正切窗时：文件已有内容则注入 `<session_notes>`；仍空则把丢掉的那一段按时间交织成 skim（user/assistant，其次 tool args/result，**不写时间戳**）注入 `<dropped_span>`，**不写进 notes.md**。写进去会让 `notes_are_ready` 变真、之后不再催写。skim 会随 preserved tail 进 JSONL，靠 search 剥 preamble，不靠再抄一份。`search_session` 搜 JSONL，并搜模型手写的 notes
 
-油表是 `<context_window>` user 片段：新窗写满窗身份；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
+油表是 `<context_window>` user 片段：新窗写满窗身份，`window_id > 1` 且**有 session log** 时另加一行「本窗跟在一次 context reset 之后、更早的轮次不在这里」（对齐 Codex `#29256` 的 `Previous context window id`；第 1 个窗不写，无 log 时也不写——那时 `search_session` 只会回「No session log on this agent」，与「只提做得到的事」同一条规则）；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
 
 #### 无 session log 时的换窗交接
 

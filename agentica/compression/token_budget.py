@@ -52,11 +52,21 @@ def full_window_text(
     read (``context_tool`` answers "No session log on this agent"), so naming
     either one sends the model after a tool that cannot help. What remains is
     the carried digest, which is self-contained.
+
+    A reset is stated only when there is something to recover from (Codex
+    #29256 carries ``Previous context window id`` for the same reason). Every
+    fragment used to say only ``Current context window N``, so after a cut the
+    model could not tell a first window from a fifth and read the recovery
+    advice below as boilerplate. ``window_id`` is per-process — it restarts at
+    1 on resume, where the turns are *not* gone (they replay from the log), so
+    staying quiet there is correct as well.
     """
-    lines = [
-        f"Current context window {window_id}.",
-        f"You have {tokens_left} tokens left in this context window.",
-    ]
+    lines = [f"Current context window {window_id}."]
+    if window_id > 1 and notes_path:
+        lines.append(
+            "This window follows a context reset: the earlier turns are not here."
+        )
+    lines.append(f"You have {tokens_left} tokens left in this context window.")
     if notes_path:
         lines.append("Recover prior facts with search_session.")
         lines.append(
@@ -81,13 +91,19 @@ def fallback_text(notes_path: Optional[str] = None) -> str:
 
     Returns "" when there is no notes path — there is nothing to ask for, and
     the caller must not postpone a cut for an unactionable instruction.
+
+    Deliberately does *not* borrow Codex's "do not continue the task" clause.
+    The runner folds this into the current user turn and auto-compact keeps
+    that turn, so the text outlives the cut and would land in the new window
+    contradicting the fresh window's own instructions. Codex gets away with
+    it because its fallback is a developer item the rollover consumes.
     """
     if not notes_path:
         return ""
     lines = [
         "This context window is about to reset.",
         "Write goals, constraints, IDs, paths, and decisions to the "
-        "session notes file now, then continue the task.",
+        "session notes file now — the next window starts without these turns.",
         f"Session notes: {notes_path}",
     ]
     return CONTEXT_WINDOW_OPEN + "\n".join(lines) + CONTEXT_WINDOW_CLOSE
