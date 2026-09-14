@@ -127,7 +127,7 @@ class MCPClient:
         Returns:
             The extracted text content
         """
-        if result.isError:
+        if result.is_error:
             return f"Error: {result.content}"
 
         text_parts = []

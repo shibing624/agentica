@@ -11,7 +11,6 @@ import os
 import threading
 from os import environ
 from typing import Dict, Optional, Union
-from datetime import timedelta
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
@@ -23,7 +22,7 @@ from agentica.mcp.server import (
     MCPServerSse,
     MCPServerStdio,
     MCPServerStreamableHttp,
-    streamablehttp_client,
+    streamable_http_transport,
 )
 from agentica.tools.base import Function
 from agentica.tools.base import Tool
@@ -218,17 +217,18 @@ class McpTool(Tool):
                 if not self._url:
                     raise ValueError("url or MCP_SERVER_URL must be provided for StreamableHttp transport")
 
-                self._transport_context = streamablehttp_client(
-                    url=self._url,
-                    headers=self._headers,
-                    timeout=timedelta(seconds=self._timeout),
-                    sse_read_timeout=timedelta(seconds=self._read_timeout),
-                    terminate_on_close=self._terminate_on_close
+                self._transport_context = streamable_http_transport(
+                    {
+                        "url": self._url,
+                        "headers": self._headers,
+                        "timeout": self._timeout,
+                        "sse_read_timeout": self._read_timeout,
+                        "terminate_on_close": self._terminate_on_close,
+                    }
                 )
 
-                # For StreamableHttp, we get a tuple of (read, write, get_session_id)
-                transport_result = await self._transport_context.__aenter__()
-                read, write = transport_result[0], transport_result[1]
+                # Every mcp 2.x transport yields (read, write)
+                read, write = await self._transport_context.__aenter__()
 
             else:
                 # Create a stdio client connection
@@ -357,8 +357,8 @@ class McpTool(Tool):
                                     params={
                                         "url": self._server_config["url"],
                                         "headers": self._server_config["headers"],
-                                        "timeout": timedelta(seconds=self._server_config["timeout"]) if self._server_config["timeout"] else None,
-                                        "sse_read_timeout": timedelta(seconds=self._server_config["read_timeout"]) if self._server_config["read_timeout"] else None,
+                                        "timeout": self._server_config["timeout"],
+                                        "sse_read_timeout": self._server_config["read_timeout"],
                                         "terminate_on_close": self._server_config["terminate_on_close"]
                                     },
                                     client_session_timeout_seconds=self._server_config["timeout"] or 8.0
@@ -424,15 +424,14 @@ class McpTool(Tool):
 
                     # Create parameter schema
                     tool_params = {"type": "object", "properties": {}}
-                    if hasattr(tool, 'inputSchema') and tool.inputSchema:
-                        if isinstance(tool.inputSchema, dict):
-                            if "properties" in tool.inputSchema:
-                                tool_params = tool.inputSchema
-                            else:
-                                tool_params = {
-                                    "type": "object",
-                                    "properties": tool.inputSchema
-                                }
+                    if tool.input_schema:
+                        if "properties" in tool.input_schema:
+                            tool_params = tool.input_schema
+                        else:
+                            tool_params = {
+                                "type": "object",
+                                "properties": tool.input_schema
+                            }
 
                     f = Function(
                         name=tool_name,

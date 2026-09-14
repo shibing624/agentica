@@ -65,7 +65,6 @@ For more control, you can directly use the `MCPClient` and server classes:
 import asyncio
 from agentica.mcp.client import MCPClient
 from agentica.mcp.server import MCPServerStdio, MCPServerSse, MCPServerStreamableHttp
-from datetime import timedelta
 
 async def stdio_example():
     """Example using stdio transport"""
@@ -113,8 +112,8 @@ async def streamable_http_example():
         params={
             "url": "http://localhost:8000/mcp",
             "headers": {"Authorization": "Bearer your-token"},  # Optional
-            "timeout": timedelta(seconds=5),  # HTTP request timeout
-            "sse_read_timeout": timedelta(seconds=300),  # Connection timeout
+            "timeout": 5.0,  # Connect / write / pool timeout, in seconds
+            "sse_read_timeout": 300.0,  # Read timeout for the response stream, in seconds
             "terminate_on_close": True  # Whether to terminate on close
         }
     )
@@ -215,14 +214,13 @@ However, using the direct parameters is recommended for clarity and type safety.
 
 ## MCP Server Implementation
 
-If you're implementing your own MCP server, you can use the `FastMCP` class from the `mcp` package:
+If you're implementing your own MCP server, you can use the `MCPServer` class from the `mcp` package:
 
 ```python
-from mcp.server.fastmcp import FastMCP
-from fastapi import FastAPI
+from mcp.server.mcpserver import MCPServer
 
 # Create server
-mcp = FastMCP("My MCP Server", host="0.0.0.0", port=8000)
+mcp = MCPServer("My MCP Server")
 
 # Define a tool
 @mcp.tool()
@@ -233,8 +231,9 @@ def get_weather(city: str) -> str:
 
 # Run the server
 if __name__ == "__main__":
-    # Use 'stdio', 'sse', or 'streamable-http' transport
-    mcp.run(transport="streamable-http")
+    # Transport-specific options (host, port, path) are run() kwargs in mcp 2.x;
+    # the v1 `mcp.settings.host` / `.port` attributes no longer exist.
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
 ```
 
 ## Examples

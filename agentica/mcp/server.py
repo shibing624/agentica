@@ -6,31 +6,54 @@
 
 import abc
 import asyncio
-from contextlib import AbstractAsyncContextManager, AsyncExitStack
-from datetime import timedelta
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, Union
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
-from collections.abc import Callable
-
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+import httpx2
 from mcp import ClientSession, StdioServerParameters, Tool as MCPTool, stdio_client
+from mcp.client import Transport
 from mcp.client.sse import sse_client
-from mcp.shared.message import SessionMessage
+from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, InitializeResult
 from typing_extensions import NotRequired, TypedDict
 
-try:
-    from mcp.client.streamable_http import streamablehttp_client
-except ImportError:  # mcp 2.x renamed the helper
-    from mcp.client.streamable_http import streamable_http_client as streamablehttp_client
-
-try:
-    from mcp.client.streamable_http import GetSessionIdCallback
-except ImportError:  # mcp 2.x dropped the public alias
-    GetSessionIdCallback = Callable[[], str | None]
-
 from agentica.utils.log import logger
+
+# Same values the mcp SDK's own client factory uses (MCP_DEFAULT_TIMEOUT /
+# MCP_DEFAULT_SSE_READ_TIMEOUT): a server may hold a response stream open, so
+# reads get a much longer budget than connect/write/pool.
+DEFAULT_TIMEOUT = 30.0
+DEFAULT_READ_TIMEOUT = 300.0
+
+
+def streamable_http_transport(params: "MCPServerStreamableHttpParams") -> Transport:
+    """Build the StreamableHTTP transport for `params`.
+
+    mcp 2.x hands timeouts and headers to an `httpx2.AsyncClient` instead of
+    taking them as transport arguments, and it closes only a client it created
+    itself — so when we pass one, entering its context is what keeps the
+    connection pool from leaking.
+    """
+    http_client = httpx2.AsyncClient(
+        headers=params.get("headers", None),
+        timeout=httpx2.Timeout(
+            params.get("timeout", DEFAULT_TIMEOUT),
+            read=params.get("sse_read_timeout", DEFAULT_READ_TIMEOUT),
+        ),
+    )
+
+    @asynccontextmanager
+    async def _streams():
+        async with http_client:
+            async with streamable_http_client(
+                url=params["url"],
+                http_client=http_client,
+                terminate_on_close=params.get("terminate_on_close", True),
+            ) as streams:
+                yield streams
+
+    return _streams()
 
 
 class MCPServer(abc.ABC):
@@ -97,13 +120,7 @@ class _MCPServerWithClientSession(MCPServer, abc.ABC):
     @abc.abstractmethod
     def create_streams(
             self,
-    ) -> AbstractAsyncContextManager[
-        Tuple[
-            MemoryObjectReceiveStream[SessionMessage | Exception],
-            MemoryObjectSendStream[SessionMessage],
-            GetSessionIdCallback | None
-        ]
-    ]:
+    ) -> Transport:
         """Create the streams for the server."""
         pass
 
@@ -122,15 +139,14 @@ class _MCPServerWithClientSession(MCPServer, abc.ABC):
         """Connect to the server."""
         try:
             transport = await self.exit_stack.enter_async_context(self.create_streams())
-            # streamablehttp_client returns (read, write, get_session_id)
-            # sse_client returns (read, write)
-            read, write, *_ = transport
+            # Every mcp 2.x transport yields exactly (read, write). Unpacking
+            # without a catch-all keeps a further SDK change a loud failure
+            # instead of a silently mis-bound stream.
+            read, write = transport
 
             session = await self.exit_stack.enter_async_context(
                 ClientSession(read, write,
-                              timedelta(seconds=self.client_session_timeout_seconds)
-                              if self.client_session_timeout_seconds
-                              else None,
+                              read_timeout_seconds=self.client_session_timeout_seconds,
                               )
             )
             server_result = await session.initialize()
@@ -242,13 +258,7 @@ class MCPServerStdio(_MCPServerWithClientSession):
 
     def create_streams(
             self,
-    ) -> AbstractAsyncContextManager[
-        Tuple[
-            MemoryObjectReceiveStream[SessionMessage | Exception],
-            MemoryObjectSendStream[SessionMessage],
-            GetSessionIdCallback | None
-        ]
-    ]:
+    ) -> Transport:
         """Create the streams for the server."""
         return stdio_client(self.params)
 
@@ -308,13 +318,7 @@ class MCPServerSse(_MCPServerWithClientSession):
 
     def create_streams(
             self,
-    ) -> AbstractAsyncContextManager[
-        Tuple[
-            MemoryObjectReceiveStream[SessionMessage | Exception],
-            MemoryObjectSendStream[SessionMessage],
-            GetSessionIdCallback | None
-        ]
-    ]:
+    ) -> Transport:
         """Create the streams for the server."""
         return sse_client(
             url=self.params["url"],
@@ -330,7 +334,7 @@ class MCPServerSse(_MCPServerWithClientSession):
 
 
 class MCPServerStreamableHttpParams(TypedDict):
-    """Mirrors the params in`mcp.client.streamable_http.streamablehttp_client`."""
+    """Params for MCPServerStreamableHttp. Timeouts are in seconds."""
 
     url: str
     """The URL of the server."""
@@ -338,11 +342,11 @@ class MCPServerStreamableHttpParams(TypedDict):
     headers: NotRequired[dict[str, str]]
     """The headers to send to the server."""
 
-    timeout: NotRequired[timedelta | float]
-    """The timeout for the HTTP request. Defaults to 5 seconds."""
+    timeout: NotRequired[float]
+    """Connect / write / pool timeout for the HTTP client, in seconds. Defaults to 30."""
 
-    sse_read_timeout: NotRequired[timedelta | float]
-    """The timeout for the SSE connection, in seconds. Defaults to 5 minutes."""
+    sse_read_timeout: NotRequired[float]
+    """Read timeout for the response stream, in seconds. Defaults to 5 minutes."""
 
     terminate_on_close: NotRequired[bool]
     """Terminate on close"""
@@ -388,21 +392,9 @@ class MCPServerStreamableHttp(_MCPServerWithClientSession):
 
     def create_streams(
         self,
-    ) -> AbstractAsyncContextManager[
-        tuple[
-            MemoryObjectReceiveStream[SessionMessage | Exception],
-            MemoryObjectSendStream[SessionMessage],
-            GetSessionIdCallback | None
-        ]
-    ]:
+    ) -> Transport:
         """Create the streams for the server."""
-        return streamablehttp_client(
-            url=self.params["url"],
-            headers=self.params.get("headers", None),
-            timeout=self.params.get("timeout", timedelta(seconds=30)),
-            sse_read_timeout=self.params.get("sse_read_timeout", timedelta(seconds=60 * 5)),
-            terminate_on_close=self.params.get("terminate_on_close", True)
-        )
+        return streamable_http_transport(self.params)
 
     @property
     def name(self) -> str:

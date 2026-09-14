@@ -14,9 +14,9 @@ import argparse
 import math
 from datetime import datetime, timezone
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("CalcServer")
+mcp = MCPServer("CalcServer")
 
 
 # ---------------------------------------------------------------------------
@@ -120,14 +120,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.transport == "sse":
-        mcp.settings.host = "0.0.0.0"
-        mcp.settings.port = 8081
         print("Starting CalcServer on http://localhost:8081/sse")
-        mcp.run(transport="sse")
+        mcp.run(transport="sse", host="0.0.0.0", port=8081)
     elif args.transport == "http":
-        mcp.settings.host = "0.0.0.0"
-        mcp.settings.port = 8000
         print("Starting CalcServer on http://localhost:8000/mcp")
-        mcp.run(transport="streamable-http")
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
     else:
         mcp.run(transport="stdio")

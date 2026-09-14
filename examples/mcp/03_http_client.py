@@ -12,7 +12,6 @@ Usage:
 import sys
 import os
 import asyncio
-from datetime import timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -31,8 +30,8 @@ async def low_level_http_demo():
             name="CalcServer-HTTP",
             params={
                 "url": "http://localhost:8000/mcp",
-                "timeout": timedelta(seconds=5),
-                "sse_read_timeout": timedelta(seconds=300),
+                "timeout": 5.0,
+                "sse_read_timeout": 300.0,
                 "terminate_on_close": True,
             }
     ) as server:

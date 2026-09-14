@@ -96,9 +96,9 @@ mcp_tool = McpTool(
 ## MCP Server 实现
 
 ```python
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("My MCP Server", host="0.0.0.0", port=8081)
+mcp = MCPServer("My MCP Server")
 
 @mcp.tool()
 def get_weather(city: str) -> str:
@@ -106,7 +106,7 @@ def get_weather(city: str) -> str:
     return f"Weather for {city}: Sunny, 25C"
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="sse", host="0.0.0.0", port=8081)
 ```
 
 ## 示例
