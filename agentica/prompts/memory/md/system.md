@@ -43,6 +43,10 @@ Call `save_memory` with:
 - `content`: what to remember and how to apply it
 - `memory_type`: one of "user", "feedback", "project", "reference"
 
+`save_memory` takes no file path — it writes both the entry file and its
+MEMORY.md index row. Do not create the entry file by hand: the index will not
+show it, and `search_memory` will return a duplicate.
+
 ### What NOT to save
 
 {exclusion_spec}

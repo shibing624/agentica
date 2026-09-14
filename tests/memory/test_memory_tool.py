@@ -87,6 +87,29 @@ class TestBuiltinMemoryTool:
         assert "AGENTS.md" in prompt
         assert "next session" in prompt
 
+    def test_system_prompt_says_save_memory_owns_the_file(self):
+        """The tool writes the entry file AND the index; there is no path arg.
+
+        An agent that does not know this writes the entry by hand first, then
+        calls the tool too — and both survive. The hand-written file is absent
+        from MEMORY.md, so the next session's system prompt never shows it,
+        while search_memory still matches it: one memory, invisible in one
+        place and a duplicate in the other.
+        """
+        prompt = self.tool.get_system_prompt()
+        assert "takes no file path" in prompt
+        assert "by hand" in prompt
+        # The consequence is the part that makes it stick.
+        assert "index" in prompt
+        assert "duplicate" in prompt
+
+    def test_save_memory_exposes_no_file_path_argument(self):
+        """The schema is the other place this is visible: nothing to pass."""
+        fn = self.tool.functions["save_memory"]
+        params = fn._parse_parameters(fn.entrypoint, strict=False)["properties"]
+        assert "file_path" not in params
+        assert set(params) == {"title", "content", "memory_type"}
+
     def test_save_memory(self):
         """Test saving a memory entry."""
         result = asyncio.run(self.tool.save_memory(
