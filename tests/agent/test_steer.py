@@ -13,7 +13,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica import Agent
+from agentica.agent.base import SteerItem
 from agentica.model.message import Message
+
+
+def _texts(items):
+    return [i.text for i in items]
 
 
 class TestSteerBuffer(unittest.TestCase):
@@ -25,7 +30,7 @@ class TestSteerBuffer(unittest.TestCase):
         agent = Agent()
         agent._begin_steer_window()
         self.assertTrue(agent.steer("keep it compatible"))
-        self.assertEqual(agent._drain_steer(), ["keep it compatible"])
+        self.assertEqual(_texts(agent._drain_steer()), ["keep it compatible"])
         # Drained -> empty on next call.
         self.assertEqual(agent._drain_steer(), [])
 
@@ -43,10 +48,10 @@ class TestSteerBuffer(unittest.TestCase):
         self.assertTrue(agent.steer("本轮\udce5加回"))
         drained = agent._drain_steer()
         self.assertEqual(len(drained), 1)
-        drained[0].encode("utf-8")
-        self.assertNotIn("\udce5", drained[0])
-        self.assertIn("本轮", drained[0])
-        self.assertIn("加回", drained[0])
+        drained[0].text.encode("utf-8")
+        self.assertNotIn("\udce5", drained[0].text)
+        self.assertIn("本轮", drained[0].text)
+        self.assertIn("加回", drained[0].text)
 
     def test_steer_rejected_when_not_running(self):
         # Outside a run window steer() must return False (caller falls back to
@@ -60,7 +65,16 @@ class TestSteerBuffer(unittest.TestCase):
         agent._begin_steer_window()
         agent.steer("first")
         agent.steer("second")
-        self.assertEqual(agent._drain_steer(), ["first", "second"])
+        self.assertEqual(_texts(agent._drain_steer()), ["first", "second"])
+
+    def test_steer_accepts_an_image_without_caption(self):
+        agent = Agent()
+        agent._begin_steer_window()
+        self.assertTrue(agent.steer("", images=["/tmp/shot.png"]))
+        drained = agent._drain_steer()
+        self.assertEqual(len(drained), 1)
+        self.assertEqual(drained[0].text, "")
+        self.assertEqual(drained[0].images, ("/tmp/shot.png",))
 
 
 class TestUndeliveredSteer(unittest.TestCase):
@@ -75,7 +89,7 @@ class TestUndeliveredSteer(unittest.TestCase):
         agent._end_steer_window()
         self.assertEqual(
             agent.pop_undelivered_steer(),
-            [("typed during the final inference", False)],
+            [SteerItem("typed during the final inference")],
         )
 
     def test_pop_drains_once(self):
@@ -84,7 +98,10 @@ class TestUndeliveredSteer(unittest.TestCase):
         agent.steer("a")
         agent.steer("b")
         agent._end_steer_window()
-        self.assertEqual(agent.pop_undelivered_steer(), [("a", False), ("b", False)])
+        self.assertEqual(
+            agent.pop_undelivered_steer(),
+            [SteerItem("a"), SteerItem("b")],
+        )
         self.assertEqual(agent.pop_undelivered_steer(), [])
 
     def test_parked_steer_keeps_relayed_provenance(self):
@@ -97,7 +114,10 @@ class TestUndeliveredSteer(unittest.TestCase):
         agent._end_steer_window()
         self.assertEqual(
             agent.pop_undelivered_steer(),
-            [("typed by the user", False), ("#3 (term_2) finished: ok", True)],
+            [
+                SteerItem("typed by the user"),
+                SteerItem("#3 (term_2) finished: ok", True),
+            ],
         )
 
     def test_drained_steer_is_not_parked(self):
@@ -124,7 +144,7 @@ class TestUndeliveredSteer(unittest.TestCase):
         Runner._inject_steering(messages, agent)
         self.assertFalse(any("too late" in (m.content or "") for m in messages))
         # ...and it is still waiting for the caller to pop it.
-        self.assertEqual(agent.pop_undelivered_steer(), [("too late", False)])
+        self.assertEqual(agent.pop_undelivered_steer(), [SteerItem("too late")])
 
 
 class TestSteerInjection(unittest.TestCase):
@@ -230,6 +250,23 @@ class TestSteerInjection(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("first", messages[-1].content)
         self.assertIn("second", messages[-1].content)
+
+    def test_steer_with_images_appends_a_user_message(self):
+        from agentica.runner import Runner
+
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("如图所示，刚测试了2个bug", images=["/tmp/clipboard.png"])
+        messages = [
+            Message(role="user", content="do the task"),
+            Message(role="assistant", content="", tool_calls=[{"id": "c1"}]),
+            Message(role="tool", content="tool output", tool_call_id="c1", tool_name="search"),
+        ]
+        Runner._inject_steering(messages, agent)
+        self.assertEqual(messages[-1].role, "user")
+        self.assertEqual(list(messages[-1].images), ["/tmp/clipboard.png"])
+        self.assertIn("如图所示，刚测试了2个bug", messages[-1].content)
+        self.assertTrue(messages[-1]._injected)
 
 
 if __name__ == "__main__":

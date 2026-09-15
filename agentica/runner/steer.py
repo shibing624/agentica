@@ -45,9 +45,26 @@ class SteerMixin:
         drained = agent._drain_steer()
         if not drained:
             return
-        marker = "\n\n".join(f"[User guidance received while you were working]\n{guidance}" for guidance in drained)
+        parts = []
+        images: list = []
+        for item in drained:
+            if item.text:
+                parts.append(
+                    f"[User guidance received while you were working]\n{item.text}"
+                )
+            elif item.images:
+                parts.append("[User attached image(s) while you were working]")
+            images.extend(item.images)
+        marker = "\n\n".join(parts)
         last = messages[-1] if messages else None
-        if last is not None and last.role == "tool":
+        if images:
+            # Vision cannot ride a tool-result string. A user message after a
+            # tool turn is the same shape idle image turns already use.
+            injected = Message(role="user", content=marker, images=list(images))
+            injected._injected = True
+            messages.append(injected)
+            logger.debug("Injected steering guidance with %s image(s)", len(images))
+        elif last is not None and last.role == "tool":
             existing = last.content.rstrip() if isinstance(last.content, str) else ""
             last.content = f"{existing}\n\n{marker}" if existing else marker
             logger.debug("Folded steering guidance into the latest tool result")

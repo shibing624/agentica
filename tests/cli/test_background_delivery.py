@@ -224,6 +224,20 @@ class TestPromoteLateSteer:
 
         assert pending.peek_all()[0] == "user correction"
 
+    def test_parked_image_steer_requeues_the_attachment(self):
+        from agentica.agent.base import SteerItem
+
+        state = SessionState()
+        state.current_agent = MagicMock()
+        state.current_agent.pop_undelivered_steer.return_value = [
+            SteerItem("如图所示", False, ("/tmp/a.png",)),
+        ]
+        pending = PendingQueue()
+
+        promote_late_steer(state, pending)
+
+        assert pending.peek_all() == [("如图所示", ["/tmp/a.png"])]
+
     def test_nothing_parked_is_a_noop(self):
         state = SessionState()
         state.current_agent = MagicMock()

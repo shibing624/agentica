@@ -37,8 +37,12 @@ from agentica.cli.approvals import (
     is_approval_request,
 )
 from agentica.cli.commands.context import CONCURRENT_CMDS, PendingQueue
-from agentica.cli.commands.registry import COMMAND_REGISTRY
-from agentica.cli.interactive.complete import rank_slash_commands, slash_command_rows
+from agentica.cli.commands.registry import COMMAND_HANDLERS, COMMAND_REGISTRY
+from agentica.cli.interactive.complete import (
+    is_slash_command_line,
+    rank_slash_commands,
+    slash_command_rows,
+)
 from agentica.cli.display import (
     build_status_bar_fragments,
     display_user_message,
@@ -51,8 +55,8 @@ from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 
 from .attachments import (
-    _deduplicate_image_attachments,
     _try_attach_clipboard_image,
+    peel_image_input,
     queue_item_preview,
 )
 from .console_io import (
@@ -83,16 +87,36 @@ def _take_buffer_text(buf) -> str:
 # ==================== TUI setup ====================
 
 
-def _steer_or_queue(state: SessionState, pending_queue: PendingQueue, text: str, payload) -> bool:
-    """Route plain text typed mid-run: steer the live run, queue on refusal.
+def _registered_slash_names(skills_registry) -> set:
+    names = set(COMMAND_HANDLERS)
+    if skills_registry is not None:
+        names.update(skills_registry.auto_commands())
+    return names
 
-    Returns True when the text was accepted as steering. A False from
-    ``steer()`` means the run ended between the UI's ``agent_running`` check
-    and the call (the TOCTOU gap ``Agent.steer`` documents) — the text falls
-    back to the queue rather than being dropped.
+
+def _should_steer_mid_run(text: str, images, skills_registry=None) -> bool:
+    """Plain mid-run Enter steers, including pasted images plus a caption.
+
+    Only a *registered* slash command stays queued. A Unix path
+    (``/var/folders/...png``) is a file drop, not ``/cron``. Images used to
+    queue because steer was text-only; they now ride ``Agent.steer(images=)``.
+    """
+    return not is_slash_command_line(text, _registered_slash_names(skills_registry))
+
+
+def _steer_or_queue(state: SessionState, pending_queue: PendingQueue, text: str, payload, images=None) -> bool:
+    """Route mid-run Enter: steer the live run, queue on refusal.
+
+    Returns True when the text (and optional images) was accepted as steering.
+    A False from ``steer()`` means the run ended between the UI's
+    ``agent_running`` check and the call (the TOCTOU gap ``Agent.steer``
+    documents) — the payload falls back to the queue rather than being dropped.
     """
     agent = state.current_agent
-    if agent is not None and agent.steer(text):
+    steer_kwargs = {}
+    if images:
+        steer_kwargs["images"] = images
+    if agent is not None and agent.steer(text, **steer_kwargs):
         return True
     pending_queue.put(payload)
     return False
@@ -100,7 +124,7 @@ def _steer_or_queue(state: SessionState, pending_queue: PendingQueue, text: str,
 
 def _queue_next_turn(state: SessionState, pending_queue: PendingQueue, text: str):
     """Queue the current input as the next turn and consume attachments."""
-    images = _deduplicate_image_attachments(list(state.attached_images))
+    text, images = peel_image_input(text, state.attached_images)
     state.attached_images.clear()
     payload = (text, images) if images else text
     pending_queue.put(payload)
@@ -516,8 +540,10 @@ def _setup_tui(
         if state.peer_session is not None:
             state.peer_session.note_user_turn()
 
-        images = _deduplicate_image_attachments(list(state.attached_images))
+        text, images = peel_image_input(text, state.attached_images)
         state.attached_images.clear()
+        if not text and not images:
+            return
         payload = (text, images) if images else text
 
         # Concurrent command dispatch — runs immediately even when agent is busy
@@ -554,23 +580,23 @@ def _setup_tui(
         # run ends means the agent finishes on stale assumptions and the next
         # turn is rework. Steering lands at the next tool-batch boundary
         # instead. Boundaries:
-        # - slash input keeps its meaning: skill auto-commands and non-
-        #   concurrent commands stay queued as next-turn prompts (concurrent
-        #   commands and /btw already returned above)
-        # - image attachments queue — the steer channel is text-only
+        # - a *registered* slash command keeps its meaning (skill auto-commands
+        #   and non-concurrent commands stay queued as next-turn prompts;
+        #   concurrent commands and /btw already returned above). A Unix path
+        #   like ``/var/folders/...png`` is not a command — it is peeled into
+        #   an image attachment plus caption, same as an idle turn.
+        # - pasted / dropped images steer with the caption (vision on the next
+        #   inference). A registered slash command still queues.
         # - steer() refused (run ended in the TOCTOU gap) falls back to the
         #   queue; steer accepted but never drained (typed during the final
         #   inference) is promoted to a queued turn when the run ends. The
         #   message is never lost either way.
-        # Gate on the post-dedup ``images`` (the payload ground truth), not the
-        # earlier ``has_images`` snapshot: if another image source is ever added
-        # between the two, an accepted steer would silently drop it.
-        if state.agent_running and not images and not text.startswith("/"):
-            if _steer_or_queue(state, pending_queue, text, payload):
+        if state.agent_running and _should_steer_mid_run(text, images, skills_registry):
+            if _steer_or_queue(state, pending_queue, text, payload, images=images):
                 # Honest copy: acceptance only means "buffered for the next
                 # inference boundary" — if the run finishes first, the text is
                 # promoted to a queued turn and app.py says so explicitly then.
-                display_user_message(text)
+                display_user_message(text, images=images)
                 get_console().print(
                     "  Steered the current query. Tip: Tab or /queue queues a request."
                 )

@@ -72,11 +72,19 @@ def promote_late_steer(state: SessionState, pending_queue) -> List[str]:
     if agent is None:
         return []
     late = agent.pop_undelivered_steer()
-    for text, relayed in late:
-        queue_ahead_of_goal_continuation(
-            pending_queue, ("__RELAYED__", text) if relayed else text
-        )
-    return [text for text, _ in late]
+    promoted = []
+    for item in late:
+        text, relayed = item[0], item[1]
+        images = item[2] if len(item) > 2 else ()
+        if relayed:
+            payload = ("__RELAYED__", text)
+        elif images:
+            payload = (text, list(images))
+        else:
+            payload = text
+        queue_ahead_of_goal_continuation(pending_queue, payload)
+        promoted.append(text)
+    return promoted
 
 
 def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:

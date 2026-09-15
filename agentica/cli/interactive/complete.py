@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Collection, Iterable, List, Optional, Sequence, Tuple
 
 # (name, display, meta). ``name`` is what is inserted; ``display`` is the menu
 # label (skills add ``(SkillName)``); ``meta`` is the one-line description.
@@ -81,6 +81,20 @@ def rank_slash_commands(query: str, rows: Sequence[SlashRow]) -> List[SlashRow]:
         scored.append((score, -i, row))
     scored.sort(reverse=True)
     return [row for _score, _order, row in scored]
+
+
+def is_slash_command_line(text: str, registered: Collection[str]) -> bool:
+    """True when the first token is a registered ``/command`` or skill slug.
+
+    A leading ``/`` is not enough: a Unix path (``/var/folders/...png``) starts
+    the same way and is ordinary input — including mid-run steering. Idle
+    dispatch already keys off the first token in ``COMMAND_HANDLERS``; this
+    is the same test so a screenshot path cannot be queued as a "command".
+    """
+    stripped = (text or "").strip()
+    if not stripped.startswith("/"):
+        return False
+    return stripped.split()[0].lower() in registered
 
 
 def slash_command_rows(

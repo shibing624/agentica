@@ -23,6 +23,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    NamedTuple,
     Optional,
     Sequence,
     Tuple,
@@ -99,6 +100,14 @@ from agentica.agent.as_tool import AsToolMixin
 from agentica.agent.tools import ToolsMixin
 from agentica.agent.printer import PrinterMixin
 from agentica.agent.goal_mixin import GoalMixin
+
+
+class SteerItem(NamedTuple):
+    """One mid-run injection: caption, optional images, and who typed it."""
+
+    text: str
+    relayed: bool = False
+    images: tuple = ()
 
 
 @dataclass(init=False)
@@ -644,17 +653,16 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
         # injected as a user message so the model sees it on the next inference.
-        # Each entry is (text, relayed): relayed marks text nobody typed on
-        # this terminal (a peer message, a finished job's report) so the
-        # re-queue path can re-tag it __RELAYED__ — without that tag a parked
-        # relayed line would regain slash-command dispatch, which the peer
-        # policy forbids.
-        self._pending_steer: List[Tuple[str, bool]] = []
+        # Each entry is a SteerItem: relayed marks text nobody typed on this
+        # terminal (a peer message, a finished job's report) so the re-queue
+        # path can re-tag it __RELAYED__; images are pasted/dropped screenshots
+        # that idle turns already send as vision and mid-run must too.
+        self._pending_steer: List[SteerItem] = []
         # Guidance accepted during a run's final inference — buffered after the
         # last drain, so the model never saw it. Parked here by
         # _end_steer_window() (instead of being dropped) for the caller to
         # recover via pop_undelivered_steer() and re-queue as the next turn.
-        self._undelivered_steer: List[Tuple[str, bool]] = []
+        self._undelivered_steer: List[SteerItem] = []
         self._steer_lock = threading.Lock()
 
         # Cross-session peer channel (``agentica.peers.PeerSession``), set by the
@@ -1001,7 +1009,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         if self._session_guidance_snapshot is None:
             self._session_guidance_snapshot = "\n\n---\n\n".join(self._session_guidance_prompts)
 
-    def steer(self, guidance: str, *, relayed: bool = False) -> bool:
+    def steer(
+        self,
+        guidance: str = "",
+        *,
+        relayed: bool = False,
+        images: Optional[Sequence[Any]] = None,
+    ) -> bool:
         """Inject guidance into a running tool loop without interrupting it.
 
         Unlike a queued message (which runs as a fresh turn after the current
@@ -1009,6 +1023,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         run and shown to the model as a user message on its next inference —
         so the agent can course-correct mid-task. Thread-safe: callers (e.g. a
         CLI input thread) may invoke this while ``run()`` executes elsewhere.
+
+        ``images`` are optional vision attachments (Ctrl+V / a leading image
+        path), the same payload idle turns already send. A caption-only steer
+        still works; an image with no caption is accepted too.
 
         Returns True if the guidance was accepted into the CURRENTLY running
         loop (an upcoming inference will drain it), False otherwise — including
@@ -1037,9 +1055,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         line can never regain slash-command dispatch (what the peer policy
         promises senders).
         """
-        if not guidance or not guidance.strip():
+        images_t = tuple(images or ())
+        text = replace_invalid_utf8(guidance or "").strip()
+        if not text and not images_t:
             return False
-        guidance = replace_invalid_utf8(guidance)
         with self._steer_lock:
             # Atomic gate: only accept steering while a run is active. Checking
             # _running under the same lock that _begin/_end_steer_window use to
@@ -1047,20 +1066,22 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # `agent_running` check but before we append.
             if not self._running:
                 return False
-            self._pending_steer.append((guidance.strip(), relayed))
+            self._pending_steer.append(SteerItem(text, relayed, images_t))
         return True
 
-    def _drain_steer(self) -> List[str]:
-        """Atomically take and clear any buffered steering guidance (texts only).
+    def _drain_steer(self) -> List[SteerItem]:
+        """Atomically take and clear any buffered steering guidance.
 
-        The delivery path (``_inject_steering``) folds everything into one
+        The delivery path (``_inject_steering``) folds text-only items into one
         user-facing marker regardless of provenance, so the relayed flag is
-        projected away here; it is only preserved on the parked path.
+        projected away there; it is only preserved on the parked path. Images
+        cannot ride a tool-result string, so inject appends a user message
+        when any item carries them.
         """
         with self._steer_lock:
             if not self._pending_steer:
                 return []
-            drained = [text for text, _relayed in self._pending_steer]
+            drained = self._pending_steer
             self._pending_steer = []
             return drained
 
@@ -1096,19 +1117,16 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 self._undelivered_steer.extend(self._pending_steer)
                 self._pending_steer = []
 
-    def pop_undelivered_steer(self) -> List[Tuple[str, bool]]:
+    def pop_undelivered_steer(self) -> List[SteerItem]:
         """Take steering that outlived its run, so the caller can re-queue it.
 
         This is the contract counterpart of ``steer()`` returning True (see its
-        docstring): every accepted-but-undrained text is retrievable here,
+        docstring): every accepted-but-undrained item is retrievable here,
         exactly once, in order. The interactive CLI pops right after each run
         finishes and turns the entries into queued next-turn input, ahead of
-        any goal-continuation prompt. Each entry is ``(text, relayed)`` —
-        relayed entries must go back tagged ``__RELAYED__``, not as plain
-        input. Outside an interactive loop there is nobody to pop it and that
-        is deliberate: texts accumulate unboundedly only for callers who steer
-        without honoring the contract, and they are never delivered to (or
-        silently dropped from) a later run either way.
+        any goal-continuation prompt. Relayed entries must go back tagged
+        ``__RELAYED__``, not as plain input; items with images re-queue as
+        ``(text, images)`` so the next turn still sees the screenshot.
         """
         with self._steer_lock:
             if not self._undelivered_steer:

@@ -115,6 +115,20 @@ class TestSlashCommandScore(unittest.TestCase):
     def test_non_slash_query_scores_nothing(self):
         self.assertIsNone(score_slash_command("help", "/help", "Show commands"))
 
+    def test_unix_paths_are_not_slash_commands(self):
+        from agentica.cli.interactive.complete import is_slash_command_line
+
+        registered = set(COMMAND_REGISTRY)
+        path = (
+            "/var/folders/my/wtb78vc53sv_jjmg5pk2j1_c0000gn/T/"
+            "clipboard-2026-09-15-195329-CDED7B8C.png  如图所示，刚测试了2个bug"
+        )
+        self.assertFalse(is_slash_command_line(path, registered))
+        self.assertTrue(is_slash_command_line("/cron", registered))
+        self.assertTrue(is_slash_command_line("/cron add foo", registered))
+        self.assertFalse(is_slash_command_line("not a command", registered))
+        self.assertFalse(is_slash_command_line("", registered))
+
 
 class TestCompletionsMenuSitsAboveTheInput(unittest.TestCase):
     """The TUI is pinned to the bottom of the terminal.

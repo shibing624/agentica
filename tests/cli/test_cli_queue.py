@@ -340,5 +340,60 @@ class TestSteerOrQueue(unittest.TestCase):
         self.assertEqual(state.attached_images, [])
 
 
+class TestShouldSteerMidRun(unittest.TestCase):
+    """Unix paths must steer; only registered slash commands (and images) queue."""
+
+    def test_clipboard_png_path_steers(self):
+        from agentica.cli.interactive.tui import _should_steer_mid_run
+
+        text = (
+            "/var/folders/my/wtb78vc53sv_jjmg5pk2j1_c0000gn/T/"
+            "clipboard-2026-09-15-195329-CDED7B8C.png  如图所示，刚测试了2个bug"
+        )
+        self.assertTrue(_should_steer_mid_run(text, images=[]))
+
+    def test_registered_slash_command_does_not_steer(self):
+        from agentica.cli.interactive.tui import _should_steer_mid_run
+
+        self.assertFalse(_should_steer_mid_run("/cron", images=[]))
+        self.assertFalse(_should_steer_mid_run("/compact extra", images=[]))
+
+    def test_image_payload_steers_with_caption(self):
+        from agentica.cli.interactive.tui import _should_steer_mid_run
+
+        self.assertTrue(_should_steer_mid_run("如图所示", images=["/tmp/a.png"]))
+
+    def test_plain_text_steers(self):
+        from agentica.cli.interactive.tui import _should_steer_mid_run
+
+        self.assertTrue(_should_steer_mid_run("not that file", images=[]))
+
+
+class TestPeelImageInput(unittest.TestCase):
+    def test_leading_png_path_becomes_an_attachment(self):
+        from agentica.cli.interactive.attachments import peel_image_input
+
+        with tempfile.TemporaryDirectory() as td:
+            image = Path(td) / "clipboard-2026-09-15-195329-CDED7B8C.png"
+            image.write_bytes(b"fake-png")
+            text, images = peel_image_input(
+                f"{image}  如图所示，刚测试了2个bug",
+                attached=[],
+            )
+        self.assertEqual(text, "如图所示，刚测试了2个bug")
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0].resolve(), image.resolve())
+
+    def test_ctrl_v_attachment_keeps_the_caption(self):
+        from agentica.cli.interactive.attachments import peel_image_input
+
+        with tempfile.TemporaryDirectory() as td:
+            image = Path(td) / "clip.png"
+            image.write_bytes(b"fake-png")
+            text, images = peel_image_input("如图所示", attached=[image])
+        self.assertEqual(text, "如图所示")
+        self.assertEqual(images, [image])
+
+
 if __name__ == "__main__":
     unittest.main()

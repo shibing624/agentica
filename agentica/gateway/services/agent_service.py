@@ -1496,7 +1496,7 @@ class AgentService:
         agent = self._cached_agent_for_owner(session_id, owner)
         if agent is None:
             return []
-        return [text for text, _relayed in agent.pop_undelivered_steer()]
+        return [item[0] for item in agent.pop_undelivered_steer()]
 
     # ============== Work directory ==============
 

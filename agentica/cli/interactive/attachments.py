@@ -124,6 +124,22 @@ def queue_item_preview(item) -> str:
     return queued.text
 
 
+def peel_image_input(text: str, attached: Optional[list] = None) -> tuple:
+    """Split a leading image path (and Ctrl+V attachments) from caption text.
+
+    Idle turns already do this via ``_detect_file_drop`` in the process loop.
+    Mid-run Enter has to do it too, or a pasted
+    ``/var/folders/...png 如图所示`` steers as a path string instead of a
+    vision image plus caption.
+    """
+    extra = list(attached or [])
+    dropped = _detect_file_drop(text)
+    if dropped and dropped["is_image"]:
+        extra.append(dropped["path"])
+        text = dropped["remainder"]
+    return text, _deduplicate_image_attachments(extra)
+
+
 def _detect_file_drop(user_input: str) -> Optional[dict]:
     """Detect if user_input starts with a real local file path."""
     if not isinstance(user_input, str):
@@ -261,4 +277,4 @@ def _ocr_images_parallel(image_paths: list) -> str:
     return "\n\n".join(results)
 
 
-__all__ = ['_split_path_input', '_resolve_attachment_path', 'queue_item_preview', '_detect_file_drop', '_image_content_key', '_deduplicate_image_attachments', '_try_attach_clipboard_image', '_OCR_PER_IMAGE_CHARS', '_OCR_TOTAL_CHARS', '_OCR_TIMEOUT_SECS', '_ocr_single_image', '_ocr_images_parallel']
+__all__ = ['_split_path_input', '_resolve_attachment_path', 'queue_item_preview', 'peel_image_input', '_detect_file_drop', '_image_content_key', '_deduplicate_image_attachments', '_try_attach_clipboard_image', '_OCR_PER_IMAGE_CHARS', '_OCR_TOTAL_CHARS', '_OCR_TIMEOUT_SECS', '_ocr_single_image', '_ocr_images_parallel']
