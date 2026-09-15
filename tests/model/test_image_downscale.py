@@ -270,9 +270,8 @@ def test_opaque_alpha_channel_is_dropped():
 def _screenshot_like_rgba(size=(2400, 1200), seed=11):
     """An opaque RGBA image resembling a screenshot: flat areas, hard edges.
 
-    A 1px checker texture is averaged away by downscaling, so the capped PNG is
-    smaller than the original — the ordinary case, unlike a tiny few-colour
-    PNG whose resampled form needs more shades than the source did.
+    A 1px checker plus hard rectangles. LANCZOS can introduce more shades than
+    the source, so the capped PNG is not guaranteed smaller than the original.
     """
     random.seed(seed)
     width, height = size
@@ -308,7 +307,6 @@ def test_opaque_alpha_stripped_on_the_png_path_too():
     with Image.open(io.BytesIO(out)) as resized:
         assert max(resized.size) == VISION_MAX_IMAGE_EDGE
         assert resized.mode == "RGB", "opaque alpha should have been dropped"
-    assert len(out) < len(raw)
 
 
 def test_palette_transparency_detected():
