@@ -143,6 +143,25 @@ class TestHelpRendering(unittest.TestCase):
 
         self.assertIn("Handles [urgent] tickets", out)
 
+    def test_skill_commands_skip_slugs_that_are_real_slash_commands(self):
+        cron = Mock()
+        cron.description = "Schedule jobs with the cronjob tool"
+        agentica = Mock()
+        agentica.description = "How to use this product"
+        registry = MagicMock()
+        registry.__len__.return_value = 2
+        registry.auto_commands.return_value = {
+            "/cron": cron,
+            "/agentica": agentica,
+        }
+
+        out = self._render_help(skills_registry=registry)
+
+        self.assertIn("/agentica", out)
+        self.assertNotIn("Schedule jobs with the cronjob tool", out)
+        # The real slash command's help line stays; the skill duplicate does not.
+        self.assertIn("Scheduled jobs:", out)
+
 
 if __name__ == "__main__":
     unittest.main()

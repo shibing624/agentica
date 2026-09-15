@@ -184,9 +184,17 @@ def show_help(skills_registry=None):
             console.print(f"    [bright_green]{escape(f'{cmd:<18}')}[/bright_green] [dim]{escape(desc)}[/dim]")
         console.print()
 
-    # Skill auto-commands
+    # Skill auto-commands that do not collide with a real slash handler.
+    # ``/cron`` / ``/worktree`` are CLI commands; the bundled skills of those
+    # names stay in the model catalog, they are not a second slash entry.
     if skills_registry and len(skills_registry) > 0:
-        skill_cmds = skills_registry.auto_commands()
+        from agentica.cli.commands.registry import COMMAND_REGISTRY
+
+        skill_cmds = {
+            slug: skill
+            for slug, skill in skills_registry.auto_commands().items()
+            if slug not in COMMAND_REGISTRY
+        }
         if skill_cmds:
             console.print("  [bold]-- Skill Commands --[/bold]")
             for slug, skill in skill_cmds.items():

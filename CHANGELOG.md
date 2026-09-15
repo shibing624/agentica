@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### fixes
+- **打 `/` 不再列出两条 `/cron`（以及 `/worktree`）**：补全把 registry 当成 generator 传进 `slash_command_rows`，碰撞集合第二次迭代是空的，bundled skill 的 `/cron (cron)` / `/worktree (worktree)` 漏进菜单。选中仍插入 `/cron`，dispatch 走的是真正的 slash handler，skill 根本跑不到。`/help` 的 Skill Commands 同样跳过已占用的 slug。
 - **不透明超边长图不再因为「重编码没变小」而跳过缩边**：`_prepare_image_bytes` 在 capped PNG 不小于原图时整张退回原图，于是少色截图（3000×2000 / 2400×1200）长边仍超过 `VISION_MAX_IMAGE_EDGE`（2000）。token 按解码几何计，这种图必须缩到 2000。只有真透明（JPEG 用不上）且 capped 拷贝也不更小，才保留原图。
 
 ## [1.4.16] - 2026-09-15

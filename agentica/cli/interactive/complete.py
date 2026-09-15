@@ -87,9 +87,16 @@ def slash_command_rows(
     registry: Iterable[tuple[str, str]],
     skill_rows: Iterable[SlashRow] = (),
 ) -> List[SlashRow]:
-    """Build the candidate list: registry commands, then skill auto-commands."""
+    """Build the candidate list: registry commands, then skill auto-commands.
+
+    ``registry`` may be a one-shot generator (the TUI passes one). Derive
+    the collision set from the rows already built, not by iterating it
+    again — a second pass is empty, so ``/cron`` and ``/worktree`` leaked
+    the bundled skills of the same slug. Dispatch prefers the real handler,
+    so those extra rows inserted the same text and never ran the skill.
+    """
     rows: List[SlashRow] = [(name, name, desc) for name, desc in registry]
-    seen = {name for name, _desc in registry}
+    seen = {name for name, _display, _meta in rows}
     for name, display, meta in skill_rows:
         if name in seen:
             continue

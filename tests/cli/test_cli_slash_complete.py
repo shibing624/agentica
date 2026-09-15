@@ -78,6 +78,40 @@ class TestSlashCommandScore(unittest.TestCase):
 
         self.assertEqual(ranked, [("/help", "/help", "Show commands"), ("/review", "/review (Review)", "Review a PR")])
 
+    def test_a_generator_registry_still_hides_colliding_skills(self):
+        """The TUI passes a generator; a second pass over it is empty."""
+        rows = slash_command_rows(
+            ((n, d) for n, d in (("/cron", "Scheduled jobs"), ("/help", "Show commands"))),
+            [
+                ("/cron", "/cron (cron)", "Schedule, list, pause, resume, edit, or run the us"),
+                ("/agentica", "/agentica (agentica)", "How to use agentica"),
+            ],
+        )
+        ranked = rank_slash_commands("/", rows)
+
+        self.assertEqual(
+            ranked,
+            [
+                ("/cron", "/cron", "Scheduled jobs"),
+                ("/help", "/help", "Show commands"),
+                ("/agentica", "/agentica (agentica)", "How to use agentica"),
+            ],
+        )
+
+    def test_production_cron_skill_does_not_duplicate_the_command(self):
+        rows = slash_command_rows(
+            ((name, desc) for name, (_, desc) in COMMAND_REGISTRY.items()),
+            [("/cron", "/cron (cron)", "skill"), ("/worktree", "/worktree (worktree)", "skill")],
+        )
+        ranked = rank_slash_commands("/", rows)
+        crons = [r for r in ranked if r[0] == "/cron"]
+        worktrees = [r for r in ranked if r[0] == "/worktree"]
+
+        self.assertEqual(len(crons), 1)
+        self.assertEqual(crons[0][1], "/cron")
+        self.assertEqual(len(worktrees), 1)
+        self.assertEqual(worktrees[0][1], "/worktree")
+
     def test_non_slash_query_scores_nothing(self):
         self.assertIsNone(score_slash_command("help", "/help", "Show commands"))
 
