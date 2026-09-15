@@ -129,8 +129,10 @@ def _prepare_image_bytes(raw: bytes, mime_type: str, *, source: str = "") -> Tup
     """Downscale an oversized inline image to the provider-safe edge.
 
     Inside the cap: original bytes and mime, no re-encode. Past it: PNG, or
-    JPEG when a lossless encode would be huge. If the capped copy is not
-    smaller than the original, keep the original.
+    JPEG when a lossless encode would be huge. Tokens follow decoded
+    geometry, so an opaque image always takes the capped copy. Keep the
+    original only when real transparency blocks JPEG *and* the capped PNG
+    is not smaller — otherwise a compact screenshot would stay retina-sized.
     """
     if len(raw) > VISION_MAX_IMAGE_BYTES:
         limit_mb = VISION_MAX_IMAGE_BYTES // 1024 // 1024
@@ -145,8 +147,9 @@ def _prepare_image_bytes(raw: bytes, mime_type: str, *, source: str = "") -> Tup
             width, height = img.size
             if max(width, height) <= VISION_MAX_IMAGE_EDGE:
                 return raw, mime_type
+            has_alpha = _has_transparency(img)
             data, out_mime = _cap_and_encode(img, original_len=len(raw))
-            if len(data) >= len(raw):
+            if has_alpha and len(data) >= len(raw):
                 return raw, mime_type
     except OSError as e:
         # SVG / corrupt / unknown codec: keep the caller's bytes.
