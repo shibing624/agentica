@@ -71,7 +71,8 @@ class TestBuiltinExecuteTool:
         # `-r` on rg is --replace and corrupts output silently; execute does
         # not teach `grep` at all (there is a dedicated `grep` tool).
         assert "grep" not in doc
-        assert "``-r`` is ``--replace`` there, not recursive" in doc
+        assert "Never ``rg -rn``" in doc
+        assert "``-r`` is ``--replace``" in doc
         assert "-g '*.py'" in doc
         assert "2>/dev/null" in doc
         assert "apply_patch" not in doc

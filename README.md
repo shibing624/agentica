@@ -275,7 +275,7 @@ agent = DeepAgent()
 
 ## 🔥 News
 
-- [2026/09/11] **Unreleased**：Layer 2 compact 改为空窗换窗（对齐 Codex TokenBudget），不再调用 LLM 或 `/responses/compact` 做摘要。旧对话留在 session JSONL，用 `search_session` 查；交接写旁边的 `<session>.notes.md`。详见 [Context Compression](https://shibing624.github.io/agentica/advanced/compression)
+- [2026/09/15] **v1.4.16**：Layer 2 compact 改为空窗换窗（不再 LLM 摘要），旧对话用 `search_session` 查；交互 CLI 可选 attach / 外部 hooks（默认关）；MCP 只支持 2.x。详见 [Release-v1.4.16](https://github.com/shibing624/agentica/releases/tag/v1.4.16)
 - [2026/09/01] **v1.4.15**：新增 TypeScript 客户端 `@agentica-ai/sdk` 与 Gateway Docker 镜像；`/export` 默认出 session JSONL；`apply_patch` 只精确匹配；CLI 不再把工具输出里的 `[/path]` 当成 Rich 标记。详见 [Release-v1.4.15](https://github.com/shibing624/agentica/releases/tag/v1.4.15)
 - [2026/08/25] **v1.4.14**：权限档更新（ask 不再藏写工具，增加「拒绝类似」）；Web/桌面真正多账号；文件工具收成 `apply_patch` + `write_file`（`read_file` 支持 tail）；Worktree 默认进仓库内；系统 skill 包内加载；桌面版首次打开自动装 Python runtime。详见 [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
 - [2026/08/20] **v1.4.13**：Web 换成 Vite + React SPA 并新增轨迹页；网页界面默认英文、设置里可切简体中文；新增 **Desktop App 安装包**（macOS dmg / Windows NSIS / Linux AppImage·deb）。详见 [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)

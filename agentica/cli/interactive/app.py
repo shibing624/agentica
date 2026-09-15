@@ -503,6 +503,7 @@ def run_interactive(
         agent_config["model_name"],
         work_dir=agent_config.get("work_dir"),
         extra_tools=extra_tool_names,
+        session_id=current_agent.session_id,
     )
 
     if workspace and workspace.exists():

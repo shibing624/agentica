@@ -510,10 +510,11 @@ class BuiltinExecuteTool(Tool):
         (pipes and ``&&``). A miss that must not stop the rest: ``;``
         and ``2>/dev/null``.
 
-        Search with ``rg`` (``rg -g '*.py' -n PAT`` or ``rg -t py``);
-        ``-r`` is ``--replace`` there, not recursive. Bound noisy output with
-        ``| head`` / ``| tail``. Newlines stay, so a
-        ``python3 - <<'EOF'`` … ``EOF`` heredoc works.
+        Search with ``rg`` (``rg -g '*.py' -n PAT`` or ``rg -t py``).
+        Never ``rg -rn``: ``-r`` is ``--replace``, so ``-rn`` replaces every
+        match with the letter ``n`` and exits 0. Line numbers are ``-n``
+        alone. Bound noisy output with ``| head`` / ``| tail``. Newlines
+        stay, so a ``python3 - <<'EOF'`` … ``EOF`` heredoc works.
 
         Do not dump a whole source file through the shell
         (``cd … && cat f.py``). Bound it with head/tail. A persisted

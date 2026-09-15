@@ -97,6 +97,7 @@ def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch
     assert "Worked for 15m 05s" in summary
     assert "agentica resume old-session" in summary
     print_header.assert_called_once()
+    assert print_header.call_args.kwargs.get("session_id") == "new-session"
     assert result["current_agent"] is new_agent
     assert result["session_started_at"] == 1_005.0
 

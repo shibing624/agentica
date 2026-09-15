@@ -14,14 +14,21 @@ from agentica.cli.runtime import BUILTIN_TOOLS, get_console
 from agentica.model.usage import Usage
 from agentica.version import __version__
 
-def print_header(model_provider: str, model_name: str, work_dir: Optional[str] = None,
-                 extra_tools: Optional[List[str]] = None):
-    """Print the application header with version and model information"""
+def print_header(
+    model_provider: str,
+    model_name: str,
+    work_dir: Optional[str] = None,
+    extra_tools: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+):
+    """Print the application header with version, model, and session id."""
     console = get_console()
     box_width = min(console.width, 80)
     console.print("=" * box_width, style="bright_cyan")
     console.print(f"  Agentica CLI v{__version__} - Interactive AI Assistant")
     console.print(f"  Model: [bright_green]{model_provider}/{model_name}[/bright_green]")
+    if session_id:
+        console.print(f"  Session: [bright_green]{escape(session_id)}[/bright_green]")
 
     # Working directory
     cwd = work_dir or os.getcwd()

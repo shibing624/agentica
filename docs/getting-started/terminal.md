@@ -20,6 +20,9 @@ agentica --model_provider deepseek --model_name deepseek-chat
 agentica --model_provider ollama --model_name llama3.1
 ```
 
+启动横幅会打出本次 `Session:` id（`/new`、`/clear` 重打横幅时也是新 id），方便复制给
+`agentica resume <id>` 或 `/resume`。
+
 ## 完整参数说明
 
 ```
