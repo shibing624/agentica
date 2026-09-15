@@ -31,7 +31,107 @@ from agentica.cli.commands import session as cli_session
 from agentica.cli import setup as cli_setup
 from agentica.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
+from agentica.model.usage import Usage
 from agentica.utils.string import format_file_size
+
+
+
+class TestClearStartsANewSession(unittest.TestCase):
+    """`/clear` must not depend on how the session was started.
+
+    Only `agentica resume <id>` / `/resume` pins `session_id` into
+    `agent_config`. Rebuilding without dropping it reused the same SessionLog,
+    so `/clear` kept appending to the old transcript and the runner replayed
+    its history into the "fresh" context — the opposite of what the command
+    says, and only after a resume.
+    """
+
+    def _ctx(self, work_dir, session_id=None, from_resume=False):
+        """A context whose agent_config is in the state the CLI leaves it in."""
+        config = {
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "work_dir": str(work_dir),
+        }
+        if session_id is not None:
+            config["session_id"] = session_id
+        if from_resume:
+            config["session_base_dir"] = str(work_dir)
+
+        old_agent = MagicMock()
+        old_agent.model.usage = Usage()
+        old_agent._session_log = None
+        return CommandContext(
+            agent_config=config,
+            current_agent=old_agent,
+            extra_tools=[],
+            workspace=None,
+        ), config
+
+    def _run(self, ctx, handler):
+        """Run the command with a create_agent that honours agent_config."""
+        built = {}
+
+        def fake_create_agent(config, *args, **kwargs):
+            # Mirror the real builder: the session id comes from the config, or
+            # a fresh one is generated — that is exactly what `pop` decides.
+            built["session_id"] = config.get("session_id") or "generated-fresh-id"
+            built["session_base_dir"] = config.get("session_base_dir")
+            agent = MagicMock()
+            agent.session_id = built["session_id"]
+            agent._session_log = SessionLog(
+                built["session_id"],
+                base_dir=built["session_base_dir"],
+                work_dir=config.get("work_dir"),
+            )
+            return agent
+
+        console = MagicMock()
+        with (
+            patch("agentica.cli.commands.session.create_agent", fake_create_agent),
+            patch("agentica.cli.commands.session.print_header"),
+            patch("agentica.cli.commands.session.get_console", return_value=console),
+            patch("agentica.cli.commands.session.os.system"),
+        ):
+            result = handler(ctx)
+        return built, result
+
+    def test_clear_after_a_resume_drops_the_pinned_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ctx, config = self._ctx(directory, session_id="resumed-1111", from_resume=True)
+
+            built, result = self._run(ctx, cli_session._cmd_clear)
+
+            self.assertEqual(built["session_id"], "generated-fresh-id")
+            self.assertEqual(result["current_agent"].session_id, "generated-fresh-id")
+            # The pins are gone from the config, so later rebuilds are clean too.
+            self.assertNotIn("session_id", config)
+            self.assertNotIn("session_base_dir", config)
+
+    def test_clear_writes_a_second_transcript_not_the_resumed_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            resumed = SessionLog("resumed-1111", base_dir=directory, work_dir=directory)
+            resumed.append("user", "before the clear")
+            ctx, _config = self._ctx(directory, session_id="resumed-1111", from_resume=True)
+
+            built, _result = self._run(ctx, cli_session._cmd_clear)
+
+            fresh = SessionLog(built["session_id"], base_dir=directory, work_dir=directory)
+            self.assertNotEqual(fresh.path, resumed.path)
+            self.assertFalse(fresh.exists())
+            self.assertIn("before the clear", resumed.path.read_text(encoding="utf-8"))
+
+    def test_clear_matches_new_for_a_plain_session(self):
+        """No pinned id: /clear and /new must produce the same outcome."""
+        with tempfile.TemporaryDirectory() as directory:
+            plain_clear, _ = self._ctx(directory)
+            plain_new, _ = self._ctx(directory)
+
+            clear_built, _ = self._run(plain_clear, cli_session._cmd_clear)
+            new_built, _ = self._run(plain_new, cli_session._cmd_newchat)
+
+            self.assertEqual(clear_built, new_built)
+            self.assertEqual(clear_built["session_id"], "generated-fresh-id")
 
 
 

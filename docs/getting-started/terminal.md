@@ -477,7 +477,10 @@ Session JSONL 的读时分析，和 Web 对话标题旁「查看轨迹」同一�
 ```
 
 ### `/clear` / `/reset`
-清屏并重置当前会话（等同于 `/newchat` + 清除屏幕）。
+清屏并开启全新会话——等价于 `/new` 再加一次清屏，和 Codex 对 `/clear` 的定义一致
+（Claude Code / opencode 干脆把它做成 `/new` 的别名）。无论当前会话是不是
+`agentica resume <id>` 恢复来的，都会得到新的 session id 和新的 JSONL；旧的那份
+不删，照样能用 `/resume` 找回。
 
 ### `/debug [on|off]`
 运行时开关 verbose 调试日志，等价于启动时的 `--debug`：打开后 DEBUG 级日志打到终端

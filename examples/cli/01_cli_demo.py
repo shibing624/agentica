@@ -34,7 +34,7 @@ Interactive Features:
 
 Interactive Commands:
     /help           Show available commands
-    /clear          Clear screen and reset conversation
+    /clear          Clear screen and start a new session (same as /new)
     /tools          List available additional tools
     /exit, /quit    Exit the CLI
 

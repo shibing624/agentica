@@ -61,8 +61,8 @@ from agentica.cli.commands.tools_skills import (
 COMMAND_REGISTRY = {
     # Session
     "/new": (_cmd_newchat, "Start a new chat session"),
-    "/clear": (_cmd_clear, "Clear screen and reset"),
-    "/reset": (_cmd_clear, "Clear screen and reset (alias)"),
+    "/clear": (_cmd_clear, "Clear screen and start a new session"),
+    "/reset": (_cmd_clear, "Clear screen and start a new session (alias)"),
     "/history": (_cmd_history, "Show conversation history or full tool details"),
     "/trace": (_cmd_trace, "Session trace: overview, /trace <n> round detail, /trace export"),
     "/export": (_cmd_export, "Save session JSONL (jsonl | analysis | messages [path])"),

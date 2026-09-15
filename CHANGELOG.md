@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### fixes
+- **`/clear` 从「看运气的两条语义」收敛成「/new + 清屏」**：`/clear` 之前是否重置会话，取决于 `agent_config` 里有没有 `session_id`——而只有 `agentica resume <id>` / `/resume` 会写那个字段，生成路径从不写回（`cli/runtime.py` 里 `session_id = agent_config.get(...) or _generate_session_id()`）。于是全新会话里 `/clear` 换新 session、清空上下文；**resume 进来后 `/clear` 却沿用同一个 `SessionLog`**，继续往旧 transcript 追加，且 runner 第一轮把旧历史回放进"新"上下文（实测：resume 后 `/clear`，下一轮请求带 4 条消息，清屏前那轮仍在）。现在 `/new` 与 `/clear` 共用一个 `_start_fresh_session()`——无条件 `pop("session_id")` / `pop("session_base_dir")` 再重建，两条命令从此不可能再漂移。对齐三家：Codex 明写 `/clear` = 清终端 + 开新 chat（`Ctrl+L` 才是「只清屏」），Claude Code 与 opencode 干脆把 `/clear` 做成 `/new` 的别名。旧 transcript 不删，`/resume` 照样找得回。文案同步：registry / `/help` / `examples/cli/01_cli_demo.py` 由「Clear screen and reset conversation」改为「Clear screen and start a new session (same as /new)」，`docs/getting-started/terminal.md` 的 `/clear` 一节写清与 `/resume` 的关系。
 - **打 `/` 不再列出两条 `/cron`（以及 `/worktree`）**：补全把 registry 当成 generator 传进 `slash_command_rows`，碰撞集合第二次迭代是空的，bundled skill 的 `/cron (cron)` / `/worktree (worktree)` 漏进菜单。选中仍插入 `/cron`，dispatch 走的是真正的 slash handler，skill 根本跑不到。`/help` 的 Skill Commands 同样跳过已占用的 slug。
 - **不透明超边长图不再因为「重编码没变小」而跳过缩边**：`_prepare_image_bytes` 在 capped PNG 不小于原图时整张退回原图，于是少色截图（3000×2000 / 2400×1200）长边仍超过 `VISION_MAX_IMAGE_EDGE`（2000）。token 按解码几何计，这种图必须缩到 2000。只有真透明（JPEG 用不上）且 capped 拷贝也不更小，才保留原图。
 

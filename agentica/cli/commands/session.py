@@ -308,9 +308,23 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
             session_id=resumable_session_id(old_agent),
         )
     )
-    # `agentica resume <id>` pins a session (and possibly another project's
-    # storage) into agent_config. A new chat must not inherit either, or it
-    # would keep appending to the session it was supposed to leave behind.
+    return _start_fresh_session(ctx)
+
+
+def _start_fresh_session(ctx: CommandContext) -> dict:
+    """Build the agent for a session that must not inherit the current one.
+
+    Shared by `/new` and `/clear` so the two cannot drift apart again: they are
+    the same operation (clear screen aside), which is how Codex documents them
+    — `/clear` is `/new` plus the terminal wipe.
+
+    The two ``pop``s are what make that true. Only ``agentica resume <id>`` /
+    ``/resume`` ever pins ``session_id`` into ``agent_config``; when one did,
+    rebuilding without popping it reused the same ``SessionLog``, so the "new"
+    session kept appending to the old transcript and the runner replayed its
+    history into the fresh context. Popping unconditionally means the outcome
+    no longer depends on how the session happened to be started.
+    """
     ctx.agent_config.pop("session_id", None)
     ctx.agent_config.pop("session_base_dir", None)
     current_agent = create_agent(
@@ -318,7 +332,7 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ctx.extra_tools,
         ctx.workspace,
         ctx.skills_registry,
-        # /new: the fresh session keeps this terminal and its person.
+        # A fresh session keeps this terminal and its person.
         include_ask_user_question=True,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
@@ -729,30 +743,19 @@ def _cmd_rename(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
+    """Wipe the screen and start a new session — `/new` plus the terminal clear.
+
+    Documented the same way by Codex (``/clear`` = clear the terminal and start
+    a fresh chat, with ``Ctrl+L`` as the "just the screen" alternative), and by
+    Claude Code / opencode, which go as far as making ``/clear`` an alias. The
+    previous transcript is not deleted: it stays on disk and ``/resume``
+    reaches it, which is what makes this safe to type.
+    """
     con = get_console()
     os.system("clear" if os.name != "nt" else "cls")
-    current_agent = create_agent(
-        ctx.agent_config,
-        ctx.extra_tools,
-        ctx.workspace,
-        ctx.skills_registry,
-        # /clear keeps the same interactive session, only the screen changed.
-        include_ask_user_question=True,
-        ask_user_question_callback=ctx.ask_user_question_callback,
-        background_process_registry=ctx.background_processes,
-        peer_session=ctx.peer_session,
-        worktree_binder=ctx.worktree_binder,
-        approve=ctx.approve,
-    )
-    print_header(
-        ctx.agent_config["model_provider"],
-        ctx.agent_config["model_name"],
-        work_dir=ctx.agent_config.get("work_dir"),
-        extra_tools=ctx.extra_tool_names,
-        session_id=current_agent.session_id,
-    )
-    con.print("[info]Screen cleared and conversation reset.[/info]")
-    return {"current_agent": current_agent, "goal_manager": None}
+    result = _start_fresh_session(ctx)
+    con.print("[info]Screen cleared; started a new session.[/info]")
+    return result
 
 
 

@@ -123,7 +123,7 @@ def show_help(skills_registry=None):
     categories = {
         "Session": {
             "/new":             "Start a new chat session",
-            "/clear, /reset":   "Clear screen and reset conversation",
+            "/clear, /reset":   "Clear screen and start a new session (same as /new)",
             "/rename <name>":   "Name current session for easy resume",
             "/resume [target]": "Resume by number, name, or id prefix ('all' lists every project, 'at <uuid>' forks)",
             "/fork [n|uuid]":   "Branch into a new session ('list' shows earlier points)",
