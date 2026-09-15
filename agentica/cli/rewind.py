@@ -85,7 +85,7 @@ def get_turn_checkpointer(tui_state: dict, session_id: str) -> TurnCheckpointer:
 
     The instance must outlive a single turn (begin/snapshot/finalize span one
     ``_process_stream_response`` call), and be recreated when the session id
-    changes (``/newchat``).
+    changes (``/new``).
     """
     tc = tui_state.get("_turn_checkpointer")
     if tc is None or getattr(tc, "session_id", None) != session_id:

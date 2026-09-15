@@ -740,7 +740,7 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
         if ctx.current_agent:
             ctx.current_agent.set_permission_mode(new_mode)
             # Keep the tier on agent_config as well: every rebuild path
-            # (`/resume`, `/model`, `/newchat`, `/clear`) builds the next agent
+            # (`/resume`, `/model`, `/new`, `/clear`) builds the next agent
             # from that dict, and without this the tier silently snapped back
             # to allow-all — a real downgrade of the approval guard.
             ctx.agent_config["permissions"] = new_mode

@@ -40,7 +40,7 @@ from agentica.cli.commands.session import (
     _cmd_compact,
     _cmd_export,
     _cmd_history,
-    _cmd_newchat,
+    _cmd_new,
     _cmd_rename,
     _cmd_resume,
     _cmd_retry,
@@ -60,7 +60,7 @@ from agentica.cli.commands.tools_skills import (
 
 COMMAND_REGISTRY = {
     # Session
-    "/new": (_cmd_newchat, "Start a new chat session"),
+    "/new": (_cmd_new, "Start a new chat session"),
     "/clear": (_cmd_clear, "Clear screen and start a new session"),
     "/reset": (_cmd_clear, "Clear screen and start a new session (alias)"),
     "/history": (_cmd_history, "Show conversation history or full tool details"),

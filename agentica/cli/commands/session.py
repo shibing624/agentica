@@ -296,7 +296,7 @@ def _cmd_history(ctx: CommandContext, cmd_args: str = ""):
 
 
 
-def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
+def _cmd_new(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     old_agent = ctx.current_agent
     tui_state = ctx.tui_state or {}

@@ -128,7 +128,7 @@ class TestClearStartsANewSession(unittest.TestCase):
             plain_new, _ = self._ctx(directory)
 
             clear_built, _ = self._run(plain_clear, cli_session._cmd_clear)
-            new_built, _ = self._run(plain_new, cli_session._cmd_newchat)
+            new_built, _ = self._run(plain_new, cli_session._cmd_new)
 
             self.assertEqual(clear_built, new_built)
             self.assertEqual(clear_built["session_id"], "generated-fresh-id")

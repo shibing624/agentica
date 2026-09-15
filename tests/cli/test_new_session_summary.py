@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentica.cli.commands.context import CommandContext
-from agentica.cli.commands.session import _cmd_newchat
+from agentica.cli.commands.session import _cmd_new
 from agentica.cli.display import format_session_summary
 from agentica.cli.interactive import run_interactive
 from agentica.cli.interactive.console_io import _print_interactive_exit_summary
@@ -68,7 +68,7 @@ def test_format_session_summary_brief_omits_usage_and_resume_hint():
     assert "agentica resume" not in rendered
 
 
-def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch):
+def test_new_prints_summary_then_header_and_resets_session_state(monkeypatch):
     usage = Usage(input_tokens=10, output_tokens=2, total_tokens=12)
     model = SimpleNamespace(usage=usage)
     agent = SimpleNamespace(
@@ -91,7 +91,7 @@ def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch
     monkeypatch.setattr("agentica.cli.commands.session.print_header", print_header)
     monkeypatch.setattr("agentica.cli.commands.session.get_console", lambda: console)
 
-    result = _cmd_newchat(ctx)
+    result = _cmd_new(ctx)
 
     summary = console.print.call_args_list[0].args[0].plain
     assert "Worked for 15m 05s" in summary

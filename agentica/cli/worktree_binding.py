@@ -37,7 +37,7 @@ class WorktreeBinder:
     """The coordinated "move this session into that worktree" operation.
 
     Constructed with getters rather than values: the CLI rebuilds its agent on
-    ``/model``, ``/resume`` and ``/newchat``, and the status bar dict is created
+    ``/model``, ``/resume`` and ``/new``, and the status bar dict is created
     after the first agent. A binder holding stale references would move a
     session that no longer exists.
     """

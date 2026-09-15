@@ -55,7 +55,7 @@ class CommandContext:
     goal_lock: Any = None  # Optional[threading.Lock]
     # Callback the ask_user_question/confirm tools use to read via the TUI input box
     # instead of a blocking input(). Must be preserved across agent rebuilds
-    # (/model, /newchat, /reload, …) or those paths reintroduce the deadlock.
+    # (/model, /new, /skills reload, …) or those paths reintroduce the deadlock.
     ask_user_question_callback: Any = None
     # Interactive tool-approval callback (``Agent.approve``). Same rebuild rule
     # as ask_user_question_callback: a /model switch must keep the TUI closer.

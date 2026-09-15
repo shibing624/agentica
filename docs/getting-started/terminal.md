@@ -343,7 +343,7 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
     换窗。`/compact` 始终强制换窗。旧轮次留在 JSONL，用 `search_session` 查。
     目标 / 约束 / 进度写到旁边的 `<session>.notes.md`。多余参数不再当摘要指令。
 
-### `/new` / `/newchat`
+### `/new`
 开启全新会话（清除消息历史，保留模型和工具配置）。切换前会显示当前会话的
 运行时间、Token 用量和可直接执行的恢复命令：
 
@@ -354,8 +354,6 @@ Worked for 15m 05s
 Token usage: total=4,300 input=4,000 (+ 800 cached) output=300
 To continue this session, run agentica resume c1392649-f07d-4f05-808b-f852c3190236
 ```
-
-`/newchat` 是 `/new` 的别名。
 
 ### `/rename <name>`
 为当前会话设置易识别的名称。名称会持久化，进程异常退出后仍会显示在 `/resume` 列表中：
