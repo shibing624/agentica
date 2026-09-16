@@ -383,7 +383,28 @@ def notify_sink_dispatch(
     ``GoalManager`` on its own callback, and an external consumer has no use for
     the goal loop — one request becoming N runs is an agentica implementation
     detail, not part of the contract.
+
+    Subagent runs are dropped here for the same reason. A subagent is not a
+    session: it is spawned with no ``session_id`` of its own, so its events would
+    be keyed on the process-wide fallback and every consumer would see one phantom
+    session that lights up whenever any child touches a tool, never receives
+    ``session.started`` / ``session.ended``, and merges all concurrent children
+    together. ``parent_run_id`` is set on exactly the subagent runs
+    (``Agent._parent_run_id``, which is also what selects ``RunSource.subagent``),
+    so it is the discriminator rather than a heuristic about the missing id.
+
+    Surfacing child activity on the *parent's* row is the better answer and needs
+    the spawning session id carried down to the child; until that exists, dropping
+    is the honest option — a wrong row is worse than no row.
     """
+    # ``getattr`` rather than attribute access on purpose: this entry point accepts
+    # any record-shaped object and is pinned by
+    # ``test_dispatch_survives_a_record_that_has_no_payload``, which passes a class
+    # carrying only ``event_type``. An observation channel must not be able to
+    # raise into a run.
+    if getattr(record, "parent_run_id", None):
+        return
+
     try:
         event = getattr(record, "event_type", None)
         name = getattr(event, "value", None) or str(event)

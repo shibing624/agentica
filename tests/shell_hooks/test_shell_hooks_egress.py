@@ -65,6 +65,20 @@ def _wait_for(path, count, timeout=10.0):
     raise AssertionError(f"{path} never reached {count} payloads")
 
 
+def _assert_nothing_arrives(path, settle=2.0):
+    """Prove an absence, which a bare ``not path.exists()`` cannot.
+
+    The hook runs in a spawned process, so straight after dispatch the file is
+    missing whether it was suppressed or merely slow — an immediate assertion
+    passes for the wrong reason and hides a regression.
+    """
+    deadline = time.monotonic() + settle
+    while time.monotonic() < deadline:
+        if path.exists():
+            raise AssertionError(f"{path} received {path.read_text(encoding='utf-8')!r}")
+        time.sleep(0.05)
+
+
 def _config(command, *, events=None, enabled=True):
     consumers = []
     if command:
@@ -353,3 +367,85 @@ class TestTheSinkStillWorks:
         sink_mod.goal_finished(agent, session_id="s1")
         doc = _wait_for(out, 1)[0]
         assert doc["hook_event_name"] == "run.completed"
+
+
+class TestSubagentRunsStayOffTheWire:
+    """A subagent is not a session.
+
+    Children are spawned with no ``session_id`` of their own, so their events
+    would be keyed on the process-wide fallback: every consumer would grow one
+    phantom session that lights up whenever any child touches a tool, never gets
+    ``session.started`` / ``session.ended``, and merges all concurrent children
+    into one row. ``tool.*`` is what makes it obvious, because children are
+    tool-heavy.
+    """
+
+    def test_a_subagent_tool_event_reaches_neither_egress(self, tmp_path, monkeypatch):
+        import agentica.notify.sink as sink_mod
+
+        command, out = _recorder(tmp_path)
+        install_hook_egress(_config(command))
+        spy = _SinkSpy()
+        monkeypatch.setattr(sink_mod, "_sink", spy)
+        record = RunEventRecord(
+            run_id="child-run",
+            event_type=RunEventType.tool_started,
+            parent_run_id="parent-run",
+            payload={"tool_name": "read_file", "tool_call_id": "c1"},
+        )
+
+        sink_mod.notify_sink_dispatch(record, session_id=None)
+
+        assert spy.events == []
+        _assert_nothing_arrives(out)
+
+    def test_a_subagent_completion_cannot_be_mistaken_for_the_users_turn(
+        self, tmp_path, monkeypatch
+    ):
+        """The one that would actually mislead: 'done' for work still running.
+
+        The deferral inputs are pinned rather than left to ambient state: with
+        `agent=None`, or with an idle provider left behind by another test, the
+        completion path bails on its own and this would pass whether or not the
+        guard exists.
+        """
+        import agentica.notify.sink as sink_mod
+
+        command, out = _recorder(tmp_path)
+        install_hook_egress(_config(command))
+        monkeypatch.setattr(sink_mod, "_sink", None)
+        monkeypatch.setattr(sink_mod, "_goal_is_driving", lambda agent: False)
+        monkeypatch.setattr(sink_mod, "_nothing_more_queued", lambda: True)
+
+        class _Agent:
+            run_response = None
+            _session_log = None
+            run_context = None
+
+        record = RunEventRecord(
+            run_id="child-run",
+            event_type=RunEventType.run_completed,
+            parent_run_id="parent-run",
+        )
+
+        sink_mod.notify_sink_dispatch(record, session_id=None, agent=_Agent())
+
+        _assert_nothing_arrives(out)
+
+    def test_the_parents_own_events_still_go_out(self, tmp_path, monkeypatch):
+        """The guard keys on lineage, so it must not silence the top-level run."""
+        import agentica.notify.sink as sink_mod
+
+        command, out = _recorder(tmp_path)
+        install_hook_egress(_config(command))
+        monkeypatch.setattr(sink_mod, "_sink", None)
+        record = RunEventRecord(
+            run_id="parent-run",
+            event_type=RunEventType.tool_started,
+            parent_run_id=None,
+            payload={"tool_name": "read_file", "tool_call_id": "c1"},
+        )
+
+        sink_mod.notify_sink_dispatch(record, session_id="s1")
+
+        assert _wait_for(out, 1)[0]["hook_event_name"] == "tool.started"
