@@ -16,14 +16,17 @@ What it does, with no mocks:
     no zombie, and never reaches its own end
   * checks the degradation ladder: missing command, disabled
 """
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 
 ROOT = tempfile.mkdtemp(prefix="agentica-hook-e2e-")
+atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 HOME = os.path.join(ROOT, ".agentica")
 os.makedirs(HOME, exist_ok=True)
 LOG = os.path.join(HOME, "hook-calls.jsonl")
@@ -36,9 +39,9 @@ with open(HOOK, "w") as fh:
         doc = json.load(sys.stdin)
         pathlib.Path({LOG!r}).open("a").write(json.dumps(doc) + "\\n")
         if doc.get("hook_event_name") == "needs.approval":
-            print(json.dumps({{"decision": "allow"}}))
+            print(json.dumps({{"request_id": doc["request_id"], "decision": "allow"}}))
         elif doc.get("hook_event_name") == "needs.input":
-            print(json.dumps({{"answer": "answered by the hook"}}))
+            print(json.dumps({{"request_id": doc["request_id"], "answer": "answered by the hook"}}))
         else:
             print(json.dumps({{"ok": True}}))
     """))
@@ -49,7 +52,9 @@ with open(os.path.join(HOME, "config.yaml"), "w") as fh:
         settings:
           hooks:
             enabled: true
-            command: ["{sys.executable}", "{HOOK}"]
+            consumers:
+              - name: e2e
+                command: ["{sys.executable}", "{HOOK}"]
     """))
 
 env = dict(os.environ, AGENTICA_HOME=HOME)
@@ -67,8 +72,7 @@ code = textwrap.dedent("""
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress, get_hook_egress
     cfg = load_shell_hooks_config()
     print("effective", cfg.effective)
-    print("command", cfg.command)
-    print("events", sorted(cfg.events))
+    print("consumers", [(c.name, c.command) for c in cfg.consumers])
     install_hook_egress(cfg)
     print("installed", get_hook_egress() is not None)
 """)
@@ -109,6 +113,7 @@ code = textwrap.dedent("""
     import asyncio, threading, time
     from agentica.agent.approvals import ApprovalRegistry, PendingApproval
     from agentica.cli.approvals import _offer_approval_to_hook
+    from agentica.cli.interactive.session_state import _InputRequest
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress
 
     install_hook_egress(load_shell_hooks_config())
@@ -118,6 +123,9 @@ code = textwrap.dedent("""
 
     class Agent:
         session_id = "sess-e2e"; work_dir = "/tmp"
+        run_context = None; model = None; session_log = None
+        class _T: permission_mode = "ask"
+        tool_config = _T()
         class _A: source_query = "the user message"
         task_anchor = _A()
 
@@ -135,7 +143,10 @@ code = textwrap.dedent("""
     async def await_it(): return await waiter
     fut = asyncio.run_coroutine_threadsafe(await_it(), loop)
 
-    _offer_approval_to_hook(pending, state, loop)
+    req = _InputRequest(prompt="approve?", kind="approval", approval_id="call_e2e",
+                        approval_pending=pending, hook_request_id="request-e2e")
+    state.input_request = req
+    _offer_approval_to_hook(pending, state, loop, req)
     print("decision:", fut.result(timeout=15))
 """)
 out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
@@ -149,11 +160,11 @@ pidfile = os.path.join(HOME, "slow-hook.pid")
 with open(trickle, "w") as fh:
     fh.write(textwrap.dedent(f"""
         import json, time, pathlib, os, sys
-        json.load(sys.stdin)
+        doc = json.load(sys.stdin)
         pathlib.Path({pidfile!r}).write_text(str(os.getpid()))
         time.sleep(4)
         pathlib.Path({marker!r}).write_text("finished")
-        print(json.dumps({{"decision": "deny"}}))
+        print(json.dumps({{"request_id": doc["request_id"], "decision": "deny"}}))
     """))
 os.chmod(trickle, 0o755)
 with open(os.path.join(HOME, "config.yaml"), "w") as fh:
@@ -161,12 +172,17 @@ with open(os.path.join(HOME, "config.yaml"), "w") as fh:
         settings:
           hooks:
             enabled: true
-            command: ["{sys.executable}", "{trickle}"]
+            consumers:
+              - name: slow
+                command: ["{sys.executable}", "{trickle}"]
+                events:
+                  needs.resolved: false
     """))
 code = textwrap.dedent("""
     import asyncio, threading, time
     from agentica.agent.approvals import ApprovalRegistry, PendingApproval
     from agentica.cli.approvals import _offer_approval_to_hook
+    from agentica.cli.interactive.session_state import _InputRequest
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress
 
     install_hook_egress(load_shell_hooks_config())
@@ -174,7 +190,10 @@ code = textwrap.dedent("""
     threading.Thread(target=loop.run_forever, daemon=True).start()
 
     class Agent:
-        session_id = "s"; work_dir = "/tmp"; task_anchor = None
+        session_id = "s"; work_dir = "/tmp"; task_anchor = None; run_context = None
+        model = None; session_log = None
+        class _T: permission_mode = "ask"
+        tool_config = _T()
     class State:
         current_agent = Agent(); approval_registry = ApprovalRegistry()
     state = State()
@@ -186,7 +205,10 @@ code = textwrap.dedent("""
     async def await_it(): return await waiter
     fut = asyncio.run_coroutine_threadsafe(await_it(), loop)
 
-    _offer_approval_to_hook(pending, state, loop)
+    req = _InputRequest(prompt="approve?", kind="approval", approval_id="c1",
+                        approval_pending=pending, hook_request_id="request-slow")
+    state.input_request = req
+    _offer_approval_to_hook(pending, state, loop, req)
 
     # the user types y in the terminal, on the loop thread (as the TUI does)
     async def decide(): return state.approval_registry.decide("c1", "allow")
@@ -218,12 +240,15 @@ with open(os.path.join(HOME, "config.yaml"), "w") as fh:
         settings:
           hooks:
             enabled: true
-            command: ["/nonexistent/hook-binary-xyz"]
+            consumers:
+              - name: missing
+                command: ["/nonexistent/hook-binary-xyz"]
     """))
 code = textwrap.dedent("""
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress, start_hook_request
     install_hook_egress(load_shell_hooks_config())
-    print("request:", start_hook_request("needs.approval", {"hook_event_name": "needs.approval"}))
+    print("request:", start_hook_request("needs.approval",
+          {"hook_event_name": "needs.approval", "request_id": "missing"}))
 """)
 out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
 print(out.stdout.strip() or out.stderr.strip())
@@ -231,7 +256,7 @@ check("missing command yields no request and no crash", "request: None" in out.s
 
 print("\n== 6. disabled means nothing is forked ==")
 with open(os.path.join(HOME, "config.yaml"), "w") as fh:
-    fh.write("settings:\n  hooks:\n    enabled: false\n    command: [\"/bin/true\"]\n")
+    fh.write("settings:\n  hooks:\n    enabled: false\n    consumers:\n      - name: off\n        command: [\"/bin/true\"]\n")
 before = set(os.listdir("/tmp"))
 code = textwrap.dedent("""
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress, get_hook_egress

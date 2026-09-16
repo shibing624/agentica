@@ -12,30 +12,26 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from agentica.cli.runtime import (
-    get_console,
-    create_agent,
-    _generate_session_id,
+from agentica.cli.commands.context import (
+    IMAGE_EXTENSIONS,
+    CommandContext,
+    queue_ahead_of_goal_continuation,
 )
+from agentica.cli.commands.session import display_resumed_transcript, hydrate_resumed_session
 from agentica.cli.display import (
     show_help,
+)
+from agentica.cli.runtime import (
+    _generate_session_id,
+    create_agent,
+    get_console,
 )
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import local_turn_stamp
-from agentica.peers import DELIVERY_QUEUE, DELIVERY_STEER, PeerMessageRefused
 from agentica.model.message import Message
+from agentica.peers import DELIVERY_QUEUE, DELIVERY_STEER, PeerMessageRefused
 from agentica.run_response import RunResponse
-
-from agentica.cli.commands.context import (
-    CommandContext,
-    IMAGE_EXTENSIONS,
-    queue_ahead_of_goal_continuation,
-)
-from agentica.cli.commands.session import display_resumed_transcript, hydrate_resumed_session
-
-
-
 
 # ==================== Command Handlers ====================
 
@@ -362,7 +358,11 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
             # a branch the user just created is too surprising.
             goal_manager.force_pause_on_resume()
             con.print(f"  [yellow]⊙ Standing goal paused on the branch:[/yellow] {state.objective}")
-    return {"current_agent": current_agent, "goal_manager": goal_manager}
+    return {
+        "current_agent": current_agent,
+        "goal_manager": goal_manager,
+        "session_transition": {"source": "fork", "reason": "fork"},
+    }
 
 
 

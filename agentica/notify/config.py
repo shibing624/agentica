@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 from agentica.global_config import get_setting
 from agentica.utils.log import logger
 
-#: The four run lifecycle events, all non-blocking fire-and-forget notices.
+#: Run and tool lifecycle events, all non-blocking fire-and-forget notices.
 #:
 #: ``needs.*`` is not in here because this channel does not take replies at all
 #: any more: the user's hook command does (``agentica/shell_hooks``), and the
@@ -26,6 +26,8 @@ RUN_EVENTS = (
     "run.completed",
     "run.failed",
     "run.cancelled",
+    "tool.started",
+    "tool.completed",
 )
 
 DEFAULT_SOCKET = "~/Library/Application Support/VPet/notify.sock"

@@ -19,9 +19,9 @@ from agentica.notify.sink import (
     install_sink,
     notify_sink_dispatch,
     reset_sink_for_tests,
-    set_attach_endpoint,
     set_idle_provider,
 )
+from agentica.notify.transport import set_attach_endpoint
 
 __all__ = [
     "NotifyConfig",

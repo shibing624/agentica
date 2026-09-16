@@ -41,6 +41,10 @@ def _agent(*, mode="ask", work_dir="/tmp/work", cancelled=False):
         tools=[],
         user_id="default",
         _cancelled=cancelled,
+        session_id="test-session",
+        run_context=None,
+        model=None,
+        session_log=None,
     )
 
 

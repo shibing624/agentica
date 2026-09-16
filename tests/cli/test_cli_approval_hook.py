@@ -17,8 +17,13 @@ import time
 import pytest
 
 from agentica.agent.approvals import ApprovalRegistry, PendingApproval
-from agentica.cli.approvals import _offer_approval_to_hook
-from agentica.shell_hooks.config import ShellHooksConfig
+from agentica.cli.approvals import (
+    _apply_hook_decision,
+    _offer_approval_to_hook,
+    complete_approval,
+)
+from agentica.cli.interactive.session_state import _InputRequest
+from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig
 from agentica.shell_hooks.egress import install_hook_egress, reset_hook_egress_for_tests
 
 
@@ -44,6 +49,14 @@ class _Agent:
     session_id = "sess-1"
     work_dir = "/w"
     task_anchor = None
+    run_context = None
+    model = None
+    session_log = None
+
+    class _ToolConfig:
+        permission_mode = "ask"
+
+    tool_config = _ToolConfig()
 
 
 class _State:
@@ -66,8 +79,37 @@ def _pending():
 
 def _script(tmp_path, body):
     path = tmp_path / "hook.py"
-    path.write_text(body, encoding="utf-8")
+    path.write_text(
+        "import json,sys\n"
+        "payload=json.load(sys.stdin)\n"
+        "request_id=payload['request_id']\n"
+        + body,
+        encoding="utf-8",
+    )
     return [sys.executable, str(path)]
+
+
+def _config(command):
+    return ShellHooksConfig(
+        enabled=True,
+        consumers=[
+            HookConsumer(
+                name="desktop",
+                command=command,
+                events={"needs.resolved": False},
+            )
+        ],
+    )
+
+
+def _request(pending):
+    return _InputRequest(
+        prompt="approve?",
+        kind="approval",
+        approval_id=pending.tool_call_id,
+        approval_pending=pending,
+        hook_request_id="request-1",
+    )
 
 
 def _decide_on_loop(loop, registry, tool_call_id, decision):
@@ -107,27 +149,33 @@ def _park(loop, registry, pending):
 
 def test_the_hook_answer_resolves_the_parked_approval(tmp_path, loop):
     install_hook_egress(
-        ShellHooksConfig(
-            enabled=True,
-            command=_script(tmp_path, "import json;print(json.dumps({'decision':'allow'}))"),
+        _config(
+            _script(
+                tmp_path,
+                "print(json.dumps({'request_id':request_id,'decision':'allow'}))",
+            )
         )
     )
     registry = ApprovalRegistry()
     future = _park(loop, registry, _pending())
-    _offer_approval_to_hook(_pending(), _State(registry), loop)
+    pending = _pending()
+    _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
     assert future.result(timeout=10) == "allow"
 
 
 def test_a_deny_is_applied_as_a_deny(tmp_path, loop):
     install_hook_egress(
-        ShellHooksConfig(
-            enabled=True,
-            command=_script(tmp_path, "import json;print(json.dumps({'decision':'deny'}))"),
+        _config(
+            _script(
+                tmp_path,
+                "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
+            )
         )
     )
     registry = ApprovalRegistry()
     future = _park(loop, registry, _pending())
-    _offer_approval_to_hook(_pending(), _State(registry), loop)
+    pending = _pending()
+    _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
     assert future.result(timeout=10) == "deny"
 
 
@@ -136,20 +184,20 @@ def test_the_terminal_answering_first_kills_the_loser(tmp_path, loop):
     stand, and the hook must be killed before it can answer — not awaited."""
     marker = tmp_path / "hook_answered"
     install_hook_egress(
-        ShellHooksConfig(
-            enabled=True,
-            command=_script(
+        _config(
+            _script(
                 tmp_path,
-                "import json,time,pathlib;"
+                "import time,pathlib;"
                 "time.sleep(2);"
                 f"pathlib.Path({str(marker)!r}).write_text('answered');"
-                "print(json.dumps({'decision':'deny'}))",
-            ),
+                "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
+            )
         )
     )
     registry = ApprovalRegistry()
     future = _park(loop, registry, _pending())
-    _offer_approval_to_hook(_pending(), _State(registry), loop)
+    pending = _pending()
+    _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
 
     # The user answers in the terminal: this is what the TUI's key handler does.
     assert _decide_on_loop(loop, registry, "call_1", "allow") is True
@@ -161,11 +209,12 @@ def test_the_terminal_answering_first_kills_the_loser(tmp_path, loop):
 
 def test_a_hook_with_no_decision_leaves_the_parked_approval_alone(tmp_path, loop):
     install_hook_egress(
-        ShellHooksConfig(enabled=True, command=_script(tmp_path, "pass"))
+        _config(_script(tmp_path, "pass"))
     )
     registry = ApprovalRegistry()
     future = _park(loop, registry, _pending())
-    _offer_approval_to_hook(_pending(), _State(registry), loop)
+    pending = _pending()
+    _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
 
     time.sleep(1.0)
     assert not future.done(), "an empty reply must not resolve the approval"
@@ -177,24 +226,49 @@ def test_a_hook_with_no_decision_leaves_the_parked_approval_alone(tmp_path, loop
 def test_no_hook_is_a_no_op(tmp_path, loop):
     registry = ApprovalRegistry()
     future = _park(loop, registry, _pending())
-    _offer_approval_to_hook(_pending(), _State(registry), loop)
+    pending = _pending()
+    _offer_approval_to_hook(pending, _State(registry), loop, _request(pending))
     time.sleep(0.4)
     assert not future.done()
     assert _decide_on_loop(loop, registry, "call_1", "deny") is True
     assert future.result(timeout=5) == "deny"
 
 
+def test_a_late_hook_decision_cannot_emit_a_conflicting_resolution(monkeypatch):
+    registry = ApprovalRegistry()
+    state = _State(registry)
+    pending = _pending()
+    req = _request(pending)
+    state.input_request = req
+    assert req.submit("allow", source="terminal")
+    emitted = []
+    monkeypatch.setattr(
+        "agentica.cli.approvals.emit_request_resolved",
+        lambda *args, **kwargs: emitted.append(kwargs),
+    )
+
+    _apply_hook_decision(
+        state,
+        "call_1",
+        "deny",
+        "request-1",
+        req,
+    )
+
+    assert req.result.get_nowait() == "allow"
+    assert emitted == []
+
+
 def test_the_payload_carries_the_anchor_and_the_offered_options(tmp_path, loop):
     out = tmp_path / "seen.json"
     install_hook_egress(
-        ShellHooksConfig(
-            enabled=True,
-            command=_script(
+        _config(
+            _script(
                 tmp_path,
-                "import json,sys,pathlib;"
-                f"pathlib.Path({str(out)!r}).write_text(json.dumps(json.load(sys.stdin)));"
-                "print(json.dumps({'decision':'deny'}))",
-            ),
+                "import pathlib;"
+                f"pathlib.Path({str(out)!r}).write_text(json.dumps(payload));"
+                "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
+            )
         )
     )
     agent = _Agent()
@@ -202,7 +276,8 @@ def test_the_payload_carries_the_anchor_and_the_offered_options(tmp_path, loop):
     state = _State(ApprovalRegistry())
     state.current_agent = agent
     future = _park(loop, state.approval_registry, _pending())
-    _offer_approval_to_hook(_pending(), state, loop)
+    pending = _pending()
+    _offer_approval_to_hook(pending, state, loop, _request(pending))
     assert future.result(timeout=10) == "deny"
 
     import json
@@ -218,8 +293,6 @@ def test_the_payload_carries_the_anchor_and_the_offered_options(tmp_path, loop):
 def test_the_hook_answer_reprints_the_approval_record(tmp_path, loop):
     """The card is layout, not scrollback. Hiding it without a remnant would
     drop the command that was just approved."""
-    from agentica.cli.interactive.session_state import _InputRequest
-
     printed = []
     done = threading.Event()
 
@@ -233,11 +306,11 @@ def test_the_hook_answer_reprints_the_approval_record(tmp_path, loop):
     approvals_mod._print_approval_record = _capture
     try:
         install_hook_egress(
-            ShellHooksConfig(
-                enabled=True,
-                command=_script(
-                    tmp_path, "import json;print(json.dumps({'decision':'allow'}))"
-                ),
+            _config(
+                _script(
+                    tmp_path,
+                    "print(json.dumps({'request_id':request_id,'decision':'allow'}))",
+                )
             )
         )
         pending = _pending()
@@ -248,12 +321,36 @@ def test_the_hook_answer_reprints_the_approval_record(tmp_path, loop):
             kind="approval",
             approval_id="call_1",
             approval_pending=pending,
+            hook_request_id="request-1",
         )
         future = _park(loop, registry, pending)
-        _offer_approval_to_hook(pending, state, loop)
+        _offer_approval_to_hook(pending, state, loop, state.input_request)
         assert future.result(timeout=10) == "allow"
         assert done.wait(5)
         assert printed == [("call_1", "allow")]
         assert state.input_request is None
     finally:
         approvals_mod._print_approval_record = original
+
+
+def test_terminal_resolution_is_announced_once(monkeypatch):
+    pending = _pending()
+    state = _State(ApprovalRegistry())
+    state.input_request = _request(pending)
+    seen = []
+    monkeypatch.setattr(
+        "agentica.cli.approvals.emit_request_resolved",
+        lambda agent, **payload: seen.append(payload),
+    )
+    monkeypatch.setattr("agentica.cli.approvals._print_approval_record", lambda *_: None)
+
+    assert complete_approval(state, "allow") is True
+    assert complete_approval(state, "allow") is False
+    assert seen == [
+        {
+            "request_id": "request-1",
+            "event": "needs.approval",
+            "decided_by": "terminal",
+            "decision": "allow",
+        }
+    ]

@@ -76,8 +76,17 @@ def test_new_prints_summary_then_header_and_resets_session_state(monkeypatch):
         memory=SimpleNamespace(messages=[]),
         session_id="old-session",
         _session_log=_FakeSessionLog(True),
+        work_dir="/tmp",
+        run_context=None,
     )
-    new_agent = SimpleNamespace(model=SimpleNamespace(usage=Usage()), session_id="new-session")
+    new_agent = SimpleNamespace(
+        model=SimpleNamespace(usage=Usage(), id="gpt-5.6-sol"),
+        session_id="new-session",
+        work_dir="/tmp",
+        run_context=None,
+        tool_config=SimpleNamespace(permission_mode="ask"),
+        session_log=None,
+    )
     console = MagicMock()
     print_header = MagicMock()
     tui_state = {"session_started_at": 100.0, "context_tokens": 42, "context_window": 128_000}
@@ -90,7 +99,6 @@ def test_new_prints_summary_then_header_and_resets_session_state(monkeypatch):
     monkeypatch.setattr("agentica.cli.commands.session.create_agent", lambda *args, **kwargs: new_agent)
     monkeypatch.setattr("agentica.cli.commands.session.print_header", print_header)
     monkeypatch.setattr("agentica.cli.commands.session.get_console", lambda: console)
-
     result = _cmd_new(ctx)
 
     summary = console.print.call_args_list[0].args[0].plain
@@ -99,6 +107,7 @@ def test_new_prints_summary_then_header_and_resets_session_state(monkeypatch):
     print_header.assert_called_once()
     assert print_header.call_args.kwargs.get("session_id") == "new-session"
     assert result["current_agent"] is new_agent
+    assert result["session_transition"] == {"source": "new", "reason": "new"}
     assert result["session_started_at"] == 1_005.0
 
 

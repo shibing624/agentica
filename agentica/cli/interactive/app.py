@@ -14,13 +14,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
+from uuid import uuid4
 
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.patch_stdout import patch_stdout
 
+from agentica import config, git_state
+from agentica.cli.approvals import build_interactive_approve, interrupt_approvals
 from agentica.cli.commands.context import (
-    CommandContext,
     IMAGE_EXTENSIONS,
+    CommandContext,
     PendingQueue,
 )
 from agentica.cli.commands.goal import _sync_goal_budget_tui
@@ -29,8 +32,6 @@ from agentica.cli.commands.session import (
     display_resumed_transcript,
     hydrate_resumed_session,
 )
-from agentica.cli.session_resume import enter_work_dir, prepare_startup_resume
-from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.cli.display import (
     display_peer_messages,
     display_user_message,
@@ -38,21 +39,32 @@ from agentica.cli.display import (
     parse_file_mentions,
     print_header,
 )
+from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.cli.runtime import (
     configure_tools,
     create_agent,
     get_console,
     set_active_console,
 )
-from agentica.cli.approvals import build_interactive_approve, interrupt_approvals
-from agentica import config
-from agentica import git_state
+from agentica.cli.session_resume import enter_work_dir, prepare_startup_resume
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
 from agentica.cli.worktree_binding import WorktreeBinder
 from agentica.global_config import get_setting, set_project_profile
-from agentica.notify import install_sink as install_notify_sink
+from agentica.notify import (
+    install_sink as install_notify_sink,
+)
+from agentica.notify import (
+    set_attach_endpoint,
+    set_idle_provider,
+)
 from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
+from agentica.shell_hooks import (
+    emit_request_resolved,
+    emit_session_ended,
+    emit_session_started,
+    install_hook_egress,
+)
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.subagents.loader import load_all_agents
 from agentica.tools.ask_user_question_tool import (
@@ -63,12 +75,12 @@ from agentica.utils.log import logger, restore_console_logging, suppress_console
 from agentica.utils.string import replace_invalid_utf8
 from agentica.workspace import Workspace
 
+from .ask_hook import start_hook_ask
 from .attachments import (
     _deduplicate_image_attachments,
     _detect_file_drop,
     unpack_queue_payload,
 )
-from .ask_hook import start_hook_ask
 from .btw import (
     _background_result_for_agent,
     _print_background_completion,
@@ -187,7 +199,9 @@ def _maybe_start_cron(state: SessionState, agent_config, extra_tools,
             return
         interval = int(get_setting("cron.interval", 60) or 60)
         from agentica.cron.cli_runner import (
-            CliAgentRunner, build_cli_agent_factory, start_cron_thread,
+            CliAgentRunner,
+            build_cli_agent_factory,
+            start_cron_thread,
         )
         factory = build_cli_agent_factory(
             agent_config, extra_tools, workspace, skills_registry)
@@ -246,7 +260,12 @@ def run_interactive(
         if state_ref is None or app_ref is None:
             return input(f"{prompt}\nYour response: ").strip()
 
-        req = _InputRequest(prompt=prompt, options=options)
+        request_id = str(uuid4())
+        req = _InputRequest(
+            prompt=prompt,
+            options=options,
+            hook_request_id=request_id,
+        )
         logger.info(
             f"[ask] armed: prompt={str(prompt)[:80]!r} options={bool(options)}"
         )
@@ -283,8 +302,9 @@ def run_interactive(
         hook = start_hook_ask(
             prompt,
             options,
-            session_id=getattr(state_ref.current_agent, "session_id", None),
-            work_dir=getattr(state_ref.current_agent, "work_dir", None),
+            session_id=state_ref.current_agent.session_id,
+            work_dir=state_ref.current_agent.work_dir,
+            request_id=request_id,
         )
 
         # Block the agent thread until the user submits a line, or Ctrl+C
@@ -335,9 +355,21 @@ def run_interactive(
             # will still respect this because AgentCancelledError subclasses
             # Exception but is explicitly re-raised by the tool infra.
             logger.info("[ask] resolved: CANCELLED")
+            emit_request_resolved(
+                state_ref.current_agent,
+                request_id=request_id,
+                event="needs.input",
+                decided_by="cancelled",
+            )
             raise AgentCancelledError("ask_user_question aborted by user (Ctrl+C)")
         answer_text = str(answer)
         logger.info(f"[ask] resolved: answer={answer_text[:80]!r}")
+        emit_request_resolved(
+            state_ref.current_agent,
+            request_id=request_id,
+            event="needs.input",
+            decided_by=req.resolved_by or "terminal",
+        )
 
         # Handed over exactly as typed. Mapping "3" to that option's text was
         # the last thing standing between the user's keystrokes and the model,
@@ -419,7 +451,8 @@ def run_interactive(
     requested_worktree = agent_config.pop("worktree", None)
     started_in_worktree = False
     if requested_worktree:
-        from agentica.worktrees import WorktreeError, claim_lock, ensure as ensure_worktree
+        from agentica.worktrees import WorktreeError, claim_lock
+        from agentica.worktrees import ensure as ensure_worktree
 
         try:
             bound = ensure_worktree(agent_config.get("work_dir") or os.getcwd(), requested_worktree)
@@ -671,6 +704,7 @@ def run_interactive(
     def _apply_command_result(result: dict):
         """Apply side effects from command handler results."""
         nonlocal skills_registry, extra_tool_names
+        previous_agent = state.current_agent
         if "work_dir" in result:
             # /resume moved us into the directory the session was started in.
             # The handler already chdir'd; everything downstream reads work_dir
@@ -752,6 +786,15 @@ def run_interactive(
             gs = state.goal_manager.load() if state.goal_manager is not None else None
             state.goal_tokens_baseline = gs.tokens_used if gs is not None and gs.status != "cleared" else 0
             _sync_goal_budget_tui(tui_state, state.goal_manager)
+        transition = result.get("session_transition")
+        if transition is not None:
+            if previous_agent is not None:
+                emit_session_ended(previous_agent, reason=transition["reason"])
+            emit_session_started(
+                state.current_agent,
+                source=transition["source"],
+                profile=tui_state["profile_name"],
+            )
 
     app = _setup_tui(
         state,
@@ -783,20 +826,15 @@ def run_interactive(
     # It is off unless the user turned it on (`settings.notify.enabled`).
     install_notify_sink()
 
-    # External hook egress: run the user's own command at lifecycle points, the
-    # way every other coding CLI does. Off unless `settings.hooks.enabled` and a
-    # command are both set; the two egresses are independent and can run at once
-    # (see `notify.sink._fan_out_event`).
-    from agentica.shell_hooks import install_hook_egress
-
+    # External hook egress: run every subscribed consumer at lifecycle points.
+    # Off unless settings.hooks is enabled with at least one active consumer;
+    # notify and hook egresses remain independent.
     install_hook_egress()
 
     # "Done" on the notify wire means "you can come back now", which is only
     # true when nothing else is queued. Several messages typed in a row each run
     # as their own turn, so without this the display announces the first one
     # finished while the rest are still going to run.
-    from agentica.notify import set_idle_provider
-
     # peek_all() rather than len(): PendingQueue exposes no __len__, and the
     # sink treats a raising probe as "idle" — so getting this wrong would
     # disable the check silently instead of failing loudly.
@@ -1304,12 +1342,16 @@ def run_interactive(
             # gets the path in ``transport`` instead of having to locate and
             # parse the presence record (which needs a python3 that can import
             # agentica — a launchd-started .app has none).
-            from agentica.notify import set_attach_endpoint
-
             set_attach_endpoint(str(attach_server.path), state.peer_session.peer_id)
     except Exception as exc:
         logger.debug(f"attach: not serving ({exc})")
         attach_server = None
+
+    emit_session_started(
+        state.current_agent,
+        source="resume" if agent_config.get("_resume_requested") else "startup",
+        profile=tui_state["profile_name"],
+    )
 
     # ── Run the TUI ──
     # Install a SIGQUIT hard-escape. When the main prompt_toolkit event loop is
@@ -1348,9 +1390,9 @@ def run_interactive(
             # The notify envelope must not keep advertising a socket that is
             # gone: a consumer that connects after teardown would hit a dead
             # path and read that as "the session is not running".
-            from agentica.notify import set_attach_endpoint
-
             set_attach_endpoint(None, None)
+        if state.current_agent is not None:
+            emit_session_ended(state.current_agent, reason="exit")
         # Kick Langfuse's ~2s atexit shutdown (span flush + consumer-thread
         # joins) onto a daemon thread NOW so it overlaps with our own teardown
         # (_stop_cron, background_processes.stop, summary print) instead of

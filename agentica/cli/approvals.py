@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple
+from uuid import uuid4
 
 from agentica.agent.approvals import (
     EXECUTE_TOOLS,
@@ -23,6 +24,8 @@ from agentica.agent.approvals import (
     command_class_display,
     make_approve,
 )
+from agentica.shell_hooks import emit_request_resolved
+from agentica.shell_hooks.requests import approval_payload, start_hook_request
 from agentica.utils.log import logger
 
 _DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
@@ -160,16 +163,18 @@ def submit_approval_decision(req: Any, decision: ApprovalDecision) -> bool:
     """
     if not is_approval_request(req) or req.resolved:
         return False
+    if not req.submit(decision):
+        return False
     registry = req.approval_registry
     loop = req.approval_loop
     tool_call_id = req.approval_id or ""
     if registry is None or not tool_call_id:
-        return req.submit(decision)
+        return True
     if loop is not None and loop.is_running():
         loop.call_soon_threadsafe(registry.decide, tool_call_id, decision)
     else:
         registry.decide(tool_call_id, decision)
-    return req.submit(decision)
+    return True
 
 
 def interrupt_approvals(state: Any) -> None:
@@ -179,9 +184,17 @@ def interrupt_approvals(state: Any) -> None:
     req = state.input_request
     pending = req.approval_pending if is_approval_request(req) else None
     if is_approval_request(req):
-        req.cancel()
+        cancelled = req.cancel()
         if state.input_request is req:
             state.input_request = None
+        if cancelled and req.hook_request_id:
+            emit_request_resolved(
+                state.current_agent,
+                request_id=req.hook_request_id,
+                event="needs.approval",
+                decided_by="cancelled",
+                decision="deny",
+            )
     with _ask_state_lock:
         _ask_active[0] = False
     _print_approval_record(pending, "deny")
@@ -203,15 +216,25 @@ def complete_approval(
     if req is None or req.kind != "approval":
         return False
     pending = req.approval_pending
+    ok = submit_approval_decision(req, decision)
+    if not ok:
+        return False
     if state.input_request is req:
         state.input_request = None
     with _ask_state_lock:
         _ask_active[0] = False
     _print_approval_record(pending, decision)
-    ok = submit_approval_decision(req, decision)
+    if req.hook_request_id:
+        emit_request_resolved(
+            state.current_agent,
+            request_id=req.hook_request_id,
+            event="needs.approval",
+            decided_by="terminal",
+            decision=decision,
+        )
     if app is not None:
         app.invalidate()
-    return ok
+    return True
 
 
 def build_noninteractive_approve(agent: Any) -> Callable:
@@ -237,12 +260,16 @@ def _anchor_text(agent: Any) -> Optional[str]:
     session shows what started the work instead of whichever lap is running. This
     is the same text the notify sink sends as ``prompt`` for run events.
     """
-    anchor = getattr(agent, "task_anchor", None)
-    return getattr(anchor, "source_query", None)
+    anchor = agent.task_anchor
+    return anchor.source_query if anchor is not None else None
 
 
 def _offer_approval_to_hook(
-    pending: PendingApproval, state: Any, loop: Any, ui_holder: Optional[dict] = None
+    pending: PendingApproval,
+    state: Any,
+    loop: Any,
+    req: Any,
+    ui_holder: Optional[dict] = None,
 ) -> None:
     """Offer ``pending`` to the user's hook command and return immediately.
 
@@ -255,16 +282,17 @@ def _offer_approval_to_hook(
     same patience rather than a shorter clock of our own invention.
     """
     try:
-        from agentica.shell_hooks.requests import approval_payload, start_hook_request
-
         agent = state.current_agent
+        request_id = req.hook_request_id
+        assert request_id is not None
         request = start_hook_request(
             "needs.approval",
             approval_payload(
                 pending,
-                session_id=getattr(agent, "session_id", None),
-                work_dir=getattr(agent, "work_dir", None),
+                session_id=agent.session_id,
+                work_dir=agent.work_dir,
                 prompt=_anchor_text(agent),
+                request_id=request_id,
             ),
         )
         if request is None:
@@ -289,6 +317,8 @@ def _offer_approval_to_hook(
                                 state,
                                 tool_call_id,
                                 decision,
+                                request_id,
+                                req,
                                 ui_holder,
                             )
                         return
@@ -316,6 +346,8 @@ def _apply_hook_decision(
     state: Any,
     tool_call_id: str,
     decision: str,
+    request_id: str,
+    req: Any,
     ui_holder: Optional[dict] = None,
 ) -> None:
     """Apply a hook answer the same way a keypress does.
@@ -325,23 +357,29 @@ def _apply_hook_decision(
     command the user just approved — the same remnant ``complete_approval``
     writes for a typed y / p / esc.
     """
-    registry = state.approval_registry
-    # False means the id is unknown or was already decided — normally the user
-    # answered in the terminal first. That is a race, not an error.
-    if not registry.decide(tool_call_id, decision):
-        logger.debug(
-            f"shell hooks: approval {tool_call_id} was already decided; "
-            f"the hook answer arrived second"
-        )
-        return
-    req = state.input_request
     pending = (
         req.approval_pending
         if is_approval_request(req) and req.approval_id == tool_call_id
         else None
     )
-    if pending is None:
+    if pending is None or not req.submit(decision, source="hook"):
+        logger.debug(
+            f"shell hooks: approval {tool_call_id} was already decided; "
+            f"the hook answer arrived second"
+        )
         return
+    registry = state.approval_registry
+    # This callback runs on the registry's event loop. The request slot above
+    # is the single race winner; only that winner may resolve the Future.
+    if not registry.decide(tool_call_id, decision):
+        return
+    emit_request_resolved(
+        state.current_agent,
+        request_id=request_id,
+        event="needs.approval",
+        decided_by="hook",
+        decision=decision,
+    )
     if state.input_request is req:
         state.input_request = None
     from agentica.cli.interactive.console_io import _ask_active, _ask_state_lock
@@ -349,7 +387,6 @@ def _apply_hook_decision(
     with _ask_state_lock:
         _ask_active[0] = False
     _print_approval_record(pending, decision)
-    req.submit(decision)
     app = (ui_holder or {}).get("app")
     if app is not None:
         app.invalidate()
@@ -366,6 +403,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
     def publish(pending: PendingApproval) -> None:
         loop = asyncio.get_running_loop()
         state.approval_loop = loop
+        request_id = str(uuid4())
         req = _InputRequest(
             prompt=format_approval_prompt(pending),
             kind="approval",
@@ -374,6 +412,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
             approval_loop=loop,
             approval_registry=state.approval_registry,
             approval_pending=pending,
+            hook_request_id=request_id,
         )
         with _ask_state_lock:
             state.input_request = req
@@ -386,7 +425,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         # offered to a desktop app, where the user may answer instead — the same
         # answer, applied the same way. The app has no authority of its own, and
         # with no hook configured this is a no-op.
-        _offer_approval_to_hook(pending, state, loop, ui_holder)
+        _offer_approval_to_hook(pending, state, loop, req, ui_holder)
 
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",

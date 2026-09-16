@@ -10,7 +10,7 @@ import time
 import pytest
 
 from agentica.cli.interactive.ask_hook import start_hook_ask
-from agentica.shell_hooks.config import ShellHooksConfig
+from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig
 from agentica.shell_hooks.egress import install_hook_egress, reset_hook_egress_for_tests
 
 
@@ -30,7 +30,7 @@ class _Request:
         self.result = queue.Queue(maxsize=1)
         self.resolved = False
 
-    def submit(self, answer: str) -> bool:
+    def submit(self, answer: str, *, source: str = "terminal") -> bool:
         if self.resolved:
             return False
         try:
@@ -44,16 +44,32 @@ class _Request:
 
 def _script(tmp_path, body, name="hook.py"):
     path = tmp_path / name
-    path.write_text(body, encoding="utf-8")
+    path.write_text(
+        "import json,sys\n"
+        "payload=json.load(sys.stdin)\n"
+        "request_id=payload['request_id']\n"
+        + body,
+        encoding="utf-8",
+    )
     return [sys.executable, str(path)]
 
 
 def _install(command, **kw):
-    install_hook_egress(ShellHooksConfig(enabled=True, command=command, **kw))
+    install_hook_egress(
+        ShellHooksConfig(
+            enabled=True,
+            consumers=[HookConsumer(name="desktop", command=command, **kw)],
+        )
+    )
 
 
 def test_the_hook_answer_reaches_the_slot(tmp_path):
-    _install(_script(tmp_path, "import json;print(json.dumps({'answer':'from hook'}))"))
+    _install(
+        _script(
+            tmp_path,
+            "print(json.dumps({'request_id':request_id,'answer':'from hook'}))",
+        )
+    )
     hook = start_hook_ask("which package?")
     assert hook is not None
     req = _Request()
@@ -68,7 +84,13 @@ def test_the_hook_answer_reaches_the_slot(tmp_path):
 
 def test_the_typed_answer_wins_when_it_arrives_first(tmp_path):
     """The user typed; the hook's answer is then second and must not overwrite."""
-    _install(_script(tmp_path, "import json,time;time.sleep(1.0);print(json.dumps({'answer':'from hook'}))"))
+    _install(
+        _script(
+            tmp_path,
+            "import time;time.sleep(1.0);"
+            "print(json.dumps({'request_id':request_id,'answer':'from hook'}))",
+        )
+    )
     hook = start_hook_ask("which?")
     assert hook is not None
     req = _Request()
@@ -132,9 +154,9 @@ def test_the_question_is_offered_with_its_options(tmp_path):
     _install(
         _script(
             tmp_path,
-            "import json,sys,pathlib;"
-            f"pathlib.Path({str(out)!r}).write_text(json.dumps(json.load(sys.stdin)));"
-            "print(json.dumps({'answer':'first'}))",
+            "import pathlib;"
+            f"pathlib.Path({str(out)!r}).write_text(json.dumps(payload));"
+            "print(json.dumps({'request_id':request_id,'answer':'first'}))",
         )
     )
     hook = start_hook_ask("which package?", ["date-fns", "dayjs"], session_id="s1")
@@ -162,7 +184,7 @@ def test_a_hook_that_prints_a_lot_does_not_wedge_the_poll(tmp_path):
         _script(
             tmp_path,
             "print('x'*200000);"
-            "import json;print(json.dumps({'answer':'late'}))",
+            "print(json.dumps({'request_id':request_id,'answer':'late'}))",
         )
     )
     hook = start_hook_ask("which?")

@@ -5,13 +5,16 @@ consumer cannot affect the sink or the run."""
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
+import threading
 import time
 
 import pytest
 
 from agentica.run_events import RunEventRecord, RunEventType
-from agentica.shell_hooks.config import ShellHooksConfig
+from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig
 from agentica.shell_hooks.egress import (
     get_hook_egress,
     hook_egress_dispatch,
@@ -35,10 +38,10 @@ class _SinkSpy:
         self.events.append((event, payload))
 
 
-def _recorder(tmp_path):
+def _recorder(tmp_path, name="hook"):
     """A hook command that appends each payload to a file."""
-    out = tmp_path / "seen.jsonl"
-    script = tmp_path / "hook.py"
+    out = tmp_path / f"{name}.jsonl"
+    script = tmp_path / f"{name}.py"
     script.write_text(
         "import json,sys\n"
         f"open({str(out)!r},'a').write(json.dumps(json.load(sys.stdin))+'\\n')\n",
@@ -62,16 +65,25 @@ def _wait_for(path, count, timeout=10.0):
     raise AssertionError(f"{path} never reached {count} payloads")
 
 
+def _config(command, *, events=None, enabled=True):
+    consumers = []
+    if command:
+        consumers.append(
+            HookConsumer(name="desktop", command=command, events=events or {})
+        )
+    return ShellHooksConfig(enabled=enabled, consumers=consumers)
+
+
 class TestInstall:
     def test_disabled_wires_nothing(self):
         assert install_hook_egress(ShellHooksConfig(enabled=False)) is None
         assert get_hook_egress() is None
 
     def test_enabled_without_a_command_wires_nothing(self):
-        assert install_hook_egress(ShellHooksConfig(enabled=True, command=[])) is None
+        assert install_hook_egress(_config([])) is None
 
     def test_enabled_with_a_command_is_wired(self):
-        cfg = install_hook_egress(ShellHooksConfig(enabled=True, command=["/bin/true"]))
+        cfg = install_hook_egress(_config(["/bin/true"]))
         assert cfg is not None
         assert get_hook_egress() is not None
 
@@ -94,7 +106,7 @@ class TestInstall:
             return real_popen(*args, **kwargs)
 
         monkeypatch.setattr(subprocess, "Popen", spy)
-        install_hook_egress(ShellHooksConfig(enabled=True, command=[]))
+        install_hook_egress(_config([]))
         hook_egress_dispatch("run.started", {}, session_id="s")
         hook_egress_dispatch("run.completed", {}, session_id="s")
         assert start_hook_request("needs.approval", {}) is None
@@ -105,7 +117,7 @@ class TestInstall:
 class TestDispatch:
     def test_an_event_reaches_the_command(self, tmp_path):
         command, out = _recorder(tmp_path)
-        install_hook_egress(ShellHooksConfig(enabled=True, command=command))
+        install_hook_egress(_config(command))
         hook_egress_dispatch(
             "run.started",
             {"agent_name": "Agent", "prompt": "do the thing"},
@@ -122,7 +134,7 @@ class TestDispatch:
     def test_a_switched_off_event_is_not_sent(self, tmp_path):
         command, out = _recorder(tmp_path)
         install_hook_egress(
-            ShellHooksConfig(enabled=True, command=command, events={"run.started": False})
+            _config(command, events={"run.started": False})
         )
         hook_egress_dispatch("run.started", {}, session_id="s")
         hook_egress_dispatch("run.completed", {}, session_id="s")
@@ -133,19 +145,154 @@ class TestDispatch:
         hook_egress_dispatch("run.started", {}, session_id="s")  # must not raise
 
     def test_a_broken_command_is_swallowed(self):
-        install_hook_egress(ShellHooksConfig(enabled=True, command=["/nonexistent/xyz"]))
+        install_hook_egress(_config(["/nonexistent/xyz"]))
         hook_egress_dispatch("run.started", {}, session_id="s")  # must not raise
 
     def test_a_hanging_command_does_not_block_the_caller(self, tmp_path):
         install_hook_egress(
-            ShellHooksConfig(
-                enabled=True,
-                command=[sys.executable, "-c", "import time; time.sleep(30)"],
-            )
+            _config([sys.executable, "-c", "import time; time.sleep(30)"])
         )
         started = time.monotonic()
         hook_egress_dispatch("run.started", {}, session_id="s")
         assert time.monotonic() - started < 1.0
+
+    def test_a_hanging_notice_consumer_is_killed_and_reaped(
+        self, tmp_path, monkeypatch
+    ):
+        import agentica.shell_hooks.egress as egress_mod
+
+        pid_file = tmp_path / "pid"
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import json,os,pathlib,sys,time;"
+                "json.load(sys.stdin);"
+                f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()));"
+                "time.sleep(30)"
+            ),
+        ]
+        monkeypatch.setattr(egress_mod, "NOTICE_PROCESS_TIMEOUT_SECONDS", 0.05)
+        install_hook_egress(_config(command))
+        hook_egress_dispatch("run.started", {}, session_id="s")
+        deadline = time.monotonic() + 5
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("notice consumer was not killed and reaped")
+
+    def test_process_exit_kills_outstanding_notice_consumers(self, tmp_path):
+        """Daemon cleanup dies with the parent; start_new_session children
+        would otherwise outlive a CLI / --query process that has already
+        exited. atexit must kill the group."""
+        pid_file = tmp_path / "pid"
+        child = tmp_path / "exiting_parent.py"
+        hang = tmp_path / "hang.py"
+        hang.write_text(
+            "import json, os, pathlib, sys, time\n"
+            "json.load(sys.stdin)\n"
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+            "time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        child.write_text(
+            "from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig\n"
+            "from agentica.shell_hooks.egress import hook_egress_dispatch, install_hook_egress\n"
+            "import time\n"
+            "from pathlib import Path\n"
+            f"pid_file = Path({str(pid_file)!r})\n"
+            "install_hook_egress(ShellHooksConfig(\n"
+            "    enabled=True,\n"
+            "    consumers=[HookConsumer(\n"
+            f"        name='hang', command=[{sys.executable!r}, {str(hang)!r}]\n"
+            "    )],\n"
+            "))\n"
+            "hook_egress_dispatch('run.started', {}, session_id='s')\n"
+            "deadline = time.monotonic() + 5\n"
+            "while time.monotonic() < deadline and not pid_file.exists():\n"
+            "    time.sleep(0.01)\n"
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+        completed = subprocess.run(
+            [sys.executable, str(child)],
+            cwd=str(tmp_path),
+            env={**os.environ, "AGENTICA_HOOKS_ENABLED": "1"},
+            timeout=15,
+        )
+        assert completed.returncode == 0
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("notice consumer outlived the parent process")
+
+    def test_each_subscribed_consumer_receives_the_event(self, tmp_path):
+        first_command, first_out = _recorder(tmp_path, "first")
+        second_command, second_out = _recorder(tmp_path, "second")
+        install_hook_egress(
+            ShellHooksConfig(
+                enabled=True,
+                consumers=[
+                    HookConsumer(name="first", command=first_command),
+                    HookConsumer(name="second", command=second_command),
+                ],
+            )
+        )
+        hook_egress_dispatch("run.started", {}, session_id="s")
+        assert _wait_for(first_out, 1)[0]["hook_event_name"] == "run.started"
+        assert _wait_for(second_out, 1)[0]["hook_event_name"] == "run.started"
+
+    def test_dispatch_lazily_installs_for_noninteractive_runs(self, tmp_path, monkeypatch):
+        import agentica.shell_hooks.egress as egress_mod
+
+        command, out = _recorder(tmp_path, "lazy")
+        monkeypatch.setattr(
+            egress_mod,
+            "load_shell_hooks_config",
+            lambda: _config(command),
+        )
+        hook_egress_dispatch("run.started", {}, session_id="s")
+        assert _wait_for(out, 1)[0]["hook_event_name"] == "run.started"
+
+    def test_concurrent_lazy_install_reads_config_once(self, monkeypatch):
+        import agentica.shell_hooks.egress as egress_mod
+
+        calls = []
+
+        def load():
+            calls.append(True)
+            time.sleep(0.05)
+            return _config(["/bin/true"])
+
+        monkeypatch.setattr(egress_mod, "load_shell_hooks_config", load)
+        barrier = threading.Barrier(8)
+        threads = [
+            threading.Thread(
+                target=lambda: (
+                    barrier.wait(),
+                    egress_mod.ensure_hook_egress_installed(),
+                )
+            )
+            for _ in range(8)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        assert calls == [True]
 
 
 class TestTheSinkStillWorks:
@@ -154,7 +301,7 @@ class TestTheSinkStillWorks:
         import agentica.notify.sink as sink_mod
 
         command, out = _recorder(tmp_path)
-        install_hook_egress(ShellHooksConfig(enabled=True, command=command))
+        install_hook_egress(_config(command))
         spy = _SinkSpy()
         monkeypatch.setattr(sink_mod, "_sink", spy)
         record = RunEventRecord(
@@ -173,7 +320,7 @@ class TestTheSinkStillWorks:
         import agentica.notify.sink as sink_mod
 
         command, out = _recorder(tmp_path)
-        install_hook_egress(ShellHooksConfig(enabled=True, command=command))
+        install_hook_egress(_config(command))
         monkeypatch.setattr(sink_mod, "_sink", None)
         record = RunEventRecord(run_id="r1", event_type=RunEventType.run_started)
         sink_mod.notify_sink_dispatch(record, session_id="s1")
@@ -184,13 +331,14 @@ class TestTheSinkStillWorks:
         sink does — not one event per lap."""
         import agentica.notify.sink as sink_mod
         command, out = _recorder(tmp_path)
-        install_hook_egress(ShellHooksConfig(enabled=True, command=command))
+        install_hook_egress(_config(command))
         monkeypatch.setattr(sink_mod, "_sink", None)
         monkeypatch.setattr(sink_mod, "_goal_is_driving", lambda agent: True)
 
         class _Agent:
             run_response = None
             _session_log = None
+            run_context = None
 
         agent = _Agent()
         record = RunEventRecord(

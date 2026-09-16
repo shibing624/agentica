@@ -21,8 +21,12 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, Optional, Sequence
+from uuid import uuid4
 
+from agentica.notify.transport import build_transport
 from agentica.notify.wire import ALLOWED_DECISIONS, clip_text
+
+PROCESS_SESSION_ID = f"process-{uuid4()}"
 
 
 def build_payload(
@@ -31,6 +35,7 @@ def build_payload(
     session_id: Optional[str] = None,
     work_dir: Optional[str] = None,
     run_id: Optional[str] = None,
+    request_id: Optional[str] = None,
     prompt: Optional[str] = None,
     options: Optional[Sequence[str]] = None,
     extra: Optional[Dict[str, Any]] = None,
@@ -41,19 +46,21 @@ def build_payload(
     turn, the goal objective in a goal-driven session. A consumer may display it
     but must not read it as "what the user just typed".
     """
-    import os
-
-    doc: Dict[str, Any] = {"hook_event_name": event}
-    if session_id:
-        doc["session_id"] = str(session_id)
+    doc: Dict[str, Any] = {
+        "hook_event_name": event,
+        "session_id": str(session_id or PROCESS_SESSION_ID),
+        "transport": build_transport(work_dir),
+    }
     clipped = clip_text(prompt)
     if clipped:
         doc["prompt"] = clipped
-    cwd = work_dir or os.getcwd()
+    cwd = doc["transport"]["cwd"]
     if cwd:
         doc["cwd"] = str(cwd)
     if run_id:
         doc["run_id"] = str(run_id)
+    if request_id:
+        doc["request_id"] = str(request_id)
     if options:
         doc["options"] = [str(o) for o in options]
     for key, value in (extra or {}).items():
@@ -63,7 +70,12 @@ def build_payload(
     return doc
 
 
-def parse_reply(stdout: Optional[str], event: str) -> Optional[Dict[str, Any]]:
+def parse_reply(
+    stdout: Optional[str],
+    event: str,
+    *,
+    request_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """A usable reply from the hook's stdout, or None for "no decision".
 
     Exit code is not consulted: a hook that fails to reply and one that declines
@@ -75,6 +87,8 @@ def parse_reply(stdout: Optional[str], event: str) -> Optional[Dict[str, Any]]:
     body = _first_json_document(stdout)
     if not isinstance(body, dict):
         # Includes malformed output and JSON that is not an object.
+        return None
+    if request_id and body.get("request_id") != request_id:
         return None
 
     if event == "needs.approval":

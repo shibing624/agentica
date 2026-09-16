@@ -56,6 +56,19 @@ class TestPayload:
         doc = build_payload("run.started", session_id="s1")
         assert doc["cwd"] == str(tmp_path)
 
+    def test_session_id_and_process_identity_are_always_present(self):
+        doc = build_payload("run.started")
+        assert doc["session_id"].startswith("process-")
+        assert doc["transport"]["ppid"] > 0
+        assert doc["transport"]["cwd"] == doc["cwd"]
+
+    def test_transport_tolerates_stdin_without_fileno(self, monkeypatch):
+        import agentica.notify.transport as transport_mod
+
+        monkeypatch.setattr(transport_mod.sys, "stdin", object())
+        doc = build_payload("run.started", work_dir="/tmp")
+        assert "tty" not in doc["transport"]
+
 
 class TestReply:
     def test_a_decision(self):
@@ -90,3 +103,11 @@ class TestReply:
 
     def test_trailing_noise_is_tolerated_when_a_document_is_present(self):
         assert parse_reply('{"decision": "deny"}\n', "needs.approval") == {"decision": "deny"}
+
+    def test_request_id_must_match(self):
+        reply = '{"request_id":"r1","decision":"allow"}'
+        assert parse_reply(reply, "needs.approval", request_id="r1") == {
+            "decision": "allow"
+        }
+        assert parse_reply(reply, "needs.approval", request_id="r2") is None
+        assert parse_reply('{"decision":"allow"}', "needs.approval", request_id="r1") is None

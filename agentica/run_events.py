@@ -8,11 +8,9 @@ The legacy `RunEvent` enum in `run_response.py` was streaming-content-centric
 typed* event record that hooks, tracing exporters and the gateway can all
 consume without re-parsing free-text content.
 
-`RunEventType` is the union of legacy stream events plus the new lifecycle
-events the Runner now emits explicitly (`run.failed`, `run.cancelled`,
-`tool.failed`, `subagent.spawned`, ...). Keep additions backward-compatible:
-existing CLI display reads `event` strings, so we ALSO keep the old names in
-`RunEvent`.
+`RunEventType` is the flat lifecycle surface the Runner emits explicitly.
+Legacy streaming events remain in `RunEvent`; values are added here only with
+a real Runner emission site.
 
 This module is intentionally dependency-free so it can be imported by any
 layer (Runner / Workspace / Gateway / tests).
@@ -45,6 +43,10 @@ class RunEventType(str, Enum):
     run_completed = "run.completed"
     run_failed = "run.failed"
     run_cancelled = "run.cancelled"
+
+    # Tool lifecycle (wired at the shared streaming/non-streaming executor).
+    tool_started = "tool.started"
+    tool_completed = "tool.completed"
 
     # Standing goal loop (emitted from agentica.goals.GoalManager via
     # an optional event_callback wired by the CLI / SDK consumer).

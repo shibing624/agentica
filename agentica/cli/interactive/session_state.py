@@ -42,8 +42,10 @@ class _InputRequest:
     approval_loop: Any = None
     approval_registry: Any = None
     approval_pending: Any = None
+    hook_request_id: Optional[str] = None
+    resolved_by: Optional[str] = None
 
-    def submit(self, answer: str) -> bool:
+    def submit(self, answer: str, *, source: str = "terminal") -> bool:
         """Deliver the user's answer exactly once.
 
         Returns ``True`` only when this call won the race to resolve the
@@ -54,6 +56,7 @@ class _InputRequest:
         try:
             self.result.put_nowait(answer)
             self.resolved = True
+            self.resolved_by = source
             return True
         except queue.Full:
             self.resolved = True
@@ -66,6 +69,7 @@ class _InputRequest:
         try:
             self.result.put_nowait(_InputRequest.CANCELLED)
             self.resolved = True
+            self.resolved_by = "cancelled"
             return True
         except queue.Full:
             # Someone already answered — nothing to unblock.

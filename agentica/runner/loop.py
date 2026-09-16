@@ -10,51 +10,77 @@ import asyncio
 import random
 import time
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
-    cast,
     Dict,
     List,
     Optional,
     Sequence,
-    TYPE_CHECKING,
     Union,
+    cast,
 )
 from uuid import uuid4
 
 from pydantic import BaseModel
 
-from agentica.utils.log import logger, _run_id_var, _parent_run_id_var, _short
-from agentica.utils.string import replace_invalid_utf8
 from agentica.agent.history_filter import (
     _text_from_content_blocks,
     strip_tool_artifacts_from_memory,
 )
 from agentica.cost_tracker import CostTracker
-from agentica.hooks import RunHooks, _CompositeAgentHooks, _CompositeRunHooks
-from agentica.model.base import Model
-from agentica.model.loop_state import LoopState
-from agentica.model.message import Message
-from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_response import AgentCancelledError, RunBreakReason, RunEvent, RunResponse
-from agentica.run_context import RunContext, RunSource, TaskAnchor
-from agentica.run_events import RunEventType
-from agentica.memory import AgentRun
-from agentica.utils.tokens import count_tokens
-from agentica.utils.langfuse_integration import langfuse_trace_context
-from agentica.tools.base import FunctionCall
 from agentica.guardrails.agent import (
     normalize_input_for_guardrails,
     run_input_guardrails,
     run_output_guardrails,
 )
 from agentica.guardrails.core import GuardrailTriggered
+from agentica.hooks import RunHooks, _CompositeAgentHooks, _CompositeRunHooks
+from agentica.memory import AgentRun
+from agentica.model.base import Model
+from agentica.model.loop_state import LoopState
+from agentica.model.message import Message
+from agentica.model.response import ModelResponse, ModelResponseEvent
+from agentica.notify.wire import clip_text
+from agentica.run_context import RunContext, RunSource, TaskAnchor
+from agentica.run_events import RunEventType
+from agentica.run_response import (
+    AgentCancelledError,
+    RunBreakReason,
+    RunEvent,
+    RunResponse,
+)
+from agentica.security.redact import redact_sensitive_text
+from agentica.tools.base import FunctionCall
+from agentica.utils.langfuse_integration import langfuse_trace_context
+from agentica.utils.log import _parent_run_id_var, _run_id_var, _short, logger
+from agentica.utils.string import replace_invalid_utf8
+from agentica.utils.tokens import count_tokens
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
 
-from agentica.runner.types import LoopBreak, ToolHandlingResult
 from agentica.compression.evict import is_irreducible_prompt_too_long
+from agentica.runner.types import LoopBreak, ToolHandlingResult
+
+
+def _tool_preview(tool_args: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Small identifier for an external status row, never a full write payload."""
+    if not tool_args:
+        return None
+    for key in (
+        "command",
+        "path",
+        "file_path",
+        "query",
+        "url",
+        "label",
+        "description",
+    ):
+        value = tool_args.get(key)
+        if value not in (None, "", []):
+            return clip_text(redact_sensitive_text(str(value), level="strict"))
+    return None
 
 
 def _sanitize_run_input(value: Any) -> Any:
@@ -254,10 +280,36 @@ class LoopMixin:
         This is the Runner-owned tool execution method. It wraps Model.run_function_calls()
         with proper hook dispatch using the Agent reference directly (no _agent_ref needed).
         """
+        def _emit_tool_event(
+            event: str,
+            function_call: FunctionCall,
+            ok: Optional[bool],
+            duration_seconds: Optional[float],
+            error: Optional[str],
+        ) -> None:
+            payload: Dict[str, Any] = {
+                "tool_name": function_call.function.name,
+                "tool_call_id": function_call.call_id or "",
+            }
+            preview = _tool_preview(function_call.arguments)
+            if preview:
+                payload["preview"] = preview
+            if event == "started":
+                self._emit_event(RunEventType.tool_started, payload)
+                return
+            payload["ok"] = bool(ok)
+            payload["duration_seconds"] = duration_seconds
+            if error:
+                payload["error"] = clip_text(
+                    redact_sensitive_text(error, level="strict")
+                )
+            self._emit_event(RunEventType.tool_completed, payload)
+
         async for tool_response in model.run_function_calls(
             function_calls=function_calls,
             function_call_results=function_call_results,
             tool_role=tool_role,
+            tool_event_callback=_emit_tool_event,
         ):
             yield tool_response
 

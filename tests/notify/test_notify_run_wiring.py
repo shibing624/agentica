@@ -10,10 +10,8 @@ here is that the envelope actually leaves the process.
 
 from __future__ import annotations
 
-import asyncio
 import time
 
-import httpx
 import pytest
 
 from agentica.agent import Agent
@@ -22,7 +20,6 @@ from agentica.notify import install_sink, reset_sink_for_tests
 from agentica.notify.config import NotifyConfig
 from agentica.run_events import RunEventType
 from agentica.runner import Runner
-
 from tests.notify.test_notify_sink import _FakeDesktop
 
 
@@ -107,6 +104,46 @@ class TestRunLifecycleReachesTheDesktop:
 
             assert len(seen) == 1, "the in-process callback must still fire"
             assert len(desktop.requests) == 1, "and the sink must get it too"
+        finally:
+            desktop.close()
+
+    def test_tool_metadata_reaches_the_desktop(self):
+        desktop = _FakeDesktop()
+        try:
+            install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
+            agent = Agent(
+                name="Probe",
+                model=OpenAIChat(id="gpt-4o-mini", api_key="fake"),
+                session_id="sess-1",
+            )
+            runner = Runner(agent)
+
+            class _Ctx:
+                run_id = "run-1"
+                agent_id = "a"
+                parent_run_id = None
+
+            agent.run_context = _Ctx()
+            runner._emit_event(
+                RunEventType.tool_completed,
+                {
+                    "tool_name": "read_file",
+                    "tool_call_id": "call-1",
+                    "preview": "/tmp/a.txt",
+                    "ok": True,
+                    "duration_seconds": 0.2,
+                },
+            )
+            _drain(desktop, 1)
+
+            body = desktop.requests[0]["json"]
+            assert body["event"] == "tool.completed"
+            payload = body["payload"]
+            assert payload["tool_name"] == "read_file"
+            assert payload["tool_call_id"] == "call-1"
+            assert payload["preview"] == "/tmp/a.txt"
+            assert payload["ok"] is True
+            assert payload["duration_seconds"] == 0.2
         finally:
             desktop.close()
 

@@ -23,6 +23,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from typing import Dict, List, Optional, Sequence
 
 from agentica.utils.log import logger
@@ -37,15 +38,19 @@ _READ_CHUNK = 4096
 
 def kill_process_group(proc: Optional[subprocess.Popen]) -> None:
     """SIGKILL the whole group. Safe to call twice, and safe after exit."""
-    if proc is None or proc.poll() is not None:
+    if proc is None:
         return
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        # The group id is the session leader's pid. Do not gate this on the
+        # leader's returncode: a grandchild may still own stdout after the
+        # original hook has exited.
+        os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
-        try:
-            proc.kill()
-        except Exception:  # already gone
-            pass
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
 
 class HookProcess:
@@ -71,6 +76,7 @@ class HookProcess:
         self._stdout = ""
         self._done = threading.Event()
         self._killed = False
+        self._completed_at: Optional[float] = None
 
     @property
     def pid(self) -> Optional[int]:
@@ -88,6 +94,12 @@ class HookProcess:
     @property
     def finished(self) -> bool:
         return self._done.is_set()
+
+    @property
+    def completed_at(self) -> float:
+        """Monotonic timestamp when this consumer produced its final stdout."""
+        assert self._completed_at is not None
+        return self._completed_at
 
     @property
     def returncode(self) -> Optional[int]:
@@ -149,12 +161,13 @@ class HookProcess:
         """Read until one JSON document has arrived, the pipe closes, or the cap."""
         proc = self._proc
         if proc is None or proc.stdout is None:
+            self._completed_at = time.monotonic()
             self._done.set()
             return
         buf = b""
         try:
             while len(buf) < MAX_OUTPUT_BYTES:
-                chunk = proc.stdout.read(_READ_CHUNK)
+                chunk = os.read(proc.stdout.fileno(), _READ_CHUNK)
                 if not chunk:
                     break
                 buf += chunk
@@ -164,6 +177,7 @@ class HookProcess:
             logger.debug(f"shell hooks: stdout read failed: {exc}")
         finally:
             self._stdout = buf.decode("utf-8", errors="replace")
+            self._completed_at = time.monotonic()
             self._done.set()
 
     def wait(self, timeout: Optional[float] = None) -> bool:

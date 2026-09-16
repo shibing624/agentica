@@ -33,10 +33,7 @@ contract for the in-process callback.
 
 from __future__ import annotations
 
-import json
-import os
 import queue
-import sys
 import threading
 from typing import Any, Callable, Dict, Optional
 
@@ -48,6 +45,11 @@ from agentica.notify.config import (
     NotifyConfig,
     load_notify_config,
 )
+from agentica.notify.transport import (
+    build_transport,
+    reset_transport_for_tests,
+)
+
 #: The payload discipline lives in ``wire`` because the hook egress puts the
 #: same strings on its own wire. Aliased to the old private name so the call
 #: sites below read unchanged.
@@ -63,15 +65,9 @@ _EVENT_TITLES = {
     "run.completed": "run completed",
     "run.failed": "run failed",
     "run.cancelled": "run cancelled",
+    "tool.started": "tool started",
+    "tool.completed": "tool completed",
 }
-
-def _tty_name() -> Optional[str]:
-    """The controlling terminal name, best effort. Used only to jump back."""
-    try:
-        return os.ttyname(sys.stdin.fileno())
-    except Exception:
-        return None
-
 
 class NotifySink:
     """Durable sink instance. Built once per process; see ``install_sink``.
@@ -225,22 +221,7 @@ class NotifySink:
     ) -> dict:
         import time as _time
 
-        transport: Dict[str, Any] = {"ppid": os.getppid()}
-        cwd = work_dir or os.getcwd()
-        if cwd:
-            transport["cwd"] = str(cwd)
-        tty = _tty_name()
-        if tty:
-            transport["tty"] = tty
-        # Where a client attaches to this session, when an attach point is
-        # listening. Carried here because this block already answers "how does
-        # an external process find this session" (ppid / cwd / tty), and the
-        # alternative is every consumer recomputing the cache path and reading
-        # the presence record itself — which a launchd-started .app cannot do
-        # without a python3 that can import agentica.
-        endpoint = _attach_endpoint
-        if endpoint:
-            transport.update(endpoint)
+        transport = build_transport(work_dir)
         body = dict(payload or {})
         body.setdefault("title", _EVENT_TITLES.get(event, event)[:40])
         return {
@@ -267,27 +248,6 @@ class NotifySink:
 
 _sink: Optional[NotifySink] = None
 _lock = threading.Lock()
-#: Set by the process that runs both an interactive session and an attach
-#: socket. Absent everywhere else, which is why it is a module-level optional
-#: rather than a sink constructor argument: a process either has an attach point
-#: or it does not, and the transport block reflects that as a fact.
-_attach_endpoint: Optional[Dict[str, str]] = None
-
-
-def set_attach_endpoint(socket: Optional[str], peer_id: Optional[str]) -> None:
-    """Publish this process's attach point to every outgoing envelope.
-
-    Called by the interactive CLI once its attach server is listening. A
-    consumer that gets this can connect without knowing anything about where
-    agentica keeps its cache — see ``docs/getting-started/attach.md``.
-    """
-    global _attach_endpoint
-    endpoint: Dict[str, str] = {}
-    if socket:
-        endpoint["attach_socket"] = str(socket)
-    if peer_id:
-        endpoint["peer_id"] = str(peer_id)
-    _attach_endpoint = endpoint or None
 #: Install-time decision: ``False`` means "this process never wires a sink".
 _installed = False
 
@@ -312,8 +272,8 @@ def set_idle_provider(provider: Optional[Callable[[], bool]]) -> None:
 def _nothing_more_queued() -> bool:
     """True only when the host is confident nothing else is waiting.
 
-    False on absent provider or any exception: this gates reporting, so an
-    unanswerable question must not silence a real completion.
+    True on an absent provider or any exception: this gates reporting, so an
+    unanswerable probe must not silence a real completion.
     """
     provider = _idle_provider
     if provider is None:
@@ -361,15 +321,13 @@ def get_sink() -> Optional[NotifySink]:
 
 def reset_sink_for_tests() -> None:
     """Drop any installed sink so a test starts from a clean process state."""
-    global _sink, _installed, _attach_endpoint
+    global _sink, _installed
     with _lock:
         if _sink is not None:
             _sink.stop()
         _sink = None
         _installed = False
-        # Part of the same process-wide state: a test that published an attach
-        # point must not hand it to the next test's envelopes.
-        _attach_endpoint = None
+        reset_transport_for_tests()
 
 
 def _fan_out_event(
@@ -629,7 +587,17 @@ def _run_event_payload(record: Any) -> Dict[str, Any]:
     raw = getattr(record, "payload", None)
     payload: Dict[str, Any] = {}
     if isinstance(raw, dict):
-        for key in ("agent_name", "duration_seconds", "had_response", "reason", "error"):
+        for key in (
+            "agent_name",
+            "duration_seconds",
+            "had_response",
+            "reason",
+            "error",
+            "tool_name",
+            "tool_call_id",
+            "preview",
+            "ok",
+        ):
             if key in raw and raw[key] is not None:
                 payload[key] = raw[key]
         prompt = _clip_text(raw.get("prompt") or raw.get("source_query"))

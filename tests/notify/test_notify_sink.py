@@ -26,7 +26,7 @@ import httpx
 import pytest
 
 from agentica.notify import sink as sink_mod
-from agentica.notify.config import NotifyConfig, load_notify_config
+from agentica.notify.config import RUN_EVENTS, NotifyConfig, load_notify_config
 from agentica.notify.sink import NotifySink, get_sink, install_sink, reset_sink_for_tests
 
 
@@ -571,8 +571,7 @@ class TestConfigLoading:
     def test_defaults_are_off(self):
         cfg = load_notify_config({})
         assert cfg.enabled is False
-        assert all(cfg.events[e] for e in
-                   ("run.started", "run.completed", "run.failed", "run.cancelled"))
+        assert all(cfg.events[event] for event in RUN_EVENTS)
 
     def test_settings_block_is_read(self):
         cfg = load_notify_config({"settings": {"notify": {

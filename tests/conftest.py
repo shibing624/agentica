@@ -21,6 +21,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Empty string is the documented "disable file sink" sentinel in config.py.
 os.environ.setdefault("AGENTICA_LOG_FILE", "")
 
+# Runner egress installs lazily even in SDK/non-interactive paths. Never let a
+# test process execute the user's real hook consumers from ~/.agentica.
+# Hook-specific tests install explicit in-memory configs or override this env.
+os.environ["AGENTICA_HOOKS_ENABLED"] = "0"
+
 # The gateway's local token gate is ON in production, and every existing
 # gateway test is about what a route *does*, not about how it is guarded — so
 # they run with the gate open rather than each one carrying a header. The gate

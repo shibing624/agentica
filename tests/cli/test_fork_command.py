@@ -99,6 +99,10 @@ class TestForkAtTheTip:
 
         assert result["current_agent"].session_id != "live-session"
         assert _forked_log(result, tmp_path).exists()
+        assert result["session_transition"] == {
+            "source": "fork",
+            "reason": "fork",
+        }
 
     def test_the_whole_conversation_carries_over(self, ctx, tmp_path):
         result = _fork(ctx, "")

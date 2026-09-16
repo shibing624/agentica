@@ -919,7 +919,14 @@ class Model(ABC):
             )
 
     async def run_function_calls(
-            self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
+            self,
+            function_calls: List[FunctionCall],
+            function_call_results: List[Message],
+            tool_role: str = "tool",
+            tool_event_callback: Optional[Callable[
+                [str, FunctionCall, Optional[bool], Optional[float], Optional[str]],
+                None,
+            ]] = None,
     ) -> AsyncIterator[ModelResponse]:
         token = None
         if self.current_run_state() is None:
@@ -929,6 +936,7 @@ class Model(ABC):
                     function_calls=function_calls,
                     function_call_results=function_call_results,
                     tool_role=tool_role,
+                    tool_event_callback=tool_event_callback,
             ):
                 yield response
         finally:
@@ -940,7 +948,14 @@ class Model(ABC):
                 self.reset_run_state(token)
 
     async def _run_function_calls_impl(
-            self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
+            self,
+            function_calls: List[FunctionCall],
+            function_call_results: List[Message],
+            tool_role: str = "tool",
+            tool_event_callback: Optional[Callable[
+                [str, FunctionCall, Optional[bool], Optional[float], Optional[str]],
+                None,
+            ]] = None,
     ) -> AsyncIterator[ModelResponse]:
         """Execute tool calls with concurrency-split execution.
 
@@ -1005,6 +1020,7 @@ class Model(ABC):
         timers = [Timer() for _ in function_calls]
         exceptions: List[Optional[BaseException]] = [None] * len(function_calls)
         results: List[bool] = [False] * len(function_calls)
+        started_indices: set[int] = set()
 
         safe_indices   = [i for i, fc in enumerate(function_calls) if fc.is_concurrency_safe()]
         unsafe_indices = [i for i, fc in enumerate(function_calls) if not fc.is_concurrency_safe()]
@@ -1028,7 +1044,27 @@ class Model(ABC):
 
         from agentica.agent.approvals import DENIED_TOOL_RESULT, approved_by_user
 
-        async def _call_execute(fc: FunctionCall):
+        def _notify_tool_event(event: str, idx: int) -> None:
+            if tool_event_callback is None:
+                return
+            fc = function_calls[idx]
+            if event == "started":
+                tool_event_callback(event, fc, None, None, None)
+                return
+            ok = results[idx]
+            error: Optional[str] = None
+            if ok and isinstance(fc.result, str) and fc.result.lstrip().startswith("Error:"):
+                ok = False
+                error = fc.result
+            elif not ok:
+                failure = exceptions[idx] or fc.error or fc.result
+                if failure is not None:
+                    error = str(failure)
+            tool_event_callback(event, fc, ok, timers[idx].elapsed, error)
+
+        async def _call_execute(idx: int, fc: FunctionCall):
+            started_indices.add(idx)
+            _notify_tool_event("started", idx)
             token = approved_by_user.set(fc.skip_hard_safety)
             try:
                 if fc.function.manages_own_timeout:
@@ -1124,7 +1160,7 @@ class Model(ABC):
                     return
             timers[idx].start()
             try:
-                results[idx] = await _call_execute(fc)
+                results[idx] = await _call_execute(idx, fc)
                 # Output guardrail check
                 if _has_guardrails:
                     _fc_args = json.dumps(fc.arguments) if fc.arguments else None
@@ -1144,7 +1180,8 @@ class Model(ABC):
             except ToolCallException as tce:
                 exceptions[idx] = tce
                 results[idx] = False
-            except AgentCancelledError:
+            except AgentCancelledError as exc:
+                exceptions[idx] = exc
                 # Hard cancellation must propagate (don't treat as tool failure).
                 raise
             except Exception as exc:
@@ -1152,6 +1189,8 @@ class Model(ABC):
                 results[idx] = False
             finally:
                 timers[idx].stop()
+                if idx in started_indices:
+                    _notify_tool_event("completed", idx)
 
         if safe_indices:
             gather_results = await asyncio.gather(
@@ -1209,7 +1248,7 @@ class Model(ABC):
                     continue
             timers[idx].start()
             try:
-                results[idx] = await _call_execute(fc)
+                results[idx] = await _call_execute(idx, fc)
                 # Output guardrail check (after execution)
                 if _has_guardrails:
                     _fc_args = json.dumps(fc.arguments) if fc.arguments else None
@@ -1232,7 +1271,8 @@ class Model(ABC):
                 results[idx] = False
                 if fc.function.name in _SHELL_TOOL_NAMES:
                     bash_errored = True
-            except AgentCancelledError:
+            except AgentCancelledError as exc:
+                exceptions[idx] = exc
                 raise
             except Exception as exc:
                 exceptions[idx] = exc
@@ -1241,6 +1281,8 @@ class Model(ABC):
                     bash_errored = True
             finally:
                 timers[idx].stop()
+                if idx in started_indices:
+                    _notify_tool_event("completed", idx)
 
         # Phase 3: Process results in original order
         for i, function_call in enumerate(function_calls):

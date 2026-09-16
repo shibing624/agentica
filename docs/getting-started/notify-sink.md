@@ -54,6 +54,8 @@ settings:
       run.completed: true
       run.failed: true
       run.cancelled: true
+      tool.started: true
+      tool.completed: true
 ```
 
 环境变量覆盖同名项，前缀 `AGENTICA_NOTIFY_`（如 `AGENTICA_NOTIFY_ENABLED=true`、`AGENTICA_NOTIFY_SOCKET`）。
@@ -73,9 +75,14 @@ settings:
 | `run.completed` | 一轮成功结束**且没有后续** |
 | `run.failed` | 一轮抛错 |
 | `run.cancelled` | 用户 Ctrl+C |
+| `tool.started` | 工具开始执行 |
+| `tool.completed` | 工具结束，含成功状态与耗时 |
 
-只有这四个。`needs.approval` / `needs.input` 曾经也在这条通道上（`/await` 的请求体），
-现在只在 hook 那条通道上（[shell-hooks.md](shell-hooks.md) 的六个事件里）。
+tool 事件按真实执行边界发送：串行调用轮到自己时才 started，并行调用按实际完成顺序
+completed；运行中取消仍会发 `ok: false` 的 completed。
+
+`needs.approval` / `needs.input` 曾经也在这条通道上（`/await` 的请求体），
+现在只在 hook 那条通道上（[shell-hooks.md](shell-hooks.md)）。
 
 ### payload 字段
 
@@ -92,6 +99,9 @@ run 类事件的 `payload` 只带元数据 + **用户已在自己屏幕上见过
 | `answered_at` | `run.completed` | 回复**产生**的时刻（unix 秒），**不是**信封 `ts` |
 | `reason` | `run.cancelled` | 为什么被取消 |
 | `error` | `run.failed` | 错误文本（`类型: 信息`） |
+| `tool_name` / `tool_call_id` | `tool.*` | 当前工具及其稳定调用 id |
+| `preview` | `tool.*` | 严格脱敏、裁剪后的命令、路径、查询或 URL；不含写入正文 |
+| `ok` / `duration_seconds` / `error` | `tool.completed` | 成功状态、耗时及失败时严格脱敏、裁剪后的错误 |
 
 `prompt` / `answer` 一律截断到 **500 字 + `…`**：桌宠是气泡不是阅读器，一条 40k 字的
 回复既撑爆每条事件也不会更好读。**截断标记是可见的**，消费端能区分「就说了这么多」和

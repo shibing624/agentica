@@ -5,12 +5,13 @@ never arrives" and "the answer arrives after the user already answered"."""
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Tuple
 
 import pytest
 
-from agentica.shell_hooks.config import ShellHooksConfig
+from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig
 from agentica.shell_hooks.egress import install_hook_egress, reset_hook_egress_for_tests
 from agentica.shell_hooks.requests import start_hook_request
 
@@ -35,12 +36,21 @@ class _Pending:
 
 def _script(tmp_path, body, name="hook.py"):
     path = tmp_path / name
-    path.write_text(body, encoding="utf-8")
+    path.write_text(
+        "import json,sys\n"
+        "payload=json.load(sys.stdin)\n"
+        "request_id=payload['request_id']\n"
+        + body,
+        encoding="utf-8",
+    )
     return [sys.executable, str(path)]
 
 
 def _config(command, **kw):
-    return ShellHooksConfig(enabled=True, command=command, **kw)
+    return ShellHooksConfig(
+        enabled=True,
+        consumers=[HookConsumer(name="desktop", command=command, **kw)],
+    )
 
 
 def _payload_for(pending, **kw):
@@ -88,7 +98,10 @@ class TestThePayload:
 
 class TestTheReplyComesBack:
     def test_a_decision_is_the_reply(self, tmp_path):
-        cmd = _script(tmp_path, "import json,sys;print(json.dumps({'decision':'allow'}))")
+        cmd = _script(
+            tmp_path,
+            "print(json.dumps({'request_id':request_id,'decision':'allow'}))",
+        )
         install_hook_egress(_config(cmd))
         req = start_hook_request("needs.approval", _payload_for(_Pending()))
         assert req is not None
@@ -101,7 +114,7 @@ class TestTheReplyComesBack:
         for word in ("allow", "allow_prefix", "deny", "deny_prefix"):
             cmd = _script(
                 tmp_path,
-                f"import json;print(json.dumps({{'decision':'{word}'}}))",
+                f"print(json.dumps({{'request_id':request_id,'decision':'{word}'}}))",
                 name=f"hook_{word}.py",
             )
             install_hook_egress(_config(cmd))
@@ -128,7 +141,9 @@ class TestTheReplyComesBack:
             req.kill()
 
     def test_no_decision_reply_is_not_a_decision(self, tmp_path):
-        cmd = _script(tmp_path, "import json,sys;print(json.dumps({'nope':1}))")
+        cmd = _script(
+            tmp_path, "print(json.dumps({'request_id':request_id,'nope':1}))"
+        )
         install_hook_egress(_config(cmd))
         req = start_hook_request("needs.approval", _payload_for(_Pending()))
         assert req is not None
@@ -161,8 +176,31 @@ class TestTheReplyComesBack:
         finally:
             req.kill()
 
+    def test_a_valid_json_reply_wins_even_when_the_process_exits_non_zero(
+        self, tmp_path
+    ):
+        """The document is the decision. Exit status used to race with early
+        JSON completion: the same allow-then-exit-1 script was accepted or
+        ignored depending on whether the child had been reaped yet."""
+        cmd = _script(
+            tmp_path,
+            "print(json.dumps({'request_id':request_id,'decision':'allow'}));"
+            "sys.stdout.flush();"
+            "raise SystemExit(1)",
+        )
+        install_hook_egress(_config(cmd))
+        req = start_hook_request("needs.approval", _payload_for(_Pending()))
+        assert req is not None
+        try:
+            assert req.wait_for_reply(timeout=5.0) == {"decision": "allow"}
+        finally:
+            req.kill()
+
     def test_an_unknown_word_is_not_a_decision(self, tmp_path):
-        cmd = _script(tmp_path, "import json;print(json.dumps({'decision':'sure'}))")
+        cmd = _script(
+            tmp_path,
+            "print(json.dumps({'request_id':request_id,'decision':'sure'}))",
+        )
         install_hook_egress(_config(cmd))
         req = start_hook_request("needs.approval", _payload_for(_Pending()))
         assert req is not None
@@ -176,10 +214,11 @@ class TestTheReplyComesBack:
         later. ``still_waiting`` must stay True so the loop keeps polling rather
         than treating the junk as the reply and giving up."""
         body = (
-            "import json,sys,time;"
+            "import time;"
             "print('warming up');sys.stdout.flush();"
             "time.sleep(1.2);"
-            "print(json.dumps({'decision':'allow'}));sys.stdout.flush()"
+            "print(json.dumps({'request_id':request_id,'decision':'allow'}));"
+            "sys.stdout.flush()"
         )
         install_hook_egress(_config(_script(tmp_path, body)))
         req = start_hook_request("needs.approval", _payload_for(_Pending()))
@@ -188,6 +227,49 @@ class TestTheReplyComesBack:
             assert req.wait_for_reply(timeout=0.4) is None
             assert req.still_waiting is True
             assert req.wait_for_reply(timeout=10) == {"decision": "allow"}
+        finally:
+            req.kill()
+
+    def test_the_first_valid_consumer_reply_wins(self, tmp_path):
+        slow = _script(
+            tmp_path,
+            "import time;time.sleep(3);"
+            "print(json.dumps({'request_id':request_id,'decision':'allow'}))",
+            name="slow.py",
+        )
+        fast = _script(
+            tmp_path,
+            "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
+            name="fast.py",
+        )
+        install_hook_egress(
+            ShellHooksConfig(
+                enabled=True,
+                consumers=[
+                    HookConsumer(name="slow", command=slow),
+                    HookConsumer(name="fast", command=fast),
+                ],
+            )
+        )
+        req = start_hook_request("needs.approval", _payload_for(_Pending()))
+        assert req is not None
+        try:
+            started = time.monotonic()
+            assert req.wait_for_reply(timeout=10) == {"decision": "deny"}
+            assert time.monotonic() - started < 2
+        finally:
+            req.kill()
+
+    def test_a_reply_for_another_request_is_ignored(self, tmp_path):
+        cmd = _script(
+            tmp_path,
+            "print(json.dumps({'request_id':'wrong','decision':'allow'}))",
+        )
+        install_hook_egress(_config(cmd))
+        req = start_hook_request("needs.approval", _payload_for(_Pending()))
+        assert req is not None
+        try:
+            assert req.wait_for_reply(timeout=5) is None
         finally:
             req.kill()
 
@@ -212,7 +294,8 @@ class TestNoCapOfOurs:
         still waiting for the same user the terminal is waiting for."""
         cmd = _script(
             tmp_path,
-            "import json,time;time.sleep(3);print(json.dumps({'decision':'deny'}))",
+            "import time;time.sleep(3);"
+            "print(json.dumps({'request_id':request_id,'decision':'deny'}))",
         )
         install_hook_egress(_config(cmd))
         req = start_hook_request("needs.approval", _payload_for(_Pending()))

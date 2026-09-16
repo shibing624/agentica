@@ -9,6 +9,7 @@ is not, and a mid-run config flip would leave half a channel behind.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -16,17 +17,20 @@ from typing import Any, Dict, List, Optional
 from agentica.global_config import get_setting
 from agentica.utils.log import logger
 
-#: The six events on this wire. Four are lifecycle notices; the two ``needs.*``
-#: ones take the other path (a request with a reply) and do not go through the
-#: fire-and-forget dispatch, but they are gated by the same ``events`` block so a
-#: user has one place to switch things off.
+#: Events on this wire. ``needs.approval`` and ``needs.input`` take the reply
+#: path; every other value is a fire-and-forget notice.
 SHELL_HOOK_EVENTS = (
     "run.started",
     "run.completed",
     "run.failed",
     "run.cancelled",
+    "tool.started",
+    "tool.completed",
+    "session.started",
+    "session.ended",
     "needs.approval",
     "needs.input",
+    "needs.resolved",
 )
 
 
@@ -46,19 +50,18 @@ def _env_bool(name: str) -> Optional[bool]:
     return value.lower() in ("1", "true", "yes", "on")
 
 
-def _parse_command(raw: Any) -> List[str]:
+def _parse_command(raw: Any, *, location: str) -> List[str]:
     """The command as an argv list.
 
     A list is the only accepted shape. A string is refused rather than split:
     splitting would invent quoting rules the user did not write, and the wire
     format is a JSON document, so a shell is never needed to pass it. A user who
-    wants a shell writes ``["/bin/sh", "-c", "..."]`` explicitly, which is also
-    how they recover things we do not send (``$PPID``, the controlling tty).
+    wants a shell writes ``["/bin/sh", "-c", "..."]`` explicitly.
     """
     if isinstance(raw, str):
         if raw.strip():
             logger.warning(
-                "shell hooks: settings.hooks.command must be an argv list, not a "
+                f"shell hooks: {location}.command must be an argv list, not a "
                 "string; ignoring it. Write [\"/abs/path/to/notifier\"] — a shell "
                 "is not implied, and $HOME is not expanded here."
             )
@@ -69,11 +72,12 @@ def _parse_command(raw: Any) -> List[str]:
 
 
 @dataclass
-class ShellHooksConfig:
-    """Resolved hook egress configuration."""
+class HookConsumer:
+    """One named hook process and its event subscription."""
 
-    enabled: bool = False
+    name: str
     command: List[str] = field(default_factory=list)
+    enabled: bool = True
     events: Dict[str, bool] = field(
         default_factory=lambda: {e: True for e in SHELL_HOOK_EVENTS}
     )
@@ -93,12 +97,59 @@ class ShellHooksConfig:
         self.events = merged
 
     def event_enabled(self, event: str) -> bool:
-        return bool(self.events.get(event, False))
+        return bool(self.enabled and self.command and self.events.get(event, False))
+
+
+@dataclass
+class ShellHooksConfig:
+    """Resolved multi-consumer hook egress configuration."""
+
+    enabled: bool = False
+    consumers: List[HookConsumer] = field(default_factory=list)
 
     @property
     def effective(self) -> bool:
         """Wired only when it is switched on *and* there is something to run."""
-        return bool(self.enabled and self.command)
+        return bool(self.enabled and any(c.enabled and c.command for c in self.consumers))
+
+    def consumers_for(self, event: str) -> List[HookConsumer]:
+        """Enabled consumers subscribed to ``event``, in config order."""
+        if not self.enabled:
+            return []
+        return [consumer for consumer in self.consumers if consumer.event_enabled(event)]
+
+
+def _parse_consumers(raw: Any, *, location: str) -> List[HookConsumer]:
+    """Parse the only supported hook shape: a list of named consumers."""
+    if not isinstance(raw, list):
+        if raw is not None:
+            logger.warning(f"shell hooks: {location} must be a list; ignoring it.")
+        return []
+    consumers: List[HookConsumer] = []
+    names = set()
+    for index, item in enumerate(raw):
+        item_location = f"{location}[{index}]"
+        if not isinstance(item, dict):
+            logger.warning(f"shell hooks: {item_location} must be an object; ignoring it.")
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            logger.warning(f"shell hooks: {item_location}.name is required; ignoring it.")
+            continue
+        if name in names:
+            logger.warning(f"shell hooks: duplicate consumer name {name!r}; ignoring it.")
+            continue
+        names.add(name)
+        events = item.get("events")
+        consumers.append(
+            HookConsumer(
+                name=name,
+                command=_parse_command(item.get("command"), location=item_location),
+                enabled=bool(item.get("enabled", True)),
+                events=events if isinstance(events, dict) else {},
+            )
+        )
+    return consumers
 
 
 def load_shell_hooks_config(config: Optional[Dict[str, Any]] = None) -> ShellHooksConfig:
@@ -111,20 +162,28 @@ def load_shell_hooks_config(config: Optional[Dict[str, Any]] = None) -> ShellHoo
     if not isinstance(block, dict):
         block = {}
 
-    cfg = ShellHooksConfig()
-    if "enabled" in block:
-        cfg.enabled = bool(block["enabled"])
-    cfg.command = _parse_command(block.get("command"))
-    events = block.get("events")
-    if isinstance(events, dict):
-        for name in SHELL_HOOK_EVENTS:
-            if name in events:
-                cfg.events[name] = bool(events[name])
+    cfg = ShellHooksConfig(
+        enabled=bool(block.get("enabled", False)),
+        consumers=_parse_consumers(
+            block.get("consumers"), location="settings.hooks.consumers"
+        ),
+    )
 
-    if _env_bool("ENABLED") is not None:
-        cfg.enabled = bool(_env_bool("ENABLED"))
-    command = _env("COMMAND")
-    if command is not None:
-        cfg.command = _parse_command(command.split())
+    env_enabled = _env_bool("ENABLED")
+    if env_enabled is not None:
+        cfg.enabled = env_enabled
+    raw_consumers = _env("CONSUMERS")
+    if raw_consumers is not None:
+        try:
+            parsed_consumers = json.loads(raw_consumers)
+        except ValueError:
+            logger.warning(
+                "shell hooks: AGENTICA_HOOKS_CONSUMERS must be a JSON array; "
+                "ignoring configured consumers."
+            )
+            parsed_consumers = None
+        cfg.consumers = _parse_consumers(
+            parsed_consumers, location="AGENTICA_HOOKS_CONSUMERS"
+        )
 
     return cfg

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentica import global_config as gc
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.session import (
     HistoryRenderStats,
@@ -24,7 +25,6 @@ from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.usage import Usage
 from agentica.run_response import RunResponse
-from agentica import global_config as gc
 
 
 def test_parse_shell_resume_command():
@@ -94,7 +94,13 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
             "debug": False,
             "work_dir": str(work_dir),
         },
-        current_agent=SimpleNamespace(_session_log=current_log, user_id="default", session_id="current"),
+        current_agent=SimpleNamespace(
+            _session_log=current_log,
+            user_id="default",
+            session_id="current",
+            work_dir=str(work_dir),
+            run_context=None,
+        ),
         extra_tools=[],
         workspace=None,
         skills_registry=None,
@@ -103,9 +109,13 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
     resumed_agent = SimpleNamespace(
         _session_log=target_log,
         working_memory=WorkingMemory(),
-        model=SimpleNamespace(supports_replayed_tool_history=True),
+        model=SimpleNamespace(supports_replayed_tool_history=True, id="deepseek-v4-flash"),
         auxiliary_model=None,
         session_id="session-target",
+        work_dir=str(work_dir),
+        run_context=None,
+        tool_config=SimpleNamespace(permission_mode="ask"),
+        session_log=target_log,
     )
     console = MagicMock()
 
@@ -120,6 +130,10 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
         result = _cmd_resume(ctx, "session-target")
 
     assert result["current_agent"] is resumed_agent
+    assert result["session_transition"] == {
+        "source": "resume",
+        "reason": "switch",
+    }
     agent_config = create.call_args.args[0]
     assert agent_config["profile_name"] == "resume-prof"
     assert agent_config["profile_source"] == "session"

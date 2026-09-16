@@ -16,16 +16,28 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
-from agentica.cli.runtime import (
-    get_console,
-    configure_tools,
-    create_agent,
+from agentica.agent.history_filter import (
+    strip_elided_notice,
+    strip_tool_artifacts_from_memory,
 )
+from agentica.cli.commands.context import CommandContext
+from agentica.cli.commands.helpers import (
+    SESSION_RECENT_REQUESTS,
+    _run_async_safe,
+    clip_preview_head,
+)
+from agentica.cli.context_usage import measure_context
 from agentica.cli.display import (
     format_session_summary,
     print_header,
     render_markdown_response,
     resumable_session_id,
+)
+from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
+from agentica.cli.runtime import (
+    configure_tools,
+    create_agent,
+    get_console,
 )
 from agentica.cli.session_resume import (
     choose_resume_work_dir,
@@ -33,27 +45,14 @@ from agentica.cli.session_resume import (
     find_sessions_by_id,
 )
 from agentica.cli.setup import apply_named_profile_to_agent_config
-from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
-from agentica.global_config import set_project_profile
-from agentica.agent.history_filter import (
-    strip_elided_notice,
-    strip_tool_artifacts_from_memory,
-)
 from agentica.compression.manager import apply_idle_compact
+from agentica.global_config import set_project_profile
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog, local_turn_stamp
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 from agentica.utils.log import logger
-from agentica.cli.context_usage import measure_context
-
-from agentica.cli.commands.context import CommandContext
-from agentica.cli.commands.helpers import (
-    SESSION_RECENT_REQUESTS,
-    _run_async_safe,
-    clip_preview_head,
-)
 from agentica.utils.string import format_file_size
 
 
@@ -308,10 +307,10 @@ def _cmd_new(ctx: CommandContext, cmd_args: str = ""):
             session_id=resumable_session_id(old_agent),
         )
     )
-    return _start_fresh_session(ctx)
+    return _start_fresh_session(ctx, source="new")
 
 
-def _start_fresh_session(ctx: CommandContext) -> dict:
+def _start_fresh_session(ctx: CommandContext, *, source: str) -> dict:
     """Build the agent for a session that must not inherit the current one.
 
     Shared by `/new` and `/clear` so the two cannot drift apart again: they are
@@ -352,6 +351,7 @@ def _start_fresh_session(ctx: CommandContext) -> dict:
         "current_agent": current_agent,
         "goal_manager": None,
         "session_started_at": time.monotonic(),
+        "session_transition": {"source": source, "reason": source},
     }
 
 
@@ -643,7 +643,6 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             worktree_binder=ctx.worktree_binder,
             approve=ctx.approve,
         )
-
         # Eagerly load history into working_memory so /status, /context etc.
         # reflect the resumed state immediately (do not wait for the next _run
         # to lazily replay). Applies to both plain resume and `resume ... at <uuid>`.
@@ -688,7 +687,11 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 elif state.status in ("paused", "complete"):
                     con.print(f"  [dim]⊙ Previous goal ({state.status}): {state.objective}[/dim]")
 
-        result = {"current_agent": current_agent, "goal_manager": resumed_goal_manager}
+        result = {
+            "current_agent": current_agent,
+            "goal_manager": resumed_goal_manager,
+            "session_transition": {"source": "resume", "reason": "switch"},
+        }
         if choice.work_dir:
             result["work_dir"] = choice.work_dir
         return result
@@ -753,7 +756,7 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     """
     con = get_console()
     os.system("clear" if os.name != "nt" else "cls")
-    result = _start_fresh_session(ctx)
+    result = _start_fresh_session(ctx, source="clear")
     con.print("[info]Screen cleared; started a new session.[/info]")
     return result
 

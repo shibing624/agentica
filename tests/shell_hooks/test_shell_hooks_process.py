@@ -29,6 +29,22 @@ class TestTheDocumentArrivesOnStdin:
         assert proc.wait(timeout=10) is True
         assert proc.stdout == '{"answer": "needs.input"}\n'
 
+    def test_a_complete_document_does_not_wait_for_process_exit(self):
+        proc = HookProcess(
+            _py(
+                "import json,sys,time;"
+                "print(json.dumps({'answer':'ready'}));sys.stdout.flush();"
+                "time.sleep(5)"
+            ),
+            {},
+        )
+        assert proc.start() is True
+        started = time.monotonic()
+        assert proc.wait(timeout=1) is True
+        assert time.monotonic() - started < 1
+        assert proc.stdout == '{"answer": "ready"}\n'
+        proc.kill()
+
 
 class TestFailuresAreNotDecisions:
     def test_a_non_zero_exit_still_returns_whatever_was_printed(self):
@@ -76,6 +92,21 @@ class TestKilling:
         proc = HookProcess(_py(body), {})
         assert proc.start() is True
         time.sleep(0.8)  # let the grandchild exist
+        proc.kill()
+        time.sleep(0.3)
+        assert _group_empty(proc.pid)
+
+    def test_kill_group_after_the_original_hook_has_exited(self):
+        """A grandchild may retain stdout after the session leader exits."""
+        child = _py("import time; time.sleep(60)")
+        body = f"import subprocess;subprocess.Popen({child!r})"
+        proc = HookProcess(_py(body), {})
+        assert proc.start() is True
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and proc.returncode is None:
+            time.sleep(0.02)
+        assert proc.returncode == 0
+        assert not _group_empty(proc.pid)
         proc.kill()
         time.sleep(0.3)
         assert _group_empty(proc.pid)

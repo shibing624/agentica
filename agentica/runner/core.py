@@ -90,7 +90,7 @@ class Runner(CompressMixin, RetryMixin, PersistMixin, SteerMixin, StreamMixin, L
         # cannot take each other down. Dispatch queues and returns — it never
         # blocks a run, and it swallows its own failures.
         #
-        # Only the four lifecycle events reach here. ``goal.*`` deliberately
+        # Run and tool lifecycle events reach here. ``goal.*`` deliberately
         # does not, for a protocol reason rather than a "we don't need it" one:
         # the sink feeds a generic agent status display that also serves Claude
         # Code / opencode / codex, none of which have a goal loop. Putting an

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
+from agentica.shell_hooks.requests import question_payload, start_hook_request
 from agentica.utils.log import logger
 
 #: How long each watchdog cycle lets the hook take before control returns to the
@@ -49,10 +50,9 @@ class HookAsk:
     def poll(self, req: Any) -> bool:
         """Give the hook one window; deliver its answer if it produced one.
 
-        Returns True only when an answer reached ``req``'s slot. Free text is the
-        whole reply for a question — there is no vocabulary to validate, and the
-        only unusable outcome is an empty string, which ``parse_reply`` has
-        already rejected by returning None.
+        Returns True when a valid hook answer arrived, including when the
+        terminal had already won the slot. Free text is the whole reply for a
+        question; ``parse_reply`` has already rejected an empty string.
         """
         try:
             reply = self._request.wait_for_reply(timeout=HOOK_POLL_SECONDS)
@@ -65,7 +65,7 @@ class HookAsk:
         answer = reply.get("answer")
         if not isinstance(answer, str):
             return False
-        if req.submit(answer):
+        if req.submit(answer, source="hook"):
             logger.info("[ask] answered from the hook command")
         # False means the user typed first: their answer is already in the slot,
         # and this one is second.
@@ -81,15 +81,18 @@ def start_hook_ask(
     *,
     session_id: Optional[str] = None,
     work_dir: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> Optional[HookAsk]:
     """Offer ``prompt`` to the user's hook command, or None when there is none."""
     try:
-        from agentica.shell_hooks.requests import question_payload, start_hook_request
-
         request = start_hook_request(
             "needs.input",
             question_payload(
-                prompt, options, session_id=session_id, work_dir=work_dir
+                prompt,
+                options,
+                session_id=session_id,
+                work_dir=work_dir,
+                request_id=request_id,
             ),
         )
         return HookAsk(request) if request is not None else None

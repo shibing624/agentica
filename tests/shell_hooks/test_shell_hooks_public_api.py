@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 """The package's public surface, and the CLI's startup import.
 
-The CLI installs the egress from ``cli/interactive/app.py`` as
-``from agentica.shell_hooks import install_hook_egress``. That import is the only
-thing standing between a configured hook and it working at startup, and nothing
-else in the suite exercises it, so it is pinned here.
+The CLI installs eagerly for session events; Runner paths install lazily.
 """
 
 from __future__ import annotations
@@ -25,6 +22,7 @@ def test_importing_the_package_starts_nothing():
 
 def test_the_public_names_are_importable():
     from agentica.shell_hooks import (
+        HookConsumer,
         HookRequest,
         ShellHooksConfig,
         approval_payload,
@@ -38,6 +36,7 @@ def test_the_public_names_are_importable():
     )
 
     for obj in (
+        HookConsumer,
         HookRequest,
         ShellHooksConfig,
         approval_payload,
