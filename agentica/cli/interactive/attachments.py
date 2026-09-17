@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,35 @@ from typing import List, NamedTuple, Optional
 from agentica.cli.commands.context import IMAGE_EXTENSIONS
 from agentica.utils.log import logger
 from agentica.utils.ocr import ocr_image_text
+
+# ==================== Pasted-block Handles ====================
+
+#: Shape of the placeholder the bracketed-paste handler leaves in the buffer.
+#: Owned here because two input paths consume it and they must not drift: the
+#: idle turn inlines the file (process loop in ``app.py``), steering keeps the
+#: handle and annotates it.
+PASTE_REF_RE = re.compile(r"\[Pasted text #\d+: \d+ lines -> (.+?)\]")
+
+_PASTE_STEER_NOTE = (
+    "(The pasted block above is not inlined here — its full text is in the "
+    "file the placeholder points at. Use read_file on that path when you "
+    "need the content.)"
+)
+
+
+def annotate_paste_refs(text: str) -> str:
+    """Say what a steered paste placeholder is, without inlining the file.
+
+    An idle turn can afford to inline: it happens once, before the request is
+    built. Steering is injected into a *running* run and then replayed in
+    every later request of that run, so a few hundred pasted lines would be
+    paid for on every lap — which is why the placeholder exists at all. The
+    handle carries an absolute path, so the model can read it on demand; what
+    was missing is any statement that it can.
+    """
+    if not PASTE_REF_RE.search(text):
+        return text
+    return f"{text}\n\n{_PASTE_STEER_NOTE}"
 
 # ==================== Image Attachment Helpers ====================
 
@@ -266,4 +296,4 @@ def _ocr_images_parallel(image_paths: list) -> str:
     return "\n\n".join(results)
 
 
-__all__ = ['_split_path_input', '_resolve_attachment_path', 'queue_item_preview', 'peel_image_input', '_detect_file_drop', '_image_content_key', '_deduplicate_image_attachments', '_try_attach_clipboard_image', '_OCR_PER_IMAGE_CHARS', '_OCR_TOTAL_CHARS', '_OCR_TIMEOUT_SECS', '_ocr_single_image', '_ocr_images_parallel']
+__all__ = ['PASTE_REF_RE', 'annotate_paste_refs', '_split_path_input', '_resolve_attachment_path', 'queue_item_preview', 'peel_image_input', '_detect_file_drop', '_image_content_key', '_deduplicate_image_attachments', '_try_attach_clipboard_image', '_OCR_PER_IMAGE_CHARS', '_OCR_TOTAL_CHARS', '_OCR_TIMEOUT_SECS', '_ocr_single_image', '_ocr_images_parallel']

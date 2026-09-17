@@ -56,6 +56,7 @@ from agentica.utils.string import replace_invalid_utf8
 
 from .attachments import (
     _try_attach_clipboard_image,
+    annotate_paste_refs,
     peel_image_input,
     queue_item_preview,
 )
@@ -116,7 +117,13 @@ def _steer_or_queue(state: SessionState, pending_queue: PendingQueue, text: str,
     steer_kwargs = {}
     if images:
         steer_kwargs["images"] = images
-    if agent is not None and agent.steer(text, **steer_kwargs):
+    if agent is not None and agent.steer(annotate_paste_refs(text), **steer_kwargs):
+        # Pasted-block bookkeeping is per message. Only the idle turn used to
+        # clear it, so a mid-run paste left its entry behind and the *next*
+        # typed line was labelled "(1 pasted block, N lines total)" with
+        # nothing pasted in it. A refused steer deliberately keeps the list:
+        # the payload is about to be queued and that turn still owns it.
+        state.pasted_files.clear()
         return True
     pending_queue.put(payload)
     return False

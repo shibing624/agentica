@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import queue
-import re
 import threading
 import time
 from datetime import datetime
@@ -77,6 +76,7 @@ from agentica.workspace import Workspace
 
 from .ask_hook import start_hook_ask
 from .attachments import (
+    PASTE_REF_RE,
     _deduplicate_image_attachments,
     _detect_file_drop,
     unpack_queue_payload,
@@ -93,7 +93,6 @@ from .console_io import (
     _ask_active,
     _ask_state_lock,
     _clear_output_pause,
-    _cprint,
     _install_sigquit_escape,
     _open_in_pager,
     _print_interactive_exit_summary,
@@ -933,12 +932,10 @@ def run_interactive(
                     # of the whole SKILL.md.
                     matched_skill = skill_cmds.get(cmd)
                     if matched_skill:
-                        _cprint(f"  Skill activated: {matched_skill.name}")
                         skill_to_invoke = matched_skill
 
             # Expand paste references
-            _paste_ref_re = re.compile(r"\[Pasted text #\d+: \d+ lines -> (.+?)\]")
-            paste_refs = list(_paste_ref_re.finditer(user_input))
+            paste_refs = list(PASTE_REF_RE.finditer(user_input))
             # A pasted block is recorded BOTH as a ``[Pasted text #N: ...]``
             # placeholder in the buffer (matched by ``paste_refs``) and as an
             # entry in ``state.pasted_files`` by the bracketed-paste handler.
@@ -959,7 +956,7 @@ def run_interactive(
                         )
                     return m.group(0)
 
-                expanded = _paste_ref_re.sub(_expand_ref, user_input)
+                expanded = PASTE_REF_RE.sub(_expand_ref, user_input)
                 user_input = expanded
             state.pasted_files.clear()
 
@@ -989,6 +986,13 @@ def run_interactive(
                     pasted_lines=n_pasted_lines,
                     images=submit_images,
                 )
+                # After the typed line, not before: `/handoff` is the request,
+                # "Skill activated" is a status under it. Printing earlier put
+                # the notice above the input panel.
+                if skill_to_invoke is not None:
+                    get_console().print(
+                        f"  Skill activated: {skill_to_invoke.name}"
+                    )
 
             turn_images = submit_images if submit_images else None
 

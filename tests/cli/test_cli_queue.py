@@ -340,6 +340,72 @@ class TestSteerOrQueue(unittest.TestCase):
         self.assertEqual(state.attached_images, [])
 
 
+class TestSteerPasteRefs(unittest.TestCase):
+    """A pasted block steers as its placeholder, not as inlined text.
+
+    The idle turn inlines the file (``app.py`` process loop). Steering is
+    injected into a *running* run and replayed in every later request, so the
+    handle stays a handle — but the message must say the content is readable,
+    otherwise the placeholder looks like the paste was lost.
+    """
+
+    def _state(self):
+        from agentica.cli.interactive.session_state import SessionState
+
+        state = SessionState()
+        state.agent_running = True
+        state.current_agent = MagicMock()
+        state.current_agent.steer.return_value = True
+        return state
+
+    def test_steered_paste_placeholder_carries_read_instructions(self):
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _steer_or_queue
+
+        state = self._state()
+        pq = PendingQueue()
+        text = "看这个 [Pasted text #1: 7 lines -> /tmp/pastes/paste_1_214910.txt]"
+
+        self.assertTrue(_steer_or_queue(state, pq, text, text))
+
+        sent = state.current_agent.steer.call_args.args[0]
+        # The handle survives verbatim, so the model can act on it.
+        self.assertIn("/tmp/pastes/paste_1_214910.txt", sent)
+        # And it is told what the handle is, instead of being left to guess.
+        self.assertIn("not inlined", sent)
+        self.assertIn("read", sent.lower())
+
+    def test_steered_text_without_a_paste_is_sent_verbatim(self):
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _steer_or_queue
+
+        state = self._state()
+        pq = PendingQueue()
+
+        self.assertTrue(_steer_or_queue(state, pq, "not that file", "not that file"))
+
+        state.current_agent.steer.assert_called_once_with("not that file")
+
+    def test_steered_paste_does_not_inflate_the_next_turn_label(self):
+        """``pasted_files`` is per-message bookkeeping, so steering consumes it.
+
+        It used to be cleared only by the idle turn. A mid-run paste therefore
+        left its entry behind and the *next* typed line rendered
+        "(1 pasted block, 8 lines total)" with nothing pasted in it.
+        """
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _steer_or_queue
+
+        state = self._state()
+        state.pasted_files.append((Path("/tmp/pastes/paste_1_214910.txt"), 8))
+        pq = PendingQueue()
+        text = "看这个 [Pasted text #1: 7 lines -> /tmp/pastes/paste_1_214910.txt]"
+
+        _steer_or_queue(state, pq, text, text)
+
+        self.assertEqual(state.pasted_files, [])
+
+
 class TestShouldSteerMidRun(unittest.TestCase):
     """Unix paths must steer; only registered slash commands (and images) queue."""
 
