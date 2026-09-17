@@ -1,4 +1,5 @@
 import json
+import os
 from time import time
 from typing import Optional, Any, Dict, List, Union, Sequence
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -72,6 +73,25 @@ class Message(BaseModel):
     audio: Optional[Any] = None
     images: Optional[Sequence[Any]] = None
     videos: Optional[Sequence[Any]] = None
+
+    @field_validator("images", "videos")
+    @classmethod
+    def normalize_media_paths(cls, v: Optional[Sequence[Any]]) -> Optional[Sequence[Any]]:
+        """Turn filesystem paths into the path strings every consumer accepts.
+
+        The CLI attaches clipboard and dropped files as ``pathlib.Path``
+        (``run(images=)`` / ``steer(images=)``), while every reader downstream is
+        specified on str / bytes / dict / PIL: ``Model.process_image`` warned
+        "unsupported image type" and sent the turn with no image, and
+        ``count_image_tokens`` raised ``'PosixPath' object has no attribute
+        'detail'`` — killing the run before the request was ever built. Doing it
+        here rather than in each reader keeps one shape on the field, so a new
+        consumer cannot miss the case; ``os.PathLike`` also covers non-Path
+        path objects without asking anyone to enumerate them.
+        """
+        if v is None or isinstance(v, (str, bytes)):
+            return v
+        return [os.fspath(item) if isinstance(item, os.PathLike) else item for item in v]
 
     # Output from the models
     audio_output: Optional[AudioResponse] = None

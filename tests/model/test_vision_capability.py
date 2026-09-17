@@ -53,6 +53,29 @@ def test_vision_model_converts_image_bytes_to_multimodal_content():
     assert formatted.content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
+def test_local_path_attachment_is_inlined_not_dropped(tmp_path):
+    """A CLI attachment is a ``pathlib.Path``; it must reach the model as pixels.
+
+    ``process_image`` is specified on str / bytes / dict, so a ``Path`` used to
+    fall through to its "unsupported image type" warning — the request went out
+    with the caption and no image at all, and the model answered about a
+    screenshot it never saw.
+    """
+    png = tmp_path / "clip.png"
+    png.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+    )
+    model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
+    message = Message(role="user", content="如图", images=[png])
+
+    formatted = model.add_images_to_message(message, message.images)
+
+    assert formatted.content[0] == {"type": "text", "text": "如图"}
+    assert formatted.content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
 def test_litellm_forwards_allowed_images_as_multimodal_content():
     model = object.__new__(LiteLLMChat)
     model.id = "private-vision-model"

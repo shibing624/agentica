@@ -268,6 +268,31 @@ class TestSteerInjection(unittest.TestCase):
         self.assertIn("如图所示，刚测试了2个bug", messages[-1].content)
         self.assertTrue(messages[-1]._injected)
 
+    def test_steered_pathlib_attachment_is_model_ready(self):
+        """Ctrl+V hands the CLI a ``Path``; the injected turn must be sendable.
+
+        ``_try_attach_clipboard_image`` appends ``Path`` objects, and mid-run
+        Enter steers them straight through — unlike an idle turn, which
+        stringifies in ``_process_stream_response``. The injected message used
+        to carry the raw ``Path``, and token counting then raised
+        ``'PosixPath' object has no attribute 'detail'``, failing the run.
+        """
+        from pathlib import Path
+
+        from agentica.runner import Runner
+        from agentica.utils.tokens import count_message_tokens
+
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("如图", images=[Path("/tmp/clip_20260917_142259_1.png")])
+        messages = [Message(role="tool", content="out", tool_call_id="c1", tool_name="t")]
+        Runner._inject_steering(messages, agent)
+
+        self.assertEqual(
+            list(messages[-1].images), ["/tmp/clip_20260917_142259_1.png"]
+        )
+        self.assertGreater(count_message_tokens(messages[-1]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

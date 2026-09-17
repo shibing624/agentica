@@ -1,6 +1,7 @@
 import base64
 import struct
 from types import SimpleNamespace
+from pathlib import Path
 
 from agentica.media import Image
 from agentica.model.message import Message
@@ -58,6 +59,25 @@ def test_count_message_tokens_accepts_gateway_image_dicts():
         images=[{"url": url}],
     )
     assert count_message_tokens(message) > 0
+
+
+def test_count_message_tokens_prices_a_pathlib_attachment_like_its_str_form(tmp_path):
+    """A CLI attachment arrives as ``Path``; Layer 1 counts it before any send.
+
+    Ctrl+V / file-drop hand ``Path`` objects to ``run(images=)`` and
+    ``steer(images=)``. ``Message`` normalises them to the path string every
+    provider already consumes, so counting cannot diverge between the two
+    shapes of the same attachment (it used to raise
+    ``'PosixPath' object has no attribute 'detail'`` and kill the whole run).
+    """
+    png = tmp_path / "clip.png"
+    png.write_bytes(_png_header(1024, 1024))
+
+    as_path = Message(role="user", content="如图", images=[png])
+    as_str = Message(role="user", content="如图", images=[str(png)])
+
+    assert list(as_path.images) == [str(png)]
+    assert count_message_tokens(as_path) == count_message_tokens(as_str)
 
 
 def test_count_message_tokens_remote_image_url_content_does_not_fetch_network(monkeypatch):
