@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 
 import tiktoken
 from pydantic import BaseModel
-from agentica.media import Audio, Image, Video
+from agentica.media import Audio, Image, Video, get_image_type
 from agentica.model.message import Message
 from agentica.tools.base import Function, ModelTool
 from agentica.utils.log import logger
@@ -194,28 +194,6 @@ def _count_tiled_visual_tokens(width: int, height: int) -> int:
 # =============================================================================
 
 
-def _get_image_type(data: bytes) -> Optional[str]:
-    """Returns the image format from magic bytes in the file header."""
-    if len(data) < 12:
-        return None
-    # PNG: 8-byte signature
-    if data[0:8] == b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a":
-        return "png"
-    # GIF: "GIF8" followed by "9a" or "7a"
-    if data[0:4] == b"GIF8" and data[5:6] == b"a":
-        return "gif"
-    # JPEG: SOI marker
-    if data[0:3] == b"\xff\xd8\xff":
-        return "jpeg"
-    # HEIC/HEIF: ftyp box at offset 4
-    if data[4:8] == b"ftyp":
-        return "heic"
-    # WebP: RIFF container with WEBP identifier
-    if data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "webp"
-    return None
-
-
 def _decode_data_url_bytes(url: str) -> Optional[bytes]:
     """Decode a base64 data URL into bytes."""
     if not url.startswith("data:") or ";base64," not in url:
@@ -236,7 +214,7 @@ def _parse_image_dimensions_from_bytes(data: bytes, img_type: Optional[str] = No
     import struct
 
     if img_type is None:
-        img_type = _get_image_type(data)
+        img_type = get_image_type(data)
 
     if img_type == "png":
         # PNG IHDR chunk: width at offset 16, height at offset 20 (big-endian)

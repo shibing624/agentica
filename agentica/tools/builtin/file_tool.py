@@ -23,6 +23,7 @@ from agentica.tools.patch import PatchContextError, PatchNoChangeError, apply_di
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
+from agentica.media import get_image_type
 
 # grep/glob self-imposed timeout (seconds). Covers rg, pathlib.glob, and the
 # pure-Python grep fallback so a missing rg or a stuck network mount cannot
@@ -391,6 +392,46 @@ def _is_blocked_device(filepath: str) -> bool:
     return False
 
 
+# Header slice inspected to classify a file as text or binary.
+_BINARY_SNIFF_BYTES = 8192
+
+
+def _binary_refusal(path: Path) -> Optional[str]:
+    """Return why ``path`` cannot be read as text, or None when it is text.
+
+    ``read_file`` decodes with ``errors='ignore'``, so without this a PNG came
+    back as ~500 numbered lines of ``IHDR``/``iCCP`` mojibake: it burns context
+    (measured: 1593 tokens on one screenshot) and invites the model to reason
+    over chunk names as if they were content. Failing loudly is strictly better
+    than returning garbage that looks like a successful read.
+
+    Classified by content, never by suffix: a ``.txt`` full of NULs is binary,
+    and a text file misnamed ``.png`` still reads. Two signals, in order —
+    the image magic bytes (so the message can name the format, and so a JPEG
+    whose header happens to hold no NUL is still caught), then NUL, which
+    cannot occur in valid UTF-8 text.
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(_BINARY_SNIFF_BYTES)
+    except OSError:
+        return None
+
+    image_type = get_image_type(head)
+    if image_type is not None:
+        return (
+            f"This is a {image_type.upper()} image, not text. read_file cannot "
+            "show you pixels. Attach the image to the conversation so a "
+            "vision-capable model sees it, or use an OCR/image tool."
+        )
+    if b"\x00" in head:
+        return (
+            "This is a binary file, not text. read_file would only return "
+            "unreadable decoded bytes. Use a tool that understands its format."
+        )
+    return None
+
+
 def _check_sensitive_write_path(filepath: str) -> Optional[str]:
     """Return an error message if the path targets a sensitive system location."""
     try:
@@ -755,6 +796,10 @@ class BuiltinFileTool(Tool):
         Results have line-number prefixes. Prefer one larger read over
         many small slices.
 
+        Text only. An image or other binary file is refused (detected by
+        content, not extension) — attach an image to the conversation for a
+        vision-capable model instead of reading its bytes here.
+
         Args:
             file_path: File path for md/txt/py/etc. Absolute, relative, or `~`
             offset: 0-based start line when not using tail. Negative = window
@@ -781,6 +826,12 @@ class BuiltinFileTool(Tool):
             raise FileNotFoundError(self._missing_path_error("File", file_path, path))
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
+
+        # Before any decoding, and before the tail/size branches below: a tail
+        # read is exempt from the size guard but must not be exempt from this.
+        refusal = _binary_refusal(path)
+        if refusal is not None:
+            raise ValueError(f"Cannot read '{file_path}': {refusal}")
 
         n_tail = _effective_tail(tail)
         if n_tail is not None:

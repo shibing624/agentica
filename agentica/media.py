@@ -10,6 +10,34 @@ from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel, model_validator
 
 
+def get_image_type(data: bytes) -> Optional[str]:
+    """Return the image format named by ``data``'s magic bytes, else None.
+
+    Lives next to ``Image`` because two unrelated callers need it and neither
+    owns it: token counting needs the format to parse dimensions, and
+    ``read_file`` needs it to refuse an image by name. It reads a header only,
+    so a truncated 12-byte slice is enough.
+    """
+    if len(data) < 12:
+        return None
+    # PNG: 8-byte signature
+    if data[0:8] == b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a":
+        return "png"
+    # GIF: "GIF8" followed by "9a" or "7a"
+    if data[0:4] == b"GIF8" and data[5:6] == b"a":
+        return "gif"
+    # JPEG: SOI marker
+    if data[0:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    # HEIC/HEIF: ftyp box at offset 4
+    if data[4:8] == b"ftyp":
+        return "heic"
+    # WebP: RIFF container with WEBP identifier
+    if data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
 class Media(BaseModel):
     id: str
     original_prompt: Optional[str] = None

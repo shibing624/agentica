@@ -101,6 +101,81 @@ class TestBuiltinFileToolReadFile:
         assert "\t" in result  # tab separator between line number and content
 
 
+class TestReadFileRejectsBinary:
+    """A binary file must fail loudly, not decode into mojibake.
+
+    ``open(..., errors='ignore')`` turned a PNG into ~500 numbered lines of
+    ``IHDR``/``iCCP`` garbage: measured 1593 wasted tokens on one screenshot,
+    and the model then reasons over chunk names as if they were content. The
+    error names the real format so the caller knows the file was fine and the
+    *tool* was wrong for it.
+    """
+
+    def test_png_is_refused_and_names_the_format(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "clip.png")
+        p.write_bytes(
+            b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + b"\x00" * 400
+        )
+
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.read_file(str(p)))
+
+        msg = str(exc.value)
+        assert "PNG" in msg
+        # The bytes themselves must not reach the caller.
+        assert "IHDR" not in msg
+
+    def test_refusal_points_a_vision_model_at_the_image(self, file_tool, tmp_dir):
+        """The image is readable — by the model's eyes, not by this tool."""
+        p = Path(tmp_dir, "shot.jpg")
+        p.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 200)
+
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.read_file(str(p)))
+
+        assert "image" in str(exc.value).lower()
+
+    def test_non_image_binary_is_refused_too(self, file_tool, tmp_dir):
+        """NUL bytes mean binary whatever the extension claims."""
+        p = Path(tmp_dir, "data.txt")
+        p.write_bytes(b"idx\x00\x01\x02\x00\xff\xfe payload \x00\x00")
+
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.read_file(str(p)))
+
+        assert "binary" in str(exc.value).lower()
+
+    def test_extension_alone_does_not_refuse_a_text_file(self, file_tool, tmp_dir):
+        """Detection is by content: a mislabelled *text* file still reads.
+
+        Guarding on the suffix would refuse this and would also miss the
+        ``data.txt`` case above.
+        """
+        p = Path(tmp_dir, "notreally.png")
+        p.write_text("this is plain text\nsecond line\n")
+
+        result = asyncio.run(file_tool.read_file(str(p)))
+
+        assert "this is plain text" in result
+
+    def test_utf8_and_bom_text_still_read(self, file_tool, tmp_dir):
+        """Multi-byte UTF-8 and a BOM are text, not binary."""
+        p = Path(tmp_dir, "cn.md")
+        p.write_bytes("\ufeff# 标题\n中文正文\n".encode("utf-8"))
+
+        result = asyncio.run(file_tool.read_file(str(p)))
+
+        assert "中文正文" in result
+
+    def test_tail_read_of_binary_is_refused_as_well(self, file_tool, tmp_dir):
+        """The tail path skips the size guard; it must not skip this one."""
+        p = Path(tmp_dir, "clip2.png")
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 300)
+
+        with pytest.raises(ValueError):
+            asyncio.run(file_tool.read_file(str(p), tail=50))
+
+
 class TestMissingPathErrors:
     """Missing-path errors expose path state without guessing candidates."""
 
