@@ -1379,13 +1379,16 @@ class Model(ABC):
                 if is_multimodal_tool_result(function_call_output):
                     envelope: Dict[str, Any] = function_call_output  # type: ignore[assignment]
                     if self.supports_images:
-                        additional_messages_from_function_call.append(
-                            Message(
-                                role="user",
-                                content=envelope.get("text") or "",
-                                images=envelope.get("images") or [],
-                            )
+                        media_message = Message(
+                            role="user",
+                            content=envelope.get("text") or "",
+                            images=envelope.get("images") or [],
                         )
+                        # Marks it as media riding with this round's results, so
+                        # a provider that pairs id-less messages to tool_use ids
+                        # does not swallow it as a lost tool result.
+                        media_message._tool_media = True
+                        additional_messages_from_function_call.append(media_message)
                     function_call_output = multimodal_text_summary(envelope)
                 elif function_call_output is not None and not isinstance(function_call_output, str):
                     function_call_output = str(function_call_output)

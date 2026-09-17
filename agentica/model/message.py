@@ -147,6 +147,14 @@ class Message(BaseModel):
     # it as the start of a fresh history.
     _injected: bool = False
 
+    # Set on the user message a tool emits to carry images to the model (see
+    # ``media.multimodal_tool_result``). It rides alongside the tool results of
+    # its round but is NOT one: without this marker Anthropic's
+    # ``format_function_call_results`` treats an id-less message as "a tool
+    # result that lost its id" and folds it into a ``tool_result`` block, so the
+    # image never reaches the model as a user turn.
+    _tool_media: bool = False
+
     # The Unix timestamp the message was created.
     created_at: int = Field(default_factory=lambda: int(time()))
 

@@ -545,10 +545,21 @@ class Claude(Model):
                     if isinstance(block, dict) and "cache_control" in block:
                         block.pop("cache_control", None)
 
-    async def add_image(self, image: Union[str, bytes]) -> Dict[str, Any]:
-        """Convert a URL, local path, or byte payload to an Anthropic image block."""
+    async def add_image(self, image: Union[str, bytes, Dict[str, Any]]) -> Dict[str, Any]:
+        """Convert a URL, data URL, local path, byte payload or dict to an image block."""
+        # ``{"url": ...}`` is the OpenAI-shaped item the gateway and the
+        # analyze_image tool both produce; unwrap it rather than making every
+        # caller keep a second, provider-specific shape.
+        if isinstance(image, dict):
+            url = image.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError(f"Image dict has no usable 'url': {image!r}")
+            image = url
+
         if isinstance(image, str):
-            if image.startswith(("http://", "https://")):
+            if image.startswith("data:") and ";base64," in image:
+                content = base64.b64decode(image.split(";base64,", 1)[1])
+            elif image.startswith(("http://", "https://")):
                 async with httpx.AsyncClient() as client:
                     response = await client.get(image)
                     response.raise_for_status()
@@ -1035,6 +1046,14 @@ class Claude(Model):
         if not tool_ids and not function_call_results:
             return
 
+        # Images a tool sent for the model to look at are a real user turn, not
+        # a tool result: they carry no tool_use id and must not be paired to one.
+        # They follow the tool_result block, matching the order the tools ran in.
+        media_messages = [m for m in function_call_results if getattr(m, "_tool_media", False)]
+        function_call_results = [
+            m for m in function_call_results if not getattr(m, "_tool_media", False)
+        ]
+
         by_id = {
             m.tool_call_id: m
             for m in function_call_results
@@ -1082,6 +1101,7 @@ class Claude(Model):
 
         if fc_responses:
             messages.append(Message(role="user", content=fc_responses))
+        messages.extend(media_messages)
 
     def parse_tool_calls(
         self,

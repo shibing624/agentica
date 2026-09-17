@@ -171,6 +171,37 @@ class TestInputHandling:
 
 
 class TestEnvelope:
+    def test_anthropic_keeps_tool_media_out_of_the_tool_result_block(self):
+        """On the messages wire, the image is a user turn — not a lost result.
+
+        ``format_function_call_results`` pairs id-less messages to the round's
+        ``tool_use`` ids, so without the ``_tool_media`` marker the image
+        message was consumed as "a tool result that lost its id" and the pixels
+        never reached the model. Measured live: opus-4.8 answered "I'm not
+        actually able to see the pixel content" before this, and read the string
+        after.
+        """
+        from agentica.model.anthropic import Claude
+        from agentica.model.message import Message
+
+        model = Claude(id="claude-opus-4-8", api_key="fake")
+        tool_result = Message(role="tool", content="[image attached]", tool_call_id="tu_1")
+        media = Message(role="user", content="look", images=[{"url": "data:image/png;base64,AA"}])
+        media._tool_media = True
+
+        messages: list = []
+        model.format_function_call_results([tool_result, media], ["tu_1"], messages)
+
+        # One tool_result block answering the one tool_use id, and nothing else
+        # folded into it.
+        blocks = messages[0].content
+        assert len(blocks) == 1
+        assert blocks[0]["tool_use_id"] == "tu_1"
+        assert blocks[0]["content"] == "[image attached]"
+        # The image survives as its own user message, after the result.
+        assert messages[1] is media
+        assert list(messages[1].images) == [{"url": "data:image/png;base64,AA"}]
+
     def test_text_summary_is_what_a_blind_model_sees(self):
         envelope = multimodal_tool_result(
             text="look at this", images=[{"url": "x"}], text_summary="[image attached]"

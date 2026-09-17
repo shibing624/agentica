@@ -132,3 +132,35 @@ def test_ollama_rejects_images_for_text_only_model():
 
     with pytest.raises(ValueError, match="does not support image input"):
         model.format_message(message)
+
+
+def test_anthropic_accepts_the_url_dict_and_data_url_shapes(tmp_path):
+    """The gateway and analyze_image both emit ``{"url": ...}``, often a data URL.
+
+    ``add_image`` used to take only str/bytes and raised ``TypeError`` on the
+    dict, and had no data-URL branch at all — so an image produced by a tool
+    could not reach a Claude model even though the model reads images fine.
+    """
+    from PIL import Image as PILImage
+
+    png_path = tmp_path / "x.png"
+    PILImage.new("RGB", (2, 2), (255, 0, 0)).save(png_path)
+    raw = png_path.read_bytes()
+    data_url = "data:image/png;base64," + base64.b64encode(raw).decode()
+
+    model = Claude(id="claude-opus-4-8", api_key="fake_anthropic_key")
+
+    from_dict = asyncio.run(model.add_image({"url": data_url}))
+    from_str = asyncio.run(model.add_image(data_url))
+
+    assert from_dict == from_str
+    assert from_dict["type"] == "image"
+    assert from_dict["source"]["media_type"] == "image/png"
+    assert from_dict["source"]["data"] == base64.b64encode(raw).decode()
+
+
+def test_anthropic_rejects_a_dict_without_a_url():
+    model = Claude(id="claude-opus-4-8", api_key="fake_anthropic_key")
+
+    with pytest.raises(ValueError, match="no usable 'url'"):
+        asyncio.run(model.add_image({"detail": "high"}))
