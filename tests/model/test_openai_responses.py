@@ -416,6 +416,47 @@ def test_native_checkpoint_is_ignored_by_other_endpoint_identity():
     ]
 
 
+def test_tool_media_user_message_becomes_an_input_image_item():
+    """Images a tool sends must survive the Responses wire as input_image.
+
+    A tool result here is one plain ``output`` string with nowhere to put an
+    image, which is why ``analyze_image`` sends the pixels on a following user
+    message instead. That message has to come out as ``input_image``, not as a
+    stringified dict. Verified live against gpt-5.5: it read both the string
+    and the shape out of two different generated images.
+    """
+    model = OpenAIResponses(id="gpt-5.5", api_key="test")
+    data_url = "data:image/png;base64,AAAA"
+    media = Message(role="user", content="look at this", images=[{"url": data_url}])
+    media._tool_media = True
+
+    formatted = model.format_messages(
+        [
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "analyze_image", "arguments": "{}"},
+                    }
+                ],
+            ),
+            Message(role="tool", content="[image attached]", tool_call_id="c1"),
+            media,
+        ]
+    )
+
+    tool_item = next(i for i in formatted if i.get("type") == "function_call_output")
+    assert tool_item["output"] == "[image attached]"
+
+    user_item = next(i for i in formatted if i.get("role") == "user")
+    kinds = [part["type"] for part in user_item["content"]]
+    assert "input_image" in kinds
+    assert next(p for p in user_item["content"] if p["type"] == "input_image")["image_url"] == data_url
+
+
 def test_runtime_selects_responses_only_for_wire_api():
     responses_model = get_model(
         model_provider="openai",
