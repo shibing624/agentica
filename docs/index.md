@@ -44,6 +44,7 @@
 | [Agent](concepts/agent.md) | Agent 核心概念、Model、Memory、Tools |
 | [Model](concepts/model.md) | 多模型提供商 |
 | [Tools](concepts/tools.md) | 内置工具与自定义工具（含 `task`/`delegate`/peer） |
+| [新增内置工具的判据](concepts/builtin-tool-bar.md) | 什么该做成内置、CLI-only 的物理边界、装配期条件挂载 |
 | [Memory & Workspace](concepts/memory.md) | 记忆系统与工作空间 |
 | [Knowledge (RAG)](concepts/rag.md) | 知识库、向量检索 |
 | **多智能体** | |

@@ -37,6 +37,7 @@ nav:
       - Agent: concepts/agent.md
       - Model: concepts/model.md
       - Tools: concepts/tools.md
+      - 新增内置工具的判据: concepts/builtin-tool-bar.md
       - Memory & Workspace: concepts/memory.md
       - Knowledge (RAG): concepts/rag.md
       - Storage (DB/Media): concepts/storage.md
