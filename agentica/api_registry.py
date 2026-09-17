@@ -121,7 +121,7 @@ LAZY_IMPORTS = {
     "tool_result": "agentica.tools.helpers",
     "SearchSerperTool": "agentica.tools.search_serper_tool",
     "BaiduSearchTool": "agentica.tools.baidu_search_tool",
-    "ImageAnalysisTool": "agentica.tools.image_analysis_tool",
+    "BuiltinVisionTool": "agentica.tools.builtin.vision_tool",
     "DalleTool": "agentica.tools.dalle_tool",
     "HackerNewsTool": "agentica.tools.hackernews_tool",
     "JinaTool": "agentica.tools.jina_tool",

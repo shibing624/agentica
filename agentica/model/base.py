@@ -26,6 +26,7 @@ from PIL.Image import Image as PILImage
 
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import logger
+from agentica.media import is_multimodal_tool_result, multimodal_text_summary
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse, ModelResponseEvent
@@ -1367,8 +1368,26 @@ class Model(ABC):
             else:
                 function_call_output = function_call.result
                 # Ensure output is always str for tool Message.content — some
-                # providers reject list-type tool results (M-02 fix)
-                if function_call_output is not None and not isinstance(function_call_output, str):
+                # providers reject list-type tool results (M-02 fix).
+                # A tool that needs the model to SEE something returns the
+                # multimodal envelope instead: its text goes in the tool result
+                # (below) and its images ride a follow-up user message, which is
+                # the one shape every vision API accepts. Measured: attaching the
+                # image to ``role="tool"`` was rejected outright by one gateway
+                # and silently hallucinated over by another, while the follow-up
+                # user message worked on all three.
+                if is_multimodal_tool_result(function_call_output):
+                    envelope: Dict[str, Any] = function_call_output  # type: ignore[assignment]
+                    if self.supports_images:
+                        additional_messages_from_function_call.append(
+                            Message(
+                                role="user",
+                                content=envelope.get("text") or "",
+                                images=envelope.get("images") or [],
+                            )
+                        )
+                    function_call_output = multimodal_text_summary(envelope)
+                elif function_call_output is not None and not isinstance(function_call_output, str):
                     function_call_output = str(function_call_output)
 
             if isinstance(function_call_output, str):
@@ -1818,6 +1837,7 @@ class Model(ABC):
     def _image_block(self, raw: bytes, mime_type: str) -> Dict[str, Any]:
         encoded = base64.b64encode(raw).decode("utf-8")
         return {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}}
+
 
     def _process_string_image(self, image: str) -> Dict[str, Any]:
         """Process string-based image (base64, URL, or file path)."""

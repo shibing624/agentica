@@ -53,18 +53,22 @@ class TestDefaultModelResolution(unittest.TestCase):
         self.assertEqual(agent.model.id, "glm-4.7-flash")
         self.assertIs(agent.auxiliary_model, agent.model)
 
-    def test_image_analysis_tool_reuses_agent_model(self):
+    def test_vision_tool_receives_the_agent_model(self):
+        """``analyze_image`` routes on the agent's own model, so it must get it.
+
+        Without this wiring the tool cannot tell a vision-capable agent (hand it
+        the pixels) from a text-only one (describe or OCR instead).
+        """
         from agentica import DeepSeekChat
         from agentica.agent import Agent
-        from agentica.tools.image_analysis_tool import ImageAnalysisTool
+        from agentica.tools.builtin.vision_tool import BuiltinVisionTool
 
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fake_deepseek_key"}, clear=True):
             model = DeepSeekChat()
-            tool = ImageAnalysisTool()
+            tool = BuiltinVisionTool()
             Agent(model=model, tools=[tool])
-            tool.update_llm()
 
-        self.assertIs(tool.llm, model)
+        self.assertIs(tool._agent_model, model)
 
 
 if __name__ == "__main__":

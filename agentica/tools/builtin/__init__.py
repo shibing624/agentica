@@ -12,6 +12,7 @@ from agentica.tools.builtin.file_tool import BuiltinFileTool
 from agentica.tools.builtin.execute_tool import BuiltinExecuteTool
 from agentica.tools.builtin.context_tool import BuiltinContextTool
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool, BuiltinTodoTool
+from agentica.tools.builtin.vision_tool import BuiltinVisionTool
 from agentica.tools.builtin.web_tools import (
     BuiltinFetchUrlTool,
     BuiltinWebSearchTool,
@@ -32,6 +33,7 @@ __all__ = [
     "BuiltinMemoryTool",
     "BuiltinContextTool",
     "BuiltinTaskTool",
+    "BuiltinVisionTool",
     "get_builtin_tools",
     "register_web_search_backend",
     "list_web_search_providers",
@@ -46,9 +48,11 @@ def get_builtin_tools(
         include_fetch_url: bool = True,
         include_todos: bool = True,
         include_task: bool = True,
+        include_vision: bool = True,
         include_skills: bool = False,
         include_ask_user_question: bool = False,
         task_model: Optional["Model"] = None,
+        vision_model: Optional["Model"] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback=None,
         sandbox_config=None,
@@ -71,12 +75,19 @@ def get_builtin_tools(
         include_fetch_url: Whether to include URL fetching tool
         include_todos: Whether to include task management tools
         include_task: Whether to include subagent task tool
+        include_vision: Whether to include the ``analyze_image`` tool, which
+            answers questions about a local or remote image. With a
+            vision-capable agent model the pixels go to that model directly;
+            otherwise it falls back to ``vision_model``, then to local OCR.
         include_skills: Whether to include skill tool for executing skills (default: False)
         include_ask_user_question: Whether to include ask_user_question tool for human-in-the-loop (default: False)
         task_model: Optional model for the cheap (``auxiliary``) tier of subagents
             spawned by the ``task`` tool. When ``None`` the parent agent's
             ``resolve_auxiliary_model("task")`` decides. Definitions that opt
             into ``model_tier: main`` run on the parent's own model.
+        vision_model: Optional model used by ``analyze_image`` to describe an
+            image when the agent's own model cannot see one. Only consulted in
+            that case — a vision-capable agent reads the image itself.
         custom_skill_dirs: Custom skill directories to load (optional)
         ask_user_question_callback: Custom callback for ask_user_question tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
@@ -135,6 +146,9 @@ def get_builtin_tools(
 
     if include_task:
         tools.append(BuiltinTaskTool(auxiliary_model=task_model))
+
+    if include_vision:
+        tools.append(BuiltinVisionTool(vision_model=vision_model, work_dir=work_dir))
 
     if include_skills:
         from agentica.tools.skill_tool import SkillTool

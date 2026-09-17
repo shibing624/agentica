@@ -10,6 +10,59 @@ from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel, model_validator
 
 
+# ---------------------------------------------------------------------------
+# Multimodal tool results
+#
+# A tool that needs the agent's model to *see* something cannot put the image
+# in its own ``role="tool"`` result: measured across three live gateways, one
+# rejected the request outright ("each tool_use must have a single result"),
+# and one returned 200 while the model confidently described an image it had
+# never received. The image rides a follow-up ``role="user"`` message instead —
+# the shape every vision API treats as first-class, and the one
+# ``add_images_to_message`` already implements on all three wires.
+#
+# So a tool returns this envelope; the model layer splits it into the text the
+# tool result carries and the user message the pixels travel in.
+# ---------------------------------------------------------------------------
+
+MULTIMODAL_KEY = "_multimodal"
+
+
+def multimodal_tool_result(
+    text: str, images: list, *, text_summary: Optional[str] = None
+) -> Dict[str, Any]:
+    """Build the envelope a tool returns when the model must see ``images``.
+
+    ``text`` is what the model reads as the tool's result; ``text_summary``
+    defaults to it and is what a text-only model gets when the images are
+    dropped, so a downgrade loses the picture without corrupting the history.
+    """
+    return {
+        MULTIMODAL_KEY: True,
+        "text": text,
+        "images": list(images),
+        "text_summary": text_summary if text_summary is not None else text,
+    }
+
+
+def is_multimodal_tool_result(value: Any) -> bool:
+    """True for the envelope built by ``multimodal_tool_result``."""
+    return (
+        isinstance(value, dict)
+        and value.get(MULTIMODAL_KEY) is True
+        and isinstance(value.get("images"), list)
+    )
+
+
+def multimodal_text_summary(value: Any) -> str:
+    """The text a tool result carries: the envelope's summary, else ``str``."""
+    if isinstance(value, str):
+        return value
+    if is_multimodal_tool_result(value):
+        return str(value.get("text_summary") or value.get("text") or "")
+    return str(value)
+
+
 def get_image_type(data: bytes) -> Optional[str]:
     """Return the image format named by ``data``'s magic bytes, else None.
 

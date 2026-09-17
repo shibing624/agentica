@@ -156,13 +156,15 @@ class TestWebSearchProviderSelection:
             tools = get_builtin_tools(
                 include_file_tools=False, include_execute=False,
                 include_fetch_url=False, include_todos=False, include_task=False,
+                include_vision=False,
             )
         assert [t.provider for t in tools] == ["exa"]
 
     def test_get_builtin_tools_passes_provider_through(self):
         tools = get_builtin_tools(
             include_file_tools=False, include_execute=False, include_fetch_url=False,
-            include_todos=False, include_task=False, web_search_provider="duckduckgo",
+            include_todos=False, include_task=False, include_vision=False,
+            web_search_provider="duckduckgo",
         )
         assert [t.provider for t in tools] == ["duckduckgo"]
 

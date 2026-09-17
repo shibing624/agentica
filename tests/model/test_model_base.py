@@ -204,6 +204,65 @@ class TestRunFunctionCalls:
         assert "tool_display_meta" not in results[0].to_model_dict()
 
     @pytest.mark.asyncio
+    async def test_multimodal_result_sends_pixels_as_a_followup_user_message(self):
+        """``analyze_image`` returns an envelope; the image must ride a user turn.
+
+        Attaching it to the ``role="tool"`` message itself was measured against
+        three live gateways: one rejected the request ("each tool_use must have
+        a single result"), one returned 200 while the model confidently
+        described an image it never received, and only one relayed it. The
+        follow-up user message worked on all three, so that is the shape.
+        """
+        from agentica.media import multimodal_tool_result
+
+        model = self._make_model_instance()
+
+        def look() -> dict:
+            """Return an image for the model to look at."""
+            return multimodal_tool_result(
+                text="look at this", images=[{"url": "data:image/png;base64,AAAA"}],
+                text_summary="[image attached]",
+            )
+
+        fc = self._make_fc(look, call_id="look-1")
+        results = []
+        async for _ in model.run_function_calls([fc], results):
+            pass
+
+        tool_result, followup = results[0], results[1]
+        # The tool result stays a plain string — never a repr of the envelope.
+        assert tool_result.role == "tool"
+        assert tool_result.content == "[image attached]"
+        assert "_multimodal" not in str(tool_result.content)
+        # The pixels arrive as a user message, which every vision wire accepts.
+        assert followup.role == "user"
+        assert list(followup.images) == [{"url": "data:image/png;base64,AAAA"}]
+        assert followup.content == "look at this"
+
+    @pytest.mark.asyncio
+    async def test_text_only_model_gets_no_image_message_at_all(self):
+        """A model that cannot see must not be sent an image it will reject."""
+        from agentica.media import multimodal_tool_result
+
+        model = self._make_model_instance()
+        model.supports_images = False
+
+        def look() -> dict:
+            """Return an image for the model to look at."""
+            return multimodal_tool_result(
+                text="look", images=[{"url": "data:image/png;base64,AAAA"}],
+                text_summary="[image attached]",
+            )
+
+        fc = self._make_fc(look, call_id="look-2")
+        results = []
+        async for _ in model.run_function_calls([fc], results):
+            pass
+
+        assert len(results) == 1
+        assert results[0].content == "[image attached]"
+
+    @pytest.mark.asyncio
     async def test_parallel_execution_faster_than_serial(self):
         """N concurrency_safe tools each sleeping 0.1s should complete in ≈0.1s (parallel), not N*0.1s."""
         model = self._make_model_instance()

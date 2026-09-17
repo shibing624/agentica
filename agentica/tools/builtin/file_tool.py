@@ -421,8 +421,8 @@ def _binary_refusal(path: Path) -> Optional[str]:
     if image_type is not None:
         return (
             f"This is a {image_type.upper()} image, not text. read_file cannot "
-            "show you pixels. Attach the image to the conversation so a "
-            "vision-capable model sees it, or use an OCR/image tool."
+            "show you pixels — use analyze_image(image_path_or_url=...) to look "
+            "at it, optionally with a question about what you need from it."
         )
     if b"\x00" in head:
         return (

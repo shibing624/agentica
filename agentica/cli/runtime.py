@@ -86,6 +86,7 @@ BUILTIN_TOOLS = [
     "fetch_url",
     "write_todos",
     "task",
+    "analyze_image",
     "delegate",
     "save_memory",
     "search_memory",
@@ -122,6 +123,7 @@ TOOL_ICONS = {
     "fetch_url": "🔗",
     "write_todos": "📋",
     "task": "🤖",
+    "analyze_image": "👁️",
     "default": "🔧",
 }
 
@@ -132,8 +134,6 @@ TOOL_REGISTRY = {
     "cogvideo": ("cogvideo", "CogVideoTool", "AI/ML", "Text-to-video generation with CogVideo"),
     "cogview": ("cogview", "CogViewTool", "AI/ML", "Text-to-image generation with CogView"),
     "dalle": ("dalle", "DalleTool", "AI/ML", "Image generation with DALL-E"),
-    "image_analysis": ("image_analysis", "ImageAnalysisTool", "AI/ML", "Image analysis and description"),
-    "ocr": ("ocr", "OcrTool", "AI/ML", "Optical character recognition"),
     "video_analysis": ("video_analysis", "VideoAnalysisTool", "AI/ML", "Video content analysis"),
     "volc_tts": ("volc_tts", "VolcTtsTool", "AI/ML", "Text-to-speech with Volcengine"),
     # Search Tools

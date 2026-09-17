@@ -14,6 +14,7 @@ from typing import List, NamedTuple, Optional
 
 from agentica.cli.commands.context import IMAGE_EXTENSIONS
 from agentica.utils.log import logger
+from agentica.utils.ocr import ocr_image_text
 
 # ==================== Image Attachment Helpers ====================
 
@@ -221,26 +222,14 @@ _OCR_TOTAL_CHARS = 200_000
 _OCR_TIMEOUT_SECS = 30
 
 
-def _img_ocr_class():
-    try:
-        from imgocr import ImgOcr
-    except ImportError:
-        return None
-    return ImgOcr
-
-
 def _ocr_single_image(image_path: str) -> str:
-    """OCR a single image, returning extracted text (truncated to limit)."""
-    ImgOcr = _img_ocr_class()
-    if ImgOcr is None:
-        return ""
+    """OCR a single image, returning extracted text (truncated to limit).
 
-    ocr = ImgOcr()
-    result = ocr.ocr(image_path)
-    text = " ".join(item["text"] for item in result if "text" in item)
-    if len(text) > _OCR_PER_IMAGE_CHARS:
-        text = text[:_OCR_PER_IMAGE_CHARS] + f"\n... (truncated, {len(text)} chars total)"
-    return text
+    Extraction itself lives in ``agentica.utils.ocr`` so the ``analyze_image``
+    tool and this prompt-injection path cannot drift apart; only the character
+    budget differs between them.
+    """
+    return ocr_image_text(image_path, _OCR_PER_IMAGE_CHARS)
 
 
 def _ocr_images_parallel(image_paths: list) -> str:
