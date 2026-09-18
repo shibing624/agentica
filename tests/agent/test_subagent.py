@@ -91,6 +91,9 @@ def _make_parent_agent(auxiliary_model=None):
         # when no run is in flight.
         run_context=None,
         run_id=None,
+        # Resolved per-run retry budget, set by Runner before the turn that
+        # spawns us. The CLI resolves this to 2; Agent's bare default is 1.
+        _run_max_api_retry=2,
     )
 
 
@@ -871,6 +874,33 @@ def test_retrieval_subagents_run_on_auxiliary_model():
         assert child_model.id == "fake-aux-model", (
             f"{agent_type} is a retrieval type and must run on the cheap model"
         )
+
+
+def test_child_inherits_parent_resolved_api_retry_budget():
+    """The child must run with the parent's resolved retry budget.
+
+    ``Runner`` reads ``agent._run_max_api_retry`` to build ``LoopState``, and
+    its mid-stream re-issue is gated on ``_ms_attempt < max_api_retry - 1``.
+    A child left on ``Agent``'s bare default of 1 makes that gate ``0 < 0`` —
+    permanently false — so a single malformed SSE frame killed the whole
+    subagent run while the same drop was survivable in the parent.
+    """
+    parent = _make_parent_agent()
+    parent._run_max_api_retry = 3
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["retrier"] = SubagentConfig(
+        type="retrier", name="retrier", description="r", system_prompt="s",
+    )
+
+    with patch("agentica.agent.Agent", RecordingAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(parent_agent=parent, task="t", agent_type="retrier")
+        )
+
+    assert result["status"] == "completed"
+    assert RecordingAgent.last_init_kwargs["max_api_retry"] == 3
 
 
 def test_runtime_subagent_can_run_on_main_model():

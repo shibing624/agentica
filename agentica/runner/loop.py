@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import time
 from typing import (
@@ -1115,12 +1116,21 @@ class LoopMixin:
                                     # loop (that would increment turn_count).
                                     # Already-yielded chunks stay on the wire
                                     # (--print concatenates partial + retry).
+                                    # A malformed SSE frame arrives as
+                                    # ``json.JSONDecodeError``, whose text is
+                                    # only "Extra data: line 1 column N" — it
+                                    # names no transport condition, so the
+                                    # substring list can never classify it.
+                                    # The exception type is the signal: a
+                                    # payload the decoder cannot parse is a
+                                    # framing failure, and the request is
+                                    # worth re-issuing.
                                     _midstream_retryable = any(
                                         r in err
                                         for r in active_model.get_retryable_substrings(
                                             loop_state.RETRYABLE_SUBSTRINGS
                                         )
-                                    )
+                                    ) or isinstance(exc, json.JSONDecodeError)
                                     if (
                                         _midstream_retryable
                                         and _ms_attempt < loop_state.max_api_retry - 1

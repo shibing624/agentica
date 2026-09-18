@@ -1329,6 +1329,45 @@ class TestMidStreamTransientRetry(unittest.TestCase):
             self.assertIn("incomplete chunked read", str(ctx.exception))
             self.assertEqual(attempts["n"], 2)
 
+    def test_midstream_json_decode_error_is_retried(self):
+        """A malformed SSE frame surfaces as ``json.JSONDecodeError``, whose
+        text is only "Extra data: line 1 column N" — it matches none of the
+        transport substrings, so the mid-stream re-issue never fired and the
+        whole turn died. The exception *type* is the signal here, not its text.
+        """
+        import tempfile
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        attempts = {"n": 0}
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+
+        async def fake_invoke_stream(messages):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                yield self._chunk(content="partial answer that will be")
+                # Two chunk objects concatenated into one SSE data frame.
+                raise json.JSONDecodeError("Extra data", '{"a": 1}{"b": 2}', 261)
+            yield self._chunk(content="recovered full answer", finish_reason="stop")
+
+        model.invoke_stream = fake_invoke_stream
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, max_api_retry=2,
+                session_id="s-midstream-json", session_base_dir=tmp,
+            )
+            agent._max_turns = 2
+
+            async def _drive():
+                async for _ in agent.run_stream("hello"):
+                    pass
+
+            with patch("agentica.runner.loop.asyncio.sleep", new_callable=AsyncMock):
+                asyncio.run(_drive())
+
+            self.assertEqual(attempts["n"], 2, "a decode error must re-issue the call")
+            self.assertEqual(agent.run_response.content, "recovered full answer")
+
 
 if __name__ == "__main__":
     unittest.main()

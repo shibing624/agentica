@@ -826,6 +826,13 @@ class SubagentRegistry:
             tools=child_tools,
             prompt_config=PromptConfig(markdown=True),
             tool_config=ToolConfig(tool_call_limit=config.tool_call_limit),
+            # The child faces the same flaky gateway as the parent, so it gets
+            # the parent's resolved per-run budget rather than ``Agent``'s bare
+            # default of 1. That default disables the Runner's mid-stream
+            # re-issue outright (it is gated on ``_ms_attempt < budget - 1``),
+            # which is why one malformed SSE frame used to kill a subagent run
+            # that the parent would have survived.
+            max_api_retry=parent_agent._run_max_api_retry,
             context={
                 "_subagent_depth": depth,
                 "_can_spawn_subagents": config.can_spawn_subagents,
