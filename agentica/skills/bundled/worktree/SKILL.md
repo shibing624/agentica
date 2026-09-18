@@ -42,6 +42,18 @@ merge. The tool schema lists the actions; do not invent paths.
 - `worktree(action="merge")` — land on local main, delete the checkout, return
 - `worktree(action="remove")` — drop one with no unique work
 
+Not `use(name="main")` when you mean "take me back to the main checkout":
+`use` reads its name as a *task*, so that creates a second checkout on a
+`wt/main` branch instead. `merge` and `remove` are the ways back, and both
+dispose of the worktree — there is no action for leaving one unfinished, so ask
+the user how to proceed instead of improvising. A `cd` is not it: that moves
+the shell only, not the file tools.
+
+Do not delete a worktree with `execute` (`git worktree remove`, `rm -rf`) while
+you are standing in it: your working directory disappears under you and every
+later command fails on it, absolute paths included. The tool's `remove` and
+`merge` move the session out before deleting, which is the reason to use them.
+
 The human's surfaces: `agentica --worktree <task>` at start (see
 `agentica --help`), `/worktree` mid-session. You cannot type slash commands;
 use the tool. Tell the user which slash to type when they want to drive.
