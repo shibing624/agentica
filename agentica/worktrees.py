@@ -131,6 +131,18 @@ def _git(args: Sequence[str], cwd: str, *, check: bool = True) -> str:
             timeout=TIMEOUT,
         )
     except FileNotFoundError as e:
+        # Two different absences reach here as ENOENT: the git binary, and
+        # ``cwd`` itself. Blaming git for a deleted directory sends the reader
+        # to install a binary they already have, and hides the one fact that
+        # matters — this session is standing in a directory that is gone, which
+        # is exactly the state ``status`` is asked about after another session
+        # removes the worktree.
+        if not Path(cwd).is_dir():
+            raise WorktreeError(
+                f"the directory this session works in no longer exists: {cwd} "
+                "— git cannot run anywhere. Move to a directory that exists "
+                "(the main checkout, or a new worktree) and retry."
+            ) from e
         raise WorktreeError("git is not installed or not on PATH") from e
     except subprocess.SubprocessError as e:
         raise WorktreeError(f"git {' '.join(args)} did not finish: {e}") from e
@@ -147,6 +159,23 @@ def is_git_repo(cwd: str) -> bool:
         return _git(["rev-parse", "--is-inside-work-tree"], cwd).strip() == "true"
     except WorktreeError:
         return False
+
+
+def _nearest_existing_dir(cwd: str) -> str:
+    """``cwd`` if it exists, else the closest ancestor that does.
+
+    A worktree removed by another session leaves this one pointing at a path
+    with nothing behind it. Its parent (``.agentica/worktrees``, or the
+    repository itself) is still there and still inside the same repository, so
+    that is where a git question about "this session's repo" can be answered.
+    """
+    path = Path(cwd)
+    if path.is_dir():
+        return cwd
+    for parent in path.parents:
+        if parent.is_dir():
+            return str(parent)
+    return cwd
 
 
 def main_root(cwd: str) -> str:
@@ -606,7 +635,15 @@ def ensure(
     Idempotent on purpose: "bind me to <task>" is a thing a long-running session
     may say more than once, and the second time must land in the same directory
     with the same branch and the same history.
+
+    ``cwd`` may itself be gone: another session merging its worktree away
+    deletes the directory this one is standing in. That session has no working
+    directory left, so it can run nothing at all — and asking for a fresh
+    worktree is precisely how it should get out. Resolve from the nearest
+    ancestor that still exists rather than refusing, which is why this is not
+    simply ``is_git_repo(cwd)``.
     """
+    cwd = _nearest_existing_dir(cwd)
     if not is_git_repo(cwd):
         raise WorktreeError(f"{cwd} is not inside a git repository")
 

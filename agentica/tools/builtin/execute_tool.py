@@ -692,13 +692,36 @@ class BuiltinExecuteTool(Tool):
         out_lines = err_lines = 0
         try:
             try:
-                proc = await asyncio.create_subprocess_shell(
-                    command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    start_new_session=os.name != "nt",
-                )
+                try:
+                    proc = await asyncio.create_subprocess_shell(
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=cwd,
+                        start_new_session=os.name != "nt",
+                    )
+                except FileNotFoundError:
+                    # The shell is on PATH; what is missing is the directory we
+                    # asked to run in. Raised bare, this surfaces as
+                    # ``[Errno 2] No such file or directory: '<dir>'`` — a path
+                    # the model never mentioned, so it reads the error as a typo
+                    # in its own command and retries variants instead. This
+                    # happens for real when another session merges away the git
+                    # worktree this one works in, and it takes every shell
+                    # command down with it, so name the cause and the way out.
+                    if cwd is not None and not os.path.isdir(cwd):
+                        raise NotADirectoryError(
+                            f"This session's working directory no longer exists: {cwd}\n"
+                            "Nothing ran — the command is fine, the directory it "
+                            "would run in is gone (typically a worktree another "
+                            "session merged or removed).\n"
+                            "Move this session to a directory that exists before "
+                            "running anything else: worktree(action=\"use\", "
+                            "name=\"<task>\") takes a fresh checkout, or ask the "
+                            "user where to continue. An absolute path in the "
+                            "command does not help — every command starts here."
+                        ) from None
+                    raise
                 out, err = await asyncio.wait_for(
                     self._drain_both(proc, stdout_spool, stderr_spool),
                     timeout=effective_timeout,

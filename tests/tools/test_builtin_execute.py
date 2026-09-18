@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -924,3 +925,26 @@ class TestExecuteRedactionReachesTheSpillFile:
             if ln.strip().endswith(".txt") and "tool-results" in ln.replace("\\", "/")
         )
         assert payload in Path(path_line).read_text(encoding="utf-8")
+
+
+class TestDeletedWorkingDirectory:
+    """Another session merging its worktree away deletes the directory this one
+    runs in. Every shell command then fails on ``cwd``, and the report has to
+    say so — the model cannot fix a directory it is not told about."""
+
+    def test_a_deleted_cwd_names_itself_and_the_way_out(self, tmp_dir):
+        gone = Path(tmp_dir) / "worktrees" / "main"
+        gone.mkdir(parents=True)
+        tool = BuiltinExecuteTool(work_dir=str(gone))
+        shutil.rmtree(gone)
+
+        with pytest.raises(OSError) as exc:
+            asyncio.run(tool.execute("echo hello"))
+
+        message = str(exc.value)
+        assert str(gone) in message
+        assert "working directory no longer exists" in message, (
+            "a bare [Errno 2] names a path the model never mentioned, so it "
+            "reads the failure as a typo in its own command and retries variants"
+        )
+        assert "worktree" in message, "the report must carry the way out"

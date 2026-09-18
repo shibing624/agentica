@@ -232,3 +232,35 @@ def _git_output(cwd, *args):
         ["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True
     )
     return result.stdout
+
+
+class TestDeletedWorkingDirectory:
+    """When another session merges away the worktree this one stands in, every
+    git call here runs with a ``cwd`` that no longer exists. The report must
+    name that, and the session must still have a way out."""
+
+    def test_a_deleted_cwd_is_not_reported_as_missing_git(self, repo):
+        wt = ensure(str(repo), "docs")
+        worktrees.remove(wt.path)
+
+        with pytest.raises(WorktreeError) as exc:
+            worktrees.main_root(wt.path)
+
+        message = str(exc.value)
+        assert "no longer exists" in message
+        assert "not installed" not in message, (
+            "ENOENT here is the deleted directory, not a missing git binary — "
+            "blaming git sends the reader to install what they already have"
+        )
+
+    def test_a_session_whose_worktree_was_removed_can_still_get_a_new_one(self, repo):
+        """The escape hatch. ``ensure`` asks ``is_git_repo(cwd)`` first, which is
+        False for a directory that is gone — so the one tool that could move the
+        session refused to, leaving it unable to run anything at all."""
+        wt = ensure(str(repo), "docs")
+        worktrees.remove(wt.path)
+
+        rescued = ensure(wt.path, "rescue")
+
+        assert Path(rescued.path) == repo / ".agentica/worktrees" / "rescue"
+        assert Path(rescued.path).is_dir()
