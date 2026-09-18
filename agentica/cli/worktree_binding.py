@@ -173,6 +173,13 @@ class WorktreeBinder:
             f"Merged {result.commits} commit(s) from {result.branch} into "
             f"{result.base} ({result.merged_sha})."
         )
+        if result.already_merged:
+            # "Merged 0 commit(s)" would be a lie about what just happened;
+            # nothing was merged because there was nothing left to merge.
+            landed = (
+                f"{result.base} already had every commit of {result.branch}; "
+                "nothing to merge."
+            )
         if leftover:
             return (
                 f"{landed}\n"

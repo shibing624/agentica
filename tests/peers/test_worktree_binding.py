@@ -150,3 +150,26 @@ class TestSwitchReportsSharing:
         assert "pid 1" in out
         assert "sharing" in out.lower()
         assert "index.lock" in out
+
+
+class TestMergeOfAnAlreadyLandedBranch:
+    """The case that drove a session to bypass the tool: work already on main,
+    "merge and clean up" asked for. The tool used to refuse, so the session
+    ran `git worktree remove` on its own cwd and lost every later command."""
+
+    def test_merge_cleans_up_when_the_branch_is_already_on_main(self, repo):
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "feature.py").write_text("x = 1\n")
+        _git(wt.path, "add", "feature.py")
+        _git(wt.path, "commit", "-q", "-m", "add feature")
+        binder, agent, _ = _binder(wt.path)
+        binder.merge()
+
+        # Re-enter, then ask again: main now holds everything.
+        binder.switch("docs")
+        out = binder.merge()
+
+        assert Path(agent.work_dir) == repo, "the session must end up on main"
+        assert not Path(wt.path).exists(), f"the checkout must be gone: {out}"
+        assert "already had every commit" in out
+        assert "Merged 0 commit" not in out, "reporting a merge that did not happen"

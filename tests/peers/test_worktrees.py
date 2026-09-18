@@ -264,3 +264,35 @@ class TestDeletedWorkingDirectory:
 
         assert Path(rescued.path) == repo / ".agentica/worktrees" / "rescue"
         assert Path(rescued.path).is_dir()
+
+
+class TestMergeOfAnAlreadyLandedBranch:
+    """"Everything is already on main" is the *success* state of a finished
+    task, not an error. Refusing it taught a live session that the tool was a
+    dead end for exactly the case it was built for — so it went around it with
+    `execute` and deleted the directory it was standing in."""
+
+    def test_merge_back_of_an_already_merged_branch_is_not_an_error(self, repo):
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "feature.py").write_text("x = 1\n")
+        _git(wt.path, "add", "feature.py")
+        _git(wt.path, "commit", "-q", "-m", "add feature")
+        worktrees.merge_back(wt.path)
+
+        # Same call again: main already has every commit of the branch.
+        result = worktrees.merge_back(wt.path)
+
+        assert not result.conflicted
+        assert result.commits == 0
+        assert result.already_merged is True
+        assert (repo / "feature.py").is_file(), "the earlier merge must stand"
+
+    def test_a_branch_with_nothing_on_it_at_all_is_also_not_an_error(self, repo):
+        """A worktree opened and never committed to. Nothing to land, nothing
+        lost by saying so — the caller's next step (remove) is the same."""
+        wt = ensure(str(repo), "docs")
+
+        result = worktrees.merge_back(wt.path)
+
+        assert result.already_merged is True
+        assert result.commits == 0

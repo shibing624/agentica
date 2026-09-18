@@ -730,6 +730,11 @@ class MergeResult:
     commits: int
     merged_sha: str
     conflicted_files: Tuple[str, ...] = ()
+    # The base already contained every commit of the branch, so there was
+    # nothing to land. Not a failure: it is what a finished (or never started)
+    # task looks like, and the caller's next step — remove the checkout — is
+    # the same as after a successful merge.
+    already_merged: bool = False
 
     @property
     def conflicted(self) -> bool:
@@ -781,8 +786,16 @@ def merge_back(cwd: str, *, base: Optional[str] = None) -> MergeResult:
     ahead = _git(["rev-list", "--count", f"{base_ref}..{branch}"], root).strip()
     commits = int(ahead) if ahead.isdigit() else 0
     if commits == 0:
-        raise WorktreeError(
-            f"{branch} has no commits that {base_ref} does not already have"
+        # Nothing to land — the base already has it all. This is the state a
+        # finished task ends in (merged earlier, or committed straight onto the
+        # base), so report it and let the caller clean up. Raising here made the
+        # tool look like a dead end for its own success case, and a session that
+        # believed that went around it with a raw ``git worktree remove`` of the
+        # directory it was standing in.
+        return MergeResult(
+            branch=branch, base=base_ref, commits=0,
+            merged_sha=_git(["rev-parse", "--short", "HEAD"], root).strip(),
+            already_merged=True,
         )
 
     # 1. Base into the branch, here, where a conflict can be resolved.
