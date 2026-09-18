@@ -95,7 +95,7 @@ class TestRemoveValidatesBeforeMoving:
         agent = FakeAgent(wt.path)
         binder, agent, cfg = _binder(wt.path, agent=agent)
 
-        with pytest.raises(WorktreeError, match="uncommitted"):
+        with pytest.raises(WorktreeError, match="modified or untracked"):
             binder.remove()
 
         assert Path(agent.work_dir).resolve() == Path(wt.path).resolve()
@@ -162,14 +162,59 @@ class TestMergeOfAnAlreadyLandedBranch:
         (Path(wt.path) / "feature.py").write_text("x = 1\n")
         _git(wt.path, "add", "feature.py")
         _git(wt.path, "commit", "-q", "-m", "add feature")
-        binder, agent, _ = _binder(wt.path)
-        binder.merge()
+        worktrees.merge_back(wt.path)
 
-        # Re-enter, then ask again: main now holds everything.
-        binder.switch("docs")
+        # Same checkout still there; main already has every commit.
+        binder, agent, _ = _binder(wt.path)
         out = binder.merge()
 
         assert Path(agent.work_dir) == repo, "the session must end up on main"
         assert not Path(wt.path).exists(), f"the checkout must be gone: {out}"
         assert "already had every commit" in out
         assert "Merged 0 commit" not in out, "reporting a merge that did not happen"
+
+
+class TestDeletedWorkingDirectory:
+    def test_status_names_a_deleted_cwd_instead_of_blaming_git(self, repo):
+        wt = ensure(str(repo), "docs")
+        binder, _, _ = _binder(wt.path)
+        worktrees.remove(wt.path)
+
+        out = binder.status()
+
+        assert "no longer exists" in out
+        assert "not inside a git repository" not in out
+        assert 'action="main"' in out
+
+    def test_a_session_whose_worktree_was_removed_can_switch_to_a_new_one(self, repo):
+        wt = ensure(str(repo), "docs")
+        binder, agent, _ = _binder(wt.path)
+        worktrees.remove(wt.path)
+
+        out = binder.switch("rescue")
+
+        assert Path(agent.work_dir).name == "rescue"
+        assert Path(agent.work_dir).is_dir()
+        assert "rescue" in out
+
+    def test_go_main_leaves_the_worktree_on_disk(self, repo):
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "wip.py").write_text("keep\n")
+        binder, agent, _ = _binder(wt.path)
+
+        out = binder.go_main()
+
+        assert Path(agent.work_dir).resolve() == Path(repo).resolve()
+        assert Path(wt.path).is_dir()
+        assert (Path(wt.path) / "wip.py").read_text() == "keep\n"
+        assert "not removed" in out
+
+    def test_go_main_from_a_deleted_cwd_lands_on_the_main_checkout(self, repo):
+        wt = ensure(str(repo), "docs")
+        binder, agent, _ = _binder(wt.path)
+        worktrees.remove(wt.path)
+
+        out = binder.go_main()
+
+        assert Path(agent.work_dir).resolve() == Path(repo).resolve()
+        assert "main checkout" in out

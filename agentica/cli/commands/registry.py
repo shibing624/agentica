@@ -95,7 +95,7 @@ COMMAND_REGISTRY = {
     "/send": (_cmd_send_message, "Send a message to a session (alias for /send-message)"),
     "/worktree": (
         _cmd_worktree,
-        "This session's git worktree: status | use <name> | merge | remove",
+        "This session's git worktree: status | use <name> | main | merge | remove",
     ),
     "/fork": (_cmd_fork, "Branch into a new session: /fork [list|n|uuid]"),
     "/rewind": (

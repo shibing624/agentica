@@ -2,7 +2,7 @@
 name: worktree
 description: >-
   Isolate this CLI session in its own git worktree of the current repository
-  (worktree tool: status / use / merge / remove). Use when another live
+  (worktree tool: status / use / main / merge / remove). Use when another live
   session is dirty in the same directory (list_agents), when two agents would
   fight over index.lock, when starting a parallel task checkout, or when asked
   to switch into a named worktree.
@@ -39,15 +39,17 @@ merge. The tool schema lists the actions; do not invent paths.
 
 - `worktree(action="use", name="<task>")` — create or reuse, then move here
 - `worktree(action="status")` — where you are, every worktree of this repo
-- `worktree(action="merge")` — land on local main, delete the checkout, return
-- `worktree(action="remove")` — drop one with no unique work
+- `worktree(action="main")` — return to the main checkout; the worktree stays
+- `worktree(action="merge")` — land on local main (conflicts stay in this
+  worktree, then fast-forward on main), delete the checkout, return
+- `worktree(action="remove")` — drop a `wt/*` checkout git will allow (dirty
+  or someone else's lock is refused; an unmerged branch is left in place)
 
 Not `use(name="main")` when you mean "take me back to the main checkout":
 `use` reads its name as a *task*, so that creates a second checkout on a
-`wt/main` branch instead. `merge` and `remove` are the ways back, and both
-dispose of the worktree — there is no action for leaving one unfinished, so ask
-the user how to proceed instead of improvising. A `cd` is not it: that moves
-the shell only, not the file tools.
+`wt/main` branch instead. `main` is the way to leave one unfinished. `merge`
+and `remove` dispose of the worktree. A `cd` is not it: that moves the shell
+only, not the file tools.
 
 Do not delete a worktree with `execute` (`git worktree remove`, `rm -rf`) while
 you are standing in it: your working directory disappears under you and every

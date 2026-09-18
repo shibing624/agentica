@@ -948,3 +948,4 @@ class TestDeletedWorkingDirectory:
             "reads the failure as a typo in its own command and retries variants"
         )
         assert "worktree" in message, "the report must carry the way out"
+        assert 'action="main"' in message or "action=\"main\"" in message

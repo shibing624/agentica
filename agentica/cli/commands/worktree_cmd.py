@@ -11,7 +11,7 @@ from agentica.worktrees import WorktreeError
 
 _USAGE = (
     "  [dim]Usage: /worktree [status] | use <name> [--base <branch>] | "
-    "merge | remove[/dim]\n"
+    "main | merge | remove[/dim]\n"
     "  [dim]Same as the worktree tool. Launch with --worktree <name> to enter "
     "one at start.[/dim]"
 )
@@ -54,6 +54,9 @@ def _cmd_worktree(ctx: CommandContext, cmd_args: str = ""):
                 con.print("  [dim]Usage: /worktree use <name> [--base <branch>][/dim]")
                 return
             con.print(binder.switch(name, base=base))
+            return
+        if action in ("main", "home"):
+            con.print(binder.go_main())
             return
         if action == "merge":
             con.print(binder.merge())

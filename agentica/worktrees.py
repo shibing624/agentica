@@ -17,14 +17,16 @@ Decisions that are not obvious:
 **A worktree is a feature checkout, not a standing room.** ``ensure()`` creates
 or reuses an *in-progress* directory (so a long-running session can still be
 told "切到 gateway-peers 再改"). ``merge_back()`` lands the branch on the local
-base; ``remove()`` deletes the checkout and the ``wt/<name>`` branch. Remove refuses anything that would lose work: a checkout agentica did not
-create (branch is not ``wt/<name>``, including detached), uncommitted files,
-commits not on the local base, no local ``main``/``master`` to compare
-against, or a lock held by a live process. That last one is why we take
-``git worktree lock`` while a session is bound — without it, another process
-(or a sweep) can ``git worktree remove`` a tree the agent is mid-edit in.
-The lock stays on a dirty tree when the session exits; a later ``claim_lock``
-steals it once the pid is dead.
+base; ``remove()`` deletes the checkout. We refuse only what we own
+(``wt/*``, not the main tree, not Claude Code / detached). Dirty trees and
+live locks are git's to refuse; unique commits stay on the branch because
+``git branch -d`` will not delete it. That last distinction is why ahead-of-base
+used to be a second refusal here — it contradicted ``merge`` on a finished
+task, and the session that hit it went around the tool.
+
+``git worktree lock`` while a session is bound is what lets git refuse
+``remove`` / ``prune`` from another process. The lock stays on a dirty tree
+when the session exits; a later ``claim_lock`` steals it once the pid is dead.
 
 **Default path is inside the repository.** ``<repo>/.agentica/worktrees/<task>``,
 the Claude Code shape. Sibling ``../<repo>-<task>`` is ``worktree.root: sibling``
@@ -147,11 +149,34 @@ def _git(args: Sequence[str], cwd: str, *, check: bool = True) -> str:
     except subprocess.SubprocessError as e:
         raise WorktreeError(f"git {' '.join(args)} did not finish: {e}") from e
     if check and result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        # Keep every line git wrote. Taking only the last one dropped the
+        # diagnosis and kept the hint: a locked worktree reported
+        # "use 'remove -f -f' to override" with no mention of the lock or its
+        # reason. Now that git enforces the rules this layer used to duplicate,
+        # its wording is the explanation the caller gets — except the
+        # ``--force`` / ``-f -f`` invitations, which taught a session to
+        # delete the directory it was standing in.
         raise WorktreeError(
-            f"git {' '.join(args)} failed: {detail[-1] if detail else 'unknown error'}"
+            f"git {' '.join(args)} failed: {_git_failure_detail(result) or 'unknown error'}"
         )
     return result.stdout
+
+
+_FORCE_HINT = re.compile(
+    r",?\s*use --force to delete it"
+    r"|use 'remove -f(?:\s+-f)?' to override",
+    re.IGNORECASE,
+)
+
+
+def _git_failure_detail(result: subprocess.CompletedProcess) -> str:
+    """Git's diagnosis, without the invitation to ``--force`` the refusal away."""
+    lines = []
+    for line in (result.stderr or result.stdout or "").strip().splitlines():
+        text = _FORCE_HINT.sub("", line.strip()).strip(" ,")
+        if text:
+            lines.append(text)
+    return " / ".join(lines)
 
 
 def is_git_repo(cwd: str) -> bool:
@@ -502,7 +527,19 @@ def resolve_entry(cwd: str) -> Worktree:
 
 
 def check_removable(cwd: str) -> Worktree:
-    """Raise if deleting this worktree would lose work or delete someone else's.
+    """Raise if deleting this worktree would delete something we do not own.
+
+    Ownership only. Dirty trees and live locks are git's to refuse. Unique
+    commits are not: ``git worktree remove`` deletes the checkout and leaves
+    the branch, and ``git branch -d`` then refuses to drop unmerged commits.
+    A second copy of those rules here can (and did) disagree with git:
+    ``remove`` used to accept a fully-merged branch while ``merge`` rejected
+    the same state as an error, and the session that hit the contradiction
+    went around the tool with a raw ``git worktree remove`` of its own
+    directory.
+
+    ``has_unique_work`` is the separate question session teardown asks; it is
+    a *workflow* judgement ("did you forget to merge?"), not a safety one.
 
     Does not unlock or delete anything. ``remove()`` calls this, then acts.
     """
@@ -515,47 +552,59 @@ def check_removable(cwd: str) -> Worktree:
             f"{entry.path} is not an agentica worktree (branch {label}); "
             "only wt/* checkouts are removed — use git worktree remove yourself"
         )
-    if _git(["status", "--porcelain"], entry.path).strip():
-        raise WorktreeError(
-            "this worktree has uncommitted changes; commit, stash, or discard "
-            "them before removing it"
-        )
-    base = default_base(entry.path)
-    ahead = _git(
-        ["rev-list", "--count", f"{base}..{entry.branch_short}"], entry.path
-    ).strip()
-    commits = int(ahead) if ahead.isdigit() else 0
-    if commits:
-        raise WorktreeError(
-            f"{entry.branch_short} has {commits} commit(s) not merged into the "
-            f"local base ({base}); merge them first (worktree action=merge)"
-        )
-    if entry.locked and not _is_our_lock(entry.lock_reason):
-        pid = _pid_from_reason(entry.lock_reason)
-        if pid is None or _pid_alive(pid):
-            why = entry.lock_reason or "no reason"
-            raise WorktreeError(
-                f"{entry.path} is locked ({why}); another session is using "
-                "it, or unlock it by hand"
-            )
     return entry
 
 
-def remove(cwd: str) -> Worktree:
-    """Delete this worktree and its branch, if that would not lose work.
+def has_unique_work(entry: Worktree) -> bool:
+    """Whether this worktree holds anything the local base does not.
 
-    Safe means: an agentica ``wt/`` checkout, not the main tree, no uncommitted
-    changes, no commits the local base does not already have, a local base
-    exists to compare against, and not locked by a live foreign holder.
-    A lock we hold (or a dead agentica pid) is released first.
-    After a successful ``merge_back`` this is always safe. Must be called
-    from outside the worktree (typically after moving back to the main
-    checkout) so the process cwd is not deleted out from under it.
+    Uncommitted files, or commits the base lacks. Session teardown uses this to
+    decide whether to clean the checkout up or leave it on disk (and locked)
+    for the next session. It is deliberately not part of ``check_removable``:
+    an explicit "remove this" is an instruction, while teardown is a guess
+    about work nobody asked to throw away.
+    """
+    if _git(["status", "--porcelain"], entry.path).strip():
+        return True
+    if not entry.branch_short:
+        return False
+    try:
+        base = default_base(entry.path)
+    except WorktreeError:
+        # No local base to compare against: cannot prove the work is landed,
+        # so treat it as unique rather than delete it.
+        return True
+    ahead = _git(
+        ["rev-list", "--count", f"{base}..{entry.branch_short}"], entry.path,
+        check=False,
+    ).strip()
+    if not ahead.isdigit():
+        # Cannot tell — teardown must not delete.
+        return True
+    return int(ahead) > 0
+
+
+def remove(cwd: str) -> Worktree:
+    """Delete this worktree and its branch.
+
+    We check ownership (``check_removable``: a ``wt/`` checkout, not the main
+    tree) and then let git enforce the rest, because git already does:
+
+    - a dirty tree -> ``contains modified or untracked files``
+    - someone else's lock -> ``cannot remove a locked working tree``
+    - a branch the base has not absorbed -> ``git branch -d`` refuses, so the
+      checkout goes and the commits stay reachable on the branch
+
+    ``release_lock`` only drops a lock this process holds (or whose pid is
+    dead), so a live peer's lock reaches git intact and stops the delete.
+
+    Must be called from outside the worktree (typically after moving back to
+    the main checkout) so the process cwd is not deleted out from under it.
     """
     entry = check_removable(cwd)
     main = main_root(entry.path)
     if entry.locked:
-        unlock(entry.path)
+        release_lock(entry.path)
 
     _invalidate_nested(main)
     _git(["worktree", "remove", entry.path], main)

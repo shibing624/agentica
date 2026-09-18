@@ -30,6 +30,12 @@ class FakeBinder:
             raise WorktreeError(self._fail)
         return f"SWITCHED {name}"
 
+    def go_main(self):
+        self.calls.append(("main", None))
+        if self._fail:
+            raise WorktreeError(self._fail)
+        return "MAIN"
+
     def merge(self):
         self.calls.append(("merge", None))
         if self._fail:
@@ -68,6 +74,12 @@ class TestDispatch:
         _run(WorktreeTool(binder), action="use", name="docs", base="release")
         assert binder.calls == [("switch", ("docs", "release"))]
 
+    def test_main_spellings(self):
+        for action in ("main", "home"):
+            binder = FakeBinder()
+            assert _run(WorktreeTool(binder), action=action) == "MAIN"
+            assert binder.calls == [("main", None)]
+
     def test_merge_spellings(self):
         for action in ("merge", "merge-back", "land"):
             binder = FakeBinder()
@@ -83,6 +95,7 @@ class TestDispatch:
         out = _run(WorktreeTool(FakeBinder()), action="explode")
         assert "status" in out and "use" in out and "merge" in out
         assert "remove" in out
+        assert "main" in out
 
 
 class TestRefusals:

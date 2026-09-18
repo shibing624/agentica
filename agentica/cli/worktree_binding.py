@@ -66,6 +66,19 @@ class WorktreeBinder:
     def status(self) -> str:
         """Where this session is, and every worktree of the repository."""
         cwd = self.work_dir()
+        if not os.path.isdir(cwd):
+            # ``is_git_repo`` swallows the deleted-cwd WorktreeError into False,
+            # which used to report "not a git repository" — the same class of
+            # lie as blaming a missing git binary. Name the directory, and the
+            # two ways to leave it, because this is the default tool action.
+            return (
+                f"This session's working directory no longer exists: {cwd}\n"
+                "Nothing listed — git cannot run here. Move before anything "
+                "else: worktree(action=\"main\") returns to the main checkout, "
+                "or worktree(action=\"use\", name=\"<task>\") takes a fresh one. "
+                "An absolute path in a command does not help — every command "
+                "starts here."
+            )
         if not worktrees.is_git_repo(cwd):
             return f"{cwd} is not inside a git repository, so there are no worktrees."
         here = os.path.realpath(worktrees.current_root(cwd))
@@ -82,8 +95,10 @@ class WorktreeBinder:
         lines.append(
             "Switch with worktree(action=\"use\", name=\"<task>\") — created "
             "if missing, reused while the task is in progress. "
-            "worktree(action=\"merge\") lands on the local base and removes "
-            "the checkout; worktree(action=\"remove\") drops an unused one."
+            "worktree(action=\"main\") returns to the main checkout without "
+            "deleting this one. worktree(action=\"merge\") lands on the local "
+            "base and removes the checkout; worktree(action=\"remove\") drops "
+            "an unused one."
         )
         return "\n".join(lines)
 
@@ -145,6 +160,42 @@ class WorktreeBinder:
         )
         return "\n".join(lines)
 
+    def go_main(self) -> str:
+        """Move this session to the main checkout without deleting the worktree.
+
+        ``use(name="main")`` is the wrong spelling of this: ``use`` reads the
+        name as a task and would create ``wt/main``. Unfinished work stays on
+        disk (and locked); ``merge`` / ``remove`` are what dispose of it.
+        """
+        if self._get_agent() is None:
+            raise worktrees.WorktreeError("no active agent to move")
+        cwd = self.work_dir()
+        probe = worktrees._nearest_existing_dir(cwd)
+        if not worktrees.is_git_repo(probe):
+            if not os.path.isdir(cwd):
+                raise worktrees.WorktreeError(
+                    f"the directory this session works in no longer exists: {cwd} "
+                    "— cannot find the main checkout from here"
+                )
+            raise worktrees.WorktreeError(f"{cwd} is not inside a git repository")
+        main = worktrees.main_root(probe)
+        if os.path.isdir(cwd) and os.path.realpath(cwd) == os.path.realpath(main):
+            return f"Already working in the main checkout ({main})."
+
+        previous = os.path.realpath(cwd) if os.path.isdir(cwd) else cwd
+        state = self._relocate(main)
+        self._entered = False
+        if os.path.isdir(previous) and os.path.realpath(previous) != os.path.realpath(main):
+            worktrees.release_lock(previous)
+
+        extra = f"  {state.summary()}\n" if state.known else ""
+        return (
+            f"Now working in the main checkout ({main}).\n"
+            f"{extra}"
+            "  the previous worktree was not removed — merge or remove it "
+            "when the task is done."
+        )
+
     def merge(self, *, base: Optional[str] = None) -> str:
         """Land this worktree's branch on the local base, then delete the checkout."""
         cwd = self.work_dir()
@@ -193,7 +244,12 @@ class WorktreeBinder:
         )
 
     def remove(self) -> str:
-        """Drop this worktree if it holds no unique work, and return to main."""
+        """Drop this worktree and return to main.
+
+        Git refuses a dirty tree or a live foreign lock; those must leave the
+        session where it was. Ownership is checked first so we never relocate
+        just to discover we do not own the checkout.
+        """
         cwd = self.work_dir()
         root = worktrees.current_root(cwd)
         main = worktrees.main_root(cwd)
@@ -201,11 +257,18 @@ class WorktreeBinder:
             raise worktrees.WorktreeError("this is the main checkout, not a worktree")
         worktrees.check_removable(root)
         self._relocate(main)
-        worktrees.remove(root)
+        try:
+            worktrees.remove(root)
+        except worktrees.WorktreeError:
+            try:
+                self._relocate(root)
+            except worktrees.WorktreeError:
+                pass
+            raise
         self._entered = False
         return (
             f"Removed worktree {root} and returned to {main}. "
-            "The branch is gone if it had no unique commits."
+            "The branch remains if git would not delete it (not fully merged)."
         )
 
     def mark_entered(self) -> None:
@@ -235,6 +298,13 @@ class WorktreeBinder:
             except worktrees.WorktreeError:
                 return None
             if entry.is_main or not worktrees.is_managed(entry):
+                return None
+            # Teardown is a guess, not an instruction: anything the base does
+            # not already have stays on disk and stays locked. ``remove`` no
+            # longer refuses these itself (git's own rules cover the dangerous
+            # cases), so the judgement lives here, where "nobody asked me to
+            # throw this away" is the actual reason.
+            if worktrees.has_unique_work(entry):
                 return None
             from agentica.cli.session_resume import enter_work_dir
             enter_work_dir(main)

@@ -229,6 +229,7 @@ mcp, skill, ...
 ```text
 > /worktree
 > /worktree use gateway-peers
+> /worktree main
 > /worktree merge
 > /worktree remove
 ```

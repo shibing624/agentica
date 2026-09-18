@@ -716,10 +716,11 @@ class BuiltinExecuteTool(Tool):
                             "would run in is gone (typically a worktree another "
                             "session merged or removed).\n"
                             "Move this session to a directory that exists before "
-                            "running anything else: worktree(action=\"use\", "
-                            "name=\"<task>\") takes a fresh checkout, or ask the "
-                            "user where to continue. An absolute path in the "
-                            "command does not help — every command starts here."
+                            "running anything else: worktree(action=\"main\") "
+                            "returns to the main checkout, or "
+                            "worktree(action=\"use\", name=\"<task>\") takes a "
+                            "fresh one. An absolute path in the command does "
+                            "not help — every command starts here."
                         ) from None
                     raise
                 out, err = await asyncio.wait_for(

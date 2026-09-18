@@ -40,9 +40,12 @@ class WorktreeTool(Tool):
             action: ``status`` (default) lists every worktree and says which one
                 this session is in. ``use`` moves this session into the worktree
                 for ``name``, creating it the first time and reusing it while
-                the task is in progress. ``merge`` lands this worktree's branch
-                on the local base and removes the checkout. ``remove`` drops an
-                unused worktree (refused if it still has unique work).
+                the task is in progress. ``main`` returns to the main checkout
+                without deleting this worktree. ``merge`` lands this worktree's
+                branch on the local base (conflicts stay here, then
+                fast-forward on main) and removes the checkout. ``remove``
+                drops a ``wt/*`` checkout; git refuses if it is dirty or locked
+                by someone else, and an unmerged branch is left in place.
             name: The task the worktree is for, e.g. "gateway-peers". Required
                 for ``use``. Normalised to a directory under
                 ``.agentica/worktrees/`` and a ``wt/<name>`` branch.
@@ -63,13 +66,15 @@ class WorktreeTool(Tool):
                         "Call action=\"status\" to see the worktrees that already exist."
                     )
                 return self._binder.switch(name, base=base.strip() or None)
+            if chosen in ("main", "home"):
+                return self._binder.go_main()
             if chosen in ("merge", "merge-back", "land"):
                 return self._binder.merge()
             if chosen in ("remove", "delete", "drop"):
                 return self._binder.remove()
             return (
                 f"Unknown action '{action}'. Use status, use (with name=...), "
-                "merge, or remove."
+                "main, merge, or remove."
             )
         except WorktreeError as e:
             # The message is written for a human ("move it aside or pick another

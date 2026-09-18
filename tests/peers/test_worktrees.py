@@ -112,20 +112,40 @@ class TestLifecycle:
         assert branches.strip() == ""
 
     def test_remove_refuses_uncommitted_work(self, repo):
+        """Git refuses this one itself. Its diagnosis has to survive, but not
+        the invitation to ``--force`` — that taught a session to delete the
+        directory it was standing in."""
         wt = ensure(str(repo), "docs")
         (Path(wt.path) / "dirty.py").write_text("nope\n")
-        with pytest.raises(WorktreeError, match="uncommitted"):
+        with pytest.raises(WorktreeError) as exc:
             worktrees.remove(wt.path)
+        message = str(exc.value)
+        assert "modified or untracked" in message
+        assert "--force" not in message
+        assert "remove -f" not in message
         assert Path(wt.path).is_dir()
 
-    def test_remove_refuses_commits_not_on_the_local_base(self, repo):
+    def test_remove_of_an_unmerged_branch_keeps_the_commits(self, repo):
+        """The checkout goes; the work does not.
+
+        This used to raise "merge them first" — a *workflow* opinion dressed as
+        a safety rule, and the one that made ``remove`` and ``merge`` contradict
+        each other on the same branch. What actually protects the commits is
+        ``git branch -d``, which refuses an unmerged branch, so the branch stays
+        and every commit on it stays reachable.
+        """
         wt = ensure(str(repo), "docs")
         (Path(wt.path) / "feature.py").write_text("x = 1\n")
         _git(wt.path, "add", "feature.py")
         _git(wt.path, "commit", "-q", "-m", "not merged yet")
-        with pytest.raises(WorktreeError, match="not.*merged|local base|main"):
-            worktrees.remove(wt.path)
-        assert Path(wt.path).is_dir()
+
+        worktrees.remove(wt.path)
+
+        assert not Path(wt.path).exists()
+        assert _git_output(repo, "branch", "--list", "wt/docs").strip() != "", (
+            "an unmerged branch must survive the checkout being removed"
+        )
+        assert "not merged yet" in _git_output(repo, "log", "--oneline", "wt/docs")
 
     def test_remove_of_a_clean_unused_worktree_is_allowed(self, repo):
         wt = ensure(str(repo), "docs")
@@ -135,8 +155,12 @@ class TestLifecycle:
     def test_a_live_foreign_lock_blocks_remove(self, repo):
         wt = ensure(str(repo), "docs")
         worktrees.lock(wt.path, reason="agentica pid=1")
-        with pytest.raises(WorktreeError, match="locked"):
+        with pytest.raises(WorktreeError) as exc:
             worktrees.remove(wt.path)
+        message = str(exc.value)
+        assert "locked" in message
+        assert "agentica pid=1" in message
+        assert "remove -f" not in message
         assert Path(wt.path).is_dir()
 
     def test_a_dead_agentica_lock_is_stolen(self, repo):
@@ -184,12 +208,15 @@ class TestLifecycle:
         assert other.is_dir()
         assert "review/docs" in _git_output(repo, "branch", "--list", "review/docs")
 
-    def test_remove_refuses_when_there_is_no_local_base(self, repo):
+    def test_remove_without_main_or_master_is_gits_decision(self, repo):
+        """No local main/master is not a reason to refuse an *explicit* remove.
+        Teardown still fail-closes via has_unique_work."""
         _git(repo, "branch", "-m", "main", "trunk")
         wt = ensure(str(repo), "docs", base="trunk")
-        with pytest.raises(WorktreeError, match="no local 'main' or 'master'"):
-            worktrees.remove(wt.path)
-        assert Path(wt.path).is_dir()
+        entry = worktrees.resolve_entry(wt.path)
+        assert worktrees.has_unique_work(entry) is True
+        worktrees.remove(wt.path)
+        assert not Path(wt.path).exists()
 
     def test_a_sibling_worktree_is_reused_by_branch_after_the_default_moves_inside(
         self, repo, monkeypatch
