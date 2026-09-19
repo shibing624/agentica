@@ -988,6 +988,13 @@ class TestFileToolRegistrationGuard:
         assert "multiline" not in by_name["grep"]
         assert "context" not in by_name["grep"]
         assert "timeout" not in by_name["glob"]
+        assert "work_dir" in by_name["read_file"]
+        assert "work_dir" in by_name["write_file"]
+        assert "work_dir" in by_name["apply_patch"]
+        assert "work_dir" not in by_name["glob"]
+        assert "work_dir" not in by_name["grep"]
+        assert "path" in by_name["glob"]
+        assert "path" in by_name["grep"]
 
     def test_auto_mode_schema_does_not_include_request_path_access(self):
         from agentica.agent import Agent
@@ -1006,4 +1013,70 @@ class TestFileToolRegistrationGuard:
         assert "ls" not in api_names
         assert "edit_file" not in api_names
         assert "write_file" in api_names
+
+
+class TestPerCallWorkDir:
+    """Isolation is a directory on the call, not a session move."""
+
+    def test_read_write_resolve_against_the_call_directory(self, tmp_dir, tmp_path):
+        session = Path(tmp_dir)
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "note.txt").write_text("from-other\n")
+        tool = BuiltinFileTool(work_dir=str(session))
+
+        out = asyncio.run(tool.read_file("note.txt", work_dir=str(other)))
+        assert "from-other" in out
+
+        asyncio.run(tool.write_file("wrote.txt", "landed\n", work_dir=str(other)))
+        assert (other / "wrote.txt").read_text() == "landed\n"
+        assert not (session / "wrote.txt").exists()
+        assert not (session / "note.txt").exists()
+
+    def test_apply_patch_writes_in_the_call_directory(self, tmp_dir, tmp_path):
+        session = Path(tmp_dir)
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "edit.txt").write_text("hello world\n")
+        tool = BuiltinFileTool(work_dir=str(session))
+
+        asyncio.run(tool.apply_patch(
+            "*** Begin Patch\n"
+            "*** Update File: edit.txt\n"
+            "@@\n"
+            "-hello world\n"
+            "+hello agentica\n"
+            "*** End Patch",
+            work_dir=str(other),
+        ))
+        assert (other / "edit.txt").read_text() == "hello agentica\n"
+        assert not (session / "edit.txt").exists()
+
+    def test_sandbox_allows_the_call_work_dir_and_still_blocks_a_sibling(
+        self, tmp_dir, tmp_path
+    ):
+        from agentica.agent.config import SandboxConfig
+
+        session = Path(tmp_dir)
+        other = tmp_path / "other"
+        third = tmp_path / "third"
+        other.mkdir()
+        third.mkdir()
+        tool = BuiltinFileTool(
+            work_dir=str(session),
+            sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(session)]),
+        )
+
+        asyncio.run(tool.write_file("ok.txt", "yes\n", work_dir=str(other)))
+        assert (other / "ok.txt").read_text() == "yes\n"
+
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.write_file(str(third / "nope.txt"), "blocked\n"))
+        assert not (third / "nope.txt").exists()
+
+    def test_missing_work_dir_names_the_directory(self, tmp_dir, tmp_path):
+        gone = tmp_path / "gone"
+        tool = BuiltinFileTool(work_dir=str(tmp_dir))
+        with pytest.raises(FileNotFoundError, match="work_dir is not a directory"):
+            asyncio.run(tool.read_file("a.txt", work_dir=str(gone)))
 

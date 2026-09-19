@@ -224,17 +224,16 @@ mcp, skill, ...
 
 ### `/worktree`
 
-把**当前这个** CLI 会话绑到本仓库的一个任务 worktree（目录 + `wt/<任务>` 分支），避免几个会话抢同一个 checkout。
+为本仓库建一个任务 worktree（目录 + `wt/<任务>` 分支）。**不搬家**：当前会话仍在原目录，把返回的路径传给文件 / execute 的 `work_dir`（glob / grep 的 `path`）。
 
 ```text
 > /worktree
-> /worktree use gateway-peers
-> /worktree main
-> /worktree merge
-> /worktree remove
+> /worktree new gateway-peers
+> /worktree merge gateway-peers
+> /worktree remove gateway-peers
 ```
 
-启动时也可以 `agentica --worktree gateway-peers`。模型侧用同名 `worktree` 工具（用法见内置 `worktree` skill），不要让它 `git worktree add` 再 `cd`。详见 [worktrees](../multi-agent/worktrees.md)。
+启动时也可以 `agentica --worktree gateway-peers`（新进程从一开始就站在树上）。模型侧用同名 `worktree` 工具（用法见内置 `worktree` skill）。详见 [worktrees](../multi-agent/worktrees.md)。
 
 ### 委托任务给另一个 CLI（`delegate`）
 

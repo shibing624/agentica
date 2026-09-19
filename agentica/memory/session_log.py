@@ -452,7 +452,7 @@ class SessionLog:
         return os.getcwd()
 
     def set_cwd(self, work_dir: str) -> None:
-        """Point later stamps at a new project directory (worktree rebind)."""
+        """Point later stamps at a new project directory."""
         self._cwd = os.path.abspath(os.path.expanduser(work_dir))
         self._git_branch = self._get_git_branch(self._cwd)
 

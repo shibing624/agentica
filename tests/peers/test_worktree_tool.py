@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tests for the `worktree` tool's dispatch (agentica/tools/worktree_tool.py).
-
-This is the surface a peer message drives ("切到 gateway-peers 再改"), so what
-matters is that every spelling an agent might reach for lands on the right
-action, and that a refusal keeps the reason it was refused for.
+@description: Tests for the `worktree` tool's dispatch.
 """
 import asyncio
 
@@ -24,29 +20,23 @@ class FakeBinder:
         self.calls.append(("status", None))
         return "STATUS"
 
-    def switch(self, name, *, base=None):
-        self.calls.append(("switch", (name, base)))
+    def create(self, name, *, base=None):
+        self.calls.append(("create", (name, base)))
         if self._fail:
             raise WorktreeError(self._fail)
-        return f"SWITCHED {name}"
+        return f"CREATED {name}"
 
-    def go_main(self):
-        self.calls.append(("main", None))
+    def merge(self, name, *, base=None):
+        self.calls.append(("merge", (name, base)))
         if self._fail:
             raise WorktreeError(self._fail)
-        return "MAIN"
+        return f"MERGED {name}"
 
-    def merge(self):
-        self.calls.append(("merge", None))
+    def remove(self, name):
+        self.calls.append(("remove", name))
         if self._fail:
             raise WorktreeError(self._fail)
-        return "MERGED"
-
-    def remove(self):
-        self.calls.append(("remove", None))
-        if self._fail:
-            raise WorktreeError(self._fail)
-        return "REMOVED"
+        return f"REMOVED {name}"
 
 
 def _run(tool, **kwargs):
@@ -63,54 +53,60 @@ class TestDispatch:
     def test_listing_spellings(self, action):
         assert _run(WorktreeTool(FakeBinder()), action=action) == "STATUS"
 
-    @pytest.mark.parametrize("action", ["use", "switch", "bind", "create", "new"])
-    def test_switching_spellings(self, action):
+    @pytest.mark.parametrize("action", ["new", "use", "switch", "bind", "create"])
+    def test_create_spellings(self, action):
         binder = FakeBinder()
-        assert _run(WorktreeTool(binder), action=action, name="docs") == "SWITCHED docs"
-        assert binder.calls == [("switch", ("docs", None))]
+        assert _run(WorktreeTool(binder), action=action, name="docs") == "CREATED docs"
+        assert binder.calls == [("create", ("docs", None))]
 
-    def test_a_base_branch_is_passed_through(self):
+    def test_a_base_branch_is_passed_through(self, ):
         binder = FakeBinder()
-        _run(WorktreeTool(binder), action="use", name="docs", base="release")
-        assert binder.calls == [("switch", ("docs", "release"))]
+        _run(WorktreeTool(binder), action="new", name="docs", base="release")
+        assert binder.calls == [("create", ("docs", "release"))]
 
-    def test_main_spellings(self):
+    def test_main_spellings_do_not_move(self):
         for action in ("main", "home"):
             binder = FakeBinder()
-            assert _run(WorktreeTool(binder), action=action) == "MAIN"
-            assert binder.calls == [("main", None)]
+            out = _run(WorktreeTool(binder), action=action)
+            assert "does not move" in out
+            assert binder.calls == []
+
+    def test_merge_requires_a_name(self):
+        binder = FakeBinder()
+        out = _run(WorktreeTool(binder), action="merge")
+        assert "name" in out
+        assert binder.calls == []
 
     def test_merge_spellings(self):
         for action in ("merge", "merge-back", "land"):
             binder = FakeBinder()
-            assert _run(WorktreeTool(binder), action=action) == "MERGED"
+            assert _run(WorktreeTool(binder), action=action, name="docs") == "MERGED docs"
+            assert binder.calls == [("merge", ("docs", None))]
 
     def test_remove_spellings(self):
         for action in ("remove", "delete", "drop"):
             binder = FakeBinder()
-            assert _run(WorktreeTool(binder), action=action) == "REMOVED"
-            assert binder.calls == [("remove", None)]
+            assert _run(WorktreeTool(binder), action=action, name="docs") == "REMOVED docs"
+            assert binder.calls == [("remove", "docs")]
 
     def test_an_unknown_action_lists_the_real_ones(self):
         out = _run(WorktreeTool(FakeBinder()), action="explode")
-        assert "status" in out and "use" in out and "merge" in out
+        assert "status" in out and "new" in out and "merge" in out
         assert "remove" in out
-        assert "main" in out
+        assert "main" not in out or "Use status" in out
 
 
 class TestRefusals:
-    def test_use_without_a_name_says_what_to_do_instead(self):
+    def test_new_without_a_name_says_what_to_do_instead(self):
         binder = FakeBinder()
-        out = _run(WorktreeTool(binder), action="use")
+        out = _run(WorktreeTool(binder), action="new")
         assert "name" in out
         assert binder.calls == []
 
     def test_a_refusal_keeps_the_reason(self):
-        """The git-level message tells the user what to do ("move it aside or
-        pick another name"); paraphrasing it would lose that."""
         out = _run(
             WorktreeTool(FakeBinder(fail="/tmp/x already exists but is not a worktree")),
-            action="use",
+            action="new",
             name="docs",
         )
         assert "already exists but is not a worktree" in out

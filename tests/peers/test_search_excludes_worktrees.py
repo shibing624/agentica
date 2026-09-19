@@ -8,6 +8,7 @@ do not pay for ``git worktree add`` on every run.
 """
 import asyncio
 import os
+from pathlib import Path
 
 from agentica.tools.builtin.file_tool import BuiltinFileTool
 
@@ -75,3 +76,54 @@ class TestSearchSkipsNestedCheckouts:
 
         assert out.count("code.py") == 1
         assert ".worktrees" not in out
+
+
+class TestUnstubbedNestedSelfExclude:
+    """The skip list comes from git, including this process's own checkout.
+
+    Stubbing ``nested_worktrees`` hid the case that used to make glob from
+    inside a worktree return nothing: the tree's own path was on the skip
+    list.
+    """
+
+    def test_glob_from_main_skips_the_nested_tree(self, clone_git_repo, tmp_path, monkeypatch):
+        from agentica import worktrees
+        from agentica.worktrees import ensure
+
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
+        repo = clone_git_repo(tmp_path / "repo")
+        wt = ensure(str(repo), "docs")
+        (repo / "only_in_main.py").write_text("MAIN = 1\n")
+        (Path(wt.path) / "only_in_tree.py").write_text("TREE = 1\n")
+
+        out = asyncio.run(_tool(repo).glob("**/*.py", path="."))
+        assert "only_in_main.py" in out
+        assert "only_in_tree.py" not in out
+
+    def test_glob_from_inside_the_worktree_still_sees_its_files(
+        self, clone_git_repo, tmp_path, monkeypatch
+    ):
+        from agentica import worktrees
+        from agentica.worktrees import ensure
+
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
+        repo = clone_git_repo(tmp_path / "repo")
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "only_in_tree.py").write_text("TREE = 1\n")
+
+        out = asyncio.run(_tool(wt.path).glob("**/*.py", path="."))
+        assert "only_in_tree.py" in out
+
+    def test_glob_with_path_pointed_at_the_tree_sees_its_files(
+        self, clone_git_repo, tmp_path, monkeypatch
+    ):
+        from agentica import worktrees
+        from agentica.worktrees import ensure
+
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
+        repo = clone_git_repo(tmp_path / "repo")
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "only_in_tree.py").write_text("TREE = 1\n")
+
+        out = asyncio.run(_tool(repo).glob("**/*.py", path=wt.path))
+        assert "only_in_tree.py" in out

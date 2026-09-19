@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: The ``worktree`` tool — a session moves itself into its own checkout.
+@description: The ``worktree`` tool — create a checkout, then pass its path.
 
-Isolation between sessions is worth nothing if arranging it requires a human at
-that particular keyboard. The sessions that most need a worktree are the ones
-running unattended for weeks, driven from IM through ``send_message``; so the
-capability is a tool, and "把你自己切到 gateway 那个 worktree" is something a
-peer message can actually carry out.
-
-The tool is CLI-only, and not because of a policy: moving a session means moving
-the process cwd, which a gateway serving many sessions in one process cannot do
-for one of them.
+Isolation is a directory, not a session move. ``new`` returns a path; subsequent
+``read_file`` / ``write_file`` / ``apply_patch`` / ``execute`` take ``work_dir=``
+(glob / grep take ``path=``). This session stays where it is.
 """
 from __future__ import annotations
 
@@ -20,63 +14,67 @@ from agentica.worktrees import WorktreeError
 
 
 class WorktreeTool(Tool):
-    """Expose ``worktree`` so the agent can bind its own session to a checkout."""
+    """Expose ``worktree`` so the agent can create and dispose checkouts."""
 
     def __init__(self, binder):
         super().__init__(name="worktree_tool")
         self._binder = binder
-        # Not concurrency-safe by any reading: it changes the directory every
-        # other tool resolves paths against.
         self.register(self.worktree, is_destructive=False)
 
     async def worktree(self, action: str = "status", name: str = "", base: str = "") -> str:
-        """Put this session in its own git worktree of the current repository.
+        """Create a git worktree of this repository, or dispose of one.
 
         Isolation for parallel work: one directory and one branch per task,
-        sharing the repository's history. Other sessions keep working in theirs,
-        so neither overwrites the other's files and neither waits on git's index.
+        sharing the repository's history. This session does not move. Pass the
+        returned path as ``work_dir`` on file / execute calls (``path`` on
+        glob / grep).
 
         Args:
-            action: ``status`` (default) lists every worktree and says which one
-                this session is in. ``use`` moves this session into the worktree
-                for ``name``, creating it the first time and reusing it while
-                the task is in progress. ``main`` returns to the main checkout
-                without deleting this worktree. ``merge`` lands this worktree's
-                branch on the local base (conflicts stay here, then
-                fast-forward on main) and removes the checkout. ``remove``
-                drops a ``wt/*`` checkout; git refuses if it is dirty or locked
-                by someone else, and an unmerged branch is left in place.
+            action: ``status`` (default) lists every worktree. ``new`` creates
+                or reuses the worktree for ``name`` and returns its path.
+                ``merge`` lands that branch on the local base and removes the
+                checkout. ``remove`` drops a ``wt/*`` checkout; git refuses if
+                it is dirty, and an unmerged branch is left in place.
             name: The task the worktree is for, e.g. "gateway-peers". Required
-                for ``use``. Normalised to a directory under
-                ``.agentica/worktrees/`` and a ``wt/<name>`` branch.
+                for ``new``, ``merge``, and ``remove``.
             base: Branch new worktrees fork from. Defaults to the repository's
                 local ``main`` (or ``master``).
 
         Returns:
-            What happened, including the directory and branch now in effect.
+            What happened, including the directory to pass as ``work_dir``.
         """
         chosen = (action or "status").strip().casefold()
         try:
             if chosen in ("status", "list", "info", ""):
                 return self._binder.status()
-            if chosen in ("use", "switch", "bind", "create", "new"):
+            if chosen in ("new", "use", "switch", "bind", "create"):
                 if not name.strip():
                     return (
-                        "A name is required: worktree(action=\"use\", name=\"<task>\"). "
+                        "A name is required: worktree(action=\"new\", name=\"<task>\"). "
                         "Call action=\"status\" to see the worktrees that already exist."
                     )
-                return self._binder.switch(name, base=base.strip() or None)
+                return self._binder.create(name, base=base.strip() or None)
             if chosen in ("main", "home"):
-                return self._binder.go_main()
+                return (
+                    "There is no main action — this session does not move. "
+                    "Stay in the current directory. Pass work_dir= only on "
+                    "the calls that should run in a worktree."
+                )
             if chosen in ("merge", "merge-back", "land"):
-                return self._binder.merge()
+                if not name.strip():
+                    return (
+                        "A name is required: worktree(action=\"merge\", name=\"<task>\")."
+                    )
+                return self._binder.merge(name, base=base.strip() or None)
             if chosen in ("remove", "delete", "drop"):
-                return self._binder.remove()
+                if not name.strip():
+                    return (
+                        "A name is required: worktree(action=\"remove\", name=\"<task>\")."
+                    )
+                return self._binder.remove(name)
             return (
-                f"Unknown action '{action}'. Use status, use (with name=...), "
-                "main, merge, or remove."
+                f"Unknown action '{action}'. Use status, new (with name=...), "
+                "merge (with name=...), or remove (with name=...)."
             )
         except WorktreeError as e:
-            # The message is written for a human ("move it aside or pick another
-            # name"); paraphrasing it would only lose that.
             return f"Worktree operation refused: {e}"

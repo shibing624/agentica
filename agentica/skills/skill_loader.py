@@ -209,7 +209,7 @@ class SkillLoader:
             registry = get_skill_registry()
 
         # One INFO per skill per call was 19-38 lines every time, and `load_all`
-        # re-runs on reload / profile switch / worktree rebind — one observed
+        # re-runs on reload / profile switch — one observed
         # process logged 291 of these. The per-skill detail is DEBUG; INFO gets
         # one summary line, and only when something actually changed.
         registered_names: List[str] = []

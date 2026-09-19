@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Worktree layout helpers plus the create / lock / merge / remove lifecycle.
+@description: Worktree layout helpers plus the create / merge / remove lifecycle.
 
 Layout tests stub ``main_root``. Lifecycle tests use a copied real git repo —
 ``git worktree add`` on a one-file tree is cheap, and the safety checks are
 the behaviour that used to be wrong.
 """
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,18 @@ class TestSlug:
     def test_a_name_with_nothing_usable_is_refused(self):
         with pytest.raises(WorktreeError):
             slug("///")
+
+    def test_the_base_branch_is_not_a_task_name(self):
+        """``use(name="main")`` used to create a second checkout on ``wt/main``.
+
+        ``main`` names the repository root, not a task — and the collision is
+        with *branch* names, so it is exactly the local base names that are
+        refused. ``home`` is not one of them.
+        """
+        for reserved in ("main", "master", "MAIN", " Master "):
+            with pytest.raises(WorktreeError, match="main checkout"):
+                slug(reserved)
+        assert slug("home") == "home"
 
 
 class TestLayout:
@@ -112,17 +126,18 @@ class TestLifecycle:
         assert branches.strip() == ""
 
     def test_remove_refuses_uncommitted_work(self, repo):
-        """Git refuses this one itself. Its diagnosis has to survive, but not
-        the invitation to ``--force`` — that taught a session to delete the
-        directory it was standing in."""
+        """Git refuses this one itself, and its sentence is what the caller gets.
+
+        Verbatim, including the ``--force`` it advertises: rewriting git's text
+        to hide that reads as censorship, works only in English, and the model
+        can run the same command through ``execute`` anyway.
+        """
         wt = ensure(str(repo), "docs")
         (Path(wt.path) / "dirty.py").write_text("nope\n")
         with pytest.raises(WorktreeError) as exc:
             worktrees.remove(wt.path)
         message = str(exc.value)
-        assert "modified or untracked" in message
-        assert "--force" not in message
-        assert "remove -f" not in message
+        assert "modified or untracked" in message, "git's diagnosis must survive"
         assert Path(wt.path).is_dir()
 
     def test_remove_of_an_unmerged_branch_keeps_the_commits(self, repo):
@@ -151,31 +166,6 @@ class TestLifecycle:
         wt = ensure(str(repo), "docs")
         worktrees.remove(wt.path)
         assert not Path(wt.path).exists()
-
-    def test_a_live_foreign_lock_blocks_remove(self, repo):
-        wt = ensure(str(repo), "docs")
-        worktrees.lock(wt.path, reason="agentica pid=1")
-        with pytest.raises(WorktreeError) as exc:
-            worktrees.remove(wt.path)
-        message = str(exc.value)
-        assert "locked" in message
-        assert "agentica pid=1" in message
-        assert "remove -f" not in message
-        assert Path(wt.path).is_dir()
-
-    def test_a_dead_agentica_lock_is_stolen(self, repo):
-        wt = ensure(str(repo), "docs")
-        worktrees.lock(wt.path, reason="agentica pid=99999999")
-        assert worktrees.claim_lock(wt.path) is True
-        worktrees.remove(wt.path)
-        assert not Path(wt.path).exists()
-
-    def test_a_user_lock_is_not_stolen_or_removed(self, repo):
-        wt = ensure(str(repo), "docs")
-        worktrees.lock(wt.path, reason="keep this")
-        assert worktrees.claim_lock(wt.path) is False
-        with pytest.raises(WorktreeError, match="locked"):
-            worktrees.remove(wt.path)
 
     def test_same_name_after_remove_forks_from_current_main(self, repo):
         wt = ensure(str(repo), "docs")
@@ -267,11 +257,19 @@ class TestDeletedWorkingDirectory:
     name that, and the session must still have a way out."""
 
     def test_a_deleted_cwd_is_not_reported_as_missing_git(self, repo):
+        """A deleted directory must not be reported as a missing git binary.
+
+        ``main_root`` answers from the nearest ancestor that still exists: the
+        repository is still nameable, and a stale registration can only be
+        removed by someone who can name it.
+        """
         wt = ensure(str(repo), "docs")
         worktrees.remove(wt.path)
 
+        assert worktrees.main_root(wt.path) == str(repo)
+
         with pytest.raises(WorktreeError) as exc:
-            worktrees.main_root(wt.path)
+            worktrees.current_root(wt.path)
 
         message = str(exc.value)
         assert "no longer exists" in message
@@ -279,6 +277,22 @@ class TestDeletedWorkingDirectory:
             "ENOENT here is the deleted directory, not a missing git binary — "
             "blaming git sends the reader to install what they already have"
         )
+
+    def test_a_missing_git_binary_is_still_blamed_on_git(self, repo, monkeypatch):
+        """The other ENOENT. Both reach ``subprocess`` the same way, and the
+        message must not send the reader to look for a directory."""
+        import subprocess
+
+        def no_git(*_args, **_kwargs):
+            raise FileNotFoundError(2, "No such file or directory", "git")
+
+        monkeypatch.setattr(subprocess, "run", no_git)
+        with pytest.raises(WorktreeError) as exc:
+            worktrees._git(["status"], str(repo))
+
+        message = str(exc.value)
+        assert "not installed" in message
+        assert "no longer exists" not in message
 
     def test_a_session_whose_worktree_was_removed_can_still_get_a_new_one(self, repo):
         """The escape hatch. ``ensure`` asks ``is_git_repo(cwd)`` first, which is
@@ -291,6 +305,77 @@ class TestDeletedWorkingDirectory:
 
         assert Path(rescued.path) == repo / ".agentica/worktrees" / "rescue"
         assert Path(rescued.path).is_dir()
+
+
+class TestStaleRegistrationIsNotDestroyed:
+    """A missing or bare path is reported. ``ensure`` does not rmtree it."""
+
+    def test_ensure_refuses_a_deleted_registration(self, repo):
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "feature.py").write_text("x = 1\n")
+        _git(wt.path, "add", "feature.py")
+        _git(wt.path, "commit", "-q", "-m", "work on docs")
+        shutil.rmtree(wt.path)
+
+        with pytest.raises(WorktreeError, match="not a checkout"):
+            ensure(str(repo), "docs")
+
+        worktrees.remove(wt.path)
+        again = ensure(str(repo), "docs")
+        assert (Path(again.path) / "feature.py").is_file()
+
+    def test_a_bare_directory_at_the_registered_path_is_left_alone(self, repo):
+        wt = ensure(str(repo), "docs")
+        shutil.rmtree(wt.path)
+        Path(wt.path).mkdir(parents=True)
+        (Path(wt.path) / "accident.py").write_text("not a checkout\n")
+
+        listed = worktrees.find(str(repo), "docs")
+        assert listed is not None
+        assert not listed.exists
+        assert "(not a checkout)" in listed.describe()
+
+        with pytest.raises(WorktreeError, match="not a checkout"):
+            ensure(str(repo), "docs")
+
+        assert (Path(wt.path) / "accident.py").read_text() == "not a checkout\n"
+
+    def test_remove_clears_a_gone_registration_without_touching_another(self, repo):
+        alive = ensure(str(repo), "keeper")
+        stale = ensure(str(repo), "docs")
+        shutil.rmtree(stale.path)
+
+        worktrees.remove(stale.path)
+
+        assert Path(alive.path).is_dir()
+        assert worktrees.find(str(repo), "keeper") is not None
+        assert worktrees.find(str(repo), "docs") is None
+
+
+class TestRemoveRefusesTheProcessCwd:
+    def test_remove_refuses_when_this_process_stands_in_the_tree(self, repo, monkeypatch):
+        wt = ensure(str(repo), "docs")
+        monkeypatch.setattr(worktrees.os, "getcwd", lambda: wt.path)
+        with pytest.raises(WorktreeError, match="this process's working directory"):
+            worktrees.remove(wt.path)
+        assert Path(wt.path).is_dir()
+
+
+class TestNestedWorktreesSelfExclude:
+    def test_nested_worktrees_lists_in_repo_checkouts(self, repo):
+        wt = ensure(str(repo), "docs")
+        nested = worktrees.nested_worktrees(str(repo), ttl=0)
+        assert os.path.realpath(wt.path) in nested
+
+    def test_nested_checkouts_skips_the_search_base_itself(self, repo):
+        from agentica.tools.builtin.file_tool import _nested_checkouts
+
+        wt = ensure(str(repo), "docs")
+        here = os.path.realpath(wt.path)
+        skipped_from_main = _nested_checkouts(repo)
+        assert here in skipped_from_main
+        skipped_from_self = _nested_checkouts(Path(wt.path))
+        assert here not in skipped_from_self
 
 
 class TestMergeOfAnAlreadyLandedBranch:

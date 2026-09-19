@@ -457,9 +457,10 @@ def parse_args():
         type=str,
         default=None,
         help=(
-            "Work in a per-task git worktree of this repository "
+            "Start this process inside a per-task git worktree "
             "(.agentica/worktrees/<name>, branch wt/<name>). Created on first "
-            "use; merge lands on local main and removes it."
+            "use. Mid-session worktrees do not move this process — pass "
+            "work_dir= on file/execute calls instead."
         ),
     )
     parser.add_argument(

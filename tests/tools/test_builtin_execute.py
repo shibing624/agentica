@@ -762,6 +762,48 @@ print(f(21))"'''
         result = asyncio.run(tool.execute("pwd"))
         assert tmp_dir in result
 
+    def test_execute_schema_offers_work_dir(self, execute_tool):
+        function = execute_tool.functions["execute"]
+        function.process_entrypoint(strict=False)
+        assert "work_dir" in function.parameters["properties"]
+
+    def test_per_call_work_dir_runs_there_not_in_the_session(self, tmp_dir, tmp_path):
+        session = Path(tmp_dir)
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "marker.txt").write_text("in-other\n")
+        tool = BuiltinExecuteTool(work_dir=str(session))
+
+        result = asyncio.run(tool.execute("cat marker.txt", work_dir=str(other)))
+        assert "in-other" in result
+        pwd = asyncio.run(tool.execute("pwd"))
+        assert Path(pwd.strip()).resolve() == session.resolve()
+
+    def test_background_uses_the_call_work_dir(self, tmp_dir, tmp_path):
+        session = Path(tmp_dir)
+        other = tmp_path / "other"
+        other.mkdir()
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(
+            work_dir=str(session),
+            background_process_registry=registry,
+        )
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+        try:
+            asyncio.run(tool.execute(command, background=True, work_dir=str(other)))
+            item = registry.list()[0]
+            assert item.cwd == str(other)
+        finally:
+            registry.stop()
+
+    def test_spill_target_uses_the_call_cwd(self, tmp_dir, tmp_path):
+        session = Path(tmp_dir)
+        other = tmp_path / "other"
+        other.mkdir()
+        tool = BuiltinExecuteTool(work_dir=str(session))
+        _sid, _uid, cwd = tool._spill_target(str(other))
+        assert cwd == str(other)
+
 
 class TestExecuteOutputCap:
     """The capture hard cap: it must bound the turn, not pin it.
@@ -943,9 +985,7 @@ class TestDeletedWorkingDirectory:
 
         message = str(exc.value)
         assert str(gone) in message
-        assert "working directory no longer exists" in message, (
+        assert "work_dir is not a directory" in message, (
             "a bare [Errno 2] names a path the model never mentioned, so it "
             "reads the failure as a typo in its own command and retries variants"
         )
-        assert "worktree" in message, "the report must carry the way out"
-        assert 'action="main"' in message or "action=\"main\"" in message

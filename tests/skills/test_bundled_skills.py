@@ -29,7 +29,7 @@ class TestBundledSkillsShip(unittest.TestCase):
 
 
 class TestSkillRegistrationLogging(unittest.TestCase):
-    """``load_all`` re-runs on reload / profile switch / worktree rebind.
+    """``load_all`` re-runs on reload / profile switch.
 
     One INFO line per skill meant 19-38 lines every time; one observed CLI log
     held 291 of them for a set of skills that had not changed.

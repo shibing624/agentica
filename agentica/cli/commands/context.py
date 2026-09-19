@@ -45,9 +45,7 @@ class CommandContext:
     # this terminal's mailbox identity.
     peer_session: Any = None
     # Per-task worktree binding (agentica.cli.worktree_binding.WorktreeBinder).
-    # Shared with every rebuilt agent for the same reason as peer_session: a
-    # session that lost the `worktree` tool to a /model switch would have to be
-    # restarted to move again, which is the one thing this feature is for.
+    # Shared with every rebuilt agent so /model does not drop the `worktree` tool.
     worktree_binder: Any = None
     # Persistent goal loop (see agentica/goals.py). Same instance is shared
     # between the post-turn hook and /goal handlers, guarded by goal_lock.

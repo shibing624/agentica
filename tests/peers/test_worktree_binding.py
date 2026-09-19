@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Binder must not move the session on a refused remove, and must
-say so when it shares a locked worktree.
+@description: Binder creates and disposes worktrees without moving the session.
 """
 from pathlib import Path
 
 import pytest
 
 from agentica import worktrees
+from agentica.cli.commands.context import CommandContext
+from agentica.cli.commands.worktree_cmd import _cmd_worktree
 from agentica.cli.worktree_binding import WorktreeBinder
 from agentica.worktrees import WorktreeError, ensure
 
@@ -21,37 +22,77 @@ def _git(cwd, *args):
     )
 
 
-class FakeAgent:
-    def __init__(self, work_dir):
-        self.work_dir = str(work_dir)
-
-    def rebind_work_dir(self, work_dir):
-        self.work_dir = str(work_dir)
-
-
 @pytest.fixture
 def repo(clone_git_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
     return clone_git_repo(tmp_path / "repo")
 
 
-def _binder(work_dir, agent=None):
-    agent = agent or FakeAgent(work_dir)
+def _binder(work_dir):
     cfg = {"work_dir": str(work_dir)}
-    return WorktreeBinder(
-        agent_config=cfg,
-        get_agent=lambda: agent,
-    ), agent, cfg
+    return WorktreeBinder(agent_config=cfg), cfg
+
+
+class TestCreateDoesNotMoveTheSession:
+    def test_create_returns_the_path_and_leaves_work_dir(self, repo):
+        binder, cfg = _binder(repo)
+        out = binder.create("docs")
+        assert str(repo / ".agentica/worktrees" / "docs") in out
+        assert "stayed in" in out
+        assert cfg["work_dir"] == str(repo)
+
+    def test_create_refuses_the_base_branch_name(self, repo):
+        binder, _ = _binder(repo)
+        with pytest.raises(WorktreeError, match="main checkout"):
+            binder.create("main")
+        assert not Path(repo, ".agentica/worktrees/main").exists()
+
+
+class TestMergeAndRemoveByName:
+    def test_merge_lands_and_deletes_without_moving(self, repo):
+        binder, cfg = _binder(repo)
+        binder.create("docs")
+        wt = worktrees.find(str(repo), "docs")
+        (Path(wt.path) / "feature.py").write_text("x = 1\n")
+        _git(wt.path, "add", "feature.py")
+        _git(wt.path, "commit", "-q", "-m", "add feature")
+
+        out = binder.merge("docs")
+        assert "Merged" in out or "already had" in out
+        assert cfg["work_dir"] == str(repo)
+        assert (repo / "feature.py").is_file()
+        assert not Path(wt.path).exists()
+
+    def test_remove_by_name_leaves_the_session(self, repo):
+        binder, cfg = _binder(repo)
+        binder.create("docs")
+        out = binder.remove("docs")
+        assert "Removed" in out
+        assert cfg["work_dir"] == str(repo)
+        assert worktrees.find(str(repo), "docs") is None
+
+    def test_remove_unknown_name_raises(self, repo):
+        binder, _ = _binder(repo)
+        with pytest.raises(WorktreeError, match="no worktree"):
+            binder.remove("nope")
 
 
 class TestReleaseOnlyAfterEntering:
     def test_release_skips_git_when_session_never_entered_a_worktree(self, repo, monkeypatch):
         wt = ensure(str(repo), "docs")
-        binder, _, _ = _binder(wt.path)
+        binder, _ = _binder(repo)
         probed = []
         monkeypatch.setattr(worktrees, "is_git_repo", lambda *_a, **_k: probed.append(True) or True)
         assert binder.release() is None
         assert probed == []
+        assert Path(wt.path).is_dir()
+
+    def test_release_leaves_dirty_worktree(self, repo):
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "dirty.py").write_text("nope\n")
+        binder, _ = _binder(wt.path)
+        binder.mark_entered()
+        assert binder.release() is None
         assert Path(wt.path).is_dir()
 
     def test_release_swallows_getcwd_eintr_when_entered(self, monkeypatch):
@@ -59,162 +100,25 @@ class TestReleaseOnlyAfterEntering:
             raise InterruptedError(4, "Interrupted system call")
 
         monkeypatch.setattr("os.getcwd", boom)
-        binder, _, _ = _binder("/unused")
+        binder, _ = _binder("/unused")
         binder.mark_entered()
         binder._agent_config.clear()
         assert binder.release() is None
 
 
-class TestReleaseOwnsOnlyWtBranches:
-    def test_release_does_not_delete_a_detached_foreign_worktree(self, repo, tmp_path):
-        inspect = tmp_path / "inspect"
-        _git(repo, "worktree", "add", "--detach", str(inspect), "HEAD")
-        binder, _, _ = _binder(inspect)
-        binder.mark_entered()
-        assert binder.release() is None
-        assert inspect.is_dir()
-
-
-class TestReleaseKeepsLockOnUniqueWork:
-    def test_release_leaves_a_dirty_worktree_locked(self, repo):
-        wt = ensure(str(repo), "docs")
-        assert worktrees.claim_lock(wt.path) is True
-        (Path(wt.path) / "dirty.py").write_text("nope\n")
-        binder, _, _ = _binder(wt.path)
-        binder.mark_entered()
-        assert binder.release() is None
-        entry = worktrees.resolve_entry(wt.path)
-        assert entry.locked
-        assert Path(wt.path).is_dir()
-
-
-class TestRemoveValidatesBeforeMoving:
-    def test_a_refused_remove_leaves_the_session_in_the_worktree(self, repo):
-        wt = ensure(str(repo), "docs")
-        (Path(wt.path) / "dirty.py").write_text("nope\n")
-        agent = FakeAgent(wt.path)
-        binder, agent, cfg = _binder(wt.path, agent=agent)
-
-        with pytest.raises(WorktreeError, match="modified or untracked"):
-            binder.remove()
-
-        assert Path(agent.work_dir).resolve() == Path(wt.path).resolve()
-        assert Path(cfg["work_dir"]).resolve() == Path(wt.path).resolve()
-        assert Path(wt.path).is_dir()
-
-
-class TestSlashWorktree:
-    def test_status_is_the_default(self, monkeypatch):
-        from agentica.cli.commands.context import CommandContext
-        from agentica.cli.commands.worktree_cmd import _cmd_worktree
-
+class TestSlashDispatch:
+    def test_new_without_a_name_prints_usage(self, capsys):
         class Binder:
-            def status(self):
-                return "WHERE"
+            def create(self, name, *, base=None):
+                raise AssertionError("must not create")
 
-        printed = []
-        monkeypatch.setattr(
-            "agentica.cli.commands.worktree_cmd.get_console",
-            lambda: type("C", (), {"print": staticmethod(printed.append)})(),
-        )
         ctx = CommandContext(agent_config={}, current_agent=None, worktree_binder=Binder())
-        _cmd_worktree(ctx, "")
-        assert printed == ["WHERE"]
+        _cmd_worktree(ctx, "new")
+        assert "Usage" in capsys.readouterr().out
 
-    def test_use_needs_a_name(self, monkeypatch):
-        from agentica.cli.commands.context import CommandContext
-        from agentica.cli.commands.worktree_cmd import _cmd_worktree
-
-        class Binder:
-            def switch(self, name, *, base=None):
-                raise AssertionError("must not switch")
-
-        printed = []
-        monkeypatch.setattr(
-            "agentica.cli.commands.worktree_cmd.get_console",
-            lambda: type("C", (), {"print": staticmethod(printed.append)})(),
+    def test_main_is_refused(self, capsys):
+        ctx = CommandContext(
+            agent_config={}, current_agent=None, worktree_binder=object()
         )
-        ctx = CommandContext(agent_config={}, current_agent=None, worktree_binder=Binder())
-        _cmd_worktree(ctx, "use")
-        assert printed and "use <name>" in str(printed[0])
-
-
-class TestSwitchReportsSharing:
-    def test_a_live_foreign_lock_is_named_in_the_switch_result(self, repo):
-        wt = ensure(str(repo), "docs")
-        worktrees.lock(wt.path, reason="agentica pid=1")
-        binder, _, _ = _binder(repo)
-
-        out = binder.switch("docs")
-
-        assert "pid 1" in out
-        assert "sharing" in out.lower()
-        assert "index.lock" in out
-
-
-class TestMergeOfAnAlreadyLandedBranch:
-    """The case that drove a session to bypass the tool: work already on main,
-    "merge and clean up" asked for. The tool used to refuse, so the session
-    ran `git worktree remove` on its own cwd and lost every later command."""
-
-    def test_merge_cleans_up_when_the_branch_is_already_on_main(self, repo):
-        wt = ensure(str(repo), "docs")
-        (Path(wt.path) / "feature.py").write_text("x = 1\n")
-        _git(wt.path, "add", "feature.py")
-        _git(wt.path, "commit", "-q", "-m", "add feature")
-        worktrees.merge_back(wt.path)
-
-        # Same checkout still there; main already has every commit.
-        binder, agent, _ = _binder(wt.path)
-        out = binder.merge()
-
-        assert Path(agent.work_dir) == repo, "the session must end up on main"
-        assert not Path(wt.path).exists(), f"the checkout must be gone: {out}"
-        assert "already had every commit" in out
-        assert "Merged 0 commit" not in out, "reporting a merge that did not happen"
-
-
-class TestDeletedWorkingDirectory:
-    def test_status_names_a_deleted_cwd_instead_of_blaming_git(self, repo):
-        wt = ensure(str(repo), "docs")
-        binder, _, _ = _binder(wt.path)
-        worktrees.remove(wt.path)
-
-        out = binder.status()
-
-        assert "no longer exists" in out
-        assert "not inside a git repository" not in out
-        assert 'action="main"' in out
-
-    def test_a_session_whose_worktree_was_removed_can_switch_to_a_new_one(self, repo):
-        wt = ensure(str(repo), "docs")
-        binder, agent, _ = _binder(wt.path)
-        worktrees.remove(wt.path)
-
-        out = binder.switch("rescue")
-
-        assert Path(agent.work_dir).name == "rescue"
-        assert Path(agent.work_dir).is_dir()
-        assert "rescue" in out
-
-    def test_go_main_leaves_the_worktree_on_disk(self, repo):
-        wt = ensure(str(repo), "docs")
-        (Path(wt.path) / "wip.py").write_text("keep\n")
-        binder, agent, _ = _binder(wt.path)
-
-        out = binder.go_main()
-
-        assert Path(agent.work_dir).resolve() == Path(repo).resolve()
-        assert Path(wt.path).is_dir()
-        assert (Path(wt.path) / "wip.py").read_text() == "keep\n"
-        assert "not removed" in out
-
-    def test_go_main_from_a_deleted_cwd_lands_on_the_main_checkout(self, repo):
-        wt = ensure(str(repo), "docs")
-        binder, agent, _ = _binder(wt.path)
-        worktrees.remove(wt.path)
-
-        out = binder.go_main()
-
-        assert Path(agent.work_dir).resolve() == Path(repo).resolve()
-        assert "main checkout" in out
+        _cmd_worktree(ctx, "main")
+        assert "does not move" in capsys.readouterr().out

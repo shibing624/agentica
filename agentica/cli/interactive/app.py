@@ -450,7 +450,7 @@ def run_interactive(
     requested_worktree = agent_config.pop("worktree", None)
     started_in_worktree = False
     if requested_worktree:
-        from agentica.worktrees import WorktreeError, claim_lock
+        from agentica.worktrees import WorktreeError
         from agentica.worktrees import ensure as ensure_worktree
 
         try:
@@ -461,7 +461,6 @@ def run_interactive(
         if not enter_work_dir(bound.path):
             get_console().print(f"[bold red]Cannot enter {bound.path}[/bold red]")
             return
-        claim_lock(bound.path)
         agent_config["work_dir"] = bound.path
         started_in_worktree = True
         get_console().print(
@@ -494,17 +493,11 @@ def run_interactive(
     # callback can close over ``state`` / ``app`` once those exist below.
     state.peer_session.publish()
     # Per-task worktrees: built before the first agent (the tool is created
-    # during create_agent) and shared with every rebuild, so a session can move
-    # itself into its own checkout at any point in its life — including when the
-    # instruction arrives from another session as a peer message. The getters
-    # are deliberate: `state.current_agent` is replaced by /model and /resume,
-    # and `tui_state` does not exist yet at this line.
-    worktree_binder = WorktreeBinder(
-        agent_config=agent_config,
-        get_agent=lambda: state.current_agent,
-        get_peers=lambda: state.peer_session,
-        get_tui_state=lambda: tui_state,
-    )
+    # during create_agent) and shared with every rebuild. Isolation is a
+    # directory other tools take as work_dir / path; this session stays put.
+    # The getters are deliberate: `state.current_agent` is replaced by /model
+    # and /resume, and `tui_state` does not exist yet at this line.
+    worktree_binder = WorktreeBinder(agent_config=agent_config)
     if started_in_worktree:
         worktree_binder.mark_entered()
     current_agent = create_agent(

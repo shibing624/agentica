@@ -517,20 +517,29 @@ class BuiltinFileTool(Tool):
         self.functions["grep"].manages_own_timeout = True
 
     def set_work_dir(self, work_dir: str) -> None:
-        """Point relative paths at another directory, mid-session.
+        """Point the session default at another directory.
 
-        A long-running session that binds itself to a git worktree
-        (``agentica/worktrees.py``) has to take its tools with it — otherwise
-        ``read_file("agentica/peers.py")`` still reads the directory the session
-        started in, and the isolation the worktree was for is a fiction.
-        ``Agent.rebind_work_dir`` calls this; the sandbox's writable_dirs are
-        updated there, on the shared SandboxConfig every tool holds.
-
-        Not a tool function: it is registered nowhere, so the model cannot move
-        its own file tools behind the agent's back — only ``rebind_work_dir``
-        can, which moves everything at once.
+        Per-call ``work_dir`` on read/write/apply_patch is the way to work in
+        another checkout without moving the session. This setter stays for
+        construction-time wiring (``--worktree`` builds the agent already
+        pointed at that process's directory).
         """
         self.work_dir = Path(work_dir)
+
+    def _call_root(self, work_dir: str = "") -> Path:
+        """Session work_dir, or the directory this call asked to use."""
+        raw = (work_dir or "").strip()
+        if not raw:
+            return self.work_dir
+        root = Path(raw).expanduser()
+        if not root.is_absolute():
+            root = self.work_dir / root
+        root = Path(os.path.abspath(root))
+        if not root.is_dir():
+            raise FileNotFoundError(
+                f"work_dir is not a directory: {work_dir}\nResolved path: {root}"
+            )
+        return root
 
     def set_permission_mode(self, mode: str) -> None:
         """Record the agent's permission tier (sandbox still reads SandboxConfig)."""
@@ -557,20 +566,20 @@ class BuiltinFileTool(Tool):
         """Say what to do about a sandbox refusal. Parking happens before execute."""
         return " This path is blocked until the user grants access."
 
-    def _resolve_path(self, path: str) -> Path:
+    def _resolve_path(self, path: str, *, root: Optional[Path] = None) -> Path:
         """Resolve path, supporting absolute, relative, and ~ paths.
 
         - ~ paths are expanded to user home directory
         - Absolute paths are used directly
-        - Relative paths are resolved relative to work_dir
+        - Relative paths are resolved relative to ``root`` or the session work_dir
         """
-        # Expand ~ to user home directory
+        base = root if root is not None else self.work_dir
         if path.startswith("~"):
             return Path(path).expanduser()
         p = Path(path)
         if p.is_absolute():
             return p
-        return self.work_dir / p
+        return base / p
 
     def _lexical_abs_path(self, path: Path) -> Path:
         """Return an absolute path without requiring the target to exist."""
@@ -601,15 +610,16 @@ class BuiltinFileTool(Tool):
             lines.append("Nearest existing parent: <none>")
         return "\n".join(lines)
 
-    def _result_path(self, raw_path: str) -> str:
-        """Return the lexical tool path relative to the configured work directory."""
+    def _result_path(self, raw_path: str, *, root: Optional[Path] = None) -> str:
+        """Return the lexical tool path relative to the call's work directory."""
+        base = root if root is not None else self.work_dir
         path = Path(raw_path).expanduser()
         if not path.is_absolute():
-            path = self.work_dir / path
+            path = base / path
         lexical_path = Path(os.path.abspath(path))
         work_roots = (
-            Path(os.path.abspath(self.work_dir.expanduser())),
-            self.work_dir.expanduser().resolve(),
+            Path(os.path.abspath(base.expanduser())),
+            base.expanduser().resolve(),
         )
         for work_root in work_roots:
             try:
@@ -666,7 +676,7 @@ class BuiltinFileTool(Tool):
         resolved_parts = set(Path(resolved).parts)
         return any(blocked in resolved_parts for blocked in self._sandbox_config.blocked_paths)
 
-    def _validate_path(self, path: str) -> str:
+    def _validate_path(self, path: str, *, root: Optional[Path] = None) -> str:
         """Validate path against sandbox restrictions and blocked device files.
 
         Always checks:
@@ -683,7 +693,7 @@ class BuiltinFileTool(Tool):
         Raises:
             PermissionError: If path is blocked by sandbox config or is a device file
         """
-        resolved = self._resolve_path(path).resolve()
+        resolved = self._resolve_path(path, root=root).resolve()
 
         # Device-file guard: always active regardless of sandbox setting.
         # Reading /dev/zero or /dev/random hangs indefinitely or exhausts memory.
@@ -705,16 +715,21 @@ class BuiltinFileTool(Tool):
             )
         return path
 
-    def _is_write_allowed(self, resolved: str) -> bool:
+    def _is_write_allowed(self, resolved: str, *, extra_root: Optional[Path] = None) -> bool:
         """Whether `resolved` (an absolute path string) is inside a writable_dir,
-        work_dir, or a previously-escalated path."""
+        the session work_dir, this call's work_dir, or a previously-escalated path."""
         if self._is_escalated(resolved):
             return True
         for wd in self._sandbox_config.writable_dirs:
             wd_resolved = str(Path(wd).expanduser().resolve())
             if resolved.startswith(wd_resolved):
                 return True
-        return resolved.startswith(str(self.work_dir.resolve()))
+        if extra_root is not None:
+            extra = str(extra_root.resolve())
+            if resolved == extra or resolved.startswith(extra + os.sep):
+                return True
+        session = str(self.work_dir.resolve())
+        return resolved == session or resolved.startswith(session + os.sep)
 
     def _sensitive_write_guard(self, filepath: str) -> Optional[str]:
         """Return an error message if `filepath` targets a sensitive system/credentials
@@ -734,7 +749,7 @@ class BuiltinFileTool(Tool):
             return None
         return err + self._escalation_hint(repr(filepath))
 
-    def _validate_write_path(self, path: str) -> str:
+    def _validate_write_path(self, path: str, *, root: Optional[Path] = None) -> str:
         """Validate that a write operation is allowed under sandbox restrictions.
 
         Checks blocked_paths and writable_dirs whitelist.
@@ -742,12 +757,13 @@ class BuiltinFileTool(Tool):
         Raises:
             PermissionError: If write is not allowed
         """
-        self._validate_path(path)
+        self._validate_path(path, root=root)
         if self._sandbox_config is None or not self._sandbox_config.enabled:
             return path
-        resolved = str(self._resolve_path(path).resolve())
-        # If writable_dirs is configured, enforce whitelist
-        if self._sandbox_config.writable_dirs and not self._is_write_allowed(resolved):
+        resolved = str(self._resolve_path(path, root=root).resolve())
+        if self._sandbox_config.writable_dirs and not self._is_write_allowed(
+            resolved, extra_root=root
+        ):
             raise PermissionError(
                 f"Sandbox: write to '{path}' is not allowed in the current permission mode. "
                 f"Writable dirs: {self._sandbox_config.writable_dirs}."
@@ -774,6 +790,7 @@ class BuiltinFileTool(Tool):
             file_path: str,
             offset: int = 0,
             limit: Optional[int] = 500,
+            work_dir: str = "",
             *,
             tail: Optional[int] = None,
     ) -> str:
@@ -791,8 +808,9 @@ class BuiltinFileTool(Tool):
           (offset=-50, limit=10 → lines N-49..N-40).
 
         A tail scan of a huge file times out after 20 seconds.
-        file_path may be absolute, relative to the working directory, or
-        `~`-prefixed. Lines longer than 2000 characters are truncated.
+        file_path may be absolute, relative to ``work_dir`` (or the session
+        working directory), or `~`-prefixed. Lines longer than 2000 characters
+        are truncated.
         Results have line-number prefixes. Prefer one larger read over
         many small slices.
 
@@ -808,12 +826,16 @@ class BuiltinFileTool(Tool):
                 paging uses this, not tail.
             tail: Last N lines (N>=1). Omit or 0 = read from the start with
                 offset/limit. Negative N is last |N| lines.
+            work_dir: Resolve relative ``file_path`` here. Omit to use this
+                session's directory. Use the path ``worktree`` returned for
+                another checkout; this does not move the session.
 
         Returns:
             File content with line numbers
         """
-        self._validate_path(file_path)
-        path = self._resolve_path(file_path)
+        root = self._call_root(work_dir)
+        self._validate_path(file_path, root=root)
+        path = self._resolve_path(file_path, root=root)
 
         # ── Device path guard ─────────────────────────────────────
         if _is_blocked_device(str(path)):
@@ -941,24 +963,28 @@ class BuiltinFileTool(Tool):
         output_lines = [f"{n:6d}\t{text}" for n, text in window]
         return "\n".join(output_lines), total_lines, window[0][0], window[-1][0]
 
-    async def write_file(self, file_path: str, content: str) -> str:
+    async def write_file(self, file_path: str, content: str, work_dir: str = "") -> str:
         """Writes content to a file in the filesystem.
 
         Creates a new file or overwrites an existing one entirely. Prefer
         apply_patch for modifying existing files. Use write_file for new files
         or whole-file rewrites, including HTML reports the user can open in a
         browser (inline CSS is fine). Parent directories are created if needed.
-        Relative paths resolve against the working directory.
+        Relative paths resolve against ``work_dir`` or the session directory.
 
         Args:
             file_path: File path (relative or absolute). Examples: "tmp/script.py", "outputs/result.txt", "./tmp/main.py", use './tmp/' prefix file path for temporary files
             content: File content to write
+            work_dir: Resolve relative ``file_path`` here. Omit to use this
+                session's directory. Use the path ``worktree`` returned for
+                another checkout; this does not move the session.
 
         Returns:
             Operation result message containing the actual absolute path of the file
         """
-        self._validate_write_path(file_path)
-        path = self._resolve_path(file_path)
+        root = self._call_root(work_dir)
+        self._validate_write_path(file_path, root=root)
+        path = self._resolve_path(file_path, root=root)
 
         # ── Sensitive path guard ──────────────────────────────────
         if self._sandbox_config is not None and self._sandbox_config.enabled:
@@ -1012,7 +1038,7 @@ class BuiltinFileTool(Tool):
             ]),
         )
 
-    async def apply_patch(self, patch: str) -> str:
+    async def apply_patch(self, patch: str, work_dir: str = "") -> str:
         """Apply one context patch across one or more text files.
 
         Use this for code edits, multi-hunk edits, and changes that span
@@ -1058,17 +1084,21 @@ class BuiltinFileTool(Tool):
 
         Args:
             patch: Begin/End Patch envelope. After @@: space keeps, '-' deletes, '+' inserts.
+            work_dir: Resolve relative patch paths here. Omit to use this
+                session's directory. Use the path ``worktree`` returned for
+                another checkout; this does not move the session.
 
         Returns:
             Summary of files and line counts actually changed.
         """
+        root = self._call_root(work_dir)
         operations = parse_patch_envelope(patch)
 
         resolved = []
         seen_paths = set()
         for operation in operations:
-            self._validate_write_path(operation.path)
-            path = self._resolve_path(operation.path).resolve()
+            self._validate_write_path(operation.path, root=root)
+            path = self._resolve_path(operation.path, root=root).resolve()
             path_key = str(path)
             if path_key in seen_paths:
                 raise ValueError(
@@ -1095,7 +1125,7 @@ class BuiltinFileTool(Tool):
             prepared = []
             preflight_errors = []
             for operation, path, path_key in resolved:
-                result_path = self._result_path(operation.path)
+                result_path = self._result_path(operation.path, root=root)
                 try:
                     if operation.action == "add":
                         if path.exists():

@@ -343,28 +343,41 @@ class BuiltinExecuteTool(Tool):
         execute_fn.skip_entrypoint_processing = True
 
     def set_work_dir(self, work_dir: str) -> None:
-        """Run subsequent commands in another directory, mid-session.
+        """Point the session default cwd at another directory.
 
-        Counterpart of ``BuiltinFileTool.set_work_dir``: a session that moves
-        into a git worktree must run its tests and its git commands there, not
-        in the checkout it happened to start in. Deliberately not a registered
-        tool function — only ``Agent.rebind_work_dir`` moves a session, and it
-        moves everything at once.
+        Per-call ``work_dir`` on ``execute`` is the way to run in another
+        checkout without moving the session. This setter stays for
+        construction-time wiring (``--worktree``).
         """
         self._work_dir = Path(work_dir)
 
-    def _spill_target(self) -> tuple[str, Optional[str], Optional[str]]:
+    def _call_cwd(self, work_dir: str = "") -> Optional[str]:
+        """Session cwd, or the directory this call asked to use."""
+        raw = (work_dir or "").strip()
+        if raw:
+            path = Path(raw).expanduser()
+            if not path.is_absolute():
+                base = self._work_dir or Path.cwd()
+                path = base / path
+            return str(Path(os.path.abspath(path)))
+        return str(self._work_dir) if self._work_dir else None
+
+    def _spill_target(
+        self, cwd: Optional[str] = None
+    ) -> tuple[str, Optional[str], Optional[str]]:
         """``(session_id, user_id, cwd)`` for a captured overflow file."""
         fn = self.functions.get("execute")
         agent = fn._agent if fn is not None else None
         session_id = "default"
         user_id = None
-        cwd = str(self._work_dir) if self._work_dir else None
+        spill_cwd = cwd if cwd is not None else (
+            str(self._work_dir) if self._work_dir else None
+        )
         if agent is not None:
             session_id = agent.session_id or "default"
             if agent.workspace is not None:
                 user_id = agent.workspace.user_id
-        return session_id, user_id, cwd
+        return session_id, user_id, spill_cwd
 
     async def _drain_both(self, proc, stdout_spool, stderr_spool):
         """Drain both pipes, killing the child the moment a stream hits the cap.
@@ -424,6 +437,7 @@ class BuiltinExecuteTool(Tool):
         out_lines: int,
         err_lines: int,
         hit_hard_cap: bool,
+        cwd: Optional[str] = None,
     ) -> str:
         """Turn drained pipes into a result that never exceeds ``max_output_length``.
 
@@ -468,7 +482,7 @@ class BuiltinExecuteTool(Tool):
             else ""
         )
 
-        session_id, user_id, cwd = self._spill_target()
+        session_id, user_id, cwd = self._spill_target(cwd)
         names = set(self.functions) if self.functions else {"execute"}
         if can_recover_spill(names):
             file_path = get_tool_result_path(
@@ -497,6 +511,7 @@ class BuiltinExecuteTool(Tool):
             timeout: Optional[int] = None,
             background: bool = False,
             parallel_safe: bool = False,
+            work_dir: str = "",
     ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
@@ -545,6 +560,10 @@ class BuiltinExecuteTool(Tool):
           `&&` in a single call is the right way to say that anyway. When
           unsure, leave it off; the cost is waiting, and the cost of getting it
           wrong is a corrupted working tree.
+        - ``work_dir`` runs this command (and any background job / overflow
+          spill) in that directory. Omit to use this session's directory.
+          Use the path ``worktree`` returned for another checkout; this
+          does not move the session.
         - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
           Oversized output is persisted to a session file with a head/tail
           preview and path. When output redaction is enabled, detected secrets
@@ -648,7 +667,7 @@ class BuiltinExecuteTool(Tool):
             logger.info(f"Safety warning: {safety['reason']} — {command[:100]}")
 
         logger.debug(f"Executing command: {command}")
-        cwd = str(self._work_dir) if self._work_dir else None
+        cwd = self._call_cwd(work_dir)
         self_detaching = bool(_SELF_DETACHING_COMMAND.search(command))
 
         if background:
@@ -711,16 +730,9 @@ class BuiltinExecuteTool(Tool):
                     # command down with it, so name the cause and the way out.
                     if cwd is not None and not os.path.isdir(cwd):
                         raise NotADirectoryError(
-                            f"This session's working directory no longer exists: {cwd}\n"
+                            f"work_dir is not a directory: {cwd}\n"
                             "Nothing ran — the command is fine, the directory it "
-                            "would run in is gone (typically a worktree another "
-                            "session merged or removed).\n"
-                            "Move this session to a directory that exists before "
-                            "running anything else: worktree(action=\"main\") "
-                            "returns to the main checkout, or "
-                            "worktree(action=\"use\", name=\"<task>\") takes a "
-                            "fresh one. An absolute path in the command does "
-                            "not help — every command starts here."
+                            "would run in is gone."
                         ) from None
                     raise
                 out, err = await asyncio.wait_for(
@@ -759,6 +771,7 @@ class BuiltinExecuteTool(Tool):
                 out_bytes=out_bytes, err_bytes=err_bytes,
                 out_lines=out_lines, err_lines=err_lines,
                 hit_hard_cap=hit_hard_cap,
+                cwd=cwd,
             )
 
             # -9 is the SIGKILL *we* sent for crossing the cap, not the

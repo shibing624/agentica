@@ -9,24 +9,20 @@ removes the cause instead of coordinating around it: separate directory,
 separate branch, one shared ``.git``.
 
 This module is the git part only — resolve, create, reuse, list, merge back.
-Binding a session to one is the CLI's business (``cli/commands/worktree_cmd.py``
-and the ``worktree`` tool), because that is where a work_dir lives.
+A worktree is a directory other tools can be pointed at (``work_dir=`` /
+``path=``). The session that created it stays where it is.
 
 Decisions that are not obvious:
 
-**A worktree is a feature checkout, not a standing room.** ``ensure()`` creates
-or reuses an *in-progress* directory (so a long-running session can still be
-told "切到 gateway-peers 再改"). ``merge_back()`` lands the branch on the local
-base; ``remove()`` deletes the checkout. We refuse only what we own
-(``wt/*``, not the main tree, not Claude Code / detached). Dirty trees and
-live locks are git's to refuse; unique commits stay on the branch because
-``git branch -d`` will not delete it. That last distinction is why ahead-of-base
-used to be a second refusal here — it contradicted ``merge`` on a finished
-task, and the session that hit it went around the tool.
+**A worktree is a feature checkout, not the session's home.** ``ensure()``
+creates or reuses an *in-progress* directory. ``merge_back()`` lands the
+branch on the local base; ``remove()`` deletes the checkout. We refuse only
+what we own (``wt/*``, not the main tree, not Claude Code / detached). Dirty
+trees are git's to refuse; unique commits stay on the branch because
+``git branch -d`` will not delete it.
 
-``git worktree lock`` while a session is bound is what lets git refuse
-``remove`` / ``prune`` from another process. The lock stays on a dirty tree
-when the session exits; a later ``claim_lock`` steals it once the pid is dead.
+A registration that is no longer a checkout is reported, not destroyed.
+``remove`` the name first, or pick another.
 
 **Default path is inside the repository.** ``<repo>/.agentica/worktrees/<task>``,
 the Claude Code shape. Sibling ``../<repo>-<task>`` is ``worktree.root: sibling``
@@ -65,10 +61,8 @@ LINKED_PATHS: Tuple[str, ...] = (".env",)
 
 # Where worktrees are created. Default is Claude Code's shape, inside the
 # repository: ``<repo>/.agentica/worktrees/<task>``. ``git clean -xdf`` (one
-# ``-f``) skips the nested checkout; ``git clean -xdff`` will remove it — that
-# is acceptable now that a finished task is merged and deleted, and an
-# in-progress one is ``git worktree lock``'d for the life of the session
-# (left locked if the session exits with unique work still in it). Opt out with:
+# ``-f``) skips the nested checkout; ``git clean -xdff`` will remove it.
+# Opt out with:
 #
 #   * ``worktree.root: sibling`` → ``../<repo>-<task>`` (the old default);
 #   * an absolute path → ``<root>/<repo>/<task>`` (one farm, many repos);
@@ -77,9 +71,16 @@ DEFAULT_ROOT = ".agentica/worktrees"
 SIBLING_ROOT = "sibling"
 ROOT_SETTING = "worktree.root"
 LINK_SETTING = "worktree.link"
-LOCK_REASON_PREFIX = "agentica pid="
 
 DEFAULT_BRANCHES = ("main", "master")
+
+# The base branch's own name, which ``use`` would otherwise read as a task and
+# give ``wt/main`` — a second checkout on a branch named after the base. Nobody
+# means that; "take me to the main checkout" is the ``main`` action. Refused
+# rather than translated, because a silent translation would move a caller who
+# believed they were creating a task. Only these two: the collision is with
+# *branch* names, and every other word is a legitimate task name.
+RESERVED_NAMES = tuple(DEFAULT_BRANCHES)
 
 TIMEOUT = 60.0
 
@@ -99,7 +100,11 @@ class Worktree:
     branch: str
     head: str = ""
     is_main: bool = False
-    # True when this record describes something already on disk.
+    # False when the path is not the root of a checkout: gone (``rm -rf``, a
+    # foreign ``git worktree remove``), or resurrected as a bare directory by a
+    # relative write. ``isdir`` is not enough — a mkdir inside the default
+    # in-repo layout still sits in the main checkout. Named in ``describe`` so
+    # a listing never offers a path that cannot be entered.
     exists: bool = True
     # Absolute paths that were symlinked in at creation time.
     linked: Tuple[str, ...] = ()
@@ -112,7 +117,13 @@ class Worktree:
 
     def describe(self) -> str:
         role = " (main)" if self.is_main else ""
-        return f"{self.name}{role} — {self.branch_short} — {self.path}"
+        if self.exists:
+            missing = ""
+        elif os.path.isdir(self.path):
+            missing = " (not a checkout)"
+        else:
+            missing = " (directory gone)"
+        return f"{self.name}{role} — {self.branch_short} — {self.path}{missing}"
 
 
 def slug(name: str) -> str:
@@ -120,6 +131,11 @@ def slug(name: str) -> str:
     cleaned = _SLUG_RE.sub("-", (name or "").strip().casefold()).strip("-._")
     if not cleaned:
         raise WorktreeError("a worktree name must contain at least one letter or digit")
+    if cleaned in RESERVED_NAMES:
+        raise WorktreeError(
+            f"'{cleaned}' names the main checkout, not a task. Stay in the "
+            "repository root to work there. Pick a name for the *task* otherwise."
+        )
     return cleaned
 
 
@@ -149,34 +165,25 @@ def _git(args: Sequence[str], cwd: str, *, check: bool = True) -> str:
     except subprocess.SubprocessError as e:
         raise WorktreeError(f"git {' '.join(args)} did not finish: {e}") from e
     if check and result.returncode != 0:
-        # Keep every line git wrote. Taking only the last one dropped the
-        # diagnosis and kept the hint: a locked worktree reported
+        # Keep every line git wrote: taking only the last one dropped the
+        # diagnosis and kept the hint, so a locked worktree reported
         # "use 'remove -f -f' to override" with no mention of the lock or its
         # reason. Now that git enforces the rules this layer used to duplicate,
-        # its wording is the explanation the caller gets — except the
-        # ``--force`` / ``-f -f`` invitations, which taught a session to
-        # delete the directory it was standing in.
+        # its wording is the explanation the caller gets, verbatim — including
+        # the ``--force`` it advertises. Rewriting git's sentence to hide that
+        # reads as censorship and only works in English, while the model can
+        # reach the same command through ``execute`` anyway; what keeps a live
+        # tree safe is the lock, not the wording.
         raise WorktreeError(
-            f"git {' '.join(args)} failed: {_git_failure_detail(result) or 'unknown error'}"
+            f"git {' '.join(args)} failed: {_failure_detail(result) or 'unknown error'}"
         )
     return result.stdout
 
 
-_FORCE_HINT = re.compile(
-    r",?\s*use --force to delete it"
-    r"|use 'remove -f(?:\s+-f)?' to override",
-    re.IGNORECASE,
-)
-
-
-def _git_failure_detail(result: subprocess.CompletedProcess) -> str:
-    """Git's diagnosis, without the invitation to ``--force`` the refusal away."""
-    lines = []
-    for line in (result.stderr or result.stdout or "").strip().splitlines():
-        text = _FORCE_HINT.sub("", line.strip()).strip(" ,")
-        if text:
-            lines.append(text)
-    return " / ".join(lines)
+def _failure_detail(result: subprocess.CompletedProcess) -> str:
+    """Everything git said, on one line, in the order it said it."""
+    lines = (result.stderr or result.stdout or "").strip().splitlines()
+    return " / ".join(line.strip() for line in lines if line.strip())
 
 
 def is_git_repo(cwd: str) -> bool:
@@ -203,14 +210,39 @@ def _nearest_existing_dir(cwd: str) -> str:
     return cwd
 
 
+def _directory_is_worktree_root(path: str) -> bool:
+    """True when ``path`` is the root of a git checkout, not merely a directory.
+
+    A relative write (or ``mkdir``) can resurrect a deleted worktree's path as
+    a bare directory. Under the default in-repo layout that directory still
+    sits inside the main checkout, so ``rev-parse --show-toplevel`` walks up
+    and names main — reuse then looks successful and the lie sticks. The
+    directory is a checkout of this path only when the toplevel *is* the path.
+    """
+    if not os.path.isdir(path):
+        return False
+    try:
+        top = _git(["rev-parse", "--show-toplevel"], path).strip()
+    except WorktreeError:
+        return False
+    return bool(top) and os.path.realpath(top) == os.path.realpath(path)
+
+
 def main_root(cwd: str) -> str:
     """The main checkout's root, even when called from inside a worktree.
 
     ``--git-common-dir`` is the shared ``.git`` of the repository; its parent is
     the main worktree. Deriving paths from here is what keeps a worktree of a
     worktree from ever happening.
+
+    Answered from the nearest ancestor that still exists, because a directory
+    removed from elsewhere must still be *nameable*: a stale registration
+    can only be ``remove``d if we can still name the repository it belongs to.
     """
-    common = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd).strip()
+    common = _git(
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        _nearest_existing_dir(cwd),
+    ).strip()
     if not common:
         raise WorktreeError(f"{cwd} is not inside a git repository")
     return str(Path(common).parent)
@@ -363,6 +395,7 @@ def list_worktrees(cwd: str) -> List[Worktree]:
                 branch="" if detached else branch,
                 head=head,
                 is_main=is_main,
+                exists=_directory_is_worktree_root(path),
                 locked=locked,
                 lock_reason=lock_reason,
             ))
@@ -401,37 +434,6 @@ def find(cwd: str, name: str) -> Optional[Worktree]:
     return None
 
 
-def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # pid 1 (and other processes we do not own): exists, just not ours.
-        return True
-    return True
-
-
-def lock_reason_for_pid(pid: Optional[int] = None) -> str:
-    return f"{LOCK_REASON_PREFIX}{pid if pid is not None else os.getpid()}"
-
-
-def _pid_from_reason(reason: str) -> Optional[int]:
-    if not (reason or "").startswith(LOCK_REASON_PREFIX):
-        return None
-    token = reason[len(LOCK_REASON_PREFIX):].strip().split()[0]
-    try:
-        return int(token)
-    except ValueError:
-        return None
-
-
-def _is_our_lock(reason: str) -> bool:
-    return _pid_from_reason(reason) == os.getpid()
-
-
 def _entry_for_path(path: str) -> Optional[Worktree]:
     want = os.path.realpath(path)
     probe = path if is_git_repo(path) else str(Path(path).parent)
@@ -451,69 +453,9 @@ def _invalidate_nested(cwd: str) -> None:
         pass
 
 
-def lock(path: str, *, reason: Optional[str] = None) -> None:
-    """``git worktree lock`` this checkout so prune/remove cannot take it."""
-    target = os.path.realpath(path)
-    why = reason if reason is not None else lock_reason_for_pid()
-    _git(["worktree", "lock", "--reason", why, target], main_root(target))
-
-
-def unlock(path: str) -> None:
-    """``git worktree unlock``. Idempotent: already-unlocked is not an error."""
-    target = os.path.realpath(path)
-    _git(["worktree", "unlock", target], main_root(target), check=False)
-
-
-def claim_lock(path: str) -> bool:
-    """Hold the agentica lock for this process.
-
-    True if we hold it. False if a live foreign holder (another agentica pid,
-    or a lock the user set by hand) owns it — sharing the directory is still
-    allowed; ``remove`` will refuse. A lock whose agentica pid is dead is stolen.
-    """
-    entry = _entry_for_path(path)
-    if entry is None:
-        raise WorktreeError(f"{path} is not a registered worktree")
-    if not entry.locked:
-        lock(path)
-        return True
-    if _is_our_lock(entry.lock_reason):
-        return True
-    foreign_pid = _pid_from_reason(entry.lock_reason)
-    if foreign_pid is not None and not _pid_alive(foreign_pid):
-        unlock(path)
-        lock(path)
-        return True
-    return False
-
-
-def release_lock(path: str) -> None:
-    """Drop the lock only if we hold it, or if the holder pid is dead."""
-    entry = _entry_for_path(path)
-    if entry is None or not entry.locked:
-        return
-    if _is_our_lock(entry.lock_reason):
-        unlock(path)
-        return
-    pid = _pid_from_reason(entry.lock_reason)
-    if pid is not None and not _pid_alive(pid):
-        unlock(path)
-
-
 def is_managed(entry: Worktree) -> bool:
     """True when this checkout is one agentica created (branch ``wt/<name>``)."""
     return entry.branch_short.startswith(BRANCH_PREFIX)
-
-
-def lock_holder_description(path: str) -> str:
-    """How to name whoever holds the lock, for a human-facing warning."""
-    entry = _entry_for_path(path)
-    if entry is None or not entry.locked:
-        return "unknown"
-    pid = _pid_from_reason(entry.lock_reason)
-    if pid is not None:
-        return f"pid {pid}"
-    return entry.lock_reason or "locked"
 
 
 def resolve_entry(cwd: str) -> Worktree:
@@ -523,27 +465,32 @@ def resolve_entry(cwd: str) -> Worktree:
         entry = _entry_for_path(current_root(cwd))
     if entry is None:
         raise WorktreeError(f"{cwd} is not a registered worktree")
+    if not entry.exists:
+        raise WorktreeError(
+            f"{entry.path} is registered as a worktree but is not a checkout "
+            f"— its branch is {entry.branch_short or 'detached'}. "
+            f"Remove it with worktree(action=\"remove\", name=\"{entry.name}\") "
+            "first, or pick another name."
+        )
     return entry
 
 
-def check_removable(cwd: str) -> Worktree:
+def check_removable(path: str) -> Worktree:
     """Raise if deleting this worktree would delete something we do not own.
 
-    Ownership only. Dirty trees and live locks are git's to refuse. Unique
-    commits are not: ``git worktree remove`` deletes the checkout and leaves
-    the branch, and ``git branch -d`` then refuses to drop unmerged commits.
-    A second copy of those rules here can (and did) disagree with git:
-    ``remove`` used to accept a fully-merged branch while ``merge`` rejected
-    the same state as an error, and the session that hit the contradiction
-    went around the tool with a raw ``git worktree remove`` of its own
-    directory.
+    Ownership only. Dirty trees are git's to refuse. Unique commits are not:
+    ``git worktree remove`` deletes the checkout and leaves the branch, and
+    ``git branch -d`` then refuses to drop unmerged commits.
 
-    ``has_unique_work`` is the separate question session teardown asks; it is
-    a *workflow* judgement ("did you forget to merge?"), not a safety one.
+    A missing directory is still removable: that is how a stale registration
+    is cleared so the name can be used again. ``has_unique_work`` is the
+    separate question session teardown asks.
 
-    Does not unlock or delete anything. ``remove()`` calls this, then acts.
+    Does not delete anything. ``remove()`` calls this, then acts.
     """
-    entry = resolve_entry(cwd)
+    entry = _entry_for_path(path)
+    if entry is None:
+        raise WorktreeError(f"{path} is not a registered worktree")
     if entry.is_main:
         raise WorktreeError("this is the main checkout, not a worktree")
     if not is_managed(entry):
@@ -559,7 +506,7 @@ def has_unique_work(entry: Worktree) -> bool:
     """Whether this worktree holds anything the local base does not.
 
     Uncommitted files, or commits the base lacks. Session teardown uses this to
-    decide whether to clean the checkout up or leave it on disk (and locked)
+    decide whether to clean the checkout up or leave it on disk
     for the next session. It is deliberately not part of ``check_removable``:
     an explicit "remove this" is an instruction, while teardown is a guess
     about work nobody asked to throw away.
@@ -584,28 +531,29 @@ def has_unique_work(entry: Worktree) -> bool:
     return int(ahead) > 0
 
 
-def remove(cwd: str) -> Worktree:
+def remove(path: str) -> Worktree:
     """Delete this worktree and its branch.
 
-    We check ownership (``check_removable``: a ``wt/`` checkout, not the main
-    tree) and then let git enforce the rest, because git already does:
+    Ownership (``check_removable``: a ``wt/`` checkout, not the main tree)
+    then git: a dirty tree is refused; a branch the base has not absorbed
+    stays after ``git branch -d`` fails. A stale registration (directory
+    gone) is still removable so the name can be used again.
 
-    - a dirty tree -> ``contains modified or untracked files``
-    - someone else's lock -> ``cannot remove a locked working tree``
-    - a branch the base has not absorbed -> ``git branch -d`` refuses, so the
-      checkout goes and the commits stay reachable on the branch
-
-    ``release_lock`` only drops a lock this process holds (or whose pid is
-    dead), so a live peer's lock reaches git intact and stops the delete.
-
-    Must be called from outside the worktree (typically after moving back to
-    the main checkout) so the process cwd is not deleted out from under it.
+    Refuses when this process's cwd *is* the tree (``--worktree`` at start):
+    removing it would delete the directory the process is standing in.
     """
-    entry = check_removable(cwd)
-    main = main_root(entry.path)
-    if entry.locked:
-        release_lock(entry.path)
-
+    entry = check_removable(path)
+    try:
+        here = os.path.realpath(os.getcwd())
+    except OSError:
+        here = ""
+    if here and os.path.realpath(entry.path) == here:
+        raise WorktreeError(
+            f"{entry.path} is this process's working directory; "
+            "remove it from another session, or exit first"
+        )
+    probe = entry.path if Path(entry.path).is_dir() else str(Path(entry.path).parent)
+    main = main_root(probe)
     _invalidate_nested(main)
     _git(["worktree", "remove", entry.path], main)
     if entry.branch_short:
@@ -648,10 +596,7 @@ def _self_ignore(parent: Path, repo_root: str) -> None:
 
     Note what this does not fix: an ignored tree is in range of
     ``git clean -xdff`` run in the main checkout. Single ``-f`` skips nested
-    checkouts ("Skipping repository"), double ``-ff`` removes them. That is
-    why an in-progress worktree is ``git worktree lock``'d while the session
-    is alive, and left locked if the session exits with unique work still in
-    it (a later claim steals the lock once the pid is dead).
+    checkouts ("Skipping repository"), double ``-ff`` removes them.
     """
     try:
         # realpath both sides: /tmp is a symlink to /private/tmp on macOS, and a
@@ -681,22 +626,22 @@ def ensure(
 ) -> Worktree:
     """Return the worktree for ``name``, creating it only if it does not exist.
 
-    Idempotent on purpose: "bind me to <task>" is a thing a long-running session
-    may say more than once, and the second time must land in the same directory
-    with the same branch and the same history.
-
-    ``cwd`` may itself be gone: another session merging its worktree away
-    deletes the directory this one is standing in. That session has no working
-    directory left, so it can run nothing at all — and asking for a fresh
-    worktree is precisely how it should get out. Resolve from the nearest
-    ancestor that still exists rather than refusing, which is why this is not
-    simply ``is_git_repo(cwd)``.
+    Idempotent on a healthy checkout: the second call returns the same
+    directory, branch and history. A registration that is no longer a
+    checkout is refused — ``remove`` the name first, or pick another.
     """
     cwd = _nearest_existing_dir(cwd)
     if not is_git_repo(cwd):
         raise WorktreeError(f"{cwd} is not inside a git repository")
 
     existing = find(cwd, name)
+    if existing is not None and not existing.exists:
+        raise WorktreeError(
+            f"{existing.path} is registered as a worktree but is not a checkout "
+            f"(branch {existing.branch_short or 'detached'}). "
+            f"Remove it with worktree(action=\"remove\", name=\"{name}\") first, "
+            "or pick another name."
+        )
     if existing is not None:
         # Reuse: also re-link, so a file added to LINKED_PATHS since creation
         # (or removed by hand) reappears.

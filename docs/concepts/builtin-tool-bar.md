@@ -19,7 +19,7 @@
 
 | 工具 | 为什么进不了 `get_builtin_tools` |
 |---|---|
-| `worktree` | 换 worktree 要换 **进程 cwd**，gateway 不能为其中一个 session 改（`agentica/tools/worktree_tool.py:12`） |
+| `worktree` | 仍只在 CLI 组装（`cli/runtime.py`）；工具本身不再改进程 cwd，隔离靠调用方传入 `work_dir` / `path` |
 | `delegate` | 要 session 的 `BackgroundProcessRegistry` 才能追踪/等待/回报 worker |
 | `list_agents` / `send_message` | 要 `PeerSession`，即「这台机器上用户开着的其它终端」 |
 | `self_manage` / `cronjob` | 改的是这套安装的 `config.yaml` / `.env` 与用户的 cron |

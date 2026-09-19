@@ -10,14 +10,14 @@ from agentica.cli.commands.context import CommandContext
 from agentica.worktrees import WorktreeError
 
 _USAGE = (
-    "  [dim]Usage: /worktree [status] | use <name> [--base <branch>] | "
-    "main | merge | remove[/dim]\n"
-    "  [dim]Same as the worktree tool. Launch with --worktree <name> to enter "
-    "one at start.[/dim]"
+    "  [dim]Usage: /worktree [status] | new <name> [--base <branch>] | "
+    "merge <name> | remove <name>[/dim]\n"
+    "  [dim]Same as the worktree tool. Does not move this session. "
+    "Launch with --worktree <name> to start a process inside one.[/dim]"
 )
 
 
-def _parse_use(tokens: list[str]) -> tuple[str, str | None]:
+def _parse_named(tokens: list[str]) -> tuple[str, str | None]:
     name = ""
     base = None
     i = 0
@@ -48,21 +48,32 @@ def _cmd_worktree(ctx: CommandContext, cmd_args: str = ""):
         if action in ("status", "list", "info"):
             con.print(binder.status())
             return
-        if action in ("use", "switch"):
-            name, base = _parse_use(rest)
+        if action in ("new", "use", "create"):
+            name, base = _parse_named(rest)
             if not name:
-                con.print("  [dim]Usage: /worktree use <name> [--base <branch>][/dim]")
+                con.print("  [dim]Usage: /worktree new <name> [--base <branch>][/dim]")
                 return
-            con.print(binder.switch(name, base=base))
+            con.print(binder.create(name, base=base))
             return
         if action in ("main", "home"):
-            con.print(binder.go_main())
+            con.print(
+                "  There is no main action — this session does not move. "
+                "Pass work_dir= on file/execute calls that should run in a worktree."
+            )
             return
         if action == "merge":
-            con.print(binder.merge())
+            name, base = _parse_named(rest)
+            if not name:
+                con.print("  [dim]Usage: /worktree merge <name>[/dim]")
+                return
+            con.print(binder.merge(name, base=base))
             return
         if action in ("remove", "delete"):
-            con.print(binder.remove())
+            name, _ = _parse_named(rest)
+            if not name:
+                con.print("  [dim]Usage: /worktree remove <name>[/dim]")
+                return
+            con.print(binder.remove(name))
             return
     except WorktreeError as exc:
         con.print(f"  [red]{exc}[/red]")

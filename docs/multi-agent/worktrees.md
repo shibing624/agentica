@@ -47,51 +47,36 @@ push 时，`origin/main` 看不见它——而那个会话恰恰是你马上要�
 
 ## 三、worktree：一个任务一个目录、一个分支
 
+会话身份留在主 checkout。worktree 是一棵给工具用的树，不是把这场对话搬进去。
+
 ```bash
-# 启动时就进入自己的 worktree（不存在则创建，进行中则复用）
+# 可选：新进程从一开始就站在树上（这场对话的身份在树上）
 agentica --worktree gateway-peers
 ```
 
-已经跑了几周的会话不必重启——模型读内置 `worktree` skill 后调用工具（人也可用 `/worktree`）：
+已经在跑的会话不必重启。模型读内置 `worktree` skill（人也可用 `/worktree`）：
 
 ```text
-你（或另一个会话）："先切到 gateway-peers 那个 worktree，再改代码"
-agent 调用：worktree(action="use", name="gateway-peers")
+agent 调用：worktree(action="new", name="gateway-peers")
+  → /repo/.agentica/worktrees/gateway-peers
+然后：read_file / write_file / apply_patch / execute(..., work_dir=<该路径>)
+      glob / grep(..., path=<该路径>)
 ```
 
-人的入口：启动时 `agentica --worktree <任务>`，会话中 `/worktree status|use|main|merge|remove`。用法判断在 skill 里，不进每轮 system prompt。
+漏传 `work_dir` / `path`，调用落在当前会话目录（通常是 main）。这是可观察的错，比把会话 cwd 绑到树上、树一删全挂要好修。
 
 `worktree` 工具的动作：
 
 | 动作 | 作用 |
 |------|------|
-| `worktree(action="status")` | 列出本仓库所有 worktree，标出"你在这"，附带当前 git 位置 |
-| `worktree(action="use", name="<任务>")` | 进入该任务的 worktree；首次创建，**任务未完成时复用** |
-| `worktree(action="main")` | 回到主 checkout，**不删** worktree（`use(name="main")` 会造出 `wt/main`，不要那么写） |
-| `worktree(action="merge")` | 把本 worktree 的分支并回本地基准分支，然后删除 checkout；分支已在 base 上则只清理 |
-| `worktree(action="remove")` | 丢掉一个 agentica 的 `wt/*` checkout。脏树 / 别人的锁由 git 拒绝；未合入的提交留在分支上 |
+| `worktree(action="status")` | 列出本仓库所有 worktree，附带当前会话所在目录 |
+| `worktree(action="new", name="<任务>")` | 创建或复用健康 checkout，**返回路径**；会话不搬家 |
+| `worktree(action="merge", name="<任务>")` | 把该分支并回本地基准分支，然后删除 checkout |
+| `worktree(action="remove", name="<任务>")` | 丢掉一个 agentica 的 `wt/*` checkout。脏树由 git 拒绝；未合入的提交留在分支上 |
 
-进行中的同名 `use` 仍然复用，所以「切到 gateway-peers 再改」还能从另一个会话送达。合完目录就没了；下一次新功能用新名字，从当前本地 `main` 再拉一份。
+`new(name="main")` 会被拒绝——`main` 不是任务名。没有 `main` / `use` 搬家动作。登记项不再是 checkout（目录没了、或占坑的裸目录）时，`new` 拒绝而不是销毁占坑内容：先 `remove` 那个名字，或换一个名字。
 
-会话绑在 worktree 上时会 `git worktree lock`（reason `agentica pid=<pid>`），别的进程的 `git worktree remove` / prune 拿不走正在用的树。用户自己加的锁不会被抢走。holder pid 已死则视为遗弃，可以偷锁。
-
-退出交互会话时：只动 agentica 自己建的 `wt/*` worktree。没有独有工作（干净且不 ahead 本地 base）→ 自动删；有未提交或未合并的提交 → 留在盘上**并且保持 lock**（下次 `use` 在 pid 已死时偷锁）。手动 `git worktree add`、detached、Claude Code 的树一律不碰。没有按天数的定期清扫——「有没有独有工作」就是安全标准（agentica 以本地 `main` 为中心，不用「是否已 push」）。
-
-### 就地切换到底动了什么
-
-"会话的目录"是四件事，必须一起动，否则隔离就是假的（比如只改了 prompt 里那句话，工具却还在
-往原来的 checkout 写）：
-
-| 动的东西 | 为什么 |
-|---|---|
-| 进程 cwd | git、`@file` 补全、shell 命令都读它 |
-| agent 的执行环境 | prompt 里的工作目录、sandbox 可写目录、每个文件/shell 工具各自捕获的 work_dir（`Agent.rebind_work_dir`） |
-| live peer 记录 | 别人靠它判断谁在哪；**但可寻址的名字不变**——别的会话和手机上 pin 的就是那个名字 |
-| 状态栏 | 人得看得见自己在往哪个 worktree 里打字 |
-
-**不动的**：transcript。会话日志继续写在它原本的位置（这正是 `session_base_dir` 的用途），
-一段对话不会因为工作目录搬家而被切成两个文件。代价是之后 `/resume` 会问你回哪个目录——那个
-提示本来就有，而且会记住你的选择。
+退出时：只动以 `--worktree` 启动的进程脚下那棵 `wt/*` 树。没有独有工作 → 自动删；有未提交或未合并的提交 → 留在盘上。手动 `git worktree add`、detached、Claude Code 的树一律不碰。
 
 ### 目录位置与命名
 
@@ -103,7 +88,7 @@ agent 调用：worktree(action="use", name="gateway-peers")
 ~/Documents/Codes/agentica/.agentica/worktrees/paper     wt/paper
 ```
 
-首次创建时会在 `.agentica/worktrees/.gitignore` 里写一个 `*`，**自我忽略**：`git status` 干净，且**不动仓库里那个被跟踪的 `.gitignore`**。`glob` / `grep` 会跳过仓库内的任何 worktree（问 `git worktree list`，不是按名字猜），绑定在该 worktree 里工作的会话仍然看得见自己的文件。
+首次创建时会在 `.agentica/worktrees/.gitignore` 里写一个 `*`，**自我忽略**：`git status` 干净，且**不动仓库里那个被跟踪的 `.gitignore`**。从主 checkout `glob` / `grep` 会跳过仓库内的任何 worktree（问 `git worktree list`，不是按名字猜）。把 `path` 指到某棵树上，才能搜到那棵树自己的文件。
 
 两种情况需要换地方，都用 `~/.agentica/config.yaml` 里的设置（`settings:` 块；嵌套 `worktree.root` 和扁平行 `worktree.root` 都行）：
 
@@ -119,21 +104,21 @@ settings:
 - **父目录塞了二十个仓库，想集中放** → 绝对路径
 - **共享挂载的父目录不可写** → 默认的仓库内布局正好不需要写父目录
 
-`git clean -xdf`（单 `-f`）对嵌套 checkout 是 `Skipping repository`，安全；`git clean -xdff`（双 `-f`）会 `Removing .agentica/`。进行中的树有 `git worktree lock`；合完的已经被删掉。这是默认改成仓库内的原因：短命 checkout 不再值得为 `clean -xdff` 把目录散到父级去。
+`git clean -xdf`（单 `-f`）对嵌套 checkout 是 `Skipping repository`，安全；`git clean -xdff`（双 `-f`）会 `Removing .agentica/`。不想被主仓库的 clean 扫到 → `root: sibling`。
 
 `.env` 是 **symlink 而不是拷贝**：轮换一次密钥所有 worktree 同时生效，而且机器上只存在一份。
 
 ### 合并回去，然后删除 worktree
 
-`worktree(action="merge")` 的顺序是刻意的：
+`worktree(action="merge", name="<任务>")` 的顺序是刻意的：
 
-1. **先在 worktree 里把基准分支合进当前分支**。冲突就留在写这段代码的会话手上、在它自己的目录里、测试一条命令就能跑——而不是把一个半合并的 index 扔在所有会话共用的主 checkout 里。
-2. **再在主 checkout 里把分支并进基准分支**，此时必然是 fast-forward，共享目录被碰的时间最短。两个会话同时 merge 时，git 自己的 `index.lock` 就是互斥锁，这里只是**等它**（重试 5 次），不另造一把锁。
-3. **会话回到主 checkout，删除 worktree 和 `wt/<任务>` 分支。** 合完之后它与本地 base 齐平，删除不会丢掉独有提交。若当时被别的活进程锁着，合并已经落在 main 上，目录会留下并说明原因。
+1. **先在那棵 worktree 里把基准分支合进当前分支**。冲突留在写代码的目录里，而不是扔在人人共用的主 checkout。
+2. **再在主 checkout 里把分支并进基准分支**，此时必然是 fast-forward。两个会话同时 merge 时，git 自己的 `index.lock` 就是互斥锁，这里只是**等它**（重试 5 次）。
+3. **删除 worktree。** 会话一直在它原来的目录，不搬家。合完后与本地 base 齐平，删除不会丢掉独有提交。
 
-会被明确拒绝（而不是替你猜）的情况：worktree 里有未提交改动、主 checkout 不干净、主 checkout 不在基准分支上、在主 checkout 里执行 merge。分支已经全部落在 base 上不是错误——那是任务做完的样子，随后照常清理 checkout。
+会被明确拒绝（而不是替你猜）的情况：worktree 里有未提交改动、主 checkout 不干净、主 checkout 不在基准分支上。分支已经全部落在 base 上不是错误——那是任务做完的样子，随后照常清理 checkout。
 
-`remove` 只拦所有权（agentica 的 `wt/*`，不是主 checkout，不是 detached / Claude Code）。脏树和别人的 `git worktree lock` 交给 git 拒绝。未合入 base 的提交不是拒绝条件：checkout 删掉，`git branch -d` 会留下分支。退出会话时的自动清理才看「有没有独有工作」——那是猜测，不是一条显式 remove。 
+`remove` 只拦所有权（agentica 的 `wt/*`，不是主 checkout，不是 detached / Claude Code）。脏树交给 git 拒绝，git 的话原样转达。未合入 base 的提交不是拒绝条件：checkout 删掉，`git branch -d` 会留下分支。以 `--worktree` 启动的进程退出时的自动清理才看「有没有独有工作」——那是猜测，不是一条显式 remove。
 
 ## 四、几个实测出来的坑
 
