@@ -556,15 +556,19 @@ def _clear_stale_registration(entry: Worktree, main: str) -> None:
 
     ``git worktree remove`` on these is a dead end: a missing ``.git`` is
     rc 128, and a leftover lock on a gone directory is the same refusal.
-    ``unlock`` then ``prune`` clears the bookkeeping. Prune only expires
-    registrations whose checkout is gone or unverifiable — it does not
-    delete leftover files at the path.
+    ``unlock`` then ``prune`` clears the bookkeeping.
+
+    Prune is repository-wide, and ``--expire now`` accepts a registration
+    the moment its directory is unverifiable — so it drops every *other*
+    checkout that happens not to be visible right now too: a mount that is
+    down, a tree someone moved aside. Files and branches survive; what a
+    returning checkout has lost is its git link, needing ``rm .git`` and a
+    fresh ``worktree add`` before it works again. Accepted, because "not
+    there at this instant" cannot be told from "gone for good" here, and
+    the narrower per-path ``remove -f -f`` deletes leftover files at the
+    path — the one thing this must not do.
     """
     _git(["worktree", "unlock", entry.path], main, check=False)
-    # prune is repo-wide: every other prunable registration goes too.
-    # It does not delete files or branches. A per-path ``remove -f -f``
-    # would be narrower, but on a bare / ``.git``-less directory it
-    # deletes leftover files — the case prune exists to leave alone.
     _git(["worktree", "prune", "--expire", "now"], main)
     if _registration_at(main, entry.path) is not None:
         raise WorktreeError(
