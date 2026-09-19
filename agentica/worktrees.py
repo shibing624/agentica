@@ -471,7 +471,29 @@ def resolve_entry(cwd: str) -> Worktree:
     return entry
 
 
-def check_removable(path: str) -> Worktree:
+def _registration_at(cwd: str, path: str) -> Optional[Worktree]:
+    """The listed worktree at ``path``, asked of the repository ``cwd`` is in.
+
+    The probe is the session's checkout, not the path's parent.
+    ``_entry_for_path`` walks to ``Path(path).parent`` when the tree itself
+    is not a repo — that works for the default in-repo layout (parent is
+    still inside the checkout) and fails for ``sibling`` / an absolute
+    ``worktree.root`` (parent is an ordinary directory). ``git worktree
+    list`` still shows the registration as prunable; the helper just
+    cannot see it. Callers that already have a repo path must use this.
+    """
+    want = os.path.realpath(path)
+    try:
+        listed = list_worktrees(_nearest_existing_dir(cwd))
+    except WorktreeError:
+        return None
+    for entry in listed:
+        if os.path.realpath(entry.path) == want:
+            return entry
+    return None
+
+
+def check_removable(entry: Worktree) -> Worktree:
     """Raise if deleting this worktree would delete something we do not own.
 
     Ownership only. Dirty trees are git's to refuse. Unique commits are not:
@@ -483,11 +505,12 @@ def check_removable(path: str) -> Worktree:
     whatever sits at the path. ``has_unique_work`` is the separate question
     session teardown asks.
 
+    Takes the already-resolved listing, not a path. Reverse-lookup from the
+    tree path cannot see a sibling / absolute-root registration whose
+    parent is outside the repository.
+
     Does not delete anything. ``remove()`` calls this, then acts.
     """
-    entry = _entry_for_path(path)
-    if entry is None:
-        raise WorktreeError(f"{path} is not a registered worktree")
     if entry.is_main:
         raise WorktreeError("this is the main checkout, not a worktree")
     if not is_managed(entry):
@@ -538,19 +561,26 @@ def _clear_stale_registration(entry: Worktree, main: str) -> None:
     delete leftover files at the path.
     """
     _git(["worktree", "unlock", entry.path], main, check=False)
+    # prune is repo-wide: every other prunable registration goes too.
+    # It does not delete files or branches. A per-path ``remove -f -f``
+    # would be narrower, but on a bare / ``.git``-less directory it
+    # deletes leftover files — the case prune exists to leave alone.
     _git(["worktree", "prune", "--expire", "now"], main)
-    if _entry_for_path(entry.path) is not None:
+    if _registration_at(main, entry.path) is not None:
         raise WorktreeError(
             f"{entry.path} is still registered after prune; "
             "the name cannot be reused"
         )
 
 
-def remove(path: str) -> Worktree:
+def remove(entry: Worktree, cwd: str) -> Worktree:
     """Delete this worktree and its branch.
 
-    Ownership (``check_removable``: a ``wt/`` checkout, not the main tree)
-    then git: a dirty tree is refused; a branch the base has not absorbed
+    ``entry`` is the listing already resolved from ``cwd``'s repository
+    (``find`` / ``list_worktrees``). ``cwd`` is a path inside that
+    repository — the session directory, not the tree. Ownership
+    (``check_removable``: a ``wt/`` checkout, not the main tree) then
+    git: a dirty tree is refused; a branch the base has not absorbed
     stays after ``git branch -d`` fails.
 
     A registration that is not a checkout (directory gone, leftover lock,
@@ -560,28 +590,31 @@ def remove(path: str) -> Worktree:
     Refuses when this process's cwd *is* a live checkout (``--worktree``
     at start): removing it would delete the directory the process is in.
     """
-    entry = check_removable(path)
-    probe = entry.path if Path(entry.path).is_dir() else str(Path(entry.path).parent)
-    main = main_root(probe)
+    check_removable(entry)
+    main = main_root(_nearest_existing_dir(cwd))
+    current = _registration_at(main, entry.path)
+    if current is None:
+        raise WorktreeError(f"{entry.path} is not a registered worktree")
+    check_removable(current)
     _invalidate_nested(main)
-    if not entry.exists:
-        _clear_stale_registration(entry, main)
-        if entry.branch_short:
-            _git(["branch", "-d", entry.branch_short], main, check=False)
-        return entry
+    if not current.exists:
+        _clear_stale_registration(current, main)
+        if current.branch_short:
+            _git(["branch", "-d", current.branch_short], main, check=False)
+        return current
     try:
         here = os.path.realpath(os.getcwd())
     except OSError:
         here = ""
-    if here and os.path.realpath(entry.path) == here:
+    if here and os.path.realpath(current.path) == here:
         raise WorktreeError(
-            f"{entry.path} is this process's working directory; "
+            f"{current.path} is this process's working directory; "
             "remove it from another session, or exit first"
         )
-    _git(["worktree", "remove", entry.path], main)
-    if entry.branch_short:
-        _git(["branch", "-d", entry.branch_short], main, check=False)
-    return entry
+    _git(["worktree", "remove", current.path], main)
+    if current.branch_short:
+        _git(["branch", "-d", current.branch_short], main, check=False)
+    return current
 
 
 def link_ignored(src_root: str, dst_root: str, names: Optional[Sequence[str]] = None) -> List[str]:

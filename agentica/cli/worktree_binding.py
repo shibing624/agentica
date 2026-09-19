@@ -100,7 +100,7 @@ class WorktreeBinder:
 
         leftover = ""
         try:
-            worktrees.remove(entry.path)
+            worktrees.remove(entry, cwd)
         except worktrees.WorktreeError as exc:
             leftover = str(exc)
 
@@ -131,7 +131,7 @@ class WorktreeBinder:
         entry = worktrees.find(cwd, name)
         if entry is None:
             raise worktrees.WorktreeError(f"no worktree named {name!r}")
-        worktrees.remove(entry.path)
+        worktrees.remove(entry, cwd)
         return (
             f"Removed worktree {entry.path}. "
             f"This session stayed in {cwd}. "
@@ -168,7 +168,7 @@ class WorktreeBinder:
             from agentica.cli.session_resume import enter_work_dir
             enter_work_dir(main)
             try:
-                worktrees.remove(root)
+                worktrees.remove(entry, main)
                 self._agent_config["work_dir"] = main
                 return root
             except worktrees.WorktreeError:

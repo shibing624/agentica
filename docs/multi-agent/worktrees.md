@@ -100,7 +100,7 @@ settings:
     link: [".env", ".envrc"]   # 新 worktree 里 symlink 过来的 gitignored 文件
 ```
 
-- **不想 worktree 落在仓库里**（比如经常 `git clean -xdff`）→ `root: sibling`
+- **不想 worktree 落在仓库里**（比如经常 `git clean -xdff`）→ `root: sibling`。清死登记项从会话所在仓库问 git，不从树路径的父目录反查，所以 sibling / 绝对根和默认布局一样能 `remove` 后再 `new`。
 - **父目录塞了二十个仓库，想集中放** → 绝对路径
 - **共享挂载的父目录不可写** → 默认的仓库内布局正好不需要写父目录
 

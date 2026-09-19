@@ -3,6 +3,7 @@
 @author: XuMing(xuming624@qq.com)
 @description: Binder creates and disposes worktrees without moving the session.
 """
+import shutil
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,28 @@ class TestMergeAndRemoveByName:
         binder, _ = _binder(repo)
         with pytest.raises(WorktreeError, match="no worktree"):
             binder.remove("nope")
+
+    def test_remove_clears_a_gone_sibling_so_new_can_reuse_the_name(
+        self, repo, monkeypatch
+    ):
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.SIBLING_ROOT)
+        binder, cfg = _binder(repo)
+        binder.create("docs")
+        entry = worktrees.find(str(repo), "docs")
+        assert entry is not None
+        shutil.rmtree(entry.path)
+
+        with pytest.raises(WorktreeError, match="not a checkout"):
+            binder.merge("docs")
+        with pytest.raises(WorktreeError, match="not a checkout"):
+            binder.create("docs")
+
+        out = binder.remove("docs")
+        assert "Removed" in out
+        assert cfg["work_dir"] == str(repo)
+        again = binder.create("docs")
+        assert str(repo.parent / f"{repo.name}-docs") in again
+        assert Path(repo.parent / f"{repo.name}-docs").is_dir()
 
 
 class TestReleaseOnlyAfterEntering:
