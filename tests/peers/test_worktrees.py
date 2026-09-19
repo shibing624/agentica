@@ -351,6 +351,42 @@ class TestStaleRegistrationIsNotDestroyed:
         assert worktrees.find(str(repo), "keeper") is not None
         assert worktrees.find(str(repo), "docs") is None
 
+    def test_remove_clears_a_locked_gone_registration(self, repo):
+        wt = ensure(str(repo), "docs")
+        _git(repo, "worktree", "lock", "--reason", "agentica pid=1", wt.path)
+        shutil.rmtree(wt.path)
+
+        worktrees.remove(wt.path)
+
+        assert worktrees.find(str(repo), "docs") is None
+        again = ensure(str(repo), "docs")
+        assert Path(again.path).is_dir()
+
+    def test_remove_of_a_bare_directory_clears_the_name_and_keeps_the_files(self, repo):
+        wt = ensure(str(repo), "docs")
+        shutil.rmtree(wt.path)
+        Path(wt.path).mkdir(parents=True)
+        (Path(wt.path) / "accident.py").write_text("not a checkout\n")
+
+        worktrees.remove(wt.path)
+
+        assert worktrees.find(str(repo), "docs") is None
+        assert (Path(wt.path) / "accident.py").read_text() == "not a checkout\n"
+        with pytest.raises(WorktreeError, match="already exists but is not a worktree"):
+            ensure(str(repo), "docs")
+
+    def test_remove_of_a_worktree_whose_git_file_is_gone_does_not_delete_files(self, repo):
+        wt = ensure(str(repo), "docs")
+        (Path(wt.path) / "dirty.py").write_text("keep me\n")
+        git_file = Path(wt.path) / ".git"
+        assert git_file.is_file()
+        git_file.unlink()
+
+        worktrees.remove(wt.path)
+
+        assert worktrees.find(str(repo), "docs") is None
+        assert (Path(wt.path) / "dirty.py").read_text() == "keep me\n"
+
 
 class TestRemoveRefusesTheProcessCwd:
     def test_remove_refuses_when_this_process_stands_in_the_tree(self, repo, monkeypatch):

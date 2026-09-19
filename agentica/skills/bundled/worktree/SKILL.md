@@ -6,7 +6,7 @@ description: >-
   session is dirty in the same directory (list_agents), when two agents would
   fight over index.lock, or when starting a parallel task checkout.
 metadata:
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Isolate work in a worktree
@@ -21,6 +21,9 @@ Pass that path as `work_dir` on `read_file` / `write_file` / `apply_patch` /
 the call stays in this session's directory.
 
 Do not `cd` and expect later calls to follow — each call is independent.
+Do not `execute` `git worktree add`: that only makes a directory, and later
+calls still use this session unless you pass `work_dir` / `path`. Use
+`worktree(action="new")`.
 
 ## When
 

@@ -166,14 +166,10 @@ def _git(args: Sequence[str], cwd: str, *, check: bool = True) -> str:
         raise WorktreeError(f"git {' '.join(args)} did not finish: {e}") from e
     if check and result.returncode != 0:
         # Keep every line git wrote: taking only the last one dropped the
-        # diagnosis and kept the hint, so a locked worktree reported
-        # "use 'remove -f -f' to override" with no mention of the lock or its
-        # reason. Now that git enforces the rules this layer used to duplicate,
-        # its wording is the explanation the caller gets, verbatim — including
-        # the ``--force`` it advertises. Rewriting git's sentence to hide that
-        # reads as censorship and only works in English, while the model can
-        # reach the same command through ``execute`` anyway; what keeps a live
-        # tree safe is the lock, not the wording.
+        # diagnosis and kept the hint. Git's wording is the explanation the
+        # caller gets, verbatim — including the ``--force`` it advertises.
+        # Rewriting that reads as censorship and only works in English; the
+        # model can run the same command through ``execute`` anyway.
         raise WorktreeError(
             f"git {' '.join(args)} failed: {_failure_detail(result) or 'unknown error'}"
         )
@@ -482,9 +478,10 @@ def check_removable(path: str) -> Worktree:
     ``git worktree remove`` deletes the checkout and leaves the branch, and
     ``git branch -d`` then refuses to drop unmerged commits.
 
-    A missing directory is still removable: that is how a stale registration
-    is cleared so the name can be used again. ``has_unique_work`` is the
-    separate question session teardown asks.
+    A registration that is not a checkout is still removable: ``remove()``
+    then clears the bookkeeping (``unlock`` + ``prune``) and does not delete
+    whatever sits at the path. ``has_unique_work`` is the separate question
+    session teardown asks.
 
     Does not delete anything. ``remove()`` calls this, then acts.
     """
@@ -531,18 +528,47 @@ def has_unique_work(entry: Worktree) -> bool:
     return int(ahead) > 0
 
 
+def _clear_stale_registration(entry: Worktree, main: str) -> None:
+    """Drop a registration that is not a checkout. Does not delete the path.
+
+    ``git worktree remove`` on these is a dead end: a missing ``.git`` is
+    rc 128, and a leftover lock on a gone directory is the same refusal.
+    ``unlock`` then ``prune`` clears the bookkeeping. Prune only expires
+    registrations whose checkout is gone or unverifiable — it does not
+    delete leftover files at the path.
+    """
+    _git(["worktree", "unlock", entry.path], main, check=False)
+    _git(["worktree", "prune", "--expire", "now"], main)
+    if _entry_for_path(entry.path) is not None:
+        raise WorktreeError(
+            f"{entry.path} is still registered after prune; "
+            "the name cannot be reused"
+        )
+
+
 def remove(path: str) -> Worktree:
     """Delete this worktree and its branch.
 
     Ownership (``check_removable``: a ``wt/`` checkout, not the main tree)
     then git: a dirty tree is refused; a branch the base has not absorbed
-    stays after ``git branch -d`` fails. A stale registration (directory
-    gone) is still removable so the name can be used again.
+    stays after ``git branch -d`` fails.
 
-    Refuses when this process's cwd *is* the tree (``--worktree`` at start):
-    removing it would delete the directory the process is standing in.
+    A registration that is not a checkout (directory gone, leftover lock,
+    or a bare directory at the path) is cleared with ``unlock`` + ``prune``
+    so ``new`` can reuse the name. That path is not deleted.
+
+    Refuses when this process's cwd *is* a live checkout (``--worktree``
+    at start): removing it would delete the directory the process is in.
     """
     entry = check_removable(path)
+    probe = entry.path if Path(entry.path).is_dir() else str(Path(entry.path).parent)
+    main = main_root(probe)
+    _invalidate_nested(main)
+    if not entry.exists:
+        _clear_stale_registration(entry, main)
+        if entry.branch_short:
+            _git(["branch", "-d", entry.branch_short], main, check=False)
+        return entry
     try:
         here = os.path.realpath(os.getcwd())
     except OSError:
@@ -552,9 +578,6 @@ def remove(path: str) -> Worktree:
             f"{entry.path} is this process's working directory; "
             "remove it from another session, or exit first"
         )
-    probe = entry.path if Path(entry.path).is_dir() else str(Path(entry.path).parent)
-    main = main_root(probe)
-    _invalidate_nested(main)
     _git(["worktree", "remove", entry.path], main)
     if entry.branch_short:
         _git(["branch", "-d", entry.branch_short], main, check=False)

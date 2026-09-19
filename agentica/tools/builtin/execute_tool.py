@@ -729,7 +729,7 @@ class BuiltinExecuteTool(Tool):
                     # worktree this one works in, and it takes every shell
                     # command down with it, so name the cause and the way out.
                     if cwd is not None and not os.path.isdir(cwd):
-                        raise NotADirectoryError(
+                        raise FileNotFoundError(
                             f"work_dir is not a directory: {cwd}\n"
                             "Nothing ran — the command is fine, the directory it "
                             "would run in is gone."

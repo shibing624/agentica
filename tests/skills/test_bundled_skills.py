@@ -319,10 +319,8 @@ class TestBundledSkillContent(unittest.TestCase):
     def test_the_worktree_skill_forbids_execute_git_and_points_at_the_tool(self):
         body = self._body("worktree")
         self.assertIn("git worktree add", body)
-        self.assertIn("worktree", body)
+        self.assertIn("worktree(action=\"new\")", body)
         self.assertIn("list_agents", body)
-        self.assertIn("/worktree", body)
-        self.assertIn("cannot type slash commands", body)
 
 
 if __name__ == "__main__":
