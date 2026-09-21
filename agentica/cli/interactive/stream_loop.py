@@ -92,8 +92,24 @@ _BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇
 _WAITING_FOR_INPUT_TEXT = "⏸  waiting for your answer…"
 
 
+def _fmt_phase_elapsed(elapsed: float) -> str:
+    """Wall time for the spinner: ``12s``, ``1m58s``, ``16m``, ``1h2m``.
+
+    A bare four-digit ``118s`` reads like a job id. Split units so a long
+    ``execute`` is visibly a duration.
+    """
+    total = max(0, int(elapsed + 0.5))
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours}h{minutes}m" if minutes else f"{hours}h"
+    if minutes:
+        return f"{minutes}m{seconds}s" if seconds else f"{minutes}m"
+    return f"{seconds}s"
+
+
 def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) -> str:
-    """Render one spinner line: ``⠋ <phase label> (Ns)``.
+    """Render one spinner line: ``⠋ <phase label> (1m58s)``.
 
     phase: ``thinking`` | ``reasoning`` | ``tool`` | ``answering`` |
            ``compacting`` | ``idle``
@@ -102,15 +118,16 @@ def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) 
     if phase == "idle":
         return ""
     icon = _BRAILLE_SPINNER[frame_idx % len(_BRAILLE_SPINNER)]
+    clock = _fmt_phase_elapsed(elapsed)
     if phase == "tool" and base:
-        return f"{icon} {base} ({elapsed:.0f}s)"
+        return f"{icon} {base} ({clock})"
     if phase == "compacting":
-        return f"{icon} 🗜 compacting context… ({elapsed:.0f}s)"
+        return f"{icon} 🗜 compacting context… ({clock})"
     if phase == "answering":
-        return f"{icon} answering… ({elapsed:.0f}s)"
+        return f"{icon} answering… ({clock})"
     if phase == "reasoning":
-        return f"{icon} reasoning… ({elapsed:.0f}s)"
-    return f"{icon} thinking… ({elapsed:.0f}s)"
+        return f"{icon} reasoning… ({clock})"
+    return f"{icon} thinking… ({clock})"
 
 
 # ==================== Stream response ====================

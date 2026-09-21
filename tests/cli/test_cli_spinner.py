@@ -74,6 +74,21 @@ class TestSpinnerRender(unittest.TestCase):
         self.assertIn(_BRAILLE_SPINNER[1], t1)
         self.assertNotEqual(t0, t1)
 
+    def test_long_elapsed_uses_minutes_not_a_second_count(self):
+        from agentica.cli.interactive.stream_loop import _fmt_phase_elapsed, _render_spinner_text
+
+        self.assertEqual(_fmt_phase_elapsed(0.4), "0s")
+        self.assertEqual(_fmt_phase_elapsed(1.5), "2s")
+        self.assertEqual(_fmt_phase_elapsed(59), "59s")
+        self.assertEqual(_fmt_phase_elapsed(60), "1m")
+        self.assertEqual(_fmt_phase_elapsed(118), "1m58s")
+        self.assertEqual(_fmt_phase_elapsed(996), "16m36s")
+        self.assertEqual(_fmt_phase_elapsed(3600), "1h")
+        self.assertEqual(_fmt_phase_elapsed(3723), "1h2m")
+        text = _render_spinner_text(0, "tool", "🔧 execute", 118)
+        self.assertIn("(1m58s)", text)
+        self.assertNotIn("118s", text)
+
 
 if __name__ == "__main__":
     unittest.main()
