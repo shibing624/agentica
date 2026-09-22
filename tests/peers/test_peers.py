@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tests for cross-session peer messaging (agentica/peers.py).
+@description: Tests for cross-session peer messaging (agentica/peers/__init__.py).
 """
 import asyncio
 import json

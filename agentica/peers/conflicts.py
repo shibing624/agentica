@@ -3,8 +3,8 @@
 @author:XuMing(xuming624@qq.com)
 @description: Warn when another live session already has this file dirty.
 
-Presence already carries each session's dirty paths (``agentica/git_state.py``
-published through ``agentica/peers.py``), so ``list_agents`` can show the
+Presence already carries each session's dirty paths (``agentica/peers/git_state.py``
+published through ``agentica/peers/__init__.py``), so ``list_agents`` can show the
 answer without asking. ``PeerConflictChecker`` is the same lookup as a
 callable, for callers who want a warning string at write time.
 
@@ -55,7 +55,7 @@ class PeerConflictChecker:
             return ""
 
     def _check(self, abs_path: str) -> str:
-        from agentica import git_state
+        from agentica.peers import git_state
 
         mine = git_state.collect(str(Path(abs_path).parent))
         if not mine.repo_root:

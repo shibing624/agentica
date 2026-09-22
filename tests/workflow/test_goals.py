@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agentica.goals import (
+from agentica.agent.goals import (
     BUDGET_WRAPUP_PROMPT_PREFIX,
     CONTINUATION_PROMPT_PREFIX,
     DEFAULT_TOKEN_BUDGET,
@@ -537,7 +537,7 @@ def test_status_line_no_goal(tmp_path: Path):
 
 
 def test_event_callback_fires_for_lifecycle(tmp_path: Path):
-    from agentica.run_events import RunEventType
+    from agentica.run.events import RunEventType
 
     events: list = []
 
@@ -651,8 +651,8 @@ def test_goal_tool_complete_persists_final_answer(tmp_path: Path):
 def test_goal_run_result_prefers_final_answer_over_chatter(tmp_path: Path):
     """response_content should return the persisted final_answer, not the last
     assistant message (which may be loop-control chatter)."""
-    from agentica.goals import GoalRunResult, GoalState
-    from agentica.run_response import RunResponse
+    from agentica.agent.goals import GoalRunResult, GoalState
+    from agentica.run.response import RunResponse
 
     state = GoalState(
         session_id="s",
@@ -759,8 +759,8 @@ def test_agent_enable_goal_tool_idempotent(tmp_path):
 
 def test_goal_run_result_response_content_property():
     """``response_content`` returns content for happy path and "" for None."""
-    from agentica.goals import GoalRunResult, GoalState
-    from agentica.run_response import RunResponse
+    from agentica.agent.goals import GoalRunResult, GoalState
+    from agentica.run.response import RunResponse
 
     state = GoalState(session_id="s", objective="x")
     rr = RunResponse(content="hello world")
@@ -776,9 +776,9 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     """
     from unittest.mock import AsyncMock, patch
     from agentica.agent import Agent
-    from agentica.goals import GoalRunResult
-    from agentica.run_context import TaskAnchor
-    from agentica.run_response import RunResponse
+    from agentica.agent.goals import GoalRunResult
+    from agentica.run.context import TaskAnchor
+    from agentica.run.response import RunResponse
     from agentica.tools.goal_tool import GoalTool
 
     agent = Agent.__new__(Agent)
@@ -817,8 +817,8 @@ def test_agent_run_goal_stream_chunks_uses_run_stream():
     """Web /goal passes stream_chunks so each turn uses run_stream, not run()."""
     from unittest.mock import AsyncMock, patch
     from agentica.agent import Agent
-    from agentica.goals import GoalRunResult
-    from agentica.run_response import RunResponse
+    from agentica.agent.goals import GoalRunResult
+    from agentica.run.response import RunResponse
 
     agent = Agent.__new__(Agent)
     agent.model = None
@@ -867,7 +867,7 @@ def test_agent_run_goal_isolate_false_does_not_clone():
     """Gateway /goal must run on the live agent so steer/cancel share buffers."""
     from unittest.mock import AsyncMock, MagicMock, patch
     from agentica.agent import Agent
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     agent = Agent.__new__(Agent)
     agent.model = None
@@ -904,8 +904,8 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     """A tight token_budget must short-circuit before the judge runs."""
     from unittest.mock import AsyncMock, patch
     from agentica.agent import Agent
-    from agentica.run_response import RunResponse
-    from agentica.cost_tracker import CostTracker
+    from agentica.run.response import RunResponse
+    from agentica.model.cost import CostTracker
 
     agent = Agent.__new__(Agent)
     agent.model = None
@@ -937,8 +937,8 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
 
 def test_goal_turn_signals_count_cached_prompt_tokens():
     """Goal token budgets track real prompt size, not just fresh input."""
-    from agentica.cost_tracker import CostTracker
-    from agentica.run_response import RunResponse
+    from agentica.model.cost import CostTracker
+    from agentica.run.response import RunResponse
 
     ct = CostTracker()
     ct.record(
@@ -965,7 +965,7 @@ def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
     from unittest.mock import MagicMock, AsyncMock
     from agentica.agent import Agent
     from agentica.memory.session_log import SessionLog
-    from agentica.run_context import TaskAnchor
+    from agentica.run.context import TaskAnchor
 
     # Set up a real SessionLog with an active goal.
     log = SessionLog(session_id="runner-s1", base_dir=str(tmp_path))
@@ -1117,7 +1117,7 @@ def test_judge_prompt_omits_tool_section_when_none():
 
 def test_consecutive_tool_failures_auto_pause(tmp_path: Path):
     """All-failed-tools turns N in a row → auto-pause with reason 'tool-stuck'."""
-    from agentica.goals import MAX_CONSECUTIVE_TOOL_FAILURES
+    from agentica.agent.goals import MAX_CONSECUTIVE_TOOL_FAILURES
 
     model = _fake_model('{"done": false, "reason": "keep going"}')
     mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)

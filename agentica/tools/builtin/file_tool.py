@@ -23,7 +23,7 @@ from agentica.tools.patch import PatchContextError, PatchNoChangeError, apply_di
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
-from agentica.media import get_image_type
+from agentica.model.media import get_image_type
 
 # grep/glob self-imposed timeout (seconds). Covers rg, pathlib.glob, and the
 # pure-Python grep fallback so a missing rg or a stuck network mount cannot
@@ -87,12 +87,12 @@ def _nested_checkouts(base: "Path") -> tuple:
     """Worktrees of this repository that live under ``base``, from git itself.
 
     A worktree inside the checkout is a second copy of every file, so searches
-    skip it — see ``agentica.worktrees.nested_worktrees`` for why this is asked
+    skip it — see ``agentica.peers.worktrees.nested_worktrees`` for why this is asked
     of git instead of matched by name. Never the base itself: a session bound to
     that worktree searches from inside it and must see its own files.
     """
     try:
-        from agentica.worktrees import nested_worktrees
+        from agentica.peers.worktrees import nested_worktrees
 
         here = os.path.realpath(str(base))
         return tuple(

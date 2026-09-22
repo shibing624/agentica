@@ -22,7 +22,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentica.agent.config import ExperienceConfig
-from agentica.hooks import ExperienceCaptureHooks, ConversationArchiveHooks, MemoryExtractHooks
+from agentica.agent.hooks import ExperienceCaptureHooks, ConversationArchiveHooks, MemoryExtractHooks
 from agentica.workspace import Workspace
 
 
@@ -947,7 +947,7 @@ class TestAgentExperienceWiring(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             agent = _make_agent(enable_experience_capture=True, workspace_path=tmp)
             self.assertIsNotNone(agent._default_run_hooks)
-            from agentica.hooks import _CompositeRunHooks
+            from agentica.agent.hooks import _CompositeRunHooks
             self.assertIsInstance(agent._default_run_hooks, _CompositeRunHooks)
 
     def test_experience_config_defaults(self):
@@ -1017,7 +1017,7 @@ class TestExperienceImports(unittest.TestCase):
         self.assertIsNotNone(ExperienceConfig)
 
     def test_import_hooks_from_hooks(self):
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         self.assertIsNotNone(ExperienceCaptureHooks)
 
     def test_import_hooks_from_top_level(self):

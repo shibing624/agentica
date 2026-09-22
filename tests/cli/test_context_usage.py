@@ -12,7 +12,7 @@ from agentica.cli.context_usage import COMPACT_SUMMARY_PREFIX, measure_context
 from agentica.memory.models import AgentRun
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.utils.tokens import count_tokens
 
 

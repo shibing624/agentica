@@ -16,14 +16,14 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
 )
 from agentica.cli import commands as cli_commands
 from agentica.cli import setup as cli_setup
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 
 

@@ -2,8 +2,8 @@
 """AuxSession tests — bounded, isolated history for auxiliary LLM tasks."""
 import asyncio
 
-from agentica.aux_session import AuxSession
-from agentica.goals import GoalManager, judge_goal
+from agentica.agent.aux_session import AuxSession
+from agentica.agent.goals import GoalManager, judge_goal
 from agentica.memory.session_log import SessionLog
 
 

@@ -43,19 +43,19 @@ from typing import (
     Union,
 )
 
-from agentica.aux_session import AuxSession
+from agentica.agent.aux_session import AuxSession
 from agentica.prompts.base.goal import (
     GOAL_JUDGE_SYSTEM_PROMPT,
     render_goal_budget_wrapup_prompt,
     render_goal_continuation_prompt,
 )
-from agentica.run_events import RunEventType
+from agentica.run.events import RunEventType
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
     from agentica.memory.session_log import SessionLog
     from agentica.model.base import Model
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
 
 # ---------------------------------------------------------------------------

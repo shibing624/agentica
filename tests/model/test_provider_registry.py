@@ -9,7 +9,7 @@ import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import provider_registry as pr
+import agentica.model.providers as pr
 
 
 class _DummyModel:

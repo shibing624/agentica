@@ -10,7 +10,7 @@ import pytest
 
 from agentica.model.base import Model
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_events import RunEventType
+from agentica.run.events import RunEventType
 from agentica.runner import Runner
 from agentica.runner.loop import _tool_preview
 from agentica.tools.base import Function, FunctionCall

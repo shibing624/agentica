@@ -12,7 +12,7 @@ import tempfile
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.knowledge.base import Knowledge
-from agentica.document import Document
+from agentica.knowledge.document import Document
 
 
 class TestKnowledgeInitialization(unittest.TestCase):

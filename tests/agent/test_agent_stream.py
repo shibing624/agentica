@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from agentica.agent import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_response import RunResponse, RunEvent
+from agentica.run.response import RunResponse, RunEvent
 
 
 # ===========================================================================
@@ -100,7 +100,7 @@ class TestStreamEvents:
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
             agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
             events = []
-            from agentica.run_config import RunConfig
+            from agentica.run.config import RunConfig
             async for chunk in agent.run_stream("Hi", config=RunConfig(stream_intermediate_steps=True)):
                 events.append(chunk.event)
             # With intermediate steps, should have RunStarted at minimum

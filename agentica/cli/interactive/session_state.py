@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional
 
 from agentica.agent.approvals import ApprovalRegistry, SessionGrants
-from agentica.goals import GoalManager
+from agentica.agent.goals import GoalManager
 from agentica.tools.background_processes import BackgroundProcessRegistry
 
 # ==================== SessionState ====================
@@ -97,9 +97,9 @@ class SessionState:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
-    # This terminal's end of the cross-session peer channel (agentica/peers.py).
+    # This terminal's end of the cross-session peer channel (agentica/peers/__init__.py).
     peer_session: Any = None
-    # Standing-goal loop (see agentica/goals.py).
+    # Standing-goal loop (see agentica/agent/goals.py).
     goal_manager: Optional[GoalManager] = None
     goal_lock: threading.Lock = field(default_factory=threading.Lock)
     # Token + wall-clock baselines for per-turn budget accounting (S2).

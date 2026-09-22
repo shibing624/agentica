@@ -12,7 +12,7 @@ from agentica.cli.usage_display import (
     format_cost_usd,
     format_turn_usage_summary,
 )
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.model.usage import RequestUsage, TokenDetails, Usage
 
 

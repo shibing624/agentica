@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agentica.goals import GoalState
+from agentica.agent.goals import GoalState
 from agentica.memory.session_log import SessionLog
 from agentica.model.response import ModelResponse
 from agentica.tools.goal_tool import GoalTool

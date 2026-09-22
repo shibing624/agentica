@@ -198,7 +198,7 @@ Layer 1 的 0.8 / 0.5 相对 min(compact_token_limit 或 ∞, window)
 压缩前后可以通过 Hooks 插入自定义逻辑：
 
 ```python
-from agentica.hooks import RunHooks
+from agentica.agent.hooks import RunHooks
 
 class CompactionTracker(RunHooks):
     async def on_pre_compact(self, agent, messages, **kwargs):

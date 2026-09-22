@@ -50,7 +50,7 @@ class TestAgentServiceApprovalMode:
 
     def test_run_config_no_longer_carries_enabled_tools(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
-        from agentica.run_context import RunSource
+        from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc.set_session_approval_mode("s1", "ask")
@@ -102,7 +102,7 @@ class TestAgentServiceRunSource:
 
     def test_chat_uses_gateway_source_by_default(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
-        from agentica.run_context import RunSource
+        from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -118,7 +118,7 @@ class TestAgentServiceRunSource:
 
     def test_chat_accepts_cron_source_override(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
-        from agentica.run_context import RunSource
+        from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -225,7 +225,7 @@ class TestAgentServiceStreamToolDispatch:
 
     @staticmethod
     def _parallel_batch_chunks():
-        from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+        from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
 
         calls = [
             ("c1", "read_file", {"file_path": "a.py"}, "ALPHA"),
@@ -300,7 +300,7 @@ class TestAgentServiceStreamToolDispatch:
 
     def test_write_file_completed_carries_unified_diff(self):
         from agentica.gateway.services.agent_service import dispatch_stream_chunk
-        from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+        from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
 
         extras = []
 
@@ -472,7 +472,7 @@ class TestAgentServiceRunCron:
 
     def test_run_cron_never_touches_the_interactive_agent_cache(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
-        from agentica.run_context import RunSource
+        from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -644,7 +644,7 @@ class TestAgentServiceRunCron:
         from agentica.gateway.config import settings
         from agentica.gateway.routes.chat import _touch_session_log
         from agentica.gateway.services.agent_service import AgentService
-        from agentica.project_store import project_base_dir
+        from agentica.config.project import project_base_dir
 
         default_dir = tmp_path / "agentica-checkout"
         other = tmp_path / "Temp"
@@ -1214,7 +1214,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_hides_read_file(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="read_file", content="file contents here")
         )
@@ -1224,7 +1224,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_includes_tool_call_id(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         _, _, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="ok", tool_call_id="c9")
         )
@@ -1232,7 +1232,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_keeps_write_and_search(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         for name, body in (
             ("write_file", "Wrote 12 lines to foo.py"),
             ("apply_patch", "Successfully applied patch to foo.py"),
@@ -1250,7 +1250,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_write_file_includes_unified_diff(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(ToolCallInfo(
             tool_name="write_file",
             content="Created file, absolute path: /tmp/a.py",
@@ -1265,7 +1265,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_apply_patch_multi_file_diff(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         _, _, extra = format_tool_result(ToolCallInfo(
             tool_name="apply_patch",
             content="Successfully applied patch to 2 files",
@@ -1282,7 +1282,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_execute_keeps_full_output(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         body = ("sorted ok\n" * 80)  # well past the old 500-char clip
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content=body)
@@ -1293,7 +1293,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_empty(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="")
         )
@@ -1302,7 +1302,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_error(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="permission denied", is_error=True)
         )
@@ -1311,7 +1311,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_read_file_error_still_shown(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         _, result_str, _ = format_tool_result(
             ToolCallInfo(tool_name="read_file", content="no such file", is_error=True)
         )
@@ -1321,7 +1321,7 @@ class TestResponseFormatter:
     def test_format_tool_result_task_keeps_detail(self):
         import json
         from agentica.gateway.services.response_formatter import format_tool_result
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
         payload = {
             "success": True,
             "subagent_type": "explore",

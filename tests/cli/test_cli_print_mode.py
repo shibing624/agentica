@@ -15,7 +15,7 @@ import pytest
 from agentica.cli.main import main
 from agentica.cli.runtime import parse_args
 from agentica.model.usage import Usage
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None, captured=None):

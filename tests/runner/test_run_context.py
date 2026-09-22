@@ -15,8 +15,8 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
-from agentica.run_events import RunEventRecord, RunEventType
+from agentica.run.context import RunContext, RunSource, RunStatus, TaskAnchor
+from agentica.run.events import RunEventRecord, RunEventType
 
 
 class TestTaskAnchor:
@@ -118,7 +118,7 @@ class TestRunContext:
         assert RunSource.workflow.value == "workflow"
 
     def test_run_config_source_defaults_to_sdk(self):
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         assert RunConfig().source == RunSource.sdk
 
@@ -164,7 +164,7 @@ class TestRunContext:
     async def test_agent_run_respects_explicit_run_config_source(self):
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         response = MagicMock()
         response.content = "ok"
@@ -190,7 +190,7 @@ class TestRunContext:
         """
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         response = MagicMock()
         response.content = "ok"
@@ -215,7 +215,7 @@ class TestRunContext:
     async def test_subagent_source_overrides_explicit_run_config_source(self):
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         response = MagicMock()
         response.content = "ok"

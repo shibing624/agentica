@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from agentica.swarm import Swarm, SwarmResult
-from agentica.run_response import RunResponse, RunEvent
+from agentica.orchestration.swarm import Swarm, SwarmResult
+from agentica.run.response import RunResponse, RunEvent
 
 
 def _make_mock_agent(name: str, response_content: str = "done"):

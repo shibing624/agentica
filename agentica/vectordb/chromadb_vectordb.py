@@ -19,7 +19,7 @@ except ImportError:
     raise ImportError("The `chromadb` package is not installed. Please install it via `pip install chromadb`.")
 
 from agentica.config import AGENTICA_CACHE_DIR
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger

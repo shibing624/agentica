@@ -443,7 +443,7 @@ def _scrub_reasoning_leak(history: List[Message]) -> List[Message]:
     No-op for the common case (no reasoning tags present). Only assistant
     messages are touched; user/tool content is left verbatim.
     """
-    from agentica.think_scrubber import contains_reasoning_leak, sanitize_assistant_content_for_history
+    from agentica.model.think_scrubber import contains_reasoning_leak, sanitize_assistant_content_for_history
 
     out: List[Message] = []
     for m in history:

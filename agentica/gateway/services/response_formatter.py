@@ -12,7 +12,7 @@ import difflib
 import json
 from typing import Any, Dict, List, Optional
 
-from agentica.run_response import ToolCallInfo
+from agentica.run.response import ToolCallInfo
 
 
 def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:

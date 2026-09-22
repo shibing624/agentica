@@ -13,7 +13,7 @@ from a terminal and from an ``@`` command, and unreachable from the one surface
 a user has when they are not at the machine: a sentence typed into IM.
 
 **Still no new protocol.** Each gateway chat session gets a ``PeerSession`` on
-the same file-based channel (``agentica/peers.py``), published under a short
+the same file-based channel (``agentica/peers/__init__.py``), published under a short
 name like the CLI (``wechat-agentica-41``: channel + cwd folder + two id
 chars), so a CLI sees it in ``list_agents`` and answers it with the
 ``send_message`` tool it already has. That symmetry buys the reverse direction

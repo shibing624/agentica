@@ -19,9 +19,9 @@ from typing import (
 
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.model.message import MessageReferences
-from agentica.run_response import RunResponseExtraData
+from agentica.run.response import RunResponseExtraData
 from agentica.tools.base import Function, ModelTool, Tool
 
 

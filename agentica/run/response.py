@@ -16,7 +16,7 @@ from agentica.model.usage import Usage
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 from agentica.model.message import Message, MessageReferences
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 
 if TYPE_CHECKING:
     pass
@@ -26,7 +26,7 @@ class RunEvent(str, Enum):
 
     Legacy CamelCase values are retained for backward compatibility with
     existing CLI display + gateway consumers. New SDK-internal lifecycle
-    events live on `agentica.run_events.RunEventType` and are dispatched via
+    events live on `agentica.run.events.RunEventType` and are dispatched via
     `Runner._emit_event` to `agent._event_callback` -- they do NOT replace
     the streaming-content events listed here.
     """

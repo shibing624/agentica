@@ -33,7 +33,7 @@ from agentica.notify import install_sink, reset_sink_for_tests
 from agentica.notify.config import NotifyConfig
 from agentica.notify.sink import notify_sink_dispatch
 from agentica.notify.sink import set_idle_provider
-from agentica.run_events import RunEventRecord, RunEventType
+from agentica.run.events import RunEventRecord, RunEventType
 
 from tests.notify.test_notify_sink import _FakeDesktop
 
@@ -77,7 +77,7 @@ class TestAGoalDoesNotReportDonePerLap:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path)
 
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             GoalManager(agent._session_log).set("跑通全部测试")
 
             # Three laps of a standing goal.
@@ -97,7 +97,7 @@ class TestAGoalDoesNotReportDonePerLap:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path)
 
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             GoalManager(agent._session_log).set("目标")
 
             for _ in range(3):
@@ -118,7 +118,7 @@ class TestAGoalDoesNotReportDonePerLap:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path)
 
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             GoalManager(agent._session_log).set("目标")
 
             notify_sink_dispatch(_record(RunEventType.run_failed), agent=agent)
@@ -143,7 +143,7 @@ class TestAGoalDoesNotReportDonePerLap:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path)
 
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             mgr = GoalManager(agent._session_log)
             mgr.set("目标")
             notify_sink_dispatch(_record(), agent=agent)   # held: a goal is driving
@@ -167,7 +167,7 @@ class TestAGoalDoesNotReportDonePerLap:
         try:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path)
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             from agentica.notify import goal_finished
 
             mgr = GoalManager(agent._session_log)
@@ -205,7 +205,7 @@ class TestAGoalDoesNotReportDonePerLap:
             install_sink(NotifyConfig(enabled=True, socket=desktop.socket_path))
             agent = _agent(tmp_path)
 
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             mgr = GoalManager(agent._session_log)
             mgr.set("目标")
             mgr.pause(reason="user-interrupted")
@@ -233,7 +233,7 @@ class TestItReadsTheSignalThatIsActuallyCurrent:
         agent.enable_goal_tool()            # agent.goal_manager is now cached
         assert agent.goal_manager.is_active() is False
 
-        from agentica.goals import GoalManager
+        from agentica.agent.goals import GoalManager
         GoalManager(agent._session_log).set("设定目标")
 
         # The authoritative manager sees it...
@@ -249,7 +249,7 @@ class TestItReadsTheSignalThatIsActuallyCurrent:
             agent = _agent(tmp_path, session_id="stale-2")
             agent.enable_goal_tool()
 
-            from agentica.goals import GoalManager
+            from agentica.agent.goals import GoalManager
             GoalManager(agent._session_log).set("设定目标")
 
             notify_sink_dispatch(_record(), agent=agent)

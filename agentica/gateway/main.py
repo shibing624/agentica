@@ -142,7 +142,7 @@ async def lifespan(app: FastAPI):
     # `cron.enabled` config.yaml setting the CLI's `/cron daemon on` toggles,
     # so both surfaces share one on/off switch.
     from agentica.cron.scheduler import tick as cron_tick
-    from agentica.global_config import get_setting
+    from agentica.config.profiles import get_setting
 
     cron_runner = _GatewayAgentRunner(agent_svc)
     deps.cron_runner = cron_runner

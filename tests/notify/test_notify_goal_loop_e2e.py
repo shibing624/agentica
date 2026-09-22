@@ -32,12 +32,12 @@ from agentica.agent import Agent
 from agentica.cli.interactive import goal_hook as cli_goal_hook
 from agentica.cli.interactive.session_state import SessionState
 from agentica.cli.commands.context import PendingQueue
-from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalDecision, GoalManager
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX, GoalDecision, GoalManager
 from agentica.model.openai import OpenAIChat
 from agentica.notify import install_sink, reset_sink_for_tests
 from agentica.notify.config import NotifyConfig
 from agentica.notify.sink import notify_sink_dispatch, set_idle_provider
-from agentica.run_events import RunEventRecord, RunEventType
+from agentica.run.events import RunEventRecord, RunEventType
 
 from tests.notify.test_notify_sink import _FakeDesktop
 

@@ -98,7 +98,7 @@ class TestStaticContextSeed(unittest.TestCase):
         from agentica.agent import Agent
         from agentica.memory.models import AgentRun
         from agentica.model.openai import OpenAIChat
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
 
         agent = Agent(
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
@@ -120,7 +120,7 @@ class TestStaticContextSeed(unittest.TestCase):
         from agentica.agent import Agent
         from agentica.memory.models import AgentRun
         from agentica.model.openai import OpenAIChat
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
 
         agent = Agent(
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),

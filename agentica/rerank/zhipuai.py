@@ -9,7 +9,7 @@ from typing import List, Optional
 import requests
 
 from agentica.rerank.base import Rerank
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.utils.log import logger
 
 

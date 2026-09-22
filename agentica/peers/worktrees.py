@@ -284,7 +284,7 @@ def worktree_path(cwd: str, name: str) -> str:
 def _worktree_setting(name: str, default: Optional[str] = None):
     """``settings.worktree.<name>``, also accepting the flat ``worktree.<name>`` key."""
     try:
-        from agentica.global_config import get_setting, load_global_config
+        from agentica.config.profiles import get_setting, load_global_config
 
         flat = get_setting(f"worktree.{name}", None)
         if flat is not None:

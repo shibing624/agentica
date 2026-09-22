@@ -72,7 +72,7 @@ from agentica.agent.config import (
     WorkspaceMemoryConfig,
 )
 from agentica.agent.history_filter import HistoryFilter
-from agentica.hooks import AgentHooks
+from agentica.agent.hooks import AgentHooks
 from agentica.memory import WorkingMemory
 from agentica.model.base import Model
 from agentica.tools.base import Tool, ModelTool, Function

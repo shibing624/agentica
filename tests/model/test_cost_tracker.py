@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Tests for agentica.cost_tracker — per-run LLM cost accounting."""
+"""Tests for agentica.model.cost — per-run LLM cost accounting."""
 import json
 import os
 import tempfile
 import unittest
 
-from agentica.cost_tracker import (
+from agentica.model.cost import (
     _CACHE_SCHEMA_VERSION,
     _CACHE_TTL,
     _FALLBACK_PRICING,
@@ -218,8 +218,8 @@ class TestPricingCache(unittest.TestCase):
             }
         }
         with (
-            unittest.mock.patch("agentica.cost_tracker._MODEL_CATALOG", None),
-            unittest.mock.patch("agentica.cost_tracker._load_cached", return_value=remote),
+            unittest.mock.patch("agentica.model.cost._MODEL_CATALOG", None),
+            unittest.mock.patch("agentica.model.cost._load_cached", return_value=remote),
         ):
             catalog = _get_catalog()
 
@@ -228,9 +228,9 @@ class TestPricingCache(unittest.TestCase):
 
     def test_catalog_lookup_does_not_fetch_network_on_cache_miss(self):
         with (
-            unittest.mock.patch("agentica.cost_tracker._MODEL_CATALOG", None),
-            unittest.mock.patch("agentica.cost_tracker._load_cached", return_value=None),
-            unittest.mock.patch("agentica.cost_tracker._fetch_and_cache", side_effect=AssertionError("network fetch")),
+            unittest.mock.patch("agentica.model.cost._MODEL_CATALOG", None),
+            unittest.mock.patch("agentica.model.cost._load_cached", return_value=None),
+            unittest.mock.patch("agentica.model.cost._fetch_and_cache", side_effect=AssertionError("network fetch")),
         ):
             catalog = _get_catalog()
 
@@ -252,9 +252,9 @@ class TestPricingCache(unittest.TestCase):
             return stale if ignore_ttl else None
 
         with (
-            unittest.mock.patch("agentica.cost_tracker._MODEL_CATALOG", None),
-            unittest.mock.patch("agentica.cost_tracker._load_cached", side_effect=_fake_load_cached),
-            unittest.mock.patch("agentica.cost_tracker._fetch_and_cache", side_effect=AssertionError("network fetch")),
+            unittest.mock.patch("agentica.model.cost._MODEL_CATALOG", None),
+            unittest.mock.patch("agentica.model.cost._load_cached", side_effect=_fake_load_cached),
+            unittest.mock.patch("agentica.model.cost._fetch_and_cache", side_effect=AssertionError("network fetch")),
         ):
             catalog = _get_catalog()
 
@@ -263,8 +263,8 @@ class TestPricingCache(unittest.TestCase):
     def test_background_refresh_starts_once_as_daemon(self):
         thread = unittest.mock.Mock()
         with (
-            unittest.mock.patch("agentica.cost_tracker._CATALOG_REFRESH_STARTED", False),
-            unittest.mock.patch("agentica.cost_tracker.threading.Thread", return_value=thread) as thread_class,
+            unittest.mock.patch("agentica.model.cost._CATALOG_REFRESH_STARTED", False),
+            unittest.mock.patch("agentica.model.cost.threading.Thread", return_value=thread) as thread_class,
         ):
             self.assertTrue(refresh_model_catalog_in_background())
             self.assertFalse(refresh_model_catalog_in_background())
@@ -298,7 +298,7 @@ class TestPricingCache(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = os.path.join(tmpdir, "model_pricing_cache.json")
-            with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value=cache_path):
+            with unittest.mock.patch("agentica.model.cost._get_cache_path", return_value=cache_path):
                 with open(cache_path, "w") as f:
                     json.dump(
                         {"schema_version": _CACHE_SCHEMA_VERSION, "models": pricing},
@@ -318,7 +318,7 @@ class TestPricingCache(unittest.TestCase):
             with open(cache_path, "w") as f:
                 json.dump({"gpt-test": {"input": 1.0}}, f)
 
-            with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value=cache_path):
+            with unittest.mock.patch("agentica.model.cost._get_cache_path", return_value=cache_path):
                 self.assertIsNone(_load_cached())
 
     def test_cache_expired_returns_none(self):
@@ -334,13 +334,13 @@ class TestPricingCache(unittest.TestCase):
             stale_time = os.path.getmtime(cache_path) - _CACHE_TTL - 100
             os.utime(cache_path, (stale_time, stale_time))
 
-            with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value=cache_path):
+            with unittest.mock.patch("agentica.model.cost._get_cache_path", return_value=cache_path):
                 loaded = _load_cached()
                 self.assertIsNone(loaded)
 
     def test_missing_cache_returns_none(self):
         """Non-existent cache file should return None."""
-        with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value="/nonexistent/path.json"):
+        with unittest.mock.patch("agentica.model.cost._get_cache_path", return_value="/nonexistent/path.json"):
             self.assertIsNone(_load_cached())
 
     def test_parse_catalog_extracts_pricing(self):

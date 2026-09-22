@@ -15,14 +15,14 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
 )
 from agentica.cli import commands as cli_commands
 from agentica.cli import setup as cli_setup
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 
 
@@ -229,7 +229,7 @@ class TestCLIToolRender(unittest.TestCase):
 
     def test_completed_tool_payload_keeps_display_meta_from_event_subject(self):
         """chunk.tools strips snapshots; the CLI must read chunk.tool_call."""
-        from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+        from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
         from agentica.cli.interactive.stream_loop import _completed_tool_payload
 
         meta = {"files": [{"path": "a.py", "before": "old\n", "after": "new\n"}]}
@@ -1183,7 +1183,7 @@ class TestCLIToolRender(unittest.TestCase):
     def test_sdk_printer_tool_line_uses_the_agents_work_dir(self):
         """printer.py must not fall back to cwd when the agent runs elsewhere."""
         from agentica.agent.printer import _tool_call_line
-        from agentica.run_response import ToolCallInfo
+        from agentica.run.response import ToolCallInfo
 
         info = ToolCallInfo(
             tool_name="read_file",

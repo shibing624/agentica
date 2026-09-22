@@ -25,12 +25,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agentica.agent import Agent
-from agentica.goals import GoalRunResult
+from agentica.agent.goals import GoalRunResult
 from agentica.model.base import ModelResponse
 from agentica.model.openai import OpenAIChat
 from agentica.notify import install_sink, reset_sink_for_tests
 from agentica.notify.config import NotifyConfig
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 from tests.notify.test_notify_sink import _FakeDesktop
 
@@ -95,7 +95,7 @@ def _run_goal(tmp_path, session_id, desktop, *, judge, laps=3):
         # never looks, and the test would then pass only because a single-lap
         # goal reports one completion either way.
         from agentica.notify.sink import notify_sink_dispatch
-        from agentica.run_events import RunEventRecord, RunEventType
+        from agentica.run.events import RunEventRecord, RunEventType
 
         notify_sink_dispatch(
             RunEventRecord(
@@ -219,7 +219,7 @@ class TestTheCloneTrap:
 
             async def _run(self, *_a, **_k):
                 from agentica.notify.sink import notify_sink_dispatch
-                from agentica.run_events import RunEventRecord, RunEventType
+                from agentica.run.events import RunEventRecord, RunEventType
 
                 lap_agents.append(self)
                 # Sampled while the lap is in flight: this is the exact call the

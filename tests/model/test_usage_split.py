@@ -9,7 +9,7 @@ All tests mock LLM API keys — no real API usage.
 """
 import unittest
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.model.usage import split_prompt_usage
 
 

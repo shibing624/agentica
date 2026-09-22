@@ -46,12 +46,12 @@ from agentica.cli.session_resume import (
 )
 from agentica.cli.setup import apply_named_profile_to_agent_config
 from agentica.compression.manager import apply_idle_compact
-from agentica.global_config import set_project_profile
-from agentica.goals import GoalManager
+from agentica.config.profiles import set_project_profile
+from agentica.agent.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog, local_turn_stamp
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.utils.log import logger
 from agentica.utils.string import format_file_size
 

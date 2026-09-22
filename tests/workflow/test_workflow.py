@@ -11,9 +11,9 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.workflow import Workflow
+from agentica.orchestration.workflow import Workflow
 from agentica.memory import WorkflowMemory
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 class SimpleWorkflow(Workflow):

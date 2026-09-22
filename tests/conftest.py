@@ -16,9 +16,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # users tail that file and would mistake test-induced warnings for runtime
 # bugs.
 #
-# Must be set BEFORE any `import agentica.*` because agentica/config.py
+# Must be set BEFORE any `import agentica.*` because agentica/config/env.py
 # reads this env var at import time and wires up loguru sinks immediately.
-# Empty string is the documented "disable file sink" sentinel in config.py.
+# Empty string is the documented "disable file sink" sentinel in config/env.py.
 os.environ.setdefault("AGENTICA_LOG_FILE", "")
 
 # Runner egress installs lazily even in SDK/non-interactive paths. Never let a

@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import global_config as gc
+import agentica.config.profiles as gc
 
 
 class TestProjectProfile(unittest.TestCase):
@@ -165,7 +165,7 @@ class TestProjectProfile(unittest.TestCase):
     def test_get_project_profile_strips_whitespace(self):
         # Pad active_profile in project.json; get_project_profile must strip.
         gc.set_project_profile(self._proj_a, "personal")
-        from agentica.project_store import project_base_dir, read_project_file, write_project_file
+        from agentica.config.project import project_base_dir, read_project_file, write_project_file
         base = project_base_dir(self._proj_a)
         data = read_project_file(base)
         data["active_profile"] = "  personal  \n"

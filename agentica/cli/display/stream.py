@@ -27,7 +27,7 @@ from agentica.cli.usage_display import (
     format_cost_usd,
     format_turn_usage_summary,
 )
-from agentica.global_config import get_setting
+from agentica.config.profiles import get_setting
 from agentica.tools.patch import parse_patch_envelope
 
 from .console import (

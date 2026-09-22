@@ -28,12 +28,12 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, patch
 
 from agentica.agent import Agent
-from agentica.hooks import ExperienceCaptureHooks
-from agentica.learning_report import LearningReport
+from agentica.agent.hooks import ExperienceCaptureHooks
+from agentica.experience.learning_report import LearningReport
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse
-from agentica.run_context import RunSource
+from agentica.run.context import RunSource
 from agentica.workspace import Workspace
 
 
@@ -210,7 +210,7 @@ class TestLearningReportWriteFailureVisible(unittest.TestCase):
     """I5 / Issue D: silent learning-report failures violate observability."""
 
     def test_learning_report_write_failure_logs_warning(self):
-        from agentica.learning_report import write_learning_report
+        from agentica.experience.learning_report import write_learning_report
 
         # A workspace stub whose reports dir resolves but whose md write fails.
         class _BrokenWorkspace:

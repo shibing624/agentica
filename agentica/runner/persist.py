@@ -25,7 +25,7 @@ from agentica.agent.history_filter import _text_from_content_blocks
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.usage import split_prompt_usage
-from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
 from agentica.memory import AgentRun
 from agentica.memory.session_log import iso_timestamp
 

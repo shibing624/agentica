@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
-from agentica.global_config import get_setting
+from agentica.config.profiles import get_setting
 from agentica.utils.log import logger
 
 #: Run and tool lifecycle events, all non-blocking fire-and-forget notices.

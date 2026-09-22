@@ -22,13 +22,13 @@ from typing import (
 from uuid import uuid4
 
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
-from agentica.run_context import TaskAnchor
+from agentica.run.response import RunResponse
+from agentica.run.context import TaskAnchor
 from agentica.memory.session_log import SessionLog
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
-    from agentica.goals import GoalRunResult, GoalStepResult
+    from agentica.agent.goals import GoalRunResult, GoalStepResult
 
 
 #: The agent's own state that says "a completion is held back". Mirror of
@@ -87,17 +87,17 @@ class GoalMixin:
             default_turn_budget: Optional turn cap for newly set goals
                 (``None`` = no turn limit). Ignored if a manager already exists.
             default_token_budget: Default token cap for newly set goals
-                (``None`` = unlimited, ``agentica.goals.DEFAULT_TOKEN_BUDGET``).
+                (``None`` = unlimited, ``agentica.agent.goals.DEFAULT_TOKEN_BUDGET``).
                 Ignored if a manager already exists.
             event_callback: ``(RunEventType, dict) -> None`` hook for
                 ``goal.set / continuing / completed / paused`` events.
 
         Returns:
-            ``agentica.goals.GoalManager``.
+            ``agentica.agent.goals.GoalManager``.
         """
         # Local import keeps module import graph cheap for users that
         # never touch the goal loop.
-        from agentica.goals import GoalManager, DEFAULT_TOKEN_BUDGET
+        from agentica.agent.goals import GoalManager, DEFAULT_TOKEN_BUDGET
 
         if self._session_log is None:
             if self.session_id is None:
@@ -265,10 +265,10 @@ class GoalMixin:
                 of ``Message`` objects or plain ``{role, content}`` dicts.
 
         Returns:
-            ``agentica.goals.GoalRunResult`` with final status / reason /
+            ``agentica.agent.goals.GoalRunResult`` with final status / reason /
             ``RunResponse`` / GoalState snapshot / turns_used.
         """
-        from agentica.goals import GoalRunResult
+        from agentica.agent.goals import GoalRunResult
 
         # SDK default: clone so concurrent run_goal() calls on one instance
         # cannot share memory or steer buffers. The gateway holds a
@@ -353,7 +353,7 @@ class GoalMixin:
         This is the shared, loop-agnostic unit of ``run_goal()``: it runs a
         single ``self.run(prompt)``, computes the turn's token delta and tool
         signals, feeds them to ``GoalManager.evaluate_after_turn()``, and
-        returns the resulting :class:`~agentica.goals.GoalStepResult`.
+        returns the resulting :class:`~agentica.agent.goals.GoalStepResult`.
 
         Both drivers reuse this:
 
@@ -382,7 +382,7 @@ class GoalMixin:
             ``GoalStepResult`` with the turn's ``run_response``, the
             ``decision`` from the manager, and the updated ``tokens_baseline``.
         """
-        from agentica.goals import GoalStepResult
+        from agentica.agent.goals import GoalStepResult
 
         mgr = self.get_goal_manager()
 
@@ -390,7 +390,7 @@ class GoalMixin:
         if stream_chunks is None:
             response = await self.run(prompt)
         else:
-            from agentica.run_config import RunConfig
+            from agentica.run.config import RunConfig
             async for chunk in self.run_stream(
                 prompt, config=RunConfig(stream_intermediate_steps=True),
             ):

@@ -17,11 +17,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from agentica.agent import Agent
-from agentica.hooks import AgentHooks, RunHooks
+from agentica.agent.hooks import AgentHooks, RunHooks
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_response import RunResponse, RunEvent, ToolCallInfo
+from agentica.run.response import RunResponse, RunEvent, ToolCallInfo
 
 
 # ---------------------------------------------------------------------------

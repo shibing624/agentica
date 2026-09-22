@@ -4,7 +4,7 @@
 @description: Standing-goal model tools: ``update_goal`` (pause/block) and
 ``verify_completion`` (agent-driven, evidence-backed completion check).
 
-When the standing-goal loop is active (see ``agentica/goals.py``), the loop
+When the standing-goal loop is active (see ``agentica/agent/goals.py``), the loop
 keeps handing the objective back to the agent until something declares the
 goal complete. Historically that "something" was an external LLM judge that
 ran **after every turn** — costing tokens on turns where the agent was
@@ -44,7 +44,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Optional
 
-from agentica.goals import GoalState, judge_goal
+from agentica.agent.goals import GoalState, judge_goal
 from agentica.tools.base import Tool
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger

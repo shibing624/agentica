@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
+from agentica.orchestration.critic import CritiqueResult, ExecCritic, SchemaCritic
 from evaluation.vag.lifecycle import SkillAdmissionGate, SkillCandidate
 from evaluation.vag.runners.regression_injection import (
     EXTENDED_DATA_PATH,

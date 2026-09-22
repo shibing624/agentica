@@ -3,7 +3,7 @@
 @author: XuMing(xuming624@qq.com)
 @description: Configuration management for the gateway service.
 
-Gateway-specific settings only. Model/path/workspace config is in agentica/config.py.
+Gateway-specific settings only. Model/path/workspace config is in agentica/config/env.py.
 """
 import os
 from dataclasses import dataclass, field
@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agentica.config import AGENTICA_CACHE_DIR, AGENTICA_WORKSPACE_DIR, AGENTICA_NUM_HISTORY_TURNS
-from agentica.global_config import apply_global_config, get_profile
+from agentica.config.profiles import apply_global_config, get_profile
 
 
 @dataclass

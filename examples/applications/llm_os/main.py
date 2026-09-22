@@ -37,7 +37,7 @@ from agentica import (
     WorkspaceMemoryConfig,
 )
 from agentica.agent.config import PromptConfig, ToolConfig
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.zhipuai import ZhipuAIEmbedding
 from agentica.knowledge.base import Knowledge
 from agentica.tools.builtin import get_builtin_tools

@@ -32,8 +32,8 @@ import wave
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from agentica.cost_tracker import get_model_supports_modality
-from agentica.global_config import get_setting
+from agentica.model.cost import get_model_supports_modality
+from agentica.config.profiles import get_setting
 from agentica.model.message import Message
 from agentica.utils.log import logger
 

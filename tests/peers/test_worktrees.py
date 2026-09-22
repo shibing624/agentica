@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from agentica import worktrees
-from agentica.worktrees import WorktreeError, ensure, slug
+from agentica.peers import worktrees
+from agentica.peers.worktrees import WorktreeError, ensure, slug
 
 
 class TestSlug:
@@ -237,18 +237,18 @@ class TestLifecycle:
 class TestSettings:
     def test_a_flat_worktree_root_key_is_read(self, monkeypatch):
         monkeypatch.setattr(
-            "agentica.global_config.get_setting",
+            "agentica.config.profiles.get_setting",
             lambda key, default=None: "sibling" if key == "worktree.root" else default,
         )
         assert worktrees._configured_root() == "sibling"
 
     def test_a_nested_worktree_root_block_is_read(self, monkeypatch):
         monkeypatch.setattr(
-            "agentica.global_config.get_setting",
+            "agentica.config.profiles.get_setting",
             lambda key, default=None: default,
         )
         monkeypatch.setattr(
-            "agentica.global_config.load_global_config",
+            "agentica.config.profiles.load_global_config",
             lambda: {"settings": {"worktree": {"root": "sibling"}}},
         )
         assert worktrees._configured_root() == "sibling"

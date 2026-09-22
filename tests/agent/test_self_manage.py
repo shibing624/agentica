@@ -80,12 +80,12 @@ class TestSelfManagePrimitives(unittest.TestCase):
 
     def test_set_profile_field_rejects_invalid_value(self):
         """config.yaml is core: `/model set temperature 99` is refused, not written."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         tmp = tempfile.mkdtemp()
         import shutil
         self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
         path = os.path.join(tmp, "config.yaml")
-        with patch("agentica.global_config.global_config_path", return_value=path):
+        with patch("agentica.config.profiles.global_config_path", return_value=path):
             gc.upsert_profile("default", {
                 "model_provider": "openai", "model_name": "gpt-4o",
                 "base_url": "https://api.openai.com/v1", "api_key": "sk-x",
@@ -110,12 +110,12 @@ class TestSelfManagePrimitives(unittest.TestCase):
             self.assertNotIn("compact_token_limit", gc.get_profile())
 
     def test_set_profile_field_extra_body_accepts_json_object(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         tmp = tempfile.mkdtemp()
         import shutil
         self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
         path = os.path.join(tmp, "config.yaml")
-        with patch("agentica.global_config.global_config_path", return_value=path):
+        with patch("agentica.config.profiles.global_config_path", return_value=path):
             gc.upsert_profile("default", {
                 "model_provider": "openai", "model_name": "hy3",
                 "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
@@ -129,12 +129,12 @@ class TestSelfManagePrimitives(unittest.TestCase):
             )
 
     def test_set_profile_field_extra_body_rejects_non_json(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         tmp = tempfile.mkdtemp()
         import shutil
         self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
         path = os.path.join(tmp, "config.yaml")
-        with patch("agentica.global_config.global_config_path", return_value=path):
+        with patch("agentica.config.profiles.global_config_path", return_value=path):
             gc.upsert_profile("default", {
                 "model_provider": "openai", "model_name": "hy3",
                 "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
@@ -146,12 +146,12 @@ class TestSelfManagePrimitives(unittest.TestCase):
             self.assertNotIn("extra_body", gc.get_profile())
 
     def test_set_profile_field_extra_body_none_clears(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         tmp = tempfile.mkdtemp()
         import shutil
         self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
         path = os.path.join(tmp, "config.yaml")
-        with patch("agentica.global_config.global_config_path", return_value=path):
+        with patch("agentica.config.profiles.global_config_path", return_value=path):
             gc.upsert_profile("default", {
                 "model_provider": "openai", "model_name": "hy3",
                 "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
@@ -223,9 +223,9 @@ class TestSelfManageTool(unittest.TestCase):
         self.assertIn("/config", commands.COMMAND_REGISTRY)
 
     def test_show_includes_settings_block(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         config_path = os.path.join(self._tmp, "config.yaml")
-        with patch("agentica.global_config.global_config_path", return_value=config_path):
+        with patch("agentica.config.profiles.global_config_path", return_value=config_path):
             gc.upsert_profile("default", {
                 "model_provider": "openai", "model_name": "gpt-4o",
                 "base_url": "https://api.openai.com/v1", "api_key": "sk-x",
@@ -271,7 +271,7 @@ class TestTheAgentCannotChangeItsOwnModel(unittest.TestCase):
         import importlib
         from agentica import config as cfg
         importlib.reload(cfg)
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         importlib.reload(gc)
         from agentica.cli import self_manage as sm
         importlib.reload(sm)
@@ -300,7 +300,7 @@ class TestTheAgentCannotChangeItsOwnModel(unittest.TestCase):
                 os.environ[key] = orig
         import importlib
         from agentica import config as cfg
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         from agentica.cli import self_manage as sm
         importlib.reload(cfg)
         importlib.reload(gc)

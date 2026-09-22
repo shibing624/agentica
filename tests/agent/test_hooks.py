@@ -7,7 +7,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agentica.hooks import (
+from agentica.agent.hooks import (
     AgentHooks, RunHooks, ConversationArchiveHooks,
     _CompositeRunHooks, _CompositeAgentHooks,
 )

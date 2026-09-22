@@ -10,7 +10,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.rerank.base import Rerank
 import agentica.rerank.jina  # noqa: E402
 import agentica.rerank.zhipuai  # noqa: E402

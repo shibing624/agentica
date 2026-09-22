@@ -22,7 +22,7 @@ import agentica.utils.langfuse_integration as langfuse_integration
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
-from agentica.run_response import RunBreakReason
+from agentica.run.response import RunBreakReason
 from agentica.runner import Runner
 from agentica.tools.base import Function, FunctionCall
 
@@ -105,7 +105,7 @@ class TestLoopSafetyChecks(unittest.TestCase):
     def test_no_issues_returns_none(self):
         agent = _make_agent()
         agent.update_model()
-        from agentica.cost_tracker import CostTracker
+        from agentica.model.cost import CostTracker
         agent.model._cost_tracker = CostTracker()
         agent._run_max_cost_usd = None
         runner = Runner(agent)
@@ -116,7 +116,7 @@ class TestLoopSafetyChecks(unittest.TestCase):
     def test_cost_exceeded_returns_message(self):
         agent = _make_agent()
         agent.update_model()
-        from agentica.cost_tracker import CostTracker
+        from agentica.model.cost import CostTracker
         ct = CostTracker()
         ct.total_cost_usd = 10.0
         agent.model._cost_tracker = ct
@@ -133,7 +133,7 @@ class TestLoopSafetyChecks(unittest.TestCase):
         (no leading newlines / bracket tags that used to ride in content)."""
         agent = _make_agent()
         agent.update_model()
-        from agentica.cost_tracker import CostTracker
+        from agentica.model.cost import CostTracker
         agent.model._cost_tracker = CostTracker()
         agent._run_max_cost_usd = None
         runner = Runner(agent)
@@ -151,7 +151,7 @@ class TestLoopSafetyChecks(unittest.TestCase):
     def test_max_turns_returns_structured_reason(self):
         agent = _make_agent()
         agent.update_model()
-        from agentica.cost_tracker import CostTracker
+        from agentica.model.cost import CostTracker
         agent.model._cost_tracker = CostTracker()
         agent._run_max_cost_usd = None
         runner = Runner(agent)
@@ -167,14 +167,14 @@ class TestRunResponseBreakSignal(unittest.TestCase):
     content clean for downstream consumers."""
 
     def test_defaults_complete(self):
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         resp = RunResponse(content="hello")
         self.assertTrue(resp.is_complete)
         self.assertIsNone(resp.break_reason)
         self.assertIsNone(resp.break_message)
 
     def test_break_marks_incomplete(self):
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         resp = RunResponse(
             content="partial answer",
             break_reason=RunBreakReason.DEATH_SPIRAL.value,
@@ -186,7 +186,7 @@ class TestRunResponseBreakSignal(unittest.TestCase):
         self.assertEqual(resp.content, "partial answer")
 
     def test_fallback_used_defaults_false(self):
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         self.assertFalse(RunResponse().fallback_used)
 
 

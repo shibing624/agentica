@@ -16,7 +16,7 @@ from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfi
 from agentica.memory import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
-from agentica.run_response import RunResponse, RunEvent
+from agentica.run.response import RunResponse, RunEvent
 from agentica.tools.base import Tool, Function
 
 

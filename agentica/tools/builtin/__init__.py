@@ -115,7 +115,7 @@ def get_builtin_tools(
     if include_file_tools:
         diagnostics_checker = None
         if enable_diagnostics:
-            from agentica.lsp_diagnostics import LspDiagnosticsChecker
+            from agentica.tools.lsp_diagnostics import LspDiagnosticsChecker
             # Attach eagerly; LSP servers start lazily on first file edit.
             diagnostics_checker = LspDiagnosticsChecker(
                 work_dir=work_dir,

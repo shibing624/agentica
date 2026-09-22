@@ -16,13 +16,13 @@ from agentica.compression.token_budget import (
     fold_window_preamble,
     is_pending_window_preamble,
 )
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
 from agentica.prompts.base.soul import get_soul_prompt
 from agentica.prompts.builder import PromptBuilder
-from agentica.run_input import build_user_message_from_sequence
-from agentica.run_response import RunResponseExtraData
+from agentica.run.input import build_user_message_from_sequence
+from agentica.run.response import RunResponseExtraData
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer

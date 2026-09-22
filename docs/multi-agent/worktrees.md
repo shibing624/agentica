@@ -11,7 +11,7 @@ agentica 对这两件事的回答是分开的：**worktree** 解决第 1 个，*
 
 ## 一、不用问就知道对方在干什么
 
-每个 CLI 会话在自己的心跳里发布 git 位置（`agentica/git_state.py` → `agentica/peers.py`），
+每个 CLI 会话在自己的心跳里发布 git 位置（`agentica/peers/git_state.py` → `agentica/peers/__init__.py`），
 所以 `list_agents`（以及 `/list-agents`）直接就能看到：
 
 ```text
@@ -37,7 +37,7 @@ push 时，`origin/main` 看不见它——而那个会话恰恰是你马上要�
 
 真正要动手之前，用 `list_agents`（或 `/list-agents`）看对方心跳里的 `dirty:`。那是现场可见的 git 状态，写文件工具**不会**再往结果里追加「另一个会话也改了这个文件」——提醒曾经挂在 `write_file` / `apply_patch` 上，模型会把它当成写入合同的一部分。
 
-需要自己在写入时查一次的调用方，仍可用 `agentica.peer_conflicts.PeerConflictChecker`；产品默认路径是看 presence，不是改工具结果。
+需要自己在写入时查一次的调用方，仍可用 `agentica.peers.conflicts.PeerConflictChecker`；产品默认路径是看 presence，不是改工具结果。
 
 三个刻意的取舍（对 presence / checker 都成立）：
 

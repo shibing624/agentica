@@ -31,7 +31,7 @@ from agentica.cron.jobs import (
     now_ms,
 )
 from agentica.cron.types import RunStatus
-from agentica.run_context import RunSource
+from agentica.run.context import RunSource
 
 logger = logging.getLogger(__name__)
 

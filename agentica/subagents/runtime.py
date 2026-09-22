@@ -33,8 +33,8 @@ from typing import (
 )
 from datetime import datetime
 
-from agentica.handoff import default_handoff_mapper
-from agentica.run_response import AgentCancelledError
+from agentica.orchestration.handoff import default_handoff_mapper
+from agentica.run.response import AgentCancelledError
 from agentica.tools.base import Function, ModelTool, Tool
 from agentica.tools.safety import is_read_only_command
 from agentica.utils.log import logger
@@ -482,7 +482,7 @@ class SubagentRegistry:
 
         Returns ``{content, tool_calls_summary}``.
         """
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
         from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
         cb: Optional[Callable[[Dict[str, Any]], None]] = parent_agent._event_callback

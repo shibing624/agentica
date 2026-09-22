@@ -48,7 +48,7 @@ class RunEventType(str, Enum):
     tool_started = "tool.started"
     tool_completed = "tool.completed"
 
-    # Standing goal loop (emitted from agentica.goals.GoalManager via
+    # Standing goal loop (emitted from agentica.agent.goals.GoalManager via
     # an optional event_callback wired by the CLI / SDK consumer).
     goal_set = "goal.set"
     goal_continuing = "goal.continuing"

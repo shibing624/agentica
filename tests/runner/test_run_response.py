@@ -10,7 +10,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from agentica.run_response import RunResponse, RunEvent, RunResponseExtraData, ToolCallInfo
+from agentica.run.response import RunResponse, RunEvent, RunResponseExtraData, ToolCallInfo
 from agentica.model.message import Message
 
 

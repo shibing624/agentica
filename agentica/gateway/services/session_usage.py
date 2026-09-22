@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from agentica.cli.context_usage import measure_context
 from agentica.cli.usage_display import ProviderUsageSummary
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.model.usage import RequestUsage, split_prompt_usage
 
 

@@ -20,8 +20,8 @@ from fastapi.responses import HTMLResponse
 from .. import deps
 from ..config import settings
 from agentica.version import __version__
-from agentica.provider_registry import list_providers, get_provider_factory
-from agentica.global_config import (
+from agentica.model.providers import list_providers, get_provider_factory
+from agentica.config.profiles import (
     get_profiles,
     get_active_profile_name,
     get_profile,
@@ -32,7 +32,7 @@ from agentica.global_config import (
 )
 from agentica.cli import self_manage
 from agentica.config import AGENTICA_HOME
-from agentica.cost_tracker import get_model_supports_images
+from agentica.model.cost import get_model_supports_images
 from agentica.compression.manager import parse_compact_token_limit
 from ..models import (
     ModelSwitchRequest,
@@ -52,7 +52,7 @@ _DIR_HISTORY_MAX = 20
 @dataclass
 class ProfileFields:
     """Single definition of the config.yaml profile schema (see the profile
-    shape documented in agentica/global_config.py). Profiles themselves stay
+    shape documented in agentica/config/profiles.py). Profiles themselves stay
     plain dicts end-to-end (loaded/saved via ruamel.yaml), but the field list
     is declared once here and reused by _profile_summary/get_profile_detail/
     _profile_body_to_dict instead of being hand-written 3 times."""

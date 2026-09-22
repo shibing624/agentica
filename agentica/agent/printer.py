@@ -19,8 +19,8 @@ from typing import (
 from agentica.utils.log import logger
 from agentica.utils.async_utils import run_sync
 from agentica.model.message import Message
-from agentica.run_display import RunDisplayEventKind, classify_run_response
-from agentica.run_response import ToolCallInfo
+from agentica.run.display import RunDisplayEventKind, classify_run_response
+from agentica.run.response import ToolCallInfo
 from agentica.utils.message import get_text_from_message
 
 # Same set as the web row: the call line is enough. CLI still prints a
@@ -170,7 +170,7 @@ class PrinterMixin:
         Usage:
             await agent.print_response_stream("...")
         """
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         if self.response_model is not None:
             logger.warning("Structured output does not support streaming. Falling back to non-streaming.")

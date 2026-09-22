@@ -50,7 +50,7 @@ Example
 
     from pydantic import BaseModel
     from agentica import Agent
-    from agentica.critic import SchemaCritic, AgentCritic, refine
+    from agentica.orchestration.critic import SchemaCritic, AgentCritic, refine
 
     class Reply(BaseModel):
         intent: str

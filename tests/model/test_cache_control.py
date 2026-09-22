@@ -7,7 +7,7 @@ import pytest
 from openai.types.completion_usage import CompletionUsage
 
 from agentica import OpenAIChat
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.openai.chat import (

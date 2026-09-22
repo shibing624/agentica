@@ -20,9 +20,9 @@ from typing import (
 from pydantic import BaseModel
 
 from agentica.utils.log import logger
-from agentica.hooks import AgentHooks, RunHooks, _CompositeAgentHooks, _CompositeRunHooks
+from agentica.agent.hooks import AgentHooks, RunHooks, _CompositeAgentHooks, _CompositeRunHooks
 from agentica.model.message import Message
-from agentica.run_events import RunEventRecord, RunEventType
+from agentica.run.events import RunEventRecord, RunEventType
 
 if TYPE_CHECKING:
     from agentica.agent import Agent

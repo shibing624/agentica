@@ -6,7 +6,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 from agentica.config import AGENTICA_CACHE_DIR
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.base import Embedding
 from agentica.embedding.openai import OpenAIEmbedding
 from agentica.vectordb.base import VectorDb, Distance

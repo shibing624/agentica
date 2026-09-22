@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from agentica.run_events import RunEventRecord, RunEventType
+from agentica.run.events import RunEventRecord, RunEventType
 from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig
 from agentica.shell_hooks.egress import (
     get_hook_egress,

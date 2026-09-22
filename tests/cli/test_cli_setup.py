@@ -68,7 +68,7 @@ class _CliSetupTestBase(unittest.TestCase):
        profiles in. Isolation is layered:
 
        * ``AGENTICA_HOME`` is pointed at the temp dir (belt).
-       * ``agentica.global_config.global_config_path`` is patched to return
+       * ``agentica.config.profiles.global_config_path`` is patched to return
          ``<tmp>/config.yaml`` explicitly (suspenders — covers callers that
          bypass the env var).
 
@@ -84,7 +84,7 @@ class _CliSetupTestBase(unittest.TestCase):
 
         cfg_path = os.path.join(self._tmp.name, "config.yaml")
         self._gc_patch = patch(
-            "agentica.global_config.global_config_path",
+            "agentica.config.profiles.global_config_path",
             return_value=cfg_path,
         )
         self._gc_patch.start()
@@ -106,7 +106,7 @@ class _CliSetupTestBase(unittest.TestCase):
             os.environ[k] = v
 
     def _write_profile(self, profile: dict, name: str = "default", make_active: bool = True):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         gc.upsert_profile(name, profile, make_active=make_active)
 
 
@@ -298,7 +298,7 @@ class TestProfileFlag(_CliSetupTestBase):
         self.assertEqual(resolved["api_key"], "sk-zhipu")
 
     def test_it_does_not_touch_the_configured_active_profile(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         self._two_providers()
         cli_setup.resolve_model_config(_make_args(profile="other"), console=None)
@@ -588,7 +588,7 @@ class TestShouldOnboard(_CliSetupTestBase):
         )
 
     def test_skips_when_profile_complete(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         gc.upsert_profile("default", {
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-x",
@@ -607,7 +607,7 @@ class TestShouldOnboard(_CliSetupTestBase):
             self.assertTrue(cli_setup.should_onboard("deepseek"))
 
     def test_skips_when_a_profile_has_key(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         # No active profile, but a profile for the provider has a key.
         gc.upsert_profile("deepseek", {
             "model_provider": "deepseek", "model_name": "x",
@@ -626,7 +626,7 @@ class TestRunOnboarding(_CliSetupTestBase):
     """Drive the wizard end-to-end with mocked prompt input."""
 
     def test_preset_provider_flow(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         # prompts: provider("2"=openai), base_url(""=default), api_key("sk-test"),
@@ -649,7 +649,7 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertNotEqual(os.environ.get("OPENAI_API_KEY"), "sk-test")
 
     def test_custom_endpoint_flow(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
@@ -673,7 +673,7 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertFalse(os.path.exists(os.path.join(self._tmp.name, ".env")))
 
     def test_advanced_params_saved_to_profile(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("y"),
@@ -706,7 +706,7 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertIsNone(result.get("reasoning_effort"))
 
     def test_auxiliary_model_skipped_when_answered_no(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         inputs = iter(["2", "", "sk-main", "", "n", "n", "n"])
@@ -715,7 +715,7 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertNotIn("auxiliary_model", gc.get_profile())
 
     def test_cache_control_opt_in_persisted_to_profile(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("n"),
@@ -729,7 +729,7 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertEqual(profile.get("cache_control_session_header"), "X-Session-Id")
 
     def test_cache_control_skipped_when_answered_no(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         inputs = iter(["2", "", "sk", "", "n", "n", "n"])
@@ -739,7 +739,7 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertNotIn("enable_cache_control", profile)
 
     def test_auxiliary_model_configured_and_persisted(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         # main: openai("2"), default base, key("sk-main"), default model, adv("n");
@@ -758,7 +758,7 @@ class TestRunOnboarding(_CliSetupTestBase):
 
     def test_rerun_keeps_existing_on_all_enter(self):
         """A re-run walked through with Enter/decline preserves the whole profile."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         # Pre-seed a fully-configured active profile (main + tuning + cache + auxiliary).
         gc.upsert_profile(
@@ -821,7 +821,7 @@ class TestRunOnboarding(_CliSetupTestBase):
 
     def test_rerun_shows_api_key_in_full(self):
         """The api key prompt must NOT be masked (is_password=False) in setup."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         gc.upsert_profile(
             "openai",
@@ -865,7 +865,7 @@ class TestMultiProfileWizard(_CliSetupTestBase):
 
     def test_profile_name_prompt_creates_named_profile(self):
         """User-supplied name becomes the YAML key, not the provider slug."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         # provider("2"=openai), base_url(""), api_key("sk"), model_name(""),
@@ -884,7 +884,7 @@ class TestMultiProfileWizard(_CliSetupTestBase):
 
     def test_two_profiles_same_provider_coexist(self):
         """Two OpenAI-style profiles with different names both survive."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         # First profile: opus
@@ -927,7 +927,7 @@ class TestConfigYamlRoundTrip(_CliSetupTestBase):
     """config.yaml is YAML with ruamel round-trip: user comments survive writes."""
 
     def test_upsert_preserves_comments(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         gc.write_commented_template()
         gc.upsert_profile("default", {
             "model_provider": "anthropic", "model_name": "claude",
@@ -1121,7 +1121,7 @@ class TestProfileValidation(_CliSetupTestBase):
 
     # ── final pre-write gate ────────────────────────────────────────────────
     def test_onboarding_reprompts_invalid_base_url(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         console = MagicMock()
         console.width = 80
         custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
@@ -1135,7 +1135,7 @@ class TestProfileValidation(_CliSetupTestBase):
     def test_onboarding_gate_blocks_invalid_prefill(self):
         """A corrupted existing profile (out-of-range temperature) carried
         through by declining to edit must NOT be re-written — the gate aborts."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
         gc.upsert_profile("default", {
             "model_provider": "openai",
             "model_name": "gpt-4o",

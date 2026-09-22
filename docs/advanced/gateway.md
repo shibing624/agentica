@@ -257,7 +257,7 @@ bridge 还必须与 CLI 使用同一个 `AGENTICA_HOME`（peers 目录在其缓�
 
 ### 原理：没有新协议
 
-bridge 只是已有 peers 通道（`agentica/peers.py`）上的又一个 peer——每个 IM 用户对应一个
+bridge 只是已有 peers 通道（`agentica/peers/__init__.py`）上的又一个 peer——每个 IM 用户对应一个
 `PeerSession`（实现见 [`gateway/services/peer_bridge.py`](https://github.com/shibing624/agentica/blob/main/agentica/gateway/services/peer_bridge.py)）。
 邮箱顺序、背压、重复/限频刹车、"在 tool 批次边界投递"等保证全部继承而非重写；
 转发消息也**不进** Gateway 按会话排队的入站队列——`@session 停` 若排在 Gateway agent

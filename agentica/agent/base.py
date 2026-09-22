@@ -50,9 +50,9 @@ from agentica.model.message import Message
 from agentica.tools.base import ModelTool, Tool, Function
 from agentica.tools.skill_tool import SkillTool
 from agentica.model.base import Model
-from agentica.run_response import RunResponse, AgentCancelledError
-from agentica.run_config import RunConfig
-from agentica.run_context import RunContext, TaskAnchor
+from agentica.run.response import RunResponse, AgentCancelledError
+from agentica.run.config import RunConfig
+from agentica.run.context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
 from agentica.memory.session_log import SessionLog
 from agentica.compression import CompressionManager
@@ -72,7 +72,7 @@ from agentica.agent.permissions import (
     sandbox_should_be_enabled,
     validate_permission_mode,
 )
-from agentica.hooks import (
+from agentica.agent.hooks import (
     AgentHooks,
     RunHooks,
     ConversationArchiveHooks,

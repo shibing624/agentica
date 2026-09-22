@@ -27,11 +27,11 @@ from uuid import uuid4
 
 from agentica.utils.log import logger
 from agentica.utils.async_utils import run_sync
-from agentica.hooks import RunHooks
+from agentica.agent.hooks import RunHooks
 from agentica.model.message import Message
-from agentica.run_input import merge_run_config, reject_unknown_run_kwargs
-from agentica.run_response import AgentCancelledError, RunResponse
-from agentica.run_config import RunConfig
+from agentica.run.input import merge_run_config, reject_unknown_run_kwargs
+from agentica.run.response import AgentCancelledError, RunResponse
+from agentica.run.config import RunConfig
 from agentica.utils.string import parse_structured_output
 
 if TYPE_CHECKING:

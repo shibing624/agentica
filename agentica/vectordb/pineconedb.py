@@ -8,7 +8,7 @@ except ImportError:
         "The `pinecone` package is not installed, please install using `pip install pinecone`."
     )
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.base import Embedding
 from agentica.embedding.openai import OpenAIEmbedding
 from agentica.vectordb.base import VectorDb, Distance

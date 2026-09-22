@@ -19,7 +19,7 @@ from agentica.agent import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.memory import WorkingMemory, AgentRun
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 # ===========================================================================

@@ -8,7 +8,7 @@ import asyncio
 import pytest
 
 from agentica.tools.worktree_tool import WorktreeTool
-from agentica.worktrees import WorktreeError
+from agentica.peers.worktrees import WorktreeError
 
 
 class FakeBinder:

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from agentica.agent import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.tools.base import Function, FunctionCall, StopAgentRun, RetryAgentRun, ToolCallException
 
 

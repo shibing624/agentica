@@ -24,9 +24,9 @@ from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable,
 from PIL import Image
 from PIL.Image import Image as PILImage
 
-from agentica.run_response import AgentCancelledError
+from agentica.run.response import AgentCancelledError
 from agentica.utils.log import logger
-from agentica.media import is_multimodal_tool_result, multimodal_text_summary
+from agentica.model.media import is_multimodal_tool_result, multimodal_text_summary
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse, ModelResponseEvent
@@ -39,8 +39,8 @@ from agentica.security.redact import (
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
 from agentica.tools.helpers import ToolDisplayOutput
 from agentica.utils.timer import Timer
-from agentica.cost_tracker import CostTracker, get_model_context_window, get_model_supports_images
-from agentica.hooks import RunHooks, _CompositeRunHooks
+from agentica.model.cost import CostTracker, get_model_context_window, get_model_supports_images
+from agentica.agent.hooks import RunHooks, _CompositeRunHooks
 
 
 def require_first_choice(response: Any, *, context: str) -> Any:

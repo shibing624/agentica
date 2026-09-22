@@ -122,7 +122,7 @@ def attach_enabled(config: Optional[Dict[str, Any]] = None) -> bool:
     if override is not None:
         return override.strip().lower() in ("1", "true", "yes", "on")
     try:
-        from agentica.global_config import get_setting
+        from agentica.config.profiles import get_setting
 
         return bool(get_setting("attach_enabled", False, config=config))
     except Exception as exc:  # a broken config must not break session start

@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from agentica.utils.log import logger, set_log_level_to_debug, _run_id_var, _short as _short_run_id
 from agentica.utils.async_utils import run_sync
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.memory import WorkflowMemory, WorkflowRun
 from agentica.db.base import BaseDb, SessionRow
 from agentica.utils.misc import merge_dictionaries

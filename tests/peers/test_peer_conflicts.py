@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tests for agentica/peer_conflicts.py — "someone else has this file dirty".
+@description: Tests for agentica/peers/conflicts.py — "someone else has this file dirty".
 
 The warning has to be right about *which* repository and it has to be quiet
 enough to keep being read, so that is what these check.
 """
 import pytest
 
-from agentica import git_state, peers
-from agentica.peer_conflicts import PeerConflictChecker, build_checker
+from agentica.peers import git_state
+from agentica import peers
+from agentica.peers.conflicts import PeerConflictChecker, build_checker
 
 
 @pytest.fixture(autouse=True)

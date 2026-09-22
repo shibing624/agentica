@@ -5,7 +5,7 @@
               combining a deterministic Pydantic schema critic and an
               LLM-based reviewer.
 
-The canonical use of :func:`agentica.critic.refine`:
+The canonical use of :func:`agentica.orchestration.critic.refine`:
 
 * Actor (cheap model) produces a JSON intent classification.
 * :class:`SchemaCritic` performs program-grade Pydantic validation
@@ -41,7 +41,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from agentica import Agent, OpenAIChat
-from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
+from agentica.orchestration.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
 from agentica.utils.log import logger, CHAT_LEVEL
 
 

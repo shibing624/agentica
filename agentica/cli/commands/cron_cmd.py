@@ -12,7 +12,7 @@ from datetime import datetime
 from agentica.cli.runtime import (
     get_console,
 )
-from agentica.run_response import AgentCancelledError
+from agentica.run.response import AgentCancelledError
 
 from agentica.cli.commands.context import CommandContext
 
@@ -320,7 +320,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         ts = ctx.tui_state or {}
         is_running = ts.get("cron_is_running", lambda: False)()
         if action == "status":
-            from agentica.global_config import get_setting
+            from agentica.config.profiles import get_setting
 
             enabled = bool(get_setting("cron.enabled", False))
             interval = int(get_setting("cron.interval", 60) or 60)
@@ -347,7 +347,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                 )
             return
         if action == "on":
-            from agentica.global_config import set_setting
+            from agentica.config.profiles import set_setting
 
             set_setting("cron.enabled", True)  # persist so it survives restart
             start = ts.get("cron_start")
@@ -357,7 +357,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                 con.print("[yellow]Enabled in config; could not start thread in this session. Restart CLI.[/yellow]")
             return
         if action == "off":
-            from agentica.global_config import set_setting
+            from agentica.config.profiles import set_setting
 
             set_setting("cron.enabled", False)
             stop = ts.get("cron_stop")

@@ -12,7 +12,7 @@ the agentica CLI sessions running on this machine and talks to it directly:
     @off                  stop talking to it; back to the gateway's own agent
 
 **There is no new protocol.** The bridge is just another peer on the existing
-file-based channel (``agentica/peers.py``): it owns a ``PeerSession`` per IM
+file-based channel (``agentica/peers/__init__.py``): it owns a ``PeerSession`` per IM
 user, so a CLI sees the phone in ``list_agents`` like any other session and
 answers it with the ``send_message`` tool it already has. Everything the channel
 already guarantees — mailbox ordering, backpressure, the repeat/rate brakes,

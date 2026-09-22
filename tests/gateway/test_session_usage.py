@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
 
 from agentica.agent import Agent
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.gateway.services.session_usage import turn_usage_payload, usage_payload
 from agentica.model.openai import OpenAIChat
 from agentica.model.usage import RequestUsage, TokenDetails
@@ -114,7 +114,7 @@ def test_payload_message_count_matches_the_measured_conversation():
     """
     from agentica.memory.models import AgentRun
     from agentica.model.message import Message
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     agent = _agent(add_history_to_context=True)
     agent.model.context_window = 128_000
@@ -132,7 +132,7 @@ def test_payload_message_count_is_zero_when_history_is_not_replayed():
     """Nothing in the prompt means nothing to count, whatever is stored."""
     from agentica.memory.models import AgentRun
     from agentica.model.message import Message
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     agent = _agent(add_history_to_context=False)
     agent.model.context_window = 128_000

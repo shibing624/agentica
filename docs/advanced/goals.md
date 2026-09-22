@@ -225,7 +225,7 @@ CLI 行为：
 ## 事件（用于 tracing / 观测）
 
 ```python
-from agentica.run_events import RunEventType
+from agentica.run.events import RunEventType
 
 def on_goal(event_type: RunEventType, payload: dict) -> None:
     print(event_type.value, payload)

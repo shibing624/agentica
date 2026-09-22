@@ -278,12 +278,12 @@ def set_active_profile(name: str) -> bool:
 #   2. Global default:   config.yaml -> active_profile
 #
 # Shares the same project directory as SessionLog / tool-result spill files
-# via :mod:`agentica.project_store`. Deliberately keyed by work_dir (not git
+# via :mod:`agentica.config.project`. Deliberately keyed by work_dir (not git
 # toplevel) so it aligns with Workspace / AGENTICA_HOME and works for
 # non-git directories with zero fallback logic.
 
 def _project_meta_path(work_dir: str) -> str:
-    from agentica.project_store import project_base_dir, project_file_path
+    from agentica.config.project import project_base_dir, project_file_path
 
     return str(project_file_path(project_base_dir(work_dir)))
 
@@ -292,14 +292,14 @@ def get_project_profile(work_dir: Optional[str]) -> Optional[str]:
     """Return the project-scoped active profile name, or None if not set."""
     if not work_dir:
         return None
-    from agentica.project_store import get_project_active_profile, project_base_dir
+    from agentica.config.project import get_project_active_profile, project_base_dir
 
     return get_project_active_profile(project_base_dir(work_dir))
 
 
 def set_project_profile(work_dir: str, name: str) -> None:
     """Persist the project-scoped active profile. Does NOT touch config.yaml."""
-    from agentica.project_store import (
+    from agentica.config.project import (
         ensure_project_work_dir,
         project_base_dir,
         set_project_active_profile,
@@ -314,7 +314,7 @@ def clear_project_profile(work_dir: str) -> bool:
     """Remove project-scoped override. Returns True if a profile was cleared."""
     if not work_dir:
         return False
-    from agentica.project_store import clear_project_active_profile, project_base_dir
+    from agentica.config.project import clear_project_active_profile, project_base_dir
 
     return clear_project_active_profile(project_base_dir(work_dir))
 

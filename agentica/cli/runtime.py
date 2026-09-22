@@ -20,7 +20,7 @@ from agentica.agent.config import (
     WorkspaceMemoryConfig,
 )
 from agentica.config import AGENTICA_CACHE_DIR
-from agentica.global_config import get_setting
+from agentica.config.profiles import get_setting
 from agentica.compression.manager import parse_compact_token_limit
 from agentica.skills import load_system_skills
 from agentica.tools.base import Tool

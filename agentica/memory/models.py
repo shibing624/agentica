@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 class MemoryType(str, Enum):

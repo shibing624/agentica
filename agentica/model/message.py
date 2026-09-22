@@ -3,7 +3,7 @@ import os
 from time import time
 from typing import Optional, Any, Dict, List, Union, Sequence
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from agentica.media import AudioResponse
+from agentica.model.media import AudioResponse
 from agentica.utils.log import logger
 
 

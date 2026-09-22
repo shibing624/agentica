@@ -23,7 +23,7 @@ def _isolate():
     import importlib
     import agentica.config as cfg
     importlib.reload(cfg)
-    import agentica.global_config as gc
+    import agentica.config.profiles as gc
     importlib.reload(gc)
     import agentica.cron.jobs as cronjobs
     importlib.reload(cronjobs)
@@ -119,7 +119,7 @@ class TestCronCommand(unittest.TestCase):
         from unittest.mock import patch
         from rich.console import Console
         from agentica.cli.commands import cron_cmd
-        from agentica.global_config import set_setting
+        from agentica.config.profiles import set_setting
 
         set_setting("cron.enabled", True)
         set_setting("cron.interval", 45)

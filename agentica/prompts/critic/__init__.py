@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Prompts for ``agentica.critic`` (critic/revise loop).
+@description: Prompts for ``agentica.orchestration.critic`` (critic/revise loop).
 
 Both templates contain literal ``{placeholder}`` markers. They are loaded
 without substitution here; ``critic.py`` calls ``.format(...)`` at use

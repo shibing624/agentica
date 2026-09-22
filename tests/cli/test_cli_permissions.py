@@ -17,7 +17,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
@@ -26,7 +26,7 @@ from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.registry import COMMAND_REGISTRY
 from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli import setup as cli_setup
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 
 

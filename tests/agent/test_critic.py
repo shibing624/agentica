@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Unit tests for agentica.critic — Protocol, adapters, and refine()."""
+"""Unit tests for agentica.orchestration.critic — Protocol, adapters, and refine()."""
 import os
 import asyncio
 import unittest
@@ -9,7 +9,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from pydantic import BaseModel, Field
 
-from agentica.critic import (
+from agentica.orchestration.critic import (
     CritiqueResult,
     CritiqueStyle,
     ExecCritic,

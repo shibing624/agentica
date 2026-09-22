@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Prompts for ``agentica.swarm`` (peer-to-peer multi-agent
+@description: Prompts for ``agentica.orchestration.swarm`` (peer-to-peer multi-agent
 collaboration).
 
 Both templates contain literal ``{placeholder}`` markers that the caller

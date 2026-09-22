@@ -213,7 +213,7 @@ class TestRunFunctionCalls:
         described an image it never received, and only one relayed it. The
         follow-up user message worked on all three, so that is the shape.
         """
-        from agentica.media import multimodal_tool_result
+        from agentica.model.media import multimodal_tool_result
 
         model = self._make_model_instance()
 
@@ -242,7 +242,7 @@ class TestRunFunctionCalls:
     @pytest.mark.asyncio
     async def test_text_only_model_gets_no_image_message_at_all(self):
         """A model that cannot see must not be sent an image it will reject."""
-        from agentica.media import multimodal_tool_result
+        from agentica.model.media import multimodal_tool_result
 
         model = self._make_model_instance()
         model.supports_images = False

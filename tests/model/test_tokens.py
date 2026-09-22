@@ -3,7 +3,7 @@ import struct
 from types import SimpleNamespace
 from pathlib import Path
 
-from agentica.media import Image
+from agentica.model.media import Image
 from agentica.model.message import Message
 from agentica.tools.base import Function
 from agentica.utils.tokens import (

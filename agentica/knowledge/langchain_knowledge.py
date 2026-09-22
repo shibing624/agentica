@@ -6,7 +6,7 @@ part of the code from https://github.com/phidatahq/phidata
 """
 from typing import List, Optional, Callable, Any
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.knowledge.base import Knowledge
 from agentica.utils.log import logger
 

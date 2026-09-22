@@ -16,7 +16,7 @@ from agentica import Agent
 from agentica.agent.config import PromptConfig
 from agentica.agent.as_tool import _serialize_content
 from agentica.tools.base import Function
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 class TestClone(unittest.TestCase):
@@ -42,7 +42,7 @@ class TestClone(unittest.TestCase):
 
     def test_clone_resets_default_run_hooks(self):
         agent = Agent(name="Worker", instructions="Test")
-        from agentica.hooks import ConversationArchiveHooks
+        from agentica.agent.hooks import ConversationArchiveHooks
         agent._default_run_hooks = ConversationArchiveHooks()
         clone = agent.clone()
         self.assertIsNone(clone._default_run_hooks)

@@ -27,7 +27,7 @@ def run_cron_daemon(args, console) -> None:
 
     # The standalone daemon reads the active profile directly (no interactive
     # arg parsing). If no profile exists yet, tell the user to run setup.
-    from agentica.global_config import get_profile
+    from agentica.config.profiles import get_profile
     profile = get_profile()
     if not profile or not profile.get("model_provider"):
         console.print("[red]No model profile configured. Run `agentica setup` first.[/red]")

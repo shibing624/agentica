@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import global_config as gc
+import agentica.config.profiles as gc
 
 
 class TestGlobalConfig(unittest.TestCase):

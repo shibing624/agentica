@@ -13,7 +13,7 @@ from agentica.cli.interactive.btw import (
     promote_late_steer,
 )
 from agentica.cli.interactive.session_state import SessionState
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.tools.background_processes import BackgroundProcessCompleted
 
 

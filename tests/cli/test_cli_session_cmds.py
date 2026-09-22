@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import config as agentica_config
 from agentica.cli.interactive import app as interactive_app
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
@@ -29,7 +29,7 @@ from agentica.cli.commands.registry import COMMAND_REGISTRY
 from agentica.cli.commands import model_config as cli_model_config
 from agentica.cli.commands import session as cli_session
 from agentica.cli import setup as cli_setup
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 from agentica.model.usage import Usage
 from agentica.utils.string import format_file_size

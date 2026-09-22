@@ -40,7 +40,7 @@ from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
-    from agentica.git_state import GitState
+    from agentica.peers.git_state import GitState
 
 # A peer heartbeats while it lives; a record older than this is treated as a
 # crashed session even when its pid still resolves (pids get reused).
@@ -184,7 +184,7 @@ class PeerInfo:
     cwd: str
     session_id: Optional[str] = None
     git_branch: Optional[str] = None
-    # Where this session sits in the repository (agentica/git_state.py).
+    # Where this session sits in the repository (agentica/peers/git_state.py).
     # Published because the alternative is asking: "did you already touch that
     # file?" and "are you behind main?" cost a message, a turn on both sides,
     # and an answer that goes stale the moment a third session commits. Git
@@ -253,7 +253,7 @@ class PeerInfo:
         and readable, and an older record that never published these fields
         yields an empty state instead of a parse error.
         """
-        from agentica.git_state import GitState
+        from agentica.peers.git_state import GitState
 
         return GitState(
             branch=self.git_branch or "",
@@ -283,7 +283,7 @@ class PeerInfo:
             return self.project_dir
         if not self.cwd:
             return None
-        from agentica.project_store import project_base_dir
+        from agentica.config.project import project_base_dir
 
         return project_base_dir(self.cwd)
 
@@ -393,7 +393,7 @@ class PeerInfo:
             rows.append(("memory", memory))
         rows.append(("mailbox", str(mailbox_dir(self.peer_id))))
         if self.attach_socket:
-            # Where to talk to this session as the user (``agentica/attach.py``).
+            # Where to talk to this session as the user (``agentica/cli/attach.py``).
             # Listed here rather than left in the record for a reader to find,
             # because this is the discovery entrance: without it a client has to
             # go spelunking in ``live/*.json``, which is not a supported path.
@@ -463,7 +463,7 @@ class PeerSession:
         model_name: Optional[str] = None,
         on_drain: Optional[Callable[[List["PeerMessage"]], None]] = None,
     ) -> None:
-        from agentica.project_store import project_base_dir
+        from agentica.config.project import project_base_dir
 
         self.peer_id = peer_id or new_peer_id()
         self._user_id = user_id
@@ -514,7 +514,7 @@ class PeerSession:
         does not know. An unknown field name is a typo, not an update, and
         raises rather than silently doing nothing.
         """
-        from agentica.project_store import project_base_dir
+        from agentica.config.project import project_base_dir
 
         user_id = updates.pop("user_id", None)
         if user_id is not None:
@@ -551,7 +551,7 @@ class PeerSession:
         Storage moves with the directory (``project_dir``), so the sessions this
         terminal starts from now on live with the worktree they belong to.
         """
-        from agentica.project_store import project_base_dir
+        from agentica.config.project import project_base_dir
 
         self._storage_cwd = str(cwd)
         self.info.cwd = os.path.realpath(os.path.expanduser(self._storage_cwd))

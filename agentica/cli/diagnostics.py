@@ -10,7 +10,7 @@ make network calls (no cost, no hang); "configured" means the key is present,
 not that the endpoint answered.
 
 SDK use:
-    from agentica.diagnostics import run_doctor
+    from agentica.cli.diagnostics import run_doctor
     report = run_doctor()
     print(report.ok, report.summary())
 
@@ -132,7 +132,7 @@ def _check_provider(report: DoctorReport) -> None:
         _is_custom_openai,
         get_profile_api_key,
     )
-    from agentica.global_config import (
+    from agentica.config.profiles import (
         get_profile,
         get_active_profile_name,
         global_config_path,

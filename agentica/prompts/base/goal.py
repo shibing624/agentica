@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: GOAL prompts — judge system message and continuation template.
 
-Three static templates used by the standing-goal loop in ``agentica.goals``:
+Three static templates used by the standing-goal loop in ``agentica.agent.goals``:
 
 - ``GOAL_JUDGE_SYSTEM_PROMPT`` — system message for the LLM-as-judge that
   decides ``done`` / ``continue`` after each agent turn. No placeholders.
@@ -15,7 +15,7 @@ Three static templates used by the standing-goal loop in ``agentica.goals``:
   of more work. Placeholders: ``{objective}``, ``{progress}``.
 
 The dynamic per-turn judge USER prompt (which interleaves tools,
-subgoals, evidence rules) is assembled in ``agentica.goals`` because it's
+subgoals, evidence rules) is assembled in ``agentica.agent.goals`` because it's
 a conditional builder, not a static template.
 """
 

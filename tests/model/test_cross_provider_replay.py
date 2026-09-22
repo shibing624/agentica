@@ -17,7 +17,7 @@ from agentica.memory.working import WorkingMemory
 from agentica.model.anthropic.claude import Claude
 from agentica.model.message import Message
 from agentica.model.openai.chat import OpenAIChat
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 def _replayed_history() -> list:

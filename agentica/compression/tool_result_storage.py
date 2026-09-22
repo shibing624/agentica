@@ -115,10 +115,10 @@ def safe_user_segment(user_id: Optional[str]) -> str:
 def get_projects_root(user_id: Optional[str] = None) -> str:
     """Return ``<AGENTICA_PROJECTS_DIR>/<user>/`` — the parent of every project dir.
 
-    Delegates to :func:`agentica.project_store.projects_root` so sessions,
+    Delegates to :func:`agentica.config.project.projects_root` so sessions,
     profiles, and tool-result spill share one layout.
     """
-    from agentica.project_store import projects_root
+    from agentica.config.project import projects_root
 
     return projects_root(user_id)
 
@@ -126,9 +126,9 @@ def get_projects_root(user_id: Optional[str] = None) -> str:
 def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) -> str:
     """Return ``<AGENTICA_PROJECTS_DIR>/<user>/<sanitized-cwd>/`` for the given user + cwd.
 
-    Thin wrapper around :func:`agentica.project_store.project_base_dir`.
+    Thin wrapper around :func:`agentica.config.project.project_base_dir`.
     """
-    from agentica.project_store import project_base_dir
+    from agentica.config.project import project_base_dir
 
     return project_base_dir(cwd, user_id=user_id)
 

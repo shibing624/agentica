@@ -246,7 +246,7 @@ agent = Agent(
 通过 `RunConfig` 设置单次运行的成本上限：
 
 ```python
-from agentica.run_config import RunConfig
+from agentica.run.config import RunConfig
 
 result = await agent.run(
     "复杂的分析任务",
@@ -314,8 +314,8 @@ Input
 生命周期钩子允许在 Agent 运行的各个阶段插入自定义逻辑：
 
 ```python
-from agentica.hooks import AgentHooks, RunHooks
-from agentica.run_response import RunResponse
+from agentica.agent.hooks import AgentHooks, RunHooks
+from agentica.run.response import RunResponse
 
 class MyHooks(RunHooks):
     async def on_agent_start(self, agent, message):

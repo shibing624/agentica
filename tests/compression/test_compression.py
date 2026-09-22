@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 # ===========================================================================

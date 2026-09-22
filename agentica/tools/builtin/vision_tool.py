@@ -23,7 +23,7 @@ import base64
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from agentica.media import get_image_type, multimodal_tool_result
+from agentica.model.media import get_image_type, multimodal_tool_result
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.utils.ocr import ocr_image_text

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tests for agentica/git_state.py — the git position a session publishes.
+@description: Tests for agentica/peers/git_state.py — the git position a session publishes.
 
 Real repositories in tmp dirs, real git. The point of this module is that
 another session can answer "are you behind main?" and "did you touch that
@@ -11,8 +11,8 @@ import subprocess
 
 import pytest
 
-from agentica import git_state
-from agentica.git_state import GitState, collect
+from agentica.peers import git_state
+from agentica.peers.git_state import GitState, collect
 
 
 def _git(cwd, *args):

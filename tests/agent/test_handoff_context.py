@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
 from agentica.agent import Agent
-from agentica.handoff import HandoffContext, default_handoff_mapper
+from agentica.orchestration.handoff import HandoffContext, default_handoff_mapper
 
 
 class TestHandoffContext(unittest.TestCase):

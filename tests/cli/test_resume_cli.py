@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentica import global_config as gc
+import agentica.config.profiles as gc
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.session import (
     HistoryRenderStats,
@@ -24,7 +24,7 @@ from agentica.memory.session_log import SessionLog
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.usage import Usage
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 def test_parse_shell_resume_command():

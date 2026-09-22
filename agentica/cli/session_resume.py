@@ -24,9 +24,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from agentica.global_config import get_setting, set_setting
+from agentica.config.profiles import get_setting, set_setting
 from agentica.memory.session_log import SessionLog
-from agentica.run_response import AgentCancelledError
+from agentica.run.response import AgentCancelledError
 from agentica.utils.log import logger
 
 # ``settings.resume_cwd`` in ~/.agentica/config.yaml.

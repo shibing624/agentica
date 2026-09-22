@@ -12,14 +12,14 @@ from unittest.mock import MagicMock
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.cli.commands.context import CommandContext
-from agentica.hooks import MemoryExtractHooks
+from agentica.agent.hooks import MemoryExtractHooks
 from agentica.cli.commands.session import _cmd_compact
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 def _run(turn: int) -> AgentRun:

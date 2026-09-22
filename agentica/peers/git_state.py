@@ -8,7 +8,7 @@ Two agentica sessions working the same repository spend real effort answering
 other* — a message, a turn on both sides, and an answer that is stale the
 moment a third session commits. Git already knows all of it. So presence
 carries it: every session publishes its branch, head, distance from the base
-branch and its dirty files (``agentica/peers.py``), and ``list_agents`` answers
+branch and its dirty files (``agentica/peers/__init__.py``), and ``list_agents`` answers
 the question with no round trip.
 
 Two constraints shape this module:

@@ -268,7 +268,7 @@ def test_swarm_clone_preserves_guardrails():
     """Autonomous swarm spawns ephemeral agent clones via _clone_agent_for_task.
     Those clones MUST inherit input_guardrails / output_guardrails — otherwise
     a protected agent silently loses its safety rails in swarm execution."""
-    from agentica.swarm import _clone_agent_for_task
+    from agentica.orchestration.swarm import _clone_agent_for_task
 
     @input_guardrail
     def in_guard(ctx, agent, input_data):

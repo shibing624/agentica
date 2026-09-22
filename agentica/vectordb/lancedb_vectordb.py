@@ -17,7 +17,7 @@ except ImportError:
     raise ImportError("`lancedb` not installed, please install it via `pip install lancedb`.")
 
 from agentica.config import AGENTICA_CACHE_DIR
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance, SearchType
 from agentica.rerank.base import Rerank

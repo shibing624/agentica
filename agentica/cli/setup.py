@@ -4,7 +4,7 @@
 @description: First-run model provider onboarding wizard + model config resolution.
 
 The single source of truth for SDK + CLI model configuration is
-``~/.agentica/config.yaml`` (see :mod:`agentica.global_config`). It holds named
+``~/.agentica/config.yaml`` (see :mod:`agentica.config.profiles`). It holds named
 profiles, each with a **main model** and an optional **auxiliary model**. The auxiliary
 model is the cheap/fast model used for all non-user-facing LLM work: memory
 extraction, context compression, user-correction classification, goal judging,
@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 
 from prompt_toolkit import prompt as pt_prompt
 
-from agentica.global_config import (
+from agentica.config.profiles import (
     DEFAULT_PROFILE_NAME,
     get_profile,
     get_profiles,
@@ -1141,7 +1141,7 @@ def _prompt_cron(console) -> None:
     Scheduled jobs run the agent in the background and cost tokens, so this is
     strictly opt-in.
     """
-    from agentica.global_config import get_setting, set_setting
+    from agentica.config.profiles import get_setting, set_setting
 
     console.print()
     console.print("  [bold]Scheduled tasks (cron)[/bold]", style="cyan")

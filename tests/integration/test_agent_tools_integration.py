@@ -18,8 +18,8 @@ from agentica.agent import Agent
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_response import RunResponse, RunEvent
-from agentica.hooks import RunHooks
+from agentica.run.response import RunResponse, RunEvent
+from agentica.agent.hooks import RunHooks
 from agentica.tools.base import Function, FunctionCall, Tool, StopAgentRun, RetryAgentRun
 from agentica.utils.hook_recorder import HookRecorder
 

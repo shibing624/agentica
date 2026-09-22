@@ -120,7 +120,7 @@ class TestSwarmCloneToolIsolation(unittest.TestCase):
     """
 
     def test_swarm_clone_does_not_overwrite_source_agent_tool(self):
-        from agentica.swarm import _clone_agent_for_task
+        from agentica.orchestration.swarm import _clone_agent_for_task
 
         source = Agent(
             name="source",
@@ -250,7 +250,7 @@ class TestSwarmCloneModelUsageIsolation(unittest.TestCase):
     """
 
     def test_swarm_clone_isolates_model_usage(self):
-        from agentica.swarm import _clone_agent_for_task
+        from agentica.orchestration.swarm import _clone_agent_for_task
 
         source = Agent(name="source", model=_model())
         source.model.usage.total_tokens = 100  # simulate prior accumulation
@@ -302,7 +302,7 @@ class TestSwarmCloneContextRobustness(unittest.TestCase):
     """
 
     def test_swarm_clone_passes_string_context_through(self):
-        from agentica.swarm import _clone_agent_for_task
+        from agentica.orchestration.swarm import _clone_agent_for_task
 
         source = Agent(
             name="source",
@@ -313,7 +313,7 @@ class TestSwarmCloneContextRobustness(unittest.TestCase):
         self.assertEqual(clone.context, "raw string brief from upstream")
 
     def test_swarm_clone_passes_callable_context_through(self):
-        from agentica.swarm import _clone_agent_for_task
+        from agentica.orchestration.swarm import _clone_agent_for_task
 
         sentinel = lambda: {"key": "value"}
         source = Agent(name="source", model=_model(), context=sentinel)
@@ -321,7 +321,7 @@ class TestSwarmCloneContextRobustness(unittest.TestCase):
         self.assertIs(clone.context, sentinel)
 
     def test_swarm_clone_deep_copies_dict_context(self):
-        from agentica.swarm import _clone_agent_for_task
+        from agentica.orchestration.swarm import _clone_agent_for_task
 
         source = Agent(name="source", model=_model(), context={"k": "v"})
         clone = _clone_agent_for_task(source)
@@ -410,7 +410,7 @@ class TestRunnerStreamToolKeyAlignment(unittest.TestCase):
     """
 
     def test_completed_payload_updates_correct_tool_entry(self):
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         from agentica.runner import Runner
 
         agent = Agent(name="a", model=_model())

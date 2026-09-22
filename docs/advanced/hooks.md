@@ -14,7 +14,7 @@ Hooks 是 Agentica 的生命周期事件系统，让你在 Agent 执行的关键
 Per-agent 生命周期钩子：
 
 ```python
-from agentica.hooks import AgentHooks
+from agentica.agent.hooks import AgentHooks
 
 class LoggingHooks(AgentHooks):
     async def on_start(self, agent, **kwargs):
@@ -36,8 +36,8 @@ agent = Agent(hooks=LoggingHooks())
 全局 run 级生命周期钩子，观察整个运行过程：
 
 ```python
-from agentica.hooks import RunHooks
-from agentica.run_config import RunConfig
+from agentica.agent.hooks import RunHooks
+from agentica.run.config import RunConfig
 
 class MetricsHooks(RunHooks):
     def __init__(self):
@@ -121,8 +121,8 @@ class CompactionLogger(RunHooks):
 内置 Hook，自动将对话归档到 Workspace 的每日日志：
 
 ```python
-from agentica.hooks import ConversationArchiveHooks
-from agentica.run_config import RunConfig
+from agentica.agent.hooks import ConversationArchiveHooks
+from agentica.run.config import RunConfig
 
 hooks = ConversationArchiveHooks()
 response = await agent.run("Hello", config=RunConfig(hooks=hooks))

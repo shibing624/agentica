@@ -9,7 +9,7 @@ import unittest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.think_scrubber import (
+from agentica.model.think_scrubber import (
     scrub_reasoning, contains_reasoning_leak, sanitize_assistant_content_for_history,
 )
 from agentica.agent.history_filter import apply_history_pipeline

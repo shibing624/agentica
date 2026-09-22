@@ -5,7 +5,7 @@
 ## 基本用法
 
 ```python
-from agentica.run_config import RunConfig
+from agentica.run.config import RunConfig
 
 result = await agent.run("分析数据", config=RunConfig(
     run_timeout=30,

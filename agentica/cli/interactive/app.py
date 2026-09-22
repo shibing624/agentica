@@ -18,7 +18,8 @@ from uuid import uuid4
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from agentica import config, git_state
+from agentica.peers import git_state
+from agentica import config
 from agentica.cli.approvals import build_interactive_approve, interrupt_approvals
 from agentica.cli.commands.context import (
     IMAGE_EXTENSIONS,
@@ -48,7 +49,7 @@ from agentica.cli.runtime import (
 from agentica.cli.session_resume import enter_work_dir, prepare_startup_resume
 from agentica.cli.setup import apply_named_profile_to_agent_config, session_profile
 from agentica.cli.worktree_binding import WorktreeBinder
-from agentica.global_config import get_setting, set_project_profile
+from agentica.config.profiles import get_setting, set_project_profile
 from agentica.notify import (
     install_sink as install_notify_sink,
 )
@@ -57,7 +58,7 @@ from agentica.notify import (
     set_idle_provider,
 )
 from agentica.peers import PeerSession, format_for_model
-from agentica.run_response import AgentCancelledError
+from agentica.run.response import AgentCancelledError
 from agentica.shell_hooks import (
     emit_request_resolved,
     emit_session_ended,
@@ -193,7 +194,7 @@ def _maybe_start_cron(state: SessionState, agent_config, extra_tools,
     if state.cron_thread is not None and state.cron_thread.is_alive():
         return
     try:
-        from agentica.global_config import get_setting
+        from agentica.config.profiles import get_setting
         if not bool(get_setting("cron.enabled", False)):
             return
         interval = int(get_setting("cron.interval", 60) or 60)
@@ -450,8 +451,8 @@ def run_interactive(
     requested_worktree = agent_config.pop("worktree", None)
     started_in_worktree = False
     if requested_worktree:
-        from agentica.worktrees import WorktreeError
-        from agentica.worktrees import ensure as ensure_worktree
+        from agentica.peers.worktrees import WorktreeError
+        from agentica.peers.worktrees import ensure as ensure_worktree
 
         try:
             bound = ensure_worktree(agent_config.get("work_dir") or os.getcwd(), requested_worktree)
@@ -1232,7 +1233,7 @@ def run_interactive(
                 # "unset" rather than being skipped, so clearing works too;
                 # heartbeat itself only writes when one of these differs.
                 #
-                # Git state rides the same tick (agentica/git_state.py caches
+                # Git state rides the same tick (agentica/peers/git_state.py caches
                 # for CACHE_TTL, so this is not three subprocesses per second).
                 # It is what lets another session read "who is behind main and
                 # who has that file dirty" instead of asking.
@@ -1300,7 +1301,7 @@ def run_interactive(
     # point.
     attach_server = None
     try:
-        from agentica.attach import AttachServer, attach_enabled
+        from agentica.cli.attach import AttachServer, attach_enabled
 
         # No config dict passed: this is a global settings toggle, read the same
         # way the CLI's other toggles are (see _maybe_start_cron above).

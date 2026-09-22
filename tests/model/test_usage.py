@@ -218,12 +218,12 @@ class TestUsageOnModel(unittest.TestCase):
 
     def test_run_response_has_usage_field(self):
         """Test that RunResponse has a usage field."""
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         self.assertIn("usage", RunResponse.model_fields)
 
     def test_run_response_usage_serialization(self):
         """Test RunResponse with usage serializes correctly."""
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         usage = Usage()
         usage.add(RequestUsage(input_tokens=100, output_tokens=50, total_tokens=150))
         rr = RunResponse(content="hello", usage=usage)

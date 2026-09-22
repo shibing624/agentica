@@ -40,9 +40,9 @@ which is a decision, not an oversight.
 
 This RFC is about the **executable** kind (`settings.hooks` below). It is not the
 Python callback classes already in the package: `AgentHooks` / `RunHooks`
-(`agentica/hooks.py:37,62`) are in-process observers and stay as they are. Naming
+(`agentica/agent/hooks.py:37,62`) are in-process observers and stay as they are. Naming
 the config block `settings.hooks` is deliberate (it is what users search for), but
-the docstring for `agentica/hooks.py` should point here so the two are not confused.
+the docstring for `agentica/agent/hooks.py` should point here so the two are not confused.
 
 ## Design
 

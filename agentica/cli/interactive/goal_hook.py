@@ -9,7 +9,7 @@ from __future__ import annotations
 from agentica.cli.commands.context import PendingQueue
 from agentica.cli.commands.goal import _detach_goal_tool, _sync_goal_budget_tui
 from agentica.cli.commands.helpers import _run_async_safe
-from agentica.goals import is_goal_generated_prompt
+from agentica.agent.goals import is_goal_generated_prompt
 
 from .attachments import unpack_queue_payload
 from .console_io import _cprint

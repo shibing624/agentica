@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
@@ -26,7 +26,7 @@ from agentica.cli.commands import model_config as cli_model_config
 from agentica.cli.commands import runtime as cli_runtime_commands
 from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli import setup as cli_setup
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 
 
@@ -384,7 +384,7 @@ class TestCLIAwareness(unittest.TestCase):
     def test_apply_profile_carries_auxiliary_model(self):
         """Switching to a profile with an auxiliary_model block rebuilds the auxiliary model
         and refreshes environment_context with the new auxiliary line."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = self._make_apply_profile_ctx()
         # Pre-state is zhipuai/glm-4.7-flash; the profile switches auxiliary to deepseek.
@@ -393,7 +393,7 @@ class TestCLIAwareness(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model", return_value=MagicMock()),
                 patch.object(cli_model_config, "_build_sibling_model", return_value=MagicMock()) as mock_auxiliary,
@@ -433,7 +433,7 @@ class TestCLIAwareness(unittest.TestCase):
     def test_apply_profile_switches_extra_body(self):
         """Switching to a profile with extra_body wires it into agent_config +
         the rebuilt model, main and auxiliary independently."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = self._make_apply_profile_ctx()
         self.assertIsNone(ctx.agent_config.get("extra_body"))
@@ -441,7 +441,7 @@ class TestCLIAwareness(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model") as mock_get_model,
                 patch.object(cli_model_config, "_build_sibling_model", return_value=MagicMock()),
@@ -474,13 +474,13 @@ class TestCLIAwareness(unittest.TestCase):
         self.assertEqual(kw["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}})
 
     def test_apply_profile_switches_wire_api(self):
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = self._make_apply_profile_ctx()
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model") as mock_get_model,
                 patch.object(cli_model_config, "set_project_profile"),
@@ -507,7 +507,7 @@ class TestCLIAwareness(unittest.TestCase):
 
     def test_apply_profile_without_auxiliary_clears(self):
         """Switching to a profile without an auxiliary_model block clears the auxiliary fields."""
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = self._make_apply_profile_ctx()
         self.assertIsNotNone(ctx.agent_config["auxiliary_model_name"])
@@ -515,7 +515,7 @@ class TestCLIAwareness(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model", return_value=MagicMock()),
                 patch.object(cli_model_config, "_build_sibling_model") as mock_sibling,

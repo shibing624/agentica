@@ -4,11 +4,11 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agentica.run_response import RunEvent, RunResponse
+from agentica.run.response import RunEvent, RunResponse
 
 
 def test_classifies_stream_content_delta():
-    from agentica.run_display import RunDisplayEventKind, classify_run_response
+    from agentica.run.display import RunDisplayEventKind, classify_run_response
 
     response = RunResponse(event=RunEvent.run_response.value, content="hello")
 
@@ -16,7 +16,7 @@ def test_classifies_stream_content_delta():
 
 
 def test_classifies_final_content_when_requested():
-    from agentica.run_display import RunDisplayEventKind, classify_run_response
+    from agentica.run.display import RunDisplayEventKind, classify_run_response
 
     response = RunResponse(event=RunEvent.run_response.value, content="final")
 
@@ -24,7 +24,7 @@ def test_classifies_final_content_when_requested():
 
 
 def test_classifies_tool_lifecycle_events():
-    from agentica.run_display import RunDisplayEventKind, classify_run_response
+    from agentica.run.display import RunDisplayEventKind, classify_run_response
 
     started = RunResponse(event=RunEvent.tool_call_started.value, tools=[{"tool_name": "search"}])
     completed = RunResponse(event=RunEvent.tool_call_completed.value, tools=[{"tool_name": "search"}])
@@ -34,7 +34,7 @@ def test_classifies_tool_lifecycle_events():
 
 
 def test_skips_metadata_events():
-    from agentica.run_display import RunDisplayEventKind, classify_run_response
+    from agentica.run.display import RunDisplayEventKind, classify_run_response
 
     response = RunResponse(event=RunEvent.run_started.value)
 
@@ -42,7 +42,7 @@ def test_skips_metadata_events():
 
 
 def test_classifies_failures_as_telemetry_only():
-    from agentica.run_display import RunDisplayEventKind, classify_run_response
+    from agentica.run.display import RunDisplayEventKind, classify_run_response
 
     response = RunResponse(event=RunEvent.run_failed.value, content="boom")
 
@@ -50,7 +50,7 @@ def test_classifies_failures_as_telemetry_only():
 
 
 def test_preserves_unknown_content_events_for_display():
-    from agentica.run_display import RunDisplayEventKind, classify_run_response
+    from agentica.run.display import RunDisplayEventKind, classify_run_response
 
     response = RunResponse(event="RunTimeout", content="Stream run timed out")
 

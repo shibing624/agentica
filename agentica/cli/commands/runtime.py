@@ -26,12 +26,12 @@ from agentica.cli.runtime import (
     create_agent,
     get_console,
 )
-from agentica.goals import GoalManager
+from agentica.agent.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import local_turn_stamp
 from agentica.model.message import Message
 from agentica.peers import DELIVERY_QUEUE, DELIVERY_STEER, PeerMessageRefused
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 # ==================== Command Handlers ====================
 
@@ -500,7 +500,7 @@ def _cmd_rewind(ctx: CommandContext, cmd_args: str = ""):
     /rewind <n> --yes             -> rewind code + conversation to turn <n> start
     """
     con = get_console()
-    from agentica.checkpoint import RewindScope
+    from agentica.agent.checkpoint import RewindScope
     from agentica.cli.rewind import get_turn_checkpointer, print_turn_list, truncate_conversation
 
     agent = ctx.current_agent

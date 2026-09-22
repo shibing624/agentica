@@ -23,7 +23,7 @@ from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.interactive.app import _resume_session_cli_prefs
 from agentica.memory.session_log import SessionLog
-from agentica.project_store import project_base_dir, read_project_file
+from agentica.config.project import project_base_dir, read_project_file
 
 
 class _WorkDir:

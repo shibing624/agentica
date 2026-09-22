@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from agentica.cli.display.live_blocks import LIVE_MAX_ROWS, LiveToolResult, LiveToolStore
 from agentica.cli.display.stream import _strip_rich_markup
 from agentica.model.message import Message
-from agentica.run_response import RunEvent, RunResponse
+from agentica.run.response import RunEvent, RunResponse
 
 
 class TestLiveToolStore(unittest.TestCase):

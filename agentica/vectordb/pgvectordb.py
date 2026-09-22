@@ -16,7 +16,7 @@ try:
 except ImportError:
     raise ImportError("`pgvector` not installed, please install it via `pip install pgvector`.")
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.embedding.openai import OpenAIEmbedding

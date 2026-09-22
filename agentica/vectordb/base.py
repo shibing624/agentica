@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Dict, Any
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 
 
 class Distance(str, Enum):

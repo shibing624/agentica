@@ -67,7 +67,7 @@ from agentica import Agent, Workspace, ArkChat
 from agentica.agent.config import ExperienceConfig, SkillUpgradeConfig
 from agentica.experience.compiler import _RULE_STOPWORDS, _rule_to_title, _stem
 from agentica.experience.skill_upgrade import SkillEvolutionManager
-from agentica.hooks import (
+from agentica.agent.hooks import (
     ConversationArchiveHooks,
     ExperienceCaptureHooks,
     MemoryExtractHooks,

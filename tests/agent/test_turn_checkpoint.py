@@ -12,7 +12,7 @@ import os
 import tempfile
 import unittest
 
-from agentica.checkpoint import RewindResult, RewindScope, TurnCheckpointer
+from agentica.agent.checkpoint import RewindResult, RewindScope, TurnCheckpointer
 
 
 class TestTurnCheckpointer(unittest.TestCase):

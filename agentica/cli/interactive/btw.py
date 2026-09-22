@@ -15,7 +15,7 @@ from agentica.cli.display.tool_format import _wrap_command_lines
 from agentica.cli.runtime import _generate_session_id, get_console
 from agentica.memory.models import AgentRun
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.tools.background_processes import (
     BackgroundProcessCompleted,
     read_log_tail,

@@ -30,7 +30,7 @@ from agentica import SqliteDb
 db = SqliteDb(db_file="~/.agentica/data/agent.db")
 ```
 
-## Media Artifacts (`agentica/media.py`)
+## Media Artifacts (`agentica/model/media.py`)
 
 生成式多模态内容的 Pydantic 模型，均继承 `Media` 基类（`id`、`original_prompt`、`revised_prompt`）：
 

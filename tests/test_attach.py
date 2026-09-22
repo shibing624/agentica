@@ -18,8 +18,9 @@ import time
 
 import pytest
 
-from agentica import attach, peers
-from agentica.attach import (
+from agentica.cli import attach
+from agentica import peers
+from agentica.cli.attach import (
     ERR_METHOD_NOT_FOUND,
     ERR_PARSE,
     ERR_REFUSED,
@@ -1056,7 +1057,7 @@ class TestPromptText:
         assert attach._prompt_text("  hello  ") == "hello"
 
     def test_an_undeliverable_block_raises_rather_than_being_dropped(self):
-        from agentica.attach import AttachError
+        from agentica.cli.attach import AttachError
 
         with pytest.raises(AttachError) as mixed:
             attach._prompt_text([{"type": "text", "text": "look"}, {"type": "image", "data": "x"}])
@@ -1067,14 +1068,14 @@ class TestPromptText:
             attach._prompt_text([{"type": "image", "uri": "x"}])
 
     def test_a_non_list_non_string_is_refused(self):
-        from agentica.attach import AttachError
+        from agentica.cli.attach import AttachError
 
         for bad in (None, 123, {"type": "text", "text": "x"}):
             with pytest.raises(AttachError):
                 attach._prompt_text(bad)
 
     def test_an_empty_prompt_raises(self):
-        from agentica.attach import AttachError
+        from agentica.cli.attach import AttachError
 
         with pytest.raises(AttachError):
             attach._prompt_text("   ")

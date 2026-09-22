@@ -23,7 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import asyncio
 from agentica import Agent, OpenAIChat
-from agentica.swarm import Swarm
+from agentica.orchestration.swarm import Swarm
 
 
 MODEL_ID = "gpt-4o-mini"

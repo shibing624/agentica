@@ -84,7 +84,7 @@ print("\n== 2. a run.started reaches the hook process ==")
 code = textwrap.dedent("""
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress
     from agentica.notify.sink import notify_sink_dispatch
-    from agentica.run_events import RunEventRecord, RunEventType
+    from agentica.run.events import RunEventRecord, RunEventType
     install_hook_egress(load_shell_hooks_config())
     notify_sink_dispatch(
         RunEventRecord(run_id="r1", event_type=RunEventType.run_started,
@@ -261,7 +261,7 @@ before = set(os.listdir("/tmp"))
 code = textwrap.dedent("""
     from agentica.shell_hooks import load_shell_hooks_config, install_hook_egress, get_hook_egress
     from agentica.notify.sink import notify_sink_dispatch
-    from agentica.run_events import RunEventRecord, RunEventType
+    from agentica.run.events import RunEventRecord, RunEventType
     install_hook_egress(load_shell_hooks_config())
     print("egress:", get_hook_egress())
     notify_sink_dispatch(RunEventRecord(run_id="r", event_type=RunEventType.run_started), session_id="s")

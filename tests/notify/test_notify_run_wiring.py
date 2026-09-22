@@ -18,7 +18,7 @@ from agentica.agent import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.notify import install_sink, reset_sink_for_tests
 from agentica.notify.config import NotifyConfig
-from agentica.run_events import RunEventType
+from agentica.run.events import RunEventType
 from agentica.runner import Runner
 from tests.notify.test_notify_sink import _FakeDesktop
 

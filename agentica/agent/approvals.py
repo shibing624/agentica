@@ -376,7 +376,7 @@ def sync_grants_from_project(
     """Pull this project's durable approval table into ``grants``."""
     if not work_dir:
         return
-    from agentica.project_store import project_base_dir, read_project_file
+    from agentica.config.project import project_base_dir, read_project_file
 
     grants.absorb_durable(read_project_file(project_base_dir(work_dir, user_id)).get("approvals"))
 
@@ -390,7 +390,7 @@ def persist_grants_to_project(
     """Union ``grants`` prefix fields into ``project.json`` ``approvals``."""
     if not work_dir:
         return
-    from agentica.project_store import (
+    from agentica.config.project import (
         ensure_project_work_dir,
         project_base_dir,
         read_project_file,

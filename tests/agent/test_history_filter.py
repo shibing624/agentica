@@ -400,7 +400,7 @@ def test_elided_notice_warns_even_without_writes():
 def test_strip_from_memory_folds_notice_into_last_assistant_turn():
     from agentica.memory.models import AgentRun
     from agentica.memory.working import WorkingMemory
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     history = [
         _user("edit it"),
@@ -439,7 +439,7 @@ def test_strip_from_memory_is_idempotent():
     """A second switch must not stack another digest."""
     from agentica.memory.models import AgentRun
     from agentica.memory.working import WorkingMemory
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     history = [
         _user("edit it"),
@@ -471,7 +471,7 @@ def test_strip_from_memory_adds_no_notice_without_tool_rounds():
     """Chat-only history: claiming tools were dropped would be false."""
     from agentica.memory.models import AgentRun
     from agentica.memory.working import WorkingMemory
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     history = [_user("hi"), _assistant("hello")]
     memory = WorkingMemory()
@@ -512,7 +512,7 @@ def test_notice_never_adds_a_consecutive_assistant_turn():
     """
     from agentica.memory.models import AgentRun
     from agentica.memory.working import WorkingMemory
-    from agentica.run_response import RunResponse
+    from agentica.run.response import RunResponse
 
     history = [
         _user("edit"),

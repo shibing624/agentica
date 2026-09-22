@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.memory import WorkingMemory, AgentRun
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.db.base import BASE64_PLACEHOLDER, filter_base64_media, clean_media_placeholders
 
 

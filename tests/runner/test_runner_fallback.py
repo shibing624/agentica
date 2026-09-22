@@ -404,14 +404,14 @@ class TestRunConfigFallbackModelsField(unittest.TestCase):
     """RunConfig.fallback_models should plumb through to agent._run_fallback_models."""
 
     def test_run_config_fallback_models_defaults_empty(self):
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
         cfg = RunConfig()
         self.assertEqual(cfg.fallback_models, [])
 
     def test_run_stashes_fallback_models_on_agent(self):
         """Calling run() with config.fallback_models sets agent._run_fallback_models."""
-        from agentica.run_config import RunConfig
-        from agentica.run_response import RunResponse, RunEvent
+        from agentica.run.config import RunConfig
+        from agentica.run.response import RunResponse, RunEvent
 
         agent = _make_agent()
         fb = _fake_model("fb")
@@ -451,7 +451,7 @@ class TestMaxApiRetryConfig(unittest.TestCase):
         self.assertEqual(captured, [4])
 
     def test_run_config_max_api_retry_overrides_agent_default(self):
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         captured = []
         agent = _make_agent()
@@ -472,7 +472,7 @@ class TestMaxApiRetryConfig(unittest.TestCase):
         self.assertEqual(captured, [2])
 
     def test_invalid_max_api_retry_rejected(self):
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         agent = _make_agent()
         with self.assertRaises(ValueError):
@@ -490,7 +490,7 @@ class TestAgentFallbackModelsField(unittest.TestCase):
         """Without RunConfig.fallback_models, agent.fallback_models is used."""
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
-        from agentica.run_response import RunResponse, RunEvent
+        from agentica.run.response import RunResponse, RunEvent
 
         fb = _fake_model("agent-default-fb")
         agent = Agent(
@@ -513,8 +513,8 @@ class TestAgentFallbackModelsField(unittest.TestCase):
         """RunConfig.fallback_models takes precedence over Agent.fallback_models."""
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
-        from agentica.run_config import RunConfig
-        from agentica.run_response import RunResponse, RunEvent
+        from agentica.run.config import RunConfig
+        from agentica.run.response import RunResponse, RunEvent
 
         agent_fb = _fake_model("agent-fb")
         run_fb = _fake_model("run-fb")
@@ -648,7 +648,7 @@ class TestFallbackToolTransaction(unittest.TestCase):
     def test_fallback_tool_transaction_compacts_replay_context(self):
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         def add_numbers(a: int, b: int) -> int:
             return a + b
@@ -711,7 +711,7 @@ class TestFallbackToolTransaction(unittest.TestCase):
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
         from agentica.model.response import ModelResponseEvent
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         def add_numbers(a: int, b: int) -> int:
             return a + b
@@ -1017,7 +1017,7 @@ class TestToolHistorySanitizeRecovery(unittest.TestCase):
         self.assertEqual(state.tool_history_sanitized_done, True)
 
     def test_also_sanitizes_working_memory_runs(self):
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         from agentica.memory.models import AgentRun
 
         primary, _ = self._model_that_fails_once_on_tool_history()

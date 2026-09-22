@@ -26,12 +26,12 @@ from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
 from agentica.agent.config import ToolConfig, WorkspaceMemoryConfig
-from agentica.run_display import RunDisplayEventKind, classify_run_response
-from agentica.run_response import AgentCancelledError
-from agentica.run_config import RunConfig
-from agentica.run_context import RunSource
+from agentica.run.display import RunDisplayEventKind, classify_run_response
+from agentica.run.response import AgentCancelledError
+from agentica.run.config import RunConfig
+from agentica.run.context import RunSource
 from agentica.workspace import Workspace
-from agentica.global_config import (
+from agentica.config.profiles import (
     apply_global_config,
     get_setting,
     get_profile,
@@ -1526,7 +1526,7 @@ class AgentService:
         This is what makes the Web sidebar and the CLI ``/resume`` list a
         consistent set of sessions for the same project + user.
         """
-        from agentica.project_store import project_base_dir
+        from agentica.config.project import project_base_dir
         return project_base_dir(work_dir, user_id=self._owner(owner))
 
     @staticmethod

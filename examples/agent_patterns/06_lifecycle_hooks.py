@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional
 
 from agentica import Agent, AgentHooks, RunHooks, ConversationArchiveHooks, OpenAIChat
 from agentica.agent.config import WorkspaceMemoryConfig
-from agentica.run_config import RunConfig
+from agentica.run.config import RunConfig
 from agentica.workspace import Workspace
 
 
@@ -146,7 +146,7 @@ async def main():
     print("=" * 60)
     print("Demo 1: Single agent with tool calls")
     print("=" * 60)
-    from agentica.run_config import RunConfig
+    from agentica.run.config import RunConfig
     response = await math_agent.run(
         "What is 3 + 5 and 4 * 7? Use the tools to compute.",
         config=RunConfig(hooks=run_hooks),

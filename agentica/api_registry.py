@@ -17,7 +17,6 @@ PROVIDER_ALIAS_EXPORTS = [
     "AuxiliaryModelRouter",
     "scrub_reasoning", "contains_reasoning_leak",
     "sanitize_assistant_content_for_history",
-    "run_doctor", "DoctorReport", "DoctorCheck",
 ]
 
 LAZY_IMPORTS = {
@@ -34,8 +33,8 @@ LAZY_IMPORTS = {
     "FileType": "agentica.model.response",
     "OpenAIChat": "agentica.model.openai.chat",
     "OpenAIResponses": "agentica.model.openai.responses",
-    "refresh_model_catalog": "agentica.cost_tracker",
-    "refresh_model_catalog_in_background": "agentica.cost_tracker",
+    "refresh_model_catalog": "agentica.model.cost",
+    "refresh_model_catalog_in_background": "agentica.model.cost",
     "AzureOpenAIChat": "agentica.model.azure.openai_chat",
     # model providers (heavy dependencies)
     "LiteLLMChat": "agentica.model.litellm.chat",
@@ -107,10 +106,14 @@ LAZY_IMPORTS = {
     "run_output_guardrails": "agentica.guardrails",
     "run_tool_input_guardrails": "agentica.guardrails",
     "run_tool_output_guardrails": "agentica.guardrails",
+    # Doctor loads the CLI package; keep it off the eager `import agentica` path.
+    "run_doctor": "agentica.cli.diagnostics",
+    "DoctorReport": "agentica.cli.diagnostics",
+    "DoctorCheck": "agentica.cli.diagnostics",
     # LSP edit-time diagnostics (pulls subprocess/LSP machinery; keep lazy)
-    "LspDiagnosticsChecker": "agentica.lsp_diagnostics",
-    "Diagnostic": "agentica.lsp_diagnostics",
-    "format_diagnostics": "agentica.lsp_diagnostics",
+    "LspDiagnosticsChecker": "agentica.tools.lsp_diagnostics",
+    "Diagnostic": "agentica.tools.lsp_diagnostics",
+    "format_diagnostics": "agentica.tools.lsp_diagnostics",
     # tools (external dependencies)
     "CronTool": "agentica.tools.cron_tool",
     "check_command_safety": "agentica.tools.safety",
@@ -132,8 +135,8 @@ LAZY_IMPORTS = {
     # Only the helper factory stays lazy (avoids importing all tool modules at startup).
     "get_builtin_tools": "agentica.tools.builtin",
     # swarm / subagent
-    "Swarm": "agentica.swarm",
-    "SwarmResult": "agentica.swarm",
+    "Swarm": "agentica.orchestration.swarm",
+    "SwarmResult": "agentica.orchestration.swarm",
     "SubagentConfig": "agentica.subagents",
     "SubagentRun": "agentica.subagents",
     "SubagentRegistry": "agentica.subagents",

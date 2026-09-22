@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from agentica.run_response import RunEvent, RunResponse
+from agentica.run.response import RunEvent, RunResponse
 
 
 class RunDisplayEventKind(str, Enum):

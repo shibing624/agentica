@@ -13,8 +13,8 @@ from agentica.cli.commands.context import CommandContext
 from agentica.cli.runtime import (
     get_console,
 )
-from agentica.goals import UNLIMITED_BUDGET_VALUE, GoalManager
-from agentica.run_context import TaskAnchor
+from agentica.agent.goals import UNLIMITED_BUDGET_VALUE, GoalManager
+from agentica.run.context import TaskAnchor
 from agentica.tools.goal_tool import GoalTool
 
 

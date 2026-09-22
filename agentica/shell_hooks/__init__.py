@@ -4,7 +4,7 @@
 @description: External shell hooks — run named consumer commands at lifecycle
 points and hand each one JSON on stdin.
 
-This is the *executable* kind of hook. It is not ``agentica/hooks.py``
+This is the *executable* kind of hook. It is not ``agentica/agent/hooks.py``
 (``AgentHooks`` / ``RunHooks``), which are in-process Python observers and stay
 as they are. See ``docs/rfcs/external-hook-egress.md``.
 """

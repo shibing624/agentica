@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from agentica.goals import is_goal_generated_prompt
+from agentica.agent.goals import is_goal_generated_prompt
 
 
 
@@ -47,7 +47,7 @@ class CommandContext:
     # Per-task worktree binding (agentica.cli.worktree_binding.WorktreeBinder).
     # Shared with every rebuilt agent so /model does not drop the `worktree` tool.
     worktree_binder: Any = None
-    # Persistent goal loop (see agentica/goals.py). Same instance is shared
+    # Persistent goal loop (see agentica/agent/goals.py). Same instance is shared
     # between the post-turn hook and /goal handlers, guarded by goal_lock.
     goal_manager: Any = None  # Optional[GoalManager]
     goal_lock: Any = None  # Optional[threading.Lock]

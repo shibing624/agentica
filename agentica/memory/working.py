@@ -11,7 +11,7 @@ from agentica.db.base import BASE64_PLACEHOLDER, clean_media_placeholders
 from agentica.compression.token_budget import is_pending_window_preamble
 from agentica.model.message import Message
 from agentica.utils.log import logger
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 from agentica.utils.tokens import count_message_tokens
 from agentica.memory.models import (
     AgentRun,

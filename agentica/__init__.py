@@ -64,7 +64,7 @@ from agentica.config import (
 )
 
 # ── Unified config (config.yaml) shared by SDK + CLI ──
-from agentica.global_config import (
+from agentica.config.profiles import (
     global_config_path,
     load_global_config,
     save_global_config,
@@ -327,7 +327,7 @@ PROVIDER_FACTORIES = {
 }
 
 # ── Pluggable provider registry ──
-from agentica.provider_registry import (
+from agentica.model.providers import (
     register_provider,
     unregister_provider,
     get_provider_factory,
@@ -336,17 +336,17 @@ from agentica.provider_registry import (
 )
 
 # ── Auxiliary task model router ──
-from agentica.auxiliary_router import AuxiliaryModelRouter
+from agentica.model.auxiliary import AuxiliaryModelRouter
 
 # ── Think scrubber ──
-from agentica.think_scrubber import (
+from agentica.model.think_scrubber import (
     scrub_reasoning,
     contains_reasoning_leak,
     sanitize_assistant_content_for_history,
 )
 
-# ── Doctor / environment health check ──
-from agentica.diagnostics import run_doctor, DoctorReport, DoctorCheck
+# ── Doctor lives in agentica.cli.diagnostics and is lazy: importing it loads
+# the CLI package. See api_registry.LAZY_IMPORTS.
 
 # ── Memory ──
 from agentica.memory import (
@@ -364,7 +364,7 @@ from agentica.memory import (
 from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow
 
 # ── Run Response ──
-from agentica.run_response import (
+from agentica.run.response import (
     RunResponse,
     RunEvent,
     RunBreakReason,
@@ -372,12 +372,12 @@ from agentica.run_response import (
     ToolCallInfo,
     pprint_run_response,
 )
-from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
-from agentica.run_events import RunEventRecord, RunEventType
-from agentica.learning_report import LearningReport, LearningStatus, write_learning_report
+from agentica.run.context import RunContext, RunSource, RunStatus, TaskAnchor
+from agentica.run.events import RunEventRecord, RunEventType
+from agentica.experience.learning_report import LearningReport, LearningStatus, write_learning_report
 
 # ── Document ──
-from agentica.document import Document
+from agentica.knowledge.document import Document
 
 # ── Tool base ──
 from agentica.tools.base import Tool, ModelTool, Function, FunctionCall
@@ -399,7 +399,7 @@ from agentica.tools.builtin import (
 from agentica.compression import CompressionManager
 
 # ── Checkpoint / rollback primitive ──
-from agentica.checkpoint import (
+from agentica.agent.checkpoint import (
     CheckpointManager,
     Checkpoint,
     CheckpointFile,
@@ -431,9 +431,9 @@ from agentica.agent.config import (
     ExperienceConfig,
     SkillUpgradeConfig,
 )
-from agentica.run_config import RunConfig
-from agentica.workflow import Workflow, WorkflowSession
-from agentica.hooks import AgentHooks, RunHooks, ConversationArchiveHooks, MemoryExtractHooks, ExperienceCaptureHooks
+from agentica.run.config import RunConfig
+from agentica.orchestration.workflow import Workflow, WorkflowSession
+from agentica.agent.hooks import AgentHooks, RunHooks, ConversationArchiveHooks, MemoryExtractHooks, ExperienceCaptureHooks
 
 # ── Experience system ──
 from agentica.experience import (
@@ -449,7 +449,7 @@ from agentica.experience import (
 from agentica.workspace import Workspace, WorkspaceConfig
 
 # ── Critic (actor-critic protocol + refine composer) ──
-from agentica.critic import (
+from agentica.orchestration.critic import (
     Critic,
     CritiqueResult,
     CritiqueStyle,

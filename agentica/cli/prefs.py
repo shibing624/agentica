@@ -120,7 +120,7 @@ def read_project_prefs(work_dir: Optional[str], user_id: Optional[str] = None) -
     """Read this work_dir's saved CLI preferences (``{}`` when never set)."""
     if not work_dir:
         return {}
-    from agentica.project_store import get_project_cli_prefs, project_base_dir
+    from agentica.config.project import get_project_cli_prefs, project_base_dir
 
     return normalize_cli_prefs(get_project_cli_prefs(project_base_dir(work_dir, user_id)))
 
@@ -139,7 +139,7 @@ def write_project_prefs(
     updates = normalize_cli_prefs(updates)
     if not work_dir or not updates:
         return
-    from agentica.project_store import (
+    from agentica.config.project import (
         ensure_project_work_dir,
         project_base_dir,
         update_project_cli_prefs,

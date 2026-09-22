@@ -190,7 +190,7 @@ class TestRunner(unittest.TestCase):
     def test_run_sync_delegates_to_runner(self):
         """agent.run_sync should delegate to agent._runner.run_sync."""
         from agentica.agent import Agent
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         agent = Agent(model=Mock())
         agent._runner.run = AsyncMock(return_value=RunResponse(content="mocked"))
         resp = agent.run_sync("test")
@@ -402,7 +402,7 @@ class TestAgentMockedModel(unittest.TestCase):
     def test_agent_with_mock_model_run_sync(self):
         """Agent.run_sync with completely mocked model."""
         from agentica.agent import Agent
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
 
         agent = Agent()
         agent._runner.run = AsyncMock(return_value=RunResponse(content="Hello!"))
@@ -413,7 +413,7 @@ class TestAgentMockedModel(unittest.TestCase):
         """Agent with OpenAIChat using fake key (mocked response)."""
         from agentica.agent import Agent
         from agentica.model.openai.chat import OpenAIChat
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
 
         model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
         agent = Agent(model=model)

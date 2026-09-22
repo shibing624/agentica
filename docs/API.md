@@ -94,14 +94,14 @@ from agentica.tools.decorators import tool
 ### 运行配置
 
 ```python
-from agentica.run_response import RunResponse, RunEvent
-from agentica.run_config import RunConfig
+from agentica.run.response import RunResponse, RunEvent
+from agentica.run.config import RunConfig
 ```
 
 ### Hook 接口
 
 ```python
-from agentica.hooks import RunHooks, AgentHooks
+from agentica.agent.hooks import RunHooks, AgentHooks
 ```
 
 ### Workspace（默认装）
@@ -258,10 +258,10 @@ uv add "agentica[tools-browser]"     # browser + crawl
 from agentica.subagents import SubagentRegistry
 
 # 多 Agent 并行 / 自治（建议新代码用 asyncio.gather）
-from agentica.swarm import Swarm
+from agentica.orchestration.swarm import Swarm
 
 # 工作流编排（建议新代码用顺序 Python）
-from agentica.workflow import Workflow
+from agentica.orchestration.workflow import Workflow
 
 # 技能 / 经验（自进化能力）
 from agentica.skills import SkillRegistry

@@ -12,8 +12,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.hooks import RunHooks
-from agentica.run_response import RunResponse, RunEvent
+from agentica.agent.hooks import RunHooks
+from agentica.run.response import RunResponse, RunEvent
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -118,7 +118,7 @@ class TestRunnerRunTimeout(unittest.TestCase):
     """run_timeout in RunConfig should return a timeout response."""
 
     def test_run_timeout_returns_response_with_timeout_content(self):
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
         agent = _make_agent()
 
         # Mock model to hang for longer than timeout
@@ -259,10 +259,10 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         already persisted, while a slow on_end hook is still awaiting.
         """
         from agentica.agent import Agent
-        from agentica.hooks import AgentHooks
+        from agentica.agent.hooks import AgentHooks
         from agentica.model.openai import OpenAIChat
         from agentica.model.response import ModelResponse, ModelResponseEvent
-        from agentica.run_response import AgentCancelledError
+        from agentica.run.response import AgentCancelledError
 
         agent = Agent(model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
 
@@ -873,7 +873,7 @@ class TestRunnerToolEventsCarryTheirToolCall(unittest.TestCase):
         return Agent(name="t", model=model, tools=[alpha, beta])
 
     def _collect(self):
-        from agentica.run_config import RunConfig
+        from agentica.run.config import RunConfig
 
         agent = self._stream_agent()
         started, completed = [], []

@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-from agentica import git_state, worktrees
+from agentica.peers import git_state, worktrees
 
 
 class WorktreeBinder:

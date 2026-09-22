@@ -6,7 +6,7 @@
 from typing import List
 
 from pydantic import BaseModel, ConfigDict
-from agentica.document import Document
+from agentica.knowledge.document import Document
 
 
 class Rerank(BaseModel):

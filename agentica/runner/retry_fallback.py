@@ -21,7 +21,7 @@ from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
 from agentica.model.usage import Usage
-from agentica.run_config import RunConfig
+from agentica.run.config import RunConfig
 
 if TYPE_CHECKING:
     from agentica.agent import Agent

@@ -102,7 +102,7 @@ class TestMemoryLeak(TestCase):
 
     def test_run_response_no_agent_reference(self):
         """Verify RunResponse doesn't hold Agent reference (good design)."""
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
 
         # Check RunResponse fields
         fields = RunResponse.model_fields.keys()
@@ -114,7 +114,7 @@ class TestMemoryLeak(TestCase):
     def test_working_memory_no_agent_reference(self):
         """Test that WorkingMemory.runs doesn't hold Agent references."""
         from agentica.memory import WorkingMemory, AgentRun
-        from agentica.run_response import RunResponse
+        from agentica.run.response import RunResponse
         from agentica.model.message import Message
 
         memory = WorkingMemory()

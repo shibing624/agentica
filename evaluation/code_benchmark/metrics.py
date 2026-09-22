@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.model.usage import split_prompt_usage
 
 from .execute import run_command

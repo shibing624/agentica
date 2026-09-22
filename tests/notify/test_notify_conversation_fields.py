@@ -12,7 +12,7 @@ import pytest
 
 from agentica.notify import install_sink, notify_sink_dispatch, reset_sink_for_tests
 from agentica.notify.config import NotifyConfig
-from agentica.run_events import RunEventRecord, RunEventType
+from agentica.run.events import RunEventRecord, RunEventType
 
 from tests.notify.test_notify_sink import _FakeDesktop
 

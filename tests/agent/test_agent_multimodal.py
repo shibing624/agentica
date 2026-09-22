@@ -15,7 +15,7 @@ from agentica.agent import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 def _mock_resp(content="OK"):

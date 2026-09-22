@@ -8,7 +8,7 @@ from hashlib import md5
 from typing import List, Dict, Any, Optional
 import numpy as np
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger

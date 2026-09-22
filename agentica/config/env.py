@@ -22,7 +22,7 @@ load_dotenv(AGENTICA_DOTENV_PATH)
 #     shell env  >  .env  >  config.yaml
 # Injection uses setdefault semantics, so an already-set variable is never
 # overwritten. The SDK keeps reading plain env vars; nothing else has to change.
-from agentica.global_config import apply_global_config, get_setting
+from agentica.config.profiles import apply_global_config, get_setting
 
 try:
     apply_global_config()

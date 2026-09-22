@@ -79,7 +79,7 @@ class TestRewindCommand(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.work = self._tmp.name
         self._root = tempfile.TemporaryDirectory()
-        self._patch = patch("agentica.checkpoint.DEFAULT_CHECKPOINT_ROOT", self._root.name)
+        self._patch = patch("agentica.agent.checkpoint.DEFAULT_CHECKPOINT_ROOT", self._root.name)
         self._patch.start()
 
         from agentica.memory.working import WorkingMemory
@@ -109,7 +109,7 @@ class TestRewindCommand(unittest.TestCase):
     def test_list_turns(self):
         self._seed_turn(1, prompt="turn one", msg_index=0)
         _cmd_rewind(self.ctx, "list")
-        from agentica.checkpoint import TurnCheckpointer
+        from agentica.agent.checkpoint import TurnCheckpointer
 
         turns = TurnCheckpointer(session_id="rewind-cli").list_turns()
         self.assertEqual([t.turn for t in turns], [1])

@@ -8,7 +8,7 @@
 
 ## SDK 契约
 
-SDK 仍读纯环境变量。import 时 `agentica/config.py` 调 `apply_global_config()`（实现在 `agentica/global_config.py`），把**活动** profile 的 `api_key`（通过 `PROVIDER_API_KEY_ENV` 投射到 provider 专属 env 变量）和自由 `env` 块用 **`setdefault` 语义**注入 `os.environ`（绝不覆盖已有变量）。无 model 类或工具改动。
+SDK 仍读纯环境变量。import 时 `agentica/config/env.py` 调 `apply_global_config()`（实现在 `agentica/config/profiles.py`），把**活动** profile 的 `api_key`（通过 `PROVIDER_API_KEY_ENV` 投射到 provider 专属 env 变量）和自由 `env` 块用 **`setdefault` 语义**注入 `os.environ`（绝不覆盖已有变量）。无 model 类或工具改动。
 
 ## 优先级（从高到低）：shell env > `.env` > `config.yaml`
 
@@ -90,9 +90,9 @@ cache_control_session_header: X-Session-Id
 
 粘住了路由，缓存仍然按**字节精确的前缀**匹配。system prompt 里带工作目录和 AGENTS.md 注入，所以**换项目目录 = 换前缀 = 重写一次缓存**，这是预期行为。会话中途哪些内容被冻结、为什么，见 [Memory & Workspace · 会话快照与 prompt cache](../concepts/memory.md#prompt-cache)。
 
-## Key functions（`agentica/global_config.py`）
+## Key functions（`agentica/config/profiles.py`）
 
-读写：`global_config_path`、`load_global_config`/`save_global_config`、`get_profile`/`get_profiles`、`get_active_profile_name`/`set_active_profile`、`upsert_profile`/`delete_profile`、`find_profile_for_provider`、`apply_global_config`、`provider_api_key_env`、`resolve_active_profile_name`、`write_commented_template`、`get_setting`/`set_setting`。其中 9 个核心读/写 API（`global_config_path`、`load_global_config`、`save_global_config`、`get_profile`、`get_profiles`、`get_active_profile_name`、`set_active_profile`、`upsert_profile`、`apply_global_config`）从 `agentica/__init__.py` re-export；其余用 `from agentica.global_config import ...`。所有写路径都 round-trip YAML 文件以保留用户注释。
+读写：`global_config_path`、`load_global_config`/`save_global_config`、`get_profile`/`get_profiles`、`get_active_profile_name`/`set_active_profile`、`upsert_profile`/`delete_profile`、`find_profile_for_provider`、`apply_global_config`、`provider_api_key_env`、`resolve_active_profile_name`、`write_commented_template`、`get_setting`/`set_setting`。其中 9 个核心读/写 API（`global_config_path`、`load_global_config`、`save_global_config`、`get_profile`、`get_profiles`、`get_active_profile_name`、`set_active_profile`、`upsert_profile`、`apply_global_config`）从 `agentica/__init__.py` re-export；其余用 `from agentica.config.profiles import ...`。所有写路径都 round-trip YAML 文件以保留用户注释。
 
 ## Profile 生效顺序：project override > global active > default
 

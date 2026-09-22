@@ -43,7 +43,7 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, DeepSeekChat
-from agentica.run_events import RunEventType
+from agentica.run.events import RunEventType
 
 
 def _print_budget(result) -> None:

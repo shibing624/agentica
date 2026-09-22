@@ -170,7 +170,7 @@ agentica extensions install /path/to/skill-repo --target-dir ~/.agentica/skills
 ### 方式三：按需激活（RunConfig 白名单）
 
 ```python
-from agentica.run_config import RunConfig
+from agentica.run.config import RunConfig
 
 result = await agent.run(
     "审查这段代码",

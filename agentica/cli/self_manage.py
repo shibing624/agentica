@@ -19,7 +19,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 from agentica.version import __version__
-from agentica.global_config import (
+from agentica.config.profiles import (
     load_global_config,
     get_profile,
     get_active_profile_name,

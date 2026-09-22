@@ -12,22 +12,35 @@ V2 architecture with layered configuration:
 - printer.py: Response printing utilities
 
 Execution engine lives in agentica/runner.py (Runner class).
+
+Submodules stay importable without pulling ``base`` (``model.base`` imports
+``agent.hooks`` while it is still loading). Names are resolved on first use.
 """
 
-from agentica.agent.base import Agent, AgentCancelledError
-from agentica.agent.config import (
-    PromptConfig,
-    ToolConfig,
-    WorkspaceMemoryConfig,
-)
-from agentica.hooks import AgentHooks, RunHooks
+import importlib
 
-__all__ = [
-    "Agent",
-    "AgentCancelledError",
-    "PromptConfig",
-    "ToolConfig",
-    "WorkspaceMemoryConfig",
-    "AgentHooks",
-    "RunHooks",
-]
+_EXPORTS = {
+    "Agent": ("agentica.agent.base", "Agent"),
+    "AgentCancelledError": ("agentica.agent.base", "AgentCancelledError"),
+    "PromptConfig": ("agentica.agent.config", "PromptConfig"),
+    "ToolConfig": ("agentica.agent.config", "ToolConfig"),
+    "WorkspaceMemoryConfig": ("agentica.agent.config", "WorkspaceMemoryConfig"),
+    "AgentHooks": ("agentica.agent.hooks", "AgentHooks"),
+    "RunHooks": ("agentica.agent.hooks", "RunHooks"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_path, attr_name = target
+    value = getattr(importlib.import_module(module_path), attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_EXPORTS))

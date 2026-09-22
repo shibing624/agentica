@@ -81,7 +81,7 @@ def _drop_consumed_window_preamble(messages: List[Dict[str, Any]]) -> List[Dict[
 # work_dir into the directory name and cannot be reversed, so without this the
 # only way to learn which project a stored session belongs to is to parse a
 # transcript. ``project.json`` also holds the project-scoped active profile.
-from agentica.project_store import (
+from agentica.config.project import (
     ensure_project_work_dir,
     read_project_file,
 )
@@ -106,7 +106,7 @@ def _get_default_base_dir(
             for the Web (per-session work_dir differs from the server cwd).
         user_id: Owner of the sessions. Keeps different users' sessions apart.
     """
-    from agentica.project_store import project_base_dir
+    from agentica.config.project import project_base_dir
 
     return project_base_dir(work_dir or os.getcwd(), user_id=user_id)
 
@@ -607,7 +607,7 @@ class SessionLog:
         return entry_uuid
 
     # ------------------------------------------------------------------
-    # Goal entries (standing-goal loop; see agentica/goals.py)
+    # Goal entries (standing-goal loop; see agentica/agent/goals.py)
     # ------------------------------------------------------------------
     # ``type="goal"`` entries snapshot the GoalState. They break the
     # parent_uuid chain (parent_uuid=None) like compact_boundary so they
@@ -1469,7 +1469,7 @@ class SessionLog:
     @classmethod
     def list_projects(cls, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List every project directory holding sessions for ``user_id``."""
-        from agentica.project_store import projects_root
+        from agentica.config.project import projects_root
 
         root = Path(projects_root(user_id))
         if not root.is_dir():
@@ -1494,7 +1494,7 @@ class SessionLog:
         ``work_dir`` of the project they live in so the caller can offer to
         switch to it.
         """
-        from agentica.project_store import projects_root
+        from agentica.config.project import projects_root
 
         needle = (needle or "").split("...", 1)[0].strip()
         if not needle:

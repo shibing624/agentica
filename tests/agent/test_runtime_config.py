@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentica.agent.config import ToolRuntimeConfig, SkillRuntimeConfig
-from agentica.run_config import RunConfig
+from agentica.run.config import RunConfig
 
 
 def _write_test_skill(root: Path, name: str, description: str) -> Path:

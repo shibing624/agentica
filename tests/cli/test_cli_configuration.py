@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
@@ -26,7 +26,7 @@ from agentica.cli.commands import runtime as cli_runtime_commands
 from agentica.cli.commands import helpers as cli_helpers
 from agentica.cli.commands import tools_skills as cli_tools_skills
 from agentica.cli import setup as cli_setup
-from agentica.goals import CONTINUATION_PROMPT_PREFIX
+from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 
 
@@ -204,7 +204,7 @@ class TestCLIConfiguration(unittest.TestCase):
         the legacy free-form path called ``_persist_model_choice`` which
         clobbered whatever main/aux/tuning the active profile had stored.
         """
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = CommandContext(
             agent_config={
@@ -223,7 +223,7 @@ class TestCLIConfiguration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model", return_value=MagicMock()),
                 patch.object(cli_model_config, "create_agent", return_value=MagicMock()),
@@ -255,7 +255,7 @@ class TestCLIConfiguration(unittest.TestCase):
         not a profile body change), but each profile's main/aux/tuning fields
         must survive intact.
         """
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = CommandContext(
             agent_config={
@@ -274,7 +274,7 @@ class TestCLIConfiguration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model", return_value=MagicMock()) as mock_get_model,
                 patch.object(cli_model_config, "create_agent", return_value=MagicMock()),
@@ -323,7 +323,7 @@ class TestCLIConfiguration(unittest.TestCase):
         same fallback — resolving with a bare (possibly-None) ``work_dir`` looks
         up the wrong key and silently falls back to the stale global default.
         """
-        from agentica import global_config as gc
+        import agentica.config.profiles as gc
 
         ctx = CommandContext(
             agent_config={
@@ -344,7 +344,7 @@ class TestCLIConfiguration(unittest.TestCase):
             os.makedirs(home, exist_ok=True)
             cfg_path = os.path.join(home, "config.yaml")
             with (
-                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
                 patch.dict(os.environ, {"AGENTICA_HOME": home}),
                 patch.object(cli_model_config, "get_console", return_value=MagicMock()),
                 patch.object(cli_model_config, "get_model", return_value=MagicMock()),
@@ -480,7 +480,7 @@ class TestCLIConfiguration(unittest.TestCase):
         """
         from agentica.cli.interactive import goal_hook as cli_goal_hook
         from agentica.cli.interactive.session_state import SessionState
-        from agentica.goals import GoalDecision
+        from agentica.agent.goals import GoalDecision
 
         continuation = f"{CONTINUATION_PROMPT_PREFIX}\nGoal: ship it"
         pending_queue = PendingQueue()

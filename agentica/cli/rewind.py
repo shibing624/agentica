@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
-from agentica.checkpoint import TurnCheckpointer
+from agentica.agent.checkpoint import TurnCheckpointer
 from agentica.cli.commands.helpers import clip_preview_head
 from agentica.utils.log import logger
 

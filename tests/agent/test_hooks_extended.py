@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Tests for agentica.hooks — new hook methods: on_user_prompt, on_pre_compact, on_post_compact,
+"""Tests for agentica.agent.hooks — new hook methods: on_user_prompt, on_pre_compact, on_post_compact,
 and _CompositeRunHooks chaining behavior."""
 import asyncio
 import unittest
 from unittest.mock import MagicMock, AsyncMock
 
-from agentica.hooks import (
+from agentica.agent.hooks import (
     AgentHooks,
     RunHooks,
     ConversationArchiveHooks,

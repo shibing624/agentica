@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentica.media import (
+from agentica.model.media import (
     is_multimodal_tool_result,
     multimodal_text_summary,
     multimodal_tool_result,

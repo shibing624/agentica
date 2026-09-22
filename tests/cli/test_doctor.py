@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Unit tests for the environment doctor (agentica.diagnostics).
+@description: Unit tests for the environment doctor (agentica.cli.diagnostics).
 """
 import os
 import sys
@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
-from agentica.diagnostics import run_doctor, DoctorReport, OK, WARN, FAIL
+from agentica.cli.diagnostics import run_doctor, DoctorReport, OK, WARN, FAIL
 
 
 class TestDoctor(unittest.TestCase):

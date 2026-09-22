@@ -112,7 +112,7 @@ def create_model(
 
     # Delegate instantiation to the central registry (single source of truth
     # for the provider dispatch table — avoids drift with a parallel copy).
-    from agentica.provider_registry import create_provider, get_provider_factory, list_providers
+    from agentica.model.providers import create_provider, get_provider_factory, list_providers
     if get_provider_factory(model_provider) is None:
         raise ValueError(
             f"Unknown model_provider '{model_provider}'. "

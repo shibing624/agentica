@@ -9,7 +9,7 @@ Design
 Debate is fundamentally **two-way adversarial dialogue**, not the one-way
 ``actor -> critic -> revise`` flow that ``refine()`` models. So this demo
 hand-rolls the pipeline (so every utterance is visible to the user) while
-still leveraging :class:`agentica.critic.AgentCritic` to wrap each side as
+still leveraging :class:`agentica.orchestration.critic.AgentCritic` to wrap each side as
 the other's critic and extract their rebuttal as a structured
 :class:`CritiqueResult`.
 
@@ -32,7 +32,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import asyncio
 
 from agentica import Agent, OpenAIChat
-from agentica.critic import AgentCritic
+from agentica.orchestration.critic import AgentCritic
 
 
 def _section(title: str) -> None:

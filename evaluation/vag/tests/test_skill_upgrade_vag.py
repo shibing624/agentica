@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from agentica.critic import CritiqueResult
+from agentica.orchestration.critic import CritiqueResult
 from agentica.experience.skill_upgrade import SkillEvolutionManager
 from evaluation.vag.lifecycle import VaGLifecycleHooks, read_provenance_events
 

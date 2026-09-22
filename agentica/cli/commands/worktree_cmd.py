@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from agentica.cli.runtime import get_console
 from agentica.cli.commands.context import CommandContext
-from agentica.worktrees import WorktreeError
+from agentica.peers.worktrees import WorktreeError
 
 _USAGE = (
     "  [dim]Usage: /worktree [status] | new <name> [--base <branch>] | "

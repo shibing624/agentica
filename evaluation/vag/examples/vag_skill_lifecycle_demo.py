@@ -36,7 +36,7 @@ sys.path.insert(0, _REPO_ROOT)
 
 from agentica import PROVIDER_FACTORIES
 from agentica.agent.config import SkillUpgradeConfig
-from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
+from agentica.orchestration.critic import CritiqueResult, ExecCritic, SchemaCritic
 from agentica.experience.skill_upgrade import SkillEvolutionManager
 from evaluation.vag.lifecycle import (
     SkillAdmissionGate,

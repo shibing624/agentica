@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from agentica.critic import Critic, CritiqueResult, SchemaCritic
+from agentica.orchestration.critic import Critic, CritiqueResult, SchemaCritic
 from agentica.skills.skill import Skill
 
 

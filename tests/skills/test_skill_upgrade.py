@@ -1144,7 +1144,7 @@ class TestHooksSkillUpgradeIntegration(unittest.TestCase):
 
     def _make_hooks(self, **config_overrides):
         config = ExperienceConfig(**config_overrides)
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         return ExperienceCaptureHooks(config)
 
     def _mock_agent(self, agent_id="test-agent"):
@@ -1290,7 +1290,7 @@ class TestToolRecoveryEmission(unittest.TestCase):
 
     def _make_hooks_with_real_store(self):
         from agentica.experience.event_store import ExperienceEventStore
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         config = ExperienceConfig(
             capture_tool_errors=True,
             capture_user_corrections=False,
@@ -1540,7 +1540,7 @@ class TestAgentSkillUpgradeLifecycle(unittest.TestCase):
     def test_spawned_generated_skill_refreshes_agent_session_guidance(self):
         """Spawned generated skills should appear in next-run session guidance immediately."""
         from agentica.agent import Agent
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         from agentica.model.openai import OpenAIChat
         from agentica.tools.skill_tool import SkillTool
         from agentica.workspace import Workspace
@@ -1583,7 +1583,7 @@ class TestAgentSkillUpgradeLifecycle(unittest.TestCase):
 
     def test_name_collision_with_project_skill_does_not_record_generated_episode(self):
         """If a project skill wins name resolution, generated skill should not get scored."""
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         from agentica.tools.skill_tool import SkillTool
 
         config = ExperienceConfig(
@@ -1665,7 +1665,7 @@ class TestOriginalTaskAnchoring(unittest.TestCase):
 
     def _make_hooks_with_real_store(self, run_input="search for X"):
         from agentica.experience.event_store import ExperienceEventStore
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         config = ExperienceConfig(
             capture_tool_errors=True,
             capture_user_corrections=False,
@@ -2087,7 +2087,7 @@ class TestCrossLayerCleanup(unittest.TestCase):
 
     def test_correction_always_goes_to_experience(self):
         """Correction classified as experience should be written to compiled store."""
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
 
         # capture_user_corrections is False by default; opt in explicitly for this test.
         # Disable the batch judge gates so a single turn flushes immediately.
@@ -2151,7 +2151,7 @@ class TestCrossLayerCleanup(unittest.TestCase):
 
     def test_classification_prompt_no_memory_feedback_target(self):
         """Classification prompt should not include memory_feedback as a persist_target."""
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         prompt = ExperienceCaptureHooks._FEEDBACK_CLASSIFY_PROMPT
         self.assertNotIn("memory_feedback", prompt)
         self.assertIn("experience", prompt)

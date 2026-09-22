@@ -480,7 +480,7 @@ class TestProjectApprovalPersist(unittest.TestCase):
             self.assertTrue(registry.decide("p1", "allow_prefix"))
             self.assertEqual(await waiter, "allow_prefix")
 
-            from agentica.project_store import project_base_dir, read_project_file
+            from agentica.config.project import project_base_dir, read_project_file
 
             data = read_project_file(project_base_dir(work, "default"))
             self.assertEqual(data["work_dir"], work)
@@ -517,7 +517,7 @@ class TestProjectApprovalPersist(unittest.TestCase):
             self.assertTrue(registry.decide("d1", "deny_prefix"))
             self.assertEqual(await waiter, "deny_prefix")
 
-            from agentica.project_store import project_base_dir, read_project_file
+            from agentica.config.project import project_base_dir, read_project_file
 
             data = read_project_file(project_base_dir(work, "default"))
             self.assertEqual(data["approvals"]["deny_command_prefixes"], [["rm", "-rf"]])
@@ -585,7 +585,7 @@ class TestProjectApprovalPersist(unittest.TestCase):
             self.assertTrue(registry.decide("once", "allow"))
             self.assertEqual(await waiter, "allow")
 
-            from agentica.project_store import project_base_dir, read_project_file
+            from agentica.config.project import project_base_dir, read_project_file
 
             data = read_project_file(project_base_dir(work, "default"))
             self.assertNotIn("approvals", data)
@@ -598,7 +598,7 @@ class TestProjectApprovalPersist(unittest.TestCase):
 
     def test_persist_merges_without_clobbering_active_profile(self):
         work = tempfile.mkdtemp()
-        from agentica.project_store import (
+        from agentica.config.project import (
             project_base_dir,
             read_project_file,
             write_project_file,

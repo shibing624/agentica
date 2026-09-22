@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 
 import tiktoken
 from pydantic import BaseModel
-from agentica.media import Audio, Image, Video, get_image_type
+from agentica.model.media import Audio, Image, Video, get_image_type
 from agentica.model.message import Message
 from agentica.tools.base import Function, ModelTool
 from agentica.utils.log import logger
@@ -378,7 +378,7 @@ def count_image_tokens(image: Union[Image, str, bytes, Dict[str, Any]]) -> int:
         return 85
 
     # Gateway / OpenAI process_image already pass {"url": "...", "detail"?: ...}
-    # dicts. Counting used to assume agentica.media.Image and crash on .detail.
+    # dicts. Counting used to assume agentica.model.media.Image and crash on .detail.
     if isinstance(image, dict):
         url = image.get("url")
         if not isinstance(url, str) or not url:

@@ -6,7 +6,7 @@ part of the code is from phidata
 """
 from typing import Union, List
 import json
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agentica.learning_report import (
+from agentica.experience.learning_report import (
     LearningReport,
     LearningStatus,
     write_learning_report,

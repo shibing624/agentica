@@ -11,8 +11,8 @@ import pytest
 
 from agentica.agent.config import SandboxConfig
 from agentica.compression.manager import CompressionManager
-from agentica.hooks import ConversationArchiveHooks
-from agentica.swarm import Swarm, SwarmResult
+from agentica.agent.hooks import ConversationArchiveHooks
+from agentica.orchestration.swarm import Swarm, SwarmResult
 from agentica.workspace import Workspace
 
 
@@ -472,7 +472,7 @@ class TestAutoArchiveHookInjection:
 
     def test_composite_hooks_merges_default_and_user(self):
         """_CompositeRunHooks should dispatch to both default and user hooks."""
-        from agentica.hooks import _CompositeRunHooks, RunHooks
+        from agentica.agent.hooks import _CompositeRunHooks, RunHooks
 
         hook1 = MagicMock(spec=RunHooks)
         hook1.on_agent_start = AsyncMock()

@@ -22,7 +22,7 @@ from agentica.memory.working import (
     _truncate_tool_content,
 )
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 class TestSessionSummary(unittest.TestCase):

@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
-from agentica.auxiliary_router import AuxiliaryModelRouter, COMPRESSION, GOAL_JUDGE
+from agentica.model.auxiliary import AuxiliaryModelRouter, COMPRESSION, GOAL_JUDGE
 
 
 class _M:

@@ -25,7 +25,7 @@ from agentica.cli.setup import (
     apply_named_profile_to_agent_config,
     session_profile,
 )
-from agentica.global_config import (
+from agentica.config.profiles import (
     get_profile,
     get_profiles,
     get_active_profile_name,
@@ -44,7 +44,7 @@ from agentica.utils.log import (
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
 from agentica.cli.usage_display import ProviderUsageSummary, format_cost_usd
-from agentica.project_store import project_base_dir
+from agentica.config.project import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.prefs import record_cli_prefs
@@ -383,7 +383,7 @@ def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
     profile_name = None
     if len(parts) >= 3:
         candidate = parts[-1]
-        from agentica.global_config import load_global_config
+        from agentica.config.profiles import load_global_config
 
         cfg = load_global_config() or {}
         if candidate in (cfg.get("profiles") or {}):

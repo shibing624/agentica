@@ -10,7 +10,7 @@ from typing import List, Optional, Iterator, Dict, Any, Union
 
 from pydantic import BaseModel, ConfigDict
 
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.utils.markdown_converter import MarkdownConverter
 from agentica.utils.log import logger
 from agentica.vectordb.base import VectorDb

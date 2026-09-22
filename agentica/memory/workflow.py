@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, ConfigDict
 
 from agentica.utils.log import logger
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 class WorkflowRun(BaseModel):

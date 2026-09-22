@@ -5,7 +5,7 @@ import unittest
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agentica.hooks import RunHooks
+from agentica.agent.hooks import RunHooks
 
 
 class TestOnUserPromptHookDefinition(unittest.TestCase):
@@ -40,7 +40,7 @@ class TestCompositeRunHooksOnUserPrompt(unittest.TestCase):
     """_CompositeRunHooks chains on_user_prompt calls."""
 
     def test_chaining(self):
-        from agentica.hooks import _CompositeRunHooks
+        from agentica.agent.hooks import _CompositeRunHooks
 
         class AddPrefix(RunHooks):
             async def on_user_prompt(self, agent: Any, message: str, **kwargs) -> Optional[str]:

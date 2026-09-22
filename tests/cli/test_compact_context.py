@@ -18,7 +18,7 @@ from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
-from agentica.run_response import RunResponse
+from agentica.run.response import RunResponse
 
 
 def _fat_run(turn: int) -> AgentRun:

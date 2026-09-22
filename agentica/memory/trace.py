@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from agentica.cost_tracker import CostTracker
+from agentica.model.cost import CostTracker
 from agentica.model.usage import cache_hit_percent
 from agentica.utils.string import format_file_size
 from agentica.utils.tokens import count_text_tokens

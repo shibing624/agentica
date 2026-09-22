@@ -26,7 +26,7 @@ from ..services.agent_service import AgentService
 from ..services import live_turn
 
 try:
-    from agentica.run_response import AgentCancelledError
+    from agentica.run.response import AgentCancelledError
 except ImportError:
     AgentCancelledError = None
 

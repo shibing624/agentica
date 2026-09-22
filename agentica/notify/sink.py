@@ -583,7 +583,7 @@ def _goal_is_driving(agent: Any) -> bool:
         session_log = getattr(agent, "_session_log", None)
         if session_log is None:
             return False
-        from agentica.goals import GoalManager
+        from agentica.agent.goals import GoalManager
 
         state = GoalManager(session_log).load()
         return state is not None and state.status == "active"

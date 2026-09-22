@@ -3,10 +3,10 @@
 @author:XuMing(xuming624@qq.com)
 @description: Rich rendering for `agentica doctor`.
 
-Thin presentation layer over agentica.diagnostics.run_doctor(); the SDK function
+Thin presentation layer over agentica.cli.diagnostics.run_doctor(); the SDK function
 holds all the logic so it stays usable headless.
 """
-from agentica.diagnostics import run_doctor, OK, WARN, FAIL
+from agentica.cli.diagnostics import run_doctor, OK, WARN, FAIL
 
 _ICON = {OK: "[green]\u2713[/green]", WARN: "[yellow]\u26a0[/yellow]", FAIL: "[red]\u2717[/red]"}
 

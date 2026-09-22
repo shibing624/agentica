@@ -24,8 +24,8 @@ from agentica.cli.display import (
 )
 from agentica.cli.runtime import get_console
 from agentica.cli.usage_display import ProviderUsageSummary
-from agentica.run_display import RunDisplayEventKind, classify_run_response
-from agentica.run_response import AgentCancelledError
+from agentica.run.display import RunDisplayEventKind, classify_run_response
+from agentica.run.response import AgentCancelledError
 from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger
 
@@ -392,8 +392,8 @@ def _process_stream_response(
     turn_checkpointer = None
     display = None
     try:
-        from agentica.run_config import RunConfig
-        from agentica.run_context import RunSource
+        from agentica.run.config import RunConfig
+        from agentica.run.context import RunSource
 
         run_config = RunConfig(stream_intermediate_steps=True, source=RunSource.cli)
 

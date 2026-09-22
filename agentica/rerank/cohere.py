@@ -5,7 +5,7 @@
 """
 from typing import List, Dict, Any, Optional
 from agentica.rerank.base import Rerank
-from agentica.document import Document
+from agentica.knowledge.document import Document
 from agentica.utils.log import logger
 
 try:

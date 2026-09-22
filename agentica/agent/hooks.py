@@ -25,7 +25,7 @@ from typing import Any, Optional, List, Dict, Tuple
 from agentica.experience import extract_state
 from agentica.experience.compiler import truncate_error_text
 from agentica.experience.skill_upgrade import SkillEvolutionManager
-from agentica.learning_report import (
+from agentica.experience.learning_report import (
     LearningReport,
     LearningStatus,
     write_learning_report,
@@ -233,7 +233,7 @@ class ConversationArchiveHooks(RunHooks):
 
     Usage::
 
-        from agentica.hooks import ConversationArchiveHooks
+        from agentica.agent.hooks import ConversationArchiveHooks
 
         hooks = ConversationArchiveHooks()
         response = await agent.run("Hello", config=RunConfig(hooks=hooks))
@@ -675,7 +675,7 @@ class ExperienceCaptureHooks(RunHooks):
 
     Usage::
 
-        from agentica.hooks import ExperienceCaptureHooks
+        from agentica.agent.hooks import ExperienceCaptureHooks
         from agentica.agent.config import ExperienceConfig
 
         hooks = ExperienceCaptureHooks(ExperienceConfig())

@@ -31,7 +31,7 @@ class TestSearchSkipsNestedCheckouts:
     def test_glob_returns_each_file_once(self, tmp_path, monkeypatch):
         root, nested = _tree_with_nested_copy(tmp_path)
         monkeypatch.setattr(
-            "agentica.worktrees.nested_worktrees",
+            "agentica.peers.worktrees.nested_worktrees",
             lambda *a, **k: (os.path.realpath(str(nested)),),
         )
 
@@ -43,7 +43,7 @@ class TestSearchSkipsNestedCheckouts:
     def test_grep_returns_each_file_once(self, tmp_path, monkeypatch):
         root, nested = _tree_with_nested_copy(tmp_path)
         monkeypatch.setattr(
-            "agentica.worktrees.nested_worktrees",
+            "agentica.peers.worktrees.nested_worktrees",
             lambda *a, **k: (os.path.realpath(str(nested)),),
         )
 
@@ -57,7 +57,7 @@ class TestSearchSkipsNestedCheckouts:
     def test_the_nested_copy_is_still_readable_when_it_is_the_work_dir(self, tmp_path, monkeypatch):
         root, nested = _tree_with_nested_copy(tmp_path)
         monkeypatch.setattr(
-            "agentica.worktrees.nested_worktrees",
+            "agentica.peers.worktrees.nested_worktrees",
             lambda *a, **k: (os.path.realpath(str(nested)),),
         )
 
@@ -68,7 +68,7 @@ class TestSearchSkipsNestedCheckouts:
     def test_a_custom_nested_name_is_excluded_the_same_way(self, tmp_path, monkeypatch):
         root, nested = _tree_with_nested_copy(tmp_path, nested_rel=".worktrees/docs")
         monkeypatch.setattr(
-            "agentica.worktrees.nested_worktrees",
+            "agentica.peers.worktrees.nested_worktrees",
             lambda *a, **k: (os.path.realpath(str(nested)),),
         )
 
@@ -87,8 +87,8 @@ class TestUnstubbedNestedSelfExclude:
     """
 
     def test_glob_from_main_skips_the_nested_tree(self, clone_git_repo, tmp_path, monkeypatch):
-        from agentica import worktrees
-        from agentica.worktrees import ensure
+        from agentica.peers import worktrees
+        from agentica.peers.worktrees import ensure
 
         monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
         repo = clone_git_repo(tmp_path / "repo")
@@ -103,8 +103,8 @@ class TestUnstubbedNestedSelfExclude:
     def test_glob_from_inside_the_worktree_still_sees_its_files(
         self, clone_git_repo, tmp_path, monkeypatch
     ):
-        from agentica import worktrees
-        from agentica.worktrees import ensure
+        from agentica.peers import worktrees
+        from agentica.peers.worktrees import ensure
 
         monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
         repo = clone_git_repo(tmp_path / "repo")
@@ -117,8 +117,8 @@ class TestUnstubbedNestedSelfExclude:
     def test_glob_with_path_pointed_at_the_tree_sees_its_files(
         self, clone_git_repo, tmp_path, monkeypatch
     ):
-        from agentica import worktrees
-        from agentica.worktrees import ensure
+        from agentica.peers import worktrees
+        from agentica.peers.worktrees import ensure
 
         monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
         repo = clone_git_repo(tmp_path / "repo")

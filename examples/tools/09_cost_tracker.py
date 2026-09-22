@@ -30,7 +30,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 def demo_cost_tracker_unit():
     """直接调用 CostTracker 验证定价计算。"""
-    from agentica.cost_tracker import CostTracker, MODEL_PRICING
+    from agentica.model.cost import CostTracker, MODEL_PRICING
 
     print("=" * 60)
     print("Demo 1: CostTracker 单元测试（无需 API Key）")
@@ -122,7 +122,7 @@ async def demo_cost_in_response():
 
 def demo_multi_model_pricing():
     """对比不同模型相同 token 量下的成本差异。"""
-    from agentica.cost_tracker import CostTracker, MODEL_PRICING
+    from agentica.model.cost import CostTracker, MODEL_PRICING
 
     print("=" * 60)
     print("Demo 3: 不同模型相同 token 量成本对比")

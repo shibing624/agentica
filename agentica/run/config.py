@@ -7,6 +7,8 @@ Separates "each run may differ" parameters from Agent construction.
 Agent fields are defaults; RunConfig overrides them for a specific run.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -18,10 +20,10 @@ from typing import (
     Union,
 )
 
-from agentica.hooks import RunHooks
-from agentica.run_context import RunSource
+from agentica.run.context import RunSource
 
 if TYPE_CHECKING:
+    from agentica.agent.hooks import RunHooks
     from agentica.model.base import Model
 
 
