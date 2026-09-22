@@ -339,7 +339,7 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
 ```
 
 !!! tip "自动压缩"
-    占用升高时会先做免费的 Layer 1 淘汰（约 70% 起）；接近窗口上限时再跑 Layer 2
+    占用升高时会先做免费的 Layer 1 淘汰（80% 起）；接近窗口上限时再跑 Layer 2
     换窗。`/compact` 始终强制换窗。旧轮次留在 JSONL，用 `search_session` 查。
     目标 / 约束 / 进度写到旁边的 `<session>.notes.md`。多余参数不再当摘要指令。
 

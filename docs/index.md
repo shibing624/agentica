@@ -57,7 +57,7 @@
 | [RunConfig](advanced/run-config.md) | 运行时配置（超时、成本、白名单） |
 | [Standing Goal Loop](advanced/goals.md) | `/goal` 长任务循环：自动判断、续跑、token / wall-clock 预算 |
 | [Guardrails](advanced/guardrails.md) | 4 层安全守卫 |
-| [Context Compression](advanced/compression.md) | 两层压缩：淘汰旧 tool result → 空窗换窗；`search_session` 找回旧轮次 |
+| [Context Compression](advanced/compression.md) | 无损两层压缩（全程零 LLM 摘要）：淘汰旧 tool result → 空窗换窗；原文留在 JSONL，`search_session` 找回旧轮次 |
 | [Skills](advanced/skills.md) | Markdown Skill 系统 |
 | [Daily Tasks](advanced/daily-tasks.md) | 定时任务、失败可见性与运行历史 |
 | [MCP](advanced/mcp.md) | Model Context Protocol |

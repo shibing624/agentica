@@ -2,6 +2,18 @@
 
 Agentica 提供两层上下文压缩策略，防止长对话或大量工具输出导致 token 超限。Layer 2 对齐 Codex TokenBudget compact：满窗时换一个空的活动窗，**不再**调用 LLM 或 `/responses/compact` 做摘要。旧对话留在 session JSONL，用 `search_session` 查。
 
+## 为什么叫「无损」
+
+业界主流的 compact 是让 LLM 把前文概括成摘要：花一次额外调用、结果有损，且被概括掉的细节再也拿不回来。Agentica 的压缩路径上**没有任何一步调用 LLM 做摘要**（`tests/compression/test_compression.py::test_new_window_does_not_call_an_llm` 钉住这条不变量），信息只是离开 prompt，不离开磁盘：
+
+| 离开 prompt 的东西 | 去哪了 | 怎么拿回来 |
+|---|---|---|
+| 超大单条 tool 结果（Layer 0） | `~/.agentica/projects/<user>/<project>/<session>/tool-results/<id>.txt` | 上下文里留了路径，`read_file` 直接读 |
+| 旧轮次的 tool 结果 / 超长调用参数（Layer 1） | 不额外落盘（原文仍在 session JSONL） | 占位符写明是哪个调用，模型原样重发；取回成本与重跑相同，而文件读取的原路径比快照更新鲜 |
+| 活动窗里的旧轮次（Layer 2） | 留在 session JSONL 的 `compact_boundary` 之前 | `search_session` 按词检索；交接摘要在 `<session>.notes.md` |
+
+所以「无损」指的是**全文始终可回取、且压缩本身不花 token**，不是「prompt 里什么都不丢」——prompt 一定会瘦，否则就没有压缩。
+
 ## 两层设计
 
 压缩本质上只有两种操作，按代价从低到高尝试：
@@ -38,7 +50,7 @@ Context Messages
 
 只有两个参数，没有「保留最近 N 条」这类计数：
 
-- **`EVICT_THRESHOLD_RATIO = 0.7`** — 占用低于窗口 70% 时一条都不动。清掉一条窗口本来放得下的结果是净亏：省下的上下文没人要，模型却要重跑工具才能拿回来。
+- **`EVICT_THRESHOLD_RATIO = 0.8`** — 占用低于窗口 80% 时一条都不动。清掉一条窗口本来放得下的结果是净亏：省下的上下文没人要，模型却要重跑工具才能拿回来。取 0.8 而不是 0.9：从 0.9 起这一层要靠 tool result 单独腾出 40% 窗口才能降到 0.5 的目标，文本为主的会话做不到，于是 Layer 2 会在 5% 的间隙里紧接着触发，把前缀断点翻倍。项目级可用 `AGENTICA_EVICT_THRESHOLD_RATIO` 覆盖（写进项目 `.env`），它是压缩策略唯一对外暴露的比例。
 - **`EVICT_TARGET_RATIO = 0.5`** — 超过阈值后按最旧优先淘汰，降回 50% 就停。目标低于阈值是为了迟滞，否则每轮刚跌破阈值又超，变成持续抖动。
 
 最近的结果之所以幸存，是因为淘汰在够到它们之前就停了。**消息尾部那一段连续的工具结果（模型还没看过的当前批次）整体排除在外**：任何固定条数都会输给 count+1 大小的并行批次，这正是「读了又读」死循环的成因。CLI `--tools`、SDK `tools=`、Web extra、MCP 与内置工具走同一条边界，不按名字开白名单。

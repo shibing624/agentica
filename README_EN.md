@@ -42,7 +42,17 @@ A terminal session *is* a collaborator. In-process `task` spawns a cheap read-on
 
 What a session learned is compiled into a reusable `SKILL.md`, so the next run of a similar task starts from last time's conclusion instead of from scratch. See the [Skills docs](https://shibing624.github.io/agentica/advanced/skills).
 
-### 4. 📱 You can leave the desk
+### 4. 🧠 Long sessions never lose the thread: compaction without an LLM
+
+The industry-standard compact asks an LLM to summarise the transcript — an extra call, lossy, and whatever got summarised away is gone for good. Agentica's compaction path uses **no LLM summary at all**:
+
+- **Oversized tool output spills to disk the moment it is produced** — the context keeps a 2000-char preview (40% head + 60% tail) plus the file path, and the model reads the path back when it needs the detail; when the session has no file-reading tool, the output is truncated honestly instead of handing out a path nobody can open
+- **Eviction only under pressure** — nothing moves below 80% window occupancy, then oldest-first eviction down to 50%; the placeholder names the evicted call so the model can re-issue it verbatim. The live tool round (in-flight calls + the trailing result batch) is never touched
+- **A full window opens a fresh one** — `<context_window>` plus handover notes, with no synthetic summary turn
+
+The transcript always stays in the session JSONL, retrievable any time via `search_session`. The result: **long sessions keep their memory, compaction costs no extra tokens, and every compaction point is auditable.** See the [compression docs](https://shibing624.github.io/agentica/advanced/compression).
+
+### 5. 📱 You can leave the desk
 
 WeChat / WeCom / Feishu / Telegram reach the agents on this machine: address one with `@session-name`, or just say what you want and let the gateway agent direct every session on the box.
 
@@ -231,7 +241,7 @@ agent = DeepAgent()
 **Memory & evolution**
 
 - **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense; standing rules live in `AGENTS.md`
-- **Context compression** — Layer 1 evicts old tool results; a full window opens an empty new one (no LLM summary). Prior turns stay in the JSONL; `search_session` retrieves them; handover goes in `<session>.notes.md`
+- **Lossless context compression** — No LLM summary anywhere: oversized tool output spills to disk on production, eviction starts only past 80% window occupancy, a full window opens an empty one. The transcript stays in the session JSONL, retrievable via `search_session`; handover goes in `<session>.notes.md`
 - **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
 - **Self-Evolution** — Experience cards auto-compile into reusable `SKILL.md` across sessions
 
@@ -262,7 +272,7 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 | **Tools** | Custom tools, async tools, search, code execution, parallel tools, concurrency safety, cost tracking, sandbox isolation, compression |
 | **Agent Patterns** | Agent-as-tool, parallel execution, multi-agent collaboration, debate, routing, Swarm, sub-agent, model-layer hooks, session resume |
 | **Guardrails** | Input / output / tool-level guardrails, streaming guardrails |
-| **Memory** | Session history, WorkingMemory, context compression, Workspace memory, LLM auto-memory |
+| **Memory** | Session history, WorkingMemory, lossless context compression, Workspace memory, LLM auto-memory |
 | **RAG** | PDF Q&A, advanced RAG, LangChain / LlamaIndex integration |
 | **Workflows** | Data pipeline, investment research, news reporting, code review |
 | **MCP** | Stdio / SSE / HTTP transport, JSON config |

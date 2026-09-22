@@ -139,11 +139,11 @@ Model Response
 
 ## 上下文压缩机制
 
-让一个超窗口的请求装下只有两种办法，按代价从低到高尝试：
+让一个超窗口的请求装下只有两种办法，按代价从低到高尝试。两层都不调 LLM 做摘要——信息离开 prompt 但不离开磁盘，全文始终可从 session JSONL / 落盘文件回取，这是 Agentica 压缩「无损」的含义（见 [无损压缩](../advanced/compression.md#为什么叫无损)）：
 
 ```
 Layer 1 淘汰（免费，无 LLM）:
-    触发：token_count >= context_window × 0.7
+    触发：token_count >= context_window × 0.8
     按最旧优先把 tool result 内容换成写明调用的占位符
     同时收缩过大的 tool_call 参数字符串（JSON 仍然合法）
     降回 context_window × 0.5 就停；模型还没看过的当前批次永不淘汰

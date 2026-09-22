@@ -31,7 +31,7 @@ agent = Agent(
 )
 ```
 
-会话摘要会注入到 System Prompt 末尾。Layer 2 compact 不再复用这份摘要：满窗时换空窗，历史用 `search_session` 从 JSONL 取。
+会话摘要会注入到 System Prompt 末尾。这是一个**独立于压缩**的可选功能：Layer 2 compact 不复用这份摘要，满窗时只换空窗，历史用 `search_session` 从 JSONL 取——压缩路径本身不调 LLM 做摘要，详见 [无损压缩](../advanced/compression.md#为什么叫无损)。
 
 ---
 
