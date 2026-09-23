@@ -234,13 +234,11 @@ class PrinterMixin:
                 if tool_info is None:
                     continue
                 if kind == RunDisplayEventKind.TOOL_STARTED:
-                    print(
-                        f"\n{_tool_call_line(
-                            tool_info, getattr(self, 'work_dir', None),
-                            model_resolver=self._tool_model_resolver(),
-                        )}",
-                        flush=True,
+                    call_line = _tool_call_line(
+                        tool_info, getattr(self, 'work_dir', None),
+                        model_resolver=self._tool_model_resolver(),
                     )
+                    print(f"\n{call_line}", flush=True)
                     _need_answer_header = True
                 else:
                     result_line = _tool_result_line(tool_info)

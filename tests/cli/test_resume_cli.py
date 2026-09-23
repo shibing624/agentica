@@ -1,5 +1,6 @@
 """Focused tests for shell resume and transcript replay."""
 
+import importlib
 import json
 import sys
 from types import SimpleNamespace
@@ -19,6 +20,10 @@ from agentica.cli.commands.session import (
 from agentica.cli.main import main
 from agentica.cli.runtime import parse_args
 from agentica.cli.session_resume import prepare_startup_resume
+
+# `agentica.cli.main` as a dotted patch target resolves to the `main` function
+# re-exported by `agentica.cli` on Python 3.10; patch the module object instead.
+cli_main = importlib.import_module("agentica.cli.main")
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
 from agentica.memory.working import WorkingMemory
@@ -475,12 +480,12 @@ def test_noninteractive_interrupt_prints_resume_summary():
         "base_url": None,
     }
     with (
-        patch("agentica.cli.main.parse_args", return_value=args),
-        patch("agentica.cli.main._enable_cli_file_logging"),
-        patch("agentica.cli.main.refresh_model_catalog_in_background"),
-        patch("agentica.cli.main.resolve_model_config", return_value=resolved),
-        patch("agentica.cli.main.create_agent", return_value=agent),
-        patch("agentica.cli.main.get_console", return_value=console),
+        patch.object(cli_main, "parse_args", return_value=args),
+        patch.object(cli_main, "_enable_cli_file_logging"),
+        patch.object(cli_main, "refresh_model_catalog_in_background"),
+        patch.object(cli_main, "resolve_model_config", return_value=resolved),
+        patch.object(cli_main, "create_agent", return_value=agent),
+        patch.object(cli_main, "get_console", return_value=console),
         # An interrupted one-shot run reports 130 in its exit status, the way a
         # shell expects; the summary is printed first.
         pytest.raises(SystemExit),

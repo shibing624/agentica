@@ -6,6 +6,7 @@
 This is what a delegating session runs, so its stdout has to be the answer and
 only the answer.
 """
+import importlib
 import sys
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,6 +15,10 @@ import pytest
 
 from agentica.cli.main import main
 from agentica.cli.runtime import parse_args
+
+# `agentica.cli.main` as a dotted patch target resolves to the `main` function
+# re-exported by `agentica.cli` on Python 3.10; patch the module object instead.
+cli_main = importlib.import_module("agentica.cli.main")
 from agentica.model.usage import Usage
 from agentica.run.response import RunResponse
 
@@ -54,11 +59,11 @@ def _run_one_shot(chunks, *, print_mode, query="say hi", stream=None, captured=N
         return agent
 
     with (
-        patch("agentica.cli.main.parse_args", return_value=args),
-        patch("agentica.cli.main._enable_cli_file_logging"),
-        patch("agentica.cli.main.refresh_model_catalog_in_background"),
-        patch("agentica.cli.main.resolve_model_config", return_value=resolved),
-        patch("agentica.cli.main.create_agent", side_effect=fake_create_agent),
+        patch.object(cli_main, "parse_args", return_value=args),
+        patch.object(cli_main, "_enable_cli_file_logging"),
+        patch.object(cli_main, "refresh_model_catalog_in_background"),
+        patch.object(cli_main, "resolve_model_config", return_value=resolved),
+        patch.object(cli_main, "create_agent", side_effect=fake_create_agent),
     ):
         main()
 

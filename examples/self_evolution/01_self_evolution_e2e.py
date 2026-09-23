@@ -628,10 +628,10 @@ async def main() -> None:
     content_returned = target_content_marker in (response.content or "")
 
     print_section("CLOSED-LOOP VERDICT")
-    print(f"  [ {'\u2713' if skill_loaded     else '\u2717'} ] (a) get_skill_info({shadow_skill_name!r}) called")
-    print(f"  [ {'\u2713' if searched_first   else '\u2717'} ] (b) a search tool called BEFORE read_file")
-    print(f"  [ {'\u2713' if found_real_file  else '\u2717'} ] (c) read_file called with the actual filename")
-    print(f"  [ {'\u2713' if content_returned else '\u2717'} ] (d) reply contains the file's real content marker")
+    print(f"  [ {'✓' if skill_loaded     else '✗'} ] (a) get_skill_info({shadow_skill_name!r}) called")
+    print(f"  [ {'✓' if searched_first   else '✗'} ] (b) a search tool called BEFORE read_file")
+    print(f"  [ {'✓' if found_real_file  else '✗'} ] (c) read_file called with the actual filename")
+    print(f"  [ {'✓' if content_returned else '✗'} ] (d) reply contains the file's real content marker")
 
     # ── 2e. tool_recovery emission verification ──
     events_path = workspace._get_user_experience_dir() / "events.jsonl"

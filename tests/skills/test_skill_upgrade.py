@@ -2091,10 +2091,13 @@ class TestCrossLayerCleanup(unittest.TestCase):
 
         # capture_user_corrections is False by default; opt in explicitly for this test.
         # Disable the batch judge gates so a single turn flushes immediately.
+        # Inline judge: asyncio.run cancels a background task on exit, and on
+        # 3.10 wait_for yields once more, so the write would never happen.
         config = ExperienceConfig(
             capture_user_corrections=True,
             judge_every_n_turns=1,
             judge_min_seconds_between=0,
+            judge_background=False,
         )
         hooks = ExperienceCaptureHooks(config)
         agent = MagicMock()
