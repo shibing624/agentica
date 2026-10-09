@@ -458,6 +458,53 @@ def test_keepalive_armed_with_sticky_header():
     assert model._cache_keepalive_generation == 1
 
 
+def test_keepalive_failure_is_logged_to_file_only(monkeypatch, tmp_path):
+    """A failed ping must not reach a console handler the TUI would display."""
+    import io
+    import logging
+
+    from agentica.model.openai import chat as chat_mod
+    from agentica.utils.log import log_file_only, logger
+
+    stream = io.StringIO()
+    console = logging.StreamHandler(stream)
+    console.setLevel(logging.DEBUG)
+    log_path = tmp_path / "keepalive.log"
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setLevel(logging.DEBUG)
+    logger.addHandler(console)
+    logger.addHandler(file_handler)
+    try:
+        log_file_only("cache keepalive ping failed, stopping chain: %s", "Error code: 400")
+    finally:
+        logger.removeHandler(console)
+        logger.removeHandler(file_handler)
+        file_handler.close()
+
+    assert stream.getvalue() == ""
+    logged = log_path.read_text()
+    assert "cache keepalive ping failed, stopping chain: Error code: 400" in logged
+
+    recorded = []
+
+    def _capture(msg, *args, **kwargs):
+        recorded.append(msg % args if args else msg)
+
+    monkeypatch.setattr(chat_mod, "log_file_only", _capture)
+    model = OpenAIChat(
+        id="m", api_key="fake_openai_key", enable_cache_control=True,
+        cache_keepalive_interval=0, cache_keepalive_max_pings=2,
+    )
+    model._last_cache_payload = ([{"role": "system", "content": "S"}], {})
+
+    async def _boom():
+        raise RuntimeError("Error code: 400 - venus")
+
+    model._cache_keepalive_ping = _boom
+    model._cache_keepalive_loop(model._cache_keepalive_generation)
+    assert recorded == ["cache keepalive ping failed, stopping chain: Error code: 400 - venus"]
+
+
 def test_keepalive_ping_request_shape(monkeypatch):
     from agentica.model.openai import chat as chat_mod
 

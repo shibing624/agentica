@@ -41,7 +41,7 @@ from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
 from agentica.model.openai.sse_sanitize import TolerantSSETransport
 from agentica.model.stream_retry import stream_with_retry
-from agentica.utils.log import logger
+from agentica.utils.log import log_file_only, logger
 from agentica.utils.langfuse_integration import (
     is_langfuse_available,
     build_langfuse_metadata,
@@ -728,7 +728,10 @@ class OpenAIChat(Model):
                 if read_tokens:
                     logger.debug(f"cache keepalive ping refreshed prefix (read={read_tokens} tokens)")
             except Exception as e:
-                logger.warning(f"cache keepalive ping failed, stopping chain: {e}")
+                # File only. This thread outlives the turn, and a console
+                # handler (or /debug) would paint the provider error into the
+                # transcript after the answer has already finished.
+                log_file_only("cache keepalive ping failed, stopping chain: %s", e)
                 return
 
     async def _cache_keepalive_ping(self) -> Optional[int]:

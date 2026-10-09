@@ -418,6 +418,23 @@ def enable_process_file_logging() -> str:
     return log_file
 
 
+def log_file_only(msg: str, *args: object, level: int = logging.WARNING) -> None:
+    """Write to file handlers only.
+
+    Background work such as the cache keepalive ping must not reach the CLI
+    transcript. A console ``StreamHandler`` is what ``/debug`` and the default
+    SDK logger print, and ``patch_stdout`` turns those bytes into TUI text.
+    When no file handler is attached, the line is dropped rather than printed.
+    """
+    fn, lno, func, sinfo = logger.findCaller(stacklevel=2)
+    record = logger.makeRecord(
+        logger.name, level, fn, lno, msg, args, None, func, None, sinfo,
+    )
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler) and record.levelno >= handler.level:
+            handler.handle(record)
+
+
 def print_llm_stream(msg):
     print(msg, end="", flush=True)
 
