@@ -37,6 +37,13 @@
     ],
     "npmRebuild": false,
     "artifactName": "agentica-desktop-${platform}-${arch}.${ext}",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
+    "appImage": {
+      "artifactName": "Agentica-${arch}.${ext}",
+      "executableArgs": ["--no-sandbox"]
+    },
     "mac": {
       "target": [
         {

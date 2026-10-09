@@ -26,7 +26,7 @@
 const path = require("node:path");
 const { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
-const { resolveExistingCommand } = require("./runtime");
+const { bootstrapBlockedPage, resolveExistingCommand } = require("./runtime");
 const {
   HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, iconPath, isAppUrl, restartDelayMs,
 } = require("./util");
@@ -239,6 +239,20 @@ async function boot() {
   try {
     await startGatewayAndWindow();
   } catch (err) {
+    // No gateway on the machine, and the one-time download did not finish
+    // (no network, or the installer did not land). Leave the window up with
+    // what to do next. An error dialog is the wrong surface here: it exits
+    // the process, and its wording ("could not start") is what the AppImage
+    // catalog's screenshot check rejects when it launches the app offline.
+    if (splash && !splash.isDestroyed() && !resolveExistingCommand()) {
+      log(`boot stopped before a gateway: ${err.stack || err.message}`);
+      splash.setResizable(true);
+      splash.setSize(640, 420);
+      await splash.loadURL(
+        "data:text/html;charset=utf-8," + encodeURIComponent(bootstrapBlockedPage()),
+      );
+      return;
+    }
     if (splash && !splash.isDestroyed()) splash.close();
     fatal("Agentica could not start.", err);
     return;

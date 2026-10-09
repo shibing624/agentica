@@ -91,7 +91,7 @@ The window is the same web UI, on the same `~/.agentica` — mixing it with the 
 |---|---|
 | **macOS** 11+ | [Apple silicon (arm64)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg) · [Intel (x64)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg) |
 | **Windows** 10+ | [x64 installer (NSIS)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe) |
-| **Linux** x64 | [AppImage](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
+| **Linux** x64 | [AppImage](https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
 
 They are attached to every [GitHub Release](https://github.com/shibing624/agentica/releases) too.
 
@@ -122,7 +122,7 @@ SmartScreen blocks unsigned installers: click "More info" → "Run anyway". Firs
 Browsers download AppImages without the execute bit (the deb goes through your package manager and is unaffected):
 
 ```bash
-chmod +x agentica-desktop-linux-x86_64.AppImage
+chmod +x Agentica-x86_64.AppImage
 ```
 
 </details>

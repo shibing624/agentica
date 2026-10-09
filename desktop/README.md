@@ -99,7 +99,15 @@ CPython 3.12, and `pip install`s `agentica[gateway]` into that venv — once.
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac    # or dist:win / dist:linux
 ```
 
-Output lands in `desktop/dist/` as `agentica-desktop-<platform>-<arch>.<ext>`.
+Output lands in `desktop/dist/` as `agentica-desktop-<platform>-<arch>.<ext>`,
+except the AppImage, which is `Agentica-x86_64.AppImage`. The catalog at
+appimage.github.io rejects a filename that contains "linux", and the old
+FUSE2 runtime (electron-builder's default on the 26.x line) needs libfuse2
+on the host. `toolsets.appimage` is pinned to `1.0.3`, the static runtime.
+That runtime adds `--no-sandbox` only when user namespaces are missing; the
+catalog enables them and then runs under firejail, where the chrome sandbox
+still does not start, so the AppImage target passes `--no-sandbox` itself.
+The deb does not.
 A given OS can only build its own installers — the NSIS exe needs Windows and
 the deb/AppImage need Linux — so the full matrix runs in CI
 (`.github/workflows/desktop.yml`) and attaches the installers to the release for

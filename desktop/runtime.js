@@ -210,47 +210,60 @@ function run(command, args, { cwd, env, timeout, log } = {}) {
   });
 }
 
-async function ensureUv(root, log) {
+// Download the installer to a file, then run it. A pipe (`curl | sh`) reports
+// the shell's status: with no network curl writes nothing and exits non-zero,
+// and `sh` still exits 0 on empty stdin. The next check then says the
+// installer "finished" while the binary was never downloaded.
+const UV_UNIX_INSTALL = [
+  "set -eu",
+  "f=$(mktemp)",
+  "trap 'rm -f \"$f\"' EXIT",
+  "curl -LsSf https://astral.sh/uv/install.sh -o \"$f\"",
+  "sh \"$f\"",
+].join("\n");
+
+function uvInstallPlan(root) {
   const dest = uvBin(root);
-  if (isExecutable(dest)) return dest;
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
   const installDir = path.dirname(dest);
-  log(`installing uv into ${installDir}`);
   if (process.platform === "win32") {
-    await run(
-      "powershell.exe",
-      [
+    return {
+      dest,
+      command: "powershell.exe",
+      args: [
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
         "irm https://astral.sh/uv/install.ps1 | iex",
       ],
-      {
-        timeout: BOOTSTRAP_UV_MS,
-        log,
-        env: {
-          ...process.env,
-          UV_INSTALL_DIR: installDir,
-          UV_UNMANAGED_INSTALL: installDir,
-        },
+      env: {
+        UV_INSTALL_DIR: installDir,
+        UV_UNMANAGED_INSTALL: installDir,
       },
-    );
-  } else {
-    await run(
-      "/bin/sh",
-      ["-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"],
-      {
-        timeout: BOOTSTRAP_UV_MS,
-        log,
-        env: {
-          ...process.env,
-          UV_UNMANAGED_INSTALL: installDir,
-        },
-      },
-    );
+    };
   }
-  if (!isExecutable(dest)) {
-    throw new Error(`uv installer finished but ${dest} is missing`);
+  // UV_UNMANAGED_INSTALL is the directory the binary is written into.
+  // UV_INSTALL_DIR is the parent: the installer appends /bin itself, so
+  // setting it to installDir would land uv at <root>/bin/bin/uv.
+  return {
+    dest,
+    command: "/bin/sh",
+    args: ["-c", UV_UNIX_INSTALL],
+    env: { UV_UNMANAGED_INSTALL: installDir },
+  };
+}
+
+async function ensureUv(root, log) {
+  const plan = uvInstallPlan(root);
+  if (isExecutable(plan.dest)) return plan.dest;
+  fs.mkdirSync(path.dirname(plan.dest), { recursive: true });
+  log(`installing uv into ${path.dirname(plan.dest)}`);
+  await run(plan.command, plan.args, {
+    timeout: BOOTSTRAP_UV_MS,
+    log,
+    env: { ...process.env, ...plan.env },
+  });
+  if (!isExecutable(plan.dest)) {
+    throw new Error(`uv installer finished but ${plan.dest} is missing`);
   }
-  return dest;
+  return plan.dest;
 }
 
 function packageSpec() {
@@ -357,10 +370,31 @@ async function resolveCommand({ log = () => {} } = {}) {
   return null;
 }
 
+/**
+ * First launch with no gateway and no network. Shown in the window instead of
+ * an error dialog: the AppImage catalog runs the app with `--net=none` and
+ * fails the screenshot on phrases like "could not start". The words here are
+ * the ones that page is allowed to say.
+ */
+function bootstrapBlockedPage() {
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Agentica</title></head>
+<body style="margin:0;padding:36px 40px;font:15px/1.5 system-ui,-apple-system,sans-serif;color:#1a1a1a;background:#fff">
+  <h1 style="font-size:18px;margin:0 0 12px">One-time setup</h1>
+  <p style="margin:0 0 12px">Agentica is a window onto a local Python gateway. The first launch downloads that gateway: uv, Python 3.12, and the agentica package. This download did not finish, so the window has nothing to show yet.</p>
+  <p style="margin:0 0 12px">Connect to the network and open Agentica again.</p>
+  <p style="margin:0 0 8px">To install the gateway yourself, then open Agentica again, run:</p>
+  <p style="margin:0;font-family:ui-monospace,monospace">pip install "agentica[gateway]"</p>
+</body></html>`;
+}
+
 module.exports = {
   PYTHON_VERSION,
+  UV_UNIX_INSTALL,
   supportRoot,
   uvBin,
+  uvInstallPlan,
+  bootstrapBlockedPage,
   venvDir,
   venvPython,
   managedGatewayBin,

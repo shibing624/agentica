@@ -111,7 +111,7 @@ SmartScreen 会拦未签名的安装程序：点「更多信息」→「仍要�
 浏览器下载的 AppImage 默认没有执行权限（deb 走包管理器，没这个问题）：
 
 ```bash
-chmod +x agentica-desktop-linux-x86_64.AppImage
+chmod +x Agentica-x86_64.AppImage
 ```
 
 </details>
