@@ -731,7 +731,7 @@ class OpenAIChat(Model):
                 # File only. This thread outlives the turn, and a console
                 # handler (or /debug) would paint the provider error into the
                 # transcript after the answer has already finished.
-                log_file_only("cache keepalive ping failed, stopping chain: %s", e)
+                log_file_only("cache keepalive ping failed, stopping chain: %s", e, exc_info=e)
                 return
 
     async def _cache_keepalive_ping(self) -> Optional[int]:

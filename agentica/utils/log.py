@@ -418,17 +418,27 @@ def enable_process_file_logging() -> str:
     return log_file
 
 
-def log_file_only(msg: str, *args: object, level: int = logging.WARNING) -> None:
+def log_file_only(
+    msg: str,
+    *args: object,
+    level: int = logging.WARNING,
+    exc_info: Optional[BaseException] = None,
+) -> None:
     """Write to file handlers only.
 
     Background work such as the cache keepalive ping must not reach the CLI
     transcript. A console ``StreamHandler`` is what ``/debug`` and the default
     SDK logger print, and ``patch_stdout`` turns those bytes into TUI text.
     When no file handler is attached, the line is dropped rather than printed.
+
+    ``exc_info`` attaches the exception's traceback to the file record: a
+    background thread's failure has no other place to leave its stack, and the
+    message alone (``'str' object has no attribute 'get'``) does not say where.
     """
     fn, lno, func, sinfo = logger.findCaller(stacklevel=2)
+    exc_tuple = (type(exc_info), exc_info, exc_info.__traceback__) if exc_info is not None else None
     record = logger.makeRecord(
-        logger.name, level, fn, lno, msg, args, None, func, None, sinfo,
+        logger.name, level, fn, lno, msg, args, exc_tuple, func, None, sinfo,
     )
     for handler in logger.handlers:
         if isinstance(handler, logging.FileHandler) and record.levelno >= handler.level:

@@ -485,6 +485,32 @@ def test_keepalive_failure_is_logged_to_file_only(monkeypatch, tmp_path):
     logged = log_path.read_text()
     assert "cache keepalive ping failed, stopping chain: Error code: 400" in logged
 
+    # The traceback goes to the file too: without it a background failure such
+    # as "'str' object has no attribute 'get'" cannot be located.
+    stream_tb = io.StringIO()
+    console_tb = logging.StreamHandler(stream_tb)
+    console_tb.setLevel(logging.DEBUG)
+    tb_path = tmp_path / "keepalive_tb.log"
+    file_tb = logging.FileHandler(tb_path)
+    file_tb.setLevel(logging.DEBUG)
+    logger.addHandler(console_tb)
+    logger.addHandler(file_tb)
+    try:
+        try:
+            "x".get("k")  # type: ignore[attr-defined]
+        except AttributeError as exc:
+            log_file_only("cache keepalive ping failed, stopping chain: %s", exc, exc_info=exc)
+    finally:
+        logger.removeHandler(console_tb)
+        logger.removeHandler(file_tb)
+        file_tb.close()
+
+    assert stream_tb.getvalue() == ""
+    tb_logged = tb_path.read_text()
+    assert "Traceback (most recent call last)" in tb_logged
+    assert 'test_keepalive_failure_is_logged_to_file_only' in tb_logged
+    assert "AttributeError: 'str' object has no attribute 'get'" in tb_logged
+
     recorded = []
 
     def _capture(msg, *args, **kwargs):
