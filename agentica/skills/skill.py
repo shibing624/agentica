@@ -176,12 +176,28 @@ class Skill:
             trigger=frontmatter.get('trigger'),
             argument_hint=frontmatter.get('argument-hint'),
             requires=frontmatter.get('requires', []) or [],
-            allowed_tools=frontmatter.get('allowed-tools', []) or [],
+            allowed_tools=Skill._as_str_list(frontmatter.get('allowed-tools')),
             metadata=frontmatter.get('metadata', {}) or {},
             user_invocable=frontmatter.get('user-invocable', True),
             is_hidden=frontmatter.get('is-hidden', False),
             location=location,
         )
+
+    @staticmethod
+    def _as_str_list(value) -> list:
+        """Normalize frontmatter values to a list of tool-name strings.
+
+        YAML `allowed-tools: a, b` parses to a bare string; using it directly
+        makes downstream `', '.join(...)` split into single characters
+        (e.g. "p, r, e, v, ..."). Split comma-separated strings instead.
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(',') if item.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
 
     @staticmethod
     def _parse_frontmatter(content: str) -> tuple:

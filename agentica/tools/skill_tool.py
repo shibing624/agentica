@@ -532,8 +532,6 @@ class SkillTool(Tool):
         result += f"Path: {skill_obj.path}\n"
         if skill_obj.license:
             result += f"License: {skill_obj.license}\n"
-        if skill_obj.allowed_tools:
-            result += f"Allowed Tools: {', '.join(skill_obj.allowed_tools)}\n"
 
         # Include full instructions from SKILL.md
         result += f"\n--- Instructions ---\n{skill_obj.content}\n"
