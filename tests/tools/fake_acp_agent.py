@@ -100,6 +100,11 @@ def run_prompt(request_id, params):
 
 
 def main():
+    if os.environ.get("FAKE_ACP_GRANDCHILD"):
+        # What npx does: the agent is a child of the process we started.
+        import subprocess
+        child = subprocess.Popen(["sleep", "300"])
+        record({"grandchild": child.pid})
     for raw in sys.stdin:
         message = json.loads(raw)
         record({"method": message.get("method"), "id": message.get("id")})

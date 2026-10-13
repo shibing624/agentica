@@ -201,11 +201,15 @@ class ACPSession:
             except ProcessLookupError:
                 proc.wait()
         if proc is not None:
-            for pipe in (proc.stdin, proc.stdout):
-                if pipe is not None:
-                    pipe.close()
+            with self._write_lock:
+                proc.stdin.close()
         if self._reader is not None:
             self._reader.join(timeout=_TERMINATE_GRACE_SECONDS)
+        # Closing stdout under a reader still blocked in read() waits on the
+        # buffer lock forever. The reader is only still there if a process
+        # that escaped the group kill holds the write end; leave the fd to it.
+        if proc is not None and (self._reader is None or not self._reader.is_alive()):
+            proc.stdout.close()
         self._stderr.close()
         if not crashed:
             try:

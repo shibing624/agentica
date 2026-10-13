@@ -214,6 +214,19 @@ def test_close_stops_the_process(registry, record, tmp_path):
         _run(tool.acp_agent(action="message", session_id=session_id, message="pid"))
 
 
+def test_close_kills_the_whole_process_group_promptly(registry, record, tmp_path):
+    runners = {"fake": {"command": sys.executable, "args": [FAKE_AGENT],
+                        "env": {"FAKE_ACP_RECORD": str(record), "FAKE_ACP_GRANDCHILD": "1"}}}
+    tool = ACPAgentTool(registry, runners=runners, work_dir=str(tmp_path))
+    report = _run(tool.acp_agent(action="start", runner="fake", message="pid"))
+    grandchild = next(r["grandchild"] for r in _received(record) if "grandchild" in r)
+    assert _alive(grandchild)
+    started = time.monotonic()
+    _run(tool.acp_agent(action="close", session_id=_session_id(report)))
+    assert time.monotonic() - started < 2  # SIGTERM answered; no wait for the SIGKILL fallback
+    assert _wait_dead(grandchild)
+
+
 def test_close_all_stops_every_process(record, tmp_path):
     registry = ACPSessionRegistry()
     tool = _tool(registry, record, tmp_path)
