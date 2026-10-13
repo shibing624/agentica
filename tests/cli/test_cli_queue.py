@@ -406,6 +406,16 @@ class TestSteerPasteRefs(unittest.TestCase):
         self.assertEqual(state.pasted_files, [])
 
 
+class _PrefixSkillRegistry:
+    """Registry whose only auto-command is a prefix of a filesystem path."""
+
+    def __init__(self, slug: str):
+        self._slug = slug if slug.startswith("/") else f"/{slug}"
+
+    def auto_commands(self):
+        return {self._slug.lower(): None}
+
+
 class TestShouldSteerMidRun(unittest.TestCase):
     """Unix paths must steer; only registered slash commands (and images) queue."""
 
@@ -433,6 +443,28 @@ class TestShouldSteerMidRun(unittest.TestCase):
         from agentica.cli.interactive.tui import _should_steer_mid_run
 
         self.assertTrue(_should_steer_mid_run("not that file", images=[]))
+
+    def test_model_weight_path_steers(self):
+        """A Ceph path is not a slash command, even if some slug is a prefix.
+
+        Mid-run Enter used to queue every line that started with ``/``.
+        ``/apdcephfs_qy3/share_.../Qwen3.5-4B-Base ...`` must steer.
+        """
+        from agentica.cli.interactive.tui import _should_steer_mid_run
+
+        text = (
+            "/apdcephfs_qy3/share_7435715/data/models/Qwen3.5-4B-Base "
+            "是我刚下载的模型权重,可以用"
+        )
+        self.assertTrue(_should_steer_mid_run(text, images=[]))
+        # A skill registered under a prefix of the path still must not swallow it.
+        self.assertTrue(
+            _should_steer_mid_run(
+                text,
+                images=[],
+                skills_registry=_PrefixSkillRegistry("/apdcephfs_qy3"),
+            )
+        )
 
 
 class TestPeelImageInput(unittest.TestCase):

@@ -129,6 +129,17 @@ class TestSlashCommandScore(unittest.TestCase):
         self.assertFalse(is_slash_command_line("not a command", registered))
         self.assertFalse(is_slash_command_line("", registered))
 
+        weight = (
+            "/apdcephfs_qy3/share_7435715/data/models/Qwen3.5-4B-Base "
+            "是我刚下载的模型权重,可以用"
+        )
+        self.assertFalse(is_slash_command_line(weight, registered))
+        # Even an exact slug equal to the path token is not a command:
+        # a second slash means a filesystem path.
+        self.assertFalse(
+            is_slash_command_line(weight, registered | {weight.split()[0].lower()})
+        )
+
 
 class TestCompletionsMenuSitsAboveTheInput(unittest.TestCase):
     """The TUI is pinned to the bottom of the terminal.
@@ -168,6 +179,36 @@ class TestCompletionsMenuSitsAboveTheInput(unittest.TestCase):
         input_window = children[menu_at + 1]
         self.assertIsInstance(input_window, Window)
         self.assertIsInstance(input_window.content, BufferControl)
+
+    def test_filesystem_path_does_not_open_the_slash_menu(self):
+        from prompt_toolkit.completion import CompleteEvent
+        from prompt_toolkit.document import Document
+
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.session_state import SessionState
+        from agentica.cli.interactive.tui import _setup_tui
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "agentica.cli.interactive.tui.history_file",
+                return_value=os.path.join(tmp, "history"),
+            ):
+                app = _setup_tui(
+                    SessionState(),
+                    skills_registry=None,
+                    tui_state={},
+                    pending_queue=PendingQueue(),
+                    image_counter_ref=[0],
+                )
+
+        completer = app.current_buffer.completer
+        path = "/apdcephfs_qy3/share_7435715/data/models/Qwen3.5-4B-Base"
+        self.assertEqual(
+            list(completer.get_completions(Document(path), CompleteEvent(text_inserted=True))),
+            [],
+        )
+        cron = list(completer.get_completions(Document("/cr"), CompleteEvent(text_inserted=True)))
+        self.assertTrue(any(c.text == "/cron" for c in cron))
 
 
 if __name__ == "__main__":

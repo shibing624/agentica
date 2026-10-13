@@ -42,6 +42,7 @@ from agentica.cli.interactive.complete import (
     is_slash_command_line,
     rank_slash_commands,
     slash_command_rows,
+    slash_command_token,
 )
 from agentica.cli.display import (
     build_status_bar_fragments,
@@ -98,9 +99,11 @@ def _registered_slash_names(skills_registry) -> set:
 def _should_steer_mid_run(text: str, images, skills_registry=None) -> bool:
     """Plain mid-run Enter steers, including pasted images plus a caption.
 
-    Only a *registered* slash command stays queued. A Unix path
-    (``/var/folders/...png``) is a file drop, not ``/cron``. Images used to
-    queue because steer was text-only; they now ride ``Agent.steer(images=)``.
+    Only a *registered* single-segment slash command stays queued
+    (``/cron``). A path with another slash (``/var/folders/...png``,
+    ``/apdcephfs_qy3/share_.../Qwen3.5-4B-Base``) is ordinary input, not a
+    command. Images used to queue because steer was text-only; they now
+    ride ``Agent.steer(images=)``.
     """
     return not is_slash_command_line(text, _registered_slash_names(skills_registry))
 
@@ -321,6 +324,10 @@ def _setup_tui(
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
             if text.startswith("/"):
+                # A second slash is a filesystem path, not a command query.
+                # Leaving the menu open rewrites the buffer on Tab.
+                if slash_command_token(text) is None:
+                    return
                 parts = text.split(None, 1)
                 if len(parts) >= 2:
                     cmd = parts[0].lower()

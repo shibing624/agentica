@@ -83,18 +83,35 @@ def rank_slash_commands(query: str, rows: Sequence[SlashRow]) -> List[SlashRow]:
     return [row for _score, _order, row in scored]
 
 
-def is_slash_command_line(text: str, registered: Collection[str]) -> bool:
-    """True when the first token is a registered ``/command`` or skill slug.
+def slash_command_token(text: str) -> Optional[str]:
+    """Lowercased first token when it is a single-segment ``/name``.
 
-    A leading ``/`` is not enough: a Unix path (``/var/folders/...png``) starts
-    the same way and is ordinary input — including mid-run steering. Idle
-    dispatch already keys off the first token in ``COMMAND_HANDLERS``; this
-    is the same test so a screenshot path cannot be queued as a "command".
+    A command is ``/`` plus a name and nothing else in that token: ``/cron``,
+    ``/compact``. A filesystem path has another slash in the first token
+    (``/var/folders/...png``, ``/apdcephfs_qy3/share_.../Qwen3.5-4B-Base``)
+    and is ordinary input — including mid-run steering. Membership in the
+    command table is not enough: a path must not become a command because
+    some slug happens to equal it.
     """
     stripped = (text or "").strip()
     if not stripped.startswith("/"):
-        return False
-    return stripped.split()[0].lower() in registered
+        return None
+    token = stripped.split()[0]
+    if token.find("/", 1) != -1:
+        return None
+    return token.lower()
+
+
+def is_slash_command_line(text: str, registered: Collection[str]) -> bool:
+    """True when the first token is a registered ``/command`` or skill slug.
+
+    See ``slash_command_token``: a leading ``/`` is not enough, and a second
+    slash in the token means a path. Idle dispatch already keys off the first
+    token in ``COMMAND_HANDLERS``; this is the same shape so a path cannot
+    be queued as a command.
+    """
+    token = slash_command_token(text)
+    return token is not None and token in registered
 
 
 def slash_command_rows(
