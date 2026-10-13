@@ -28,6 +28,11 @@ schema in every tier; the difference is whether the runner parks before
                   the override. The process runs with the OS user's own
                   privileges — if that user can sudo/root, so can execute.
 
+``acp_agent`` (CLI only) counts as a write in "ask". The external agent's own
+permission requests arrive as ``acp_permission`` calls and park in ask *and*
+auto — it is stepping outside its own sandbox — with no grant answering for
+them; allow-all runs them like everything else.
+
 Callers should not construct their own mode strings — always compare against
 ``PERMISSION_MODES`` / use ``validate_permission_mode`` so a typo fails loud
 instead of silently falling through to the most permissive behavior.

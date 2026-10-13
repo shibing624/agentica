@@ -507,6 +507,7 @@ def run_interactive(
         include_ask_user_question=True,
         ask_user_question_callback=_cli_ask_user_question_callback,
         background_process_registry=state.background_processes,
+        acp_sessions=state.acp_sessions,
         permission_mode=perm_mode,
         peer_session=state.peer_session,
         worktree_binder=worktree_binder,
@@ -666,6 +667,7 @@ def run_interactive(
             bg_tasks=state.bg_tasks,
             bg_task_counter=state.bg_task_counter,
             background_processes=state.background_processes,
+            acp_sessions=state.acp_sessions,
             peer_session=state.peer_session,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
@@ -1406,6 +1408,7 @@ def run_interactive(
         try:
             _stop_cron(state)
             state.background_processes.stop()
+            state.acp_sessions.close_all()
             if worktree_binder is not None:
                 removed = worktree_binder.release()
                 if removed:

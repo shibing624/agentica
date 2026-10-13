@@ -90,6 +90,7 @@ def _refresh_skills_session(ctx: CommandContext):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
+        acp_sessions=ctx.acp_sessions,
         worktree_binder=ctx.worktree_binder,
         approve=ctx.approve,
     )

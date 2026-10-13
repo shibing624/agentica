@@ -279,6 +279,39 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
 - 子进程用的是 `agentica --query "..." --print`，`--print` 只把最终回答写到 stdout（没有 banner、没有日志），你也可以在脚本里直接这么用；失败时退出码非 0。
 - **小活用 `task`，而且可以并行。** 读代码、搜仓库、查资料——一条消息里发多个 `task` 就会一起跑，比 `delegate` 便宜得多。不要因为「要并行」就上 `delegate`。只有工作大到值得独立 context（或必须换目录、要写文件）时才 `delegate`。
 
+### 把任务交给 Codex / Claude Code（`acp_agent`）
+
+`delegate` 起的是另一个 agentica；`acp_agent` 起的是**别家的 coding agent**，通过 [ACP](https://agentclientprotocol.com)（stdio 上的 JSON-RPC）驱动它，能用上你的 ChatGPT / Claude 订阅额度，也适合找另一个模型做第二意见。
+
+内置三个 runner（命令要在 PATH 上，`npx` 首次会下载适配器）：
+
+| runner | 命令 |
+|---|---|
+| `codex` | `npx -y @zed-industries/codex-acp` |
+| `claude_code` | `npx -y @zed-industries/claude-agent-acp` |
+| `opencode` | `opencode acp` |
+
+动作：`list`（runner 和打开的会话）、`start`（runner + message + work_dir，开会话并发第一条）、`message`（session_id + message，接着聊，对方保留上下文）、`close`（结束并杀掉进程）。
+
+- **会话跨轮存活**：这一轮 `start`，下一轮还能 `message`；`/model` 重建 agent 也不丢。最多同时开 3 个，退出 CLI 时全部关闭。
+- **对方要越过它自己沙箱的权限时**（`session/request_permission`），在这里弹一张普通审批卡，只有「允许 / 拒绝」：`ask` 和 `auto` 都会问，`allow-all` 直接放行；没人能问的会话（`--print`、cron、`/bg`）没有这个工具。
+- `ask` 模式下调用 `acp_agent` 本身也要审批——对方会自己改文件，等同一次写操作。
+- 默认单条消息最多等 1800 秒；超时会发 `session/cancel`，把已有的输出交回来，会话保持打开。
+- 结果里有对方的回复、它跑过的工具调用（标题 + 状态）、计划，以及批准 / 拒绝了几次权限请求。它改过的东西照样要自己看 diff、跑测试。
+
+自定义或覆盖 runner（同名覆盖内置）：
+
+```yaml
+settings:
+  acp_runners:
+    codex:
+      command: /opt/homebrew/bin/codex-acp
+    kimi:
+      command: kimi
+      args: [acp]
+      env: {KIMI_LOG: "0"}
+```
+
 ### `/ps` 与 `/stop`
 
 `/ps` 列出后台终端命令（`execute(background=True)`、`delegate`）和后台 agent 任务（`/background`）。

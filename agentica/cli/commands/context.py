@@ -40,6 +40,9 @@ class CommandContext:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: Any = None
+    # Open `acp_agent` sessions (agentica.tools.acp_agent_tool.ACPSessionRegistry),
+    # shared with every rebuilt agent like background_processes.
+    acp_sessions: Any = None
     # Cross-session peer channel (agentica.peers.PeerSession). Shared with every
     # rebuilt agent so /resume, /model and friends keep the messaging tools and
     # this terminal's mailbox identity.
