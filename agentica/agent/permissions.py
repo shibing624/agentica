@@ -28,6 +28,11 @@ schema in every tier; the difference is whether the runner parks before
                   the override. The process runs with the OS user's own
                   privileges — if that user can sudo/root, so can execute.
 
+The OS sandbox (``SandboxConfig.os_sandbox``) is a second, independent axis:
+it confines every ``execute`` in all three tiers. ``execute(escalate=True)``
+— run outside it — always parks in ask/auto, before any allow-similar grant
+or the read-only fast path; allow-all runs it like everything else.
+
 Callers should not construct their own mode strings — always compare against
 ``PERMISSION_MODES`` / use ``validate_permission_mode`` so a typo fails loud
 instead of silently falling through to the most permissive behavior.

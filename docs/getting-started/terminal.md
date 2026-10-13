@@ -44,8 +44,29 @@ agentica [OPTIONS]
 | `--no-workspace` | flag | -- | 禁用 Workspace（不注入长期记忆） |
 | `--tools` | list | -- | 额外启用的工具（追加到内置工具） |
 | `--enable-diagnostics` | flag | 开 | 编辑后把 LSP/Pyright 诊断附到 `write_file` / `apply_patch` 结果上（`--no-enable-diagnostics` 关掉） |
+| `--sandbox` | str | `off` | `workspace-write`：shell 命令跑在系统沙箱里（见下文「系统沙箱」） |
 | `--enable-skills` | flag | -- | 启用 Skills 系统 |
 | `--debug` | int | `0` | 调试级别（1=启用，显示内部日志） |
+
+### 系统沙箱（`--sandbox workspace-write`）
+
+和 Codex CLI 同一个做法：`execute` 的每条命令由内核约束（macOS 用 Seatbelt `sandbox-exec`，Linux 用 bubblewrap `bwrap`），不是靠正则匹配。
+
+- **写**：只能写工作目录、同一个 git 仓库的所有 worktree（含共享的 `.git`）、临时目录和 `~/.cache` / `~/Library/Caches` / `~/.npm`。其中 `.git/hooks` 和 `.git/config` 只读：hook 和 `core.hooksPath` 会在你自己之后的 `git` 里执行，写得进去就等于绕过了沙箱。`git commit` 照常可用，改 git 配置（如 `git remote add`）要出沙箱。
+- **读**：到处可读，但路径里带 `.ssh`、`.aws`、`.gnupg`、`.env`、`.netrc` 等（`SandboxConfig.blocked_paths`）的读不了。Linux 上只能挡 `$HOME` 下的这些目录。
+- **网络**：默认关；本机 `localhost` 照常可连（macOS）。
+
+命令被沙箱挡住时，结果里会写明边界，模型可以带 `escalate=true` 重跑：在沙箱**外**执行，`ask` / `auto` 模式下一定先弹审批卡（之前的「允许同类」不算数），`allow-all` 直接放行。没有审批入口的会话（`--print`、cron）不能出沙箱。
+
+也可以写进 `~/.agentica/config.yaml`，命令行参数优先：
+
+```yaml
+settings:
+  sandbox: workspace-write
+  sandbox_network_access: false   # true 则沙箱里允许联网
+```
+
+Linux 需要先装 bubblewrap（`apt install bubblewrap`）；装不上时开启沙箱会直接报错，不会悄悄不隔离。
 
 ### 支持的模型提供商
 

@@ -149,11 +149,16 @@ class BackgroundProcessRegistry:
         env: Optional[dict] = None,
         kind: str = "command",
         label: str = "",
+        argv: Optional[List[str]] = None,
     ) -> BackgroundProcess:
         """Spawn ``command`` detached from the turn.
 
         ``env`` is merged over the current environment (it does not replace it),
         so a caller only names what it wants to change.
+
+        ``argv``, when given, is what actually runs (no shell) while ``command``
+        stays what the log header and ``/ps`` show — the OS sandbox wrapper is
+        an implementation detail of how the command ran, not the command.
         """
         with self._lock:
             self._counter += 1
@@ -174,8 +179,8 @@ class BackgroundProcessRegistry:
             header = header.encode("utf-8", errors="replace")
             log_fh.write(header)
             process = subprocess.Popen(
-                command,
-                shell=True,
+                argv if argv is not None else command,
+                shell=argv is None,
                 cwd=cwd,
                 env={**os.environ, **env} if env else None,
                 stdout=log_fh,

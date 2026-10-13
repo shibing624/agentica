@@ -464,6 +464,11 @@ def classify(
         return "allow"
     if grants.denies(fc, work_dir=work_dir):
         return "deny"
+    # Leaving the OS sandbox is the one execute decision no grant covers: an
+    # "allow similar" given to a sandboxed `git push` was not given to running
+    # it unconfined. Checked before ``covers`` and before the read-only fast path.
+    if is_sandbox_escalation(fc):
+        return "ask"
     if grants.covers(fc, work_dir=work_dir):
         return "allow"
 
@@ -492,6 +497,18 @@ def classify(
     if name in NETWORK_TOOLS:
         return "ask"
     return "allow"
+
+
+def is_sandbox_escalation(fc: FunctionCall) -> bool:
+    """Does this ``execute`` call ask to run outside the OS sandbox?
+
+    Anything but an absent / false ``escalate`` counts. The entrypoint's
+    validation turns more than ``true`` into True (``"yes"``, ``1``), so the
+    predicate errs toward asking: a needless card is the cheap mistake here.
+    """
+    if fc.function.name not in EXECUTE_TOOLS:
+        return False
+    return (fc.arguments or {}).get("escalate") not in (None, False)
 
 
 def _default_blocked_commands() -> List[str]:
@@ -612,6 +629,8 @@ def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tu
     args = fc.arguments or {}
     if name in EXECUTE_TOOLS:
         preview = str(args.get("command") or "")
+        if is_sandbox_escalation(fc):
+            return "Allow running this command OUTSIDE the sandbox?", preview
         return "Allow running the following command?", preview
     if name in FILE_TOOLS:
         preview = "; ".join(call_paths(fc, work_dir=work_dir) or [str(args)])
@@ -768,6 +787,8 @@ def _similar_label_for(fc: FunctionCall) -> str:
 
 def _approval_options(fc: FunctionCall) -> Tuple[ApprovalDecision, ...]:
     if fc.function.name in EXECUTE_TOOLS:
+        if is_sandbox_escalation(fc):
+            return ("allow", "deny")
         command = _call_command(fc) or ""
         if not command_allows_prefix(command) or not command_class_display(command):
             return ("allow", "deny")

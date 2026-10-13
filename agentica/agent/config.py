@@ -343,6 +343,16 @@ class SandboxConfig:
             NOTE: This is prefix-matched against the first token of the command,
             so "python" allows both "python script.py" and "python3 -c '...'".
         max_execution_time: Maximum seconds for a single command execution
+        os_sandbox: Run every ``execute`` command inside the OS sandbox
+            (macOS Seatbelt / Linux bubblewrap, see ``agentica.tools.os_sandbox``):
+            writes only under ``writable_dirs`` + the session work_dir (and the
+            git worktrees they belong to), temp and package caches; reads of
+            ``blocked_paths`` denied. Unlike the checks above this is enforced by
+            the kernel, and it is independent of ``enabled`` — it holds in every
+            permission mode. A command that needs more is re-run with
+            ``execute(escalate=True)``, which always asks a human in ask/auto.
+        network_access: With ``os_sandbox``, allow outbound network. Off by
+            default; loopback stays reachable on macOS.
     """
     enabled: bool = False
     writable_dirs: List[str] = field(default_factory=list)
@@ -357,3 +367,5 @@ class SandboxConfig:
     ])
     allowed_commands: Optional[List[str]] = None
     max_execution_time: int = 300
+    os_sandbox: bool = False
+    network_access: bool = False

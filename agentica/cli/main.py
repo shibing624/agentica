@@ -162,6 +162,7 @@ def main():
         "enable_skill_upgrade": args.enable_skill_upgrade,
         "skill_upgrade_mode": args.skill_upgrade_mode,
         "permissions": "allow-all" if args.allow_all else (args.permissions or "allow-all"),
+        "sandbox": args.sandbox,
         "enable_diagnostics": args.enable_diagnostics,
         "diagnostics_servers": args.diagnostics_servers,
         "_model_config_explicit": any(

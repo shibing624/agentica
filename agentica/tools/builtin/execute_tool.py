@@ -17,6 +17,13 @@ from uuid import uuid4
 
 from agentica.tools.base import Tool
 from agentica.tools.background_processes import BackgroundProcessRegistry, read_log_tail
+from agentica.tools.os_sandbox import (
+    SandboxPolicy,
+    describe_policy,
+    resolve_policy_paths,
+    unsupported_reason,
+    wrap_command,
+)
 from agentica.tools.safety import (
     check_command_safety,
     command_matches_blocked,
@@ -275,6 +282,19 @@ _BACKGROUND_GUIDANCE = """
   Example: execute(command="make release", background=True)
 """
 
+# Appended, together with the ``escalate`` parameter, only when the OS sandbox
+# is on — same rule as background: the parameter and its prose come as a pair.
+_SANDBOX_GUIDANCE = """
+- Commands run inside an OS sandbox: they may write only inside the work
+  directory (and its git worktrees), temp dirs and package caches; the network
+  is off (localhost works); credential paths such as ``~/.ssh`` are unreadable.
+  When the sandbox is what stops a command — it failed with "Operation not
+  permitted" / a connection error, or it plainly needs the network or a write
+  elsewhere (``git push``, an install from the network) — call execute with
+  ``escalate=True``: it runs outside the sandbox once the user approves. Do not
+  route around the sandbox any other way.
+"""
+
 
 class BuiltinExecuteTool(Tool):
     """
@@ -295,6 +315,8 @@ class BuiltinExecuteTool(Tool):
                 are applied as-is with no upper cap — the caller decides.
             max_output_length: Maximum length of output to return
             sandbox_config: SandboxConfig instance for command restriction enforcement
+                (``os_sandbox`` puts every command inside the OS sandbox and
+                adds the ``escalate`` parameter)
             background_process_registry: shared registry owning detached
                 commands. Supplied by surfaces that can also list, report and
                 stop them (the interactive CLI). Without one, ``background``
@@ -308,6 +330,14 @@ class BuiltinExecuteTool(Tool):
         self._max_output_length = max_output_length
         self._sandbox_config = sandbox_config
         self._background_process_registry = background_process_registry
+        self._os_sandbox = bool(sandbox_config is not None and sandbox_config.os_sandbox)
+        if self._os_sandbox:
+            reason = unsupported_reason()
+            if reason is not None:
+                raise RuntimeError(
+                    f"SandboxConfig.os_sandbox is on, but this machine cannot run it: {reason}. "
+                    "Install it or turn the OS sandbox off."
+                )
         # Override timeout from sandbox config if set
         if sandbox_config and sandbox_config.enabled and sandbox_config.max_execution_time:
             self._timeout = sandbox_config.max_execution_time
@@ -340,6 +370,14 @@ class BuiltinExecuteTool(Tool):
             self.functions["wait"].manages_own_timeout = True
         else:
             execute_fn.parameters["properties"].pop("background", None)
+        if self._os_sandbox:
+            execute_fn.description += _SANDBOX_GUIDANCE
+            execute_fn.parameters["properties"]["escalate"]["description"] = (
+                "run outside the OS sandbox; the user is asked first. Only when "
+                "the sandbox is what stops the command"
+            )
+        else:
+            execute_fn.parameters["properties"].pop("escalate", None)
         execute_fn.skip_entrypoint_processing = True
 
     def set_work_dir(self, work_dir: str) -> None:
@@ -361,6 +399,22 @@ class BuiltinExecuteTool(Tool):
                 path = base / path
             return str(Path(os.path.abspath(path)))
         return str(self._work_dir) if self._work_dir else None
+
+    async def _sandbox_policy(self) -> SandboxPolicy:
+        """The OS sandbox policy for one command, roots resolved now.
+
+        Resolved per call rather than once: a worktree created mid-session
+        must be writable without restarting, and that is a ``git`` question.
+        """
+        config = self._sandbox_config
+        session_dir = str(self._work_dir) if self._work_dir else os.getcwd()
+        roots, read_only = await resolve_policy_paths([*config.writable_dirs, session_dir])
+        return SandboxPolicy(
+            writable_roots=roots,
+            read_only_paths=read_only,
+            blocked_components=tuple(config.blocked_paths),
+            network_access=config.network_access,
+        )
 
     def _spill_target(
         self, cwd: Optional[str] = None
@@ -512,6 +566,7 @@ class BuiltinExecuteTool(Tool):
             background: bool = False,
             parallel_safe: bool = False,
             work_dir: str = "",
+            escalate: bool = False,
     ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
@@ -623,6 +678,16 @@ class BuiltinExecuteTool(Tool):
         # Sandbox: check blocked commands (best-effort, not a true security sandbox)
         from agentica.agent.approvals import approved_by_user
 
+        if self._os_sandbox and escalate and not approved_by_user.get():
+            # The approval layer routes every escalation to a human in
+            # ask/auto; reaching here unapproved means nothing asked one (an
+            # SDK agent without ``approve``), so the sandbox stays.
+            raise PermissionError(
+                "escalate=true runs the command outside the sandbox, which needs the "
+                "user's approval, and nothing in this session can ask for it. Run it "
+                "inside the sandbox, or tell the user the exact command to run."
+            )
+
         sandbox_on = bool(self._sandbox_config and self._sandbox_config.enabled)
         skip_hard_block = approved_by_user.get() or not sandbox_on
         if sandbox_on and not skip_hard_block:
@@ -669,6 +734,11 @@ class BuiltinExecuteTool(Tool):
         logger.debug(f"Executing command: {command}")
         cwd = self._call_cwd(work_dir)
         self_detaching = bool(_SELF_DETACHING_COMMAND.search(command))
+        policy: Optional[SandboxPolicy] = None
+        argv = None
+        if self._os_sandbox and not escalate:
+            policy = await self._sandbox_policy()
+            argv = wrap_command(command, policy)
 
         if background:
             if self._background_process_registry is None:
@@ -683,7 +753,7 @@ class BuiltinExecuteTool(Tool):
                     "fork the work away and exit at once, reporting a completion "
                     "while the command is still running. Pass the plain command."
                 )
-            item = self._background_process_registry.start(command, cwd=cwd)
+            item = self._background_process_registry.start(command, cwd=cwd, argv=argv)
             return (
                 f"Started background command #{item.num} "
                 f"(PID {item.pid}, id: {item.id}).\n"
@@ -712,13 +782,22 @@ class BuiltinExecuteTool(Tool):
         try:
             try:
                 try:
-                    proc = await asyncio.create_subprocess_shell(
-                        command,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        start_new_session=os.name != "nt",
-                    )
+                    if argv is not None:
+                        proc = await asyncio.create_subprocess_exec(
+                            *argv,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=cwd,
+                            start_new_session=True,
+                        )
+                    else:
+                        proc = await asyncio.create_subprocess_shell(
+                            command,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=cwd,
+                            start_new_session=os.name != "nt",
+                        )
                 except FileNotFoundError:
                     # The shell is on PATH; what is missing is the directory we
                     # asked to run in. Raised bare, this surfaces as
@@ -781,6 +860,10 @@ class BuiltinExecuteTool(Tool):
             killed_by_cap = hit_hard_cap and proc.returncode in (-9, -signal.SIGKILL)
             if proc.returncode and proc.returncode != 0 and not killed_by_cap:
                 output = f"{output}\n\n[Exit code: {proc.returncode}]"
+                # Every non-zero exit, "expected" ones included: curl's 7 and
+                # git's 1 are exactly how a denied connection or write shows up.
+                if policy is not None:
+                    output = f"{output}\n\n{describe_policy(policy, cwd)}"
 
             logger.debug(f"Command exit code: {proc.returncode}")
             if not output:
