@@ -183,3 +183,39 @@ class TestPublishedThroughPresence:
         assert "git: main" in described
         assert "clean" not in described
         assert "dirty:" not in described
+
+
+class TestBackgroundGitDoesNotLockTheIndex:
+    """A killed ``git status`` used to leave ``.git/index.lock`` behind.
+
+    The peer loop polls this every few seconds. ``status`` refreshes the
+    index under an optional lock; the old 3s timeout SIGKILLed git on a
+    slow filesystem before it could delete the lock, and the next human
+    ``git pull`` reported ``File exists``.
+    """
+
+    def test_every_call_skips_optional_locks_and_waits_ten_seconds(self, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs.get("timeout")))
+            completed = subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if "status" in cmd:
+                completed.stdout = "## main\n"
+            elif "--short" in cmd:
+                completed.stdout = "abc1234\n"
+            elif "git-common-dir" in cmd:
+                completed.stdout = str(tmp_path / ".git") + "\n"
+            elif "--verify" in cmd:
+                completed.stdout = "main\n"
+            elif "rev-list" in cmd:
+                completed.stdout = "0\t0\n"
+            return completed
+
+        monkeypatch.setattr(git_state.subprocess, "run", fake_run)
+        collect(str(tmp_path), ttl=0)
+
+        assert calls
+        for cmd, timeout in calls:
+            assert cmd[:2] == ["git", "--no-optional-locks"]
+            assert timeout == 10.0

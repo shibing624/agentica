@@ -39,9 +39,13 @@ from typing import Dict, List, Optional, Tuple
 # bounds how often a changed dirty list can force a presence write.
 CACHE_TTL = 10.0
 
-# Git should answer in milliseconds; a hang (network remote, stale lock) must
-# not stall the peer loop.
-TIMEOUT = 3.0
+# A presence tick must not stall on a hung git. 3s was inside the time
+# ``git status`` takes on a slow filesystem (about 2s on CephFS): the
+# timeout SIGKILLs git while it still holds ``index.lock``, and the lock
+# file is what the next human ``git pull`` trips over. 10s leaves room for
+# that status. The calls themselves pass ``--no-optional-locks``, so a
+# kill no longer abandons a lock ``status`` only took to refresh the index.
+TIMEOUT = 10.0
 
 # How many paths travel in a live record. The point is recognising an overlap,
 # not reproducing `git status` — and every listing pays for this.
@@ -121,7 +125,10 @@ def _git(args: List[str], cwd: str) -> Optional[str]:
     """Run one git command, or None when it did not answer cleanly."""
     try:
         result = subprocess.run(
-            ["git", *args],
+            # Optional locks are the index refresh ``status`` does on the
+            # side. This process polls; it must not take ``index.lock`` and
+            # then die on the timeout, leaving the lock for a later pull.
+            ["git", "--no-optional-locks", *args],
             cwd=cwd,
             capture_output=True,
             text=True,

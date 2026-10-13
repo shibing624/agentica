@@ -142,7 +142,10 @@ def slug(name: str) -> str:
 def _git(args: Sequence[str], cwd: str, *, check: bool = True) -> str:
     try:
         result = subprocess.run(
-            ["git", *args],
+            # Same reason as ``git_state._git``: a background or interrupted
+            # ``status`` must not leave ``.git/index.lock`` behind. Required
+            # locks (merge, worktree add) are unaffected.
+            ["git", "--no-optional-locks", *args],
             cwd=cwd,
             capture_output=True,
             text=True,

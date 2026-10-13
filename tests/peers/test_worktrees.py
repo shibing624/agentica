@@ -9,6 +9,7 @@ the behaviour that used to be wrong.
 """
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -496,3 +497,17 @@ class TestMergeOfAnAlreadyLandedBranch:
 
         assert result.already_merged is True
         assert result.commits == 0
+
+
+class TestGitSkipsOptionalLocks:
+    def test_status_does_not_refresh_the_index(self, monkeypatch):
+        seen = []
+
+        def fake_run(cmd, **kwargs):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(worktrees.subprocess, "run", fake_run)
+
+        assert worktrees._git(["status", "--porcelain"], "/tmp") == ""
+        assert seen == [["git", "--no-optional-locks", "status", "--porcelain"]]
