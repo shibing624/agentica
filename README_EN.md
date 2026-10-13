@@ -22,6 +22,10 @@
 
 <p align="center"><a href="https://github.com/shibing624/agentica/blob/main/README.md">简体中文</a> | English</p>
 
+<p align="center">
+  <video src="docs/assets/agentica-promo.mp4" width="800" controls playsinline></video>
+</p>
+
 ## Why Agentica
 
 ### 1. 🏆 Same model, less time and fewer tokens
