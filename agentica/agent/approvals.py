@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
 from agentica.tools.base import FunctionCall
+from agentica.tools.acp_agent_tool import ACP_AGENT_TOOL, ACP_PERMISSION_TOOL
 from agentica.tools.safety import (
     check_command_safety,
     command_matches_blocked,
@@ -467,7 +468,8 @@ def classify(
     # Leaving the OS sandbox is the one execute decision no grant covers: an
     # "allow similar" given to a sandboxed `git push` was not given to running
     # it unconfined. Checked before ``covers`` and before the read-only fast path.
-    if is_sandbox_escalation(fc):
+    # An external agent asking to step outside *its* sandbox is the same call.
+    if is_sandbox_escalation(fc) or fc.function.name == ACP_PERMISSION_TOOL:
         return "ask"
     if grants.covers(fc, work_dir=work_dir):
         return "allow"
@@ -486,7 +488,9 @@ def classify(
             return "ask"
         return "allow"
 
-    if name in WRITE_FILE_TOOLS:
+    # `acp_agent` hands work to an agent that edits files on its own; in ask
+    # that is a write like any other.
+    if name in WRITE_FILE_TOOLS or name == ACP_AGENT_TOOL:
         return "ask"
     if name in FILE_TOOLS:
         return "allow"
@@ -641,6 +645,9 @@ def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tu
     if name == "fetch_url":
         preview = str(args.get("url") or "")
         return "Allow fetching this URL?", preview
+    if name == ACP_PERMISSION_TOOL:
+        lines = [f"[{args['kind']}] {args['title']}", *args["paths"]]
+        return f"Allow {args['runner']} to do this?", "\n".join(lines)
     preview = json.dumps(args, ensure_ascii=False, default=str)
     return f"Allow this {name} call?", preview
 
@@ -786,6 +793,8 @@ def _similar_label_for(fc: FunctionCall) -> str:
 
 
 def _approval_options(fc: FunctionCall) -> Tuple[ApprovalDecision, ...]:
+    if fc.function.name == ACP_PERMISSION_TOOL:
+        return ("allow", "deny")
     if fc.function.name in EXECUTE_TOOLS:
         if is_sandbox_escalation(fc):
             return ("allow", "deny")

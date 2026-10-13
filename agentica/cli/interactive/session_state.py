@@ -13,6 +13,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 
 from agentica.agent.approvals import ApprovalRegistry, SessionGrants
 from agentica.agent.goals import GoalManager
+from agentica.tools.acp_agent_tool import ACPSessionRegistry
 from agentica.tools.background_processes import BackgroundProcessRegistry
 
 # ==================== SessionState ====================
@@ -97,6 +98,8 @@ class SessionState:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
+    # ACP sessions (`acp_agent`) outlive a turn and an agent rebuild; closed on exit.
+    acp_sessions: ACPSessionRegistry = field(default_factory=ACPSessionRegistry)
     # This terminal's end of the cross-session peer channel (agentica/peers/__init__.py).
     peer_session: Any = None
     # Standing-goal loop (see agentica/agent/goals.py).

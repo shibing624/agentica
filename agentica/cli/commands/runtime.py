@@ -319,6 +319,7 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
+        acp_sessions=ctx.acp_sessions,
         worktree_binder=ctx.worktree_binder,
         approve=ctx.approve,
     )

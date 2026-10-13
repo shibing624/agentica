@@ -951,6 +951,7 @@ def create_agent(
     include_ask_user_question: bool,
     ask_user_question_callback=None,
     background_process_registry=None,
+    acp_sessions=None,
     enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
     peer_session=None,
@@ -975,6 +976,11 @@ def create_agent(
         the background agent thread).
     background_process_registry: optional shared registry used by
         execute(background=True), /ps, /stop, and the status bar.
+    acp_sessions: optional ``ACPSessionRegistry`` owned by the interactive CLI.
+        When given, the agent gets the ``acp_agent`` tool (runners: built-in
+        defaults overlaid with config.yaml ``settings.acp_runners``). Its
+        permission requests go through ``approve``, so only a surface with an
+        owner for the registry *and* a person to ask should pass one.
     enable_cron_immediate_run: when True (interactive CLI) the ``cronjob`` tool's
         ``action='run'`` executes a job once immediately and returns its output.
         Set False for cron-spawned agents so a scheduled job cannot recursively
@@ -1130,6 +1136,15 @@ def create_agent(
         from agentica.tools.worktree_tool import WorktreeTool
 
         cli_tools.insert(0, WorktreeTool(worktree_binder))
+
+    if acp_sessions is not None:
+        from agentica.tools.acp_agent_tool import ACPAgentTool, merge_runners
+
+        cli_tools.insert(0, ACPAgentTool(
+            acp_sessions,
+            runners=merge_runners(get_setting("acp_runners", None)),
+            work_dir=work_dir,
+        ))
 
     # Delegating needs the session's process registry (that is how the worker is
     # tracked, waited on and reported), so a one-shot `--query` run and a

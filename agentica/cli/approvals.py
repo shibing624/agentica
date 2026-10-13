@@ -25,6 +25,7 @@ from agentica.agent.approvals import (
     make_approve,
 )
 from agentica.shell_hooks import emit_request_resolved
+from agentica.tools.acp_agent_tool import ACP_PERMISSION_TOOL
 from agentica.shell_hooks.requests import approval_payload, start_hook_request
 from agentica.utils.log import logger
 
@@ -105,6 +106,11 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         body = preview
         allow_similar = "Yes, and don't ask again for this class of network tool (p)"
         deny_similar = "No, and don't ask again for this class of network tool (x)"
+    elif name == ACP_PERMISSION_TOOL:
+        # The external agent's own request; ``describe_approval`` names the runner.
+        question = pending.question
+        body = preview
+        allow_similar = deny_similar = ""
     else:
         question = f"Would you like to allow this {name} call?"
         body = preview
