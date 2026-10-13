@@ -336,3 +336,65 @@ def test_background_commands_are_sandboxed_too(tmp_path):
         assert Path(item.log_path).read_text().splitlines()[0] == "$ cat .env"
     finally:
         registry.stop()
+
+
+# --- SDK: DeepAgent(sandbox=...) -----------------------------------------
+
+
+def _deep_agent(tmp_path, **kwargs):
+    from unittest.mock import MagicMock, patch
+
+    from agentica.agent.deep import DeepAgent
+
+    with patch("agentica.agent.base.Agent._load_mcp_tools"), patch(
+        "agentica.agent.base.Agent._merge_tool_system_prompts"
+    ):
+        return DeepAgent(
+            model=MagicMock(), workspace=str(tmp_path / "ws"), work_dir=str(tmp_path),
+            include_skills=False, **kwargs,
+        )
+
+
+def _execute_tool(agent) -> BuiltinExecuteTool:
+    (tool,) = [t for t in agent.tools if isinstance(t, BuiltinExecuteTool)]
+    return tool
+
+
+def test_sdk_default_runs_on_the_host(tmp_path):
+    agent = _deep_agent(tmp_path)
+    assert agent.sandbox_config.os_sandbox is False
+    assert "escalate" not in _execute_tool(agent).functions["execute"].parameters["properties"]
+
+
+def test_sdk_sandbox_reaches_the_execute_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr("agentica.tools.builtin.execute_tool.unsupported_reason", lambda: None)
+    agent = _deep_agent(tmp_path, sandbox="workspace-write", sandbox_network_access=True,
+                        permission_mode="auto")
+    tool = _execute_tool(agent)
+    # One shared object: the tool confines with exactly what the agent reports.
+    assert tool._sandbox_config is agent.sandbox_config
+    assert agent.sandbox_config.os_sandbox is True
+    assert agent.sandbox_config.network_access is True
+    assert agent.sandbox_config.writable_dirs == [str(tmp_path)]
+    assert "escalate" in tool.functions["execute"].parameters["properties"]
+
+
+def test_sdk_rejects_an_unknown_mode_and_a_double_spec(tmp_path):
+    with pytest.raises(ValueError, match="Invalid sandbox mode"):
+        _deep_agent(tmp_path, sandbox="read-only")
+    with pytest.raises(ValueError, match="not both"):
+        _deep_agent(tmp_path, sandbox="workspace-write", sandbox_config=SandboxConfig())
+
+
+@needs_seatbelt
+def test_sdk_sandboxed_agent_confines_real_commands(tmp_path):
+    agent = _deep_agent(tmp_path, sandbox="workspace-write")
+    tool = _execute_tool(agent)
+    assert asyncio.run(tool.execute("echo ok > inside.txt && cat inside.txt")) == "ok"
+    outside = Path.home() / f".agentica-sdk-sandbox-test-{uuid.uuid4().hex}"
+    try:
+        with pytest.raises(RuntimeError, match="Operation not permitted"):
+            asyncio.run(tool.execute(f"echo x > {outside}"))
+        assert not outside.exists()
+    finally:
+        outside.unlink(missing_ok=True)

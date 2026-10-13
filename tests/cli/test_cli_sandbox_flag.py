@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""``--sandbox`` / ``settings.sandbox`` -> the SandboxConfig the CLI agent gets."""
-import pytest
+"""``--sandbox`` / ``settings.sandbox`` -> what the CLI hands to ``DeepAgent``."""
+from unittest.mock import MagicMock, patch
 
 from agentica.cli import runtime
 
@@ -9,39 +9,45 @@ def _settings(monkeypatch, values):
     monkeypatch.setattr(runtime, "get_setting", lambda key, default=None: values.get(key, default))
 
 
-def test_off_by_default_keeps_the_sdk_default(monkeypatch):
+def test_off_by_default(monkeypatch):
     _settings(monkeypatch, {})
-    assert runtime._resolve_sandbox_config({}, "ask") is None
+    assert runtime._resolve_sandbox({}) == ("off", False)
 
 
-def test_flag_beats_setting(monkeypatch, tmp_path):
+def test_flag_beats_setting(monkeypatch):
     _settings(monkeypatch, {"sandbox": "off"})
-    config = runtime._resolve_sandbox_config(
-        {"sandbox": "workspace-write", "work_dir": str(tmp_path)}, "ask"
-    )
-    assert config.os_sandbox is True
-    assert config.network_access is False
-    assert config.writable_dirs == [str(tmp_path)]
-    # The path-check layer still follows the permission tier.
-    assert config.enabled is True
-    assert runtime._resolve_sandbox_config(
-        {"sandbox": "workspace-write", "work_dir": str(tmp_path)}, "allow-all"
-    ).enabled is False
+    assert runtime._resolve_sandbox({"sandbox": "workspace-write"}) == ("workspace-write", False)
 
 
-def test_setting_turns_it_on_with_network(monkeypatch, tmp_path):
+def test_setting_turns_it_on_with_network(monkeypatch):
     _settings(monkeypatch, {"sandbox": "workspace-write", "sandbox_network_access": True})
-    config = runtime._resolve_sandbox_config({"work_dir": str(tmp_path)}, "auto")
-    assert config.os_sandbox is True
-    assert config.network_access is True
-
-
-def test_unknown_mode_fails_loudly(monkeypatch):
-    _settings(monkeypatch, {"sandbox": "read-only"})
-    with pytest.raises(ValueError, match="read-only"):
-        runtime._resolve_sandbox_config({}, "ask")
+    assert runtime._resolve_sandbox({}) == ("workspace-write", True)
 
 
 def test_parse_args_accepts_the_flag(monkeypatch):
     monkeypatch.setattr("sys.argv", ["agentica", "--sandbox", "workspace-write"])
     assert runtime.parse_args().sandbox == "workspace-write"
+
+
+def test_create_agent_forwards_the_mode_to_deep_agent(monkeypatch):
+    _settings(monkeypatch, {"sandbox_network_access": True})
+    captured = {}
+
+    class FakeDeepAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.tools = []
+
+    with (
+        patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
+        patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
+    ):
+        runtime.create_agent(
+            {"model_provider": "openai", "model_name": "m", "debug": False, "work_dir": None,
+             "sandbox": "workspace-write"},
+            extra_tools=[], workspace=None, skills_registry=None,
+            include_ask_user_question=True,
+        )
+    assert captured["sandbox"] == "workspace-write"
+    assert captured["sandbox_network_access"] is True
+    assert "sandbox_config" not in captured

@@ -397,6 +397,25 @@ result = await agent.run("""
 !!! tip "SDK Core vs Product Preset"
     如果你在应用里嵌入 Agentica，默认选 `Agent`。如果你在做 CLI/Gateway/无人值守任务，想要一键获得工具、记忆、压缩和经验捕获，再选 `DeepAgent`。
 
+### 可选的系统沙箱
+
+SDK 和 CLI 一样，**默认在本机直接执行**（`sandbox="off"`）。需要隔离时打开系统沙箱，`execute` 的每条命令都由内核约束（macOS Seatbelt / Linux bubblewrap）：只能写 `work_dir`（及同仓库的 worktree）、临时目录和包缓存，`~/.ssh`、`.env` 等读不了，网络默认关。
+
+```python
+agent = DeepAgent(
+    work_dir="./my-project",
+    sandbox="workspace-write",        # 默认 "off"
+    sandbox_network_access=False,     # True 则沙箱里允许联网
+    permission_mode="auto",
+    approve=my_approve,               # 可选：允许模型经审批跑到沙箱外
+)
+```
+
+- 命令被沙箱挡住时，模型可以带 `escalate=true` 重跑到沙箱外：`ask` / `auto` 下一定走 `approve`；**没有 `approve` 的 Agent 出不了沙箱**。`allow-all` 不拦。
+- 机器上没有 `sandbox-exec` / `bwrap` 时构造直接报错，不会悄悄退回本机执行。
+- 普通 `Agent` 自己组装工具时，把 `SandboxConfig(os_sandbox=True, writable_dirs=[...])` 传给 `BuiltinExecuteTool(sandbox_config=...)` 即可；`sandbox=` 与 `sandbox_config=` 不能同时传。
+- CLI 对应 `--sandbox workspace-write`，见 [CLI 终端指南](../getting-started/terminal.md)。
+
 ## 结构化输出
 
 通过 Pydantic 模型获取严格结构化的 JSON 数据：

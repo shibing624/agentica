@@ -46,6 +46,13 @@ from typing import List, Optional, Set
 
 PERMISSION_MODES = ("ask", "auto", "allow-all")
 
+# Where ``execute`` commands run, independent of the permission tier:
+#   "off"             : on the host, as the OS user (default for SDK and CLI).
+#   "workspace-write" : inside the OS sandbox (``agentica.tools.os_sandbox``) —
+#                       writes only in the work dir / its worktrees / temp /
+#                       caches, credential paths unreadable, network off.
+SANDBOX_MODES = ("off", "workspace-write")
+
 # Historically the tools "ask" exposed by hiding the rest. The classifier
 # no longer uses this set (tools stay visible). Reads are auto-allowed
 # everywhere, not only inside the workspace.
@@ -62,6 +69,16 @@ def validate_permission_mode(mode: str) -> None:
     """Raise ValueError if `mode` is not one of PERMISSION_MODES."""
     if mode not in PERMISSION_MODES:
         raise ValueError(f"Invalid permission mode: {mode!r}. Must be one of {PERMISSION_MODES}.")
+
+
+def validate_sandbox_mode(mode: str) -> None:
+    """Raise ValueError if `mode` is not one of SANDBOX_MODES.
+
+    Loud on purpose: a caller who asked for a sandbox and silently got the
+    host is the failure that matters.
+    """
+    if mode not in SANDBOX_MODES:
+        raise ValueError(f"Invalid sandbox mode: {mode!r}. Must be one of {SANDBOX_MODES}.")
 
 
 def read_only_whitelist(mode: str) -> Optional[List[str]]:

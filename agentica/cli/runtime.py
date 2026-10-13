@@ -15,11 +15,11 @@ from rich.console import Console
 
 from agentica.agent.config import (
     ExperienceConfig,
-    SandboxConfig,
     SkillUpgradeConfig,
     ToolConfig,
     WorkspaceMemoryConfig,
 )
+from agentica.agent.permissions import SANDBOX_MODES
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.config.profiles import get_setting
 from agentica.compression.manager import parse_compact_token_limit
@@ -917,29 +917,15 @@ def _resolve_compact_token_limit(agent_config: dict) -> Optional[int]:
     return parse_compact_token_limit(get_setting("compact_token_limit", None))
 
 
-SANDBOX_MODES = ("off", "workspace-write")
+def _resolve_sandbox(agent_config: dict) -> tuple[str, bool]:
+    """``(sandbox mode, network access)`` for ``DeepAgent``.
 
-
-def _resolve_sandbox_config(agent_config: dict, permission_mode: str) -> Optional[SandboxConfig]:
-    """The SandboxConfig for an OS-sandboxed session, or None for the default one.
-
-    CLI flag wins, else config.yaml ``settings.sandbox``. A value outside
-    ``SANDBOX_MODES`` raises: the user asked for a sandbox, and silently
-    running without one is the failure that matters.
+    CLI flag wins, else config.yaml ``settings.sandbox``; default "off" (the
+    host). ``DeepAgent`` validates the mode and builds the SandboxConfig, the
+    same way an SDK caller gets it.
     """
-    from agentica.agent.permissions import sandbox_should_be_enabled
-
     mode = agent_config.get("sandbox") or get_setting("sandbox", "off")
-    if mode not in SANDBOX_MODES:
-        raise ValueError(f"Invalid sandbox mode {mode!r}: must be one of {SANDBOX_MODES}.")
-    if mode == "off":
-        return None
-    return SandboxConfig(
-        enabled=sandbox_should_be_enabled(permission_mode),
-        writable_dirs=[agent_config.get("work_dir") or os.getcwd()],
-        os_sandbox=True,
-        network_access=bool(get_setting("sandbox_network_access", False)),
-    )
+    return mode, bool(get_setting("sandbox_network_access", False))
 
 
 def create_agent(
@@ -1005,7 +991,7 @@ def create_agent(
         permission_mode = configured_permission_mode if isinstance(configured_permission_mode, str) else "allow-all"
     enable_evict, enable_auto_compact = _resolve_compression_flags(agent_config)
     compact_token_limit = _resolve_compact_token_limit(agent_config)
-    sandbox_config = _resolve_sandbox_config(agent_config, permission_mode)
+    sandbox_mode, sandbox_network_access = _resolve_sandbox(agent_config)
     load_system_skills()
     model = get_model(
         model_provider=agent_config["model_provider"],
@@ -1184,7 +1170,8 @@ def create_agent(
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
         diagnostics_servers=agent_config.get("diagnostics_servers"),
         permission_mode=permission_mode,
-        sandbox_config=sandbox_config,
+        sandbox=sandbox_mode,
+        sandbox_network_access=sandbox_network_access,
         tool_config=ToolConfig(
             auto_load_mcp=True,
             permission_mode=permission_mode,

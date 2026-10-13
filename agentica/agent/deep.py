@@ -55,6 +55,11 @@ Usage:
     from agentica import SandboxConfig
     agent = DeepAgent(sandbox_config=SandboxConfig(enabled=True, writable_dirs=["./output"]))
 
+    # Run shell commands inside the OS sandbox (macOS Seatbelt / Linux bubblewrap).
+    # Default "off" runs them on the host. Leaving the sandbox needs `approve`.
+    agent = DeepAgent(sandbox="workspace-write", permission_mode="auto")
+    agent = DeepAgent(sandbox="workspace-write", sandbox_network_access=True)
+
     # Every Agent parameter is declared explicitly — a typo raises TypeError here
     agent = DeepAgent(debug=True, enable_tracing=True, response_model=MyModel)
 """
@@ -137,6 +142,8 @@ class DeepAgent(Agent):
         experience_config: Optional[ExperienceConfig] = None,
         sandbox_config: Optional[SandboxConfig] = None,
         permission_mode: str = "allow-all",
+        sandbox: str = "off",
+        sandbox_network_access: bool = False,
         # Builtin tool toggles — mirror get_builtin_tools() params
         include_file_tools: bool = True,
         include_execute: bool = True,
@@ -218,15 +225,28 @@ class DeepAgent(Agent):
         # place) is immediately observed by already-constructed tools without
         # rebuilding the Agent. An explicit sandbox_config always wins as-is
         # (advanced override); permission_mode only supplies the default.
-        from agentica.agent.permissions import validate_permission_mode, sandbox_should_be_enabled
+        from agentica.agent.permissions import (
+            sandbox_should_be_enabled,
+            validate_permission_mode,
+            validate_sandbox_mode,
+        )
         validate_permission_mode(permission_mode)
+        validate_sandbox_mode(sandbox)
+        if sandbox_config is not None and (sandbox != "off" or sandbox_network_access):
+            raise ValueError(
+                "Pass either sandbox_config or sandbox / sandbox_network_access, not both: "
+                "set os_sandbox / network_access on the SandboxConfig instead."
+            )
         if sandbox_config is None:
             # writable_dirs must be seeded with work_dir: SandboxConfig only
             # enforces work_dir as a fallback when writable_dirs is non-empty
             # (see BuiltinFileTool._validate_write_path) — an empty list is a
             # silent no-op even with enabled=True.
             sandbox_config = SandboxConfig(
-                enabled=sandbox_should_be_enabled(permission_mode), writable_dirs=[work_dir]
+                enabled=sandbox_should_be_enabled(permission_mode),
+                writable_dirs=[work_dir],
+                os_sandbox=sandbox == "workspace-write",
+                network_access=sandbox_network_access,
             )
 
         # Builtin tools + user-provided tools
