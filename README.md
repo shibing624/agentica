@@ -22,9 +22,7 @@
 
 <p align="center">简体中文 | <a href="https://github.com/shibing624/agentica/blob/main/README_EN.md">English</a></p>
 
-<p align="center">
-  <video src="docs/assets/agentica-promo.mp4" width="800" controls playsinline></video>
-</p>
+https://github.com/user-attachments/assets/AGENTICA_PROMO_VIDEO_ID
 
 ## 为什么选 Agentica
 
