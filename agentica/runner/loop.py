@@ -245,7 +245,7 @@ class LoopMixin:
         Returns True to continue looping, False to break.
         """
         if not had_tool_calls:
-            # Max-tokens recovery: if output was truncated, ask the model to go on.
+            # Max-tokens recovery.
             _finish = model.last_finish_reason
             if _finish == "length" and loop_state.max_tokens_recovery_count < loop_state.max_tokens_recovery_limit:
                 loop_state.max_tokens_recovery_count += 1
@@ -253,20 +253,25 @@ class LoopMixin:
                 if truncated is not None and truncated.content:
                     prompt = "Continue from where you left off."
                 else:
-                    # The whole budget went to reasoning. Reasoning is not
-                    # replayed, so there is nothing to continue from, and
-                    # restarting the same analysis would hit the limit again.
+                    # The whole budget went to reasoning, which is not replayed:
+                    # there is nothing visible to continue from. "Continue" makes
+                    # the model redo the same analysis and run out again. This
+                    # prompt does not stop it spending the budget; what it buys
+                    # is visible output inside it, after which the branch above
+                    # can continue that text. It does not mention reasoning: in a
+                    # replay of the failed run on Venus, all 8 content_filter
+                    # replies came from wording that did (8/30), none from the
+                    # other arms (0/38).
                     prompt = (
-                        "Your previous response used the entire output token limit on "
-                        "reasoning and produced no text or tool call; that reasoning is "
-                        "not available to you now. Do not redo the full analysis. Take "
-                        "the next concrete step directly (call a tool or write the "
-                        "answer) and keep reasoning brief."
+                        "Your previous response ran out of output tokens before it "
+                        "produced any text or tool call, and none of it was kept. Do "
+                        "not start the analysis over. Take the next concrete step now: "
+                        "call a tool, or write the answer."
                     )
                 messages.append(Message(role="user", content=prompt))
                 logger.debug(
                     f"[loop] max_tokens recovery #{loop_state.max_tokens_recovery_count}: "
-                    "injecting 'Continue' and looping"
+                    "injecting a recovery prompt and looping"
                 )
                 return True  # continue
             logger.debug(f"[loop] exit: no tool_calls, finish_reason={_finish!r}, turn={loop_state.turn_count}")

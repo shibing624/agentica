@@ -291,7 +291,9 @@ class TestLoopPostResponse(unittest.TestCase):
         prompt = messages[-1].content
         self.assertEqual(messages[-1].role, "user")
         self.assertNotEqual(prompt, "Continue from where you left off.")
-        self.assertIn("entire output token limit on reasoning", prompt)
+        self.assertIn("next concrete step", prompt)
+        # Wording that names the reasoning drew content_filter on Venus.
+        self.assertNotIn("reasoning", prompt.lower())
 
         model.last_finish_reason = "length"
         partial = [Message(role="user", content="q"), Message(role="assistant", content="half an ans")]
