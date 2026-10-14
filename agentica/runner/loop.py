@@ -200,6 +200,45 @@ class LoopMixin:
                 return m
         return None
 
+    @staticmethod
+    def _last_visible_continuation(messages: List[Message]) -> Optional[str]:
+        """Latest non-empty text in the max_tokens continuation chain that ended the run.
+
+        The chain is the assistant replies after the last tool round. A hop
+        that spent its whole budget on reasoning has no text; when the final
+        hop is such a hop, the answer would otherwise come back empty although
+        an earlier hop wrote one (5056 characters, in one measured run).
+
+        Hops are not joined. Of 11 real continuation boundaries (three
+        providers), every one was cut mid-sentence; 3 re-emitted the tail of
+        the previous hop verbatim (27-235 chars), 3 opened with meta text
+        ("## 7. ... (continued)", "Continuing from where I left off."), and
+        one of the overlaps restated a whole list item. A plain join shows the
+        seam in 6 of 11; removing it means matching text, and a restatement in
+        new words is out of reach even then. One segment never repeats itself.
+        """
+        for m in reversed(messages):
+            if m.role == "tool" or (m.role == "assistant" and m.tool_calls):
+                return None
+            if m.role == "assistant" and isinstance(m.content, str) and m.content.strip():
+                return m.content
+        return None
+
+    @staticmethod
+    def _mark_output_truncated(agent: "Agent", messages: List[Message], loop_state: "LoopState") -> None:
+        """Report a reply cut off at max_tokens instead of returning it as complete."""
+        if not loop_state.output_truncated:
+            return
+        if not agent.run_response.content:
+            agent.run_response.content = LoopMixin._last_visible_continuation(messages) or ""
+        agent.run_response.break_reason = RunBreakReason.OUTPUT_TRUNCATED.value
+        agent.run_response.break_message = (
+            "The reply hit the output token limit (max_tokens) after "
+            f"{loop_state.max_tokens_recovery_count} continuation attempt(s). `content` holds "
+            "the last part that had visible text; earlier parts are in `messages`."
+        )
+        logger.warning(f"Agent '{agent.identifier}': {agent.run_response.break_message}")
+
     def _loop_safety_checks(
         self,
         messages: List[Message],
@@ -288,6 +327,8 @@ class LoopMixin:
                     f"[loop] max_tokens recovery #{loop_state.max_tokens_recovery_count}: {recovery}"
                 )
                 return True  # continue
+            if _finish == "length":
+                loop_state.output_truncated = True
             logger.debug(f"[loop] exit: no tool_calls, finish_reason={_finish!r}, turn={loop_state.turn_count}")
             return False  # break
 
@@ -1543,6 +1584,11 @@ class LoopMixin:
                     agent.run_response.content = model_response.content
                     if model_response.reasoning_content:
                         agent.run_response.reasoning_content = model_response.reasoning_content
+
+                # A reply that never fit in max_tokens is not a finished answer,
+                # even though the loop ended normally. Runs after the streaming
+                # assignment above so the fallback text can fill an empty reply.
+                LoopMixin._mark_output_truncated(agent, messages_for_model, loop_state)
 
                 # --- Agent-level output guardrails ---
                 # MUST run BEFORE memory persistence, summary update, file save,

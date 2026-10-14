@@ -29,6 +29,9 @@ class LoopState:
     # Max-tokens recovery (finish_reason == "length")
     max_tokens_recovery_count: int = 0
     max_tokens_recovery_limit: int = 3
+    # The loop ended on a reply that was still cut off at max_tokens, with no
+    # recovery attempt left.
+    output_truncated: bool = False
 
     # API call attempts per model in Runner-level retry/fallback handling.
     # 1 means no same-model retry; fallback can still switch models immediately.

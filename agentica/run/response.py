@@ -69,6 +69,8 @@ class RunBreakReason(str, Enum):
     DEATH_SPIRAL = "death_spiral"
     MAX_TURNS = "max_turns"
     COST_BUDGET = "cost_budget"
+    # The reply still hit max_tokens after every max_tokens recovery attempt.
+    OUTPUT_TRUNCATED = "output_truncated"
 
 
 class ToolCallInfo(BaseModel):
