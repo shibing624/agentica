@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Shared process identity attached to every external egress payload."""
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+Shared process identity attached to every external egress payload.
+"""
 
 from __future__ import annotations
 

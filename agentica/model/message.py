@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+Message model for the model.
+"""
 import json
 import os
 from time import time

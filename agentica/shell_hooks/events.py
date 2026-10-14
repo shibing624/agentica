@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""High-level shell-hook notices that do not belong to one Runner run."""
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+High-level shell-hook notices that do not belong to one Runner run.
+"""
 
 from __future__ import annotations
 

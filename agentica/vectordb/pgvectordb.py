@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+PgVectorDb implementation for the vector database.
+"""
 from hashlib import md5
 from typing import Optional, List, Union, Dict, Any
 

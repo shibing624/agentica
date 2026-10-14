@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+OpenAI chat model implementation.
+"""
+
 from os import getenv
 from dataclasses import dataclass, field
 from pathlib import Path

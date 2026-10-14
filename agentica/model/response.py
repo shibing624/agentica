@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+Response model for the model.
+"""
 from time import time
 from enum import Enum
 from typing import Optional, Any, Dict

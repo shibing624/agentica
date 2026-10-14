@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Render the session-guidance skills catalog (name + description, budgeted)."""
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+Render the session-guidance skills catalog (name + description, budgeted).
+"""
 from typing import List, Optional, Sequence, Tuple
 
 from agentica.skills.skill import Skill

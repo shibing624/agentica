@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+QdrantDb implementation for the vector database.
+"""
 import os
 from hashlib import md5
 from typing import List, Optional, Dict, Any

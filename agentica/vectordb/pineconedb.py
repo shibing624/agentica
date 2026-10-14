@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: XuMing(xuming624@qq.com)
+@description:
+PineconeDB implementation for the vector database.
+"""
 from typing import Optional, Dict, Union, List, Any
 
 try:
