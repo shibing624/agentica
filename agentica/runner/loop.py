@@ -245,11 +245,25 @@ class LoopMixin:
         Returns True to continue looping, False to break.
         """
         if not had_tool_calls:
-            # Max-tokens recovery: if output was truncated, inject "Continue"
+            # Max-tokens recovery: if output was truncated, ask the model to go on.
             _finish = model.last_finish_reason
             if _finish == "length" and loop_state.max_tokens_recovery_count < loop_state.max_tokens_recovery_limit:
                 loop_state.max_tokens_recovery_count += 1
-                messages.append(Message(role="user", content="Continue from where you left off."))
+                truncated = LoopMixin._get_last_assistant_message(messages)
+                if truncated is not None and truncated.content:
+                    prompt = "Continue from where you left off."
+                else:
+                    # The whole budget went to reasoning. Reasoning is not
+                    # replayed, so there is nothing to continue from, and
+                    # restarting the same analysis would hit the limit again.
+                    prompt = (
+                        "Your previous response used the entire output token limit on "
+                        "reasoning and produced no text or tool call; that reasoning is "
+                        "not available to you now. Do not redo the full analysis. Take "
+                        "the next concrete step directly (call a tool or write the "
+                        "answer) and keep reasoning brief."
+                    )
+                messages.append(Message(role="user", content=prompt))
                 logger.debug(
                     f"[loop] max_tokens recovery #{loop_state.max_tokens_recovery_count}: "
                     "injecting 'Continue' and looping"

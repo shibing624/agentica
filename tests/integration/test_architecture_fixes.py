@@ -268,9 +268,35 @@ class TestLoopPostResponse(unittest.TestCase):
         messages = []
         result = Runner._loop_post_response(messages, model, loop_state, had_tool_calls=False)
         self.assertTrue(result)
-        # Should have appended "Continue" message
+        # A recovery prompt is appended; its wording is pinned by the next test.
         self.assertEqual(len(messages), 1)
-        self.assertIn("Continue", messages[0].content)
+        self.assertEqual(messages[0].role, "user")
+        self.assertEqual(loop_state.max_tokens_recovery_count, 1)
+
+    def test_length_with_reasoning_only_asks_for_next_step_not_continue(self):
+        """Budget spent on reasoning alone: there is no visible text to continue.
+
+        Reasoning is not replayed, so "continue from where you left off" makes
+        the model restart the same analysis and hit the limit again.
+        """
+        from agentica.model.openai import OpenAIChat
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        model.last_finish_reason = "length"
+        loop_state = LoopState()
+        messages = [
+            Message(role="user", content="q"),
+            Message(role="assistant", content=None, reasoning_content="r" * 100),
+        ]
+        self.assertTrue(Runner._loop_post_response(messages, model, loop_state, had_tool_calls=False))
+        prompt = messages[-1].content
+        self.assertEqual(messages[-1].role, "user")
+        self.assertNotEqual(prompt, "Continue from where you left off.")
+        self.assertIn("entire output token limit on reasoning", prompt)
+
+        model.last_finish_reason = "length"
+        partial = [Message(role="user", content="q"), Message(role="assistant", content="half an ans")]
+        Runner._loop_post_response(partial, model, loop_state, had_tool_calls=False)
+        self.assertEqual(partial[-1].content, "Continue from where you left off.")
 
     def test_had_tool_calls_continues(self):
         """Tool calls processed -> should continue (return True)."""

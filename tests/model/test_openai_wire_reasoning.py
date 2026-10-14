@@ -8,7 +8,9 @@ history message is pure request-body dead weight — 85K tokens of it on a long
 reasoning-model session — so the chat wire format must strip it. Persistence
 and replay keep it via ``to_replay_dict``.
 """
+import asyncio
 import unittest
+from unittest import mock
 
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
@@ -39,6 +41,39 @@ class TestReasoningContentNotSentOnWire(unittest.TestCase):
     def test_replay_dict_still_carries_reasoning_for_persistence(self):
         msg = Message(role="assistant", content="a", reasoning_content="kept")
         self.assertEqual(msg.to_replay_dict()["reasoning_content"], "kept")
+
+    def test_reasoning_only_assistant_turn_is_omitted_from_request(self):
+        """Venus 4000 ``message has no content``: a truncated thinking turn.
+
+        The output budget can be spent entirely on ``reasoning_content``,
+        which the wire strips. Measured on Venus: ``{role: assistant,
+        content: null}`` and ``content: ""`` both 400, while dropping the
+        turn (user,user or tool,user) is accepted. The turn carries nothing
+        sendable, so it is omitted. A tool-call turn with null content stays.
+        """
+        model = OpenAIChat(id="claude-opus-5-5", api_key="fake")
+        tool_call = {"id": "t", "type": "function", "function": {"name": "execute", "arguments": "{}"}}
+        history = [
+            Message(role="user", content="read the code"),
+            Message(role="assistant", content=None, tool_calls=[tool_call]),
+            Message(role="tool", tool_call_id="t", content="ok"),
+            Message(role="assistant", content=None, reasoning_content="x" * 1000),
+            Message(role="assistant", content="", reasoning_content="y"),
+            Message(role="user", content="Continue."),
+        ]
+        create = mock.AsyncMock(return_value=object())
+        client = mock.Mock()
+        client.chat.completions.create = create
+        with mock.patch.object(model, "get_client", return_value=client):
+            asyncio.run(model.invoke(history))
+
+        sent = create.call_args.kwargs["messages"]
+        self.assertEqual([m["role"] for m in sent], ["user", "assistant", "tool", "user"])
+        self.assertIsNone(sent[1]["content"])
+        self.assertEqual(sent[1]["tool_calls"], [tool_call])
+        self.assertTrue(all("reasoning_content" not in m for m in sent))
+        # History itself is untouched: persistence still sees the turn.
+        self.assertEqual(len(history), 6)
 
 
 if __name__ == "__main__":

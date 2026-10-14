@@ -643,6 +643,29 @@ class OpenAIChat(Model):
                 wire["content"] = filtered
         return wire
 
+    def format_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
+        """Format history for the chat wire, omitting assistant turns with nothing to send.
+
+        A turn that spent its whole output budget on reasoning keeps only
+        ``reasoning_content``, which this wire strips. What remains is an
+        assistant message with no content, no tool call and no audio: it
+        carries no information, and Venus rejects it (4000 ``message has no
+        content``), which kills every later request of the session. The
+        Anthropic path skips such turns the same way.
+        """
+        formatted = []
+        for message in messages:
+            wire = self.format_message(message)
+            if (
+                wire["role"] == "assistant"
+                and not wire.get("tool_calls")
+                and not wire.get("audio")
+                and not _has_cacheable_content(wire["content"])
+            ):
+                continue
+            formatted.append(wire)
+        return formatted
+
     # ── Prompt caching (Anthropic-via-OpenAI proxies) ──
 
     def _prompt_cache_key(self) -> Optional[str]:
@@ -874,7 +897,7 @@ class OpenAIChat(Model):
     async def invoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
         """Send a chat completion request to the OpenAI API (async-only)."""
         langfuse_params = self._get_langfuse_extra_params()
-        formatted = [self.format_message(m) for m in messages]
+        formatted = self.format_messages(messages)
         # Inject Anthropic-style cache_control breakpoints for OpenAI-compatible
         # proxies that front Claude. No-op when caching is off.
         formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
@@ -921,7 +944,7 @@ class OpenAIChat(Model):
         would duplicate output.
         """
         langfuse_params = self._get_langfuse_extra_params()
-        formatted = [self.format_message(m) for m in messages]
+        formatted = self.format_messages(messages)
         formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
 
         async def _open() -> AsyncIterator[ChatCompletionChunk]:
