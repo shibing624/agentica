@@ -71,6 +71,9 @@ class RunBreakReason(str, Enum):
     COST_BUDGET = "cost_budget"
     # The reply still hit max_tokens after every max_tokens recovery attempt.
     OUTPUT_TRUNCATED = "output_truncated"
+    # The provider kept answering with nothing (no text, reasoning or tool
+    # call) after every empty-response retry.
+    EMPTY_RESPONSE = "empty_response"
 
 
 class ToolCallInfo(BaseModel):

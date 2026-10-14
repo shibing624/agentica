@@ -201,6 +201,19 @@ class LoopMixin:
         return None
 
     @staticmethod
+    def _is_empty_reply(message: Message) -> bool:
+        """True when an assistant turn carries nothing: no text, reasoning, tool call or audio."""
+        content = message.content.strip() if isinstance(message.content, str) else message.content
+        return not (
+            content
+            or message.reasoning_content
+            or message.thinking
+            or message.redacted_thinking
+            or message.tool_calls
+            or message.audio
+        )
+
+    @staticmethod
     def _last_visible_continuation(messages: List[Message]) -> Optional[str]:
         """Latest non-empty text in the max_tokens continuation chain that ended the run.
 
@@ -236,6 +249,19 @@ class LoopMixin:
             "The reply hit the output token limit (max_tokens) after "
             f"{loop_state.max_tokens_recovery_count} continuation attempt(s). `content` holds "
             "the last part that had visible text; earlier parts are in `messages`."
+        )
+        logger.warning(f"Agent '{agent.identifier}': {agent.run_response.break_message}")
+
+    @staticmethod
+    def _mark_empty_response(agent: "Agent", loop_state: "LoopState") -> None:
+        """Report a run that ended on an empty provider reply instead of a deliberate stop."""
+        if not loop_state.empty_response:
+            return
+        agent.run_response.break_reason = RunBreakReason.EMPTY_RESPONSE.value
+        agent.run_response.break_message = (
+            "The model provider returned an empty response (no text, no tool call) "
+            f"{loop_state.empty_response_retry_limit + 1} times in a row. The task may be "
+            "unfinished; send a follow-up message to resume."
         )
         logger.warning(f"Agent '{agent.identifier}': {agent.run_response.break_message}")
 
@@ -283,6 +309,11 @@ class LoopMixin:
 
         Returns True to continue looping, False to break.
         """
+        reply = LoopMixin._get_last_assistant_message(messages)
+        empty_reply = reply is not None and LoopMixin._is_empty_reply(reply)
+        if not empty_reply:
+            loop_state.empty_response_retry_count = 0
+
         if not had_tool_calls:
             # Max-tokens recovery.
             _finish = model.last_finish_reason
@@ -329,6 +360,23 @@ class LoopMixin:
                 return True  # continue
             if _finish == "length":
                 loop_state.output_truncated = True
+            elif empty_reply:
+                # HTTP 200 with nothing in it (seen from the Venus proxy after a
+                # long idle: 5 of 494 requests in one session, no exception, no
+                # error status). No retry layer fires on a clean empty stream,
+                # and ending here looks exactly like the model deciding it was
+                # done. Re-send the same request. The empty turn stays in the
+                # history (it holds the call's usage) and is skipped on the
+                # wire, so the retry sends what the failed call sent.
+                if loop_state.empty_response_retry_count < loop_state.empty_response_retry_limit:
+                    loop_state.empty_response_retry_count += 1
+                    logger.warning(
+                        f"[loop] empty response from provider (no content, no tool call, "
+                        f"finish_reason={_finish!r}); retry "
+                        f"{loop_state.empty_response_retry_count}/{loop_state.empty_response_retry_limit}"
+                    )
+                    return True  # continue
+                loop_state.empty_response = True
             logger.debug(f"[loop] exit: no tool_calls, finish_reason={_finish!r}, turn={loop_state.turn_count}")
             return False  # break
 
@@ -1589,6 +1637,7 @@ class LoopMixin:
                 # even though the loop ended normally. Runs after the streaming
                 # assignment above so the fallback text can fill an empty reply.
                 LoopMixin._mark_output_truncated(agent, messages_for_model, loop_state)
+                LoopMixin._mark_empty_response(agent, loop_state)
 
                 # --- Agent-level output guardrails ---
                 # MUST run BEFORE memory persistence, summary update, file save,

@@ -33,6 +33,14 @@ class LoopState:
     # recovery attempt left.
     output_truncated: bool = False
 
+    # Empty-response recovery: the provider answered 200 with no text, no
+    # reasoning and no tool call. Counts consecutive empties; any non-empty
+    # reply resets it, so a long run survives isolated hiccups.
+    empty_response_retry_count: int = 0
+    empty_response_retry_limit: int = 2
+    # The loop ended on an empty reply after every retry came back empty too.
+    empty_response: bool = False
+
     # API call attempts per model in Runner-level retry/fallback handling.
     # 1 means no same-model retry; fallback can still switch models immediately.
     # The streaming consume site uses the same budget for mid-stream drops.
