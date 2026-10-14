@@ -80,6 +80,7 @@ from .attachments import (
     PASTE_REF_RE,
     _deduplicate_image_attachments,
     _detect_file_drop,
+    note_leading_text_file,
     unpack_queue_payload,
 )
 from .btw import (
@@ -871,17 +872,18 @@ def run_interactive(
             if not user_input and not submit_images:
                 continue
 
+            # What the transcript echoes. File parsing (image attach, text
+            # inject, a question for an image-only paste) must not rewrite it.
+            typed_input = user_input
             if not user_input and submit_images:
                 user_input = "What do you see in this image?"
 
-            # Detect file drops
-            dropped = _detect_file_drop(user_input)
-            if dropped:
-                if dropped["is_image"]:
-                    submit_images.append(dropped["path"])
-                    user_input = dropped["remainder"] or f"[User attached image: {dropped['path'].name}]"
-                else:
-                    user_input = f"@{dropped['path']} {dropped['remainder']}".strip()
+            dropped_text_file = None
+            dropped = _detect_file_drop(typed_input)
+            if dropped and dropped["is_image"]:
+                submit_images.append(dropped["path"])
+            else:
+                _, dropped_text_file = note_leading_text_file(typed_input)
 
             # Slash commands
             first_word = user_input.split()[0].lower() if user_input else ""
@@ -965,6 +967,8 @@ def run_interactive(
                 llm_input = skills_registry.expand_invocation(user_input) or user_input
 
             prompt_text, mentioned_files = parse_file_mentions(llm_input)
+            if dropped_text_file is not None and dropped_text_file not in mentioned_files:
+                mentioned_files.append(dropped_text_file)
             # @-mentioned image files are multimodal attachments, not text to
             # inject — reading a jpg as utf-8 yields garbage / a decode error.
             image_mentions = [f for f in mentioned_files if f.suffix.lower() in IMAGE_EXTENSIONS]
@@ -977,7 +981,7 @@ def run_interactive(
 
             if not is_btw and not already_shown:
                 display_user_message(
-                    user_input,
+                    typed_input,
                     pasted_blocks=n_pasted_blocks,
                     pasted_lines=n_pasted_lines,
                     images=submit_images,

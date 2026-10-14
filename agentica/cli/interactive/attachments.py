@@ -156,18 +156,18 @@ def queue_item_preview(item) -> str:
 
 
 def peel_image_input(text: str, attached: Optional[list] = None) -> tuple:
-    """Split a leading image path (and Ctrl+V attachments) from caption text.
+    """Attach a leading image path, and keep the typed line unchanged.
 
-    Idle turns already do this via ``_detect_file_drop`` in the process loop.
-    Mid-run Enter has to do it too, or a pasted
-    ``/var/folders/...png 如图所示`` steers as a path string instead of a
-    vision image plus caption.
+    The image still goes out as an attachment (mid-run Enter included, so a
+    pasted ``/var/folders/...png 如图所示`` is a vision image plus the words
+    the user typed). The line is not rewritten: stripping the path, or
+    substituting ``[User attached image: ...]``, is what the transcript used
+    to show instead of the input.
     """
     extra = list(attached or [])
     dropped = _detect_file_drop(text)
     if dropped and dropped["is_image"]:
         extra.append(dropped["path"])
-        text = dropped["remainder"]
     return text, _deduplicate_image_attachments(extra)
 
 
@@ -202,6 +202,21 @@ def _detect_file_drop(user_input: str) -> Optional[dict]:
         "is_image": drop_path.suffix.lower() in IMAGE_EXTENSIONS,
         "remainder": remainder,
     }
+
+
+def note_leading_text_file(user_input: str) -> tuple:
+    """Return the typed line and a text file to inject, when the line starts with one.
+
+    The line is not rewritten. A leading ``@`` used to be inserted so
+    ``parse_file_mentions`` would inject the file, and that rewrite is what
+    the transcript showed. A path later in the sentence never gained one, so
+    the same path looked different depending on where it sat. Images are left
+    to the caller, which peels them into attachments.
+    """
+    dropped = _detect_file_drop(user_input)
+    if dropped is None or dropped["is_image"]:
+        return user_input, None
+    return user_input, dropped["path"]
 
 
 def _image_content_key(path: Path) -> str:
@@ -296,4 +311,4 @@ def _ocr_images_parallel(image_paths: list) -> str:
     return "\n\n".join(results)
 
 
-__all__ = ['PASTE_REF_RE', 'annotate_paste_refs', '_split_path_input', '_resolve_attachment_path', 'queue_item_preview', 'peel_image_input', '_detect_file_drop', '_image_content_key', '_deduplicate_image_attachments', '_try_attach_clipboard_image', '_OCR_PER_IMAGE_CHARS', '_OCR_TOTAL_CHARS', '_OCR_TIMEOUT_SECS', '_ocr_single_image', '_ocr_images_parallel']
+__all__ = ['PASTE_REF_RE', 'annotate_paste_refs', '_split_path_input', '_resolve_attachment_path', 'queue_item_preview', 'peel_image_input', '_detect_file_drop', 'note_leading_text_file', '_image_content_key', '_deduplicate_image_attachments', '_try_attach_clipboard_image', '_OCR_PER_IMAGE_CHARS', '_OCR_TOTAL_CHARS', '_OCR_TIMEOUT_SECS', '_ocr_single_image', '_ocr_images_parallel']

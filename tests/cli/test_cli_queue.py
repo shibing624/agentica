@@ -467,6 +467,31 @@ class TestShouldSteerMidRun(unittest.TestCase):
         )
 
 
+class TestLeadingTextFile(unittest.TestCase):
+    def test_leading_path_is_not_rewritten_with_at(self):
+        from agentica.cli.interactive.attachments import note_leading_text_file
+
+        with tempfile.TemporaryDirectory() as td:
+            doc = Path(td) / "ISSUE-empty-response-ends-turn.md"
+            doc.write_text("hello", encoding="utf-8")
+            typed = f"{doc} 解释"
+            shown, attached = note_leading_text_file(typed)
+        self.assertEqual(shown, typed)
+        self.assertNotIn("@", shown)
+        self.assertEqual(attached, doc.resolve())
+
+    def test_path_later_in_the_line_is_left_alone(self):
+        from agentica.cli.interactive.attachments import note_leading_text_file
+
+        with tempfile.TemporaryDirectory() as td:
+            doc = Path(td) / "notes.md"
+            doc.write_text("hello", encoding="utf-8")
+            typed = f"看一下 {doc}"
+            shown, attached = note_leading_text_file(typed)
+        self.assertEqual(shown, typed)
+        self.assertIsNone(attached)
+
+
 class TestPeelImageInput(unittest.TestCase):
     def test_leading_png_path_becomes_an_attachment(self):
         from agentica.cli.interactive.attachments import peel_image_input
@@ -474,11 +499,9 @@ class TestPeelImageInput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             image = Path(td) / "clipboard-2026-09-15-195329-CDED7B8C.png"
             image.write_bytes(b"fake-png")
-            text, images = peel_image_input(
-                f"{image}  如图所示，刚测试了2个bug",
-                attached=[],
-            )
-        self.assertEqual(text, "如图所示，刚测试了2个bug")
+            typed = f"{image}  如图所示，刚测试了2个bug"
+            text, images = peel_image_input(typed, attached=[])
+        self.assertEqual(text, typed)
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0].resolve(), image.resolve())
 
