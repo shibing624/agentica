@@ -499,9 +499,11 @@ class TestPeelImageInput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             image = Path(td) / "clipboard-2026-09-15-195329-CDED7B8C.png"
             image.write_bytes(b"fake-png")
-            typed = f"{image}  如图所示，刚测试了2个bug"
-            text, images = peel_image_input(typed, attached=[])
-        self.assertEqual(text, typed)
+            text, images = peel_image_input(
+                f"{image}  如图所示，刚测试了2个bug",
+                attached=[],
+            )
+        self.assertEqual(text, "如图所示，刚测试了2个bug")
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0].resolve(), image.resolve())
 

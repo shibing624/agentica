@@ -597,10 +597,10 @@ def _setup_tui(
         # - a *registered* slash command keeps its meaning (skill auto-commands
         #   and non-concurrent commands stay queued as next-turn prompts;
         #   concurrent commands and /btw already returned above). A Unix path
-        #   like ``/var/folders/...png`` is not a command — the image is
-        #   attached and the typed line is left as entered, same as an idle turn.
-        # - pasted / dropped images steer with that same line (vision on the
-        #   next inference). A registered slash command still queues.
+        #   like ``/var/folders/...png`` is not a command — it is peeled into
+        #   an image attachment plus caption, same as an idle turn.
+        # - pasted / dropped images steer with the caption (vision on the next
+        #   inference). A registered slash command still queues.
         # - steer() refused (run ended in the TOCTOU gap) falls back to the
         #   queue; steer accepted but never drained (typed during the final
         #   inference) is promoted to a queued turn when the run ends. The

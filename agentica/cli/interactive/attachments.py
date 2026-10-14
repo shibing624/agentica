@@ -156,18 +156,18 @@ def queue_item_preview(item) -> str:
 
 
 def peel_image_input(text: str, attached: Optional[list] = None) -> tuple:
-    """Attach a leading image path, and keep the typed line unchanged.
+    """Split a leading image path (and Ctrl+V attachments) from caption text.
 
-    The image still goes out as an attachment (mid-run Enter included, so a
-    pasted ``/var/folders/...png 如图所示`` is a vision image plus the words
-    the user typed). The line is not rewritten: stripping the path, or
-    substituting ``[User attached image: ...]``, is what the transcript used
-    to show instead of the input.
+    Idle turns already do this via ``_detect_file_drop`` in the process loop.
+    Mid-run Enter has to do it too, or a pasted
+    ``/var/folders/...png 如图所示`` steers as a path string instead of a
+    vision image plus caption.
     """
     extra = list(attached or [])
     dropped = _detect_file_drop(text)
     if dropped and dropped["is_image"]:
         extra.append(dropped["path"])
+        text = dropped["remainder"]
     return text, _deduplicate_image_attachments(extra)
 
 

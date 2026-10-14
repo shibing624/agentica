@@ -872,18 +872,19 @@ def run_interactive(
             if not user_input and not submit_images:
                 continue
 
-            # What the transcript echoes. File parsing (image attach, text
-            # inject, a question for an image-only paste) must not rewrite it.
-            typed_input = user_input
             if not user_input and submit_images:
                 user_input = "What do you see in this image?"
 
+            # A leading image is an attachment. A leading text file is injected
+            # into the model prompt below; unlike the old ``@`` rewrite, the
+            # text-file path stays exactly as entered.
             dropped_text_file = None
-            dropped = _detect_file_drop(typed_input)
+            dropped = _detect_file_drop(user_input)
             if dropped and dropped["is_image"]:
                 submit_images.append(dropped["path"])
+                user_input = dropped["remainder"] or f"[User attached image: {dropped['path'].name}]"
             else:
-                _, dropped_text_file = note_leading_text_file(typed_input)
+                user_input, dropped_text_file = note_leading_text_file(user_input)
 
             # Slash commands
             first_word = user_input.split()[0].lower() if user_input else ""
@@ -981,7 +982,7 @@ def run_interactive(
 
             if not is_btw and not already_shown:
                 display_user_message(
-                    typed_input,
+                    user_input,
                     pasted_blocks=n_pasted_blocks,
                     pasted_lines=n_pasted_lines,
                     images=submit_images,
