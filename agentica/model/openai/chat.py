@@ -8,6 +8,7 @@ import time
 import re
 import sys
 from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
+from typing import Awaitable, Callable, ClassVar
 from uuid import uuid4
 from xml.etree import ElementTree
 
@@ -17,6 +18,7 @@ else:
     from typing_extensions import override
 
 import httpx
+import openai
 from enum import Enum, EnumMeta
 from pydantic import BaseModel
 
@@ -36,6 +38,7 @@ from agentica.model.cache_routing import (
     persistent_cache_session_id,
     resolve_cache_session_id,
 )
+from agentica.model.cost import get_model_max_output_tokens
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
@@ -355,6 +358,78 @@ class OpenAIChat(Model):
     langfuse_tags: Optional[List[str]] = None
     # Langfuse trace name (defaults to model id)
     langfuse_trace_name: Optional[str] = None
+    # True while the output cap in the request was chosen by agentica (catalog
+    # ceiling or a recovery raise), not by the user. Only such a cap is ever
+    # raised or dropped; a user-configured one is sent as given.
+    _auto_output_cap: bool = field(default=False, init=False, repr=False)
+    # Request field that carries the output cap on this wire.
+    _OUTPUT_CAP_KEY: ClassVar[str] = "max_tokens"
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Output cap precedence: user config > catalog ceiling > gateway default.
+        # Without a cap in the request the gateway picks one — 20000 on Venus
+        # for claude-opus-5-5, which a high-effort thinking turn can spend
+        # entirely on reasoning. The catalog ceiling is models.dev
+        # ``limit.output``. It is a ceiling, not a reservation: providers bill
+        # what they generate.
+        if not self._has_explicit_output_cap():
+            catalog_cap = get_model_max_output_tokens(self.id)
+            if catalog_cap is not None:
+                self.max_tokens = catalog_cap
+                self._auto_output_cap = True
+
+    def _has_explicit_output_cap(self) -> bool:
+        return self.max_tokens is not None or self.max_completion_tokens is not None
+
+    def raise_output_cap(self, used_tokens: int) -> bool:
+        """Double the cap after a turn spent ``used_tokens`` and showed nothing.
+
+        Bounded by the catalog ceiling. A cap the user configured is left
+        alone. Returns True when the next request will carry a higher cap.
+        """
+        if self._has_explicit_output_cap() and not self._auto_output_cap:
+            return False
+        target = used_tokens * 2
+        ceiling = get_model_max_output_tokens(self.id)
+        if ceiling is not None:
+            target = min(target, ceiling)
+        if self.max_tokens is not None and target <= self.max_tokens:
+            return False
+        logger.info(f"Raising output cap for {self.id}: {self.max_tokens} -> {target}")
+        self.max_tokens = target
+        self._auto_output_cap = True
+        return True
+
+    async def _create_with_auto_cap(
+        self,
+        create: Callable[[Dict[str, Any]], Awaitable[Any]],
+        request_kwargs: Dict[str, Any],
+    ) -> Any:
+        """Send ``request_kwargs``; if an agentica-chosen cap is rejected, drop it.
+
+        The catalog ceiling describes the model, not a given deployment: a
+        self-hosted DeepSeek-V4-Flash with ``max_model_len=163840`` rejects the
+        catalog's 393216, and OpenAI's own reasoning models reject
+        ``max_tokens`` on chat completions. Either way the request 400s. Whether
+        the cap caused it is tested, not parsed out of the error text: re-send
+        without it. Success means it did, so stop sending it; failure means it
+        did not, and that error is the real one.
+        """
+        try:
+            return await create(request_kwargs)
+        except openai.BadRequestError:
+            if not self._auto_output_cap or self._OUTPUT_CAP_KEY not in request_kwargs:
+                raise
+            without_cap = {k: v for k, v in request_kwargs.items() if k != self._OUTPUT_CAP_KEY}
+            result = await create(without_cap)
+            logger.info(
+                f"{self.id}: endpoint rejected {self._OUTPUT_CAP_KEY}={request_kwargs[self._OUTPUT_CAP_KEY]}; "
+                "using the endpoint's default output cap from now on"
+            )
+            self.max_tokens = None
+            self._auto_output_cap = False
+            return result
 
     def get_client_params(self) -> Dict[str, Any]:
         client_params: Dict[str, Any] = {}
@@ -905,11 +980,14 @@ class OpenAIChat(Model):
         if self.response_format is not None and self.use_structured_outputs:
             try:
                 if isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel):
-                    response = await self.get_client().beta.chat.completions.parse(
-                        model=self.id,
-                        messages=formatted,  # type: ignore
-                        **request_kwargs,
-                        **langfuse_params,
+                    response = await self._create_with_auto_cap(
+                        lambda kwargs: self.get_client().beta.chat.completions.parse(
+                            model=self.id,
+                            messages=formatted,  # type: ignore
+                            **kwargs,
+                            **langfuse_params,
+                        ),
+                        request_kwargs,
                     )
                     self._arm_cache_keepalive()
                     return response
@@ -921,11 +999,14 @@ class OpenAIChat(Model):
                 raise
 
         try:
-            response = await self.get_client().chat.completions.create(
-                model=self.id,
-                messages=formatted,  # type: ignore
-                **request_kwargs,
-                **langfuse_params,
+            response = await self._create_with_auto_cap(
+                lambda kwargs: self.get_client().chat.completions.create(
+                    model=self.id,
+                    messages=formatted,  # type: ignore
+                    **kwargs,
+                    **langfuse_params,
+                ),
+                request_kwargs,
             )
             self._arm_cache_keepalive()
             return response
@@ -949,13 +1030,16 @@ class OpenAIChat(Model):
 
         async def _open() -> AsyncIterator[ChatCompletionChunk]:
             try:
-                return await self.get_client().chat.completions.create(
-                    model=self.id,
-                    messages=formatted,  # type: ignore
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    **request_kwargs,
-                    **langfuse_params,
+                return await self._create_with_auto_cap(
+                    lambda kwargs: self.get_client().chat.completions.create(
+                        model=self.id,
+                        messages=formatted,  # type: ignore
+                        stream=True,
+                        stream_options={"include_usage": True},
+                        **kwargs,
+                        **langfuse_params,
+                    ),
+                    request_kwargs,
                 )
             except Exception as e:
                 self._learn_context_limit_from_error(str(e))

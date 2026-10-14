@@ -251,27 +251,41 @@ class LoopMixin:
                 loop_state.max_tokens_recovery_count += 1
                 truncated = LoopMixin._get_last_assistant_message(messages)
                 if truncated is not None and truncated.content:
-                    prompt = "Continue from where you left off."
+                    messages.append(Message(role="user", content="Continue from where you left off."))
+                    recovery = "continue"
+                elif (
+                    truncated is not None
+                    and "output_tokens" in truncated.metrics
+                    and model.raise_output_cap(truncated.metrics["output_tokens"])
+                ):
+                    # The whole budget went to reasoning and the cap can go up:
+                    # re-send the same request with more room. The empty turn is
+                    # dropped on the wire. Replaying the run that hit this
+                    # (a034fa4c, 144K tokens, Venus 20000 default cap) with the
+                    # cap doubled and no added prompt: 6/6 produced a tool call.
+                    recovery = "raised output cap"
                 else:
-                    # The whole budget went to reasoning, which is not replayed:
-                    # there is nothing visible to continue from. "Continue" makes
-                    # the model redo the same analysis and run out again. This
-                    # prompt does not stop it spending the budget; what it buys
-                    # is visible output inside it, after which the branch above
-                    # can continue that text. It does not mention reasoning: in a
-                    # replay of the failed run on Venus, all 8 content_filter
+                    # Reasoning-only truncation at a cap that cannot go up (user
+                    # configured, or already the model's ceiling). Reasoning is
+                    # not replayed, so "Continue" makes the model redo the same
+                    # analysis and run out again. This prompt does not stop it
+                    # spending the budget; what it buys is visible output inside
+                    # it, which the branch above can then continue. It does not
+                    # mention reasoning: in that replay, all 8 content_filter
                     # replies came from wording that did (8/30), none from the
                     # other arms (0/38).
-                    prompt = (
-                        "Your previous response ran out of output tokens before it "
-                        "produced any text or tool call, and none of it was kept. Do "
-                        "not start the analysis over. Take the next concrete step now: "
-                        "call a tool, or write the answer."
-                    )
-                messages.append(Message(role="user", content=prompt))
+                    messages.append(Message(
+                        role="user",
+                        content=(
+                            "Your previous response ran out of output tokens before it "
+                            "produced any text or tool call, and none of it was kept. Do "
+                            "not start the analysis over. Take the next concrete step now: "
+                            "call a tool, or write the answer."
+                        ),
+                    ))
+                    recovery = "next-step prompt"
                 logger.debug(
-                    f"[loop] max_tokens recovery #{loop_state.max_tokens_recovery_count}: "
-                    "injecting a recovery prompt and looping"
+                    f"[loop] max_tokens recovery #{loop_state.max_tokens_recovery_count}: {recovery}"
                 )
                 return True  # continue
             logger.debug(f"[loop] exit: no tool_calls, finish_reason={_finish!r}, turn={loop_state.turn_count}")

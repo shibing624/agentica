@@ -192,6 +192,8 @@ def _parse_catalog(catalog: dict) -> Dict[str, ModelEntry]:
                 "cache_read": float(cost.get("cache_read", 0)),
                 "cache_write": float(cost.get("cache_write", 0)),
                 "context_window": int(limit.get("context", 0)),
+                # models.dev ``limit.output``: the model's output-token ceiling.
+                "max_output_tokens": int(limit.get("output", 0)),
                 "input_modalities": tuple(str(item) for item in input_modalities),
             }
 
@@ -376,6 +378,18 @@ def get_model_context_window(model_id: str, default: int = 128000) -> int:
     if entry and entry.get("context_window", 0) > 0:
         return int(entry["context_window"])
     return default
+
+
+def get_model_max_output_tokens(model_id: str) -> Optional[int]:
+    """Output-token ceiling from the catalog, or None when it is not listed.
+
+    Cache files written before this field existed have no key for it; the
+    next catalog refresh (every CLI start) fills it in.
+    """
+    entry = _get_model_entry(model_id)
+    if entry and entry.get("max_output_tokens", 0) > 0:
+        return int(entry["max_output_tokens"])
+    return None
 
 
 def get_model_supports_modality(model_id: str, modality: str) -> bool:

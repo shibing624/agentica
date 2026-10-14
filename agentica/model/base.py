@@ -540,6 +540,14 @@ class Model(ABC):
                 self.context_window = limit
                 logger.info(f"Learned context_window={limit} from API error (was {old}) for model {self.id}")
 
+    def raise_output_cap(self, used_tokens: int) -> bool:
+        """Raise the output cap after a turn spent ``used_tokens`` with nothing visible.
+
+        Returns True when the next request will carry a higher cap. Providers
+        whose cap agentica does not choose keep this default.
+        """
+        return False
+
     @property
     @abstractmethod
     def request_kwargs(self) -> Dict[str, Any]:

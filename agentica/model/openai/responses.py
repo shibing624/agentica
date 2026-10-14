@@ -8,7 +8,7 @@ import json
 import os
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -38,11 +38,15 @@ class OpenAIResponses(OpenAIChat):
     max_output_tokens: Optional[int] = None
     parallel_tool_calls: Optional[bool] = None
     truncation: Optional[str] = None
+    _OUTPUT_CAP_KEY: ClassVar[str] = "max_output_tokens"
 
     def __post_init__(self):
         super().__post_init__()
         if self.reasoning_effort is not None:
             raise ValueError("OpenAIResponses uses 'reasoning', not Chat Completions' 'reasoning_effort'.")
+
+    def _has_explicit_output_cap(self) -> bool:
+        return self.max_output_tokens is not None or super()._has_explicit_output_cap()
 
     def describe_thinking_mode(self) -> str:
         if self.reasoning is None:
@@ -406,13 +410,19 @@ class OpenAIResponses(OpenAIChat):
                 and issubclass(self.response_format, BaseModel)
             ):
                 request.pop("text", None)
-                return await self.get_client().responses.parse(
-                    model=self.id,
-                    input=formatted,
-                    text_format=self.response_format,
-                    **request,
+                return await self._create_with_auto_cap(
+                    lambda kwargs: self.get_client().responses.parse(
+                        model=self.id,
+                        input=formatted,
+                        text_format=self.response_format,
+                        **kwargs,
+                    ),
+                    request,
                 )
-            return await self.get_client().responses.create(model=self.id, input=formatted, **request)
+            return await self._create_with_auto_cap(
+                lambda kwargs: self.get_client().responses.create(model=self.id, input=formatted, **kwargs),
+                request,
+            )
         except Exception as error:
             self._learn_context_limit_from_error(str(error))
             raise
@@ -424,11 +434,14 @@ class OpenAIResponses(OpenAIChat):
 
         async def _open() -> AsyncIterator[Any]:
             try:
-                return await self.get_client().responses.create(
-                    model=self.id,
-                    input=formatted,
-                    stream=True,
-                    **request,
+                return await self._create_with_auto_cap(
+                    lambda kwargs: self.get_client().responses.create(
+                        model=self.id,
+                        input=formatted,
+                        stream=True,
+                        **kwargs,
+                    ),
+                    request,
                 )
             except Exception as error:
                 self._learn_context_limit_from_error(str(error))
