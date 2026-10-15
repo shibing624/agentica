@@ -9,6 +9,9 @@ import unittest
 import unittest.mock
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
+import openai
+
 from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
 from agentica.model.response import ModelResponse
@@ -333,6 +336,103 @@ class TestFallbackRetryableExhausted(unittest.TestCase):
                 )
                 self.assertEqual(primary_calls["n"], 1)
                 self.assertEqual(result.content, "ok")
+
+
+class TestTypedApiErrors(unittest.TestCase):
+    def test_timeout_types_work_without_message_markers(self):
+        request = httpx.Request("POST", "http://test/v1/chat/completions")
+        errors = [
+            openai.APITimeoutError(request=request),
+            httpx.ReadTimeout("", request=request),
+            httpx.ConnectTimeout("", request=request),
+            httpx.PoolTimeout("", request=request),
+            TimeoutError(),
+        ]
+        for exc in errors:
+            with self.subTest(exc=type(exc).__name__):
+                primary = _fake_model("primary")
+                primary.response = AsyncMock(side_effect=exc)
+                fallback = _fake_model("fallback")
+                agent = _make_agent()
+                agent._run_fallback_models = [fallback]
+                result = asyncio.run(Runner._call_with_retry(
+                    primary, [], LoopState(max_api_retry=1), agent,
+                ))
+                self.assertEqual(primary.response.await_count, 1)
+                self.assertEqual(result.used_model.id, "fallback")
+
+    def test_timeout_respects_configured_runner_retry(self):
+        primary = _fake_model("primary")
+        primary.response = AsyncMock(side_effect=[TimeoutError(), ModelResponse(content="ok")])
+        agent = _make_agent()
+        agent._run_fallback_models = [_fake_model("fallback")]
+        with unittest.mock.patch("agentica.runner.retry_fallback.asyncio.sleep", new_callable=AsyncMock):
+            result = asyncio.run(Runner._call_with_retry(
+                primary, [], LoopState(max_api_retry=2), agent,
+            ))
+        self.assertEqual(primary.response.await_count, 2)
+        self.assertEqual(result.used_model.id, "primary")
+
+    def test_connection_types_fallback_without_retry(self):
+        request = httpx.Request("POST", "http://test")
+        for exc in (
+            openai.APIConnectionError(message="offline", request=request),
+            httpx.ConnectError("offline", request=request),
+            ConnectionError(),
+        ):
+            with self.subTest(exc=type(exc).__name__):
+                primary = _fake_model("primary")
+                primary.response = AsyncMock(side_effect=exc)
+                agent = _make_agent()
+                agent._run_fallback_models = [_fake_model("fallback")]
+                result = asyncio.run(Runner._call_with_retry(
+                    primary, [], LoopState(max_api_retry=3), agent,
+                ))
+                self.assertEqual(primary.response.await_count, 1)
+                self.assertEqual(result.used_model.id, "fallback")
+
+    def test_http_status_wins_over_misleading_message(self):
+        request = httpx.Request("POST", "http://test")
+        state = LoopState()
+        for status, expected in (
+            (400, (False, False)), (401, (False, False)), (403, (False, False)),
+            (408, (True, False)), (409, (True, False)), (429, (True, False)),
+            (500, (False, True)), (502, (False, True)), (503, (False, True)),
+            (504, (True, False)),
+        ):
+            for exc in (
+                openai.APIStatusError("timeout connection 503", response=httpx.Response(status, request=request), body={}),
+                httpx.HTTPStatusError("timeout connection 503", request=request,
+                                      response=httpx.Response(status, request=request)),
+            ):
+                with self.subTest(status=status, exc=type(exc).__name__):
+                    self.assertEqual(Runner._classify_api_error(
+                        exc, state.RETRYABLE_SUBSTRINGS, state.FALLBACK_ONLY_SUBSTRINGS,
+                    ), expected)
+
+    def test_error_after_tool_history_repair_is_classified_not_original_error(self):
+        primary = _fake_model("primary")
+        primary.response = AsyncMock(side_effect=[
+            RuntimeError("tool message must be a response to a preceding message"),
+            TimeoutError(),
+        ])
+        agent = _make_agent()
+        agent._run_fallback_models = [_fake_model("fallback")]
+        result = asyncio.run(Runner._call_with_retry(primary, [], LoopState(), agent))
+        self.assertEqual(primary.response.await_count, 2)
+        self.assertEqual(result.used_model.id, "fallback")
+
+    def test_typed_auth_error_never_calls_fallback(self):
+        request = httpx.Request("POST", "http://test")
+        exc = openai.AuthenticationError("upstream timeout 503", response=httpx.Response(401, request=request), body={})
+        primary = _fake_model("primary", raise_exc=exc)
+        fallback = _fake_model("fallback")
+        fallback.response = AsyncMock()
+        agent = _make_agent()
+        agent._run_fallback_models = [fallback]
+        with self.assertRaises(openai.AuthenticationError):
+            asyncio.run(Runner._call_with_retry(primary, [], LoopState(), agent))
+        fallback.response.assert_not_awaited()
 
 
 class TestFallbackNonRetryableImmediateRaise(unittest.TestCase):

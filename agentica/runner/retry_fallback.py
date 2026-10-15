@@ -7,6 +7,10 @@
 import asyncio
 import copy
 import random
+
+import httpx
+from openai import APIConnectionError, APITimeoutError
+
 from typing import (
     List,
     Optional,
@@ -145,6 +149,32 @@ class RetryMixin:
         if value < 1:
             raise ValueError("max_api_retry must be >= 1; use 1 to disable Runner-level same-model retry")
         return value
+
+    @staticmethod
+    def _classify_api_error(
+        exc: BaseException, retryable_substrings: tuple, fallback_only_substrings: tuple,
+    ) -> tuple[bool, bool]:
+        """Return (retryable, fallback_only), preferring status/type to error prose."""
+        status = getattr(exc, "status_code", None)
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+        if isinstance(status, int):
+            if status in (408, 409, 429, 504):
+                return True, False
+            if 500 <= status < 600:
+                return False, True
+            if 400 <= status < 500:
+                return False, False
+        if isinstance(exc, (APITimeoutError, httpx.TimeoutException, TimeoutError)):
+            return True, False
+
+        err = str(exc).lower()
+        retryable = any(marker in err for marker in retryable_substrings)
+        fallback_only = not retryable and (
+            isinstance(exc, (APIConnectionError, httpx.TransportError, ConnectionError))
+            or any(marker in err for marker in fallback_only_substrings)
+        )
+        return retryable, fallback_only
 
     @staticmethod
     async def _call_with_retry(
@@ -394,18 +424,8 @@ class RetryMixin:
                     # (e.g. a private "gateway_error") become retryable
                     # without touching SDK source.
                     _retryable = current.get_retryable_substrings(state.RETRYABLE_SUBSTRINGS)
-                    is_retryable = any(r in err for r in _retryable)
-
-                    # Hard outage errors: do not retry the same model. Switch
-                    # directly to the next fallback model when configured.
-                    # Checked AFTER the retryable match: transport drops such as
-                    # "peer closed connection ... (incomplete chunked read)"
-                    # contain "connection" (fallback-only) AND an explicit
-                    # retryable marker — the retryable classification must win,
-                    # otherwise those RETRYABLE substrings could never trigger
-                    # a same-model retry.
-                    is_fallback_only = not is_retryable and any(
-                        r in err for r in state.FALLBACK_ONLY_SUBSTRINGS
+                    is_retryable, is_fallback_only = RetryMixin._classify_api_error(
+                        last_exc, _retryable, state.FALLBACK_ONLY_SUBSTRINGS,
                     )
                     if is_fallback_only:
                         logger.warning(f"[fallback] {current.id} hit non-retry outage: {exc}; trying next fallback")
