@@ -9,7 +9,6 @@ import copy
 import random
 
 import httpx
-from openai import APIConnectionError, APITimeoutError
 
 from typing import (
     List,
@@ -155,6 +154,10 @@ class RetryMixin:
         exc: BaseException, retryable_substrings: tuple, fallback_only_substrings: tuple,
     ) -> tuple[bool, bool]:
         """Return (retryable, fallback_only), preferring status/type to error prose."""
+        # openai is a core dependency, but importing it here keeps `import agentica`
+        # and CLI startup from loading the provider SDK.
+        from openai import APIConnectionError, APITimeoutError
+
         status = getattr(exc, "status_code", None)
         if isinstance(exc, httpx.HTTPStatusError):
             status = exc.response.status_code

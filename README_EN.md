@@ -296,15 +296,16 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 
 ## 🔥 News
 
+- [2026/10/15] **v1.4.17**: Output cap follows user config, then the model catalog, then the gateway default. Empty gateway replies are retried; answers that never finish under `max_tokens` are marked incomplete. Built-in `analyze_image`. Public `from agentica import …` stays the same; submodules move into domain packages. `worktree` no longer relocates or locks a checkout. See [Release-v1.4.17](https://github.com/shibing624/agentica/releases/tag/v1.4.17)
 - [2026/09/15] **v1.4.16**: Layer 2 compact opens an empty window (no LLM summary); prior turns stay in the session JSONL via `search_session`. Optional CLI attach and external hooks (off by default). MCP is 2.x only. See [Release-v1.4.16](https://github.com/shibing624/agentica/releases/tag/v1.4.16)
 - [2026/09/01] **v1.4.15**: Adds the `@agentica-ai/sdk` TypeScript client and a Gateway Docker image; `/export` now writes the session JSONL; `apply_patch` matches context exactly; CLI no longer treats `[/path]` in tool output as Rich markup. See [Release-v1.4.15](https://github.com/shibing624/agentica/releases/tag/v1.4.15)
-- [2026/08/25] **v1.4.14**: Permissions match Codex (ask keeps write tools visible; deny-similar); true multi-account Web/Desktop; file tools narrowed to `apply_patch` + `write_file` with `read_file` tail; worktrees live inside the repo; bundled skills load in-place; desktop first-launch bootstraps a Python runtime. See [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
-- [2026/08/20] **v1.4.13**: The web UI is a Vite + React SPA with a new traces page; the UI ships in English with Simplified Chinese in settings; and there are now **desktop installers** (macOS dmg / Windows NSIS / Linux AppImage and deb). See [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
-- [2026/08/10] **v1.4.12**: Two-layer context compression (tool-result eviction → LLM/native summarise); fixes the read-and-reread loop and Anthropic paths where eviction never ran; compaction counts on `RunResponse`. Adds cross-terminal peer messaging (`list_agents` / `send_message`) and process-level `delegate` (full `agentica --query --print`, managed via `/ps` `/stop` `wait`) vs cheap in-process `task`. See [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 
 <details>
 <summary>Older releases</summary>
 
+- [2026/08/25] **v1.4.14**: Permissions match Codex (ask keeps write tools visible; deny-similar); true multi-account Web/Desktop; file tools narrowed to `apply_patch` + `write_file` with `read_file` tail; worktrees live inside the repo; bundled skills load in-place; desktop first-launch bootstraps a Python runtime. See [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
+- [2026/08/20] **v1.4.13**: The web UI is a Vite + React SPA with a new traces page; the UI ships in English with Simplified Chinese in settings; and there are now **desktop installers** (macOS dmg / Windows NSIS / Linux AppImage and deb). See [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
+- [2026/08/10] **v1.4.12**: Two-layer context compression (tool-result eviction → LLM/native summarise); fixes the read-and-reread loop and Anthropic paths where eviction never ran; compaction counts on `RunResponse`. Adds cross-terminal peer messaging (`list_agents` / `send_message`) and process-level `delegate` (full `agentica --query --print`, managed via `/ps` `/stop` `wait`) vs cheap in-process `task`. See [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**: Adds OpenAI Responses API (with provider-native compaction), Markdown-configurable subagents, and multi-file `apply_patch`; improves CLI resume/status/compaction feedback; trims prompt and grep/glob schema cost; fixes Learned Experiences corruption and `write_todos` full-list echo. See [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**: Adds native image input with catalog-driven model capability routing; introduces `/rename` and name-based `/resume`; fixes Pillow core dependency metadata. See [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**: Unified 3-tier permission across SDK/CLI/Web (`ask`/`auto`/`allow-all`); built-in subagents are read-only; `edit_file` gives advisory tips instead of hard-rejecting; fixes `ask_user_question` CLI freeze. See [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
@@ -330,11 +331,27 @@ Full documentation: **https://shibing624.github.io/agentica**
 
 ## Citation
 
-If you use Agentica in your research, please cite:
+If you use Agentica's self-evolution or skill admission in research, please cite:
 
-> Xu, M. (2026). Agentica: A Human-Centric Framework for Large Language Model Agent Workflows. GitHub. https://github.com/shibing624/agentica
+> Shang, L., Xu, M., Sun, Y., Xia, T., Hu, L., Xu, L., & Zheng, N. (2026). *When Self-Evolution Backfires: Pre-Commit Gating against Skill Contamination in LLM Agents*. arXiv:2608.05810. https://arxiv.org/abs/2608.05810
 
 BibTeX:
+
+```bibtex
+@misc{shang2026selfevolution,
+  title         = {When Self-Evolution Backfires: Pre-Commit Gating against Skill Contamination in LLM Agents},
+  author        = {Shang, Linfang and Xu, Ming and Sun, Yiding and Xia, Tianle and Hu, Lingxiang and Xu, Lan and Zheng, Ning},
+  year          = {2026},
+  eprint        = {2608.05810},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2608.05810}
+}
+```
+
+The software itself:
+
+> Xu, M. (2026). Agentica: A Human-Centric Framework for Large Language Model Agent Workflows. GitHub. https://github.com/shibing624/agentica
 
 ```bibtex
 @misc{xu2026agentica,
