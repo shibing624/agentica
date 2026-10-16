@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### fixes
+- **OpenAI Chat Completions 的输出上限字段无需维护模型名名单**：`max_tokens` 被服务端以结构化 `unsupported_parameter` 拒绝时，会保留原值改用 `max_completion_tokens` 重发；反方向同样支持。成功协商的字段按 `(provider, base_url, model_id)` 记忆，fallback 每轮创建的新模型实例会直接复用，未来新增模型名无需更新代码，也不会每轮多付一次 400 往返。Responses API 仍固定使用 `max_output_tokens`。
+- **状态栏上一轮耗时超过一分钟不再写成 `1803.0s`**：`⏱` 拆成 `30m3s`，整点分钟是 `16m`；超过一小时仍带秒，`3723s` 是 `1h2m3s`，当前这轮还在跑时秒数会走。一分钟以内仍保留一位小数（`12.3s`）。右边的 `Σ` 会话累计时长不变。
+- **`fetch_url` 回显不再把整页显示成 `1 lines`**：结果是一行 JSON（`url` / `content` / `save_path`），以前按这个字符串的换行数计数，一篇 README 也是 `1 lines`。现在数 `content` 里的正文行，一行写成 `1 line`；抓取失败且没有正文时显示错误本身。
+
 ## [1.4.17] - 2026-10-15
 
 #### breaking

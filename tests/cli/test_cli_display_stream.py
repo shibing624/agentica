@@ -4,6 +4,7 @@
 @description: Unit tests for CLI module.
 """
 
+import json
 import logging
 import os
 import sys
@@ -721,6 +722,40 @@ class TestReadFileCountSummary(unittest.TestCase):
         from agentica.cli.display import StreamDisplayManager
         self.assertEqual(StreamDisplayManager._result_count_summary("grep", "m1\nm2"), "2 lines")
         self.assertEqual(StreamDisplayManager._result_count_summary("grep", ""), "no matches")
+
+    def test_fetch_url_counts_document_lines_not_the_json_line(self):
+        from agentica.cli.display import StreamDisplayManager
+        body = "\n".join(f"line {i}" for i in range(40))
+        payload = json.dumps({"url": "https://example.com/README.md", "content": body, "save_path": "/tmp/x"})
+        self.assertNotIn("\n", payload)
+        self.assertEqual(StreamDisplayManager._result_count_summary("fetch_url", payload), "40 lines")
+
+    def test_fetch_url_one_line_document_is_singular(self):
+        from agentica.cli.display import StreamDisplayManager
+        payload = json.dumps({"url": "u", "content": "only one", "save_path": "/tmp/x"})
+        self.assertEqual(StreamDisplayManager._result_count_summary("fetch_url", payload), "1 line")
+
+    def test_fetch_url_truncated_content_says_so(self):
+        from agentica.cli.display import StreamDisplayManager
+        payload = json.dumps({
+            "url": "u",
+            "content": "a\nb... (content truncated)",
+            "save_path": "/tmp/x",
+        })
+        self.assertEqual(
+            StreamDisplayManager._result_count_summary("fetch_url", payload),
+            "2 lines, truncated",
+        )
+
+    def test_fetch_url_error_without_content_shows_the_error(self):
+        from agentica.cli.display import StreamDisplayManager
+        payload = json.dumps({
+            "url": "u", "content": "", "save_path": "/tmp/x", "error": "HTTP 404 Not Found",
+        })
+        self.assertEqual(
+            StreamDisplayManager._result_count_summary("fetch_url", payload),
+            "HTTP 404 Not Found",
+        )
 
 
 if __name__ == "__main__":

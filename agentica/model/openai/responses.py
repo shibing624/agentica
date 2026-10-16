@@ -39,6 +39,7 @@ class OpenAIResponses(OpenAIChat):
     parallel_tool_calls: Optional[bool] = None
     truncation: Optional[str] = None
     _OUTPUT_CAP_KEY: ClassVar[str] = "max_output_tokens"
+    _OUTPUT_CAP_KEYS: ClassVar[tuple[str, ...]] = ("max_output_tokens",)
 
     def __post_init__(self):
         super().__post_init__()

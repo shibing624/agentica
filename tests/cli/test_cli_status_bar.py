@@ -328,7 +328,20 @@ class TestCLIStatusBar(unittest.TestCase):
         text = "".join(v for _, v in frags)
 
         self.assertLessEqual(len(text), 100)
-        self.assertTrue(text.rstrip().endswith("│ ⏱ 239.0s  Σ 3m58s"))
+        self.assertTrue(text.rstrip().endswith("│ ⏱ 3m59s  Σ 3m58s"))
+
+
+    def test_turn_clock_splits_past_a_minute(self):
+        from agentica.cli.display.status_bar import format_turn_clock
+
+        self.assertEqual(format_turn_clock(12.3), "12.3s")
+        self.assertEqual(format_turn_clock(59.9), "59.9s")
+        self.assertEqual(format_turn_clock(60), "1m")
+        self.assertEqual(format_turn_clock(118), "1m58s")
+        self.assertEqual(format_turn_clock(1803), "30m3s")
+        self.assertEqual(format_turn_clock(3600), "1h0m0s")
+        self.assertEqual(format_turn_clock(3603), "1h0m3s")
+        self.assertEqual(format_turn_clock(3723), "1h2m3s")
 
 
     def test_build_status_bar_fragments_cost_in_medium(self):

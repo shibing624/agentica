@@ -121,6 +121,24 @@ def format_duration_compact(seconds: float) -> str:
     return f"{h}h{m:02d}m"
 
 
+def format_turn_clock(seconds: float) -> str:
+    """Last-turn clock on the status bar.
+
+    Under a minute keep a tenth (``12.3s``). Past a minute split units
+    (``30m3s``, ``16m``) so it is not a four-digit second count. Past an
+    hour keep the seconds (``1h2m3s``): this is the live turn, and the
+    clock has to tick while the CLI is still running.
+    """
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    total = max(0, int(seconds + 0.5))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h{minutes}m{secs}s"
+    return f"{minutes}m{secs}s" if secs else f"{minutes}m"
+
+
 def _format_status_work_dir(work_dir: str) -> str:
     """Return a home-relative absolute path for the persistent status bar."""
     if not work_dir:
@@ -204,7 +222,7 @@ def build_status_bar_fragments(
     fg = _ctx_fg_style(pct)
     cost_str = format_cost_usd(cost_usd)
 
-    turn_str = f"⏱ {last_turn_seconds:.1f}s" if last_turn_seconds > 0 else ""
+    turn_str = f"⏱ {format_turn_clock(last_turn_seconds)}" if last_turn_seconds > 0 else ""
     total_str = f"Σ {format_duration_compact(active_seconds)}" if active_seconds > 0 else ""
     bg_full = ""
     bg_short = ""

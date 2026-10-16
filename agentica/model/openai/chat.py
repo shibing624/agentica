@@ -369,8 +369,45 @@ class OpenAIChat(Model):
     # ceiling or a recovery raise), not by the user. Only such a cap is ever
     # raised or dropped; a user-configured one is sent as given.
     _auto_output_cap: bool = field(default=False, init=False, repr=False)
-    # Request field that carries the output cap on this wire.
+    # Default request field that carries the output cap on this wire.
     _OUTPUT_CAP_KEY: ClassVar[str] = "max_tokens"
+    # Chat Completions deployments disagree on the wire name. This is a
+    # protocol capability learned from a structured API error, not inferred
+    # from model-name families.
+    _OUTPUT_CAP_KEYS: ClassVar[tuple[str, ...]] = ("max_tokens", "max_completion_tokens")
+    _OUTPUT_CAP_KEY_BY_DEPLOYMENT: ClassVar[Dict[tuple[str, str, str], str]] = {}
+
+    def _output_cap_deployment_key(self) -> tuple[str, str, str]:
+        """Identity used to share a learned wire key across per-run clones."""
+        endpoint = self.base_url or getenv("OPENAI_BASE_URL") or ""
+        return self.provider, str(endpoint), self.id
+
+    def _active_output_cap_key(self, request_kwargs: Dict[str, Any]) -> Optional[str]:
+        present = [key for key in self._OUTPUT_CAP_KEYS if key in request_kwargs]
+        return present[0] if len(present) == 1 else None
+
+    @staticmethod
+    def _move_output_cap(
+        request_kwargs: Dict[str, Any],
+        source_key: str,
+        target_key: str,
+    ) -> Dict[str, Any]:
+        moved = {key: value for key, value in request_kwargs.items() if key != source_key}
+        moved[target_key] = request_kwargs[source_key]
+        return moved
+
+    @staticmethod
+    def _is_unsupported_parameter(error: openai.BadRequestError, parameter: str) -> bool:
+        return error.code == "unsupported_parameter" and error.param == parameter
+
+    def _apply_learned_output_cap_key(self, request_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        active_key = self._active_output_cap_key(request_kwargs)
+        if active_key is None:
+            return request_kwargs
+        learned_key = self._OUTPUT_CAP_KEY_BY_DEPLOYMENT.get(self._output_cap_deployment_key())
+        if learned_key is None or learned_key == active_key or learned_key not in self._OUTPUT_CAP_KEYS:
+            return request_kwargs
+        return self._move_output_cap(request_kwargs, active_key, learned_key)
 
     def __post_init__(self):
         super().__post_init__()
@@ -415,23 +452,53 @@ class OpenAIChat(Model):
     ) -> Any:
         """Send ``request_kwargs``; if an agentica-chosen cap is rejected, drop it.
 
-        The catalog ceiling describes the model, not a given deployment: a
-        self-hosted DeepSeek-V4-Flash with ``max_model_len=163840`` rejects the
-        catalog's 393216, and OpenAI's own reasoning models reject
-        ``max_tokens`` on chat completions. Either way the request 400s. Whether
-        the cap caused it is tested, not parsed out of the error text: re-send
-        without it. Success means it did, so stop sending it; failure means it
-        did not, and that error is the real one.
+        Chat Completions endpoints disagree between ``max_tokens`` and
+        ``max_completion_tokens``. When the API identifies the sent field as an
+        unsupported parameter, try the other field with the same value. A
+        successful retry records that protocol capability for this exact
+        deployment, including model id, so new model names require no code
+        changes and per-run clones avoid another failed probe.
+
+        Other 400 responses retain the existing recovery for agentica-chosen
+        catalog caps: retry without the cap, remember a successful drop, and
+        surface the retry error otherwise. User-configured cap values are never
+        dropped.
         """
+        request_kwargs = self._apply_learned_output_cap_key(request_kwargs)
+        active_key = self._active_output_cap_key(request_kwargs)
         try:
             return await create(request_kwargs)
-        except openai.BadRequestError:
-            if not self._auto_output_cap or self._OUTPUT_CAP_KEY not in request_kwargs:
+        except openai.BadRequestError as error:
+            if (
+                active_key is not None
+                and len(self._OUTPUT_CAP_KEYS) == 2
+                and self._is_unsupported_parameter(error, active_key)
+            ):
+                alternate_key = next(key for key in self._OUTPUT_CAP_KEYS if key != active_key)
+                alternate_kwargs = self._move_output_cap(request_kwargs, active_key, alternate_key)
+                try:
+                    result = await create(alternate_kwargs)
+                except openai.BadRequestError as alternate_error:
+                    if (
+                        not self._auto_output_cap
+                        or not self._is_unsupported_parameter(alternate_error, alternate_key)
+                    ):
+                        raise
+                    request_kwargs = alternate_kwargs
+                    active_key = alternate_key
+                else:
+                    self._OUTPUT_CAP_KEY_BY_DEPLOYMENT[self._output_cap_deployment_key()] = alternate_key
+                    logger.info(
+                        f"{self.id}: endpoint rejected {active_key}; switched the output cap "
+                        f"to {alternate_key} with the value preserved"
+                    )
+                    return result
+            if not self._auto_output_cap or active_key is None:
                 raise
-            without_cap = {k: v for k, v in request_kwargs.items() if k != self._OUTPUT_CAP_KEY}
+            without_cap = {key: value for key, value in request_kwargs.items() if key != active_key}
             result = await create(without_cap)
             logger.info(
-                f"{self.id}: endpoint rejected {self._OUTPUT_CAP_KEY}={request_kwargs[self._OUTPUT_CAP_KEY]}; "
+                f"{self.id}: endpoint rejected {active_key}={request_kwargs[active_key]}; "
                 "using the endpoint's default output cap from now on"
             )
             self.max_tokens = None
@@ -873,7 +940,10 @@ class OpenAIChat(Model):
             client_params = self.get_client_params()
             client_params.pop("http_client", None)  # we supply the throwaway one
             client = AsyncOpenAIClient(http_client=http_client, **client_params)
-            response = await client.chat.completions.create(**ping_kwargs)
+            response = await self._create_with_auto_cap(
+                lambda kwargs: client.chat.completions.create(**kwargs),
+                ping_kwargs,
+            )
         finally:
             await http_client.aclose()
         usage = getattr(response, "usage", None)

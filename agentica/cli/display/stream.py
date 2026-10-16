@@ -155,6 +155,38 @@ def _parse_ask_user_exchange(
     )
 
 
+def _fetch_url_count_summary(result_content: str) -> str:
+    """Count the fetched document, not the one-line JSON envelope.
+
+    ``fetch_url`` returns ``json.dumps({url, content, save_path})`` with no
+    indent, so ``splitlines()`` on the tool result is always 1.
+    """
+    text = str(result_content).strip()
+    if not text:
+        return ""
+    content = text
+    truncated = False
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        raw = payload.get("content")
+        if isinstance(raw, str):
+            content = raw
+            truncated = raw.endswith("... (content truncated)")
+        error = payload.get("error")
+        if error and not str(content).strip():
+            return str(error).replace("\n", " ").strip()
+    n = len(str(content).splitlines()) if str(content).strip() else 0
+    if n == 0:
+        return "empty"
+    label = "1 line" if n == 1 else f"{n} lines"
+    if truncated:
+        label += ", truncated"
+    return label
+
+
 class StreamDisplayManager:
     """Manages CLI output display state for streaming responses."""
 
@@ -664,6 +696,8 @@ class StreamDisplayManager:
     @staticmethod
     def _result_count_summary(tool_name: str, result_content: str) -> str:
         """One-word count summary for a deferred read-only tool's result."""
+        if tool_name == "fetch_url":
+            return _fetch_url_count_summary(result_content)
         if not result_content:
             return "no matches" if tool_name == "grep" else ""
         # read_file appends a "[Showing lines A-B of N total lines]" footer
