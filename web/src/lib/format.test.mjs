@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { agoStr, lastQueryTs, sessionSideStatus } = await vite.ssrLoadModule("/src/lib/format.ts");
+const { agoStr, fmtDurationMs, lastQueryTs, sessionSideStatus } = await vite.ssrLoadModule("/src/lib/format.ts");
 after(() => vite.close());
 
 const zh = {
@@ -27,6 +27,14 @@ const en = {
 };
 
 const now = Date.parse("2026-08-22T15:32:00Z");
+
+test("duration drops leading zeros", () => {
+  assert.equal(fmtDurationMs(5 * 60_000 + 13_000), "5m13s");
+  assert.equal(fmtDurationMs(5 * 60_000 + 3_000), "5m3s");
+  assert.equal(fmtDurationMs(5 * 60_000), "5m");
+  assert.equal(fmtDurationMs(3_600_000 + 5 * 60_000), "1h5m");
+  assert.equal(fmtDurationMs(3_600_000), "1h");
+});
 
 test("idle label is coarse and bilingual", () => {
   assert.equal(agoStr(now - 30_000, zh, now), "刚刚");

@@ -923,9 +923,9 @@ def _format_duration(seconds: float) -> str:
         return f"{seconds:.1f}s"
     m, s = divmod(int(seconds), 60)
     if m < 60:
-        return f"{m}m{s:02d}s"
+        return f"{m}m{s}s"
     h, m = divmod(m, 60)
-    return f"{h}h{m:02d}m{s:02d}s"
+    return f"{h}h{m}m{s}s"
 
 
 def parse_args() -> argparse.Namespace:

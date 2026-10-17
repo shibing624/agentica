@@ -50,12 +50,20 @@ def read_log_tail(log_path: str, max_lines: int = 5, max_chars: int = 2000) -> s
 
 
 def _format_elapsed(seconds: float) -> str:
-    seconds = max(0, int(seconds))
-    minutes, sec = divmod(seconds, 60)
+    """Duration, not a clock: ``5m13s``, ``5m3s``, ``3m18s``. No leading zeros."""
+    total = max(0, int(seconds))
+    minutes, secs = divmod(total, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
-        return f"{hours}:{minutes:02d}:{sec:02d}"
-    return f"{minutes:02d}:{sec:02d}"
+        text = f"{hours}h"
+        if minutes:
+            text += f"{minutes}m"
+        if secs:
+            text += f"{secs}s"
+        return text
+    if minutes:
+        return f"{minutes}m{secs}s" if secs else f"{minutes}m"
+    return f"{secs}s"
 
 
 @dataclass

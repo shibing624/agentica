@@ -111,23 +111,29 @@ def _ctx_fg_style(pct: float) -> str:
 
 
 def format_duration_compact(seconds: float) -> str:
-    """Format seconds into compact human-readable duration."""
+    """Format seconds into compact human-readable duration.
+
+    No leading zeros: ``5m13s``, ``5m3s``, ``5m``, ``1h5m``. A zero-padded
+    ``5m03s`` reads like a clock field, not a duration.
+    """
     if seconds < 60:
         return f"{seconds:.0f}s"
-    m, s = divmod(int(seconds), 60)
-    if m < 60:
-        return f"{m}m{s:02d}s"
-    h, m = divmod(m, 60)
-    return f"{h}h{m:02d}m"
+    total = max(0, int(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minutes}m" if minutes else f"{hours}h"
+    return f"{minutes}m{secs}s" if secs else f"{minutes}m"
 
 
 def format_turn_clock(seconds: float) -> str:
     """Last-turn clock on the status bar.
 
     Under a minute keep a tenth (``12.3s``). Past a minute split units
-    (``30m3s``, ``16m``) so it is not a four-digit second count. Past an
-    hour keep the seconds (``1h2m3s``): this is the live turn, and the
-    clock has to tick while the CLI is still running.
+    (``30m3s``, ``5m13s``, ``16m``) so it is not a four-digit second count.
+    Past an hour keep every non-zero unit (``1h2m3s``, ``1h3s``). A zero
+    unit is omitted (``1h``, not ``1h0m0s``): this is the live turn, and
+    the clock has to tick while the CLI is still running.
     """
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -135,7 +141,12 @@ def format_turn_clock(seconds: float) -> str:
     hours, rem = divmod(total, 3600)
     minutes, secs = divmod(rem, 60)
     if hours:
-        return f"{hours}h{minutes}m{secs}s"
+        text = f"{hours}h"
+        if minutes:
+            text += f"{minutes}m"
+        if secs:
+            text += f"{secs}s"
+        return text
     return f"{minutes}m{secs}s" if secs else f"{minutes}m"
 
 

@@ -338,10 +338,21 @@ class TestCLIStatusBar(unittest.TestCase):
         self.assertEqual(format_turn_clock(59.9), "59.9s")
         self.assertEqual(format_turn_clock(60), "1m")
         self.assertEqual(format_turn_clock(118), "1m58s")
+        self.assertEqual(format_turn_clock(313), "5m13s")
+        self.assertEqual(format_turn_clock(303), "5m3s")
         self.assertEqual(format_turn_clock(1803), "30m3s")
-        self.assertEqual(format_turn_clock(3600), "1h0m0s")
-        self.assertEqual(format_turn_clock(3603), "1h0m3s")
+        self.assertEqual(format_turn_clock(3600), "1h")
+        self.assertEqual(format_turn_clock(3603), "1h3s")
         self.assertEqual(format_turn_clock(3723), "1h2m3s")
+
+    def test_session_total_does_not_zero_pad(self):
+        from agentica.cli.display.status_bar import format_duration_compact
+
+        self.assertEqual(format_duration_compact(313), "5m13s")
+        self.assertEqual(format_duration_compact(303), "5m3s")
+        self.assertEqual(format_duration_compact(300), "5m")
+        self.assertEqual(format_duration_compact(3900), "1h5m")
+        self.assertEqual(format_duration_compact(3600), "1h")
 
 
     def test_build_status_bar_fragments_cost_in_medium(self):

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .live_blocks import LIVE_MAX_ROWS, LiveToolBlock, LiveToolResult, LiveToolStore
+from .status_bar import format_turn_clock
 
 from rich.markup import escape as rich_escape
 from rich.markdown import Markdown
@@ -1272,7 +1273,7 @@ class StreamDisplayManager:
             if tool_count > 0:
                 summary_parts.append(f"{tool_count} tool uses")
             if exec_time is not None:
-                summary_parts.append(f"{exec_time:.1f}s")
+                summary_parts.append(format_turn_clock(float(exec_time)))
             if summary_parts:
                 self._assistant_console.print(
                     f"    [dim italic]⎿ task done ({', '.join(summary_parts)})[/dim italic]"
@@ -1306,7 +1307,7 @@ class StreamDisplayManager:
         if tool_count > 0:
             summary_parts.append(f"{tool_count} tool uses")
         if exec_time is not None:
-            summary_parts.append(f"cost: {exec_time:.1f}s")
+            summary_parts.append(f"cost: {format_turn_clock(float(exec_time))}")
         if summary_parts:
             summary_str = ", ".join(summary_parts)
             self._assistant_console.print(f"    [dim italic]Execution Summary: {summary_str}[/dim italic]")
@@ -1611,8 +1612,10 @@ class StreamDisplayManager:
                          when caller supplied ``turn_no`` to :meth:`finalize`;
                          acts as a scrollback anchor ("see turn #7").
         * ``HH:MM:SS`` — Wall-clock time the turn ended. Always shown.
-        * ``Xs``       — Net execution time (LLM + tools), NOT the wall-clock
-                         seen in the status bar's ``⏱``. The two differ by CLI
+        * duration   — Net execution time (LLM + tools), NOT the wall-clock
+                         seen in the status bar's ``⏱``. Under a minute it keeps
+                         a tenth (``12.3s``); past that it is ``8m1s`` / ``5m13s``,
+                         never a raw ``480.6s``. The two clocks differ by CLI
                          overhead (render / disk / callbacks) — that gap is
                          real and intentional; see docs.
         * ``+Tk``      — Net new tokens this turn (fresh input + cache writes +
@@ -1636,7 +1639,7 @@ class StreamDisplayManager:
         parts.append(time.strftime("%H:%M:%S", time.localtime()))
         if self._turn_started_at is not None:
             elapsed = time.monotonic() - self._turn_started_at
-            parts.append(f"{elapsed:.1f}s")
+            parts.append(format_turn_clock(elapsed))
         if self._summary_usage is not None:
             usage_text = format_turn_usage_summary(self._summary_usage)
             if usage_text:

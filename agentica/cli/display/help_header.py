@@ -87,7 +87,7 @@ def format_session_summary(
     elapsed = max(0, int(elapsed_seconds))
     hours, remainder = divmod(elapsed, 3600)
     minutes, seconds = divmod(remainder, 60)
-    duration = f"{hours}h {minutes:02d}m {seconds:02d}s" if hours else f"{minutes}m {seconds:02d}s"
+    duration = f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s"
 
     text = Text()
     text.append(f"Worked for {duration} ", style="dim")

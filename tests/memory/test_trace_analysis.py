@@ -567,6 +567,21 @@ def test_session_log_analyze_and_export(tmp_path):
     assert "[user]" in round_text
 
 
+def test_format_trace_duration_has_no_space():
+    text = format_trace_text(
+        {
+            "session_id": "s",
+            "file": {},
+            "meta": {},
+            "totals": {"rounds": 1, "tokens": {}, "costUsd": 0, "toolCalls": 0, "elapsedMs": 905_000},
+            "rounds": [{"title": "q", "durationMs": 3_905_000, "tokens": {}, "costUsd": 0, "toolCalls": 0}],
+        }
+    )
+    assert "15m5s" in text
+    assert "15m 5s" not in text
+    assert "1h5m5s" in text
+
+
 def test_format_trace_uses_human_file_size():
     text = format_trace_text(
         {

@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import tempfile
+import time
 import unittest
 from io import StringIO
 from pathlib import Path
@@ -447,6 +448,17 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         out = self._capture(render)
         self.assertRegex(out, r"1 tool\b", "rule must show N tools when >0")
         self.assertRegex(out, r"\d+\.\ds", "rule must show elapsed seconds")
+
+    def test_finalize_rule_splits_a_long_elapsed(self):
+        def render(mgr):
+            mgr.start_response()
+            mgr.stream_response("done")
+            mgr._turn_started_at = time.monotonic() - 480.6
+            mgr.finalize()
+
+        out = self._capture(render)
+        self.assertIn("8m1s", out)
+        self.assertNotIn("480.6s", out)
 
     def test_finalize_rule_counts_deferred_and_write_tools(self):
         """Regression: ``read_file`` / ``grep`` (deferred) and

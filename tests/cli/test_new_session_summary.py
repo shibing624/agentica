@@ -40,7 +40,7 @@ def test_format_session_summary_shows_usage_and_resume_hint():
         session_id="session-123",
     ).plain
 
-    assert "Worked for 15m 05s" in rendered
+    assert "Worked for 15m 5s" in rendered
     assert "Token usage: total=4,300 input=4,000 (+ 800 cached) output=300 (reasoning 120)" in rendered
     assert "To continue this session, run agentica resume session-123" in rendered
 
@@ -63,7 +63,7 @@ def test_format_session_summary_brief_omits_usage_and_resume_hint():
         brief=True,
     ).plain
 
-    assert "Worked for 15m 05s" in rendered
+    assert "Worked for 15m 5s" in rendered
     assert "Token usage" not in rendered
     assert "agentica resume" not in rendered
 
@@ -102,7 +102,7 @@ def test_new_prints_summary_then_header_and_resets_session_state(monkeypatch):
     result = _cmd_new(ctx)
 
     summary = console.print.call_args_list[0].args[0].plain
-    assert "Worked for 15m 05s" in summary
+    assert "Worked for 15m 5s" in summary
     assert "agentica resume old-session" in summary
     print_header.assert_called_once()
     assert print_header.call_args.kwargs.get("session_id") == "new-session"

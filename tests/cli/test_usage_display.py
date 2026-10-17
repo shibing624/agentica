@@ -237,6 +237,37 @@ def test_usage_command_omits_net_new_row_when_nothing_re_read(monkeypatch):
     assert "1,500" in out
 
 
+def test_usage_command_duration_has_no_space(monkeypatch):
+    tracker = CostTracker()
+    tracker.record("gpt-4o", input_tokens=1, output_tokens=1)
+    usage = Usage()
+    usage.add(RequestUsage(input_tokens=1, output_tokens=1, total_tokens=2))
+    agent = SimpleNamespace(
+        run_response=SimpleNamespace(cost_tracker=tracker),
+        model=SimpleNamespace(usage=usage),
+        working_memory=SimpleNamespace(messages=["user"]),
+    )
+
+    def _print(active_seconds):
+        ctx = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+            current_agent=agent,
+            tui_state={"active_seconds": active_seconds, "cost_usd": 0},
+        )
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=False, color_system=None, width=120)
+        monkeypatch.setattr(model_config, "get_console", lambda: console)
+        monkeypatch.setattr(model_config, "_render_context_breakdown", lambda con, agent: None)
+        model_config._cmd_usage(ctx)
+        return buf.getvalue()
+
+    fifteen = _print(15 * 60 + 5)
+    assert "15m5s" in fifteen
+    assert "15m 5s" not in fifteen
+    assert "15m" in _print(15 * 60)
+    assert "1h5m" in _print(3600 + 5 * 60)
+
+
 def test_format_cost_usd_adaptive_precision():
     assert format_cost_usd(0.004) == "$0.0040"
     assert format_cost_usd(0.04) == "$0.04"

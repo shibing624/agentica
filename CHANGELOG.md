@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### fixes
 - **OpenAI Chat Completions 的输出上限字段无需维护模型名名单**：`max_tokens` 被服务端以结构化 `unsupported_parameter` 拒绝时，会保留原值改用 `max_completion_tokens` 重发；反方向同样支持。成功协商的字段按 `(provider, base_url, model_id)` 记忆，fallback 每轮创建的新模型实例会直接复用，未来新增模型名无需更新代码，也不会每轮多付一次 400 往返。Responses API 仍固定使用 `max_output_tokens`。
 - **状态栏上一轮耗时超过一分钟不再写成 `1803.0s`**：`⏱` 拆成 `30m3s`，整点分钟是 `16m`；超过一小时仍带秒，`3723s` 是 `1h2m3s`，当前这轮还在跑时秒数会走。一分钟以内仍保留一位小数（`12.3s`）。右边的 `Σ` 会话累计时长不变。
+- **耗时不再补前导 0，也不再写成钟点**：状态栏 `Σ`、`⏱`、spinner、Web 里 `execute` 旁的耗时、`/ps` 和后台完成报告都用 `5m13s`。5 分 3 秒是 `5m3s`，不再是 `5m03s` 或 `5:13` / `03:18`。`/usage` 和 trace 是 `15m5s`，不再是 `15m 5s`；超过一小时同样不留空格（`1h5m`）。会话结束的 `Worked for` 仍是带空格的 `15m 5s`，只是不再补成 `15m 05s`。整分、整小时省略 0 单位（`5m`、`1h`）；超过一小时的 `⏱` 不再写 `1h0m0s`，只有秒是 `1h3s`。每轮结束线上的耗时也不再是 `480.6s`，480.6 秒写成 `8m1s`；一分钟以内仍是 `12.3s`。消息上的钟点（`09:05`）仍补零。
 - **`fetch_url` 回显不再把整页显示成 `1 lines`**：结果是一行 JSON（`url` / `content` / `save_path`），以前按这个字符串的换行数计数，一篇 README 也是 `1 lines`。现在数 `content` 里的正文行，一行写成 `1 line`；抓取失败且没有正文时显示错误本身。
 
 ## [1.4.17] - 2026-10-15

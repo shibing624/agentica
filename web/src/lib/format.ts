@@ -44,11 +44,13 @@ export function fmtDurationMs(ms: number) {
   const sec = ms / 1000;
   if (sec < 10) return `${sec.toFixed(2)}s`;
   if (sec < 60) return `${sec.toFixed(1)}s`;
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  if (m < 60) return `${m}m${String(s).padStart(2, "0")}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h${String(m % 60).padStart(2, "0")}m`;
+  let total = Math.round(sec);
+  const hours = Math.floor(total / 3600);
+  total %= 3600;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (hours) return minutes ? `${hours}h${minutes}m` : `${hours}h`;
+  return seconds ? `${minutes}m${seconds}s` : `${minutes}m`;
 }
 
 export function fmtTps(n: number) {

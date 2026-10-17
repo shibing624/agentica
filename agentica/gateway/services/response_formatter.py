@@ -12,6 +12,7 @@ import difflib
 import json
 from typing import Any, Dict, List, Optional
 
+from agentica.cli.display.status_bar import format_turn_clock
 from agentica.run.response import ToolCallInfo
 
 
@@ -92,7 +93,7 @@ def _format_task_result(raw: str) -> str:
     if n:
         bits.append(f"{n} tools")
     if elapsed is not None:
-        bits.append(f"{float(elapsed):.1f}s")
+        bits.append(format_turn_clock(float(elapsed)))
     lines = [" · ".join(bits)]
     if data.get("error"):
         lines.append(f"error: {data['error']}")

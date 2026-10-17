@@ -40,7 +40,7 @@ class TestReportText:
 
         assert "#3 (term_3) finished" in text
         assert "exit 0" in text
-        assert "03:18" in text
+        assert "3m18s" in text
         assert "Command: pytest -q" in text
 
     def test_a_failure_is_named_as_one(self):

@@ -958,13 +958,14 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
 
     if active_secs < 60:
         duration_str = f"{active_secs:.0f}s"
-    elif active_secs < 3600:
-        m, s = divmod(int(active_secs), 60)
-        duration_str = f"{m}m {s:02d}s"
     else:
-        h, rem = divmod(int(active_secs), 3600)
-        m, _ = divmod(rem, 60)
-        duration_str = f"{h}h {m:02d}m"
+        total = int(active_secs)
+        minutes, secs = divmod(total, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            duration_str = f"{hours}h{minutes}m" if minutes else f"{hours}h"
+        else:
+            duration_str = f"{minutes}m{secs}s" if secs else f"{minutes}m"
 
     session_cost = ts.get("cost_usd", tracker.total_cost_usd)
 

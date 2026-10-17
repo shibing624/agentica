@@ -783,8 +783,17 @@ def _fmt_ms(ms: int) -> str:
     seconds = ms / 1000
     if seconds < 60:
         return f"{seconds:.1f}s"
-    m, s = divmod(int(seconds), 60)
-    return f"{m}m {s:02d}s"
+    total = int(seconds)
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        text = f"{hours}h"
+        if minutes:
+            text += f"{minutes}m"
+        if secs:
+            text += f"{secs}s"
+        return text
+    return f"{minutes}m{secs}s" if secs else f"{minutes}m"
 
 
 def _fmt_cost(value: Optional[float]) -> str:

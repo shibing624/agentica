@@ -82,6 +82,8 @@ class TestSpinnerRender(unittest.TestCase):
         self.assertEqual(_fmt_phase_elapsed(59), "59s")
         self.assertEqual(_fmt_phase_elapsed(60), "1m")
         self.assertEqual(_fmt_phase_elapsed(118), "1m58s")
+        self.assertEqual(_fmt_phase_elapsed(313), "5m13s")
+        self.assertEqual(_fmt_phase_elapsed(303), "5m3s")
         self.assertEqual(_fmt_phase_elapsed(996), "16m36s")
         self.assertEqual(_fmt_phase_elapsed(3600), "1h")
         self.assertEqual(_fmt_phase_elapsed(3723), "1h2m")
