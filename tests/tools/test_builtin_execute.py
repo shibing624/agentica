@@ -310,6 +310,52 @@ class TestBuiltinExecuteTool:
         assert "wait" in bg_execute_tool.functions
         assert "background=True" in bg_execute_tool.functions["execute"].description
 
+    def test_background_prose_states_where_results_go(self, tmp_dir):
+        """The interactive CLI hands a finished command back to the agent; a
+        registry nobody drains does not. The prose must say which, or the model
+        is told the opposite of what happens to its result."""
+        delivered = BuiltinExecuteTool(
+            work_dir=tmp_dir,
+            background_process_registry=BackgroundProcessRegistry(delivers_results=True),
+        ).functions["execute"].description
+        undelivered = BuiltinExecuteTool(
+            work_dir=tmp_dir,
+            background_process_registry=BackgroundProcessRegistry(),
+        ).functions["execute"].description
+
+        assert "come back to you as a new" in delivered
+        assert "reported to the user, not to you" not in delivered
+        assert "reported to the user, not to you" in undelivered
+        assert "come back to you as a new" not in undelivered
+
+    def test_background_prose_watcher_example_reports_the_job(self, bg_execute_tool, tmp_dir):
+        """A tmux/nohup job has no completion event, so the prose teaches a
+        watcher. The example is what models copy: it must exit with the job's
+        own code once the marker exists, and fail loudly when the session is
+        gone without one (no tmux server here, so `has-session` fails)."""
+        description = bg_execute_tool.functions["execute"].description
+        watcher = next(
+            line.strip()[len('execute(command="'):-len('", background=True)')]
+            for line in description.splitlines()
+            if line.strip().startswith('execute(command="while [ ! -f train.exit ]')
+        ).replace("-t train ", f"-t agentica-test-{os.getpid()} ")
+        assert f"agentica-test-{os.getpid()}" in watcher
+
+        def run_watcher():
+            return subprocess.run(
+                ["bash", "-c", watcher], cwd=tmp_dir,
+                capture_output=True, text=True, timeout=10,
+            )
+
+        vanished = run_watcher()
+        assert vanished.returncode == 2
+        assert "train gone, no exit file" in vanished.stdout
+
+        with open(os.path.join(tmp_dir, "train.exit"), "w") as fh:
+            fh.write("3\n")
+        finished = run_watcher()
+        assert finished.returncode == 3
+
     def test_execute_leaves_plain_commands_unflagged(self, execute_tool):
         """`2>&1` contains an ampersand without detaching anything."""
         result = asyncio.run(execute_tool.execute("echo ok 2>&1"))

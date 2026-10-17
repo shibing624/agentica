@@ -132,12 +132,18 @@ class BackgroundProcessCompleted:
 class BackgroundProcessRegistry:
     """Thread-safe registry shared by execute(), /ps, /stop and the status bar."""
 
-    def __init__(self, user_id: Optional[str] = None) -> None:
+    def __init__(self, user_id: Optional[str] = None, delivers_results: bool = False) -> None:
         self._lock = threading.RLock()
         self._counter = 0
         self._items: dict[str, BackgroundProcess] = {}
         self._completed: queue.Queue[BackgroundProcessCompleted] = queue.Queue()
         self._user_id = user_id
+        # Whether the owner drains completions back to the agent as a new
+        # message (the interactive CLI does, per `deliver_background_results`).
+        # Off by default: a registry nobody drains delivers nothing. The execute
+        # tool reads it to tell the model where a finished command's result
+        # goes, so it must be set before that tool is built.
+        self.delivers_results = delivers_results
 
     def set_user_id(self, user_id: Optional[str]) -> None:
         """Set the user segment used for future background command logs."""

@@ -394,6 +394,13 @@ def run_interactive(
     # the first agent is built because ExecuteTool receives this shared
     # instance during create_agent().
     state = SessionState()
+    # A background command's result is the agent's own pending work, so it is
+    # delivered by default; set `deliver_background_results: false` in
+    # config.yaml for a session that must never wake up on its own. Set before
+    # the first agent: the execute tool's prose says where results go.
+    state.background_processes.delivers_results = bool(
+        get_setting("deliver_background_results", True)
+    )
     cli_approve = build_interactive_approve(state, _ui_holder)
     # Publish this terminal in the peer directory before the first agent exists:
     # the messaging tools are built from this object, and the identity must
@@ -1178,11 +1185,6 @@ def run_interactive(
         text = str(content).strip()
         return text or None
 
-    # A background command's result is the agent's own pending work, so it is
-    # delivered by default; set `deliver_background_results: false` in
-    # config.yaml for a session that must never wake up on its own.
-    deliver_results = bool(get_setting("deliver_background_results", True))
-
     def background_completion_loop():
         pending_events: List[BackgroundProcessCompleted] = []
         while not state.should_exit:
@@ -1201,7 +1203,7 @@ def run_interactive(
                     if event.stop_requested:
                         continue
                     _print_background_completion(event)
-                    if deliver_results:
+                    if state.background_processes.delivers_results:
                         _hand_to_agent(_background_result_for_agent(event))
                     printed = True
             if printed and app.is_running:

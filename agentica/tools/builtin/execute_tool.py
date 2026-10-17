@@ -273,14 +273,38 @@ _BACKGROUND_GUIDANCE = """
   or a cancelled turn loses everything it printed, while a background one keeps
   its log. Something you need right now that fits in one call belongs in the
   foreground with a raised ``timeout`` — reach for ``parallel_safe`` rather than
-  ``background`` when the goal is speed. A background command's exit is reported
-  to the user, not to you; ``wait`` with the returned id is what brings it back
-  to you. Never improvise a wait with ``sleep``, polling, or a blocking ``tail``;
-  a 120s+ leading ``sleep`` is refused. A trailing ``&`` detaches into an
-  untracked orphan that nothing can wait on or stop, so prefer
+  ``background`` when the goal is speed.
+  {delivery}
+  Never improvise a wait inside a turn with ``sleep``, polling, or a blocking
+  ``tail``; a 120s+ leading ``sleep`` is refused. A trailing ``&`` detaches into
+  an untracked orphan that nothing can wait on or stop, so prefer
   ``background=True``.
   Example: execute(command="make release", background=True)
+- A background command belongs to this session: it is stopped when the
+  session exits. A job that must outlive the session (hours of training, a
+  server) goes in ``tmux``/``nohup``/``setsid`` instead — and from then on
+  nothing reports its end: ``/ps`` does not list it, and no exit reaches you.
+  So launch it to leave a completion marker and, in the same step, start one
+  background watcher that turns the marker into a completion — do not wait to
+  be asked. Polling is right here, because there is no event to wait on; the
+  watcher only reads, and exits non-zero if the job vanished without a marker:
+  execute(command="tmux new-session -d -s train 'python train.py > train.log 2>&1; echo $? > train.exit'")
+  execute(command="while [ ! -f train.exit ]; do tmux has-session -t train 2>/dev/null || [ -f train.exit ] || {{ echo 'train gone, no exit file'; tail -20 train.log; exit 2; }}; sleep 60; done; tail -20 train.log; exit $(cat train.exit)", background=True)
+  The same watcher fits any job you did not start here (a job queue, a remote
+  run): loop on whatever condition marks it done. Tell the user the watcher
+  dies with this session while the job keeps running; after a restart, read
+  the marker before assuming anything.
 """
+
+_DELIVERED = (
+    "When it exits, its exit code and log tail come back to you as a new message,\n"
+    "  so you can end the turn and pick up from there; ``wait`` with the returned\n"
+    "  id is only for needing the result within this turn."
+)
+_NOT_DELIVERED = (
+    "A background command's exit is reported to the user, not to you; ``wait`` with\n"
+    "  the returned id is what brings it back to you."
+)
 
 # Appended, together with the ``escalate`` parameter, only when the OS sandbox
 # is on — same rule as background: the parameter and its prose come as a pair.
@@ -363,7 +387,10 @@ class BuiltinExecuteTool(Tool):
         execute_fn = self.functions["execute"]
         execute_fn.process_entrypoint()
         if self._background_process_registry is not None:
-            execute_fn.description += _BACKGROUND_GUIDANCE
+            execute_fn.description += _BACKGROUND_GUIDANCE.format(
+                delivery=_DELIVERED if self._background_process_registry.delivers_results
+                else _NOT_DELIVERED,
+            )
             self.register(self.wait, concurrency_safe=True, is_read_only=True, is_destructive=False)
             # `wait` may block past the outer 120s executor wrapper; it owns its
             # timeout so the caller-supplied value is not cut short mid-wait.
@@ -897,17 +924,15 @@ class BuiltinExecuteTool(Tool):
         """Blocks until a background command finishes, then reports how it went.
 
         Returns the instant the command exits, so a generous timeout costs no
-        more than the command itself. Use it when a later step of your plan needs
-        the result of something already backgrounded: a background command's exit
-        is reported to the user and never to you, so this is the only way to
-        reach that later step.
+        more than the command itself. Use it when a later step of this turn needs
+        the result of something already backgrounded. Whether a finished command
+        also comes back to you on its own is stated under ``execute``.
 
         It is not the default. Something you need the result of, that fits in one
         tool call, should just run in the foreground with a raised ``timeout``.
         And do not loop on it: if the command is still running after a wait or
         two, it is long enough that holding the turn is worse than ending it —
-        say what is running and stop, and the completion notice the user gets
-        drives the next step.
+        say what is running and stop; its completion drives the next step.
 
         Never guess a duration with ``sleep``: a fixed wait keeps waiting after
         the command has already failed, and cannot tell you its exit code.
