@@ -54,6 +54,14 @@ def test_automated_turn_is_recorded_hidden_from_people_and_kept_for_the_model():
         preview = SessionLog.session_preview(str(agent._session_log.path))
         assert preview["user_count"] == 1
         assert preview["recent_users"] == ["rename the loader"]
+        # Not a reading for people: fork points are positions in the
+        # transcript, and search_session is the model's recall of what it saw.
+        assert [m["content"] for m in agent._session_log.list_user_messages()] == [
+            PEER_TURN, "rename the loader",
+        ]
+        assert [q["snippet"] for q in agent._session_log.list_user_questions()] == [
+            PEER_TURN, "rename the loader",
+        ]
 
         resumed = _agent(tmp, requests)
         _, runs_built = hydrate_resumed_session(resumed)
@@ -88,6 +96,29 @@ def test_automated_steer_is_not_presented_as_user_guidance():
     injected = messages[-1]
     assert injected.content == "[Background terminal #1 (term_1) finished: exit 0]"
     assert injected.automated
+
+
+def test_automated_steer_with_an_image_keeps_its_provenance():
+    agent = Agent()
+    agent._begin_steer_window()
+    agent.steer("screenshot from the job", automated=True, images=["/tmp/shot.png"])
+    messages = [Message(role="user", content="do the task")]
+    Runner._inject_steering(messages, agent)
+
+    injected = messages[-1]
+    assert injected.images == ["/tmp/shot.png"]
+    assert injected.automated
+
+
+def test_steer_typed_by_a_person_is_not_automated():
+    agent = Agent()
+    agent._begin_steer_window()
+    agent.steer("look at this", images=["/tmp/shot.png"])
+    agent.steer("job report", automated=True)
+    messages = [Message(role="user", content="do the task")]
+    Runner._inject_steering(messages, agent)
+
+    assert not messages[-1].automated
 
 
 def test_parked_automated_steer_keeps_its_provenance():

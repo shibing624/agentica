@@ -59,12 +59,14 @@ class SteerMixin:
                 parts.append("[User attached image(s) while you were working]")
             images.extend(item.images)
         marker = "\n\n".join(parts)
+        automated = all(item.automated for item in drained)
         last = messages[-1] if messages else None
         if images:
             # Vision cannot ride a tool-result string. A user message after a
             # tool turn is the same shape idle image turns already use.
             injected = Message(role="user", content=marker, images=list(images))
             injected._injected = True
+            injected.automated = automated
             messages.append(injected)
             logger.debug("Injected steering guidance with %s image(s)", len(images))
         elif last is not None and last.role == "tool":
@@ -80,7 +82,7 @@ class SteerMixin:
             # before the model has ever read its result.
             injected = Message(role="user", content=marker)
             injected._injected = True
-            injected.automated = all(item.automated for item in drained)
+            injected.automated = automated
             messages.append(injected)
             logger.debug("Injected steering guidance as a user message")
 
