@@ -139,6 +139,12 @@ class Message(BaseModel):
     # Compressed content for tool results (used by CompressionManager)
     compressed_content: Optional[str] = None
 
+    # A user turn no person wrote: another agent session's message or a
+    # finished job's report. Kept in history for the model; transcripts shown
+    # to people (/resume, /history, the resume picker) skip it. Not sent to
+    # the Model API.
+    automated: bool = False
+
     # Set by evict_tool_results() once every result this message carries is a
     # placeholder, so later passes can skip it outright. A message is the unit
     # here, but a result is not: an Anthropic round packs several tool_result

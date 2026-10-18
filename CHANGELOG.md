@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fetch_url` 回显不再把整页显示成 `1 lines`**：结果是一行 JSON（`url` / `content` / `save_path`），以前按这个字符串的换行数计数，一篇 README 也是 `1 lines`。现在数 `content` 里的正文行，一行写成 `1 line`；抓取失败且没有正文时显示错误本身。
 - **`execute` 的后台说明不再说「结果只报告给用户、不会给你」**：交互式 CLI 默认（`deliver_background_results: true`）会把后台命令的退出码和日志尾部交回 agent，旧说明恰好说反，`wait` 的说明也一样。现在按实际配置二选一：开着时告诉模型结果会作为新消息回来、可以直接结束这一轮；关掉时保持原话。
 - **`tmux` / `nohup` / `setsid` 里跑的长任务有了配套做法**：这类任务要比会话活得久，但 `/ps` 看不到，跑完也没人通知。`execute` 说明里新增一段：启动时让任务把退出码写进标记文件，并在同一步起一个 `background=True` 的只读监视循环——标记出现就带着任务自己的退出码结束，会话消失却没有标记就以 2 退出并打印日志尾部。监视会随会话结束，任务不会；重开会话后先读标记文件。附带的示例命令有测试实际跑过这两种结局。
+- **`/resume`、`/history` 和 resume 列表只显示人说的话**：另一个 agent 会话发来的消息、后台命令 / delegate 的完成报告，以前作为一轮「You」原样出现在回放里，也计入 picker 的 turns 和最近请求。现在这类轮次在 session log 的 user 条目上记 `"automated": true`（新增 `RunConfig.automated_input`、`Message.automated`，不发给 provider），回放时跳过，agent 随后的回答并入上一段；模型侧历史不变，仍能看到这些消息。用户从另一个会话转发过来的话（`/send-message`、attach）仍是人发起的，照常显示。运行中到达的后台报告也不再被套上 `[User guidance received while you were working]`。
+- **peer agent 消息在终端里弱化显示**：另一个会话的 agent 发来的消息从和用户输入同款的面板，改成缩进的暗色 `↳ <name>: …` 一行；用户本人从别处发来的话仍是 `❯` 面板。这类自动轮次也不再覆盖本会话对外公布的「正在做什么」。
+- **peer 消息不再被当成派活渠道**：`list_agents` / `send_message` 的说明和 `multi-agent` skill 重写——自己的任务自己做（直接做、`task`、`delegate`、后台命令），结果直接回到自己手里；`send_message` 用于和不属于自己的工作协调（别的仓库或 checkout、用户在做的另一件事）。收到 agent 消息时的提示由「If it handed you work」改为「If it asked you for something」。tmux 里起第二个 CLI 只留给用户想单独盯着或接手的场景。
 
 ## [1.4.17] - 2026-10-15
 

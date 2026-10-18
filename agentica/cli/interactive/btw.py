@@ -24,7 +24,7 @@ from agentica.tools.background_processes import (
 from .console_io import _print_boxed_result
 from .session_state import SessionState
 
-def hand_to_agent(state: SessionState, pending_queue, text: str) -> str:
+def hand_to_agent(state: SessionState, pending_queue, text: str, *, automated: bool = False) -> str:
     """Give the agent text nobody typed, without interrupting its work.
 
     A running agent takes it through ``steer()``, which lands at the next
@@ -39,6 +39,10 @@ def hand_to_agent(state: SessionState, pending_queue, text: str) -> str:
     so the raw model-facing text — headers, log tails and all — would be a
     second, uglier copy of what the user just read.
 
+    ``automated=True`` says no person wrote it (a peer agent, a job report), as
+    opposed to the user typing somewhere else. It rides into the run so the
+    turn is recorded as automated and left out of human-facing transcripts.
+
     ``relayed=True`` threads the same provenance through the steer buffer: if
     the text is accepted during the run's final inference and never drained,
     ``promote_late_steer`` re-queues it with the tag instead of as plain input.
@@ -50,9 +54,9 @@ def hand_to_agent(state: SessionState, pending_queue, text: str) -> str:
     value, which is why this is a plain return rather than a new function.
     """
     agent = state.current_agent
-    if state.agent_running and agent is not None and agent.steer(text, relayed=True):
+    if state.agent_running and agent is not None and agent.steer(text, relayed=True, automated=automated):
         return "steered"
-    pending_queue.put(("__RELAYED__", text))
+    pending_queue.put(("__RELAYED__", text, automated))
     return "queued"
 
 
@@ -74,16 +78,14 @@ def promote_late_steer(state: SessionState, pending_queue) -> List[str]:
     late = agent.pop_undelivered_steer()
     promoted = []
     for item in late:
-        text, relayed = item[0], item[1]
-        images = item[2] if len(item) > 2 else ()
-        if relayed:
-            payload = ("__RELAYED__", text)
-        elif images:
-            payload = (text, list(images))
+        if item.relayed:
+            payload = ("__RELAYED__", item.text, item.automated)
+        elif item.images:
+            payload = (item.text, list(item.images))
         else:
-            payload = text
+            payload = item.text
         queue_ahead_of_goal_continuation(pending_queue, payload)
-        promoted.append(text)
+        promoted.append(item.text)
     return promoted
 
 

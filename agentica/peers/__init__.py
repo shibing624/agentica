@@ -1005,7 +1005,7 @@ def format_for_model(messages: List[PeerMessage]) -> str:
             if replyable:
                 header = (
                     f"[Message from another agent session '{message.from_name}' "
-                    f"— it cannot see this terminal. If it handed you work, report "
+                    f"— it cannot see this terminal. If it asked you for something, report "
                     f"the outcome back with send_message to {message.from_name} when "
                     f"it is done or you stop; if it only informed you, no reply is "
                     f"needed]"
@@ -1013,7 +1013,7 @@ def format_for_model(messages: List[PeerMessage]) -> str:
             else:
                 header = (
                     f"[Message from '{message.from_name}' — it cannot see this "
-                    f"terminal and has no reply address. If it handed you work, the "
+                    f"terminal and has no reply address. If it asked you for something, the "
                     f"result stands in this terminal; if it only informed you, no "
                     f"reply is needed]"
                 )

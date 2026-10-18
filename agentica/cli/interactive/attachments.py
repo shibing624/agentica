@@ -117,6 +117,8 @@ class QueuedInput(NamedTuple):
     images: List[Path]
     is_btw: bool
     is_relayed: bool
+    # No person wrote it (a peer agent, a job report); implies is_relayed.
+    is_automated: bool = False
 
 
 def unpack_queue_payload(item) -> QueuedInput:
@@ -136,7 +138,8 @@ def unpack_queue_payload(item) -> QueuedInput:
         if item and item[0] == "__BTW__":
             return QueuedInput(str(item[1]) if len(item) > 1 else "", [], True, False)
         if item and item[0] == "__RELAYED__":
-            return QueuedInput(str(item[1]) if len(item) > 1 else "", [], False, True)
+            automated = len(item) > 2 and item[2] is True
+            return QueuedInput(str(item[1]) if len(item) > 1 else "", [], False, True, automated)
         text, images = item
         return QueuedInput(str(text), list(images or []), False, False)
     return QueuedInput(str(item), [], False, False)

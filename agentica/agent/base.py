@@ -103,11 +103,13 @@ from agentica.agent.goal_mixin import GoalMixin
 
 
 class SteerItem(NamedTuple):
-    """One mid-run injection: caption, optional images, and who typed it."""
+    """One mid-run injection: caption, optional images, and who wrote it."""
 
     text: str
     relayed: bool = False
     images: tuple = ()
+    # Written by software (another agent, a job report), not a person.
+    automated: bool = False
 
 
 @dataclass(init=False)
@@ -269,6 +271,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # Per-run break-recovery toggle. Set by Runner from RunConfig.fallback_on_break
     # (falling back to Agent.fallback_on_break). Read at the loop-break sites.
     _run_fallback_on_break: bool = field(default=False, init=False, repr=False)
+    # Per-run: this turn's message came from software, not a person. Set by
+    # Runner from RunConfig.automated_input; stamped on the user message.
+    _run_automated_input: bool = field(default=False, init=False, repr=False)
     # Per-run Runner-level API call attempts. Set by Runner from RunConfig.
     _run_max_api_retry: int = field(default=1, init=False, repr=False)
     # Max LLM loop turns. None = unlimited (main agent default).
@@ -641,6 +646,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._run_max_cost_usd = None
         self._run_fallback_models = []
         self._run_fallback_on_break = False
+        self._run_automated_input = False
         self._run_max_api_retry = 1
         self.todos = []
         self._tool_policy_prompts: List[str] = []
@@ -1014,6 +1020,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         guidance: str = "",
         *,
         relayed: bool = False,
+        automated: bool = False,
         images: Optional[Sequence[Any]] = None,
     ) -> bool:
         """Inject guidance into a running tool loop without interrupting it.
@@ -1054,6 +1061,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         up parked: the re-queue path re-tags it ``__RELAYED__`` so a relayed
         line can never regain slash-command dispatch (what the peer policy
         promises senders).
+
+        ``automated=True`` (implies relayed) marks text no person wrote — a
+        peer agent's message, a finished job's report — so it is not presented
+        to the model as the user's guidance.
         """
         images_t = tuple(images or ())
         text = replace_invalid_utf8(guidance or "").strip()
@@ -1066,7 +1077,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # `agent_running` check but before we append.
             if not self._running:
                 return False
-            self._pending_steer.append(SteerItem(text, relayed, images_t))
+            self._pending_steer.append(SteerItem(text, relayed or automated, images_t, automated))
         return True
 
     def _drain_steer(self) -> List[SteerItem]:

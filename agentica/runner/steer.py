@@ -48,7 +48,10 @@ class SteerMixin:
         parts = []
         images: list = []
         for item in drained:
-            if item.text:
+            if item.text and item.automated:
+                # Carries its own header saying who sent it; it is not the user.
+                parts.append(item.text)
+            elif item.text:
                 parts.append(
                     f"[User guidance received while you were working]\n{item.text}"
                 )
@@ -77,6 +80,7 @@ class SteerMixin:
             # before the model has ever read its result.
             injected = Message(role="user", content=marker)
             injected._injected = True
+            injected.automated = all(item.automated for item in drained)
             messages.append(injected)
             logger.debug("Injected steering guidance as a user message")
 
@@ -119,6 +123,7 @@ class SteerMixin:
             # that already ran, and the round below it is still live for Layer 1.
             injected = Message(role="user", content=marker)
             injected._injected = True
+            injected.automated = not any(message.from_user for message in drained)
             messages.append(injected)
         logger.debug(f"Injected {len(drained)} peer message(s) into the run")
 

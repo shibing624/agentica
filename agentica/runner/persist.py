@@ -166,6 +166,8 @@ class PersistMixin:
         if not text:
             return
         meta = PersistMixin._provider_replay_meta(user_messages[-1]) if user_messages else {}
+        if user_messages and user_messages[-1].automated:
+            meta["automated"] = True
         session_log._turn_user_uuid = session_log.append("user", text, **meta)
 
     @staticmethod

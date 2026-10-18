@@ -971,6 +971,9 @@ class LoopMixin:
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
                     message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
                 )
+                if agent._run_automated_input:
+                    for _user_message in user_messages:
+                        _user_message.automated = True
                 num_input_messages = len(messages_for_model)
                 input_message_ids = {id(m) for m in messages_for_model}
                 # Open the turn for incremental writes: everything this turn puts

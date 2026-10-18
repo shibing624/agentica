@@ -147,11 +147,11 @@ def _echo_panel(
 def display_peer_messages(messages: List[PeerMessage]) -> None:
     """Show messages that just arrived from another session.
 
-    Both user and agent messages are independent incoming requests, so both use
-    the same history-panel shape. ``❯`` means the human spoke; another
-    session's agent is identified by a source title (``🖥️ <name>:``) without a
-    direction arrow. The model-facing header separately enforces that an agent
-    message does not carry user authority.
+    The user speaking from another session gets the input panel with ``❯``:
+    it is a request, same as typing here. Another session's agent is internal
+    traffic, so it is a dim, indented note (``↳ <name>:``) rather than a panel
+    that competes with the person's own requests. The model-facing header
+    separately enforces that an agent message does not carry user authority.
     """
     for message in messages:
         if message.from_user:
@@ -160,10 +160,16 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
             body.append(message.text, style=f"bold {COLORS['user']}")
             _echo_panel(body)
         else:
-            body = Text()
-            body.append(f"🖥️ {message.from_name}:\n", style=f"bold {COLORS['tool']}")
-            body.append(message.text, style=f"bold {COLORS['user']}")
-            _echo_panel(body, marker="", marker_style=f"bold {COLORS['tool']}")
+            note = Table.grid(padding=(0, 1), expand=True)
+            note.add_column(no_wrap=True)
+            note.add_column(ratio=1, overflow="fold")
+            note.add_row(
+                Text("↳", style="dim"),
+                Text.assemble((f"{message.from_name}: ", "dim bold"), (message.text, "dim")),
+            )
+            console = get_console()
+            console.print()
+            console.print(Padding(note, (0, 0, 0, 2)))
 
 
 def display_attached_user_message(text: str, *, from_name: str = "") -> None:

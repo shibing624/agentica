@@ -339,6 +339,7 @@ def _process_stream_response(
     *,
     images: Optional[list] = None,
     work_dir: Optional[str] = None,
+    automated_input: bool = False,
 ) -> None:
     """Process the agent's streaming response and display it."""
     con = get_console()
@@ -395,7 +396,11 @@ def _process_stream_response(
         from agentica.run.config import RunConfig
         from agentica.run.context import RunSource
 
-        run_config = RunConfig(stream_intermediate_steps=True, source=RunSource.cli)
+        run_config = RunConfig(
+            stream_intermediate_steps=True,
+            source=RunSource.cli,
+            automated_input=automated_input,
+        )
 
         # ── Per-turn rewind checkpoint ─────────────────────────────
         # Open a turn checkpoint BEFORE the run: msg_index = the conversation

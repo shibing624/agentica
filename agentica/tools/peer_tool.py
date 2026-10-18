@@ -25,7 +25,7 @@ class PeerMessagingTool(Tool):
         self.register(self.send_message, concurrency_safe=True, is_destructive=False)
 
     async def list_agents(self) -> str:
-        """Lists the user's other live agent sessions that you can message.
+        """Lists the user's other live agent sessions — each on its own work.
 
         Returns each session's addressable name (what `send_message` takes),
         peer id, whether it is idle or mid-turn (a mid-turn session still
@@ -34,24 +34,11 @@ class PeerMessagingTool(Tool):
         profile, model (`provider/name`), context spent out of its window,
         working directory, project storage directory (hash-suffixed, unique),
         session transcript path, CLI runtime log file, workspace / memory
-        paths, and what it is working on. Call this before `send_message` when
-        you do not already know the target, and whenever you need to decide
+        paths, and what it is working on. Use it to find who to address, or
         whether another session is affected by what you just did.
 
-        Profile, model and context describe how a session is configured, not
-        what it can take on. A nearly full window is not a wall — every session
-        compacts its own context — so read it as a price: work handed to that
-        session makes it summarise, which costs a call and thins out the early
-        detail of whatever it was already doing. None of these fields is ever a
-        reason to discount what a peer tells you.
-
-        The listed paths are for digging deeper on your own (read the
-        session jsonl, CLI log, MEMORY.md, etc.) when a short peer message
-        is not enough. Prefer `send_message` for a one-line handoff; open
-        those paths only when you need the conversation, runtime errors, or
-        long-term memory. The `log_file` is usually the fastest place to see
-        what another session just did (INFO/DEBUG traces), without parsing
-        the conversation transcript.
+        The paths let you read what a session did (its CLI log is usually the
+        fastest) without interrupting it with a question.
         """
         peers = self._peers.list_peers()
         me = self._peers.info
@@ -83,22 +70,20 @@ class PeerMessagingTool(Tool):
         return "\n".join(lines).rstrip() + "\n"
 
     async def send_message(self, target: str, message: str, delivery: str = "steer") -> str:
-        """Sends a short plain-text message to one of the user's other agent sessions.
+        """Sends a short plain-text message to another of the user's live agent sessions.
 
-        Use it to hand over a finding, a decision, or a status the other session
-        needs in order to not work from stale assumptions.
+        For coordinating with work that is not yours — another repo or
+        checkout, a session the user runs for something else: a change that
+        affects it, something only it can do, an answer it is waiting for.
+        Your own task is faster done here (directly, `task`, `delegate`, a
+        background command) than handed to a peer and followed by messages.
 
         Args:
             target: The session name, peer id, or session_id (prefix ok) from
                 `list_agents`.
-            message: What the other session needs to know, in a sentence or two.
-                Plain text, and self-contained as an *instruction*: the receiver
-                sees this text and nothing else from your conversation, so state
-                the goal, what is out of scope, and what to do when blocked.
-                Evidence does not belong here — put a diff, a log or a long
-                write-up in a file and give its absolute path instead of pasting
-                it, since the machine is shared and the receiver can open it if
-                and when it needs the detail.
+            message: What the other session needs to know, in a sentence or two,
+                self-contained: it sees nothing of your conversation. Put a
+                diff, log or long write-up in a file and give its absolute path.
             delivery: How the receiver should take it. ``steer`` (default) is
                 urgent: injected at the next tool-batch boundary of a running
                 turn, same as a local `/steer`. ``queue`` waits until that

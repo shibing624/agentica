@@ -1013,7 +1013,8 @@ def run_interactive(
             state.agent_running = True
             # Publish what this terminal is working on so another session's
             # agent can pick it as a message target without guessing.
-            if state.peer_session is not None:
+            # An automated turn (peer message, job report) is not the user's task.
+            if state.peer_session is not None and not queued.is_automated:
                 state.peer_session.publish(task=" ".join(user_input.split())[:240])
             app.invalidate()
             _process_stream_response(
@@ -1022,6 +1023,7 @@ def run_interactive(
                 tui_state,
                 images=turn_images,
                 work_dir=agent_config.get("work_dir"),
+                automated_input=queued.is_automated,
             )
             state.agent_running = False
             tui_state["spinner_text"] = ""
@@ -1129,8 +1131,8 @@ def run_interactive(
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()
 
-    def _hand_to_agent(text: str) -> str:
-        return hand_to_agent(state, pending_queue, text)
+    def _hand_to_agent(text: str, *, automated: bool = False) -> str:
+        return hand_to_agent(state, pending_queue, text, automated=automated)
 
     def _inject_from_outside(text: str) -> str:
         """Take a line handed in by an external client (the attach socket).
@@ -1204,7 +1206,7 @@ def run_interactive(
                         continue
                     _print_background_completion(event)
                     if state.background_processes.delivers_results:
-                        _hand_to_agent(_background_result_for_agent(event))
+                        _hand_to_agent(_background_result_for_agent(event), automated=True)
                     printed = True
             if printed and app.is_running:
                 app.invalidate()
@@ -1279,7 +1281,12 @@ def run_interactive(
                 continue
             if not messages:
                 continue
-            _hand_to_agent(format_for_model(messages))
+            # A batch carrying the user's own words (sent from their other
+            # session) is a human turn; agent-to-agent traffic is automated.
+            _hand_to_agent(
+                format_for_model(messages),
+                automated=not any(message.from_user for message in messages),
+            )
             if app.is_running:
                 app.invalidate()
 

@@ -65,6 +65,10 @@ class RunConfig:
     max_api_retry: Optional[int] = None
     # Explicit provenance for this run. Product entry points should set this.
     source: RunSource = RunSource.sdk
+    # The message was written by software, not a person (another agent
+    # session, a background job's report). Recorded on the user turn so
+    # human-facing transcripts can leave it out.
+    automated_input: bool = False
     # Fallback model chain (cross-provider). Triggered per-call by:
     #   - finish_reason == "content_filter" (provider-side content moderation)
     #   - fallback-only API errors (connection / 502 / 503 / bad gateway)

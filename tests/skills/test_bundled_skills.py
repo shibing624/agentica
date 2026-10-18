@@ -291,7 +291,9 @@ class TestBundledSkillContent(unittest.TestCase):
             self.assertNotIn(action, body)
 
     def test_the_multi_agent_skill_covers_all_three_mechanisms(self):
-        body = self._body("multi-agent")
+        # Phrases are checked across line wraps, so rewrapping the prose
+        # does not break them.
+        body = " ".join(self._body("multi-agent").split())
         for mechanism in ("`task`", "`delegate`", "tmux"):
             self.assertIn(mechanism, body)
         # Verified behaviours that are easy to get wrong.
@@ -301,6 +303,8 @@ class TestBundledSkillContent(unittest.TestCase):
         # Parallelism is a property of `task`, not a reason to pick delegate.
         self.assertIn("several `task` calls", body)
         self.assertIn("not a reason to reach for `delegate`", body)
+        # Other live sessions are coordinated with, not dispatched to.
+        self.assertIn("are not a worker pool", body)
         self.assertIn("IS your user", body)
         self.assertIn("goes back to the sender with `send_message`", body)
         self.assertIn("goes in a file and the message carries its absolute path", body)

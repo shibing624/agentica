@@ -1101,6 +1101,7 @@ class SessionLog:
             "metrics",
             "model",
             "usage",
+            "automated",
         )
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
         for entry in entries[start_from:]:
@@ -1553,6 +1554,10 @@ class SessionLog:
                     except Exception:
                         continue
                     if entry.get("type") != "user":
+                        continue
+                    # Another agent's message or a job report: not a request
+                    # the person made, so not what the picker should show.
+                    if entry.get("automated") is True:
                         continue
                     content = entry.get("content") or ""
                     if not isinstance(content, str):

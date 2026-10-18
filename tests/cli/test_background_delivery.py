@@ -7,6 +7,7 @@ import time
 from unittest.mock import MagicMock
 
 from agentica.cli.commands.context import PendingQueue
+from agentica.agent.base import SteerItem
 from agentica.cli.interactive.btw import (
     _background_result_for_agent,
     hand_to_agent,
@@ -133,11 +134,12 @@ class TestHandToAgent:
         state.current_agent.steer.return_value = True
         pending = PendingQueue()
 
-        hand_to_agent(state, pending, "report")
+        hand_to_agent(state, pending, "report", automated=True)
 
         # relayed=True marks provenance so a parked (undrained) report can be
-        # re-queued with the __RELAYED__ tag instead of as plain typed input.
-        state.current_agent.steer.assert_called_once_with("report", relayed=True)
+        # re-queued with the __RELAYED__ tag instead of as plain typed input;
+        # automated=True says no person wrote it.
+        state.current_agent.steer.assert_called_once_with("report", relayed=True, automated=True)
         assert pending.empty()
 
     def test_an_idle_agent_gets_a_queued_turn(self):
@@ -146,11 +148,11 @@ class TestHandToAgent:
         state.current_agent = MagicMock()
         pending = PendingQueue()
 
-        hand_to_agent(state, pending, "report")
+        hand_to_agent(state, pending, "report", automated=True)
 
         state.current_agent.steer.assert_not_called()
         # Tagged, so the turn is not echoed as if the user had typed the report.
-        assert pending.peek_all() == [("__RELAYED__", "report")]
+        assert pending.peek_all() == [("__RELAYED__", "report", True)]
 
     def test_a_refused_steer_falls_back_to_the_queue(self):
         # steer() returns False when the run ended between the check and the
@@ -161,9 +163,9 @@ class TestHandToAgent:
         state.current_agent.steer.return_value = False
         pending = PendingQueue()
 
-        hand_to_agent(state, pending, "report")
+        hand_to_agent(state, pending, "report", automated=True)
 
-        assert pending.peek_all() == [("__RELAYED__", "report")]
+        assert pending.peek_all() == [("__RELAYED__", "report", True)]
 
     def test_text_is_kept_even_before_the_first_agent_exists(self):
         state = SessionState()
@@ -171,9 +173,9 @@ class TestHandToAgent:
         state.current_agent = None
         pending = PendingQueue()
 
-        hand_to_agent(state, pending, "report")
+        hand_to_agent(state, pending, "report", automated=True)
 
-        assert pending.peek_all() == [("__RELAYED__", "report")]
+        assert pending.peek_all() == [("__RELAYED__", "report", True)]
 
 
 class TestPromoteLateSteer:
@@ -185,8 +187,8 @@ class TestPromoteLateSteer:
         state.agent_running = False
         state.current_agent = MagicMock()
         state.current_agent.pop_undelivered_steer.return_value = [
-            ("first", False),
-            ("second", False),
+            SteerItem("first"),
+            SteerItem("second"),
         ]
         pending = PendingQueue()
 
@@ -205,18 +207,18 @@ class TestPromoteLateSteer:
         state = SessionState()
         state.current_agent = MagicMock()
         state.current_agent.pop_undelivered_steer.return_value = [
-            ("#3 (term_2) finished: exit=0", True),
+            SteerItem("#3 (term_2) finished: exit=0", True, (), True),
         ]
         pending = PendingQueue()
 
         promote_late_steer(state, pending)
 
-        assert pending.peek_all() == [("__RELAYED__", "#3 (term_2) finished: exit=0")]
+        assert pending.peek_all() == [("__RELAYED__", "#3 (term_2) finished: exit=0", True)]
 
     def test_promotion_jumps_ahead_of_a_goal_continuation(self):
         state = SessionState()
         state.current_agent = MagicMock()
-        state.current_agent.pop_undelivered_steer.return_value = [("user correction", False)]
+        state.current_agent.pop_undelivered_steer.return_value = [SteerItem("user correction")]
         pending = PendingQueue()
         pending.put(f"{CONTINUATION_PROMPT_PREFIX} keep going")
 

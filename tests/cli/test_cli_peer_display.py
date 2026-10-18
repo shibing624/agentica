@@ -45,26 +45,26 @@ class TestPeerMessageRendering:
         out = _render([_message("方案A全量+四臂完成")])
 
         assert "nlp-f1" in out
-        assert "🖥️" in out
         assert "方案A全量+四臂完成" in out
 
-    def test_an_agent_message_uses_history_panel_with_agent_source_title(self):
-        """Agent requests share the input-panel shape without borrowing ``❯``."""
+    def test_an_agent_message_is_a_dim_note_not_a_request_panel(self):
+        """Agent-to-agent traffic must not look like the person's own request:
+        no ``❯``, no input-panel background, and dim text."""
         out = _render([_message("I refactored the loader")])
 
         assert "❯" not in out
-        assert "↳" not in out
-        assert "🖥️ nlp-f1:" in out
+        assert "↳ nlp-f1: I refactored the loader" in out
 
         console = MagicMock()
         with patch("agentica.cli.display.messages.get_console", return_value=console):
             display_peer_messages([_message("I refactored the loader")])
 
         renderable = console.print.call_args.args[0]
-        assert renderable.style == "on rgb(35,35,35)"
-        marker_column, content_column = renderable.renderable.columns
-        assert marker_column._cells[0].plain == ""
-        assert content_column._cells[0].plain == "🖥️ nlp-f1:\nI refactored the loader"
+        assert "on rgb" not in str(renderable.style)
+        _, content_column = renderable.renderable.columns
+        body = content_column._cells[0]
+        assert body.plain == "nlp-f1: I refactored the loader"
+        assert all("dim" in str(span.style) for span in body.spans)
 
     def test_a_relayed_user_message_is_shown_as_the_user_speaking(self):
         out = _render([_message("ship it", from_kind="user")])
@@ -162,11 +162,25 @@ class TestRelayedTurnsAreNotEchoedTwice:
         state.current_agent = MagicMock()
         pending = PendingQueue()
 
-        hand_to_agent(state, pending, "[Message from another agent session] hi")
+        hand_to_agent(state, pending, "[Message from another agent session] hi", automated=True)
 
         assert pending.peek_all() == [
-            ("__RELAYED__", "[Message from another agent session] hi")
+            ("__RELAYED__", "[Message from another agent session] hi", True)
         ]
+        queued = unpack_queue_payload(pending.peek_all()[0])
+        assert queued.is_relayed and queued.is_automated
+
+    def test_the_user_speaking_from_elsewhere_is_relayed_but_not_automated(self):
+        state = SessionState()
+        state.agent_running = False
+        state.current_agent = MagicMock()
+        pending = PendingQueue()
+
+        hand_to_agent(state, pending, "commit what you have")
+
+        queued = unpack_queue_payload(pending.peek_all()[0])
+        assert queued.is_relayed
+        assert not queued.is_automated
 
     def test_the_queue_bar_previews_the_text_not_the_marker(self):
         preview = queue_item_preview(("__RELAYED__", "schema migration finished"))

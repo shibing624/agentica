@@ -157,6 +157,10 @@ def _qa_blocks_for_display(messages: list[Message]) -> list[tuple[str, str]]:
 
     for message in messages:
         if message.role == "user":
+            # Not a person's request (another agent, a job report): leave it
+            # out, and let what the agent said next join the previous answer.
+            if message.automated:
+                continue
             flush_assistant()
             text = _visible_text(message)
             if text:
