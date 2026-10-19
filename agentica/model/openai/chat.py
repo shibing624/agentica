@@ -115,6 +115,7 @@ _DEEPSEEK_THINKING_UNSUPPORTED_PARAMS = (
 # Anthropic caps a single request at 4 cache breakpoints total, so the injector
 # below budgets tools(1) + system(1) + trailing messages(remaining) ≤ 4.
 _CACHE_CONTROL_BREAKPOINT_BUDGET = 4
+_SYSTEM_POSITION_ERROR = "role 'system' must precede"
 
 
 def _has_cacheable_content(content: Any) -> bool:
@@ -126,6 +127,56 @@ def _has_cacheable_content(content: Any) -> bool:
     if isinstance(content, list):
         return len(content) > 0
     return False
+
+
+def _repair_claude_system_positions(
+    messages: List[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Relocate only invalid mid-conversation system directives.
+
+    Some OpenAI-compatible Claude gateways accept a content-bearing system
+    message only immediately before an assistant message or at the end. The
+    leading OpenAI system prefix is left untouched for the gateway to hoist.
+    A rejected mid-conversation directive is moved to the boundary immediately
+    before the next assistant reply, preserving its intended forward scope.
+    """
+    prefix_end = 0
+    while prefix_end < len(messages) and messages[prefix_end].get("role") == "system":
+        prefix_end += 1
+
+    moves = []
+    for index in range(prefix_end, len(messages)):
+        if messages[index].get("role") != "system":
+            continue
+        if index == len(messages) - 1 or messages[index + 1].get("role") == "assistant":
+            continue
+        target = next(
+            (i for i in range(index + 1, len(messages)) if messages[i].get("role") == "assistant"),
+            None,
+        )
+        moves.append((index, target, messages[index]))
+
+    if not moves:
+        return None
+
+    moved_indexes = {index for index, _, _ in moves}
+    repaired = [(index, message) for index, message in enumerate(messages) if index not in moved_indexes]
+    for _, target, directive in moves:
+        if target is None:
+            repaired.append((-1, directive))
+            continue
+        insert_at = next(i for i, (original_index, _) in enumerate(repaired) if original_index == target)
+        repaired.insert(insert_at, (-1, directive))
+
+    result = [message for _, message in repaired]
+    for index in range(prefix_end, len(result)):
+        if (
+            result[index].get("role") == "system"
+            and index != len(result) - 1
+            and result[index + 1].get("role") != "assistant"
+        ):
+            return None
+    return result
 
 
 _THINKING_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
@@ -337,6 +388,7 @@ class OpenAIChat(Model):
     cache_keepalive_max_pings: int = 3
     _last_cache_payload: Any = field(default=None, init=False, repr=False)
     _cache_keepalive_generation: int = field(default=0, init=False, repr=False)
+    _requires_system_position_repair: bool = field(default=False, init=False, repr=False)
 
     # Client parameters
     api_key: Optional[str] = None
@@ -1045,11 +1097,50 @@ class OpenAIChat(Model):
 
         return extra_params
 
+    async def _send_with_system_position_repair(
+        self,
+        formatted: List[Dict[str, Any]],
+        send: Callable[[List[Dict[str, Any]]], Awaitable[Any]],
+    ) -> Any:
+        """Repair a client-side mid-conversation system placement once."""
+        try:
+            return await send(formatted)
+        except Exception as error:
+            if _SYSTEM_POSITION_ERROR not in str(error).lower():
+                raise
+            repaired = _repair_claude_system_positions(formatted)
+            if repaired is None:
+                logger.warning(
+                    "[system_position] %s rejected messages, but the client wire "
+                    "has no safely repairable mid-conversation system directive; "
+                    "not retrying (roles=%s, system_indexes=%s): %s",
+                    self.id,
+                    [message.get("role") for message in formatted],
+                    [i for i, message in enumerate(formatted) if message.get("role") == "system"],
+                    error,
+                )
+                raise
+            self._requires_system_position_repair = True
+            logger.warning(
+                "[system_position] %s rejected a client-side system placement; "
+                "retrying once after structural repair "
+                "(roles=%s -> %s, system_indexes=%s -> %s): %s",
+                self.id,
+                [message.get("role") for message in formatted],
+                [message.get("role") for message in repaired],
+                [i for i, message in enumerate(formatted) if message.get("role") == "system"],
+                [i for i, message in enumerate(repaired) if message.get("role") == "system"],
+                error,
+            )
+            return await send(repaired)
+
     @override
     async def invoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
         """Send a chat completion request to the OpenAI API (async-only)."""
         langfuse_params = self._get_langfuse_extra_params()
         formatted = self.format_messages(messages)
+        if self._requires_system_position_repair:
+            formatted = _repair_claude_system_positions(formatted) or formatted
         # Inject Anthropic-style cache_control breakpoints for OpenAI-compatible
         # proxies that front Claude. No-op when caching is off.
         formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
@@ -1057,15 +1148,18 @@ class OpenAIChat(Model):
         if self.response_format is not None and self.use_structured_outputs:
             try:
                 if isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel):
-                    response = await self._create_with_auto_cap(
-                        lambda kwargs: self.get_client().beta.chat.completions.parse(
-                            model=self.id,
-                            messages=formatted,  # type: ignore
-                            **kwargs,
-                            **langfuse_params,
-                        ),
-                        request_kwargs,
-                    )
+                    async def _parse(payload: List[Dict[str, Any]]) -> Any:
+                        return await self._create_with_auto_cap(
+                            lambda kwargs: self.get_client().beta.chat.completions.parse(
+                                model=self.id,
+                                messages=payload,  # type: ignore
+                                **kwargs,
+                                **langfuse_params,
+                            ),
+                            request_kwargs,
+                        )
+
+                    response = await self._send_with_system_position_repair(formatted, _parse)
                     self._arm_cache_keepalive()
                     return response
                 else:
@@ -1075,16 +1169,19 @@ class OpenAIChat(Model):
                 logger.error(f"Error from OpenAI API structured outputs: {e}")
                 raise
 
-        try:
-            response = await self._create_with_auto_cap(
+        async def _create(payload: List[Dict[str, Any]]) -> Any:
+            return await self._create_with_auto_cap(
                 lambda kwargs: self.get_client().chat.completions.create(
                     model=self.id,
-                    messages=formatted,  # type: ignore
+                    messages=payload,  # type: ignore
                     **kwargs,
                     **langfuse_params,
                 ),
                 request_kwargs,
             )
+
+        try:
+            response = await self._send_with_system_position_repair(formatted, _create)
             self._arm_cache_keepalive()
             return response
         except Exception as e:
@@ -1103,21 +1200,26 @@ class OpenAIChat(Model):
         """
         langfuse_params = self._get_langfuse_extra_params()
         formatted = self.format_messages(messages)
+        if self._requires_system_position_repair:
+            formatted = _repair_claude_system_positions(formatted) or formatted
         formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
+
+        async def _create_stream(payload: List[Dict[str, Any]]) -> Any:
+            return await self._create_with_auto_cap(
+                lambda kwargs: self.get_client().chat.completions.create(
+                    model=self.id,
+                    messages=payload,  # type: ignore
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **kwargs,
+                    **langfuse_params,
+                ),
+                request_kwargs,
+            )
 
         async def _open() -> AsyncIterator[ChatCompletionChunk]:
             try:
-                return await self._create_with_auto_cap(
-                    lambda kwargs: self.get_client().chat.completions.create(
-                        model=self.id,
-                        messages=formatted,  # type: ignore
-                        stream=True,
-                        stream_options={"include_usage": True},
-                        **kwargs,
-                        **langfuse_params,
-                    ),
-                    request_kwargs,
-                )
+                return await self._send_with_system_position_repair(formatted, _create_stream)
             except Exception as e:
                 self._learn_context_limit_from_error(str(e))
                 raise

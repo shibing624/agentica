@@ -113,8 +113,7 @@ class LoopState:
     # Provider-side content moderation. Detected as either:
     #   - normal-return finish_reason (OpenAI / Azure / OpenAI-compat providers)
     #   - exception text from providers that raise instead of returning a flag
-    # When hit, switch to the next fallback model in the chain (no backoff —
-    # retrying the same model is pointless because the moderator is deterministic).
+    # When hit, skip same-model retry and switch to the next fallback candidate.
     CONTENT_FILTER_FINISH_REASONS: tuple = field(
         default=("content_filter", "content-filter", "content_filtered"),
         repr=False,

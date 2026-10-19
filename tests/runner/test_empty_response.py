@@ -19,6 +19,7 @@ from agentica import Agent
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
+from agentica.model.response import ContentFilterError
 from agentica.run.response import RunBreakReason
 from agentica.runner import Runner
 
@@ -55,15 +56,17 @@ async def _stream(text, finish, tool_calls=None):
     )
 
 
-def _run(replies, stream):
+def _run(replies, stream, sent=None, *, fallback=False, used_models=None):
     """Run a real Agent against a scripted provider; returns (run_response, sent requests)."""
     with mock.patch(CEILING, return_value=None):
         model = OpenAIChat(id="m", api_key="k", max_tokens=2000)
     script = iter(replies)
-    sent = []
+    sent = [] if sent is None else sent
 
     async def create(**kwargs):
         sent.append(kwargs["messages"])
+        if used_models is not None:
+            used_models.append(kwargs["model"])
         text, finish, *tool_calls = next(script)
         tool_calls = tool_calls[0] if tool_calls else None
         if kwargs.get("stream"):
@@ -72,7 +75,12 @@ def _run(replies, stream):
 
     client = mock.Mock()
     client.chat.completions.create = create
-    agent = Agent(model=model)
+    fallback_models = (
+        [OpenAIChat(id="fallback", api_key="k", max_tokens=2000)]
+        if fallback
+        else []
+    )
+    agent = Agent(model=model, fallback_models=fallback_models)
 
     async def go():
         with mock.patch.object(OpenAIChat, "get_client", return_value=client):
@@ -86,6 +94,56 @@ def _run(replies, stream):
 
 
 class TestEmptyResponseEndToEnd(unittest.TestCase):
+    def test_content_filter_switches_to_fallback_without_retrying_primary(self):
+        for stream in (False, True):
+            for filtered_text in (None, "filtered partial"):
+                with self.subTest(stream=stream, filtered_text=filtered_text):
+                    sent = []
+                    used_models = []
+                    response, _ = _run(
+                        [(filtered_text, "content_filter"), ("fallback answer", "stop")],
+                        stream,
+                        sent,
+                        fallback=True,
+                        used_models=used_models,
+                    )
+                    self.assertEqual(used_models, ["m", "fallback"])
+                    self.assertEqual(len(sent), 2)
+                    self.assertEqual(response.content, "fallback answer")
+                    self.assertTrue(response.fallback_used)
+
+    def test_content_filter_is_reported_without_retry(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                sent = []
+                with self.assertRaises(ContentFilterError):
+                    _run([(None, "content_filter"), ("must not be requested", "stop")], stream, sent)
+                self.assertEqual(len(sent), 1)
+
+    def test_all_filtered_candidates_are_tried_once(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                sent = []
+                used_models = []
+                with self.assertRaises(ContentFilterError):
+                    _run(
+                        [(None, "content_filter"), (None, "content_filter")],
+                        stream,
+                        sent,
+                        fallback=True,
+                        used_models=used_models,
+                    )
+                self.assertEqual(used_models, ["m", "fallback"])
+                self.assertEqual(len(sent), 2)
+
+    def test_partial_content_filter_is_not_accepted_as_complete(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                sent = []
+                with self.assertRaises(ContentFilterError):
+                    _run([("filtered partial", "content_filter"), ("must not be requested", "stop")], stream, sent)
+                self.assertEqual(len(sent), 1)
+
     def test_empty_reply_is_retried_with_the_same_request(self):
         for stream in (False, True):
             with self.subTest(stream=stream):

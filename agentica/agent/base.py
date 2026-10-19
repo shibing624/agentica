@@ -155,9 +155,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     auxiliary_task_models: Dict[str, Model] = field(default_factory=dict)
     # Cross-provider fallback model chain. Activated PER-CALL (not per-run):
     # each LLM call starts from `model`; fallbacks are tried in order only when
-    # the primary fails (content_filter / fallback-only outage / exhausted retry).
-    # The next call again starts from the primary. Use cross-provider models —
-    # same provider often shares the moderation layer, defeating the purpose.
+    # the primary is filtered, hits a fallback-only outage, or exhausts retries.
+    # The next call again starts from the primary.
     # RunConfig.fallback_models, if provided, overrides this default for one run.
     fallback_models: List[Model] = field(default_factory=list)
     # When the agentic loop is aborted by a safety check (death spiral / max

@@ -102,7 +102,7 @@ class TestCLIUserMessage(unittest.TestCase):
         self.assertIn("/retry", view["hint"])
 
 
-    def test_system_role_placement_400_suggests_continue(self):
+    def test_system_role_placement_400_does_not_suggest_blind_retry(self):
         from agentica.cli.display import console as disp
 
         raw = (
@@ -112,7 +112,17 @@ class TestCLIUserMessage(unittest.TestCase):
         view = disp._format_agent_execution_error(RuntimeError(raw))
 
         self.assertEqual(view["summary"], "Agent execution failed (400)")
-        self.assertEqual(view["hint"], "Type continue or 继续.")
+        self.assertIn("No safe client-side", view["hint"])
+
+    def test_content_filter_is_reported_as_provider_policy(self):
+        from agentica.cli.display import console as disp
+
+        view = disp._format_agent_execution_error(
+            RuntimeError("Content filter blocked the response from venus: finish_reason='content_filter'")
+        )
+
+        self.assertEqual(view["summary"], "Response blocked by provider content filter")
+        self.assertIsNone(view["hint"])
 
     def test_display_agent_execution_error_prints_non_json_message(self):
         """Plain-text proxy failures still show their actual error message."""

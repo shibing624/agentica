@@ -635,7 +635,12 @@ def _process_stream_response(
         tui_state.pop("_turn_calls_baseline", None)
         tui_state.pop("_turn_goal_tokens_baseline", None)
 
-        if not display.has_content_output and display.tool_count == 0 and not display.thinking_shown:
+        if (
+            not current_agent.run_response.break_reason
+            and not display.has_content_output
+            and display.tool_count == 0
+            and not display.thinking_shown
+        ):
             _set_phase("idle")
             con.print("[info]Agent returned no content.[/info]")
 

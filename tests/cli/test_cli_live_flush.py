@@ -239,6 +239,82 @@ class TestGenericExceptionFlushesLive(unittest.TestCase):
         self.assertIn("pytest", buf.getvalue())
 
 
+class TestRunBreakNotice(unittest.TestCase):
+    def test_break_reason_suppresses_generic_no_content_notice(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from agentica.cli.interactive.stream_loop import _process_stream_response
+
+        class EmptyDisplay:
+            tool_count = 0
+            has_content_output = False
+            thinking_shown = False
+            on_live_change = None
+
+            def compose_live(self, frame):
+                return []
+
+            def handle_event(self, event):
+                return None
+
+            def finalize(self, **kwargs):
+                return None
+
+        def _stream(*_args, **_kwargs):
+            if False:
+                yield None
+
+        buf = StringIO()
+        con = Console(file=buf, width=120, force_terminal=False, no_color=True)
+        agent = SimpleNamespace(
+            model=SimpleNamespace(
+                usage=SimpleNamespace(request_usage_entries=[]),
+                supports_images=False,
+                id="fake",
+                context_window=128000,
+            ),
+            session_id="s",
+            working_memory=SimpleNamespace(messages=[Message(role="user", content="hi")]),
+            _cancelled=False,
+            _running=False,
+            _event_callback=None,
+            run_response=SimpleNamespace(
+                break_reason="empty_response",
+                break_message="No reply 3 times. Type continue or 继续.",
+                cost_tracker=None,
+            ),
+            run_stream_sync=_stream,
+        )
+        tui_state = {
+            "cost_usd": 0.0,
+            "active_seconds": 0.0,
+            "total_api_calls": 0,
+            "goal_tokens_used": 0,
+            "debug": False,
+            "session_started_at": time.monotonic(),
+            "work_dir": "/tmp",
+        }
+
+        with patch(
+            "agentica.cli.interactive.stream_loop.get_console", return_value=con,
+        ), patch(
+            "agentica.cli.interactive.stream_loop.get_turn_checkpointer", return_value=MagicMock(),
+        ), patch(
+            "agentica.cli.interactive.stream_loop.StreamDisplayManager", return_value=EmptyDisplay(),
+        ), patch(
+            "agentica.cli.interactive.stream_loop._seed_context_tokens",
+        ), patch(
+            "agentica.cli.interactive.stream_loop._read_git_branch", return_value="main",
+        ):
+            _process_stream_response(agent, "continue", tui_state)
+
+        output = buf.getvalue()
+        self.assertIn("Run stopped early (empty_response)", output)
+        self.assertNotIn("Agent returned no content", output)
+
+
 class TestInterruptedSyscallIsCancel(unittest.TestCase):
     def test_eintr_is_user_cancel_not_provider_error(self):
         from io import StringIO

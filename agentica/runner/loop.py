@@ -41,7 +41,7 @@ from agentica.memory import AgentRun
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
-from agentica.model.response import ModelResponse, ModelResponseEvent
+from agentica.model.response import ContentFilterError, ModelResponse, ModelResponseEvent
 from agentica.notify.wire import clip_text
 from agentica.run.context import RunContext, RunSource, TaskAnchor
 from agentica.run.events import RunEventType
@@ -1096,6 +1096,7 @@ class LoopMixin:
                         # mutate the transcript and need compression again).
                         _ms_attempt = 0
                         _restart_turn = False
+                        _content_filter_advance = False
                         while True:
                             self._trace_event(agent, "request_begin")
                             _trace_status = "failed"
@@ -1107,8 +1108,14 @@ class LoopMixin:
                             phase_ends: dict[str, float] = {}
                             try:
                                 model_call = await self._call_with_retry(
-                                    active_model, messages_for_model, loop_state, agent, stream=True
+                                    active_model,
+                                    messages_for_model,
+                                    loop_state,
+                                    agent,
+                                    stream=True,
+                                    after_content_filter=_content_filter_advance,
                                 )
+                                _content_filter_advance = False
                                 model_response_stream = model_call.response
                                 active_model = model_call.used_model
                                 if model_call.used_fallback:
@@ -1146,6 +1153,13 @@ class LoopMixin:
                                                     run_id=agent.run_id,
                                                     agent_id=agent.agent_id,
                                                 )
+                                    _finish = (active_model.last_finish_reason or "").lower()
+                                    if _finish in loop_state.CONTENT_FILTER_FINISH_REASONS:
+                                        del messages_for_model[call_start:]
+                                        raise ContentFilterError(
+                                            active_model.id,
+                                            f"finish_reason={active_model.last_finish_reason!r}",
+                                        )
                                 except Exception as exc:
                                     # _call_with_retry's tool-history sanitize-retry never
                                     # fires for streaming: it only wraps generator
@@ -1154,6 +1168,21 @@ class LoopMixin:
                                     # first chunk. Mirror that one-shot recovery at the
                                     # point the error actually surfaces.
                                     err = str(exc).lower()
+                                    is_content_filter = isinstance(exc, ContentFilterError) or any(
+                                        h in err for h in loop_state.CONTENT_FILTER_HINTS
+                                    )
+                                    if is_content_filter:
+                                        if _content_filter_advance:
+                                            raise
+                                        del messages_for_model[call_start:]
+                                        model_response.content = content_at_call_start
+                                        model_response.reasoning_content = reasoning_at_call_start
+                                        _content_filter_advance = True
+                                        logger.warning(
+                                            f"[content_filter] {active_model.id} filtered the stream; "
+                                            "trying next fallback"
+                                        )
+                                        continue
                                     is_tool_history_error = any(h in err for h in loop_state.TOOL_HISTORY_HINTS)
                                     if is_tool_history_error and not loop_state.tool_history_sanitized_done:
                                         loop_state.tool_history_sanitized_done = True

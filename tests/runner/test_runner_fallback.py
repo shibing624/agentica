@@ -14,7 +14,7 @@ import openai
 
 from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
-from agentica.model.response import ModelResponse
+from agentica.model.response import ContentFilterError, ModelResponse
 from agentica.runner import ModelCallResult, Runner
 
 
@@ -53,41 +53,15 @@ def _fake_model(model_id, response_factory=None, raise_exc=None):
 
 
 class TestFallbackContentFilterFinishReason(unittest.TestCase):
-    """Primary returns finish_reason=content_filter -> switch to next model."""
+    """A filtered candidate is skipped without same-model retry."""
 
-    def test_switches_to_fallback_when_primary_returns_content_filter(self):
-        primary = _fake_model(
-            "primary-gpt",
-            response_factory=lambda: ModelResponse(
-                content="I cannot help with that",
-                finish_reason="content_filter",
-            ),
-        )
-        fallback = _fake_model(
-            "fallback-glm",
-            response_factory=lambda: ModelResponse(
-                content="real answer",
-                finish_reason="stop",
-            ),
-        )
-        agent = _make_agent()
-        agent._run_fallback_models = [fallback]
-
-        state = LoopState()
-        result = asyncio.run(
-            Runner._call_with_retry(primary, [], state, agent, stream=False)
-        )
-
-        self.assertEqual(result.content, "real answer")
-        self.assertEqual(result.finish_reason, "stop")
-
-    def test_fallback_does_not_receive_filtered_assistant_from_primary(self):
+    def test_finish_reason_switches_to_fallback_without_replaying_blocked_turn(self):
         messages = [
             Message(role="user", content="上一轮用户问题"),
             Message(role="assistant", content="上一轮正常回答"),
             Message(role="user", content="当前用户追问"),
         ]
-        seen_by_fallback = {"contents": []}
+        seen_by_fallback = []
 
         async def _primary_resp(messages):
             messages.append(
@@ -99,9 +73,8 @@ class TestFallbackContentFilterFinishReason(unittest.TestCase):
             )
 
         async def _fallback_resp(messages):
-            seen_by_fallback["contents"] = [m.content for m in messages]
-            messages.append(Message(role="assistant", content="结合上文继续回答"))
-            return ModelResponse(content="结合上文继续回答", finish_reason="stop")
+            seen_by_fallback.extend(message.content for message in messages)
+            return ModelResponse(content="fallback answer", finish_reason="stop")
 
         primary = MagicMock()
         primary.id = "primary"
@@ -119,82 +92,41 @@ class TestFallbackContentFilterFinishReason(unittest.TestCase):
         agent._run_fallback_models = [fallback]
 
         state = LoopState()
-        result = asyncio.run(
-            Runner._call_with_retry(primary, messages, state, agent, stream=False)
-        )
+        result = asyncio.run(Runner._call_with_retry(primary, messages, state, agent, stream=False))
 
-        self.assertEqual(result.content, "结合上文继续回答")
+        self.assertEqual(result.content, "fallback answer")
         self.assertEqual(
-            seen_by_fallback["contents"],
+            seen_by_fallback,
             ["上一轮用户问题", "上一轮正常回答", "当前用户追问"],
         )
         self.assertEqual(
             [m.content for m in messages],
-            ["上一轮用户问题", "上一轮正常回答", "当前用户追问", "结合上文继续回答"],
+            ["上一轮用户问题", "上一轮正常回答", "当前用户追问"],
         )
-
-    def test_walks_full_chain_until_a_clean_finish_reason(self):
-        primary = _fake_model(
-            "primary",
-            response_factory=lambda: ModelResponse(content="x", finish_reason="content_filter"),
-        )
-        fb1 = _fake_model(
-            "fb1",
-            response_factory=lambda: ModelResponse(content="y", finish_reason="content-filter"),
-        )
-        fb2 = _fake_model(
-            "fb2",
-            response_factory=lambda: ModelResponse(content="z", finish_reason="stop"),
-        )
-        agent = _make_agent()
-        agent._run_fallback_models = [fb1, fb2]
-
-        state = LoopState()
-        result = asyncio.run(
-            Runner._call_with_retry(primary, [], state, agent, stream=False)
-        )
-        self.assertEqual(result.content, "z")
-
-    def test_raises_when_entire_chain_returns_content_filter(self):
-        primary = _fake_model(
-            "p",
-            response_factory=lambda: ModelResponse(content="a", finish_reason="content_filter"),
-        )
-        fb1 = _fake_model(
-            "f1",
-            response_factory=lambda: ModelResponse(content="b", finish_reason="content_filter"),
-        )
-        agent = _make_agent()
-        agent._run_fallback_models = [fb1]
-
-        state = LoopState()
-        with self.assertRaises(RuntimeError) as cm:
-            asyncio.run(
-                Runner._call_with_retry(primary, [], state, agent, stream=False)
-            )
-        self.assertIn("2 model", str(cm.exception))
-
 
 class TestFallbackContentFilterException(unittest.TestCase):
     """Some providers raise instead of setting finish_reason."""
 
-    def test_switches_when_primary_raises_content_filter(self):
+    def test_exception_switches_to_fallback_without_retrying_primary(self):
         primary = _fake_model(
             "primary",
             raise_exc=RuntimeError("ResponsibleAIPolicyViolation: blocked"),
         )
-        fallback = _fake_model(
-            "fb",
-            response_factory=lambda: ModelResponse(content="ok", finish_reason="stop"),
-        )
+        fallback_calls = {"n": 0}
+
+        async def _fallback_response(messages):
+            fallback_calls["n"] += 1
+            return ModelResponse(content="fallback answer", finish_reason="stop")
+
+        fallback = _fake_model("fb")
+        fallback.response = _fallback_response
         agent = _make_agent()
         agent._run_fallback_models = [fallback]
 
         state = LoopState()
-        result = asyncio.run(
-            Runner._call_with_retry(primary, [], state, agent, stream=False)
-        )
-        self.assertEqual(result.content, "ok")
+        result = asyncio.run(Runner._call_with_retry(primary, [], state, agent, stream=False))
+        self.assertEqual(result.content, "fallback answer")
+        self.assertEqual(fallback_calls["n"], 1)
 
 
 class TestFallbackRetryableExhausted(unittest.TestCase):
@@ -469,7 +401,7 @@ class TestFallbackNonRetryableImmediateRaise(unittest.TestCase):
 
 
 class TestFallbackEmptyChain(unittest.TestCase):
-    """No fallback configured -> behave like before (raise on content_filter / retryable)."""
+    """No fallback configured surfaces policy and exhausted retry errors."""
 
     def test_content_filter_with_empty_chain_raises(self):
         primary = _fake_model(
@@ -480,7 +412,7 @@ class TestFallbackEmptyChain(unittest.TestCase):
         agent._run_fallback_models = []
 
         state = LoopState()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ContentFilterError):
             asyncio.run(
                 Runner._call_with_retry(primary, [], state, agent, stream=False)
             )
@@ -646,7 +578,7 @@ class TestPerCallNotPerRun(unittest.TestCase):
     def test_agent_model_unchanged_after_fallback_switch(self):
         primary = _fake_model(
             "p",
-            response_factory=lambda: ModelResponse(content="x", finish_reason="content_filter"),
+            raise_exc=RuntimeError("503 service unavailable"),
         )
         fallback = _fake_model(
             "fb",
@@ -670,7 +602,7 @@ class TestPerCallNotPerRun(unittest.TestCase):
 
         async def _flaky(messages):
             primary_calls["n"] += 1
-            return ModelResponse(content="filtered", finish_reason="content_filter")
+            raise RuntimeError("503 service unavailable")
 
         primary = MagicMock()
         primary.id = "p"
@@ -711,10 +643,10 @@ class TestLastUsedModelTruthfulness(unittest.TestCase):
         self.assertEqual(state.last_used_model_id, "p")
         self.assertEqual(state.last_used_model_idx, 0)
 
-    def test_last_used_model_id_is_fallback_on_content_filter_recovery(self):
+    def test_last_used_model_id_is_fallback_on_outage_recovery(self):
         primary = _fake_model(
             "p",
-            response_factory=lambda: ModelResponse(content="x", finish_reason="content_filter"),
+            raise_exc=RuntimeError("503 service unavailable"),
         )
         fb = _fake_model("fb")
         agent = _make_agent()
@@ -757,8 +689,7 @@ class TestFallbackToolTransaction(unittest.TestCase):
         fallback = OpenAIChat(id="fallback", api_key="fake_openai_key")
 
         async def _primary_response(messages):
-            messages.append(Message(role="assistant", content="blocked"))
-            return ModelResponse(content="blocked", finish_reason="content_filter")
+            raise RuntimeError("503 service unavailable")
 
         fallback_calls = {"n": 0, "saw_tool_result": False}
 
@@ -821,7 +752,7 @@ class TestFallbackToolTransaction(unittest.TestCase):
 
         def _primary_stream(messages):
             # Plain function so it raises at call time -> triggers fallback.
-            raise RuntimeError("content_filter triggered")
+            raise RuntimeError("503 service unavailable")
 
         fallback_calls = {"n": 0, "saw_tool_result": False}
 
@@ -880,12 +811,29 @@ class TestFallbackToolTransaction(unittest.TestCase):
 class TestFallbackRecoveryEvent(unittest.TestCase):
     """Successful fallback rescue should emit a structured event for audit/observability."""
 
-    def test_fallback_recovery_event_emitted_on_content_filter(self):
+    def test_content_filter_recovery_records_its_trigger(self):
+        captured = []
+        primary = _fake_model(
+            "primary-id",
+            response_factory=lambda: ModelResponse(content=None, finish_reason="content_filter"),
+        )
+        fallback = _fake_model("fallback-id")
+        agent = _make_agent()
+        agent._run_fallback_models = [fallback]
+        agent._event_callback = captured.append
+
+        asyncio.run(Runner._call_with_retry(primary, [], LoopState(), agent, stream=False))
+
+        event = next(item for item in captured if item.get("type") == "fallback.recovered")
+        self.assertEqual(event["used_model"], "fallback-id")
+        self.assertEqual(event["trigger"], "content_filter")
+
+    def test_fallback_recovery_event_emitted_on_outage(self):
         captured = []
 
         primary = _fake_model(
             "primary-id",
-            response_factory=lambda: ModelResponse(content="x", finish_reason="content_filter"),
+            raise_exc=RuntimeError("503 service unavailable"),
         )
         fb = _fake_model(
             "fallback-id",
@@ -905,7 +853,7 @@ class TestFallbackRecoveryEvent(unittest.TestCase):
         self.assertEqual(evt["primary_model"], "primary-id")
         self.assertEqual(evt["used_model"], "fallback-id")
         self.assertEqual(evt["fallback_index"], 1)
-        self.assertEqual(evt["trigger"], "content_filter")
+        self.assertEqual(evt["trigger"], "fallback_only")
         self.assertEqual(evt["agent_name"], "audited")
 
     def test_no_event_emitted_when_primary_succeeds(self):
@@ -923,7 +871,7 @@ class TestFallbackRecoveryEvent(unittest.TestCase):
     def test_recovery_log_warning_message(self):
         """Audit log line `[fallback.recovered]` must be emitted at WARNING level."""
         primary = _fake_model(
-            "p", response_factory=lambda: ModelResponse(content="x", finish_reason="content_filter"),
+            "p", raise_exc=RuntimeError("503 service unavailable"),
         )
         fb = _fake_model("fb")
         agent = _make_agent()

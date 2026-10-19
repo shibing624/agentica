@@ -5,16 +5,14 @@
 Cross-Provider Fallback Models Demo.
 
 Real-world problem:
-    Some user prompts hit a provider's content moderation layer
-    ("我无法给到相关内容" / "I cannot help with that"). Or the provider
-    has an outage or transient failure (connection / 5xx / timeout / 429).
-    Either way, the user's request fails.
+    A provider filters a response, has an outage, or hits a transient failure
+    (content_filter / connection / 5xx / timeout / 429).
 
 Solution in agentica:
     Configure a cross-provider fallback chain on the Agent. When the
-    primary model fails (content_filter / direct-fallback outage / exhausted retry),
+    primary model is filtered, hits a direct-fallback outage, or exhausts retries,
     the next model in the chain is tried automatically. The user gets a
-    real answer instead of a refusal.
+    response without changing the Agent's primary model.
 
 Three guarantees, all demoed below:
   1. PER-CALL switch: each LLM call starts from the primary; fallback

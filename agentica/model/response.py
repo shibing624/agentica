@@ -11,6 +11,15 @@ from typing import Optional, Any, Dict
 from dataclasses import dataclass
 
 
+class ContentFilterError(RuntimeError):
+    """The provider deliberately blocked a response."""
+
+    def __init__(self, model_id: str, detail: str) -> None:
+        self.model_id = model_id
+        self.detail = detail
+        super().__init__(f"Content filter blocked the response from {model_id}: {detail}")
+
+
 class ModelResponseEvent(str, Enum):
     """Events that can be sent by the Model.response() method"""
 

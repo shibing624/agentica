@@ -22,7 +22,7 @@ from agentica.utils.log import logger
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
-from agentica.model.response import ModelResponse
+from agentica.model.response import ContentFilterError, ModelResponse
 from agentica.model.usage import Usage
 from agentica.run.config import RunConfig
 
@@ -187,6 +187,7 @@ class RetryMixin:
         agent: "Agent",
         *,
         stream: bool = False,
+        after_content_filter: bool = False,
     ):
         """Call model.response()/response_stream() with retry, reactive compact,
         and cross-provider fallback chain.
@@ -199,14 +200,16 @@ class RetryMixin:
         ``model`` argument; ``agent._run_fallback_models`` are tried in order
         when triggered by:
 
-          1. ``finish_reason in CONTENT_FILTER_FINISH_REASONS`` (non-stream only;
-             stream cannot detect this until consumed).
-          2. Exception whose text matches ``CONTENT_FILTER_HINTS`` (any provider
-             that raises instead of flagging a finish reason).
-          3. Fallback-only API error (``FALLBACK_ONLY_SUBSTRINGS``), such as
+          1. Provider content filtering, without retrying the same model.
+          2. Fallback-only API error (``FALLBACK_ONLY_SUBSTRINGS``), such as
              connection failure / 502 / 503 / bad gateway.
-          4. Retryable API error (``RETRYABLE_SUBSTRINGS``) that exhausted local
+          3. Retryable API error (``RETRYABLE_SUBSTRINGS``) that exhausted local
              exponential backoff on the current model.
+
+        ``after_content_filter`` is the streaming continuation path: the
+        consumer has already exhausted the current model's lazy generator and
+        observed a filtered finish_reason, so this call starts at the next
+        fallback candidate instead of re-sending to the filtered model.
 
         Reactive compact (``prompt_too_long``) is NOT a fallback trigger —
         switching providers does not solve a too-long context.
@@ -222,13 +225,17 @@ class RetryMixin:
                 continue
             candidates.append(candidate)
             seen_candidate_objs.add(id(candidate))
+        if after_content_filter:
+            candidates = candidates[1:]
+            if not candidates:
+                raise ContentFilterError(model.id, "no fallback model remains")
         last_exc: Optional[BaseException] = None
         # Reset per-call bookkeeping. last_used_* reflects the model that
         # actually produced the response returned by THIS call invocation.
         state.last_used_model_id = None
         state.last_used_model_idx = -1
         primary_id = model.id
-        trigger: Optional[str] = None  # "content_filter" | "fallback_only" | "exhausted_retry"
+        trigger: Optional[str] = "content_filter" if after_content_filter else None
 
         def _emit_fallback_recovery(used_model_id: str, used_idx: int) -> None:
             """Audit-log + event-bus a successful fallback recovery.
@@ -256,11 +263,14 @@ class RetryMixin:
                 except Exception as e:
                     logger.warning(f"event callback failed for fallback.recovered: {e}")
 
-        for model_idx, current in enumerate(candidates):
+        candidate_offset = 1 if after_content_filter else 0
+        for local_idx, current in enumerate(candidates):
+            model_idx = local_idx + candidate_offset
             is_fallback = model_idx > 0
             if is_fallback:
                 logger.warning(
-                    f"[fallback] switching to {current.id} ({model_idx}/{len(candidates) - 1}) trigger={trigger}"
+                    f"[fallback] switching to {current.id} "
+                    f"({model_idx}/{candidate_offset + len(candidates) - 1}) trigger={trigger}"
                 )
 
             for attempt in range(state.max_api_retry):
@@ -293,11 +303,9 @@ class RetryMixin:
                 message_checkpoint = len(messages)
                 try:
                     if stream:
-                        # Stream: defer content_filter detection to the consumer.
-                        # Exception-based fallbacks (timeout/5xx/content_filter
-                        # raised at connect time) are still handled below.
-                        # Record optimistically; consumer may flip later if
-                        # finish_reason turns out to be content_filter.
+                        # Stream finish_reason is available only after the
+                        # consumer exhausts the generator. The Runner checks it
+                        # there before accepting the call as complete.
                         state.last_used_model_id = current.id
                         state.last_used_model_idx = model_idx
                         if is_fallback:
@@ -312,21 +320,21 @@ class RetryMixin:
                     CompressMixin._emit_context_usage(agent, current, messages)
                     resp = await current.response(messages=messages)
 
-                    # Non-stream: content_filter is a normal-return finish_reason.
+                    # Content filtering is deterministic for this model: switch
+                    # candidates immediately without same-model retry.
                     _fr = (resp.finish_reason or "").lower()
                     if _fr in state.CONTENT_FILTER_FINISH_REASONS:
                         logger.warning(
                             f"[content_filter] {current.id} returned "
-                            f"finish_reason={resp.finish_reason!r}; "
-                            f"trying next fallback"
+                            f"finish_reason={resp.finish_reason!r}; trying next fallback"
                         )
-                        # Model.response() may already have appended the blocked
-                        # assistant message. Fallback must retry the same clean
-                        # prompt, not continue after the primary model's refusal.
                         del messages[message_checkpoint:]
                         trigger = "content_filter"
-                        last_exc = RuntimeError(f"content_filter on {current.id} (finish_reason={resp.finish_reason})")
-                        break  # exit retry loop, go to next model
+                        last_exc = ContentFilterError(
+                            current.id,
+                            f"finish_reason={resp.finish_reason!r}",
+                        )
+                        break
 
                     # Success: stamp who actually answered.
                     state.last_used_model_id = current.id
@@ -343,6 +351,10 @@ class RetryMixin:
                     del messages[message_checkpoint:]
                     last_exc = exc
                     err = str(exc).lower()
+
+                    if isinstance(exc, ContentFilterError):
+                        trigger = "content_filter"
+                        break
 
                     # One-shot recovery: cross-provider tool-call/tool-result
                     # format mismatch (e.g. resuming a session recorded under
@@ -412,14 +424,14 @@ class RetryMixin:
                         # BadRequest so the CLI shows the model's limit text.
                         raise
 
-                    # Content filter raised as exception (some providers do this
-                    # instead of setting finish_reason). No point retrying same
-                    # model — moderation is deterministic.
+                    # Some providers raise instead of returning a finish_reason.
+                    # Switch candidates immediately; do not retry this model.
                     is_content_filter = any(h in err for h in state.CONTENT_FILTER_HINTS)
                     if is_content_filter:
                         logger.warning(f"[content_filter] {current.id} raised content_filter exception: {exc}")
+                        last_exc = ContentFilterError(current.id, str(exc))
                         trigger = "content_filter"
-                        break  # next model
+                        break
 
                     # Retryable transient errors: backoff within current model.
                     # Merge SDK defaults with model-level + env-level user
@@ -459,6 +471,8 @@ class RetryMixin:
 
         # All models in the chain failed.
         logger.error(f"[fallback] All {len(candidates)} models exhausted. Last error: {last_exc}")
+        if isinstance(last_exc, ContentFilterError):
+            raise last_exc
         raise RuntimeError(
             f"LLM call failed across {len(candidates)} model(s) "
             f"(primary + {len(candidates) - 1} fallback). Last error: {last_exc}"

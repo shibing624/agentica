@@ -229,13 +229,14 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
         if window:
             detail = f"{detail}\n  near the break: {window}"
         hint = "Type /retry to resend the last message."
+    elif any(marker in low for marker in ("content_filter", "content filter", "responsibleaipolicyviolation")):
+        summary = "Response blocked by provider content filter"
+        detail = provider_message or raw
+        hint = None
     elif "role 'system' must precede" in low:
-        # Claude rejects a system message that is neither before an assistant
-        # turn nor at the end of the array. The run then often ends on
-        # empty_response. A new user turn is the recovery that usually works.
         summary = f"Agent execution failed ({status})" if status else "Agent execution failed"
         detail = provider_message or raw
-        hint = "Type continue or 继续."
+        hint = "No safe client-side system-message repair was available; inspect the gateway request ID."
     elif is_transient:
         summary = f"Transient LLM/API error ({status})" if status else "Transient LLM/API error"
         detail = provider_message or raw
