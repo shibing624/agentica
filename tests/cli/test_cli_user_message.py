@@ -102,6 +102,18 @@ class TestCLIUserMessage(unittest.TestCase):
         self.assertIn("/retry", view["hint"])
 
 
+    def test_system_role_placement_400_suggests_continue(self):
+        from agentica.cli.display import console as disp
+
+        raw = (
+            "Error code: 400 - {'message': \"messages.27: role 'system' must precede "
+            "an 'assistant' message or end the array\"}"
+        )
+        view = disp._format_agent_execution_error(RuntimeError(raw))
+
+        self.assertEqual(view["summary"], "Agent execution failed (400)")
+        self.assertEqual(view["hint"], "Type continue or 继续.")
+
     def test_display_agent_execution_error_prints_non_json_message(self):
         """Plain-text proxy failures still show their actual error message."""
         from agentica.cli.display import console as disp

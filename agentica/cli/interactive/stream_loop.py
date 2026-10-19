@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Optional
@@ -608,11 +609,13 @@ def _process_stream_response(
         # These no longer ride inside the response content, so render a notice
         # here to keep the CLI user informed about a truncated run.
         if current_agent.run_response.break_reason:
+            stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             con.print(
                 f"\n[yellow]⚠ Run stopped early "
-                f"({current_agent.run_response.break_reason}): "
-                f"{current_agent.run_response.break_message}[/yellow]"
+                f"({current_agent.run_response.break_reason}) - {stamp}[/yellow]"
             )
+            if current_agent.run_response.break_message:
+                con.print(f"[yellow]  {current_agent.run_response.break_message}[/yellow]")
 
         # Final reconcile of the live status fields. Same idempotent helper
         # the spinner loop calls mid-turn — overwrites with exact end-of-turn

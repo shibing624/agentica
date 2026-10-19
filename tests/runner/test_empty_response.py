@@ -114,6 +114,7 @@ class TestEmptyResponseEndToEnd(unittest.TestCase):
                 self.assertEqual(len(sent), limit + 1)
                 self.assertFalse(r.is_complete)
                 self.assertEqual(r.break_reason, RunBreakReason.EMPTY_RESPONSE.value)
+                self.assertEqual(r.break_message, f"No reply {limit + 1} times. Type continue or 继续.")
 
     def test_limit_counts_consecutive_empties_only(self):
         """A long run survives isolated empties spread across many calls."""

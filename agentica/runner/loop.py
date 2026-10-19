@@ -258,11 +258,8 @@ class LoopMixin:
         if not loop_state.empty_response:
             return
         agent.run_response.break_reason = RunBreakReason.EMPTY_RESPONSE.value
-        agent.run_response.break_message = (
-            "The model provider returned an empty response (no text, no tool call) "
-            f"{loop_state.empty_response_retry_limit + 1} times in a row. The task may be "
-            "unfinished; send a follow-up message to resume."
-        )
+        n = loop_state.empty_response_retry_limit + 1
+        agent.run_response.break_message = f"No reply {n} times. Type continue or 继续."
         logger.warning(f"Agent '{agent.identifier}': {agent.run_response.break_message}")
 
     def _loop_safety_checks(
