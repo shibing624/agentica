@@ -30,7 +30,6 @@ from agentica.cli.display.messages import (
 from agentica.cli.display.status_bar import (
     build_context_bar,
     build_status_bar_fragments,
-    context_pct_style,
     display_token_stats,
     format_duration_compact,
 )
@@ -43,7 +42,6 @@ __all__ = [
     "build_context_bar",
     "build_status_bar_fragments",
     "clear_truncated_blocks",
-    "context_pct_style",
     "display_agent_execution_error",
     "display_diff",
     "display_peer_messages",

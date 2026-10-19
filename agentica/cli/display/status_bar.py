@@ -21,17 +21,6 @@ def _format_tokens_short(n: int) -> str:
     return str(n)
 
 
-def context_pct_style(pct: float) -> str:
-    """Return Rich style name based on context usage percentage."""
-    if pct >= 95:
-        return "bold red"
-    if pct >= 80:
-        return "red"
-    if pct >= 50:
-        return "yellow"
-    return "green"
-
-
 def build_context_bar(pct: float, width: int = 10) -> str:
     """Build a visual context usage bar like [████░░░░░░]."""
     safe = max(0.0, min(100.0, pct))
@@ -48,7 +37,7 @@ def display_token_stats(
     tool_use_count: int = 0,
     elapsed_seconds: float = 0.0,
 ) -> None:
-    """Display compact per-response stats footer with color-graded context.
+    """Display compact per-response stats footer.
 
     Format example::
 
@@ -60,14 +49,13 @@ def display_token_stats(
     used_pct = (
         context_tokens / context_window * 100 if context_window > 0 else 0.0
     )
-    pct_style = context_pct_style(used_pct)
     bar = build_context_bar(used_pct)
 
     parts = [
-        f"[{pct_style}]ctx {used_pct:.1f}%[/{pct_style}] "
+        f"[green]ctx {used_pct:.1f}%[/green] "
         f"({_format_tokens_short(context_tokens)} / "
         f"{_format_tokens_short(context_window)}) "
-        f"[{pct_style}]{bar}[/{pct_style}]"
+        f"[green]{bar}[/green]"
     ]
 
     if tool_use_count > 0:
@@ -98,17 +86,6 @@ def display_token_stats(
 # ---------------------------------------------------------------------------
 # Persistent TUI status bar (prompt_toolkit fragments)
 # ---------------------------------------------------------------------------
-
-def _ctx_fg_style(pct: float) -> str:
-    """Return a prompt_toolkit style class for context usage percentage."""
-    if pct >= 95:
-        return "class:sb-critical"
-    if pct >= 80:
-        return "class:sb-bad"
-    if pct >= 50:
-        return "class:sb-warn"
-    return "class:sb"
-
 
 def format_duration_compact(seconds: float) -> str:
     """Format seconds into compact human-readable duration.
@@ -230,7 +207,6 @@ def build_status_bar_fragments(
         label = label[:23] + "..."
     pct = (context_tokens / context_window * 100) if context_window > 0 else 0.0
     pct_label = f"{pct:.0f}%"
-    fg = _ctx_fg_style(pct)
     cost_str = format_cost_usd(cost_usd)
 
     turn_str = f"⏱ {format_turn_clock(last_turn_seconds)}" if last_turn_seconds > 0 else ""
@@ -293,7 +269,7 @@ def build_status_bar_fragments(
             frags.append(("class:sb-dim", " │ "))
             if context_detail:
                 frags.append(("class:sb", f"{ctx_used}/{ctx_total} "))
-            frags.append((fg, pct_label))
+            frags.append(("class:sb", pct_label))
         if show_goal and goal_text:
             frags.extend([
                 ("class:sb-dim", " │ "),

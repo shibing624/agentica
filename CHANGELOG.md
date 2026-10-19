@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### fixes
+- **CLI 底部 context usage 不再按占用率变色**：`263.6K/512K 51%` 等百分比始终使用普通状态栏样式，删除 50% 黄、80% 红、95% 加粗红的阈值配色；数字和百分比仍照常更新。
 - **`content_filter` 不再被流式路径误判为空响应或正常完成**：网关返回 `finish_reason=content_filter` 时，流式和非流式都不再重试同一模型，而是立即切到下一个 fallback；整条 fallback 链都被过滤时才抛出 `ContentFilterError`，如实显示 `Response blocked by provider content filter`。流式已输出部分文字后收到过滤结束原因，也不会再把该片段标为完整答案。已有 `break_reason` 时，CLI 不再紧接着重复打印 `Agent returned no content.`。
 - **OpenAI-compatible Claude 网关的中途 `system` 位置 400 可定点修复**：遇到 `role 'system' must precede an 'assistant' message or end the array` 时，若最终客户端 payload 确有非法中途 `system`，只把该指令移到下一条 assistant 前（或数组末尾），结构校验通过后原地重发一次；开头的 system 前缀不动。若客户端结构本来正常，则不盲目重试，并记录角色序列和 system 索引供定位网关转换层。
 - **空回复提前结束的提示变短，并带时间**：连续空回复时 CLI 原先打印一整句 “The model provider returned an empty response… send a follow-up message”。现在是 `⚠ Run stopped early (empty_response) - YYYY-MM-DD HH:MM:SS`，下一行 `No reply 3 times. Type continue or 继续.`。

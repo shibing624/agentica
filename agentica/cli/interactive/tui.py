@@ -1023,10 +1023,6 @@ def _setup_tui(
             "sb": "bg:#1a1a2e #C0C0C0",
             "sb-strong": "bg:#1a1a2e #FFD700 bold",
             "sb-dim": "bg:#1a1a2e #8B8682",
-            "sb-good": "bg:#1a1a2e #8FBC8F bold",
-            "sb-warn": "bg:#1a1a2e #FFD700 bold",
-            "sb-bad": "bg:#1a1a2e #FF8C00 bold",
-            "sb-critical": "bg:#1a1a2e #FF6B6B bold",
             "sb-spin": "bg:#1a1a2e #FFD700 italic",
             # Agent-running variants: same foreground palette, one shade
             # darker background (#0f0f1a instead of #1a1a2e) so the bar
@@ -1036,10 +1032,6 @@ def _setup_tui(
             "sb-active": "bg:#0f0f1a #C0C0C0",
             "sb-strong-active": "bg:#0f0f1a #FFD700 bold",
             "sb-dim-active": "bg:#0f0f1a #8B8682",
-            "sb-good-active": "bg:#0f0f1a #8FBC8F bold",
-            "sb-warn-active": "bg:#0f0f1a #FFD700 bold",
-            "sb-bad-active": "bg:#0f0f1a #FF8C00 bold",
-            "sb-critical-active": "bg:#0f0f1a #FF6B6B bold",
             "sb-spin-active": "bg:#0f0f1a #FFD700 italic",
             "completion-menu": "bg:#1a1a2e #FFF8DC",
             "completion-menu.completion": "bg:#1a1a2e #FFF8DC",

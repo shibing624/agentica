@@ -145,13 +145,19 @@ class TestCLIStatusBar(unittest.TestCase):
         self.assertEqual(_format_tokens_short(1500000), "1.5M")
 
 
-    def test_context_pct_style(self):
-        from agentica.cli.display import context_pct_style
+    def test_context_percentage_keeps_the_normal_status_style(self):
+        from agentica.cli.display import build_status_bar_fragments
 
-        self.assertEqual(context_pct_style(30), "green")
-        self.assertEqual(context_pct_style(50), "yellow")
-        self.assertEqual(context_pct_style(80), "red")
-        self.assertEqual(context_pct_style(95), "bold red")
+        for pct in (30, 50, 51, 80, 90, 95, 100):
+            with self.subTest(pct=pct):
+                frags = build_status_bar_fragments(
+                    model_name="gpt-4o",
+                    context_tokens=pct,
+                    context_window=100,
+                    terminal_width=100,
+                )
+                pct_fragment = next((style, text) for style, text in frags if text == f"{pct}%")
+                self.assertEqual(pct_fragment[0], "class:sb")
 
 
     def test_build_context_bar(self):
