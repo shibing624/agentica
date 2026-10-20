@@ -243,7 +243,7 @@ class CompressMixin:
         if left > reminder_threshold(working_window):
             return
         last = messages[-1] if messages else None
-        if last is None or last.role == "tool":
+        if last is None:
             return
         if last.role == "assistant" and last.tool_calls:
             return
@@ -270,7 +270,7 @@ class CompressMixin:
         from agentica.compression.notes import (
             can_author_notes,
             fallback_buffer_tokens,
-            notes_are_ready,
+            notes_are_fresh,
         )
         from agentica.compression.token_budget import fallback_text
 
@@ -279,7 +279,7 @@ class CompressMixin:
         if working_window > 0 and context_tokens >= working_window:
             return False
         notes = notes_path_for(agent._session_log)
-        if notes_are_ready(notes):
+        if notes_are_fresh(notes, since=cm.window_started_at):
             return False
         # No notes path (SDK without session_id) => nothing to ask for, and
         # postponing the cut would only delay it for a file we cannot name.
@@ -296,26 +296,37 @@ class CompressMixin:
             context_tokens + fallback_buffer_tokens(working_window),
         )
         logger.info(
-            "Auto-compact fallback: notes still empty, "
+            "Auto-compact fallback: notes not yet updated in this window, "
             f"postpone until {cm.compact_token_floor} tokens"
         )
         return True
 
     @staticmethod
     def _fold_budget_fragment(messages: List[Message], text: str) -> bool:
-        from agentica.compression.token_budget import is_context_window_message
+        from agentica.compression.evict import carries_tool_results, tool_result_blocks
+        from agentica.compression.token_budget import is_pending_window_preamble
 
-        target = next(
-            (
-                m for m in reversed(messages)
-                if m.role == "user" and isinstance(m.content, str)
-            ),
-            None,
-        )
-        if target is None or is_context_window_message(target):
+        if not messages:
             return False
-        target.content = f"{target.content}\n\n{text}"
-        return True
+        m = messages[-1]
+        if carries_tool_results(m):
+            if m.role == "tool" and isinstance(m.content, str):
+                m.content = f"{m.content}\n\n{text}" if m.content else text
+                return True
+            blocks = tool_result_blocks(m)
+            if blocks:
+                last_block = blocks[-1]
+                prev = last_block.get("content", "")
+                if isinstance(prev, str):
+                    last_block["content"] = f"{prev}\n\n{text}" if prev else text
+                    return True
+            return False
+        if m.role == "user" and isinstance(m.content, str):
+            if is_pending_window_preamble(m):
+                return False
+            m.content = f"{m.content}\n\n{text}" if m.content else text
+            return True
+        return False
 
     @staticmethod
     def _note_compaction(agent: "Agent") -> None:

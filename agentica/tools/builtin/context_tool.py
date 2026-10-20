@@ -41,6 +41,11 @@ _SEARCH_LIMIT_DESC = (
     "Maximum number of matching items to return, 1-20."
 )
 
+_SEARCH_UUID_DESC = (
+    "Fetch the full content of one session-log entry by passing its full uuid "
+    "or the 8-char uuid prefix (without brackets) shown in search hits."
+)
+
 _SEARCH_SCHEMA = {
     "type": "object",
     "properties": {
@@ -53,6 +58,10 @@ _SEARCH_SCHEMA = {
         "limit": {
             "type": "integer",
             "description": _SEARCH_LIMIT_DESC,
+        },
+        "uuid": {
+            "type": "string",
+            "description": _SEARCH_UUID_DESC,
         },
     },
 }
@@ -97,9 +106,8 @@ class BuiltinContextTool(Tool):
         body = hit["snippet"]
         if with_type:
             body = f"{hit.get('type', '')}: {body}"
-        if stamp:
-            return f"- {stamp} {body}"
-        return f"- {body}"
+        prefix = " ".join(p for p in (stamp, f"[{hit['uuid'][:8]}]") if p)
+        return f"- {prefix} {body}"
 
     def _format_user_questions(self, questions) -> str:
         if not questions:
@@ -130,6 +138,7 @@ class BuiltinContextTool(Tool):
         query: str = "",
         role: str = "",
         limit: int = 8,
+        uuid: str = "",
     ) -> str:
         """Search this session JSONL, including turns before the last compact boundary.
 
@@ -139,10 +148,27 @@ class BuiltinContextTool(Tool):
         Also searches the session notes file. Empty query returns only the index.
         role: restrict keyword hits to user | assistant | tool.
         limit: max keyword hits 1-20.
+        uuid: full text of one entry, by the [8-char] prefix shown on a hit.
         """
         slog = self._session_log()
         if slog is None:
             return "No session log on this agent; nothing to search."
+        if uuid:
+            matches = slog.find_entries(uuid)
+            if not matches:
+                return f"No session-log entry found for uuid {uuid!r}."
+            if len(matches) > 1:
+                ids = ", ".join(m["uuid"] for m in matches[:5])
+                return (
+                    f"uuid {uuid!r} matches {len(matches)} entries ({ids}); "
+                    "pass a longer prefix."
+                )
+            entry = matches[0]
+            stamp = local_turn_stamp(entry.get("timestamp"))
+            header = " ".join(
+                p for p in (stamp, f"[{entry['uuid']}]", f"{entry['type']}:") if p
+            )
+            return f"{header}\n{entry['content']}"
         q = (query or "").strip()
         cap = min(20, max(1, int(limit)))
         questions = slog.list_user_questions()

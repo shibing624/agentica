@@ -135,7 +135,7 @@ class DeepAgent(Agent):
         work_dir: Optional[str] = None,
         session_id: Optional[str] = None,
         add_history_to_context: bool = True,
-        num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS,
+        num_history_turns: Optional[int] = AGENTICA_NUM_HISTORY_TURNS,
         prompt_config: Optional[PromptConfig] = None,
         tool_config: Optional[ToolConfig] = None,
         long_term_memory_config: Optional[WorkspaceMemoryConfig] = None,

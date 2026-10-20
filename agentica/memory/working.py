@@ -448,7 +448,7 @@ class WorkingMemory(BaseModel):
             last_n: Optional[int] = None,
             skip_role: Optional[str] = None,
             max_tokens: Optional[int] = None,
-            truncate_tool_results: bool = True,
+            truncate_tool_results: bool = False,
             tool_result_max_chars: int = 2000,
     ) -> List[Message]:
         """Returns the messages from the last_n runs with token budget awareness."""

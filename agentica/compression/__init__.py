@@ -28,6 +28,7 @@ from agentica.compression.new_window import (
 )
 from agentica.compression.notes import (
     compose_transcript_digest,
+    notes_are_fresh,
     notes_are_ready,
     rollover_handover,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "notes_path_for",
     "start_new_context_window",
     "compose_transcript_digest",
+    "notes_are_fresh",
     "notes_are_ready",
     "rollover_handover",
     "REMINDER_REMAINING_RATIO",

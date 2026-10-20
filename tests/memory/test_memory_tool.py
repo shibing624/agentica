@@ -820,3 +820,39 @@ class TestRelevanceScoring:
     def test_empty_query(self):
         score = Workspace.compute_relevance_score("", "some content")
         assert score == 0.0
+
+    def test_memory_extract_flush_archives_conversation_even_when_save_memory_called(self):
+        import asyncio
+        from agentica.agent.hooks import MemoryExtractHooks
+        from agentica.agent.config import WorkspaceMemoryConfig
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            workspace = Workspace(temp_dir)
+            workspace.initialize()
+            hooks = MemoryExtractHooks(background=False)
+            session_key = ("default", "sess-save-archive")
+            hooks._buffers[session_key] = [
+                (
+                    "Remember that our deployment target is Kubernetes cluster prod-ap-east-1 " * 3,
+                    "Saved deployment target to memory. " * 4,
+                    True,  # save_memory was called in this turn
+                )
+            ]
+            agent = type(
+                "A",
+                (),
+                {
+                    "long_term_memory_config": WorkspaceMemoryConfig(auto_extract_memory=True),
+                    "resolve_auxiliary_model": lambda self, name: (_ for _ in ()).throw(
+                        AssertionError("LLM extract should be skipped when save_memory was called")
+                    ),
+                },
+            )()
+            asyncio.run(hooks._flush(agent, workspace, session_key))
+            conv_dir = workspace._get_user_conversations_dir()
+            files = list(conv_dir.glob("*.md"))
+            assert len(files) == 1
+            assert "prod-ap-east-1" in files[0].read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)

@@ -69,9 +69,20 @@ def normalize_role(role: str) -> str:
 
 def _entry_text(entry: Dict) -> str:
     content = entry.get("content", "")
-    if not isinstance(content, str):
-        return str(content)
-    return content
+    text = content if isinstance(content, str) else str(content)
+    etype = entry.get("type", "")
+    if etype == "assistant":
+        calls = " ".join(
+            f"{tc['function']['name']}({tc['function']['arguments']})"
+            for tc in entry.get("tool_calls") or []
+        )
+        if calls:
+            return f"{text}\n{calls}" if text else calls
+    elif etype in ("tool", "tool_audit"):
+        tname = entry.get("tool_name", "")
+        if tname:
+            return f"{tname}: {text}" if text else str(tname)
+    return text
 
 
 def is_window_preamble(content: str) -> bool:
@@ -139,7 +150,7 @@ def drop_shadowed_by_boundary(entries: List[Dict]) -> List[Dict]:
             continue
         drop.add(shadow)
         for i in range(shadow + 1, pos):
-            if entries[i].get("type") in ("assistant", "tool"):
+            if entries[i].get("type") in ("assistant", "tool", "tool_audit"):
                 drop.add(i)
     if not drop:
         return entries
@@ -251,9 +262,12 @@ def rank_entries(
     scored.sort(key=lambda x: (-x[0], -x[1]))
     hits: List[Dict] = []
     for sc, _, entry, content in scored[:limit]:
+        etype = entry.get("type", "")
+        if etype == "tool_audit":
+            etype = "tool"
         hits.append({
             "uuid": entry.get("uuid", ""),
-            "type": entry.get("type", ""),
+            "type": etype,
             "snippet": snippet_for(content, q, list(terms)),
             "score": sc,
             "timestamp": entry.get("timestamp", ""),

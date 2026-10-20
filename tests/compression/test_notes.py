@@ -9,6 +9,7 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 from agentica.compression.manager import CompressionManager
 from agentica.compression.notes import (
     compose_transcript_digest,
+    notes_are_fresh,
     notes_are_ready,
     rollover_handover,
 )
@@ -225,30 +226,32 @@ class TestRolloverHandover(unittest.TestCase):
         self.assertIn("KeyDB", text)
         self.assertLess(len(text), 8000, "digest must stay bounded")
 
-    def test_user_notes_body_is_carried_too(self):
-        """A model-authored <session_notes> body is real content, not chrome."""
-        from agentica.compression.new_window import notes_excerpt
+    def test_session_notes_are_not_copied_into_dropped_span(self):
+        """<session_notes> is re-injected on every cut, so carried_rows must not copy it into <dropped_span>."""
+        from agentica.compression.new_window import dropped_span_excerpt, notes_excerpt
+        from agentica.compression.token_budget import full_window_text
 
         notes = notes_excerpt(None, notes_text=(
             "- Constraint: do not rewrite auth\n- Ticket ZX-41827\n"
         ))
-        # Order matches _preamble: context_window, session_notes, span, turn.
-        from agentica.compression.new_window import dropped_span_excerpt
-        from agentica.compression.token_budget import full_window_text
-
+        prior_span = dropped_span_excerpt(
+            "# Dropped span\n\n## Turns\n- user: 窗口1问题 WIN1-8080\n"
+        )
         folded = "\n\n".join([
             full_window_text(1, 512000, None),
             notes,
+            prior_span,
         ]) + "\n\n继续？"
         text = compose_transcript_digest([
             Message(role="user", content=folded),
         ])
-        self.assertIn("do not rewrite auth", text)
-        self.assertIn("ZX-41827", text)
+        self.assertNotIn("do not rewrite auth", text)
+        self.assertNotIn("ZX-41827", text)
+        self.assertIn("WIN1-8080", text)
         self.assertIn("继续？", text)
         self.assertNotIn("<session_notes", text)
 
-    def test_model_authored_notes_are_kept_and_digest_is_skipped(self):
+    def test_model_authored_notes_keep_both_notes_and_dropped_span(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "s.notes.md")
             Path(path).write_text("Constraint: do not rewrite auth\n", encoding="utf-8")
@@ -257,12 +260,43 @@ class TestRolloverHandover(unittest.TestCase):
                 path,
             )
             self.assertEqual(notes, "Constraint: do not rewrite auth\n")
-            self.assertIsNone(span)
+            self.assertIsNotNone(span)
+            self.assertIn("ZX-41827", span)
             self.assertEqual(
                 Path(path).read_text(encoding="utf-8"),
                 "Constraint: do not rewrite auth\n",
             )
             self.assertTrue(notes_are_ready(path))
+
+    def test_notes_are_fresh_tracks_window_start_mtime(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "s.notes.md")
+            Path(path).write_text("Window 0 notes\n", encoding="utf-8")
+            os.utime(path, (1000.0, 1000.0))
+            self.assertFalse(notes_are_fresh(path, since=2000.0))
+            os.utime(path, (3000.0, 3000.0))
+            self.assertTrue(notes_are_fresh(path, since=2000.0))
+
+    def test_dropped_span_drops_tool_call_narration_before_user_and_final_answers(self):
+        msgs = [
+            Message(role="user", content="请排查 Ticket-ALPHA-001 并修复"),
+        ]
+        # 50 intermediate assistant tool-call narrations (exceeding _MAX_TURNS=40)
+        for i in range(50):
+            msgs.append(
+                Message(
+                    role="assistant",
+                    content=f"我先调用 grep 检查第 {i} 个文件",
+                    tool_calls=[{"id": f"tc_{i}", "function": {"name": "grep", "arguments": "{}"}}],
+                )
+            )
+        msgs.append(Message(role="assistant", content="最终结论：根因在 parser.py:88"))
+        digest = compose_transcript_digest(msgs)
+        self.assertIn("Ticket-ALPHA-001", digest)
+        self.assertIn("最终结论：根因在 parser.py:88", digest)
+        self.assertNotIn("检查第 0 个文件", digest)
 
     def test_empty_notes_digest_is_not_written_to_the_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,3 +336,66 @@ class TestAutoCompactWritesNotes(unittest.TestCase):
             self.assertNotIn("<session_notes", joined)
             self.assertIn("ZX-41827", joined)
             self.assertIn("继续", joined)
+
+    def test_existing_notes_inject_both_session_notes_and_dropped_span(self):
+        import asyncio
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog = SessionLog("notes-both", base_dir=tmp)
+            notes = Path(slog.path).with_name("notes-both.notes.md")
+            notes.write_text("Goal: keep compatibility\n", encoding="utf-8")
+            cm = CompressionManager()
+            agent = type("A", (), {"_session_log": slog})()
+            model = type("M", (), {"id": "gpt-4o", "context_window": 128_000})()
+            model._agent_ref = lambda: agent
+            msgs = [
+                Message(role="system", content="sys"),
+                Message(role="user", content="第二窗口新增约束：端口号固定 9091"),
+                Message(role="assistant", content="好的，已改为 9091"),
+                Message(role="user", content="继续"),
+            ]
+            asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+            joined = " ".join(str(m.content) for m in msgs)
+            self.assertIn("<session_notes", joined)
+            self.assertIn("Goal: keep compatibility", joined)
+            self.assertIn("<dropped_span", joined)
+            self.assertIn("9091", joined)
+
+    def test_long_notes_do_not_bleed_into_dropped_span_on_second_compact(self):
+        import asyncio
+        from agentica.compression.notes import _DROPPED_SPAN_CLOSE, _DROPPED_SPAN_OPEN, _tag_body
+
+        with tempfile.TemporaryDirectory() as tmp:
+            slog = SessionLog("notes-no-bleed", base_dir=tmp)
+            notes = Path(slog.path).with_name("notes-no-bleed.notes.md")
+            long_notes = "\n".join(
+                f"- STANDING-NOTE-{i:02d}: keep architectural invariant #{i:02d} intact across all modules"
+                for i in range(40)
+            )
+            notes.write_text(long_notes + "\n", encoding="utf-8")
+            cm = CompressionManager()
+            agent = type("A", (), {"_session_log": slog})()
+            model = type("M", (), {"id": "gpt-4o", "context_window": 128_000})()
+            model._agent_ref = lambda: agent
+
+            # Compact #1
+            msgs = [
+                Message(role="system", content="sys"),
+                Message(role="user", content="窗口1任务：修复 WIN1-BUG-7788"),
+                Message(role="assistant", content="窗口1已完成 WIN1-BUG-7788 修复"),
+                Message(role="user", content="进入窗口2：端口号改为 PORT-9091"),
+            ]
+            asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+
+            # Compact #2
+            msgs.append(Message(role="assistant", content="窗口2已将端口改为 PORT-9091"))
+            msgs.append(Message(role="user", content="进入窗口3：继续验证"))
+            asyncio.run(cm.auto_compact(msgs, model=model, force=True))
+
+            final_user = msgs[-1].content
+            span_body = _tag_body(final_user, _DROPPED_SPAN_OPEN, _DROPPED_SPAN_CLOSE)
+            self.assertTrue(span_body)
+            self.assertNotIn("STANDING-NOTE-", span_body)
+            self.assertIn("WIN1-BUG-7788", span_body)
+            self.assertIn("PORT-9091", span_body)
+            self.assertIn("STANDING-NOTE-00", final_user)

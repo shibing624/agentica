@@ -39,16 +39,14 @@ _MAX_TOOLS = 20
 # Stay under notes_excerpt's 4000-char inject cap.
 _DIGEST_BUDGET = 3600
 
-# These two tags are *injected by us* and carry no user prose: a previous
-# digest, and the model's own notes. ``strip_window_preamble`` deliberately
-# peels them so the search index does not score our chrome as a second hit.
-# The digest needs the opposite — what a previous cut already skimmed is the
-# only copy of those turns when there is no session log, so it is carried
-# forward instead of discarded.
+# ``<dropped_span>`` is injected by us and carries no user prose: ``strip_window_preamble``
+# deliberately peels it so the search index does not score our chrome as a
+# second hit. The digest needs the opposite — what a previous cut already
+# skimmed is carried forward so earlier windows survive later cuts.
+# ``<session_notes>`` is NOT carried here because the notes file is re-injected
+# separately on every cut.
 _DROPPED_SPAN_OPEN = "<dropped_span>"
 _DROPPED_SPAN_CLOSE = "</dropped_span>"
-_SESSION_NOTES_OPEN = "<session_notes"
-_SESSION_NOTES_CLOSE = "</session_notes>"
 
 # After the 0.95 Layer 2 trigger, wait this extra share of the working
 # window for the model to write notes (Codex auto_compact_fallback_buffer).
@@ -68,30 +66,25 @@ def _tag_body(text: str, open_tag: str, close_tag: str) -> str:
 def carried_rows(content: str) -> List[str]:
     """Digest rows a previous cut already skimmed, for carry-forward.
 
-    Both bodies are ours, not the user's: ``<dropped_span>`` is the prior
-    digest and ``<session_notes>`` the model's file. ``strip_window_preamble``
-    peels them on purpose (the search index must not score our chrome), but
-    the digest must not, or the only surviving copy of those turns is thrown
-    away on the next cut — for an SDK agent with no session log, the copy in
-    the prompt *is* the history.
+    ``<dropped_span>`` is the prior digest. ``strip_window_preamble`` peels it
+    on purpose (the search index must not score our chrome), but the digest
+    must not, or the only surviving copy of those turns in the prompt is thrown
+    away on the next cut. ``<session_notes>`` is excluded because the notes
+    file is injected in its own block on every cut.
 
     Only the ``- `` rows are taken, dropping the previous header and section
     titles: re-emitting those would nest one digest inside the next and the
     text would drift into header soup within a few cuts. The rows come back in
     their original order, so prepending keeps the span chronological.
     """
+    body = _tag_body(content, _DROPPED_SPAN_OPEN, _DROPPED_SPAN_CLOSE)
+    if not body:
+        return []
     rows: List[str] = []
-    for open_tag, close_tag in (
-        (_DROPPED_SPAN_OPEN, _DROPPED_SPAN_CLOSE),
-        (_SESSION_NOTES_OPEN, _SESSION_NOTES_CLOSE),
-    ):
-        body = _tag_body(content, open_tag, close_tag)
-        if not body:
-            continue
-        for line in body.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("- ") and stripped != "- ":
-                rows.append(stripped)
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- ") and stripped != "- ":
+            rows.append(stripped)
     return rows
 
 
@@ -122,6 +115,13 @@ def notes_are_ready(notes_path: Optional[str]) -> bool:
     if not path.is_file():
         return False
     return bool(path.read_text(encoding="utf-8").strip())
+
+
+def notes_are_fresh(notes_path: Optional[str], since: float) -> bool:
+    """True when the notes file is non-empty and modified after ``since``."""
+    if not notes_are_ready(notes_path):
+        return False
+    return Path(notes_path).stat().st_mtime > since
 
 
 def _content(message: Message) -> str:
@@ -201,8 +201,15 @@ def _tool_result_line(name: str, text: str) -> str:
     return f"{label} result: {_one_line(text, _TOOL_RESULT_LINE)}"
 
 
-def _collect(messages: Sequence[Message]) -> Tuple[List[str], List[str]]:
-    turns: List[str] = []
+def _collect(messages: Sequence[Message]) -> Tuple[List[Tuple[bool, str]], List[str]]:
+    """Return ``(turns, tools)`` where each turn is ``(is_narration, line)``.
+
+    Assistant messages that carry ``tool_calls`` are intermediate narration
+    inside a tool loop; assistant messages without ``tool_calls`` are the
+    turn's final answer. Under budget pressure narration is dropped first so
+    user questions and final answers survive across long tool-heavy turns.
+    """
+    turns: List[Tuple[bool, str]] = []
     tools: List[str] = []
     for message in messages:
         if message.role == "system":
@@ -224,16 +231,21 @@ def _collect(messages: Sequence[Message]) -> Tuple[List[str], List[str]]:
             raw = _content(message)
             # Carried rows ride in front of this turn's own prose, keeping the
             # span chronological: earlier windows, then this row's question.
-            turns.extend(carried_rows(raw))
+            for carried in carried_rows(raw):
+                turns.append((False, carried))
             text = strip_window_preamble(raw)
             if not text.strip() or _is_pad(text):
                 continue
-            turns.append(_line(f"user: {_one_line(text, _USER_LINE)}"))
+            turns.append((False, _line(f"user: {_one_line(text, _USER_LINE)}")))
             continue
         if message.role == "assistant":
             text = _content(message)
+            is_narration = bool(message.tool_calls)
             if text.strip() and not _is_pad(text):
-                turns.append(_line(f"assistant: {_one_line(text, _ASSISTANT_LINE)}"))
+                turns.append((
+                    is_narration,
+                    _line(f"assistant: {_one_line(text, _ASSISTANT_LINE)}"),
+                ))
             for row in _tool_call_rows(message):
                 tools.append(_line(row))
     return turns, tools
@@ -246,6 +258,22 @@ def _fit(lines: List[str], limit: int, budget: int) -> List[str]:
         used -= len(chosen[0]) + 1
         chosen.pop(0)
     return chosen
+
+
+def _fit_turns(
+    turns: List[Tuple[bool, str]],
+    limit: int,
+    budget: int,
+) -> List[str]:
+    """Fit turns to ``limit`` and ``budget``, dropping tool-loop narration first."""
+    items = list(turns)
+    used = sum(len(line) + 1 for _, line in items)
+    while items and (len(items) > limit or used > budget):
+        nar_idx = next((i for i, (nar, _) in enumerate(items) if nar), None)
+        drop_idx = nar_idx if nar_idx is not None else 0
+        _, removed = items.pop(drop_idx)
+        used -= len(removed) + 1
+    return [line for _, line in items]
 
 
 def compose_transcript_digest(
@@ -261,17 +289,27 @@ def compose_transcript_digest(
     model after something that cannot help, and this skim is the only copy of
     those turns. Say only what is true.
     """
-    turns, tools = _collect(messages)
+    turn_items, tools = _collect(messages)
     if notes_path:
-        header = [
-            "# Dropped span",
-            "",
-            "Not session notes — that file is still empty. "
-            "Chronological skim of what left this window. "
-            "Write goals, constraints, IDs, and decisions to the notes file. "
-            "Use search_session for anything missing.",
-            "",
-        ]
+        if notes_are_ready(notes_path):
+            header = [
+                "# Dropped span",
+                "",
+                "Chronological skim of what left this window. "
+                "Update the session notes file with any new goals, constraints, IDs, or decisions. "
+                "Use search_session for anything missing.",
+                "",
+            ]
+        else:
+            header = [
+                "# Dropped span",
+                "",
+                "Not session notes — that file is still empty. "
+                "Chronological skim of what left this window. "
+                "Write goals, constraints, IDs, and decisions to the notes file. "
+                "Use search_session for anything missing.",
+                "",
+            ]
     else:
         header = [
             "# Dropped span",
@@ -282,7 +320,7 @@ def compose_transcript_digest(
         ]
     header_size = sum(len(x) + 1 for x in header)
     turn_budget = max(800, _DIGEST_BUDGET - header_size)
-    turns = _fit(turns, _MAX_TURNS, turn_budget)
+    turns = _fit_turns(turn_items, _MAX_TURNS, turn_budget)
     leftover = max(400, _DIGEST_BUDGET - header_size - sum(len(x) + 1 for x in turns))
     tools = _fit(tools, _MAX_TOOLS, leftover)
 
@@ -309,7 +347,15 @@ def rollover_handover(
     messages: Sequence[Message],
     notes_path: Optional[str],
 ) -> Tuple[Optional[str], Optional[str]]:
-    """``(model_notes, dropped_span)``. Never writes the digest to disk."""
-    if notes_are_ready(notes_path):
-        return Path(notes_path).read_text(encoding="utf-8"), None
-    return None, compose_transcript_digest(messages, notes_path=notes_path)
+    """``(model_notes, dropped_span)``. Never writes the digest to disk.
+
+    Always returns ``dropped_span`` even when ``notes.md`` exists: a notes file
+    written in an earlier window does not cover the turns that ran since, so
+    dropping the skim on cut >= 2 silently erased the entire closing window.
+    """
+    notes = (
+        Path(notes_path).read_text(encoding="utf-8")
+        if notes_are_ready(notes_path)
+        else None
+    )
+    return notes, compose_transcript_digest(messages, notes_path=notes_path)

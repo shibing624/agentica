@@ -28,6 +28,7 @@ from agentica.model.usage import split_prompt_usage
 from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
 from agentica.memory import AgentRun
 from agentica.memory.session_log import iso_timestamp
+from agentica.compression.tool_result_storage import DEFAULT_MAX_RESULT_SIZE_CHARS
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -320,8 +321,10 @@ class PersistMixin:
                 )
                 return
             _tool_content = _tc.get("content", "") or ""
-            if len(_tool_content) > 2000:
-                _tool_content = _tool_content[:2000] + "\n... [truncated]"
+            if len(_tool_content) > DEFAULT_MAX_RESULT_SIZE_CHARS:
+                _tool_content = (
+                    _tool_content[:DEFAULT_MAX_RESULT_SIZE_CHARS] + "\n... [truncated]"
+                )
             _origin_meta: Dict[str, Any] = {}
             _fn = _functions.get(_tc.get("tool_name", ""))
             if _fn is not None and _fn.origin is not None:

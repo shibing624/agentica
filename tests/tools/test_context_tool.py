@@ -127,6 +127,45 @@ class TestContextTool(unittest.TestCase):
             "ctx-tool.notes.md",
         )
 
+    def test_search_hits_include_uuid_prefix_and_uuid_fetches_full_entry(self):
+        tool, _, slog = self._agent()
+        full_body = "Header line\n" + ("middle detail line\n" * 30) + "Tail marker ZX-8899"
+        uid = slog.append("tool", full_body, tool_name="read_file", tool_call_id="tc_9")
+        out = asyncio.run(tool.search_session("ZX-8899", role="tool"))
+        self.assertIn(f"[{uid[:8]}]", out)
+        fetched = asyncio.run(tool.search_session(uuid=uid[:8]))
+        self.assertIn(f"[{uid}]", fetched)
+        self.assertIn("Header line", fetched)
+        self.assertIn("Tail marker ZX-8899", fetched)
+
+    def test_ambiguous_uuid_prefix_is_reported_not_guessed(self):
+        from unittest import mock
+
+        tool, _, slog = self._agent()
+        ids = iter([
+            "abcd1111-0000-0000-0000-000000000000",
+            "abcd2222-0000-0000-0000-000000000000",
+        ])
+        with mock.patch("agentica.memory.session_log.uuid4", side_effect=lambda: next(ids)):
+            slog.append("user", "alpha question")
+            slog.append("user", "beta question")
+        out = asyncio.run(tool.search_session(uuid="abcd"))
+        self.assertIn("matches 2 entries", out)
+        self.assertNotIn("alpha question", out)
+        self.assertNotIn("beta question", out)
+        self.assertIn("beta question", asyncio.run(tool.search_session(uuid="abcd2")))
+        self.assertIn("No session-log entry", asyncio.run(tool.search_session(uuid="ffff")))
+
+    def test_user_question_index_carries_uuid_for_full_fetch(self):
+        tool, _, slog = self._agent()
+        filler = "很长的问题描述 " * 40
+        long_q = f"请排查 {filler}MID-MARK-42 {filler}结束"
+        uid = slog.append("user", long_q)
+        index = asyncio.run(tool.search_session())
+        self.assertIn(f"[{uid[:8]}]", index)
+        self.assertNotIn("MID-MARK-42", index)
+        self.assertIn("MID-MARK-42", asyncio.run(tool.search_session(uuid=uid[:8])))
+
 
 if __name__ == "__main__":
     unittest.main()

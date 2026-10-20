@@ -134,6 +134,38 @@ class TestSearchEntriesRank(unittest.TestCase):
         self.assertEqual(user_hits[0]["type"], "user")
         self.assertEqual(toolish[0]["type"], "assistant")
 
+    def test_assistant_tool_call_arguments_and_tool_audit_are_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append(
+                "assistant",
+                "",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": '{"file_path": "/workspace/feishu_Upload.py"}',
+                        },
+                    }
+                ],
+            )
+            log.append(
+                "tool_audit",
+                "Uploaded doc token doxcn998877",
+                tool_name="execute",
+                tool_call_id="call_1",
+                replay=False,
+            )
+            asst_hits = log.search_entries("feishu_Upload.py", role="assistant")
+            tool_hits = log.search_entries("doxcn998877", role="tool")
+        self.assertEqual(len(asst_hits), 1)
+        self.assertEqual(asst_hits[0]["type"], "assistant")
+        self.assertIn("feishu_Upload.py", asst_hits[0]["snippet"])
+        self.assertEqual(len(tool_hits), 1)
+        self.assertEqual(tool_hits[0]["type"], "tool")
+        self.assertIn("doxcn998877", tool_hits[0]["snippet"])
+
     def test_search_does_not_hit_dropped_span_copy(self):
         with tempfile.TemporaryDirectory() as tmp:
             log = SessionLog("s", base_dir=tmp)

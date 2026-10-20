@@ -93,10 +93,11 @@ def fallback_text(notes_path: Optional[str] = None) -> str:
     the caller must not postpone a cut for an unactionable instruction.
 
     Deliberately does *not* borrow Codex's "do not continue the task" clause.
-    The runner folds this into the current user turn and auto-compact keeps
-    that turn, so the text outlives the cut and would land in the new window
-    contradicting the fresh window's own instructions. Codex gets away with
-    it because its fallback is a developer item the rollover consumes.
+    The runner folds this into the last message (the current user turn, or
+    the trailing tool result mid-loop) and auto-compact keeps that turn, so
+    the text outlives the cut and would land in the new window contradicting
+    the fresh window's own instructions. Codex gets away with it because its
+    fallback is a developer item the rollover consumes.
     """
     if not notes_path:
         return ""

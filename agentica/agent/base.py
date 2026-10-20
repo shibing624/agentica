@@ -185,7 +185,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # Layer 2: Common config
     # ============================
     add_history_to_context: bool = False
-    num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS
+    num_history_turns: Optional[int] = AGENTICA_NUM_HISTORY_TURNS
     use_structured_outputs: bool = False
     debug: bool = False
     enable_tracing: bool = False
@@ -326,7 +326,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         response_model: Optional[Type[Any]] = None,
         # ---- Common config ----
         add_history_to_context: bool = False,
-        num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS,
+        num_history_turns: Optional[int] = AGENTICA_NUM_HISTORY_TURNS,
         use_structured_outputs: bool = False,
         debug: bool = False,
         enable_tracing: bool = False,
@@ -511,7 +511,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self,
         *,
         add_history_to_context: bool,
-        num_history_turns: int,
+        num_history_turns: Optional[int],
         use_structured_outputs: bool,
         debug: bool,
         enable_tracing: bool,

@@ -837,7 +837,7 @@ class SessionLog:
         # is not a searchable row and is filtered out below.
         typed = [
             e for e in self._iter_entries()
-            if e.get("type", "") in ("user", "assistant", "tool", "compact_boundary")
+            if e.get("type", "") in ("user", "assistant", "tool", "tool_audit", "compact_boundary")
         ]
         rows: List[Dict[str, Any]] = []
         for entry in drop_shadowed_by_boundary(typed):
@@ -872,9 +872,30 @@ class SessionLog:
             return []
         want = normalize_role(role)
         rows = self._conversation_rows()
-        if want:
+        if want == "tool":
+            rows = [e for e in rows if e.get("type") in ("tool", "tool_audit")]
+        elif want:
             rows = [e for e in rows if e.get("type") == want]
         return rank_entries(rows, q, limit=min(20, max(1, int(limit))))
+
+    def find_entries(self, uuid_prefix: str) -> List[Dict[str, Any]]:
+        """Conversation rows whose uuid starts with ``uuid_prefix``, full text.
+
+        Returns every match so the caller can tell "none" from "ambiguous"
+        instead of this layer picking one.
+        """
+        from agentica.memory.session_search import _entry_text, strip_window_preamble
+
+        return [
+            {
+                "uuid": e["uuid"],
+                "type": "tool" if e["type"] == "tool_audit" else e["type"],
+                "timestamp": e.get("timestamp", ""),
+                "content": strip_window_preamble(_entry_text(e)),
+            }
+            for e in self._conversation_rows()
+            if e["uuid"].startswith(uuid_prefix)
+        ]
 
     def list_user_questions(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Newest user turns across compact_boundary, preamble skipped."""

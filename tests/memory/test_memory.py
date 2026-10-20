@@ -363,10 +363,39 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
             truncate_tool_results=True,
             tool_result_max_chars=50,
         )
-        # The older run's tool response should be truncated
+        # The older run's tool response should be truncated when explicitly requested
         for m in msgs:
             if m.role == "tool" and "detailed" in str(m.content):
                 self.assertIn("truncated", m.content)
+
+    def test_default_leaves_older_tool_results_intact_for_layer1(self):
+        """By default, get_messages_from_last_n_runs does not truncate older tool results."""
+        memory = WorkingMemory()
+        long_tool_result = "detailed " * 400
+        run_with_tool = AgentRun(
+            message=Message(role="user", content="Q0"),
+            response=RunResponse(
+                content="A0",
+                messages=[
+                    Message(role="user", content="Q0"),
+                    Message(
+                        role="assistant",
+                        content=None,
+                        tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "{}"}}],
+                    ),
+                    Message(role="tool", content=long_tool_result, tool_call_id="call_1"),
+                    Message(role="assistant", content="A0"),
+                ],
+            ),
+        )
+        memory.add_run(run_with_tool)
+        memory.add_run(self._make_run("Q1", "short"))
+
+        msgs = memory.get_messages_from_last_n_runs()
+        tool_msgs = [m for m in msgs if m.role == "tool"]
+        self.assertEqual(len(tool_msgs), 1)
+        self.assertEqual(tool_msgs[0].content, long_tool_result)
+        self.assertNotIn("truncated", tool_msgs[0].content)
 
     def test_skip_role(self):
         """Test skip_role parameter still works."""

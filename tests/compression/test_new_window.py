@@ -229,6 +229,152 @@ class TestRunnerNewWindow(unittest.TestCase):
         )
         self.assertEqual(msgs[0].content, before)
 
+    def test_stale_notes_from_previous_window_still_postpone_on_next_window(self):
+        from agentica.runner import Runner
+
+        agent = self._agent(session_id="stale-notes")
+        cm = agent.tool_config.compression_manager
+        agent.model.functions = {"write_file": object(), "read_file": object()}
+        notes_file = Path(notes_path_for(agent._session_log))
+        notes_file.write_text("Window 0 notes\n", encoding="utf-8")
+        # Simulate notes written in window 0 (before window 1 started)
+        os.utime(notes_file, (1000.0, 1000.0))
+        cm.window_id = 1
+        cm.window_started_at = 2000.0
+        cm.fallback_claimed = False
+
+        msgs = [
+            Message(role="system", content="sys"),
+            Message(
+                role="user",
+                content="<context_window>\nCurrent context window 1.\n</context_window>\n\ndo all",
+            ),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "tc1", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", content="file contents", tool_call_id="tc1"),
+        ]
+        postponed = Runner._claim_notes_fallback(
+            msgs, agent, agent.model, cm,
+            context_tokens=960, working_window=1000,
+        )
+        self.assertTrue(postponed)
+        self.assertTrue(cm.fallback_claimed)
+        self.assertIn("about to reset", msgs[-1].content)
+
+    def test_reminder_folds_into_trailing_tool_result_during_tool_loop(self):
+        from agentica.runner import Runner
+
+        agent = self._agent(session_id="tool-loop-reminder")
+        cm = agent.tool_config.compression_manager
+        msgs = [
+            Message(
+                role="user",
+                content="<context_window>\nCurrent context window 1.\n</context_window>\n\ndo all",
+            ),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "tc1", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", content="result payload", tool_call_id="tc1"),
+        ]
+        Runner._maybe_inject_token_budget_reminder(
+            msgs, agent, cm, context_tokens=800, working_window=1000,
+        )
+        self.assertTrue(cm.reminder_claimed)
+        self.assertIn("tokens left in this context window", msgs[-1].content)
+
+    def test_fold_budget_fragment_only_writes_into_last_message(self):
+        from agentica.runner import Runner
+
+        agent = self._agent(session_id="no-history-mutation")
+        cm = agent.tool_config.compression_manager
+
+        # Case 1: trailing message is a plain assistant reply -> must NOT mutate earlier tool/user
+        msgs_assistant_tail = [
+            Message(role="user", content="initial question"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "tc1", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", content="old tool result", tool_call_id="tc1"),
+            Message(role="assistant", content="final answer"),
+        ]
+        Runner._maybe_inject_token_budget_reminder(
+            msgs_assistant_tail, agent, cm, context_tokens=800, working_window=1000,
+        )
+        self.assertFalse(cm.reminder_claimed)
+        self.assertEqual(msgs_assistant_tail[0].content, "initial question")
+        self.assertEqual(msgs_assistant_tail[2].content, "old tool result")
+        self.assertEqual(msgs_assistant_tail[3].content, "final answer")
+
+        # Case 2: trailing message is a multimodal list tool result -> must NOT skip back to index 2
+        msgs_multimodal_tail = [
+            Message(role="user", content="initial question"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "tc1", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", content="earlier tool result", tool_call_id="tc1"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "tc2", "function": {"name": "analyze_image", "arguments": "{}"}}],
+            ),
+            Message(
+                role="tool",
+                content=[{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}],
+                tool_call_id="tc2",
+            ),
+        ]
+        folded = Runner._fold_budget_fragment(msgs_multimodal_tail, "REMINDER")
+        self.assertFalse(folded)
+        self.assertEqual(msgs_multimodal_tail[0].content, "initial question")
+        self.assertEqual(msgs_multimodal_tail[2].content, "earlier tool result")
+
+    def test_fresh_agent_apply_idle_compact_before_run_resolves_notes_path(self):
+        from agentica.compression.manager import apply_idle_compact
+
+        agent = self._agent(session_id="idle-compact-before-run")
+        notes_file = Path(notes_path_for(agent._session_log))
+        notes_file.write_text("- Goal: preserve idle compact notes\n", encoding="utf-8")
+        agent.working_memory.messages = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="turn 1 question"),
+            Message(role="assistant", content="turn 1 answer"),
+        ]
+        compacted = asyncio.run(apply_idle_compact(agent))
+        self.assertTrue(compacted)
+        joined = " ".join(str(m.content) for m in agent.working_memory.messages)
+        self.assertIn(str(notes_file), joined)
+        self.assertIn("preserve idle compact notes", joined)
+        self.assertIn("<session_notes", joined)
+
+    def test_idle_compact_after_model_swap_still_resolves_notes_path(self):
+        """/model assigns a fresh Model that no run() has bound to the agent."""
+        from agentica.compression.manager import apply_idle_compact
+        from agentica.model.openai import OpenAIChat
+
+        agent = self._agent(session_id="idle-compact-after-swap")
+        agent.model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        self.assertIsNone(agent.model._agent_ref)
+        notes_file = Path(notes_path_for(agent._session_log))
+        notes_file.write_text("- Goal: survive model swap\n", encoding="utf-8")
+        agent.working_memory.messages = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="turn 1 question"),
+            Message(role="assistant", content="turn 1 answer"),
+        ]
+        self.assertTrue(asyncio.run(apply_idle_compact(agent)))
+        joined = " ".join(str(m.content) for m in agent.working_memory.messages)
+        self.assertIn(str(notes_file), joined)
+        self.assertIn("survive model swap", joined)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,7 +33,7 @@ from agentica import Agent
 | `enable_long_term_memory` | `bool` | `False` | 启用长期记忆工具、检索和相关 hooks |
 | `enable_experience_capture` | `bool` | `False` | 启用 experience 捕获与自进化 hooks |
 | `add_history_to_context` | `bool` | `False` | 将历史消息加入上下文 |
-| `num_history_turns` | `int` | `3` | 保留的历史轮数 |
+| `num_history_turns` | `Optional[int]` | `None` | 保留的历史轮数上限；默认 `None` 表示重放当前上下文窗口内的全部轮次（由 Layer 1/2 按 token 水位压缩） |
 | `use_structured_outputs` | `bool` | `False` | 使用 OpenAI 严格结构化输出模式 |
 | `debug` | `bool` | `False` | 调试模式（详细日志） |
 | `enable_tracing` | `bool` | `False` | 启用 Langfuse 追踪 |

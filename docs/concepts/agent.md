@@ -101,7 +101,7 @@ asyncio.run(main())
 | `enable_long_term_memory` | `bool` | `False` | 启用长期记忆工具、检索和相关 hooks |
 | `enable_experience_capture` | `bool` | `False` | 启用 experience 捕获与自进化 hooks |
 | `add_history_to_context` | `bool` | `False` | 将历史消息加入上下文 |
-| `num_history_turns` | `int` | `3` | 保留最近 N 轮历史 |
+| `num_history_turns` | `Optional[int]` | `None` | 保留最近 N 轮历史；`None` 表示重放当前上下文窗口内的全部轮次 |
 | `use_structured_outputs` | `bool` | `False` | 严格 JSON 结构化输出（部分 API 支持） |
 | `debug` | `bool` | `False` | 启用调试日志 |
 | `enable_tracing` | `bool` | `False` | 启用 Langfuse tracing |

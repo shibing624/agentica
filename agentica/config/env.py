@@ -47,10 +47,10 @@ AGENTICA_MAX_MEMORY_CHARACTER_COUNT = int(os.getenv("AGENTICA_MAX_MEMORY_CHARACT
 # Default conversation history window (in turns/runs) for Agent/DeepAgent —
 # the single SDK-wide default that the CLI and gateway (web) inherit unless a
 # caller passes num_history_turns=... explicitly. Precedence (highest first):
-# shell env > .env > config.yaml `settings.num_history_turns` > built-in 20.
-AGENTICA_NUM_HISTORY_TURNS = int(
-    os.getenv("AGENTICA_NUM_HISTORY_TURNS") or get_setting("num_history_turns", 20)
-)
+# shell env > .env > config.yaml `settings.num_history_turns` > None (replay
+# every run in the current context window; Layer 1/2 bounds token size).
+_raw_num_history_turns = os.getenv("AGENTICA_NUM_HISTORY_TURNS") or get_setting("num_history_turns", None)
+AGENTICA_NUM_HISTORY_TURNS = None if _raw_num_history_turns is None else int(_raw_num_history_turns)
 
 # SDK default: no log file, logs only go to stdio. The CLI opts in by setting
 # ``AGENTICA_LOG_FILE`` to a daily path in ``agentica.cli.main`` — SDK users

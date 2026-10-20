@@ -59,7 +59,7 @@ class Settings:
     # exact same window as the interactive agent it replaced. Defaults to the
     # SDK-wide AGENTICA_NUM_HISTORY_TURNS (same default the CLI/SDK use), so
     # web/CLI/SDK stay aligned unless a user overrides it explicitly.
-    num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS
+    num_history_turns: Optional[int] = AGENTICA_NUM_HISTORY_TURNS
 
     # Feishu
     feishu_app_id: Optional[str] = None

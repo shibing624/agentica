@@ -509,15 +509,6 @@ class MemoryExtractHooks(RunHooks):
         if not agent.long_term_memory_config.auto_extract_memory:
             return
 
-        # If any turn in the window already called save_memory, the model
-        # self-curated — skip extraction. Mirrors CC's hasMemoryWritesSince.
-        if any(save_called for _, _, save_called in buf):
-            logger.debug(
-                "Skipping memory extraction: save_memory called within batch (session=%s, turns=%d)",
-                session_key, len(buf),
-            )
-            return
-
         parts: List[str] = []
         archive_messages: List[Dict[str, str]] = []
         for user_msg, assistant_msg, _ in buf:
@@ -534,6 +525,20 @@ class MemoryExtractHooks(RunHooks):
         if len(conversation_text) < 200:
             return
 
+        evidence_refs = await self._archive_extract_evidence(
+            workspace, archive_messages, session_key[1],
+        )
+
+        # If any turn in the window already called save_memory, the model
+        # self-curated — skip the LLM extraction call, while keeping the raw
+        # conversation archive written above so search_memory can still find it.
+        if any(save_called for _, _, save_called in buf):
+            logger.debug(
+                "Skipping memory extraction: save_memory called within batch (session=%s, turns=%d)",
+                session_key, len(buf),
+            )
+            return
+
         model = agent.resolve_auxiliary_model("memory_extract")
         if model is None:
             return
@@ -543,9 +548,6 @@ class MemoryExtractHooks(RunHooks):
         # extraction fails closed with a truncated recent slice instead of a
         # silent context_length_exceeded on the side call.
         conversation_text = self._fit_text_to_model(model, conversation_text)
-        evidence_refs = await self._archive_extract_evidence(
-            workspace, archive_messages, session_key[1],
-        )
         await self._extract_and_save(
             model, workspace, conversation_text, evidence_refs=evidence_refs,
         )

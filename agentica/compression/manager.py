@@ -11,6 +11,8 @@ session JSONL and are retrieved with ``search_session``.
 This is Codex TokenBudget compact (#29743): same lifecycle name, no summarizer.
 """
 import hashlib
+import time
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -121,6 +123,7 @@ class CompressionManager:
 
     stats: Dict[str, Any] = field(default_factory=dict)
     window_id: int = 0
+    window_started_at: float = field(default_factory=time.time)
     reminder_claimed: bool = False
     fallback_claimed: bool = False
     compact_token_floor: Optional[int] = None
@@ -180,6 +183,7 @@ class CompressionManager:
         logger.info("Auto-compact triggered: starting a new context window")
 
         self.window_id += 1
+        self.window_started_at = time.time()
         self.reminder_claimed = False
         self.fallback_claimed = False
         self.compact_token_floor = None
@@ -262,6 +266,12 @@ async def apply_idle_compact(agent: Any) -> bool:
     cm = agent.tool_config.compression_manager if agent.tool_config else None
     if cm is None:
         return False
+    # auto_compact resolves the session log (and so the notes path) through
+    # model._agent_ref, which run() binds. An idle /compact can come before
+    # any run on this model: right after /resume, or after /model swapped in
+    # a fresh Model object.
+    if agent.model is not None:
+        agent.model._agent_ref = weakref.ref(agent)
     compacted = await cm.auto_compact(
         messages,
         model=agent.model,

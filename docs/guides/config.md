@@ -134,7 +134,7 @@ profiles:
 
 # CLI / gateway 行为开关（与 model profile 无关）
 settings:
-  num_history_turns: 20
+  # num_history_turns: 20      # 历史轮数上限；不配 = 重放当前窗口全部轮次，由 Layer 1/2 按 token 水位回收
   # enable_evict: true         # Layer 1 淘汰旧工具结果（默认开）
   # enable_auto_compact: true  # Layer 2 窗口满时自动换窗（默认开；/compact 仍可用）
   # compact_token_limit: 300000  # 可选工作阈值；不配 = 窗口×0.95 才换窗
