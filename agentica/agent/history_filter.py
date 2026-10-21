@@ -230,6 +230,80 @@ def _tool_result_text(content) -> str:
     return _text_from_content_blocks(content)
 
 
+def _portable_history(
+    messages: List[Message],
+    *,
+    drop_system: bool,
+    input_message_ids: Optional[set[int]] = None,
+) -> tuple[List[Message], set[int]]:
+    """Build portable messages and preserve which rebuilt items were inputs."""
+    portable: List[Message] = []
+    portable_input_ids: set[int] = set()
+
+    def append(source: Message, converted: Message) -> None:
+        portable.append(converted)
+        if input_message_ids is not None and id(source) in input_message_ids:
+            portable_input_ids.add(id(converted))
+
+    tool_names: dict = {}
+    answered: set = set()
+    for m in messages:
+        if m.role == "system":
+            if not drop_system:
+                append(m, m)
+            continue
+        if m.role == "assistant":
+            tool_calls = m.tool_calls or _tool_calls_from_blocks(m.content) or None
+            for tc in tool_calls or ():
+                tool_names[tc["id"]] = tc["function"]["name"]
+            text = _text_from_content_blocks(m.content)
+            if not tool_calls and not text.strip():
+                continue
+            append(m, Message(role="assistant", content=text, tool_calls=tool_calls))
+            continue
+        if m.role == "tool":
+            if m.tool_call_id in answered:
+                continue
+            answered.add(m.tool_call_id)
+            append(
+                m,
+                Message(
+                    role="tool",
+                    tool_call_id=m.tool_call_id,
+                    tool_name=m.tool_name or tool_names.get(m.tool_call_id),
+                    content=_tool_result_text(m.content),
+                    tool_call_error=m.tool_call_error,
+                ),
+            )
+            continue
+        # role == "user"
+        if isinstance(m.content, list):
+            for block in m.content:
+                if not (isinstance(block, dict) and block.get("type") == "tool_result"):
+                    continue
+                call_id = block["tool_use_id"]
+                if call_id in answered:
+                    continue
+                answered.add(call_id)
+                append(
+                    m,
+                    Message(
+                        role="tool",
+                        tool_call_id=call_id,
+                        tool_name=tool_names.get(call_id),
+                        content=_tool_result_text(block.get("content")),
+                        tool_call_error=block.get("is_error") or None,
+                    ),
+                )
+        text = _text_from_content_blocks(m.content)
+        images = _merge_images(m.images, _images_from_content_blocks(m.content))
+        if images:
+            append(m, Message(role="user", content=text or None, images=images))
+        elif text.strip():
+            append(m, Message(role="user", content=text))
+    return portable, portable_input_ids
+
+
 def to_portable_history(messages: List[Message], *, drop_system: bool = False) -> List[Message]:
     """History in the one shape every provider adapter replays, tool rounds kept.
 
@@ -248,62 +322,19 @@ def to_portable_history(messages: List[Message], *, drop_system: bool = False) -
     ``drop_system`` also removes system messages (the run stores; the system
     prompt is rebuilt fresh each run).
     """
-    portable: List[Message] = []
-    tool_names: dict = {}
-    answered: set = set()
-    for m in messages:
-        if m.role == "system":
-            if not drop_system:
-                portable.append(m)
-            continue
-        if m.role == "assistant":
-            tool_calls = m.tool_calls or _tool_calls_from_blocks(m.content) or None
-            for tc in tool_calls or ():
-                tool_names[tc["id"]] = tc["function"]["name"]
-            text = _text_from_content_blocks(m.content)
-            if not tool_calls and not text.strip():
-                continue
-            portable.append(Message(role="assistant", content=text, tool_calls=tool_calls))
-            continue
-        if m.role == "tool":
-            if m.tool_call_id in answered:
-                continue
-            answered.add(m.tool_call_id)
-            portable.append(
-                Message(
-                    role="tool",
-                    tool_call_id=m.tool_call_id,
-                    tool_name=m.tool_name or tool_names.get(m.tool_call_id),
-                    content=_tool_result_text(m.content),
-                    tool_call_error=m.tool_call_error,
-                )
-            )
-            continue
-        # role == "user"
-        if isinstance(m.content, list):
-            for block in m.content:
-                if not (isinstance(block, dict) and block.get("type") == "tool_result"):
-                    continue
-                call_id = block["tool_use_id"]
-                if call_id in answered:
-                    continue
-                answered.add(call_id)
-                portable.append(
-                    Message(
-                        role="tool",
-                        tool_call_id=call_id,
-                        tool_name=tool_names.get(call_id),
-                        content=_tool_result_text(block.get("content")),
-                        tool_call_error=block.get("is_error") or None,
-                    )
-                )
-        text = _text_from_content_blocks(m.content)
-        images = _merge_images(m.images, _images_from_content_blocks(m.content))
-        if images:
-            portable.append(Message(role="user", content=text or None, images=images))
-        elif text.strip():
-            portable.append(Message(role="user", content=text))
-    return portable
+    return _portable_history(messages, drop_system=drop_system)[0]
+
+
+def to_portable_history_with_input_ids(
+    messages: List[Message],
+    input_message_ids: set[int],
+) -> tuple[List[Message], set[int]]:
+    """Portable history plus rebuilt IDs for messages that predated this turn."""
+    return _portable_history(
+        messages,
+        drop_system=False,
+        input_message_ids=input_message_ids,
+    )
 
 
 def make_history_portable(working_memory) -> None:

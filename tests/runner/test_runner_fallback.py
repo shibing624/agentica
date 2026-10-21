@@ -1147,6 +1147,10 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
                 agent = _make_agent()
                 agent._run_fallback_models = [fallback]
                 state = LoopState()
+                # The initial user message predates this turn's tool round.
+                # Rebuilding message objects must preserve that provenance so
+                # flat-memory persistence keeps the assistant/tool additions.
+                state.input_message_ids = {id(messages[0])}
 
                 call = asyncio.run(
                     Runner._call_with_retry(primary, messages, state, agent, stream=stream)
@@ -1172,6 +1176,10 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
                 result = next(m for m in seen_after_repair if m.role == "tool")
                 self.assertEqual(result.tool_call_id, "toolu_1")
                 self.assertEqual(result.content, "PORT = 8080")
+                repaired_user = next(m for m in seen_after_repair if m.role == "user")
+                self.assertIn(id(repaired_user), state.input_message_ids)
+                self.assertNotIn(id(assistant), state.input_message_ids)
+                self.assertNotIn(id(result), state.input_message_ids)
 
     def test_bad_signature_repair_is_attempted_only_once(self):
         calls = {"n": 0}

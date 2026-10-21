@@ -414,6 +414,30 @@ class TestResumeCommandAcrossProjects(unittest.TestCase):
         self.assertIn(self.alpha, printed)
         self.assertEqual(len(ctx.tui_state["resume_picker"]), 2)
 
+    def test_local_resume_list_names_project_work_dir_and_profile(self):
+        agent = MagicMock()
+        agent.user_id = "default"
+        agent.session_id = "bbbbbbbb-2222"
+        agent._session_log = SessionLog(
+            "bbbbbbbb-2222", work_dir=self.current, user_id="default"
+        )
+        agent._session_log.set_profile("venus-opus", "session")
+        ctx = CommandContext(
+            agent_config={"work_dir": self.current},
+            current_agent=agent,
+            tui_state={},
+        )
+        console = MagicMock()
+
+        with patch("agentica.cli.commands.session.get_console", return_value=console):
+            cli_session._cmd_resume(ctx, "")
+
+        printed = "\n".join(str(c.args[0]) for c in console.print.call_args_list if c.args)
+        self.assertIn("Project:", printed)
+        self.assertIn("beta", printed)
+        self.assertIn(f"Work dir: {self.current}", printed)
+        self.assertIn("Profile: venus-opus", printed)
+
     def test_number_after_resume_all_uses_that_listing(self):
         agent = MagicMock()
         agent.user_id = "default"

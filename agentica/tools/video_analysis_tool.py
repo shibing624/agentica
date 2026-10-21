@@ -134,6 +134,7 @@ class VideoAnalysisTool(Tool):
 
         logger.debug(f"Video will be downloaded to {self._download_directory}")
 
+        self._vl_model_follows_agent = model is None
         self.vl_model = model
         self._agent_model: Optional[Model] = None
         self.model_name = model_name
@@ -155,6 +156,10 @@ class VideoAnalysisTool(Tool):
 
     def set_agent_model(self, model: Optional[Model]) -> None:
         self._agent_model = model
+        if self._vl_model_follows_agent:
+            self.vl_model = model
+            if model is not None:
+                self.model_name = model.id
 
     def _ensure_vl_model(self) -> None:
         if self.vl_model is not None:

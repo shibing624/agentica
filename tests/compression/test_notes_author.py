@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import weakref
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -77,6 +78,23 @@ class TestAuthorSessionNotes(unittest.TestCase):
     def test_the_setting_comes_back_when_the_request_fails(self):
         model = _Scribe(fail=RuntimeError("gateway 502"))
         self.assertIsNone(asyncio.run(author_session_notes(_window(), model, self.path)))
+        self.assertTrue(model.run_tools)
+
+    def test_stalled_notes_request_times_out_and_leaves_existing_file(self):
+        class _StalledScribe(_Scribe):
+            async def response_stream(self, messages):
+                self.requests.append(list(messages))
+                self.run_tools_seen.append(self.run_tools)
+                await asyncio.Event().wait()
+                yield ModelResponse(content="unreachable")
+
+        Path(self.path).write_text("- keep me\n", encoding="utf-8")
+        model = _StalledScribe()
+        with patch("agentica.compression.notes_author.NOTES_AUTHOR_TIMEOUT_SECONDS", 0.01):
+            result = asyncio.run(author_session_notes(_window(), model, self.path))
+
+        self.assertIsNone(result)
+        self.assertEqual(Path(self.path).read_text(encoding="utf-8"), "- keep me\n")
         self.assertTrue(model.run_tools)
 
     def test_reply_becomes_the_whole_file(self):

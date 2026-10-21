@@ -282,7 +282,8 @@ async def apply_idle_compact(agent: Any) -> bool:
         # The notes request goes to agent.model like a run would; after /model
         # the history may still be the previous model's, signed thinking
         # included. Rebinds wm.messages, so it is read only after this.
-        ensure_history_portable(agent)
+        if agent.add_history_to_context:
+            ensure_history_portable(agent)
     messages = wm.messages
     # ``wm.messages`` holds no system prompt; the notes request is built the
     # way the next turn's prefix is, so it matches what the last request sent

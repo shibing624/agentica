@@ -22,6 +22,7 @@ from agentica.cli.commands.helpers import (
     SESSION_RECENT_REQUESTS,
     _run_async_safe,
     clip_preview_head,
+    format_path_for_display,
 )
 from agentica.cli.context_usage import measure_context
 from agentica.cli.display import (
@@ -432,7 +433,6 @@ def _print_session_list(
     *,
     title: str,
     usage_hint: str,
-    show_work_dir: bool = False,
 ) -> None:
     """Render the resume picker and remember what each number pointed at.
 
@@ -469,8 +469,17 @@ def _print_session_list(
                 con.print(f"     [dim]> {clip_preview_head(request)}[/dim]")
         elif not user_name:
             con.print("     [dim](empty session)[/dim]")
-        if show_work_dir and s.get("work_dir"):
-            con.print(f"     [dim]{s['work_dir']}[/dim]")
+        work_dir = s.get("work_dir")
+        if work_dir:
+            project = Path(work_dir).name or work_dir
+            con.print(
+                f"     [dim]Project:[/dim] [bold]{project}[/bold]"
+                f"  [dim]· Work dir: {format_path_for_display(work_dir)}[/dim]"
+            )
+        else:
+            con.print("     [dim]Project: unknown · Work dir: unavailable[/dim]")
+        if s.get("profile_name"):
+            con.print(f"     [dim]Profile: {s['profile_name']}[/dim]")
     con.print(f"\n[dim]{usage_hint}[/dim]")
     if ctx.tui_state is not None:
         ctx.tui_state["resume_picker"] = shown
@@ -559,7 +568,6 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             title="Sessions across all projects:",
             usage_hint="Usage: /resume <number|id-prefix> — resuming a session from "
             "another directory asks which directory to work in.",
-            show_work_dir=True,
         )
         return
 

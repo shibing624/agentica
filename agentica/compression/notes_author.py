@@ -14,6 +14,7 @@ request used, so the request reads the prompt cache instead of paying for
 the context again; only the trailing instruction is new. Tools are not run:
 this pass reads the window and writes prose, it does not continue the task.
 """
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -23,6 +24,8 @@ from agentica.compression.new_window import _NOTES_HEAD_RATIO, _NOTES_INJECT_LIM
 from agentica.compression.notes import clip_head_tail
 from agentica.model.message import Message
 from agentica.utils.log import logger
+
+NOTES_AUTHOR_TIMEOUT_SECONDS = 120.0
 
 _INSTRUCTIONS = """Write the session notes file for the next context window.
 
@@ -94,7 +97,7 @@ async def author_session_notes(
 
     Returns None and leaves the file untouched when there is no notes file to
     write (SDK agent without a session), no user turn to take notes on, or
-    the request fails or comes back empty. The cut never waits on this: the
+    the bounded request fails, times out, or comes back empty. The
     ``<dropped_span>`` skim still rides along as the fallback carrier.
     """
     if not notes_path or not any(m.role == "user" for m in messages):
@@ -104,12 +107,18 @@ async def author_session_notes(
     run_tools = model.run_tools
     model.run_tools = False
     parts: List[str] = []
-    try:
-        # Streamed like every turn of the loop: the Anthropic SDK refuses a
-        # non-streaming request whose max_tokens could run past ten minutes.
+
+    async def collect() -> None:
         async for chunk in model.response_stream(request):
             if chunk.content:
                 parts.append(chunk.content)
+
+    try:
+        # Streamed like every turn of the loop: the Anthropic SDK refuses a
+        # non-streaming request whose max_tokens could run past ten minutes.
+        # Notes improve the handover but are not allowed to pin the cut when
+        # this auxiliary request stalls; the local digest is always available.
+        await asyncio.wait_for(collect(), timeout=NOTES_AUTHOR_TIMEOUT_SECONDS)
     except Exception as exc:
         logger.warning(f"Session notes not written ({type(exc).__name__}: {exc}); the digest carries the window")
         return None

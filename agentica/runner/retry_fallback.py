@@ -20,7 +20,10 @@ from typing import (
 )
 
 
-from agentica.agent.history_filter import make_history_portable, to_portable_history
+from agentica.agent.history_filter import (
+    make_history_portable,
+    to_portable_history_with_input_ids,
+)
 from agentica.compression.evict import is_irreducible_prompt_too_long
 from agentica.utils.log import logger
 from agentica.model.base import Model
@@ -463,9 +466,13 @@ class RetryMixin:
                             current.id,
                         )
                         make_history_portable(agent.working_memory)
-                        messages[:] = to_portable_history(messages)
+                        portable, portable_input_ids = to_portable_history_with_input_ids(
+                            messages,
+                            state.input_message_ids,
+                        )
+                        messages[:] = portable
                         state.context_collapsed = True
-                        state.input_message_ids.update(id(message) for message in messages)
+                        state.input_message_ids = portable_input_ids
                         # A second failure must trim against the rebuilt list.
                         message_checkpoint = len(messages)
                         continue

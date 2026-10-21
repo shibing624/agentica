@@ -889,10 +889,6 @@ class LoopMixin:
                 # 1. Setup
                 agent.update_model()
                 agent.run_response.model = agent.model.id if agent.model is not None else None
-                # The model is final now: if /model or /config set left it on a
-                # model other than the one the history was written for, the
-                # history is carried over here, once, right before it is sent.
-                ensure_history_portable(agent)
                 if agent.context is not None:
                     agent._resolve_context()
 
@@ -954,6 +950,13 @@ class LoopMixin:
                         guardrails=agent.input_guardrails,
                         context=agent.context,
                     )
+
+                # Only the normal message path replays working_memory. Wait
+                # until guardrails pass so a blocked run, or an SDK call with
+                # an explicit messages= transcript, cannot irreversibly strip
+                # signed history that was never sent to the selected model.
+                if messages is None and agent.add_history_to_context:
+                    ensure_history_portable(agent)
 
                 # 3. Prepare messages
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(

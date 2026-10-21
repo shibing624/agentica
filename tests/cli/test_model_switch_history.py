@@ -5,11 +5,13 @@ import os
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 os.environ.setdefault("ANTHROPIC_API_KEY", "fake_anthropic_key")
 
+import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from agentica.agent import Agent
 from agentica.agent.history_filter import ensure_history_portable, model_identity
+from agentica.guardrails import GuardrailOutput, InputGuardrailTripwireTriggered, input_guardrail
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.anthropic.claude import Claude
@@ -174,3 +176,41 @@ def test_the_next_request_on_another_model_carries_the_history_over():
     assert "sig-claude-opus-5" not in repr([m.content for m in request])
     assert "done" in repr([m.content for m in request if m.role == "assistant"])
     assert "sig-claude-opus-5" not in _history_signatures(agent)
+
+
+def test_guardrail_block_on_another_model_does_not_claim_or_rewrite_history():
+    @input_guardrail
+    def block(ctx, agent, input_data):
+        return GuardrailOutput(output_info="blocked", tripwire_triggered=True)
+
+    opus = _opus()
+    agent = Agent(model=opus, add_history_to_context=True)
+    _run(agent, opus, "first")
+    original_identity = agent._history_model_identity
+
+    agent.model = OpenAIChat(id="gpt-5", api_key="k")
+    agent.input_guardrails = [block]
+    with pytest.raises(InputGuardrailTripwireTriggered):
+        agent.run_sync("blocked")
+
+    assert agent._history_model_identity == original_identity
+    assert _history_signatures(agent) == ["sig-claude-opus-5"]
+
+    agent.input_guardrails = []
+    request = _run(agent, _opus(), "second")
+    assert "sig-claude-opus-5" in repr([m.content for m in request])
+
+
+def test_explicit_messages_request_does_not_rewrite_unused_working_history():
+    opus = _opus()
+    agent = Agent(model=opus, add_history_to_context=True)
+    _run(agent, opus, "first")
+    original_identity = agent._history_model_identity
+
+    other = OpenAIChat(id="gpt-5", api_key="k")
+    agent.model = other
+    with patch.object(other, "response", new=_scripted(other, [])):
+        agent.run_sync(messages=[Message(role="user", content="standalone")])
+
+    assert agent._history_model_identity == original_identity
+    assert _history_signatures(agent) == ["sig-claude-opus-5"]

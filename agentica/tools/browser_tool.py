@@ -1484,6 +1484,8 @@ class BrowserTool(Tool):
         self.cache_dir = cache_dir
         self.channel = channel
         self.num_history_turns = num_history_turns
+        self._web_model_follows_agent = web_agent_model is None
+        self._planning_model_follows_agent = planning_agent_model is None
         self.web_agent_model = web_agent_model
         self.planning_agent_model = planning_agent_model
         self.output_language = output_language
@@ -1492,10 +1494,17 @@ class BrowserTool(Tool):
         self.register(self.browse_webpage)
 
     def set_agent_model(self, model: Optional[Model]) -> None:
-        if self.web_agent_model is None:
+        if self._web_model_follows_agent:
             self.web_agent_model = model
-        if self.planning_agent_model is None:
+            if self._browser is not None:
+                self._browser.web_agent_model = model
+                self._browser.browser.web_agent_model = model
+                self._browser.web_agent.model = model
+        if self._planning_model_follows_agent:
             self.planning_agent_model = model
+            if self._browser is not None:
+                self._browser.planning_agent_model = model
+                self._browser.planning_agent.model = model
 
     async def _init_browser(self):
         """Initialize the browser instance."""
