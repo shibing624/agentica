@@ -70,7 +70,16 @@ class TestReasoningContentNotSentOnWire(unittest.TestCase):
         sent = create.call_args.kwargs["messages"]
         self.assertEqual([m["role"] for m in sent], ["user", "assistant", "tool", "user"])
         self.assertIsNone(sent[1]["content"])
-        self.assertEqual(sent[1]["tool_calls"], [tool_call])
+        # The call is sent as stored, plus the placeholder signature a wire
+        # that validates signatures (Gemini) needs on a call issued elsewhere.
+        call = sent[1]["tool_calls"][0]
+        self.assertEqual(
+            {k: call[k] for k in ("id", "type", "function")},
+            {"id": "t", "type": "function", "function": {"name": "execute", "arguments": "{}"}},
+        )
+        self.assertEqual(
+            call["extra_content"], {"google": {"thought_signature": "skip_thought_signature_validator"}}
+        )
         self.assertTrue(all("reasoning_content" not in m for m in sent))
         # History itself is untouched: persistence still sees the turn.
         self.assertEqual(len(history), 6)

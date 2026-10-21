@@ -79,6 +79,11 @@ class OpenAIImageType(Enum, metaclass=OpenAIImageTypeMeta):
     GIF = "gif"
 
 
+# Gemini's signature placeholder for a tool call issued by another model
+# (https://ai.google.dev/gemini-api/docs/thought-signatures). Google documents
+# this exact value for replaying a trace whose signatures are not available.
+_FOREIGN_CALL_SIGNATURE = {"google": {"thought_signature": "skip_thought_signature_validator"}}
+
 # Request parameter names shared between request_kwargs and to_dict
 _OPENAI_REQUEST_PARAMS = [
     "store",
@@ -853,9 +858,25 @@ class OpenAIChat(Model):
         carries no information, and Venus rejects it (4000 ``message has no
         content``), which kills every later request of the session. The
         Anthropic path skips such turns the same way.
+
+        A Claude-native tool round (an in-turn fallback from a Claude primary)
+        is rewritten to this wire's shape first; see
+        ``claude_blocks_to_shared_shape``.
+
+        A tool call that carries no ``extra_content`` was issued by some other
+        model (Gemini returns its ``thought_signature`` there on every call).
+        Gemini validates the signature of the calls in the current turn and
+        rejects an unsigned one (400 "Function call is missing a
+        thought_signature"), which is exactly what an in-turn fallback to
+        Gemini replays. Such calls get Google's documented placeholder
+        signature; the other chat endpoints ignore the field (measured: Venus
+        opus / glm / deepseek / hy4, nextoken, openoneapi gpt).
         """
+        # Imported here: agentica.agent imports this module.
+        from agentica.agent.history_filter import claude_blocks_to_shared_shape
+
         formatted = []
-        for message in messages:
+        for message in claude_blocks_to_shared_shape(messages):
             wire = self.format_message(message)
             if (
                 wire["role"] == "assistant"
@@ -864,6 +885,11 @@ class OpenAIChat(Model):
                 and not _has_cacheable_content(wire["content"])
             ):
                 continue
+            if wire.get("tool_calls"):
+                wire["tool_calls"] = [
+                    call if "extra_content" in call else {**call, "extra_content": _FOREIGN_CALL_SIGNATURE}
+                    for call in wire["tool_calls"]
+                ]
             formatted.append(wire)
         return formatted
 
@@ -1265,7 +1291,14 @@ class OpenAIChat(Model):
         assistant_message.provider_data = response_message.model_dump(exclude_none=True)
         if response_message.tool_calls is not None and len(response_message.tool_calls) > 0:
             try:
-                assistant_message.tool_calls = [t.model_dump() for t in response_message.tool_calls]
+                # ``type`` is the discriminator the runner dispatches on, and
+                # ``get_function_call_for_tool_call`` requires it to be
+                # "function". Gemini leaves it null; left as-is, the call is
+                # dropped and the model is told the tool does not exist.
+                assistant_message.tool_calls = [
+                    {**dump, "type": dump.get("type") or "function"}
+                    for dump in (t.model_dump() for t in response_message.tool_calls)
+                ]
             except Exception as e:
                 logger.warning(f"Error processing tool calls: {e}")
         if hasattr(response_message, "audio") and response_message.audio is not None:
@@ -1496,14 +1529,27 @@ class OpenAIChat(Model):
         # Maps an id -> position in ``tool_calls`` for the index-less fallback.
         id_to_pos: Dict[str, int] = {}
 
-        def _new_entry(tid, ttype, fname, fargs) -> Dict[str, Any]:
+        def _passthrough(_tool_call) -> Dict[str, Any]:
+            """Provider fields a delta carries outside the OpenAI schema.
+
+            Gemini streams its ``thought_signature`` (and ``extra_content``
+            wrapping it) as extra keys on the tool-call delta. They are the
+            provider's replay state: dropping them makes Gemini reject its own
+            earlier call on the next request (400 "missing a
+            thought_signature"). Carried on the stored call so the wire gets
+            them back.
+            """
+            return {k: v for k, v in (getattr(_tool_call, "model_extra", None) or {}).items() if v is not None}
+
+        def _new_entry(tid, ttype, fname, fargs, extra) -> Dict[str, Any]:
             return {
                 "id": tid or "",
                 "type": ttype or "function",
                 "function": {"name": fname or "", "arguments": fargs or ""},
+                **extra,
             }
 
-        def _merge_into(entry: Dict[str, Any], tid, ttype, fname, fargs) -> None:
+        def _merge_into(entry: Dict[str, Any], tid, ttype, fname, fargs, extra) -> None:
             if fname:
                 entry["function"]["name"] += fname
             if fargs:
@@ -1512,6 +1558,7 @@ class OpenAIChat(Model):
                 entry["id"] = tid
             if ttype:
                 entry["type"] = ttype
+            entry.update(extra)
 
         for _tool_call in tool_calls_data:
             _index = getattr(_tool_call, "index", None)
@@ -1527,9 +1574,14 @@ class OpenAIChat(Model):
                     tool_calls.extend([{}] * (_index - len(tool_calls) + 1))
                 entry = tool_calls[_index]
                 if not entry:
-                    tool_calls[_index] = _new_entry(_tool_call_id, _tool_call_type, _function_name, _function_arguments)
+                    tool_calls[_index] = _new_entry(
+                        _tool_call_id, _tool_call_type, _function_name, _function_arguments, _passthrough(_tool_call)
+                    )
                 else:
-                    _merge_into(entry, _tool_call_id, _tool_call_type, _function_name, _function_arguments)
+                    _merge_into(
+                        entry, _tool_call_id, _tool_call_type, _function_name, _function_arguments,
+                        _passthrough(_tool_call),
+                    )
                 continue
 
             # ── index-less fallback (loose proxy) ──
@@ -1542,16 +1594,24 @@ class OpenAIChat(Model):
                     _tool_call_type,
                     _function_name,
                     _function_arguments,
+                    _passthrough(_tool_call),
                 )
             elif _tool_call_id:
-                tool_calls.append(_new_entry(_tool_call_id, _tool_call_type, _function_name, _function_arguments))
+                tool_calls.append(_new_entry(
+                    _tool_call_id, _tool_call_type, _function_name, _function_arguments, _passthrough(_tool_call)
+                ))
                 id_to_pos[_tool_call_id] = len(tool_calls) - 1
             elif tool_calls:
                 # id-less continuation of the current (last) call.
-                _merge_into(tool_calls[-1], _tool_call_id, _tool_call_type, _function_name, _function_arguments)
+                _merge_into(
+                    tool_calls[-1], _tool_call_id, _tool_call_type, _function_name, _function_arguments,
+                    _passthrough(_tool_call),
+                )
             else:
                 # First fragment has no id and no index — open a fresh call.
-                tool_calls.append(_new_entry(_tool_call_id, _tool_call_type, _function_name, _function_arguments))
+                tool_calls.append(_new_entry(
+                    _tool_call_id, _tool_call_type, _function_name, _function_arguments, _passthrough(_tool_call)
+                ))
 
         # Drop any empty slots left by sparse positional indices.
         return [tc for tc in tool_calls if tc]

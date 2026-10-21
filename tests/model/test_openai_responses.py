@@ -283,7 +283,7 @@ def test_provider_data_keeps_only_replayable_parts_of_the_response():
     assistant = messages[-1]
 
     # Allowlist, not a `tools` blacklist: a future fat echo key cannot creep in.
-    assert set(assistant.provider_data) == {"object", "output"}
+    assert set(assistant.provider_data) == {"object", "output", "replay_origin"}
     assert assistant.provider_data["object"] == "response"
 
     # ... and what survives is still enough to rebuild the turn for the provider.
@@ -518,3 +518,60 @@ def test_profile_validation_accepts_responses_reasoning():
     profile.pop("reasoning_effort")
     profile.pop("wire_api")
     assert "reasoning requires wire_api: responses." in _validate_profile(profile)
+
+
+def test_replay_origin_is_the_model_and_endpoint_that_produced_the_output():
+    """Encrypted reasoning is replayable only by its issuer.
+
+    Two Responses profiles (same wire, different model and endpoint) can both
+    be active in one session: ``/model`` between them, or a resume after a
+    profile change. Replaying one's raw output to the other was a live 400 —
+    "The encrypted content for item rs_... could not be verified" — so the
+    raw output is replayed only when the origin matches.
+    """
+    from agentica.model.openai.responses import OpenAIResponses
+    from agentica.model.metrics import Metrics
+
+    def _model(base_url):
+        return OpenAIResponses(id="gpt-6.1-sol", api_key="fake", base_url=base_url)
+
+    first, second = _model("https://a.example/v1"), _model("https://b.example/v1")
+    response = _response([
+        {
+            "id": "rs_1",
+            "type": "reasoning",
+            "encrypted_content": "encrypted-reasoning-state",
+            "summary": [{"type": "summary_text", "text": "Need the probe tool."}],
+            "status": "completed",
+        },
+        {
+            "id": "fc_1",
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "probe_tool",
+            "arguments": "{}",
+            "status": "completed",
+        },
+    ])
+    assistant = first._assistant_message(response, Metrics())
+    stored = [Message(role="user", content="Call the probe tool."), assistant,
+              Message(role="tool", tool_call_id="call_1", content="probe-ok")]
+
+    same = first.format_messages([m.model_copy(deep=True) for m in stored])
+    assert [item.get("type") for item in same[1:]] == ["reasoning", "function_call", "function_call_output"]
+
+    other_model = second.format_messages([m.model_copy(deep=True) for m in stored])
+    assert [item.get("type") for item in other_model[1:]] == ["function_call", "function_call_output"], (
+        "a different model/endpoint must rebuild the turn from content + tool_calls, "
+        "not replay reasoning it cannot decrypt"
+    )
+
+    renamed = _model("https://a.example/v1")
+    renamed.id = "gpt-5.6-terra"
+    assert [i.get("type") for i in renamed.format_messages([m.model_copy(deep=True) for m in stored])[1:]] == [
+        "function_call", "function_call_output",
+    ]
+
+    legacy = [m.model_copy(deep=True) for m in stored]
+    del legacy[1].provider_data["replay_origin"]
+    assert [i.get("type") for i in first.format_messages(legacy)[1:]] == ["function_call", "function_call_output"]

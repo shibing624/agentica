@@ -644,3 +644,80 @@ class TestStripRecoveryNeverEndsOnAssistant(unittest.TestCase):
         PersistMixin._sanitize_tool_history_after_error(agent, messages)
         self.assertEqual([(m.role, m.content) for m in messages],
                          [("system", "sys"), ("user", "do all")])
+
+
+class TestInTurnFallbackFromClaudeKeepsTheToolRound(unittest.TestCase):
+    """Claude primary fails after a tool round; the OpenAI fallback finishes the turn.
+
+    The fallback receives Claude's in-flight array. It must get this turn's
+    tool round in its own wire shape — not Claude's blocks (rejected live with
+    "type must not be null" / "Invalid value: 'thinking'") and not stripped
+    (the model would have to redo the work it just did).
+    """
+
+    def test_fallback_wire_carries_the_round_in_chat_shape(self):
+        import tempfile
+        from anthropic.types import ToolUseBlock
+        from agentica.agent import Agent
+        from agentica.model.openai.chat import OpenAIChat
+        from agentica.model.response import ModelResponse
+
+        sent = []
+
+        class _Fallback(OpenAIChat):
+            async def response_stream(self, messages):
+                sent.append(self.format_messages(messages))
+                messages.append(Message(role="assistant", content="echo said hi"))
+                yield ModelResponse(content="echo said hi")
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        class _Overloaded(Exception):
+            status_code = 529
+
+        class _Primary(Claude):
+            """Round 1 answers with a tool call; round 2 refuses (provider down)."""
+
+            rounds = 0
+
+            def response_stream(self, messages):  # plain function: raises at call time
+                if _Primary.rounds:
+                    raise _Overloaded("overloaded_error")
+                _Primary.rounds += 1
+                return super().response_stream(messages)
+
+        client = _StrictAnthropicClient([
+            TestClaudeRefusedToolCallAnswersItsId._events(
+                ToolUseBlock(type="tool_use", id="toolu_live", name="echo", input={"text": "hi"}),
+                stop_reason="tool_use",
+            ),
+        ])
+        model = _Primary(id="claude-opus-4-6", api_key="fake")
+        model.client = client
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                fallback_models=[_Fallback(id="deepseek-v4.1-flash-external", api_key="fake")],
+                session_id="s-fallback", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("go"):
+                    pass
+
+            asyncio.run(_drive())
+
+        self.assertEqual(agent.run_response.content, "echo said hi")
+        self.assertTrue(sent, "the fallback must have been called")
+        wire = sent[0]
+        native = [
+            b["type"] for m in wire if isinstance(m.get("content"), list) for b in m["content"]
+            if isinstance(b, dict) and b.get("type") in {"tool_use", "tool_result", "thinking"}
+        ]
+        self.assertEqual(native, [])
+        assistant = next(m for m in wire if m["role"] == "assistant")
+        self.assertEqual(assistant["tool_calls"][0]["id"], "toolu_live")
+        result = next(m for m in wire if m["role"] == "tool")
+        self.assertEqual((result["tool_call_id"], result["content"]), ("toolu_live", "echo:hi"))

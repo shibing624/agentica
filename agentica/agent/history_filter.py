@@ -322,6 +322,48 @@ def make_history_portable(working_memory) -> None:
         working_memory.messages = to_portable_history(working_memory.messages)
 
 
+_CLAUDE_NATIVE_BLOCKS = frozenset({"tool_use", "tool_result", "thinking", "redacted_thinking"})
+
+
+def _carries_claude_blocks(message: Message) -> bool:
+    return isinstance(message.content, list) and any(
+        isinstance(b, dict) and b.get("type") in _CLAUDE_NATIVE_BLOCKS for b in message.content
+    )
+
+
+def claude_blocks_to_shared_shape(messages: List[Message]) -> List[Message]:
+    """Request-side copy of ``messages`` with Claude's native blocks rewritten.
+
+    Claude records a live tool round as ``tool_use`` / ``thinking`` blocks on
+    the assistant and ``tool_result`` blocks on a user turn. ``/model`` and
+    resume convert history ahead of time, but an in-turn fallback does not: a
+    Claude primary that fails after a tool round hands that very array to the
+    fallback model, and the OpenAI wires reject the blocks (Venus chat: "type
+    must not be null"; Responses: "Invalid value: 'thinking'").
+
+    Only messages that carry such blocks are rebuilt (``to_portable_history``
+    per message); every other message is passed through as the same object, so
+    the wire's own replay state — Responses ``provider_data``, Chat
+    ``reasoning_content`` handling — is untouched. Returns ``messages`` itself
+    when nothing needs rewriting.
+    """
+    if not any(_carries_claude_blocks(m) for m in messages):
+        return messages
+    shared: List[Message] = []
+    answered: set = set()
+    for message in messages:
+        rewritten = to_portable_history([message]) if _carries_claude_blocks(message) else [message]
+        for m in rewritten:
+            if m.role == "tool":
+                # The runner can hold the same result twice (a role="tool"
+                # pad and the native block); the wire takes one per call.
+                if m.tool_call_id in answered:
+                    continue
+                answered.add(m.tool_call_id)
+            shared.append(m)
+    return shared
+
+
 def _matches_any(name: Optional[str], patterns: List[str]) -> bool:
     if not name:
         return False

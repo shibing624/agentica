@@ -72,6 +72,112 @@ def _claude_native_round() -> list:
     ]
 
 
+class TestOpenAIWiresAcceptAClaudeNativeRound(unittest.TestCase):
+    """An in-turn fallback from a Claude primary hands over Claude's own array.
+
+    ``/model`` and resume convert history ahead of time; a fallback inside a
+    tool loop does not, so the very blocks Claude needs reached the OpenAI
+    wires. Live: Venus chat answered 400 "type must not be null", Responses
+    400 "Invalid value: 'thinking'", and the run died mid-turn.
+    """
+
+    def setUp(self):
+        self.chat = OpenAIChat(id="deepseek-v4.1-flash-external", api_key="fake")
+        self.responses = OpenAIResponses(id="gpt-6.1-sol", api_key="fake")
+
+    def _chat_wire(self, messages):
+        return self.chat.format_messages([m.model_copy(deep=True) for m in messages])
+
+    def _responses_wire(self, messages):
+        return self.responses.format_messages([m.model_copy(deep=True) for m in messages])
+
+    def test_chat_wire_gets_flat_tool_calls_and_role_tool_results(self):
+        wire = self._chat_wire(_claude_native_round() + [Message(role="user", content="and the port?")])
+        blocks = [
+            b for m in wire if isinstance(m.get("content"), list) for b in m["content"]
+            if isinstance(b, dict)
+        ]
+        self.assertEqual(
+            [b["type"] for b in blocks if b["type"] in {"thinking", "tool_use", "tool_result"}], [],
+            "no Claude-native block may reach the chat wire",
+        )
+        assistant = next(m for m in wire if m["role"] == "assistant" and m.get("tool_calls"))
+        self.assertEqual(assistant["content"], "checking")
+        self.assertEqual(assistant["tool_calls"][0]["id"], "tu_1")
+        self.assertEqual(assistant["tool_calls"][0]["function"]["name"], "read_file")
+        result = next(m for m in wire if m["role"] == "tool")
+        self.assertEqual((result["tool_call_id"], result["content"]), ("tu_1", "PORT = 8080"))
+
+    def test_responses_wire_emits_function_call_items(self):
+        wire = self._responses_wire(_claude_native_round() + [Message(role="user", content="and the port?")])
+        self.assertEqual(
+            [item["type"] for item in wire if item.get("type")],
+            ["function_call", "function_call_output"],
+            "the Responses wire takes function_call items, not tool_use blocks",
+        )
+        call = next(i for i in wire if i.get("type") == "function_call")
+        output = next(i for i in wire if i.get("type") == "function_call_output")
+        self.assertEqual((call["call_id"], call["name"]), ("tu_1", "read_file"))
+        self.assertEqual((output["call_id"], output["output"]), ("tu_1", "PORT = 8080"))
+
+    def test_a_history_without_claude_blocks_is_passed_through_as_the_same_list(self):
+        from agentica.agent.history_filter import claude_blocks_to_shared_shape
+
+        messages = _replayed_history()
+        self.assertIs(claude_blocks_to_shared_shape(messages), messages)
+
+    def test_only_the_claude_messages_are_rebuilt(self):
+        from agentica.agent.history_filter import claude_blocks_to_shared_shape
+
+        responses_turn = Message(
+            role="assistant", content="earlier",
+            provider_data={"object": "response", "output": [], "replay_origin": {"model": "x"}},
+        )
+        messages = [Message(role="user", content="q0"), responses_turn] + _claude_native_round()
+        shared = claude_blocks_to_shared_shape(messages)
+        self.assertIs(shared[1], responses_turn, "replay state of other turns must survive")
+        self.assertEqual([m.role for m in shared[2:]], ["user", "assistant", "tool", "assistant"])
+
+    def test_duplicate_tool_results_are_sent_once(self):
+        messages = _claude_native_round()
+        messages.insert(3, Message(role="tool", tool_call_id="tu_1", content="PORT = 8080"))
+        wire = self._chat_wire(messages)
+        self.assertEqual([m["role"] for m in wire].count("tool"), 1)
+
+
+class TestForeignToolCallsCarryGeminiPlaceholderSignature(unittest.TestCase):
+    """Gemini rejects an unsigned call in the current turn.
+
+    Live (venus gemini-3.7-flash): a Claude primary that fails after its tool
+    round hands Gemini a call with no ``thought_signature`` and Gemini answers
+    400 "Function call is missing a thought_signature"; the placeholder makes
+    the same request pass. Gemini's own calls keep their real signature.
+    """
+
+    def setUp(self):
+        self.chat = OpenAIChat(id="gemini-3.7-flash", api_key="fake")
+
+    def test_unsigned_call_gets_the_documented_placeholder(self):
+        wire = self.chat.format_messages(_replayed_history())
+        call = next(m for m in wire if m.get("tool_calls"))["tool_calls"][0]
+        self.assertEqual(
+            call["extra_content"], {"google": {"thought_signature": "skip_thought_signature_validator"}}
+        )
+
+    def test_geminis_own_signature_is_sent_unchanged(self):
+        own = {"google": {"thought_signature": "AY89a1-real"}}
+        messages = _replayed_history()
+        messages[1].tool_calls[0]["extra_content"] = own
+        wire = self.chat.format_messages(messages)
+        call = next(m for m in wire if m.get("tool_calls"))["tool_calls"][0]
+        self.assertEqual(call["extra_content"], own)
+
+    def test_the_stored_message_is_not_rewritten(self):
+        messages = _replayed_history()
+        self.chat.format_messages(messages)
+        self.assertNotIn("extra_content", messages[1].tool_calls[0], "history on disk must stay as written")
+
+
 class TestAnthropicFormatsReplayedHistory(unittest.TestCase):
     def setUp(self):
         self.model = Claude(api_key="fake_anthropic_key")

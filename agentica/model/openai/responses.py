@@ -150,7 +150,16 @@ class OpenAIResponses(OpenAIChat):
     def _assistant_items(self, message: Message) -> List[Dict[str, Any]]:
         provider_data = message.provider_data
         raw_output = []
-        if isinstance(provider_data, dict) and provider_data.get("object") == "response":
+        # Raw output carries encrypted reasoning items only the issuing model
+        # and endpoint can decrypt; any other Responses model rejects the
+        # whole request ("encrypted content ... could not be verified"). The
+        # same history replays elsewhere from content + tool_calls alone.
+        # Entries written before the origin was stamped are treated as foreign.
+        if (
+            isinstance(provider_data, dict)
+            and provider_data.get("object") == "response"
+            and provider_data.get("replay_origin") == self._checkpoint_identity()
+        ):
             raw_output = provider_data.get("output") or []
 
         current_calls = {call["id"]: call for call in (message.tool_calls or [])}
@@ -251,6 +260,12 @@ class OpenAIResponses(OpenAIChat):
             )
 
     def format_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
+        # A Claude-native tool round (in-turn fallback from a Claude primary)
+        # in this wire's shape first. Imported here: agentica.agent imports
+        # this module.
+        from agentica.agent.history_filter import claude_blocks_to_shared_shape
+
+        messages = claude_blocks_to_shared_shape(messages)
         formatted: List[Dict[str, Any]] = []
         checkpoint_index = -1
         checkpoint: Optional[Dict[str, Any]] = None
@@ -481,8 +496,7 @@ class OpenAIResponses(OpenAIChat):
             completion_tokens_details=response_usage.output_tokens_details,
         )
 
-    @staticmethod
-    def _replay_provider_data(response: Any) -> Dict[str, Any]:
+    def _replay_provider_data(self, response: Any) -> Dict[str, Any]:
         """Keep only the parts of the Response that replay actually reads back.
 
         A full ``response.model_dump()`` is mostly an echo of the REQUEST, and
@@ -500,8 +514,13 @@ class OpenAIResponses(OpenAIChat):
 
         So this is an allowlist, not a ``tools`` blacklist: a future fat
         request-echo key cannot silently reintroduce the bloat.
+
+        ``replay_origin`` records who produced the output, so
+        ``_assistant_items`` replays it only to that same model and endpoint.
         """
-        return response.model_dump(exclude_none=True, include={"object", "output"})
+        data = response.model_dump(exclude_none=True, include={"object", "output"})
+        data["replay_origin"] = self._checkpoint_identity()
+        return data
 
     def _assistant_message(self, response: Any, metrics: Metrics) -> Message:
         output = response.output
