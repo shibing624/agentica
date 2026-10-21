@@ -1087,15 +1087,34 @@ class Claude(Model):
         Returns:
             List[FunctionCall]: A list of function calls to run.
         """
+        # A call refused before it runs (unknown tool, undecodable or evicted
+        # arguments) still answers its tool_use id. As plain user text it left
+        # the tool_use orphaned: Anthropic rejected the next request, and the
+        # model never saw why the call failed. ``format_messages`` folds the
+        # role="tool" error into the round's tool_result message.
         function_calls_to_run: List[FunctionCall] = []
         if assistant_message.tool_calls is not None:
             for tool_call in assistant_message.tool_calls:
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
-                    messages.append(Message(role="user", content="Could not find function to call."))
+                    messages.append(
+                        Message(
+                            role="tool",
+                            tool_call_id=tool_call["id"],
+                            content="Could not find function to call.",
+                            tool_call_error=True,
+                        )
+                    )
                     continue
                 if _function_call.error is not None:
-                    messages.append(Message(role="user", content=_function_call.error))
+                    messages.append(
+                        Message(
+                            role="tool",
+                            tool_call_id=tool_call["id"],
+                            content=_function_call.error,
+                            tool_call_error=True,
+                        )
+                    )
                     continue
                 function_calls_to_run.append(_function_call)
         return function_calls_to_run
@@ -1132,6 +1151,10 @@ class Claude(Model):
         function_call_results = [
             m for m in function_call_results if not getattr(m, "_tool_media", False)
         ]
+        # Calls refused before running already answered their id with a
+        # role="tool" error (get_function_calls_to_run); padding them again
+        # would replace the real reason with "interrupted".
+        refused = {m.tool_call_id for m in messages if m.role == "tool"}
 
         by_id = {
             m.tool_call_id: m
@@ -1144,7 +1167,7 @@ class Claude(Model):
             m for m in function_call_results if not getattr(m, "tool_call_id", None)
         ]
 
-        expected = list(tool_ids) or list(by_id.keys())
+        expected = [i for i in tool_ids if i not in refused] or list(by_id.keys())
         fc_responses: List = []
         for _tool_use_id in expected:
             result = by_id.pop(_tool_use_id, None)
@@ -1191,26 +1214,12 @@ class Claude(Model):
         """Parse tool calls for Anthropic format.
 
         Anthropic tool_calls include 'id' (tool_use_id) which is needed for result formatting.
-        Errors are appended as role="user" messages (Anthropic convention).
+        Calls refused before running are answered with role="tool" errors.
         """
-        function_calls_to_run: List[FunctionCall] = []
-        tool_ids: List[str] = []
         if assistant_message.tool_calls is None or len(assistant_message.tool_calls) == 0:
-            return function_calls_to_run, {"tool_ids": tool_ids}
-
-        for tool_call in assistant_message.tool_calls:
-            _tool_use_id = tool_call.get("id", "")
-            tool_ids.append(_tool_use_id)
-            _function_call = get_function_call_for_tool_call(tool_call, self.functions)
-            if _function_call is None:
-                messages.append(Message(role="user", content="Could not find function to call."))
-                continue
-            if _function_call.error is not None:
-                messages.append(Message(role="user", content=_function_call.error))
-                continue
-            function_calls_to_run.append(_function_call)
-
-        return function_calls_to_run, {"tool_ids": tool_ids}
+            return [], {"tool_ids": []}
+        tool_ids = [tool_call["id"] for tool_call in assistant_message.tool_calls]
+        return self.get_function_calls_to_run(assistant_message, messages), {"tool_ids": tool_ids}
 
     def format_tool_results(
         self,

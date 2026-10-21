@@ -464,3 +464,183 @@ class TestPaddingHoldsOnEveryProvider(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _StrictAnthropicClient:
+    """Fake ``client.messages`` that validates the request the way Anthropic does.
+
+    Records every request and raises the provider's shape errors instead of
+    answering, so a test fails on exactly what the live API rejected.
+    """
+
+    def __init__(self, rounds):
+        self._rounds = iter(rounds)
+        self.requests = []
+        self.messages = self
+
+    @staticmethod
+    def shape_errors(chat_messages):
+        errors = []
+        if chat_messages[-1]["role"] != "user":
+            errors.append("This model does not support assistant message prefill.")
+        for i, message in enumerate(chat_messages):
+            if message["role"] != "assistant":
+                continue
+            ids = {
+                b["id"] for b in message["content"]
+                if isinstance(b, dict) and b.get("type") == "tool_use"
+            }
+            following = chat_messages[i + 1]["content"] if i + 1 < len(chat_messages) else []
+            answered = {
+                b.get("tool_use_id") for b in following
+                if isinstance(b, dict) and b.get("type") == "tool_result"
+            }
+            if ids - answered:
+                errors.append(
+                    "`tool_use` ids were found without `tool_result` blocks "
+                    f"immediately after: {sorted(ids - answered)}"
+                )
+        return errors
+
+    def stream(self, **kwargs):
+        self.requests.append(kwargs["messages"])
+        errors = self.shape_errors(kwargs["messages"])
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        events = list(next(self._rounds))
+
+        class _Mgr:
+            async def __aenter__(self_inner):
+                class _Iter:
+                    def __aiter__(self_it):
+                        return self_it
+
+                    async def __anext__(self_it):
+                        if not events:
+                            raise StopAsyncIteration
+                        return events.pop(0)
+
+                return _Iter()
+
+            async def __aexit__(self_inner, *_a):
+                return None
+
+        return _Mgr()
+
+
+class TestClaudeRefusedToolCallAnswersItsId(unittest.TestCase):
+    """A call refused before it runs must answer its own tool_use id.
+
+    Live failure (session 692116c3, 2026-10-21): the model echoed an evicted
+    ``apply_patch`` payload, the call was refused, and Claude appended the
+    refusal as plain user text. The tool_use was left without a tool_result,
+    Anthropic rejected the next request, and the strip-and-retry recovery
+    then sent a request ending in an assistant turn — the run died on
+    "assistant message prefill".
+    """
+
+    @staticmethod
+    def _events(*blocks, stop_reason):
+        from unittest.mock import MagicMock
+        from anthropic.types import RawContentBlockDeltaEvent, TextBlock, TextDelta
+        from anthropic.lib.streaming._types import (
+            ParsedContentBlockStopEvent,
+            ParsedMessageStopEvent,
+        )
+
+        msg = MagicMock()
+        msg.usage = MagicMock(
+            input_tokens=1, output_tokens=1,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
+        )
+        msg.stop_reason = stop_reason
+        events = []
+        for block in blocks:
+            if isinstance(block, TextBlock):
+                events.append(RawContentBlockDeltaEvent.model_construct(
+                    type="content_block_delta", index=0,
+                    delta=TextDelta(type="text_delta", text=block.text),
+                ))
+            events.append(ParsedContentBlockStopEvent.model_construct(
+                type="content_block_stop", index=0, content_block=block
+            ))
+        return events + [ParsedMessageStopEvent.model_construct(type="message_stop", message=msg)]
+
+    def _run(self, tool_uses):
+        import json
+        import tempfile
+        from anthropic.types import TextBlock, ToolUseBlock
+        from agentica.agent import Agent
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        client = _StrictAnthropicClient([
+            self._events(
+                *[ToolUseBlock(type="tool_use", id=i, name=n, input=a) for i, n, a in tool_uses],
+                stop_reason="tool_use",
+            ),
+            self._events(TextBlock(type="text", text="done"), stop_reason="end_turn"),
+        ])
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.client = client
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                session_id="s-refused", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("go"):
+                    pass
+
+            asyncio.run(_drive())
+        self.assertEqual(agent.run_response.content, "done")
+        for request in client.requests:
+            self.assertEqual(client.shape_errors(request), [], json.dumps(request, default=str))
+        self.assertEqual(len(client.requests), 2, "no recovery retry may be needed")
+        return client.requests[1]
+
+    def test_evicted_payload_is_answered_with_the_refusal(self):
+        from agentica.compression.tool_call_args import omitted_tool_arg
+
+        second = self._run([("toolu_evicted", "echo", {"text": omitted_tool_arg(900)})])
+        self.assertEqual([m["role"] for m in second], ["user", "assistant", "user"])
+        (result,) = second[2]["content"]
+        self.assertEqual(result["type"], "tool_result")
+        self.assertEqual(result["tool_use_id"], "toolu_evicted")
+        self.assertTrue(result["is_error"])
+        self.assertIn("were dropped from context", result["content"])
+
+    def test_refused_and_executed_calls_share_one_result_message(self):
+        second = self._run([
+            ("toolu_unknown", "no_such_tool", {}),
+            ("toolu_echo", "echo", {"text": "hi"}),
+        ])
+        self.assertEqual([m["role"] for m in second], ["user", "assistant", "user"])
+        results = {b["tool_use_id"]: b for b in second[2]["content"]}
+        self.assertEqual(results["toolu_unknown"]["content"], "Could not find function to call.")
+        self.assertTrue(results["toolu_unknown"]["is_error"])
+        self.assertEqual(results["toolu_echo"]["content"], "echo:hi")
+
+
+class TestStripRecoveryNeverEndsOnAssistant(unittest.TestCase):
+    def test_turn_ending_in_a_tool_round_restarts_from_the_user(self):
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(working_memory=SimpleNamespace(runs=[]))
+        messages = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="do all"),
+            Message(
+                role="assistant",
+                content="patching now",
+                tool_calls=[{"id": "t1", "type": "function",
+                             "function": {"name": "apply_patch", "arguments": "{}"}}],
+            ),
+            Message(role="tool", tool_call_id="t1", content="ok"),
+        ]
+        PersistMixin._sanitize_tool_history_after_error(agent, messages)
+        self.assertEqual([(m.role, m.content) for m in messages],
+                         [("system", "sys"), ("user", "do all")])

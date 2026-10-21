@@ -463,6 +463,12 @@ class PersistMixin:
             if run.response and run.response.messages:
                 run.response.messages = PersistMixin._strip_tool_artifacts(run.response.messages, drop_system=True)
         messages[:] = PersistMixin._strip_tool_artifacts(messages)
+        # The in-flight turn ended in a tool round; without it, its narration
+        # is the last message, and providers reject a request ending in an
+        # assistant turn ("assistant message prefill"). The retry restarts
+        # the turn from the user's message.
+        while messages and messages[-1].role == "assistant":
+            messages.pop()
 
     def save_run_response_to_file(
         self,
