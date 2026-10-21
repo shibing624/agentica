@@ -198,6 +198,7 @@ class Ollama(Model):
 
             if metrics.input_tokens is not None:
                 assistant_message.metrics["input_tokens"] = metrics.input_tokens
+                assistant_message.metrics["context_tokens"] = metrics.input_tokens
                 self.metrics["input_tokens"] = self.metrics.get("input_tokens", 0) + metrics.input_tokens
             if metrics.output_tokens is not None:
                 assistant_message.metrics["output_tokens"] = metrics.output_tokens

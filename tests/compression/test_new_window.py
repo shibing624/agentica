@@ -56,6 +56,28 @@ class TestNotesExcerpt(unittest.TestCase):
         self.assertIn("Goal: finish auth", excerpt)
         self.assertIn("Pending: 订正行号", excerpt)
 
+    def test_long_file_spends_most_of_the_cap_on_the_tail(self):
+        """An 8000-char clip of a 47KB append-only file must carry its newest section.
+
+        Head-heavy 2/3 of 4000 left ~1.3K for the tail: less than one log
+        entry, so every rollover in production opened with a full
+        ``read_file(notes.md)``.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "s.notes.md")
+            body = "## Old experiment log\n" + ("- 27B DI35 sample done: 56.15\n" * 1500)
+            body += "## Recovered current task (2026-10-20 14:35)\n" + (
+                "- v0.4.0 4B 发布包已在 Line 19868 准备好，等待复核\n" * 30
+            )
+            Path(path).write_text("Goal: finish auth\n" + body, encoding="utf-8")
+            excerpt = notes_excerpt(path)
+        self.assertIn("Goal: finish auth", excerpt)
+        self.assertIn("Recovered current task", excerpt)
+        self.assertIn("等待复核", excerpt)
+        # 70% of the budget, not the 1/3 the turn-shaped clip gave.
+        tail = excerpt.rsplit("…[truncated]…", 1)[1]
+        self.assertGreater(len(tail), 4000)
+
 
 class TestDroppedSpanExcerpt(unittest.TestCase):
     def test_long_digest_keeps_the_newest_turns(self):

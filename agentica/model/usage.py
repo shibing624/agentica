@@ -74,6 +74,22 @@ def cache_hit_percent(prompt_tokens: int, cache_read_tokens: int) -> Optional[fl
     return rounded
 
 
+def record_context_tokens(
+    message: Any,
+    prompt_tokens: int,
+    prompt_details: Optional[Dict[str, Any]],
+) -> None:
+    """Store the provider-counted size of the request this message answers.
+
+    ``metrics["context_tokens"]`` is the whole prompt — fresh, cache-read and
+    cache-write together — whichever convention the provider reports in.
+    Context compression calibrates its local estimate against it
+    (``agentica/compression/calibration.py``).
+    """
+    fresh, read, write = split_prompt_usage(prompt_tokens, prompt_details)
+    message.metrics["context_tokens"] = fresh + read + write
+
+
 class TokenDetails(BaseModel):
     """Detailed token breakdown (cached, reasoning, etc.)."""
     cached_tokens: int = 0

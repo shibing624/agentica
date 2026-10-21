@@ -19,6 +19,7 @@ so that chrome is not a second hit. Digest lines have no timestamp
 ``load()``. ``search_session`` may still hit model-authored notes.
 """
 import json
+from fractions import Fraction
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -36,7 +37,7 @@ _TOOL_ARGS_LINE = 200
 _TOOL_RESULT_LINE = 300
 _MAX_TURNS = 40
 _MAX_TOOLS = 20
-# Stay under notes_excerpt's 4000-char inject cap.
+# Stay under dropped_span_excerpt's 4000-char inject cap.
 _DIGEST_BUDGET = 3600
 
 # ``<dropped_span>`` is injected by us and carries no user prose: ``strip_window_preamble``
@@ -124,7 +125,12 @@ def _clip(text: str, head: int, tail: int, marker: str = "\n…\n") -> str:
     return text[:head].rstrip() + marker + text[-tail:].lstrip()
 
 
-def clip_head_tail(text: str, limit: int, marker: str = "\n…\n") -> str:
+def clip_head_tail(
+    text: str,
+    limit: int,
+    marker: str = "\n…\n",
+    head_ratio: Fraction = Fraction(2, 3),
+) -> str:
     """Keep both ends of an over-long block. The tail carries the ask.
 
     Head-only clipping lost it: an assistant turn that reasoned out loud and
@@ -132,11 +138,15 @@ def clip_head_tail(text: str, limit: int, marker: str = "\n…\n") -> str:
     with no question, so the user's "ok" had no visible antecedent. Tool
     results already kept both ends (``_clip``); turns did not.
 
+    ``head_ratio`` lets a caller weight the split. A turn reads front to back,
+    so it keeps the 2/3 default; an append-only notes file is written newest
+    last, so ``notes_excerpt`` asks for the mirror of it.
+
     The marker is charged against ``limit``, so the result is never longer
     than the caller asked for.
     """
     body = max(2, limit - len(marker))
-    head = max(1, body * 2 // 3)
+    head = min(body - 1, max(1, int(body * head_ratio)))
     return _clip(text, head, max(1, body - head), marker)
 
 
@@ -170,15 +180,26 @@ def _tool_result_line(name: str, text: str) -> str:
     return f"{label} result: {_one_line(text, _TOOL_RESULT_LINE)}"
 
 
-def _collect(messages: Sequence[Message]) -> Tuple[List[Tuple[bool, str]], List[str]]:
-    """Return ``(turns, tools)`` where each turn is ``(is_narration, line)``.
+# Eviction rank of a digest turn: lower ranks leave first under budget.
+_RANK_NARRATION = 0
+_RANK_AUTOMATED = 1
+_RANK_KEEP = 2
+
+
+def _collect(messages: Sequence[Message]) -> Tuple[List[Tuple[int, str]], List[str]]:
+    """Return ``(turns, tools)`` where each turn is ``(rank, line)``.
 
     Assistant messages that carry ``tool_calls`` are intermediate narration
     inside a tool loop; assistant messages without ``tool_calls`` are the
     turn's final answer. Under budget pressure narration is dropped first so
     user questions and final answers survive across long tool-heavy turns.
+
+    ``automated`` user turns (job reports, peer messages, background-command
+    completions) go next. One production window took 30+ background-eval
+    reports and only a dozen human asks; ranked equal, the reports pushed the
+    asks out of the span.
     """
-    turns: List[Tuple[bool, str]] = []
+    turns: List[Tuple[int, str]] = []
     tools: List[str] = []
     for message in messages:
         if message.role == "system":
@@ -201,18 +222,19 @@ def _collect(messages: Sequence[Message]) -> Tuple[List[Tuple[bool, str]], List[
             # Carried rows ride in front of this turn's own prose, keeping the
             # span chronological: earlier windows, then this row's question.
             for carried in carried_rows(raw):
-                turns.append((False, carried))
+                turns.append((_RANK_KEEP, carried))
             text = strip_window_preamble(raw)
             if not text.strip() or _is_pad(text):
                 continue
-            turns.append((False, _line(f"user: {_one_line(text, _USER_LINE)}")))
+            rank = _RANK_AUTOMATED if message.automated else _RANK_KEEP
+            turns.append((rank, _line(f"user: {_one_line(text, _USER_LINE)}")))
             continue
         if message.role == "assistant":
             text = _content(message)
-            is_narration = bool(message.tool_calls)
+            rank = _RANK_NARRATION if message.tool_calls else _RANK_KEEP
             if text.strip() and not _is_pad(text):
                 turns.append((
-                    is_narration,
+                    rank,
                     _line(f"assistant: {_one_line(text, _ASSISTANT_LINE)}"),
                 ))
             for row in _tool_call_rows(message):
@@ -230,16 +252,16 @@ def _fit(lines: List[str], limit: int, budget: int) -> List[str]:
 
 
 def _fit_turns(
-    turns: List[Tuple[bool, str]],
+    turns: List[Tuple[int, str]],
     limit: int,
     budget: int,
 ) -> List[str]:
-    """Fit turns to ``limit`` and ``budget``, dropping tool-loop narration first."""
+    """Fit turns to ``limit`` and ``budget``: the oldest of the lowest rank goes first."""
     items = list(turns)
     used = sum(len(line) + 1 for _, line in items)
     while items and (len(items) > limit or used > budget):
-        nar_idx = next((i for i, (nar, _) in enumerate(items) if nar), None)
-        drop_idx = nar_idx if nar_idx is not None else 0
+        lowest = min(rank for rank, _ in items)
+        drop_idx = next(i for i, (rank, _) in enumerate(items) if rank == lowest)
         _, removed = items.pop(drop_idx)
         used -= len(removed) + 1
     return [line for _, line in items]

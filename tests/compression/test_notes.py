@@ -286,6 +286,39 @@ class TestRolloverHandover(unittest.TestCase):
         self.assertIn("最终结论：根因在 parser.py:88", digest)
         self.assertNotIn("检查第 0 个文件", digest)
 
+    def test_dropped_span_drops_job_reports_before_a_human_ask(self):
+        """30 background-eval reports must not push the person's ask out.
+
+        Production hit this: one window took 30+ ``[Background terminal #N
+        finished]`` turns (``automated``) plus a dozen human asks, and ranked
+        equal under the budget cap the asks went first.
+        """
+        msgs = [Message(role="user", content="先跑完这批评测，再决定要不要改 lr")]
+        for i in range(45):
+            msgs.append(Message(
+                role="user", content=f"[Background terminal #{i} finished] exit 0", automated=True,
+            ))
+        msgs.append(Message(role="user", content="评测结果出来后把 lr 从 2e-5 改成 1e-5"))
+        digest = compose_transcript_digest(msgs)
+        self.assertIn("先跑完这批评测", digest)
+        self.assertIn("把 lr 从 2e-5 改成 1e-5", digest)
+        self.assertNotIn("Background terminal #0 finished", digest)
+
+    def test_narration_still_leaves_before_automated_reports(self):
+        """Rank order is narration < automated < human, not "drop anything odd"."""
+        msgs = [Message(role="user", content="跑测试")]
+        for i in range(44):
+            msgs.append(Message(role="user", content=f"[job {i}] done", automated=True))
+        for i in range(3):
+            msgs.append(Message(
+                role="assistant", content=f"调用第 {i} 个工具",
+                tool_calls=[{"id": f"tc_{i}", "function": {"name": "grep", "arguments": "{}"}}],
+            ))
+        digest = compose_transcript_digest(msgs)
+        self.assertIn("跑测试", digest)
+        self.assertNotIn("调用第 0 个工具", digest)
+        self.assertNotIn("[job 0] done", digest)
+
     def test_empty_notes_digest_is_not_written_to_the_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "s.notes.md")

@@ -281,12 +281,25 @@ def list_user_questions(
     snippet_width: int = USER_QUESTION_SNIPPET_CHARS,
     budget_chars: int = USER_QUESTION_BUDGET_CHARS,
 ) -> List[Dict]:
-    """Newest user turns. Skip only the window preamble we inject."""
+    """Newest user turns. Skip only the window preamble we inject.
+
+    Automated turns (job reports, peer messages, background-command
+    completions) stay in the list — the model did read them — but they cannot
+    take the whole budget: a window that finished 20 background jobs answered
+    "what did the person ask" with 20 job reports and no question. Half the
+    slots are held for prose a person wrote, and an automated hit carries
+    ``automated`` so the caller can label it.
+    """
     cap = min(USER_QUESTION_LIMIT, max(1, int(limit)))
+    automated_cap = max(1, cap // 2)
     hits: List[Dict] = []
     used = 0
+    automated = 0
     for entry in reversed(entries):
         if entry.get("type") != "user":
+            continue
+        is_automated = entry.get("automated") is True
+        if is_automated and automated >= automated_cap:
             continue
         text = strip_window_preamble(_entry_text(entry))
         if not text.strip():
@@ -294,12 +307,16 @@ def list_user_questions(
         snippet = snippet_head(text, snippet_width)
         if hits and used + len(snippet) > budget_chars:
             break
-        hits.append({
+        hit = {
             "uuid": entry.get("uuid", ""),
             "type": "user",
             "snippet": snippet,
             "timestamp": entry.get("timestamp", ""),
-        })
+        }
+        if is_automated:
+            hit["automated"] = True
+            automated += 1
+        hits.append(hit)
         used += len(snippet)
         if len(hits) >= cap:
             break

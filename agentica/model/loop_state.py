@@ -9,6 +9,7 @@ attributes on the Model instance.
 
 Created fresh at the start of each agentic loop in Runner._run_impl().
 """
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -110,6 +111,27 @@ class LoopState:
         ),
         repr=False,
     )
+    # Structured error codes for the same condition. The OpenAI SDK raises a
+    # stream ``error`` event as ``APIError(message, body=error)``: ``str(exc)``
+    # is only the human message ("Your input exceeds the context window of
+    # this model..."), while the code sits on ``exc.code``. Production lost
+    # 3.5 hours to that gap — the overflow never reached reactive compact.
+    PROMPT_TOO_LONG_CODES: tuple = field(
+        default=("context_length_exceeded",),
+        repr=False,
+    )
+
+    def is_prompt_too_long(self, exc: BaseException) -> bool:
+        """Provider says the request is larger than the context window."""
+        # Read from sys.modules: an APIError can only exist if the SDK that
+        # raises it is already loaded, and an Anthropic-only process must not
+        # pay for importing it here.
+        openai = sys.modules.get("openai")
+        if openai is not None and isinstance(exc, openai.APIError):
+            if exc.code in self.PROMPT_TOO_LONG_CODES:
+                return True
+        err = str(exc).lower()
+        return any(h in err for h in self.PROMPT_TOO_LONG_HINTS)
     # Provider-side content moderation. Detected as either:
     #   - normal-return finish_reason (OpenAI / Azure / OpenAI-compat providers)
     #   - exception text from providers that raise instead of returning a flag

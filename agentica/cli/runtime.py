@@ -943,6 +943,7 @@ def create_agent(
     peer_session=None,
     worktree_binder=None,
     approve=None,
+    enable_session_log: bool = True,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
@@ -985,6 +986,9 @@ def create_agent(
         Codex y/p/esc TUI closer. When omitted (``--print``, cron, ``/bg``),
         a deny-on-park callback is installed so a call that would wait for a
         human cannot hang.
+    enable_session_log: False for a run that must not write a transcript under
+        ``~/.agentica/projects`` (cron jobs: their history lives in the cron run
+        log, and a JSONL per tick would flood ``/resume``).
     """
     if permission_mode is None:
         configured_permission_mode = agent_config.get("permissions")
@@ -1160,6 +1164,7 @@ def create_agent(
         user_id=cli_user_id,
         session_id=session_id,
         session_base_dir=session_base_dir,
+        enable_session_log=enable_session_log,
         debug=agent_config["debug"],
         enable_experience_capture=agent_config.get("enable_experience_capture", True),
         experience_config=experience_config,

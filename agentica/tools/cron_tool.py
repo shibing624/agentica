@@ -105,6 +105,11 @@ Actions:
 Jobs run in a fresh session with no current-chat context, so the prompt must be fully self-contained.
 Scheduled jobs run autonomously with no user present; write prompts that need no clarification.
 
+Not for waiting on a job this session started (training, eval, build, tmux/nohup): a background
+execute watcher on its exit marker costs no tokens and reports back here; a cron poll runs a full
+agent every tick and cannot message this session. A job that watches for an end state must say in its
+prompt to pause itself (action='pause' with its own job_id) once that state is reached.
+
 Schedule formats:
 - Cron expression: "30 7 * * *" (daily 7:30), "0 9 * * 1-5" (weekdays 9:00)
 - Interval: "30m", "every 2h", "5s", "1d"

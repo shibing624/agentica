@@ -403,7 +403,7 @@ class RetryMixin:
                     # user turn cannot be rescued (Layer 2 keeps it), so surface
                     # the provider error immediately instead of hiding it behind
                     # a summary that preserves the same text.
-                    is_too_long = any(h in err for h in state.PROMPT_TOO_LONG_HINTS)
+                    is_too_long = state.is_prompt_too_long(last_exc)
                     if is_too_long:
                         _window = current.context_window if isinstance(current.context_window, int) else 0
                         if is_irreducible_prompt_too_long(

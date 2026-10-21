@@ -17,6 +17,7 @@ that already persisted notes and wants a blank page). Production auto and
 Budget / notes text is folded into a single user message so we never emit
 consecutive user roles (Bedrock and some gateways 400 on that).
 """
+from fractions import Fraction
 from pathlib import Path
 from typing import List, Optional
 
@@ -24,6 +25,16 @@ from agentica.compression.evict import trailing_user_turn_start
 from agentica.compression.notes import clip_head_tail
 from agentica.compression.token_budget import WINDOW_CONTINUATION_MARK, full_window_text
 from agentica.model.message import Message
+
+# Clip cap and split for the notes body. The harness writes notes itself now
+# and keeps them under 3000 chars, so this is the fallback for a file written
+# by an older version or by the model directly. Those were append-only and
+# reached 47KB and 98KB; a 4000-char head-heavy clip then handed the next
+# window the oldest goals (~2.6K) and barely one paragraph of current state
+# (~1.3K), so every rollover opened with a read_file of the whole file. The
+# head still carries goal and constraints, so it keeps a share.
+_NOTES_INJECT_LIMIT = 8000
+_NOTES_HEAD_RATIO = Fraction(3, 10)
 
 
 def notes_path_for(session_log) -> Optional[str]:
@@ -38,7 +49,7 @@ def notes_path_for(session_log) -> Optional[str]:
 
 def notes_excerpt(
     notes_path: Optional[str],
-    limit: int = 4000,
+    limit: int = _NOTES_INJECT_LIMIT,
     notes_text: Optional[str] = None,
 ) -> Optional[str]:
     """Inject model-authored notes. Not a transcript skim.
@@ -57,7 +68,9 @@ def notes_excerpt(
         return None
     if not text.strip():
         return None
-    text = clip_head_tail(text, limit, marker="\n…[truncated]…\n")
+    text = clip_head_tail(
+        text, limit, marker="\n…[truncated]…\n", head_ratio=_NOTES_HEAD_RATIO,
+    )
     label = notes_path or "session.notes.md"
     return f"<session_notes path=\"{label}\">\n{text}\n</session_notes>"
 

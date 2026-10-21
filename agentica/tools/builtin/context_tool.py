@@ -106,6 +106,8 @@ class BuiltinContextTool(Tool):
         body = hit["snippet"]
         if with_type:
             body = f"{hit.get('type', '')}: {body}"
+        if hit.get("automated"):
+            body = f"(auto) {body}"
         prefix = " ".join(p for p in (stamp, f"[{hit['uuid'][:8]}]") if p)
         return f"- {prefix} {body}"
 

@@ -1212,7 +1212,7 @@ class LoopMixin:
                                     # too. Without this, streaming runs (the CLI
                                     # default) die on a context that a compact would
                                     # have rescued.
-                                    is_too_long = any(h in err for h in loop_state.PROMPT_TOO_LONG_HINTS)
+                                    is_too_long = loop_state.is_prompt_too_long(exc)
                                     if is_too_long:
                                         _window = (
                                             active_model.context_window

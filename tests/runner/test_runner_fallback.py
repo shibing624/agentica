@@ -35,6 +35,8 @@ def _fake_model(model_id, response_factory=None, raise_exc=None):
     """
     m = MagicMock()
     m.id = model_id
+    # Model declares this field; a MagicMock attribute would stand in for it.
+    m._context_calibration = None
 
     async def _resp(messages):
         if raise_exc is not None:

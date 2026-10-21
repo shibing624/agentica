@@ -210,6 +210,54 @@ class TestStreamPromptTooLongReactiveCompact(unittest.TestCase):
         self.assertIn("context_length_exceeded", str(ctx.exception))
         self.assertIn("192000", str(ctx.exception))
 
+    def test_stream_api_error_with_code_only_in_body_compacts(self):
+        """OpenAI Responses stream ``error`` event, as the SDK raises it.
+
+        ``str(exc)`` is only the message — "Your input exceeds the context
+        window of this model" — and the code is on ``exc.code``. Production
+        (gpt-6.1-sol, 1.05M window) failed 7 turns in a row on this shape
+        because no hint matched the message text.
+        """
+        import httpx
+        from openai import APIError
+        from agentica.agent import Agent
+        from agentica.model.response import ModelResponseEvent
+
+        model = self._make_model()
+        calls = {"n": 0}
+
+        async def _ok_stream(messages):
+            messages.append(Message(role="assistant", content="ok"))
+            yield ModelResponse(event=ModelResponseEvent.assistant_response.value, content="ok")
+
+        async def _overflow_then_recover(messages):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise APIError(
+                    "Your input exceeds the context window of this model. "
+                    "Please adjust your input and try again.",
+                    httpx.Request("POST", "https://example.invalid/v1/responses"),
+                    body={"type": "invalid_request_error", "code": "context_length_exceeded"},
+                )
+                yield  # pragma: no cover
+            messages.append(Message(role="assistant", content="recovered"))
+            yield ModelResponse(event=ModelResponseEvent.assistant_response.value, content="recovered")
+
+        agent = Agent(name="stream-api-error-code", model=model, add_history_to_context=True)
+        agent._run_fallback_models = []
+        model.response_stream = _ok_stream
+        for turn in ("first turn", "second turn", "third turn"):
+            for _ in agent.run_stream_sync(turn):
+                pass
+
+        model.response_stream = _overflow_then_recover
+        for _ in agent.run_stream_sync("继续"):
+            pass
+
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(agent.run_response.content, "recovered")
+        self.assertEqual(agent.run_response.context_compactions, 1)
+
 
 class TestLearnContextLimitFromProviderError(unittest.TestCase):
     """The provider tells us the real input limit in the error text; agentica

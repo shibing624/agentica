@@ -101,7 +101,8 @@ class TestEmitContextUsage:
             usage.add(RequestUsage(
                 input_tokens=1000, input_tokens_details=TokenDetails(cached_tokens=prev_usage_ratio)
             ))
-        model = SimpleNamespace(tools=None, context_window=128000, id="gpt-4o", usage=usage)
+        model = SimpleNamespace(tools=None, context_window=128000, id="gpt-4o", usage=usage,
+                                _context_calibration=None)
         if model_extra:
             for k, v in model_extra.items():
                 setattr(model, k, v)
@@ -122,7 +123,8 @@ class TestEmitContextUsage:
                 _event_callback=events.append, name="a", _parent_run_id=None,
                 tool_config=SimpleNamespace(compact_token_limit=None),
             )
-            model = SimpleNamespace(tools=None, context_window=128000, id="gpt-4o", usage=Usage())
+            model = SimpleNamespace(tools=None, context_window=128000, id="gpt-4o", usage=Usage(),
+                                    _context_calibration=None)
             CompressMixin._emit_context_usage(agent, model, agent_msgs)
             changed = _msgs("a", "B-CHANGED")
             CompressMixin._emit_context_usage(agent, model, changed)

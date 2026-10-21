@@ -18,6 +18,7 @@ from typing import (
 
 
 from agentica.utils.log import logger
+from agentica.compression.calibration import ContextCalibration
 from agentica.compression.evict import evict_context
 from agentica.compression.manager import compact_token_limit_of, working_context_window
 from agentica.model.base import Model
@@ -129,12 +130,20 @@ class CompressMixin:
         elif agent is not None:
             _cap = agent.tool_config.compact_token_limit
         _working = working_context_window(_window, _cap)
-        context_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
+        calibration = CompressMixin._calibration(model)
+        calibration.observe(messages)
+        # Raw = local tiktoken estimate; context_tokens = the same scaled to
+        # what the provider will count. Thresholds read the scaled figure.
+        raw_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
+        context_tokens = calibration.scale(raw_tokens)
         if enable_evict:
+            # Eviction measures what each placeholder saves with the local
+            # tokenizer, so it works in raw units against a window shrunk by
+            # the same ratio.
             reclaimed = evict_context(
                 messages,
-                context_tokens=context_tokens,
-                context_window=_working,
+                context_tokens=raw_tokens,
+                context_window=int(_working / calibration.ratio),
                 model_id=model.id,
             )
             if reclaimed.total:
@@ -155,9 +164,11 @@ class CompressMixin:
                 # Eviction rewrote content, so the count taken above is stale — and
                 # too high. Re-measure before deciding on Layer 2: an LLM summary
                 # bought for a request eviction already made fit is pure waste.
-                context_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
+                raw_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
+                context_tokens = calibration.scale(raw_tokens)
 
         if not enable_auto_compact or cm is None:
+            calibration.record_send(messages, raw_tokens)
             return
 
         CompressMixin._maybe_inject_token_budget_reminder(
@@ -169,10 +180,20 @@ class CompressMixin:
         if not cm.should_auto_compact(
             messages, model, context_tokens=context_tokens if _window else None
         ):
+            calibration.record_send(messages, raw_tokens)
             return
         await CompressMixin._install_new_window(
             messages, agent, model, loop_state, keep_trailing_turn=True,
         )
+        # The window was replaced: the estimate for the request now going out
+        # has to be taken again.
+        calibration.record_send(messages, count_tokens(messages, model.tools, model.id))
+
+    @staticmethod
+    def _calibration(model: "Model") -> ContextCalibration:
+        if model._context_calibration is None:
+            model._context_calibration = ContextCalibration()
+        return model._context_calibration
 
     @staticmethod
     async def _install_new_window(
@@ -383,7 +404,9 @@ class CompressMixin:
                     "type": "context.usage",
                     "agent_name": agent.name or "Agent",
                     "is_main_agent": agent._parent_run_id is None,
-                    "context_tokens": count_tokens(messages, tools, model.id),
+                    "context_tokens": CompressMixin._calibration(model).scale(
+                        count_tokens(messages, tools, model.id)
+                    ),
                     "context_window": window,
                     "provider_window": provider_window,
                     "cache_hit_ratio": hit_ratio,

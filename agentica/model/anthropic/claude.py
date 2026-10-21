@@ -975,6 +975,11 @@ class Claude(Model):
             # Anthropic cache_creation_input_tokens / cache_read_input_tokens
             cache_read = usage.cache_read_input_tokens or 0
             cache_write = usage.cache_creation_input_tokens or 0
+            # Native input_tokens excludes both cache counters; the request
+            # occupied all three in the window.
+            assistant_message.metrics["context_tokens"] = (
+                metrics.input_tokens + cache_read + cache_write
+            )
             if cache_read or cache_write:
                 entry.input_tokens_details = TokenDetails(
                     cached_tokens=cache_read,

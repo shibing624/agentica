@@ -30,7 +30,13 @@ from agentica.model.media import is_multimodal_tool_result, multimodal_text_summ
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.model.usage import Usage, RequestUsage, TokenDetails, split_prompt_usage
+from agentica.model.usage import (
+    Usage,
+    RequestUsage,
+    TokenDetails,
+    record_context_tokens,
+    split_prompt_usage,
+)
 from agentica.security.redact import (
     redact_sensitive_text,
     redact_streamed_text_enabled,
@@ -310,6 +316,12 @@ class Model(ABC):
     context_window: int = 200000
     supports_images: Optional[bool] = None
     supports_native_compaction: bool = False
+    # Ratio between this provider's own prompt count and the local estimate,
+    # learned request by request (agentica/compression/calibration.py). Lives
+    # on the model: a /model switch starts from 1.0 rather than inheriting a
+    # ratio measured against another tokenizer.
+    _context_calibration: Any = field(init=False, repr=False, default=None)
+
     # Extra retryable error substrings, merged on top of the SDK's default
     # protocol-level transients (see ``LoopState.RETRYABLE_SUBSTRINGS``).
     #
@@ -1729,6 +1741,8 @@ class Model(ABC):
                             self.metrics["prompt_tokens_details"] = {}
                         for k, v in metrics.prompt_tokens_details.items():
                             self.metrics["prompt_tokens_details"][k] = self.metrics["prompt_tokens_details"].get(k, 0) + v
+            if prompt_tokens:
+                record_context_tokens(assistant_message, prompt_tokens, metrics.prompt_tokens_details)
 
             # Parse completion_tokens_details (only on CompletionUsage, not dict)
             if not isinstance(response_usage, dict):
@@ -1817,6 +1831,8 @@ class Model(ABC):
                 self.metrics["prompt_tokens_details"] = {}
             for k, v in metrics.prompt_tokens_details.items():
                 self.metrics["prompt_tokens_details"][k] = self.metrics["prompt_tokens_details"].get(k, 0) + v
+        if metrics.input_tokens:
+            record_context_tokens(assistant_message, metrics.input_tokens, metrics.prompt_tokens_details)
         if metrics.completion_tokens_details is not None:
             assistant_message.metrics["completion_tokens_details"] = metrics.completion_tokens_details
             entry.output_tokens_details = TokenDetails(

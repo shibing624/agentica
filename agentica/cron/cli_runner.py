@@ -23,6 +23,10 @@ from agentica.utils.log import logger
 
 from agentica.cron.scheduler import tick
 
+# Keys in a CLI agent_config that name the interactive session's transcript.
+# A cron job built from that config must not inherit them.
+_SESSION_IDENTITY_KEYS = ("session_id", "session_base_dir", "_resume_at_uuid", "_fork_session")
+
 
 class CliAgentRunner:
     """Adapt a CLI agent factory to the cron ``AgentRunner`` protocol.
@@ -61,13 +65,25 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
     cron jobs that target a specific workspace); when not provided it falls back
     to the default captured here. Imported lazily to avoid a circular import
     (cli.config imports tools which may import cron).
+
+    The job gets the interactive session's model and tools, not its session.
+    Inheriting ``session_id`` made every tick replay the host's transcript as
+    its own history and append its turns to the host's JSONL: production saw
+    419 monitor turns interleaved into a 9-day session, its search_session
+    drowned in them, and each tick's startup ``seal_incomplete_turn`` stamping
+    "[Session ended before the assistant replied]" over the host's live turn.
+    No session log at all, because a job's history is the cron run log.
     """
     workspace_default = workspace
 
     def _factory(workspace=None):
         from agentica.cli.runtime import create_agent
+        job_config = {
+            key: value for key, value in agent_config.items()
+            if key not in _SESSION_IDENTITY_KEYS
+        }
         return create_agent(
-            agent_config,
+            job_config,
             extra_tools=extra_tools or [],
             workspace=workspace if workspace is not None else workspace_default,
             skills_registry=skills_registry,
@@ -77,6 +93,7 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
             include_ask_user_question=False,
             # A scheduled job must not recursively kick off further immediate runs.
             enable_cron_immediate_run=False,
+            enable_session_log=False,
         )
 
     return _factory

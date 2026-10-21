@@ -355,6 +355,20 @@ class TestSearchEntriesRank(unittest.TestCase):
             self.assertEqual(log.search_entries("ZX-99999", limit=5), [])
             self.assertIn("note.md", log.list_user_questions()[0]["snippet"])
 
+    def test_automated_turns_cannot_take_the_whole_question_list(self):
+        """A window that finished 20 background jobs still shows its human asks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s", base_dir=tmp)
+            log.append("user", "把学习率降到 1e-5 重跑")
+            for i in range(20):
+                log.append("user", f"[Background terminal #{i} finished] exit 0", automated=True)
+            hits = log.list_user_questions(limit=20)
+        snippets = [h["snippet"] for h in hits]
+        self.assertIn("把学习率降到 1e-5 重跑", snippets)
+        self.assertEqual(len([h for h in hits if h.get("automated")]), 10)
+        human = next(h for h in hits if h["snippet"] == "把学习率降到 1e-5 重跑")
+        self.assertNotIn("automated", human)
+
 
 if __name__ == "__main__":
     unittest.main()

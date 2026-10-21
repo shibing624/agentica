@@ -339,6 +339,66 @@ class TestCronInCliTools(unittest.TestCase):
         agent.update_model()
         self.assertNotIn("ask_user_question", agent.model.functions or {})
 
+    def test_cron_agent_does_not_inherit_the_host_session(self):
+        """A tick must not replay or append to the interactive session's JSONL.
+
+        Production (9-day session, job on a 6-minute schedule): the job was
+        built from the host's agent_config, so it replayed 500k-token host
+        history as its own, wrote 419 turns into the host's transcript, and its
+        startup ``seal_incomplete_turn`` closed the host's live turn 133 times.
+        """
+        import sys
+        from pathlib import Path
+        from agentica.cli.runtime import parse_args
+        from agentica.cron.cli_runner import build_cli_agent_factory
+        from agentica.memory.session_log import SessionLog
+
+        sys.argv = ["agentica"]
+        cfg = vars(parse_args())
+        cfg.update({
+            "model_provider": "openai", "model_name": "gpt-4o",
+            "api_key": "sk-test", "base_url": None,
+            "session_id": "11111111-2222-3333-4444-555555555555",
+            "session_base_dir": "/tmp/host-session-base",
+        })
+
+        factory = build_cli_agent_factory(
+            cfg, extra_tools=[], workspace=None, skills_registry=None)
+        agent = factory()
+
+        self.assertIsNone(
+            agent._session_log,
+            "a cron tick has no transcript of its own to write or replay",
+        )
+        self.assertNotEqual(agent.session_id, cfg["session_id"])
+
+    def test_host_config_is_not_mutated_by_building_a_job_agent(self):
+        """The factory is called on every tick; it must not fork the host.
+
+        ``create_agent`` pops the one-shot fork keys it consumes. Handing it the
+        host's own dict let a tick swallow a pending ``/fork`` of the host.
+        """
+        import sys
+        from agentica.cli.runtime import parse_args
+        from agentica.cron.cli_runner import build_cli_agent_factory
+
+        sys.argv = ["agentica"]
+        cfg = vars(parse_args())
+        cfg.update({
+            "model_provider": "openai", "model_name": "gpt-4o",
+            "api_key": "sk-test", "base_url": None,
+            "session_id": "11111111-2222-3333-4444-555555555555",
+            "_fork_session": True,
+        })
+        before = dict(cfg)
+
+        factory = build_cli_agent_factory(
+            cfg, extra_tools=[], workspace=None, skills_registry=None)
+        factory()
+        factory()
+
+        self.assertEqual(cfg, before)
+
 
 if __name__ == "__main__":
     unittest.main()
