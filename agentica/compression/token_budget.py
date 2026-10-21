@@ -70,44 +70,23 @@ def full_window_text(
     if notes_path:
         lines.append("Recover prior facts with search_session.")
         lines.append(
-            "Keep the session notes file current: goals, constraints, IDs, decisions."
-        )
-        lines.append(f"Session notes: {notes_path}")
-    return CONTEXT_WINDOW_OPEN + "\n".join(lines) + CONTEXT_WINDOW_CLOSE
-
-
-def remaining_text(tokens_left: int, notes_path: Optional[str] = None) -> str:
-    """Threshold reminder — remaining tokens only."""
-    lines = [f"You have {tokens_left} tokens left in this context window."]
-    if notes_path:
-        lines.append(
-            f"Update session notes ({notes_path}) before the window rolls over."
+            "Session notes (goals, constraints, IDs, decisions) are rewritten "
+            f"automatically whenever the window rolls over: {notes_path}"
         )
     return CONTEXT_WINDOW_OPEN + "\n".join(lines) + CONTEXT_WINDOW_CLOSE
 
 
-def fallback_text(notes_path: Optional[str] = None) -> str:
-    """Codex auto-compact fallback: write notes now, window is about to reset.
+def remaining_text(tokens_left: int) -> str:
+    """Threshold reminder — remaining tokens only.
 
-    Returns "" when there is no notes path — there is nothing to ask for, and
-    the caller must not postpone a cut for an unactionable instruction.
-
-    Deliberately does *not* borrow Codex's "do not continue the task" clause.
-    The runner folds this into the last message (the current user turn, or
-    the trailing tool result mid-loop) and auto-compact keeps that turn, so
-    the text outlives the cut and would land in the new window contradicting
-    the fresh window's own instructions. Codex gets away with it because its
-    fallback is a developer item the rollover consumes.
+    It no longer asks the model to update the notes: the harness writes them
+    itself when the window is cut (``notes_author``).
     """
-    if not notes_path:
-        return ""
-    lines = [
-        "This context window is about to reset.",
-        "Write goals, constraints, IDs, paths, and decisions to the "
-        "session notes file now — the next window starts without these turns.",
-        f"Session notes: {notes_path}",
-    ]
-    return CONTEXT_WINDOW_OPEN + "\n".join(lines) + CONTEXT_WINDOW_CLOSE
+    return (
+        CONTEXT_WINDOW_OPEN
+        + f"You have {tokens_left} tokens left in this context window."
+        + CONTEXT_WINDOW_CLOSE
+    )
 
 
 def window_message(
@@ -121,11 +100,8 @@ def window_message(
     )
 
 
-def remaining_message(tokens_left: int, notes_path: Optional[str] = None) -> Message:
-    return Message(
-        role="user",
-        content=remaining_text(tokens_left, notes_path),
-    )
+def remaining_message(tokens_left: int) -> Message:
+    return Message(role="user", content=remaining_text(tokens_left))
 
 
 def is_context_window_message(message: Message) -> bool:

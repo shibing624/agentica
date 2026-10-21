@@ -129,11 +129,7 @@ class TestStartNewContextWindow(unittest.TestCase):
 
 class TestRunnerNewWindow(unittest.TestCase):
     def _agent(self, session_id=None):
-        """An agent that can write notes, unless ``session_id`` is None.
-
-        Without a session_id there is no notes path, so the runner has nothing
-        to ask the model to write — see the two postpone tests below.
-        """
+        """An agent with a notes path, unless ``session_id`` is None."""
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
 
@@ -147,69 +143,6 @@ class TestRunnerNewWindow(unittest.TestCase):
             session_id=session_id,
             session_base_dir=self._tmp.name,
         )
-
-    def test_empty_notes_postpone_compact_once(self):
-        from agentica.runner import Runner
-
-        # With a session_id the notes file has a path, so asking for it is
-        # actionable and the cut is postponed once.
-        agent = self._agent(session_id="postpone-once")
-        cm = agent.tool_config.compression_manager
-        agent.model.functions = {"write_file": object(), "read_file": object()}
-        msgs = [
-            Message(role="system", content="sys"),
-            Message(role="user", content="current question"),
-        ]
-        postponed = Runner._claim_notes_fallback(
-            msgs, agent, agent.model, cm,
-            context_tokens=960, working_window=1000,
-        )
-        self.assertTrue(postponed)
-        self.assertTrue(cm.fallback_claimed)
-        self.assertEqual(cm.compact_token_floor, 1000)
-        self.assertEqual(cm.window_id, 0)
-        self.assertIn("about to reset", msgs[-1].content)
-        self.assertIn("current question", msgs[-1].content)
-        agent.model.context_window = 1000
-        self.assertFalse(cm.should_auto_compact(
-            msgs, agent.model, context_tokens=960,
-        ))
-        self.assertTrue(cm.should_auto_compact(
-            msgs, agent.model, context_tokens=1000,
-        ))
-
-        asyncio.run(cm.auto_compact(msgs, model=agent.model, force=True))
-        self.assertEqual(cm.window_id, 1)
-        self.assertFalse(cm.fallback_claimed)
-        self.assertIsNone(cm.compact_token_floor)
-
-    def test_no_session_id_does_not_postpone_for_an_unwritable_file(self):
-        """No notes path => nothing to ask for => do not postpone the cut.
-
-        This is the SDK shape: tools exist but there is no session_id, so
-        ``notes_path_for`` returns None. The runner used to postpone anyway,
-        telling the model to write a file it could not name — and the delay
-        bought nothing.
-        """
-        from agentica.runner import Runner
-
-        agent = self._agent(session_id=None)
-        cm = agent.tool_config.compression_manager
-        agent.model.functions = {"write_file": object(), "read_file": object()}
-        msgs = [
-            Message(role="system", content="sys"),
-            Message(role="user", content="current question"),
-        ]
-        self.assertIsNone(notes_path_for(agent._session_log))
-        postponed = Runner._claim_notes_fallback(
-            msgs, agent, agent.model, cm,
-            context_tokens=960, working_window=1000,
-        )
-        self.assertFalse(postponed)
-        self.assertFalse(cm.fallback_claimed)
-        self.assertIsNone(cm.compact_token_floor)
-        self.assertEqual(len(msgs), 2, "no nudge should be folded in")
-        self.assertNotIn("about to reset", msgs[-1].content)
 
     def test_reminder_folds_once_into_the_last_user_message(self):
         from agentica.runner import Runner
@@ -228,41 +161,6 @@ class TestRunnerNewWindow(unittest.TestCase):
             msgs, agent, cm, context_tokens=900, working_window=1000,
         )
         self.assertEqual(msgs[0].content, before)
-
-    def test_stale_notes_from_previous_window_still_postpone_on_next_window(self):
-        from agentica.runner import Runner
-
-        agent = self._agent(session_id="stale-notes")
-        cm = agent.tool_config.compression_manager
-        agent.model.functions = {"write_file": object(), "read_file": object()}
-        notes_file = Path(notes_path_for(agent._session_log))
-        notes_file.write_text("Window 0 notes\n", encoding="utf-8")
-        # Simulate notes written in window 0 (before window 1 started)
-        os.utime(notes_file, (1000.0, 1000.0))
-        cm.window_id = 1
-        cm.window_started_at = 2000.0
-        cm.fallback_claimed = False
-
-        msgs = [
-            Message(role="system", content="sys"),
-            Message(
-                role="user",
-                content="<context_window>\nCurrent context window 1.\n</context_window>\n\ndo all",
-            ),
-            Message(
-                role="assistant",
-                content="",
-                tool_calls=[{"id": "tc1", "function": {"name": "read_file", "arguments": "{}"}}],
-            ),
-            Message(role="tool", content="file contents", tool_call_id="tc1"),
-        ]
-        postponed = Runner._claim_notes_fallback(
-            msgs, agent, agent.model, cm,
-            context_tokens=960, working_window=1000,
-        )
-        self.assertTrue(postponed)
-        self.assertTrue(cm.fallback_claimed)
-        self.assertIn("about to reset", msgs[-1].content)
 
     def test_reminder_folds_into_trailing_tool_result_during_tool_loop(self):
         from agentica.runner import Runner

@@ -11,7 +11,6 @@ session JSONL and are retrieved with ``search_session``.
 This is Codex TokenBudget compact (#29743): same lifecycle name, no summarizer.
 """
 import hashlib
-import time
 import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -19,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from agentica.compression.evict import trailing_user_turn_start
 from agentica.compression.new_window import notes_path_for, start_new_context_window
 from agentica.compression.notes import rollover_handover
+from agentica.compression.notes_author import author_session_notes
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_tokens
@@ -123,10 +123,9 @@ class CompressionManager:
 
     stats: Dict[str, Any] = field(default_factory=dict)
     window_id: int = 0
-    window_started_at: float = field(default_factory=time.time)
     reminder_claimed: bool = False
-    fallback_claimed: bool = False
-    compact_token_floor: Optional[int] = None
+    # Whether the last cut's notes were written by the model (False: digest only).
+    last_notes_authored: bool = False
 
     def should_native_compact(
         self,
@@ -152,9 +151,6 @@ class CompressionManager:
         tokens = context_tokens if context_tokens is not None else count_tokens(messages, None, model_id, None)
         if tokens < threshold:
             return False
-        floor = self.compact_token_floor
-        if floor is not None and tokens < floor:
-            return False
         logger.debug(
             f"Auto-compact threshold hit: {tokens:,} tokens "
             f">= {threshold:,} (window={context_window:,}"
@@ -170,33 +166,44 @@ class CompressionManager:
         working_memory: Optional[Any] = None,
         custom_instructions: Optional[str] = None,
         keep_trailing_turn: bool = True,
+        notes_request: Optional[List["Message"]] = None,
     ) -> bool:
         """Layer 2: install a fresh context window. No LLM summary.
 
         ``working_memory`` and ``custom_instructions`` are accepted and ignored
         (legacy Layer 2 summariser knobs). ``keep_trailing_turn`` is True for
         auto-compact / ``/compact`` so the pending question survives.
+
+        ``notes_request`` is the window as the model last saw it (system
+        prompt included, so the request reads the prompt cache). When given,
+        ``model`` first rewrites the session notes file from it
+        (``author_session_notes``). None for the cuts where that request
+        cannot work: after a ``prompt_too_long`` rejection the same prompt
+        would be rejected again, and before a cross-provider fallback the
+        window still carries the failed provider's checkpoint.
         """
         if not force and not self.should_auto_compact(messages, model):
             return False
 
         logger.info("Auto-compact triggered: starting a new context window")
 
+        agent = self._agent_of(model)
+        slog = agent._session_log if agent is not None else None
+        notes_path = notes_path_for(slog)
+        self.last_notes_authored = False
+        if notes_request is not None and model is not None:
+            self.last_notes_authored = (
+                await author_session_notes(notes_request, model, notes_path) is not None
+            )
+
         self.window_id += 1
-        self.window_started_at = time.time()
         self.reminder_claimed = False
-        self.fallback_claimed = False
-        self.compact_token_floor = None
 
         context_window = 0
         if model is not None and isinstance(model.context_window, int):
             context_window = model.context_window
         working = working_context_window(context_window, self.compact_token_limit)
         tokens_left = working if working else context_window
-
-        agent = self._agent_of(model)
-        slog = agent._session_log if agent is not None else None
-        notes_path = notes_path_for(slog)
 
         if keep_trailing_turn:
             tail_start = trailing_user_turn_start(messages)
@@ -272,11 +279,16 @@ async def apply_idle_compact(agent: Any) -> bool:
     # a fresh Model object.
     if agent.model is not None:
         agent.model._agent_ref = weakref.ref(agent)
+    # ``wm.messages`` holds no system prompt; the notes request is built the
+    # way the next turn's prefix is, so it matches what the last request sent
+    # and reads its prompt cache.
+    notes_request = await agent.get_messages_for_notes()
     compacted = await cm.auto_compact(
         messages,
         model=agent.model,
         force=True,
         keep_trailing_turn=False,
+        notes_request=notes_request,
     )
     if compacted:
         wm.collapse_runs(messages)

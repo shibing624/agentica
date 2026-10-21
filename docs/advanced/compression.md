@@ -21,7 +21,7 @@ Agentica 提供两层上下文压缩策略，防止长对话或大量工具输�
 | 层 | 做什么 | 代价 | 可逆性 |
 |----|--------|------|--------|
 | Layer 1 淘汰 | 把更早回合的工具结果换成占位符；超长 tool_call 参数换成 JSON 对象 `{"$evicted": N}`（不是一段可当正文的字符串）。**正在跑的那一轮（未返回的调用 + 末批 result）不动**，含 SDK / CLI / Web 自定义工具 | 免费，无 LLM | 参数还在时可重发；payload 已丢掉则不可恢复 |
-| Layer 2 换窗 | 丢掉活动窗里的旧轮次，装上 `<context_window>` + session notes 摘录 | 免费，无 LLM | 原文在 JSONL，不在 prompt 里 |
+| Layer 2 换窗 | 丢掉活动窗里的旧轮次，装上 `<context_window>` + session notes 摘录 | 一次缓存命中的请求（写 notes） | 原文在 JSONL，不在 prompt 里 |
 
 在这两层之前还有一个 **Layer 0**，它不是压缩而是工具输出策略：单条结果超过阈值时在产生的那一刻就落盘，从不以全量进入上下文。
 
@@ -88,7 +88,7 @@ Context Messages
 ```
 
 - `search_session` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词打在 `strip_window_preamble` 之后的正文上：油表 / `<dropped_span>` 不是命中，折在 preamble 后面的那句 user 问题还在。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断、带 JSONL 时间戳）。空 query 只返回这份索引。不要扫 JSONL。不提供 `read_session_item`
-- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），模型用已有文件工具写，不是第二份 transcript。第一次触及 Layer 2 阈值时若文件仍空，先注入 fallback 催写并推迟约 4% 窗口 —— 那段催写只要求「把状态写下来」，**不要求继续干活**（reserve 就是留给这件事的；自动换窗会保留被折入的那一轮，所以任何"别再继续"之类的话都会跨窗残留）。真正切窗时：文件已有内容则注入 `<session_notes>`；仍空则把丢掉的那一段按时间交织成 skim（user/assistant，其次 tool args/result，**不写时间戳**）注入 `<dropped_span>`，**不写进 notes.md**。写进去会让 `notes_are_ready` 变真、之后不再催写。skim 会随 preserved tail 进 JSONL，靠 search 剥 preamble，不靠再抄一份。`search_session` 搜 JSONL，并搜模型手写的 notes
+- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），不是第二份 transcript；**由 harness 在每次换窗前自动重写**，不需要模型自己记得写、也不需要用户知道文件在哪。实现是 `agentica/compression/notes_author.py`：切窗之前，用**主模型**、**同一份 messages**（system 前缀、正文、tools、`tool_choice`、thinking 配置全部照旧，只在末尾追加一条指令）发一次请求——因此这次请求读的是已经缓存的前缀，只新写末尾那条指令和输出，Venus Anthropic 接口实测一次 `/compact`：`cache_read=3715`、新写缓存 639（上一轮的回答加这条指令）、输出 207 token。这次请求里 `run_tools=False`，模型即使想调工具也不会执行，只取回复正文；回复即整份新文件，经临时文件 + `os.replace` 原子替换，避免半个文件被后续每个窗口注入。请求失败、被内容过滤或返回空时，文件保持原样，仅靠 `<dropped_span>` 交接，换窗不因此卡住。旧的实现是「触及 Layer 2 阈值时注入 fallback 催写并推迟约 4% 窗口」，已删除：催写可能撞上工具循环发不出去，模型也可能不写，`<session_notes>` 与 `<dropped_span>` 现在每次换窗都同时注入。`search_session` 搜 JSONL，旁边的 notes 文件也会被搜到
 
 油表是 `<context_window>` user 片段：新窗写满窗身份，`window_id > 1` 且**有 session log** 时另加一行「本窗跟在一次 context reset 之后、更早的轮次不在这里」（对齐 Codex `#29256` 的 `Previous context window id`；第 1 个窗不写，无 log 时也不写——那时 `search_session` 只会回「No session log on this agent」，与「只提做得到的事」同一条规则）；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
 
@@ -96,8 +96,8 @@ Context Messages
 
 `session_id` 决定有没有 JSONL 与 notes 文件。SDK 不传时两者都没有（`notes_path_for` 返回 `None`），这时**注入 prompt 的那份 skim 就是那些轮次的唯一副本**：
 
-- skim **可累积**：`_collect` 会把上一轮 `<dropped_span>` / `<session_notes>` 里的 `- ` 行继承进本轮（只取正文行，丢掉旧 header 与分区标题，否则每轮叠一层变成 header 汤）。连续换窗因此不会逐轮丢事实，长度线性有界，最老的先被 `_fit` 淘汰。`strip_window_preamble` 仍照常剥这些标签——搜索索引不该把我们的 chrome 当第二次命中；两处需求相反，所以在 `_collect` 里分开处理。
-- 提醒**只说做得到的事**：没有 notes 路径时不注入催写、也不推迟换窗（`can_author_notes` 现在同时要求工具与路径）；`<context_window>` 里不提 `search_session` 与 notes 文件（没有 log 时前者只会回「No session log on this agent」）。有 `session_id` 时以上提示与能力完全不变。
+- skim **可累积**：`_collect` 会把上一轮 `<dropped_span>` 里的 `- ` 行继承进本轮（`<session_notes>` 每次换窗单独注入，不再抄进 skim）（只取正文行，丢掉旧 header 与分区标题，否则每轮叠一层变成 header 汤）。连续换窗因此不会逐轮丢事实，长度线性有界，最老的先被 `_fit` 淘汰。`strip_window_preamble` 仍照常剥这些标签——搜索索引不该把我们的 chrome 当第二次命中；两处需求相反，所以在 `_collect` 里分开处理。
+- 提醒**只说做得到的事**：没有 notes 路径时不会去写 notes（`author_session_notes` 直接返回）；`<context_window>` 里不提 `search_session` 与 notes 文件（没有 log 时前者只会回「No session log on this agent」）。有 `session_id` 时以上提示与能力完全不变。
 
 ## CompressionManager 配置
 
@@ -212,7 +212,7 @@ class CompactionTracker(RunHooks):
 
 `CompressionManager.auto_compact` 在以下条件触发：
 
-1. 当前 token 数达到 `min(compact_token_limit or ∞, int(window × 0.95))`（notes 仍空时先 fallback 催写，推迟到约 99%）
+1. 当前 token 数达到 `min(compact_token_limit or ∞, int(window × 0.95))`；换窗前先用主模型重写 session notes（一次缓存命中的请求），失败则只用 skim
 2. 用户执行 `/compact`（始终强制换窗；多余参数不再当摘要指令）
 3. provider 返回 `prompt_too_long` 之后的 reactive 换窗
 

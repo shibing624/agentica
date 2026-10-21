@@ -1503,6 +1503,9 @@ class StreamDisplayManager:
         # compaction stages that change conversation structure.
         if et == "compact.evict":
             return
+        if et in ("compact.start", "compact.end"):
+            # Spinner phase only (stream_loop._make_compact_phase_handler).
+            return
 
         is_main_agent = event.get("is_main_agent") is True
         prefix = "  " if is_main_agent else "    "
@@ -1510,6 +1513,11 @@ class StreamDisplayManager:
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)
+            notes_line = (
+                "Session notes were rewritten from the closing window."
+                if event.get("notes_authored")
+                else "Session notes were not rewritten; a skim of the closing window was carried instead."
+            )
             if is_main_agent:
                 count = event.get("compaction_count")
                 if isinstance(count, int) and count >= 2:
@@ -1529,6 +1537,7 @@ class StreamDisplayManager:
                         f"{prefix}[yellow]Long sessions may become less accurate; "
                         "use /new for a focused fresh session.[/yellow]"
                     )
+                self._assistant_console.print(f"{prefix}[dim]{notes_line}[/dim]")
                 return
             self._assistant_console.print(
                 f"{prefix}[dim yellow]🗜 compact (auto / new window)[/dim yellow] "

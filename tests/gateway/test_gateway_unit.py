@@ -1555,6 +1555,7 @@ class TestCompactSession:
         agent._run_hooks = None
         agent._session_log = None
         agent.tool_config.compression_manager.auto_compact = AsyncMock(return_value=True)
+        agent.get_messages_for_notes = AsyncMock(return_value=messages)
         agent.run_response = None
         agent.model.usage = None
         # usage_payload walks working_memory + measure_context; stub the live

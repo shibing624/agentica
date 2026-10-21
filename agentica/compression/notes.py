@@ -48,10 +48,6 @@ _DIGEST_BUDGET = 3600
 _DROPPED_SPAN_OPEN = "<dropped_span>"
 _DROPPED_SPAN_CLOSE = "</dropped_span>"
 
-# After the 0.95 Layer 2 trigger, wait this extra share of the working
-# window for the model to write notes (Codex auto_compact_fallback_buffer).
-AUTO_COMPACT_FALLBACK_BUFFER_RATIO = 0.04
-
 
 def _tag_body(text: str, open_tag: str, close_tag: str) -> str:
     start = text.find(open_tag)
@@ -88,26 +84,6 @@ def carried_rows(content: str) -> List[str]:
     return rows
 
 
-def fallback_buffer_tokens(working_window: int) -> int:
-    if working_window <= 0:
-        return 0
-    return max(1, int(working_window * AUTO_COMPACT_FALLBACK_BUFFER_RATIO))
-
-
-def can_author_notes(functions, notes_path: Optional[str] = None) -> bool:
-    """True when this agent can actually write the notes file.
-
-    Two conditions, not one. The tools must exist (``write_file`` /
-    ``apply_patch``), **and** there must be a path to write them to — the path
-    comes from ``notes_path_for(agent._session_log)``, which is None for an
-    SDK agent built without ``session_id``. Checking only the tools made the
-    runner postpone a window cut to ask for a file that had nowhere to go.
-    """
-    if not functions or not notes_path:
-        return False
-    return "write_file" in functions or "apply_patch" in functions
-
-
 def notes_are_ready(notes_path: Optional[str]) -> bool:
     if not notes_path:
         return False
@@ -115,13 +91,6 @@ def notes_are_ready(notes_path: Optional[str]) -> bool:
     if not path.is_file():
         return False
     return bool(path.read_text(encoding="utf-8").strip())
-
-
-def notes_are_fresh(notes_path: Optional[str], since: float) -> bool:
-    """True when the notes file is non-empty and modified after ``since``."""
-    if not notes_are_ready(notes_path):
-        return False
-    return Path(notes_path).stat().st_mtime > since
 
 
 def _content(message: Message) -> str:
@@ -291,25 +260,13 @@ def compose_transcript_digest(
     """
     turn_items, tools = _collect(messages)
     if notes_path:
-        if notes_are_ready(notes_path):
-            header = [
-                "# Dropped span",
-                "",
-                "Chronological skim of what left this window. "
-                "Update the session notes file with any new goals, constraints, IDs, or decisions. "
-                "Use search_session for anything missing.",
-                "",
-            ]
-        else:
-            header = [
-                "# Dropped span",
-                "",
-                "Not session notes — that file is still empty. "
-                "Chronological skim of what left this window. "
-                "Write goals, constraints, IDs, and decisions to the notes file. "
-                "Use search_session for anything missing.",
-                "",
-            ]
+        header = [
+            "# Dropped span",
+            "",
+            "Chronological skim of what left this window, beside the session notes. "
+            "Use search_session for anything missing.",
+            "",
+        ]
     else:
         header = [
             "# Dropped span",

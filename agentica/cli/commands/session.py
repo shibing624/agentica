@@ -792,15 +792,21 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
     if cm is None:
         con.print("[red]No compression manager on this agent; nothing to compact with.[/red]")
         return
-    con.print(f"[dim]Starting a new context window ({msg_count} messages)...[/dim]")
+    con.print(
+        f"[dim]Writing session notes and starting a new context window "
+        f"({msg_count} messages)...[/dim]"
+    )
     compacted = _run_async_safe(apply_idle_compact(agent))
     if not compacted:
         con.print("[red]New context window failed; conversation left unchanged.[/red]")
         return
+    notes_note = (
+        "Session notes rewritten." if cm.last_notes_authored else "Notes unchanged."
+    )
     con.print(
         f"[green]New context window {cm.window_id}: "
         f"{msg_count} messages -> {len(wm.messages)}. "
-        f"Prior turns stay in the session log.[/green]"
+        f"Prior turns stay in the session log. {notes_note}[/green]"
     )
 
     if hooks is not None:

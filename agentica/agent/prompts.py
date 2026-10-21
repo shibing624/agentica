@@ -768,3 +768,26 @@ class PromptsMixin:
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model
 
+    async def get_messages_for_notes(self) -> List[Message]:
+        """System prompt + replayed history: the prefix the last request sent.
+
+        ``get_messages_for_run`` without a new user message and without its
+        side effects on ``run_response``. Used by the idle ``/compact`` notes
+        pass, which must send the same prefix to hit the prompt cache.
+        """
+        pc = self.prompt_config
+        messages: List[Message] = []
+        system_message = await self.get_system_message()
+        if system_message is not None:
+            messages.append(system_message)
+        if self.add_history_to_context:
+            history = self.working_memory.get_messages_from_last_n_runs(
+                last_n=self.num_history_turns, skip_role=pc.system_message_role
+            )
+            messages += apply_history_pipeline(
+                history,
+                config=self.history_config,
+                user_filter=self.history_filter,
+            )
+        return messages
+

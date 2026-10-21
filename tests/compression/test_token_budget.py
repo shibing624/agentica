@@ -8,7 +8,6 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 from agentica.compression.token_budget import (
     REMINDER_REMAINING_RATIO,
     WINDOW_CONTINUATION_MARK,
-    fallback_text,
     full_window_text,
     is_context_window_message,
     remaining_text,
@@ -75,10 +74,13 @@ class TestTokenBudget(unittest.TestCase):
         self.assertEqual(tokens_remaining(1200, 1000), 0)
 
     def test_remaining_text_does_not_open_a_new_window_id(self):
-        text = remaining_text(250, "/tmp/s.notes.md")
+        text = remaining_text(250)
         self.assertIn("250 tokens left", text)
         self.assertNotIn("Current context window", text)
-        self.assertIn("/tmp/s.notes.md", text)
+        # The harness writes the notes itself (notes_author), so the reminder
+        # must not ask the model to.
+        self.assertNotIn("Update session notes", text)
+        self.assertNotIn(".notes.md", text)
 
     def test_system_messages_are_never_tagged_as_budget(self):
         self.assertFalse(
@@ -130,39 +132,3 @@ class TestResetSemantics(unittest.TestCase):
         self.assertNotIn("reset", text.lower())
 
 
-class TestFallbackNudgeSurvivesTheCut(unittest.TestCase):
-    """Why the fallback must not forbid continuing: the nudge outlives the cut.
-
-    The runner folds the nudge into the current user turn, and auto-compact
-    keeps that turn (``keep_trailing_turn=True``) so the pending question
-    survives. So whatever the nudge says is still in the *next* window — a
-    "do not continue the task" copied from Codex's fallback would sit there
-    contradicting the fresh window. Codex does not have this problem: its
-    fallback is a developer item consumed by the rollover.
-    """
-
-    def _folded(self, question: str = "把测试跑一遍") -> Message:
-        return Message(role="user", content=f"{question}\n\n{fallback_text('/tmp/s.notes.md')}")
-
-    def test_nudge_asks_for_the_write_not_for_more_work(self):
-        text = fallback_text("/tmp/s.notes.md")
-        self.assertIn("about to reset", text)
-        self.assertIn("/tmp/s.notes.md", text)
-        self.assertNotIn("then continue the task", text)
-
-    def test_cut_leaves_the_nudge_in_the_new_window(self):
-        messages = [
-            Message(role="system", content="sys"),
-            self._folded(),
-            Message(role="assistant", content="跑完了"),
-        ]
-        start_new_context_window(
-            messages, window_id=2, tokens_left=512_000, keep_trailing_turn=True
-        )
-        joined = "\n\n".join(str(m.content) for m in messages)
-        self.assertIn("about to reset", joined)
-        self.assertIn("把测试跑一遍", joined)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -9,7 +9,6 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 from agentica.compression.manager import CompressionManager
 from agentica.compression.notes import (
     compose_transcript_digest,
-    notes_are_fresh,
     notes_are_ready,
     rollover_handover,
 )
@@ -39,10 +38,10 @@ class TestComposeTranscriptDigest(unittest.TestCase):
     def test_header_only_names_paths_that_exist(self):
         """The header may not advertise tools the agent does not have.
 
-        With a notes path the model can write notes and search the log. With
-        no session log, ``search_session`` answers "No session log on this
-        agent" — naming it sends the model after nothing, on the one window
-        whose skim is the only copy of those turns.
+        With a session log the model can search it and the notes are injected
+        beside the digest. With no session log, ``search_session`` answers "No
+        session log on this agent" — naming it sends the model after nothing,
+        on the one window whose skim is the only copy of those turns.
         """
         msgs = [
             Message(role="user", content="工单 ZX-41827"),
@@ -51,9 +50,9 @@ class TestComposeTranscriptDigest(unittest.TestCase):
         with_path = compose_transcript_digest(msgs, notes_path="/tmp/s.notes.md")
         without = compose_transcript_digest(msgs)
         self.assertIn("search_session", with_path)
-        self.assertIn("notes file", with_path)
+        self.assertIn("session notes", with_path)
         self.assertNotIn("search_session", without)
-        self.assertNotIn("notes file", without)
+        self.assertNotIn("session notes", without)
         # Both keep the content; only the instructions differ.
         for text in (with_path, without):
             self.assertIn("ZX-41827", text)
@@ -267,17 +266,6 @@ class TestRolloverHandover(unittest.TestCase):
                 "Constraint: do not rewrite auth\n",
             )
             self.assertTrue(notes_are_ready(path))
-
-    def test_notes_are_fresh_tracks_window_start_mtime(self):
-        import os
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = str(Path(tmp) / "s.notes.md")
-            Path(path).write_text("Window 0 notes\n", encoding="utf-8")
-            os.utime(path, (1000.0, 1000.0))
-            self.assertFalse(notes_are_fresh(path, since=2000.0))
-            os.utime(path, (3000.0, 3000.0))
-            self.assertTrue(notes_are_fresh(path, since=2000.0))
 
     def test_dropped_span_drops_tool_call_narration_before_user_and_final_answers(self):
         msgs = [

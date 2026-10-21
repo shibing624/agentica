@@ -170,10 +170,6 @@ class CompressMixin:
             messages, model, context_tokens=context_tokens if _window else None
         ):
             return
-        if CompressMixin._claim_notes_fallback(
-            messages, agent, model, cm, context_tokens, _working,
-        ):
-            return
         await CompressMixin._install_new_window(
             messages, agent, model, loop_state, keep_trailing_turn=True,
         )
@@ -187,7 +183,7 @@ class CompressMixin:
         *,
         keep_trailing_turn: bool,
     ) -> bool:
-        """Shared new-window cut for auto-compact and reactive compact."""
+        """Layer 2 new-window cut, session notes written by the model first."""
         cm = agent.tool_config.compression_manager
         if cm is None:
             return False
@@ -195,12 +191,21 @@ class CompressMixin:
         before = len(messages)
         t0 = time.monotonic()
         await CompressMixin._fire_pre_compact(agent, messages)
-        compacted = await cm.auto_compact(
-            messages,
-            model=model,
-            force=True,
-            keep_trailing_turn=keep_trailing_turn,
-        )
+        # The notes pass is a full model request; the spinner says
+        # "compacting" for it instead of a turn that looks hung.
+        if cb is not None:
+            cb({"type": "compact.start", "agent_name": agent.name or "Agent"})
+        try:
+            compacted = await cm.auto_compact(
+                messages,
+                model=model,
+                force=True,
+                keep_trailing_turn=keep_trailing_turn,
+                notes_request=messages,
+            )
+        finally:
+            if cb is not None:
+                cb({"type": "compact.end", "agent_name": agent.name or "Agent"})
         if not compacted:
             return False
         loop_state.context_collapsed = True
@@ -217,6 +222,7 @@ class CompressMixin:
                     "elapsed": time.monotonic() - t0,
                     "window_id": cm.window_id,
                     "new_window": True,
+                    "notes_authored": cm.last_notes_authored,
                 }
             )
         return True
@@ -230,7 +236,6 @@ class CompressMixin:
         working_window: int,
     ) -> None:
         """Once-per-window remaining-token notice (Codex post-#27438 reminder)."""
-        from agentica.compression.new_window import notes_path_for
         from agentica.compression.token_budget import (
             remaining_text,
             reminder_threshold,
@@ -247,59 +252,9 @@ class CompressMixin:
             return
         if last.role == "assistant" and last.tool_calls:
             return
-        notes = notes_path_for(agent._session_log)
-        text = remaining_text(left, notes)
+        text = remaining_text(left)
         if CompressMixin._fold_budget_fragment(messages, text):
             cm.reminder_claimed = True
-
-    @staticmethod
-    def _claim_notes_fallback(
-        messages: List[Message],
-        agent: "Agent",
-        model: "Model",
-        cm: Any,
-        context_tokens: int,
-        working_window: int,
-    ) -> bool:
-        """Codex #33255: once per window, ask the model to write notes first.
-
-        Returns True when compact is postponed. ``fallback_claimed is False``
-        so a MagicMock manager (tests) is not treated as due.
-        """
-        from agentica.compression.new_window import notes_path_for
-        from agentica.compression.notes import (
-            can_author_notes,
-            fallback_buffer_tokens,
-            notes_are_fresh,
-        )
-        from agentica.compression.token_budget import fallback_text
-
-        if cm.fallback_claimed is not False:
-            return False
-        if working_window > 0 and context_tokens >= working_window:
-            return False
-        notes = notes_path_for(agent._session_log)
-        if notes_are_fresh(notes, since=cm.window_started_at):
-            return False
-        # No notes path (SDK without session_id) => nothing to ask for, and
-        # postponing the cut would only delay it for a file we cannot name.
-        if not can_author_notes(model.functions, notes):
-            return False
-        nudge = fallback_text(notes)
-        if not nudge:
-            return False
-        if not CompressMixin._fold_budget_fragment(messages, nudge):
-            return False
-        cm.fallback_claimed = True
-        cm.compact_token_floor = min(
-            working_window,
-            context_tokens + fallback_buffer_tokens(working_window),
-        )
-        logger.info(
-            "Auto-compact fallback: notes not yet updated in this window, "
-            f"postpone until {cm.compact_token_floor} tokens"
-        )
-        return True
 
     @staticmethod
     def _fold_budget_fragment(messages: List[Message], text: str) -> bool:
