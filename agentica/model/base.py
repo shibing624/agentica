@@ -851,6 +851,23 @@ class Model(ABC):
     # Default implementations handle OpenAI-compatible format.
     # Providers with different protocols (Anthropic, Ollama) override.
 
+    @staticmethod
+    def refused_tool_result(tool_call: Dict[str, Any], reason: str, role: str = "tool") -> Message:
+        """The result that answers a call refused before it ran.
+
+        Unknown tool, undecodable or evicted arguments: the call still answers
+        its own id, as an error under the tool's name, so the session log keeps
+        ``is_error`` / ``tool_name`` and ``/resume`` replays it as the failure
+        it was.
+        """
+        return Message(
+            role=role,
+            tool_call_id=tool_call.get("id"),
+            tool_name=tool_call["function"]["name"],
+            content=reason,
+            tool_call_error=True,
+        )
+
     def parse_tool_calls(
         self, assistant_message: Message, messages: List[Message], tool_role: str = "tool",
     ) -> tuple:
@@ -866,17 +883,14 @@ class Model(ABC):
             return function_calls_to_run, {}
 
         for tool_call in assistant_message.tool_calls:
-            _tool_call_id = tool_call.get("id")
             _function_call = get_function_call_for_tool_call(tool_call, self.functions)
             if _function_call is None:
                 messages.append(
-                    Message(role=tool_role, tool_call_id=_tool_call_id, content="Could not find function to call.")
+                    self.refused_tool_result(tool_call, "Could not find function to call.", tool_role)
                 )
                 continue
             if _function_call.error is not None:
-                messages.append(
-                    Message(role=tool_role, tool_call_id=_tool_call_id, content=_function_call.error)
-                )
+                messages.append(self.refused_tool_result(tool_call, _function_call.error, tool_role))
                 continue
             function_calls_to_run.append(_function_call)
 
@@ -1603,17 +1617,14 @@ class Model(ABC):
             function_call_results: List[Message] = []
             function_calls_to_run: List[FunctionCall] = []
             for tool_call in assistant_message.tool_calls:
-                _tool_call_id = tool_call.get("id")
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
                     messages.append(
-                        Message(role=tool_role, tool_call_id=_tool_call_id, content="Could not find function to call.")
+                        self.refused_tool_result(tool_call, "Could not find function to call.", tool_role)
                     )
                     continue
                 if _function_call.error is not None:
-                    messages.append(
-                        Message(role=tool_role, tool_call_id=_tool_call_id, content=_function_call.error)
-                    )
+                    messages.append(self.refused_tool_result(tool_call, _function_call.error, tool_role))
                     continue
                 function_calls_to_run.append(_function_call)
 
@@ -1643,17 +1654,14 @@ class Model(ABC):
             function_calls_to_run: List[FunctionCall] = []
             function_call_results: List[Message] = []
             for tool_call in assistant_message.tool_calls:
-                _tool_call_id = tool_call.get("id")
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
                     messages.append(
-                        Message(role=tool_role, tool_call_id=_tool_call_id, content="Could not find function to call.")
+                        self.refused_tool_result(tool_call, "Could not find function to call.", tool_role)
                     )
                     continue
                 if _function_call.error is not None:
-                    messages.append(
-                        Message(role=tool_role, tool_call_id=_tool_call_id, content=_function_call.error)
-                    )
+                    messages.append(self.refused_tool_result(tool_call, _function_call.error, tool_role))
                     continue
                 function_calls_to_run.append(_function_call)
 

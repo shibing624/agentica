@@ -764,7 +764,6 @@ class LoopMixin:
                 user_messages: List[Message] = []
                 messages_for_model: List[Message] = []
                 num_input_messages = 0
-                input_message_ids: set = set()
                 model_response = ModelResponse(content="")
                 loop_state = LoopState(
                     max_turns=agent._max_turns,
@@ -960,7 +959,7 @@ class LoopMixin:
                     for _user_message in user_messages:
                         _user_message.automated = True
                 num_input_messages = len(messages_for_model)
-                input_message_ids = {id(m) for m in messages_for_model}
+                loop_state.input_message_ids = {id(m) for m in messages_for_model}
                 # Open the turn for incremental writes: everything this turn puts
                 # on disk mid-flight is recorded so the end-of-turn write becomes
                 # a backfill instead of a duplicate.
@@ -1199,7 +1198,9 @@ class LoopMixin:
                                             f"history mid-stream (likely cross-model resume); "
                                             f"stripping tool messages and retrying once: {exc}"
                                         )
-                                        self._sanitize_tool_history_after_error(agent, messages_for_model)
+                                        self._sanitize_tool_history_after_error(
+                                            agent, messages_for_model, loop_state
+                                        )
                                         _restart_turn = True
                                         break
 
@@ -1682,7 +1683,7 @@ class LoopMixin:
                     if loop_state.context_collapsed:
                         turn_messages = [
                             m for m in messages_for_model
-                            if id(m) not in input_message_ids and m.role != "system"
+                            if id(m) not in loop_state.input_message_ids and m.role != "system"
                         ]
                     else:
                         turn_messages = messages_for_model[num_input_messages:]
@@ -1840,7 +1841,7 @@ class LoopMixin:
                         num_input_messages,
                         model_response,
                         loop_state,
-                        input_message_ids,
+                        loop_state.input_message_ids,
                         marker="[User interrupted the response]",
                         finish_reason="cancelled",
                     )
@@ -1873,7 +1874,7 @@ class LoopMixin:
                         num_input_messages,
                         model_response,
                         loop_state,
-                        input_message_ids,
+                        loop_state.input_message_ids,
                         marker=f"[Run failed: {_err}]",
                         finish_reason="error",
                     )

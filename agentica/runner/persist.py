@@ -309,9 +309,13 @@ class PersistMixin:
             if _tc is None:
                 # Tool result without matching FunctionCall metadata: log a
                 # minimal entry so resume still has a valid assistant->tool pair.
+                # A call refused before it ran lands here (it never reached
+                # tool execution); it still carries its name and error flag.
                 _minimal: Dict[str, Any] = {}
                 if fallback_is_error:
                     _minimal["is_error"] = True
+                if msg.tool_name:
+                    _minimal["tool_name"] = msg.tool_name
                 session_log.append(
                     "tool",
                     _text_from_content_blocks(fallback_content),
@@ -369,7 +373,10 @@ class PersistMixin:
                     **PersistMixin._provider_replay_meta(msg),
                 )
             elif msg.role == "tool":
-                _write_tool_result(msg.tool_call_id, msg.content, msg)
+                _write_tool_result(
+                    msg.tool_call_id, msg.content, msg,
+                    fallback_is_error=bool(msg.tool_call_error),
+                )
             else:
                 # Anthropic packs a round's results into one role="user"
                 # message of tool_result blocks; each block is its own row.
@@ -447,7 +454,9 @@ class PersistMixin:
             logger.debug("session-log trajectory check failed", exc_info=True)
 
     @staticmethod
-    def _sanitize_tool_history_after_error(agent: "Agent", messages: List[Message]) -> None:
+    def _sanitize_tool_history_after_error(
+        agent: "Agent", messages: List[Message], loop_state: "LoopState"
+    ) -> None:
         """Strip tool-call artifacts from history after a tool-history API error.
 
         Recovery path for resuming a session whose history was recorded under
@@ -458,6 +467,12 @@ class PersistMixin:
         results are dropped entirely — both from working-memory-backed
         history (so future turns stay clean) and the in-flight ``messages``
         list (so the immediate retry succeeds).
+
+        The stripped list is shorter than the turn's input prefix, so the
+        ``num_input_messages`` slice would no longer find this turn's reply:
+        the context counts as collapsed. The rebuilt history messages are new
+        objects standing in for input, and are recorded as such so the flat
+        archive does not take them for this turn's output.
         """
         for run in agent.working_memory.runs:
             if run.response and run.response.messages:
@@ -469,6 +484,8 @@ class PersistMixin:
         # the turn from the user's message.
         while messages and messages[-1].role == "assistant":
             messages.pop()
+        loop_state.context_collapsed = True
+        loop_state.input_message_ids.update(id(m) for m in messages)
 
     def save_run_response_to_file(
         self,

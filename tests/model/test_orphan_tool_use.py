@@ -462,15 +462,13 @@ class TestPaddingHoldsOnEveryProvider(unittest.TestCase):
         self.assertEqual(messages[1].content, "real output")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class _StrictAnthropicClient:
     """Fake ``client.messages`` that validates the request the way Anthropic does.
 
     Records every request and raises the provider's shape errors instead of
-    answering, so a test fails on exactly what the live API rejected.
+    answering, so a test fails on exactly what the live API rejected. A round
+    scripted as an exception is raised instead of answered.
     """
 
     def __init__(self, rounds):
@@ -507,7 +505,11 @@ class _StrictAnthropicClient:
         errors = self.shape_errors(kwargs["messages"])
         if errors:
             raise RuntimeError("; ".join(errors))
-        events = list(next(self._rounds))
+        step = next(self._rounds)
+        if isinstance(step, Exception):
+            # A scripted provider rejection, raised where the live 400 surfaces.
+            raise step
+        events = list(step)
 
         class _Mgr:
             async def __aenter__(self_inner):
@@ -641,7 +643,7 @@ class TestStripRecoveryNeverEndsOnAssistant(unittest.TestCase):
             ),
             Message(role="tool", tool_call_id="t1", content="ok"),
         ]
-        PersistMixin._sanitize_tool_history_after_error(agent, messages)
+        PersistMixin._sanitize_tool_history_after_error(agent, messages, LoopState())
         self.assertEqual([(m.role, m.content) for m in messages],
                          [("system", "sys"), ("user", "do all")])
 
@@ -721,3 +723,175 @@ class TestInTurnFallbackFromClaudeKeepsTheToolRound(unittest.TestCase):
         self.assertEqual(assistant["tool_calls"][0]["id"], "toolu_live")
         result = next(m for m in wire if m["role"] == "tool")
         self.assertEqual((result["tool_call_id"], result["content"]), ("toolu_live", "echo:hi"))
+
+
+class TestStripRecoveryKeepsTheTurnsAnswer(unittest.TestCase):
+    """The strip-and-retry recovery shrinks the in-flight list below the turn's
+    input boundary; the retry's answer must still reach run history, the
+    flat archive and the session log."""
+
+    def test_answer_after_strip_recovery_survives_in_every_store(self):
+        import json
+        import tempfile
+        from anthropic.types import TextBlock, ToolUseBlock
+        from agentica.agent import Agent
+
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echo:{text}"
+
+        events = TestClaudeRefusedToolCallAnswersItsId._events
+        client = _StrictAnthropicClient([
+            # turn 1: one tool round, then an answer
+            events(ToolUseBlock(type="tool_use", id="toolu_1", name="echo", input={"text": "a"}),
+                   stop_reason="tool_use"),
+            events(TextBlock(type="text", text="first answer"), stop_reason="end_turn"),
+            # turn 2: the provider rejects the history once, then answers
+            RuntimeError(ANTHROPIC_ORPHAN_ERROR),
+            events(TextBlock(type="text", text="second answer"), stop_reason="end_turn"),
+        ])
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.client = client
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[echo],
+                session_id="s-strip", session_base_dir=tmp,
+                add_history_to_context=True,
+            )
+
+            async def _drive(prompt):
+                # close_client() clears the fake at the end of every turn.
+                model.client = client
+                async for _ in agent.run_stream(prompt):
+                    pass
+
+            asyncio.run(_drive("first question"))
+            asyncio.run(_drive("second question"))
+            entries = [
+                json.loads(line)
+                for line in agent._session_log.path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(len(client.requests), 4, "one strip-and-retry, nothing else")
+        self.assertEqual(agent.run_response.content, "second answer")
+
+        # Run history: the next turn's prompt is built from these runs.
+        history = agent.working_memory.get_messages_from_last_n_runs()
+        self.assertEqual(
+            [(m.role, m.content) for m in history if m.role != "system"][-2:],
+            [("user", "second question"), ("assistant", "second answer")],
+        )
+
+        # Flat archive: the retry's answer is there, earlier turns once each.
+        archive = [(m.role, m.content) for m in agent.working_memory.messages if m.role != "system"]
+        self.assertIn(("assistant", "second answer"), archive)
+        self.assertEqual(archive.count(("user", "first question")), 1, archive)
+        self.assertEqual(archive.count(("assistant", "first answer")), 1, archive)
+
+        # Session log: the turn's final assistant entry is the retry's answer.
+        assistants = [e for e in entries if e.get("type") == "assistant" and not e.get("tool_calls")]
+        self.assertEqual(assistants[-1]["content"], "second answer")
+
+
+class TestStripRecoveryNonStreamBookkeeping(unittest.TestCase):
+    """Non-stream path: ``_call_with_retry`` strips and retries in place."""
+
+    def test_strip_marks_collapse_and_retry_failure_trims_from_the_new_end(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from agentica.runner import Runner
+
+        junk = Message(role="assistant", content="half-written retry")
+        calls = {"n": 0}
+
+        async def _response(messages):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError(ANTHROPIC_ORPHAN_ERROR)
+            messages.append(junk)
+            raise RuntimeError("401 invalid api key")
+
+        model = MagicMock()
+        model.id = "m"
+        model.response = _response
+        model.get_retryable_substrings = lambda defaults: tuple(defaults)
+        model.extra_retryable_substrings = None
+        agent = MagicMock()
+        agent.working_memory = SimpleNamespace(runs=[])
+        agent._run_fallback_models = []
+        agent._event_callback = None
+        messages = [
+            Message(role="user", content="q1"),
+            Message(role="assistant", content="",
+                    tool_calls=[{"id": "c1", "type": "function",
+                                 "function": {"name": "f", "arguments": "{}"}}]),
+            Message(role="tool", tool_call_id="c1", content="r1"),
+            Message(role="assistant", content="a1"),
+            Message(role="user", content="q2"),
+        ]
+        state = LoopState()
+        state.input_message_ids = {id(m) for m in messages}
+        with self.assertRaises(RuntimeError):
+            asyncio.run(Runner._call_with_retry(model, messages, state, agent))
+
+        self.assertTrue(state.context_collapsed)
+        self.assertNotIn(junk, messages, "a failed retry's partial output is trimmed")
+        self.assertEqual([(m.role, m.content) for m in messages],
+                         [("user", "q1"), ("assistant", "a1"), ("user", "q2")])
+        # The stripped copies stand in for the turn's input, not for new output.
+        self.assertTrue(all(id(m) in state.input_message_ids for m in messages))
+
+
+class TestRefusedCallIsPersistedAsAnError(unittest.TestCase):
+    """A refused call's result keeps ``is_error`` and its tool name on disk,
+    so ``/resume`` replays it as the failure it was."""
+
+    def _refusal(self, model):
+        tool_call = {"id": "toolu_x", "type": "function",
+                     "function": {"name": "no_such_tool", "arguments": "{}"}}
+        messages = []
+        model.parse_tool_calls(Message(role="assistant", tool_calls=[tool_call]), messages)
+        (refusal,) = messages
+        return refusal
+
+    def test_every_provider_tags_the_refusal_with_name_and_error(self):
+        from agentica.model.openai import OpenAIChat
+
+        for model in (Claude(id="claude-opus-4-6", api_key="fake"),
+                      OpenAIChat(id="gpt-4o", api_key="fake")):
+            with self.subTest(model=type(model).__name__):
+                refusal = self._refusal(model)
+                self.assertEqual(refusal.role, "tool")
+                self.assertEqual(refusal.tool_call_id, "toolu_x")
+                self.assertEqual(refusal.tool_name, "no_such_tool")
+                self.assertTrue(refusal.tool_call_error)
+
+    def test_refusal_without_a_tool_record_is_written_as_an_error(self):
+        import json
+        import tempfile
+        from types import SimpleNamespace
+        from agentica.memory.session_log import SessionLog
+
+        refusal = self._refusal(Claude(id="claude-opus-4-6", api_key="fake"))
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s-refusal", base_dir=tmp)
+            log.begin_turn()
+            agent = SimpleNamespace(_session_log=log, model=None)
+            assistant = Message(role="assistant", content="", tool_calls=[
+                {"id": "toolu_x", "type": "function",
+                 "function": {"name": "no_such_tool", "arguments": "{}"}},
+            ])
+            # No run_response.tools record: the streaming path never executed it.
+            PersistMixin._persist_assistant_tool_calls(
+                agent, messages=[assistant, refusal], tool_records=[],
+            )
+            entries = [json.loads(line) for line in log.path.read_text(encoding="utf-8").splitlines()]
+
+        (tool_entry,) = [e for e in entries if e.get("type") == "tool"]
+        self.assertTrue(tool_entry["is_error"])
+        self.assertEqual(tool_entry["tool_name"], "no_such_tool")
+        self.assertEqual(tool_entry["tool_call_id"], "toolu_x")
+
+
+if __name__ == "__main__":
+    unittest.main()

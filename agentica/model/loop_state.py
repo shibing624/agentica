@@ -11,7 +11,7 @@ Created fresh at the start of each agentic loop in Runner._run_impl().
 """
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Set
 
 
 @dataclass
@@ -65,6 +65,12 @@ class LoopState:
     # result truncation, tool-result eviction) leaves the boundary intact and does not
     # set this.
     context_collapsed: bool = False
+    # Identity of the messages that were already in the in-flight list when
+    # the turn started, i.e. not this turn's output. Once the context has
+    # collapsed, the flat archive keeps only what is not in this set. A stage
+    # that rebuilds surviving messages as new objects must add them here, or
+    # they are archived a second time.
+    input_message_ids: Set[int] = field(default_factory=set)
 
     # Tool-history sanitize (one-shot per loop invocation)
     tool_history_sanitized_done: bool = False

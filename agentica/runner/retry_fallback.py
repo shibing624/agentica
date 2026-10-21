@@ -370,7 +370,10 @@ class RetryMixin:
                             f"history (likely cross-model resume); stripping "
                             f"tool messages and retrying once: {exc}"
                         )
-                        PersistMixin._sanitize_tool_history_after_error(agent, messages)
+                        PersistMixin._sanitize_tool_history_after_error(agent, messages, state)
+                        # The list shrank; a failed retry must be trimmed back
+                        # to the stripped end, not to the pre-strip length.
+                        message_checkpoint = len(messages)
                         try:
                             if stream:
                                 state.last_used_model_id = current.id

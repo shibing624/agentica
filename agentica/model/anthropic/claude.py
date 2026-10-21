@@ -1102,24 +1102,10 @@ class Claude(Model):
             for tool_call in assistant_message.tool_calls:
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
-                    messages.append(
-                        Message(
-                            role="tool",
-                            tool_call_id=tool_call["id"],
-                            content="Could not find function to call.",
-                            tool_call_error=True,
-                        )
-                    )
+                    messages.append(self.refused_tool_result(tool_call, "Could not find function to call."))
                     continue
                 if _function_call.error is not None:
-                    messages.append(
-                        Message(
-                            role="tool",
-                            tool_call_id=tool_call["id"],
-                            content=_function_call.error,
-                            tool_call_error=True,
-                        )
-                    )
+                    messages.append(self.refused_tool_result(tool_call, _function_call.error))
                     continue
                 function_calls_to_run.append(_function_call)
         return function_calls_to_run
