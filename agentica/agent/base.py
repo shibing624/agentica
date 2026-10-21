@@ -626,6 +626,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self.run_context = None
         self.task_anchor = None
         self._anchor_session_id = None
+        # Model the working_memory history was written for; see
+        # ``ensure_history_portable``. None until a run sends a request.
+        self._history_model_identity = None
         self._parent_run_id = None
         self.run_response = RunResponse()
         self.stream = None

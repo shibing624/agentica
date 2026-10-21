@@ -48,10 +48,10 @@ from agentica.config.project import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.prefs import record_cli_prefs
+from agentica.tools.base import Tool
 from agentica.cli.commands.helpers import (
     _count_enabled_skills,
     _run_async_safe,
-    _sanitize_history_for_model_switch,
     _update_task_tool_auxiliary_model,
     _update_delegate_tool_models,
     format_cli_log_location,
@@ -354,15 +354,35 @@ def _rebuild_live_model(ctx: CommandContext):
         "extra_headers": ctx.agent_config.get("extra_headers"),
         "default_headers": ctx.agent_config.get("default_headers"),
     }
-    previous = ctx.current_agent.model
     ctx.current_agent.model = get_model(**model_kwargs)
-    _sanitize_history_for_model_switch(ctx.current_agent, previous)
+    _rebind_live_model(ctx)
     ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
+
+
+def _rebind_live_model(ctx: CommandContext) -> None:
+    """Point everything that copies the model or profile at the one just swapped in.
+
+    ``/model`` and ``/config set`` replace ``agent.model`` without rebuilding
+    the agent. These are plain assignments, so they happen at once: the status
+    bar and ``/status`` read them right after the switch, and A→B→A ends where
+    it started. The history is not touched here — ``ensure_history_portable``
+    rewrites it at the next run, only if a request really goes to another model.
+    """
+    agent = ctx.current_agent
     cap = _resolve_compact_token_limit(ctx.agent_config)
-    ctx.current_agent.tool_config.compact_token_limit = cap
-    cm = ctx.current_agent.tool_config.compression_manager
+    agent.tool_config.compact_token_limit = cap
+    cm = agent.tool_config.compression_manager
     if cm is not None:
         cm.compact_token_limit = cap
+    for tool in agent.tools or ():
+        # Same call _wire_tools_to_self makes when the agent is built; the
+        # tools that care (vision, LLM-backed) read it for the next call.
+        # agent.tools also holds plain functions, which have no model to bind.
+        if isinstance(tool, Tool):
+            tool.set_agent_model(agent.model)
+    # delegate judges a ``model`` arg against the session's own models and
+    # launches the worker on the session profile, so both follow the switch.
+    _update_delegate_tool_models(agent, ctx.agent_config.get("profile_name") or None)
 
 
 
@@ -591,7 +611,6 @@ def _apply_profile(
     }
     new_model_obj = get_model(**model_kwargs)
     if ctx.current_agent is not None:
-        previous_model = ctx.current_agent.model
         ctx.current_agent.model = new_model_obj
         ctx.current_agent.auxiliary_model = new_auxiliary_model
         # Fallback chain + retry count follow the profile switch too, so the
@@ -608,10 +627,7 @@ def _apply_profile(
         # model (None = fall back to the parent's main model, matching
         # create_agent's default).
         _update_task_tool_auxiliary_model(ctx.current_agent, new_auxiliary_model)
-        # delegate judges a ``model`` arg against the session's own models, so
-        # it has to be looking at the profile just switched to.
-        _update_delegate_tool_models(ctx.current_agent)
-        _sanitize_history_for_model_switch(ctx.current_agent, previous_model)
+        _rebind_live_model(ctx)
         # Refresh the self-description block so the agent reports its new
         # model/auxiliary model on the next turn.
         ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)

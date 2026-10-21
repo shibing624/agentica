@@ -98,6 +98,19 @@ class TestAuthorSessionNotes(unittest.TestCase):
         asyncio.run(author_session_notes(_window(), model, self.path))
         self.assertNotIn("<current_notes>", model.requests[0][-1].content)
 
+    def test_oversized_legacy_notes_are_clipped_keeping_head_and_tail(self):
+        """A 98KB append-only file sent whole would overflow the request at
+        95% of the window, so the rewrite that shrinks it would never land."""
+        legacy = "- GOAL-HEAD keep the public API\n" + "- old round detail\n" * 5000 + "- NEXT-TAIL run pytest\n"
+        Path(self.path).write_text(legacy, encoding="utf-8")
+        model = _Scribe()
+        asyncio.run(author_session_notes(_window(), model, self.path))
+        body = model.requests[0][-1].content.split("<current_notes>")[1]
+        self.assertLess(len(body), 8200)
+        self.assertIn("GOAL-HEAD", body)
+        self.assertIn("NEXT-TAIL", body)
+        self.assertIn("[truncated]", body)
+
     def test_failed_or_empty_reply_leaves_the_file_alone(self):
         Path(self.path).write_text("- keep me\n", encoding="utf-8")
         for model in (_Scribe(fail=RuntimeError("429")), _Scribe(reply="   ")):
@@ -184,6 +197,40 @@ class TestCutWritesNotes(unittest.TestCase):
         self.assertEqual([(m.role, m.content) for m in request[1:3]],
                          [("user", "工单 ZX-41827"), ("assistant", "记下了")])
         self.assertIn("Write the session notes file", request[3].content)
+
+    def test_idle_compact_after_model_switch_sends_no_foreign_signature(self):
+        """/model then /compact with no turn between: the notes request is the
+        first one the new model sees, so the old model's signed thinking must
+        not ride along."""
+        from agentica.agent import Agent
+        from agentica.agent.history_filter import model_identity
+        from agentica.model.anthropic.claude import Claude
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        model = _Scribe(context_window=128_000)
+        agent = Agent(
+            model=model, session_id="idle-switch", session_base_dir=tmp.name,
+            add_history_to_context=True,
+        )
+        turn = [
+            Message(role="user", content="工单 ZX-41827"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "plan", "signature": "sig-from-opus"},
+                    {"type": "text", "text": "记下了"},
+                ],
+            ),
+        ]
+        agent.working_memory.add_messages(turn)
+        agent.working_memory.collapse_runs(turn)
+        agent._history_model_identity = model_identity(Claude(id="claude-opus-5", api_key="k"))
+
+        self.assertTrue(asyncio.run(apply_idle_compact(agent)))
+        (request,) = model.requests
+        self.assertNotIn("sig-from-opus", repr([m.content for m in request]))
+        self.assertIn("记下了", repr([m.content for m in request]))
 
 
 if __name__ == "__main__":

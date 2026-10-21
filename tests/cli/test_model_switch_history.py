@@ -6,13 +6,16 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 os.environ.setdefault("ANTHROPIC_API_KEY", "fake_anthropic_key")
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from agentica.cli.commands.helpers import _sanitize_history_for_model_switch, model_identity
+from agentica.agent import Agent
+from agentica.agent.history_filter import ensure_history_portable, model_identity
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.anthropic.claude import Claude
 from agentica.model.message import Message
 from agentica.model.openai.chat import OpenAIChat
+from agentica.model.response import ModelResponse
 from agentica.run.response import RunResponse
 
 
@@ -42,9 +45,13 @@ def _claude_round_memory() -> WorkingMemory:
 
 
 def _switch(previous, new):
-    agent = SimpleNamespace(model=new, working_memory=_claude_round_memory())
+    agent = SimpleNamespace(
+        model=new,
+        working_memory=_claude_round_memory(),
+        _history_model_identity=model_identity(previous),
+    )
     before = list(agent.working_memory.runs[0].response.messages)
-    _sanitize_history_for_model_switch(agent, previous)
+    ensure_history_portable(agent)
     return before, agent.working_memory
 
 
@@ -86,3 +93,84 @@ def test_same_id_on_another_wire_counts_as_a_switch():
     assert model_identity(Claude(id="claude-opus-5", api_key="k")) != model_identity(
         OpenAIChat(id="claude-opus-5", api_key="k")
     )
+
+
+def test_a_fresh_history_is_left_alone_and_claimed_by_the_model():
+    """No request yet (or history replayed from the log, already portable):
+    there is nothing model-bound to strip."""
+    agent = SimpleNamespace(
+        model=OpenAIChat(id="gpt-5", api_key="k"),
+        working_memory=_claude_round_memory(),
+        _history_model_identity=None,
+    )
+    before = list(agent.working_memory.runs[0].response.messages)
+    assert ensure_history_portable(agent) is False
+    assert all(a is b for a, b in zip(agent.working_memory.runs[0].response.messages, before))
+    assert agent._history_model_identity == model_identity(agent.model)
+
+
+# --- Through the runner: the rewrite happens on the next request, not on /model ---
+
+
+def _scripted(model, seen):
+    async def response(messages):
+        seen.append(list(messages))
+        reply = Message(
+            role="assistant",
+            content=[
+                {"type": "thinking", "thinking": "plan", "signature": f"sig-{model.id}"},
+                {"type": "text", "text": "done"},
+            ],
+        )
+        messages.append(reply)
+        return ModelResponse(content="done")
+
+    return response
+
+
+def _run(agent, model, prompt):
+    seen = []
+    agent.model = model
+    with patch.object(model, "response", new=_scripted(model, seen)):
+        agent.run_sync(prompt)
+    return seen[-1]
+
+
+def _history_signatures(agent):
+    return [
+        b.get("signature")
+        for run in agent.working_memory.runs
+        for m in run.response.messages
+        if isinstance(m.content, list)
+        for b in m.content
+        if isinstance(b, dict) and b.get("type") == "thinking"
+    ]
+
+
+def _opus():
+    return Claude(id="claude-opus-5", api_key="k", base_url="https://gw/a")
+
+
+def test_switching_away_and_back_before_any_request_keeps_signed_thinking():
+    """A→B→A with no request in between: the history was never sent to B, so
+    A gets its own signed thinking back and the cached prefix stays intact."""
+    agent = Agent(model=_opus(), add_history_to_context=True)
+    _run(agent, agent.model, "first")
+    assert _history_signatures(agent) == ["sig-claude-opus-5"]
+
+    agent.model = OpenAIChat(id="gpt-5", api_key="k")  # /model B, no request
+    request = _run(agent, _opus(), "second")  # /model A, then a request
+
+    assert _history_signatures(agent)[0] == "sig-claude-opus-5"
+    assert "sig-claude-opus-5" in repr([m.content for m in request])
+
+
+def test_the_next_request_on_another_model_carries_the_history_over():
+    agent = Agent(model=_opus(), add_history_to_context=True)
+    _run(agent, agent.model, "first")
+
+    request = _run(agent, OpenAIChat(id="gpt-5", api_key="k"), "second")
+
+    assert "sig-claude-opus-5" not in repr([m.content for m in request])
+    assert "done" in repr([m.content for m in request if m.role == "assistant"])
+    assert "sig-claude-opus-5" not in _history_signatures(agent)

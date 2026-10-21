@@ -728,10 +728,10 @@ def run_interactive(
             tui_state["thinking_mode"] = _status_thinking_mode(
                 state.current_agent, agent_config
             )
-            tui_state["context_window"] = (
-                state.current_agent.model.context_window if state.current_agent.model else 128000
-            )
-            tui_state["provider_window"] = tui_state["context_window"]
+            # Measure instead of reading the provider window: a new profile may
+            # carry compact_token_limit, and the bar must divide by the cap the
+            # runner actually compacts against.
+            _seed_context_tokens(state.current_agent, tui_state)
             tui_state["cost_usd"] = 0.0
             # A fresh agent (/clear, /model) carries a fresh system prompt and
             # tool set — re-measure rather than dropping the bar to zero.

@@ -19,6 +19,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
+from agentica.compression.new_window import _NOTES_HEAD_RATIO, _NOTES_INJECT_LIMIT
+from agentica.compression.notes import clip_head_tail
 from agentica.model.message import Message
 from agentica.utils.log import logger
 
@@ -56,6 +58,12 @@ def notes_instruction(notes_path: str) -> str:
     existing = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
     if not existing:
         return _INSTRUCTIONS
+    # An append-only file from an older version can be 98KB. Sent whole, at
+    # 95% of the window, the request overflows and the file never gets the
+    # rewrite that would shrink it. Clipped the same way as its injection.
+    existing = clip_head_tail(
+        existing, _NOTES_INJECT_LIMIT, marker="\n…[truncated]…\n", head_ratio=_NOTES_HEAD_RATIO,
+    )
     return _INSTRUCTIONS + _REVISE.format(existing=existing)
 
 

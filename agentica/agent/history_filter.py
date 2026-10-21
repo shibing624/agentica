@@ -322,6 +322,38 @@ def make_history_portable(working_memory) -> None:
         working_memory.messages = to_portable_history(working_memory.messages)
 
 
+def model_identity(model) -> tuple:
+    """What decides whether history written by one model replays on another.
+
+    The adapter class fixes the wire shape, the id and endpoint fix who
+    verifies thinking signatures and provider replay state. A profile switch
+    that rebuilds the same model leaves all three unchanged.
+    """
+    return (type(model), model.id, model.base_url)
+
+
+def ensure_history_portable(agent) -> bool:
+    """Before a request: carry the history onto ``agent.model`` if another model wrote it.
+
+    Called at run start, not on ``/model``: the rewrite drops signed thinking
+    and provider replay state for good, so it waits until a request actually
+    goes to the new model. A→B→A with no request in between leaves the
+    history untouched, prompt cache and signatures included.
+
+    ``agent._history_model_identity`` names the model the history in
+    ``working_memory`` was written for. None means nothing model-bound is in
+    it yet (fresh session, or history replayed from the session log, which is
+    already in the shared shape). Returns True when the history was rewritten.
+    """
+    identity = model_identity(agent.model)
+    written_for = agent._history_model_identity
+    agent._history_model_identity = identity
+    if written_for is None or written_for == identity:
+        return False
+    make_history_portable(agent.working_memory)
+    return True
+
+
 _CLAUDE_NATIVE_BLOCKS = frozenset({"tool_use", "tool_result", "thinking", "redacted_thinking"})
 
 

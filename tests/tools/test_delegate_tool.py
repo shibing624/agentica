@@ -671,15 +671,20 @@ class TestOnlyTheUserChangesTheModel:
         new_main = SimpleNamespace(id="glm-5.3-external", api_key="sk", base_url=None)
         new_aux = SimpleNamespace(id="gpt-4o", api_key="sk", base_url=None)
 
-        tool.refresh_session_models(model=new_main, auxiliary_model=new_aux)
+        tool.refresh_session_models(
+            model=new_main,
+            auxiliary_model=new_aux,
+            session_profile="venus-glm-5-3",
+        )
 
         # The new profile's two models are now the offered ones, and both run
-        # on the session profile.
+        # on the profile just switched to — not the one left behind, whose
+        # endpoint and key would get the new model's name.
         for task, model in (("a", "glm-5.3-external"), ("b", "gpt-4o")):
             assert _delegate(tool, task=task, model=model).startswith("Delegated")
             argv = _argv(registry.started[-1])
             assert argv[argv.index("--model_name") + 1] == model
-            assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
+            assert argv[argv.index("--profile") + 1] == "venus-glm-5-3"
         # The profile that was switched away from is no longer available.
         assert _delegate(
             tool, task="c", model="deepseek-v4.1-flash-official",

@@ -15,6 +15,7 @@ import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from agentica.agent.history_filter import ensure_history_portable
 from agentica.compression.evict import trailing_user_turn_start
 from agentica.compression.new_window import notes_path_for, start_new_context_window
 from agentica.compression.notes import rollover_handover
@@ -267,8 +268,7 @@ async def apply_idle_compact(agent: Any) -> bool:
     wm = agent.working_memory
     if wm is None:
         return False
-    messages = wm.messages
-    if not messages:
+    if not wm.messages:
         return False
     cm = agent.tool_config.compression_manager if agent.tool_config else None
     if cm is None:
@@ -279,6 +279,11 @@ async def apply_idle_compact(agent: Any) -> bool:
     # a fresh Model object.
     if agent.model is not None:
         agent.model._agent_ref = weakref.ref(agent)
+        # The notes request goes to agent.model like a run would; after /model
+        # the history may still be the previous model's, signed thinking
+        # included. Rebinds wm.messages, so it is read only after this.
+        ensure_history_portable(agent)
+    messages = wm.messages
     # ``wm.messages`` holds no system prompt; the notes request is built the
     # way the next turn's prefix is, so it matches what the last request sent
     # and reads its prompt cache.

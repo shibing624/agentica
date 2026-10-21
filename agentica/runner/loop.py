@@ -25,7 +25,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from agentica.agent.history_filter import _text_from_content_blocks
+from agentica.agent.history_filter import _text_from_content_blocks, ensure_history_portable
 from agentica.model.cost import CostTracker
 from agentica.guardrails.agent import (
     normalize_input_for_guardrails,
@@ -889,6 +889,10 @@ class LoopMixin:
                 # 1. Setup
                 agent.update_model()
                 agent.run_response.model = agent.model.id if agent.model is not None else None
+                # The model is final now: if /model or /config set left it on a
+                # model other than the one the history was written for, the
+                # history is carried over here, once, right before it is sent.
+                ensure_history_portable(agent)
                 if agent.context is not None:
                     agent._resolve_context()
 

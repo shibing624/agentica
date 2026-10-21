@@ -541,6 +541,52 @@ class TestCLIAwareness(unittest.TestCase):
         mock_sibling.assert_not_called()
         self.assertNotIn("Auxiliary model:", ctx.current_agent.environment_context)
 
+    def test_apply_profile_rebinds_everything_that_copies_the_model(self):
+        """Plain copies of the model/profile follow /model at once; the history
+        does not — it is rewritten on the next request, if one goes out."""
+        import agentica.config.profiles as gc
+        from agentica.tools.base import Tool
+
+        ctx = self._make_apply_profile_ctx()
+        tool = MagicMock(spec=Tool)
+        tool.functions = {}
+        plain_function = MagicMock(spec=lambda: None)
+        ctx.current_agent.tools = [tool, plain_function]
+        ctx.current_agent.tool_config.compact_token_limit = 300_000
+        ctx.current_agent.tool_config.compression_manager.compact_token_limit = 300_000
+        history = ctx.current_agent.working_memory
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, "config.yaml")
+            with (
+                patch("agentica.config.profiles.global_config_path", return_value=cfg_path),
+                patch.object(cli_model_config, "get_console", return_value=MagicMock()),
+                patch.object(cli_model_config, "get_model", return_value=MagicMock()) as mock_get_model,
+                patch.object(cli_model_config, "set_project_profile"),
+                patch.object(cli_model_config, "_update_delegate_tool_models") as mock_delegate,
+                patch("agentica.agent.history_filter.make_history_portable") as mock_portable,
+            ):
+                gc.upsert_profile(
+                    "capped",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "gpt-5",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-main",
+                        "compact_token_limit": 128_000,
+                    },
+                    make_active=True,
+                )
+                cli_model_config._apply_profile(ctx, "capped")
+
+        new_model = mock_get_model.return_value
+        self.assertEqual(ctx.current_agent.tool_config.compact_token_limit, 128_000)
+        self.assertEqual(ctx.current_agent.tool_config.compression_manager.compact_token_limit, 128_000)
+        tool.set_agent_model.assert_called_once_with(new_model)
+        mock_delegate.assert_called_once_with(ctx.current_agent, "capped")
+        mock_portable.assert_not_called()
+        self.assertIs(ctx.current_agent.working_memory, history)
+
     def test_cmd_tools_add_from_rejects_path_traversal(self):
         """/tools add-from ../evil is rejected before any module is loaded."""
         ctx = CommandContext(

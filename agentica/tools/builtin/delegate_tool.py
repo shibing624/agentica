@@ -185,15 +185,19 @@ class BuiltinDelegateTool(Tool):
         *,
         model: Optional["Model"] = None,
         auxiliary_model: Optional["Model"] = None,
+        session_profile: Optional[str],
     ) -> None:
         """Repoint the session models this tool judges and labels against.
 
         ``/model`` rewrites the live agent in place — no rebuild, so the tool
         instance survives with the previous profile's models. Both the refusal
         check and the model label read these, and either one running on a stale
-        profile is worse than not having it at all.
+        profile is worse than not having it at all. ``session_profile`` moves
+        with them: a worker launched as ``--profile <old> --model_name <new>``
+        sends the new model name to the old profile's endpoint and key.
         """
         self._auxiliary_model = auxiliary_model
+        self._session_profile = session_profile
         if model is None:
             return
         self._model = model
