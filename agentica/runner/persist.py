@@ -590,7 +590,7 @@ class PersistMixin:
         return filtered
 
     @staticmethod
-    def repair_unanswered_tool_calls(msgs: List[Message], *, anthropic_blocks: bool) -> int:
+    def repair_unanswered_tool_calls(msgs: List[Message]) -> int:
         """Answer every unanswered ``tool_calls`` round in place. Returns the count.
 
         Recovery for a provider rejection of transcript *shape* ("`tool_use`
@@ -603,6 +603,9 @@ class PersistMixin:
         it injects a placeholder result for the ids that never got one, which is
         the minimum edit that satisfies the provider. Dropping all tool history
         to fix one missing result throws away the whole run's context.
+
+        The pad is a ``role="tool"`` message on every provider: Claude folds it
+        into the tool_result user turn of the round it answers.
         """
         def result_ids(message: Message) -> set:
             if message.role == "tool" and message.tool_call_id:
@@ -635,28 +638,17 @@ class PersistMixin:
                         "Error: tool call did not return a response "
                         "(execution was interrupted)."
                     )
-                    if anthropic_blocks:
-                        pad = Message(
-                            role="user",
-                            content=[
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": tc_id,
-                                    "content": text,
-                                    "is_error": True,
-                                }
-                                for tc_id in missing
-                            ],
+                    for tc_id in missing:
+                        msgs.insert(
+                            j,
+                            Message(
+                                role="tool",
+                                tool_call_id=tc_id,
+                                content=text,
+                                tool_call_error=True,
+                            ),
                         )
-                        msgs.insert(j, pad)
                         j += 1
-                    else:
-                        for tc_id in missing:
-                            msgs.insert(
-                                j,
-                                Message(role="tool", tool_call_id=tc_id, content=text),
-                            )
-                            j += 1
                     repaired += len(missing)
                 i = j
                 continue

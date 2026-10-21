@@ -110,6 +110,52 @@ def _is_empty_text_block(block: Any) -> bool:
     return not (isinstance(text, str) and text.strip())
 
 
+def _tool_use_blocks(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """``tool_use`` blocks for an assistant turn stored in the OpenAI shape.
+
+    SessionLog persists every provider's tool rounds as ``tool_calls`` plus
+    ``role="tool"`` results, and OpenAI-wire models produce that shape live.
+    Arguments are a JSON string there; Claude omits the key for a call with
+    no input. An OpenAI model cut off mid-call can leave arguments that are
+    not JSON at all — that call already failed, and its tool_result says so,
+    so it replays with an empty input instead of failing the whole request.
+    """
+    blocks: List[Dict[str, Any]] = []
+    for tool_call in tool_calls:
+        function = tool_call["function"]
+        raw = function.get("arguments") or "{}"
+        try:
+            tool_input = json.loads(raw)
+        except json.JSONDecodeError:
+            tool_input = {}
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": tool_call["id"],
+                "name": function["name"],
+                "input": tool_input if isinstance(tool_input, dict) else {},
+            }
+        )
+    return blocks
+
+
+def _tool_result_block(message: Message) -> Dict[str, Any]:
+    """A ``role="tool"`` result as the ``tool_result`` block Claude accepts."""
+    content = message.content
+    if not isinstance(content, str):
+        content = "\n".join(
+            b["text"] for b in content or [] if isinstance(b, dict) and b.get("type") == "text"
+        )
+    block: Dict[str, Any] = {
+        "type": "tool_result",
+        "tool_use_id": message.tool_call_id,
+        "content": content,
+    }
+    if message.tool_call_error:
+        block["is_error"] = True
+    return block
+
+
 _THINKING_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
 
 
@@ -236,11 +282,6 @@ class Claude(Model):
     # Structured output support
     use_structured_outputs: bool = False
     supports_structured_outputs: bool = True
-
-    # Tool rounds live in `content` as tool_use / tool_result blocks here, not
-    # in `tool_calls` + role="tool" messages. A transcript persisted by any
-    # provider comes back in the latter shape, which this API cannot accept.
-    supports_replayed_tool_history: bool = False
 
     # Prompt caching: inject cache_control breakpoints into system message
     # and conversation history to reduce input token costs on multi-turn runs.
@@ -421,6 +462,10 @@ class Claude(Model):
         chat_messages: List[Dict[str, str]] = []
         system_messages: List[str] = []
         pending_tool_use_ids: set[str] = set()
+        # Index in chat_messages of the user turn collecting role="tool"
+        # results for the open tool_use round; Anthropic wants every result of
+        # one round in a single user message, right after the tool_use.
+        tool_result_turn: Optional[int] = None
 
         # This path intentionally does NOT round-trip through
         # ``Message.to_model_dict()``: Anthropic needs block-typed content
@@ -442,13 +487,20 @@ class Claude(Model):
             ):
                 system_messages.append(content)  # type: ignore
             elif message.role == "tool":
-                # OpenAI-style tool-result message (role="tool"). Anthropic only
-                # allows "user"/"assistant", and this class already emits tool
-                # results as a "user" message carrying tool_result blocks (see
-                # format_function_call_results). The shared Runner may leave a
-                # duplicate role="tool" copy in history; skip it so we don't send
-                # an invalid role or a duplicate tool_result for the same id.
-                continue
+                # OpenAI-shape result: from a resumed transcript, a history
+                # converted on /model, or a placeholder the shared repair code
+                # inserted. A live Claude round already answered its ids with a
+                # tool_result user message, so an id no longer pending is a
+                # duplicate (or an orphan) and must not reach the wire.
+                if message.tool_call_id not in pending_tool_use_ids:
+                    continue
+                pending_tool_use_ids.discard(message.tool_call_id)
+                block = _tool_result_block(message)
+                if tool_result_turn is None:
+                    chat_messages.append({"role": "user", "content": [block]})  # type: ignore
+                    tool_result_turn = len(chat_messages) - 1
+                else:
+                    chat_messages[tool_result_turn]["content"].append(block)  # type: ignore
             else:
                 if isinstance(content, str):
                     blocks = [{"type": "text", "text": content}] if content.strip() else []
@@ -458,11 +510,20 @@ class Claude(Model):
                         for b in content
                         if not _is_empty_text_block(b) and not _is_unsigned_thinking_block(b)
                     ]
+                if (
+                    message.role == "assistant"
+                    and message.tool_calls
+                    and not any(
+                        isinstance(b, dict) and b.get("type") == "tool_use" for b in blocks
+                    )
+                ):
+                    blocks.extend(_tool_use_blocks(message.tool_calls))
 
                 has_tool_result = any(
                     isinstance(block, dict) and block.get("type") == "tool_result"
                     for block in blocks
                 )
+                answered: set[str] = set()
                 if message.role == "user" and has_tool_result:
                     blocks = [
                         block
@@ -473,6 +534,11 @@ class Claude(Model):
                             and block.get("tool_use_id") not in pending_tool_use_ids
                         )
                     ]
+                    answered = {
+                        block["tool_use_id"]
+                        for block in blocks
+                        if isinstance(block, dict) and block.get("type") == "tool_result"
+                    }
 
                 if message.role == "user" and message.images is not None:
                     self.validate_image_input()
@@ -482,15 +548,11 @@ class Claude(Model):
                 if not blocks:
                     # Anthropic rejects empty text blocks outright, and a turn
                     # with nothing left to send carries no information anyway.
-                    # Replayed tool-call assistant messages land here: their
-                    # tool_use blocks did not survive persistence, so only an
-                    # empty string remains.
-                    if message.role == "user" and has_tool_result:
-                        pending_tool_use_ids = set()
                     continue
 
-                chat_messages.append({"role": message.role, "content": blocks})  # type: ignore
                 if message.role == "assistant":
+                    tool_result_turn = None
+                    chat_messages.append({"role": "assistant", "content": blocks})  # type: ignore
                     pending_tool_use_ids = {
                         block.get("id")
                         for block in blocks
@@ -498,7 +560,24 @@ class Claude(Model):
                         and block.get("type") == "tool_use"
                         and block.get("id")
                     }
-                elif message.role == "user":
+                    continue
+
+                # A user turn after a tool round joins the message holding that
+                # round's results, whichever shape delivered them (role="tool"
+                # rows, native tool_result blocks, or both when a placeholder
+                # pads a partial native round): every result lands in the one
+                # message right after the tool_use, results first, and the
+                # request never carries two consecutive user turns.
+                if tool_result_turn is None:
+                    chat_messages.append({"role": "user", "content": blocks})  # type: ignore
+                    tool_result_turn = len(chat_messages) - 1 if answered else None
+                else:
+                    chat_messages[tool_result_turn]["content"].extend(blocks)  # type: ignore
+                if answered:
+                    pending_tool_use_ids -= answered
+                else:
+                    # Plain user input closes the round.
+                    tool_result_turn = None
                     pending_tool_use_ids = set()
 
         # system_and_3 strategy: cache the system prompt (breakpoint added in

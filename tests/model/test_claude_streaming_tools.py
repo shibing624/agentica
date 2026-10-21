@@ -239,8 +239,14 @@ class TestClaudeFormatMessagesToolRole(unittest.TestCase):
         self.assertEqual(roles, ["user", "assistant", "user"])
         self.assertEqual(system, "")
 
-    def test_orphan_tool_result_blocks_are_filtered(self):
-        """A damaged interrupted turn must not send tool_result without tool_use."""
+    def test_an_interrupted_turn_pairs_its_result_with_the_call(self):
+        """No tool_result reaches the wire without its tool_use.
+
+        A damaged turn used to lose the tool_use (``tool_calls`` was never
+        rendered as a block) and had to drop the result with it. The call is
+        rendered from ``tool_calls`` now, so the round replays intact instead
+        of silently losing output the model had already seen.
+        """
         model = Claude(id="claude-opus-4-6", api_key="fake")
         model.enable_cache_control = False
 
@@ -269,7 +275,14 @@ class TestClaudeFormatMessagesToolRole(unittest.TestCase):
             for block in msg["content"]
             if isinstance(block, dict) and block.get("type") == "text"
         ]
-        self.assertEqual(tool_results, [])
+        self.assertEqual([b["tool_use_id"] for b in tool_results], ["t1"])
+        used = {
+            block["id"]
+            for msg in chat_messages
+            for block in msg["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_use"
+        }
+        self.assertEqual(used, {"t1"})
         self.assertEqual(texts, ["run status", "[User interrupted the response]", "retry"])
 
 

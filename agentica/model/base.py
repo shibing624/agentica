@@ -296,6 +296,10 @@ class Model(ABC):
     name: Optional[str] = None
     # Provider for this Model. This is not sent to the Model API.
     provider: Optional[str] = None
+    # Endpoint this model is served from, when it has one. Not sent to the API;
+    # a model switch compares it, because the same id on another endpoint means
+    # another backend and another prompt cache.
+    base_url: Optional[str] = None
     # Metrics collected for this Model. This is not sent to the Model API.
     metrics: Dict[str, Any] = field(default_factory=dict)
     # Structured usage tracking (cross-request aggregation).
@@ -306,14 +310,6 @@ class Model(ABC):
     context_window: int = 200000
     supports_images: Optional[bool] = None
     supports_native_compaction: bool = False
-    # Whether this model can replay a persisted transcript's tool rounds.
-    # SessionLog records them in the OpenAI wire shape (assistant.tool_calls
-    # plus role="tool" results) whatever provider produced them, so a provider
-    # with its own shape (Anthropic content blocks) cannot send them back.
-    # Resume/fork hands those providers plain user/assistant text instead —
-    # the conversation continues, the tool rounds do not come along.
-    supports_replayed_tool_history: bool = True
-
     # Extra retryable error substrings, merged on top of the SDK's default
     # protocol-level transients (see ``LoopState.RETRYABLE_SUBSTRINGS``).
     #

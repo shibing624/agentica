@@ -25,10 +25,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from agentica.agent.history_filter import (
-    _text_from_content_blocks,
-    strip_tool_artifacts_from_memory,
-)
+from agentica.agent.history_filter import _text_from_content_blocks
 from agentica.model.cost import CostTracker
 from agentica.guardrails.agent import (
     normalize_input_for_guardrails,
@@ -832,15 +829,6 @@ class LoopMixin:
                     )
                     if resumed_messages:
                         runs_built = agent.working_memory.hydrate_runs_from_history(resumed_messages)
-                        # The transcript stores tool rounds in the OpenAI wire
-                        # shape; a provider that speaks another one would 400
-                        # on replay, so it continues from the text turns only.
-                        if (
-                            runs_built
-                            and agent.model is not None
-                            and not agent.model.supports_replayed_tool_history
-                        ):
-                            strip_tool_artifacts_from_memory(agent.working_memory)
                         logger.debug(
                             f"Session resumed from JSONL: {len(resumed_messages)} messages, "
                             f"{runs_built} runs reconstructed"
@@ -1197,15 +1185,7 @@ class LoopMixin:
                                         # history when there was nothing to pad
                                         # (i.e. a genuine cross-provider format
                                         # mismatch).
-                                        _repaired = self.repair_unanswered_tool_calls(
-                                            messages_for_model,
-                                            # Claude sets this False: it needs
-                                            # tool_result content blocks on a
-                                            # user message, not a role="tool" one.
-                                            anthropic_blocks=not getattr(
-                                                active_model, "supports_replayed_tool_history", True
-                                            ),
-                                        )
+                                        _repaired = self.repair_unanswered_tool_calls(messages_for_model)
                                         if _repaired:
                                             logger.warning(
                                                 f"[tool_history] {active_model.id} rejected an "

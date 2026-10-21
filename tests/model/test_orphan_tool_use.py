@@ -241,7 +241,7 @@ class TestRepairUnansweredToolCalls(unittest.TestCase):
             Message(role="assistant", content="done"),
         ]
         before = len(messages)
-        repaired = PersistMixin.repair_unanswered_tool_calls(messages, anthropic_blocks=True)
+        repaired = PersistMixin.repair_unanswered_tool_calls(messages)
         self.assertEqual(repaired, 1)
         self.assertEqual(len(messages), before + 1, "repair inserts, never deletes")
 
@@ -253,7 +253,7 @@ class TestRepairUnansweredToolCalls(unittest.TestCase):
         # The transcript survives: the nuclear strip would have removed these.
         self.assertTrue(any(m.role == "assistant" and m.content == "done" for m in messages))
 
-    def test_openai_shape_uses_tool_role_messages(self):
+    def test_pad_is_a_tool_role_message_on_every_provider(self):
         messages = [
             Message(
                 role="assistant",
@@ -261,7 +261,7 @@ class TestRepairUnansweredToolCalls(unittest.TestCase):
                 tool_calls=[{"id": "call_1", "function": {"name": "execute"}}],
             ),
         ]
-        repaired = PersistMixin.repair_unanswered_tool_calls(messages, anthropic_blocks=False)
+        repaired = PersistMixin.repair_unanswered_tool_calls(messages)
         self.assertEqual(repaired, 1)
         self.assertEqual(messages[1].role, "tool")
         self.assertEqual(messages[1].tool_call_id, "call_1")
@@ -272,9 +272,7 @@ class TestRepairUnansweredToolCalls(unittest.TestCase):
             Message(role="user", content=[{"type": "tool_result", "tool_use_id": "a", "content": "ok"}]),
         ]
         snapshot = list(messages)
-        self.assertEqual(
-            PersistMixin.repair_unanswered_tool_calls(messages, anthropic_blocks=True), 0
-        )
+        self.assertEqual(PersistMixin.repair_unanswered_tool_calls(messages), 0)
         self.assertEqual(messages, snapshot)
 
     def test_partially_answered_round_pads_only_the_gap(self):
@@ -289,9 +287,7 @@ class TestRepairUnansweredToolCalls(unittest.TestCase):
             ),
             Message(role="user", content=[{"type": "tool_result", "tool_use_id": "a", "content": "ok"}]),
         ]
-        self.assertEqual(
-            PersistMixin.repair_unanswered_tool_calls(messages, anthropic_blocks=True), 1
-        )
+        self.assertEqual(PersistMixin.repair_unanswered_tool_calls(messages), 1)
         answered = set()
         for m in messages:
             answered |= _tool_result_ids(m)

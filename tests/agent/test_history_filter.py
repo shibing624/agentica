@@ -7,12 +7,8 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.agent.config import HistoryConfig
 from agentica.agent.history_filter import (
-    ELIDED_TOOLS_MARK,
     apply_history_pipeline,
-    elided_tools_notice,
     strip_all_tool_artifacts,
-    strip_tool_artifacts_from_memory,
-    summarize_elided_writes,
 )
 from agentica.model.message import Message
 
@@ -356,140 +352,11 @@ def test_strip_does_not_duplicate_images_from_both_shapes():
     assert len(out[0].images) == 1
 
 
-def test_summarize_elided_writes_lists_apply_patch_not_execute_body():
-    history = [
-        _assistant(
-            tool_calls=[
-                {
-                    "id": "w1",
-                    "type": "function",
-                    "function": {
-                        "name": "apply_patch",
-                        "arguments": (
-                            '{"patch": "*** Update File: docs/foo.md\\n'
-                            '@@\\n-a\\n+b\\n"}'
-                        ),
-                    },
-                },
-                {
-                    "id": "e1",
-                    "type": "function",
-                    "function": {
-                        "name": "execute",
-                        "arguments": '{"command": "cat ~/.agentica/config.yaml"}',
-                    },
-                },
-            ]
-        ),
-        _tool("w1", "apply_patch", "Successfully applied patch to 1 file (+1 -1)"),
-        _tool("e1", "execute", "api_key: SECRET-DO-NOT-LEAK\n"),
-    ]
-    lines = summarize_elided_writes(history)
-    assert any("apply_patch" in line and "docs/foo.md" in line for line in lines)
-    assert any("Successfully applied" in line for line in lines)
-    assert not any("SECRET" in line or "execute" in line for line in lines)
-
-
-def test_elided_notice_warns_even_without_writes():
-    text = elided_tools_notice([_user("hi"), _assistant("I wrote docs/x.md")])
-    assert ELIDED_TOOLS_MARK in text
-    assert "not proof a file exists" in text
-    assert "Writes that actually ran" not in text
-
-
-def test_strip_from_memory_folds_notice_into_last_assistant_turn():
-    from agentica.memory.models import AgentRun
-    from agentica.memory.working import WorkingMemory
-    from agentica.run.response import RunResponse
-
-    history = [
-        _user("edit it"),
-        _assistant(
-            tool_calls=[{
-                "id": "w1",
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "arguments": '{"file_path": "docs/foo.md", "content": "x"}',
-                },
-            }]
-        ),
-        _tool("w1", "write_file", "Wrote docs/foo.md"),
-        _assistant("写好了：docs/foo.md（193 行）"),
-    ]
-    memory = WorkingMemory()
-    memory.add_messages(history)
-    memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
-    strip_tool_artifacts_from_memory(memory)
-
-    for messages in (memory.messages, memory.runs[0].response.messages):
-        assert all(m.role != "tool" for m in messages)
-        assert all(not m.tool_calls for m in messages)
-        # Merged into the existing answer, not a second assistant message:
-        # consecutive same-role turns are a 400 on Bedrock and some proxies.
-        assert [m.role for m in messages] == ["user", "assistant"]
-        last = messages[-1]
-        assert last.content.startswith("写好了：docs/foo.md（193 行）")
-        assert ELIDED_TOOLS_MARK in last.content
-        assert "write_file docs/foo.md" in last.content
-        assert "Wrote docs/foo.md" in last.content
-
-
-def test_strip_from_memory_is_idempotent():
-    """A second switch must not stack another digest."""
-    from agentica.memory.models import AgentRun
-    from agentica.memory.working import WorkingMemory
-    from agentica.run.response import RunResponse
-
-    history = [
-        _user("edit it"),
-        _assistant(
-            tool_calls=[{
-                "id": "w1",
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "arguments": '{"file_path": "docs/foo.md", "content": "x"}',
-                },
-            }]
-        ),
-        _tool("w1", "write_file", "Wrote docs/foo.md"),
-        _assistant("done"),
-    ]
-    memory = WorkingMemory()
-    memory.add_messages(history)
-    memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
-    strip_tool_artifacts_from_memory(memory)
-    strip_tool_artifacts_from_memory(memory)
-
-    for messages in (memory.messages, memory.runs[0].response.messages):
-        assert [m.role for m in messages] == ["user", "assistant"]
-        assert messages[-1].content.count(ELIDED_TOOLS_MARK) == 1
-
-
-def test_strip_from_memory_adds_no_notice_without_tool_rounds():
-    """Chat-only history: claiming tools were dropped would be false."""
-    from agentica.memory.models import AgentRun
-    from agentica.memory.working import WorkingMemory
-    from agentica.run.response import RunResponse
-
-    history = [_user("hi"), _assistant("hello")]
-    memory = WorkingMemory()
-    memory.add_messages(history)
-    memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
-    strip_tool_artifacts_from_memory(memory)
-
-    for messages in (memory.messages, memory.runs[0].response.messages):
-        assert [(m.role, m.content) for m in messages] == [
-            ("user", "hi"),
-            ("assistant", "hello"),
-        ]
-
-
 def test_strip_elided_notice_leaves_prose():
+    """Old transcripts carry the marker; replay must not show it."""
     from agentica.agent.history_filter import strip_elided_notice
 
-    merged = "The port is 8080.\n\n" + elided_tools_notice([])
+    merged = "The port is 8080.\n\n<elided-tools>\nTool calls were dropped</elided-tools>"
     assert strip_elided_notice(merged) == "The port is 8080."
     assert strip_elided_notice("plain text") == "plain text"
 
@@ -503,39 +370,40 @@ def test_strip_keeps_image_only_user_turn():
     assert out[0].images == [image_block]
 
 
-def test_notice_never_adds_a_consecutive_assistant_turn():
-    """The digest merges into the trailing assistant turn.
-
-    ``strip_all_tool_artifacts`` itself can still leave two assistant turns
-    adjacent (pre-existing; four tests pin that shape). What must not regress
-    is the notice adding *another* one on top.
-    """
+def test_portable_history_keeps_what_the_prompt_builder_replays():
+    """The conversion runs over both stores, so they agree afterwards."""
     from agentica.memory.models import AgentRun
     from agentica.memory.working import WorkingMemory
     from agentica.run.response import RunResponse
+    from agentica.agent.history_filter import make_history_portable
 
     history = [
-        _user("edit"),
-        Message(
-            role="assistant",
+        _user("read a.py"),
+        _assistant(
             content=[
-                {"type": "text", "text": "ok"},
-                {"type": "tool_use", "id": "t1", "name": "write_file", "input": {}},
+                {"type": "text", "text": "reading"},
+                {"type": "tool_use", "id": "t1", "name": "read_file", "input": {"path": "a.py"}},
             ],
+            tool_calls=[{"id": "t1", "type": "function", "function": {"name": "read_file"}}],
         ),
         Message(
             role="user",
-            content=[{"type": "tool_result", "tool_use_id": "t1", "content": "Wrote a.md"}],
+            content=[{"type": "tool_result", "tool_use_id": "t1", "content": "PORT = 8080"}],
         ),
-        _assistant("done"),
+        _assistant("the port is 8080"),
     ]
     memory = WorkingMemory()
     memory.add_messages(history)
     memory.add_run(AgentRun(response=RunResponse(messages=list(history))))
-    before = [m.role for m in strip_all_tool_artifacts(history)]
-    strip_tool_artifacts_from_memory(memory)
+    make_history_portable(memory)
 
-    after = [m.role for m in memory.messages]
-    assert after == before, "the notice must not append a further assistant turn"
-    assert sum(ELIDED_TOOLS_MARK in (m.content or "") for m in memory.messages) == 1
-    assert memory.messages[-1].content.startswith("done")
+    for messages in (memory.messages, memory.runs[0].response.messages):
+        assert [(m.role, m.content) for m in messages] == [
+            ("user", "read a.py"),
+            ("assistant", "reading"),
+            ("tool", "PORT = 8080"),
+            ("assistant", "the port is 8080"),
+        ]
+        assert messages[1].tool_calls[0]["id"] == "t1"
+        assert messages[2].tool_call_id == "t1"
+        assert messages[2].tool_name == "read_file"

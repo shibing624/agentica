@@ -114,7 +114,7 @@ def test_resume_restores_session_profile_before_creating_agent(tmp_path, monkeyp
     resumed_agent = SimpleNamespace(
         _session_log=target_log,
         working_memory=WorkingMemory(),
-        model=SimpleNamespace(supports_replayed_tool_history=True, id="deepseek-v4-flash"),
+        model=SimpleNamespace(id="deepseek-v4-flash", base_url=None),
         auxiliary_model=None,
         session_id="session-target",
         work_dir=str(work_dir),
@@ -183,11 +183,12 @@ def _tool_round_log(tmp_path, session_id):
     return log
 
 
-def test_resume_keeps_tool_history_for_a_provider_that_can_replay_it(tmp_path):
+def test_resume_keeps_tool_history(tmp_path):
+    """Whatever the provider, the round comes back; each adapter replays it."""
     agent = SimpleNamespace(
         _session_log=_tool_round_log(tmp_path, "session-openai"),
         working_memory=WorkingMemory(),
-        model=SimpleNamespace(supports_replayed_tool_history=True),
+        model=SimpleNamespace(id="deepseek-v4-flash", base_url=None),
     )
 
     hydrate_resumed_session(agent)
@@ -196,35 +197,14 @@ def test_resume_keeps_tool_history_for_a_provider_that_can_replay_it(tmp_path):
     assert [message.role for message in history] == ["user", "assistant", "tool", "assistant"]
 
 
-def test_resume_drops_tool_history_for_a_provider_that_cannot(tmp_path):
-    """Anthropic cannot replay assistant.tool_calls + role="tool"; it gets the text."""
-    agent = SimpleNamespace(
-        _session_log=_tool_round_log(tmp_path, "session-claude"),
-        working_memory=WorkingMemory(),
-        model=SimpleNamespace(supports_replayed_tool_history=False),
-    )
-
-    hydrate_resumed_session(agent)
-
-    history = agent.working_memory.get_messages_from_last_n_runs()
-    # Roles still alternate: the elided-tools digest is folded into the
-    # trailing assistant turn rather than appended as a second assistant
-    # message (Bedrock/proxies 400 on consecutive same-role turns).
-    assert [m.role for m in history] == ["user", "assistant"]
-    assert history[0].content == "read config.py"
-    assert history[1].content.startswith("The port is 8080.")
-    assert "<elided-tools>" in history[1].content
-
-
-def test_resume_of_a_text_only_session_adds_no_elided_notice(tmp_path):
-    """Nothing was dropped, so the digest would be a lie — it must be absent."""
+def test_resume_of_a_text_only_session_is_plain_text(tmp_path):
     log = SessionLog("session-claude-text", base_dir=str(tmp_path))
     log.append("user", "hi")
     log.append("assistant", "hello")
     agent = SimpleNamespace(
         _session_log=log,
         working_memory=WorkingMemory(),
-        model=SimpleNamespace(supports_replayed_tool_history=False),
+        model=SimpleNamespace(id="claude-opus-5"),
     )
 
     hydrate_resumed_session(agent)
@@ -236,33 +216,16 @@ def test_resume_of_a_text_only_session_adds_no_elided_notice(tmp_path):
     ]
 
 
-def test_repeated_strips_do_not_stack_the_elided_notice(tmp_path):
-    """resume-into-Claude then /model must not append a second digest."""
-    from agentica.agent.history_filter import strip_tool_artifacts_from_memory
-
-    agent = SimpleNamespace(
-        _session_log=_tool_round_log(tmp_path, "session-claude-twice"),
-        working_memory=WorkingMemory(),
-        model=SimpleNamespace(supports_replayed_tool_history=False),
-    )
-    hydrate_resumed_session(agent)
-    strip_tool_artifacts_from_memory(agent.working_memory)
-    strip_tool_artifacts_from_memory(agent.working_memory)
-
-    history = agent.working_memory.get_messages_from_last_n_runs()
-    assert [m.role for m in history] == ["user", "assistant"]
-    assert history[1].content.count("<elided-tools>") == 1
-
-
 def test_resumed_transcript_hides_the_elided_marker(tmp_path):
-    """The digest is for the next model; the user sees the prose."""
-    from agentica.agent.history_filter import elided_tools_notice
-
+    """The marker is for the next model; the user sees the prose."""
     run = _history_run([
         Message(role="user", content="read config.py"),
         Message(
             role="assistant",
-            content="The port is 8080.\n\n" + elided_tools_notice([]),
+            content=(
+                "The port is 8080.\n\n<elided-tools>\n"
+                "Tool calls were dropped after a model switch.\n</elided-tools>"
+            ),
         ),
     ])
     console = MagicMock()

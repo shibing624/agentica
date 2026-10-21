@@ -16,10 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
-from agentica.agent.history_filter import (
-    strip_elided_notice,
-    strip_tool_artifacts_from_memory,
-)
+from agentica.agent.history_filter import strip_elided_notice
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.helpers import (
     SESSION_RECENT_REQUESTS,
@@ -406,8 +403,6 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
     )
     agent.working_memory.clear()
     runs_built = agent.working_memory.hydrate_runs_from_history(resumed) if resumed else 0
-    if runs_built and agent.model is not None and not agent.model.supports_replayed_tool_history:
-        strip_tool_artifacts_from_memory(agent.working_memory)
     return resumed, runs_built
 
 

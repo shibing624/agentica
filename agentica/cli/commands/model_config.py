@@ -355,11 +355,8 @@ def _rebuild_live_model(ctx: CommandContext):
         "default_headers": ctx.agent_config.get("default_headers"),
     }
     previous = ctx.current_agent.model
-    previous_key = (type(previous), previous.id if previous is not None else None)
     ctx.current_agent.model = get_model(**model_kwargs)
-    new_model = ctx.current_agent.model
-    if (type(new_model), new_model.id) != previous_key:
-        _sanitize_history_for_model_switch(ctx.current_agent)
+    _sanitize_history_for_model_switch(ctx.current_agent, previous)
     ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
     cap = _resolve_compact_token_limit(ctx.agent_config)
     ctx.current_agent.tool_config.compact_token_limit = cap
@@ -594,6 +591,7 @@ def _apply_profile(
     }
     new_model_obj = get_model(**model_kwargs)
     if ctx.current_agent is not None:
+        previous_model = ctx.current_agent.model
         ctx.current_agent.model = new_model_obj
         ctx.current_agent.auxiliary_model = new_auxiliary_model
         # Fallback chain + retry count follow the profile switch too, so the
@@ -613,7 +611,7 @@ def _apply_profile(
         # delegate judges a ``model`` arg against the session's own models, so
         # it has to be looking at the profile just switched to.
         _update_delegate_tool_models(ctx.current_agent)
-        _sanitize_history_for_model_switch(ctx.current_agent)
+        _sanitize_history_for_model_switch(ctx.current_agent, previous_model)
         # Refresh the self-description block so the agent reports its new
         # model/auxiliary model on the next turn.
         ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)

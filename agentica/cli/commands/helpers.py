@@ -59,20 +59,29 @@ def format_cli_log_location() -> Optional[str]:
     return f"{format_path_for_display(path)} ({config.AGENTICA_LOG_LEVEL})"
 
 
-def _sanitize_history_for_model_switch(agent) -> None:
-    """Keep portable Q&A plus an elided-tools digest across a model switch.
+def model_identity(model) -> tuple:
+    """What decides whether history written by one model replays on another.
 
-    Either direction (OpenAI ↔ Claude, native or via a proxy). Thinking and
-    raw tool rounds stay behind — those artifacts are what the next
-    provider 400s on. A short ``<elided-tools>`` note lists writes that
-    actually ran, so the next model does not treat prior prose as proof.
-
-    Both ``wm.runs[].response.messages`` (the source for future prompts) and
-    the flat ``wm.messages`` list are sanitised.
+    The adapter class fixes the wire shape, the id and endpoint fix who
+    verifies thinking signatures and provider replay state. A profile switch
+    that rebuilds the same model leaves all three unchanged.
     """
-    from agentica.agent.history_filter import strip_tool_artifacts_from_memory
+    return (type(model), model.id, model.base_url)
 
-    strip_tool_artifacts_from_memory(agent.working_memory)
+
+def _sanitize_history_for_model_switch(agent, previous_model) -> None:
+    """Carry the history, tool rounds included, onto a different model.
+
+    Either direction (OpenAI ↔ Claude ↔ Responses, native or via a proxy).
+    Only what is bound to the issuing model stays behind: thinking blocks,
+    ``reasoning_content`` and provider replay state. Same model, nothing to do —
+    and leaving the history untouched keeps the provider's prompt cache warm.
+    """
+    if previous_model is not None and model_identity(previous_model) == model_identity(agent.model):
+        return
+    from agentica.agent.history_filter import make_history_portable
+
+    make_history_portable(agent.working_memory)
 
 
 def _refresh_skills_session(ctx: CommandContext):
