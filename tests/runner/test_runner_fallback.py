@@ -810,6 +810,66 @@ class TestFallbackToolTransaction(unittest.TestCase):
         self.assertIs(agent.model, primary)
 
 
+class TestStreamingOpenFailureFallsBack(unittest.TestCase):
+    """A real ``response_stream`` is a lazy async generator: the HTTP request,
+    and its connection error, happen on the first ``__anext__``, not when the
+    generator is created. The fallback chain must still see that error."""
+
+    def _agent(self, primary_stream, fallback_stream):
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        primary = OpenAIChat(id="primary", api_key="fake_openai_key")
+        fallback = OpenAIChat(id="fallback", api_key="fake_openai_key")
+        primary.response_stream = primary_stream
+        fallback.response_stream = fallback_stream
+        return Agent(name="lazy-stream", model=primary, fallback_models=[fallback])
+
+    def test_connection_error_on_first_chunk_switches_to_fallback(self):
+        from agentica.model.response import ModelResponseEvent
+
+        primary_opened = {"n": 0}
+
+        async def primary_stream(messages):
+            primary_opened["n"] += 1
+            raise openai.APIConnectionError(
+                message="Connection error.", request=httpx.Request("POST", "http://x")
+            )
+            yield  # noqa: unreachable — makes this a lazy async generator
+
+        async def fallback_stream(messages):
+            messages.append(Message(role="assistant", content="from fallback"))
+            yield ModelResponse(event=ModelResponseEvent.assistant_response.value, content="from fallback")
+
+        agent = self._agent(primary_stream, fallback_stream)
+        chunks = [c.content for c in agent.run_stream_sync("hi") if c.content]
+
+        self.assertEqual("".join(chunks), "from fallback")
+        self.assertEqual(primary_opened["n"], 1)
+        self.assertTrue(agent.run_response.fallback_used)
+        self.assertEqual(agent.run_response.model, "fallback")
+
+    def test_error_after_first_chunk_is_not_handed_to_fallback(self):
+        """Once output is on the wire, a fallback would duplicate it."""
+        from agentica.model.response import ModelResponseEvent
+
+        fallback_opened = {"n": 0}
+
+        async def primary_stream(messages):
+            yield ModelResponse(event=ModelResponseEvent.assistant_response.value, content="partial")
+            raise ValueError("decoder blew up mid-stream")
+
+        async def fallback_stream(messages):
+            fallback_opened["n"] += 1
+            yield ModelResponse(event=ModelResponseEvent.assistant_response.value, content="x")
+
+        agent = self._agent(primary_stream, fallback_stream)
+        with self.assertRaises(ValueError):
+            for _ in agent.run_stream_sync("hi"):
+                pass
+        self.assertEqual(fallback_opened["n"], 0)
+
+
 class TestFallbackRecoveryEvent(unittest.TestCase):
     """Successful fallback rescue should emit a structured event for audit/observability."""
 

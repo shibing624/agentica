@@ -11,6 +11,9 @@ import random
 import httpx
 
 from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
     List,
     Optional,
     TYPE_CHECKING,
@@ -32,6 +35,34 @@ if TYPE_CHECKING:
 from agentica.runner.types import ModelCallResult
 from agentica.runner.compress import CompressMixin
 from agentica.runner.persist import PersistMixin
+
+
+async def _open_stream(stream: AsyncGenerator[Any, None]) -> AsyncIterator[Any]:
+    """Pull the first chunk now, then hand back an iterator over the whole stream.
+
+    ``response_stream()`` is a lazy async generator: calling it sends nothing,
+    and the HTTP request (and its 503 / connection error / 429) happens on the
+    first ``__anext__``. Pulling that chunk here makes an open failure raise
+    inside ``_call_with_retry``, where it gets the same retry and fallback
+    treatment as a non-streaming call. Errors after the first chunk still
+    surface to the consumer: output is already on the wire by then.
+    """
+    try:
+        first = await stream.__anext__()
+    except StopAsyncIteration:
+        return _replay_stream(None, stream, empty=True)
+    return _replay_stream(first, stream, empty=False)
+
+
+async def _replay_stream(first: Any, stream: AsyncGenerator[Any, None], *, empty: bool) -> AsyncIterator[Any]:
+    try:
+        if empty:
+            return
+        yield first
+        async for chunk in stream:
+            yield chunk
+    finally:
+        await stream.aclose()
 
 
 class RetryMixin:
@@ -273,7 +304,10 @@ class RetryMixin:
                     f"({model_idx}/{candidate_offset + len(candidates) - 1}) trigger={trigger}"
                 )
 
-            for attempt in range(state.max_api_retry):
+            # A reactive-compact resend is a structural fix (one-shot via
+            # reactive_compact_done), not a retry: it does not spend an attempt.
+            attempt = 0
+            while attempt < state.max_api_retry:
                 RetryMixin._prepare_model_for_runner_call(current, model)
                 if (
                     is_fallback
@@ -306,13 +340,14 @@ class RetryMixin:
                         # Stream finish_reason is available only after the
                         # consumer exhausts the generator. The Runner checks it
                         # there before accepting the call as complete.
+                        CompressMixin._emit_context_usage(agent, current, messages)
+                        opened = await _open_stream(current.response_stream(messages=messages))
                         state.last_used_model_id = current.id
                         state.last_used_model_idx = model_idx
                         if is_fallback:
                             _emit_fallback_recovery(current.id, model_idx)
-                        CompressMixin._emit_context_usage(agent, current, messages)
                         return ModelCallResult(
-                            response=current.response_stream(messages=messages),
+                            response=opened,
                             used_model=current,
                             used_fallback=is_fallback,
                         )
@@ -376,13 +411,14 @@ class RetryMixin:
                         message_checkpoint = len(messages)
                         try:
                             if stream:
+                                CompressMixin._emit_context_usage(agent, current, messages)
+                                opened = await _open_stream(current.response_stream(messages=messages))
                                 state.last_used_model_id = current.id
                                 state.last_used_model_idx = model_idx
                                 if is_fallback:
                                     _emit_fallback_recovery(current.id, model_idx)
-                                CompressMixin._emit_context_usage(agent, current, messages)
                                 return ModelCallResult(
-                                    response=current.response_stream(messages=messages),
+                                    response=opened,
                                     used_model=current,
                                     used_fallback=is_fallback,
                                 )
@@ -458,6 +494,7 @@ class RetryMixin:
                             f"retrying same model in {wait:.1f}s: {exc}"
                         )
                         await asyncio.sleep(wait)
+                        attempt += 1
                         continue
 
                     if is_retryable:
