@@ -1075,6 +1075,130 @@ class TestContextUsageEvent(unittest.TestCase):
         self.assertTrue(any("context.usage" in line for line in logs.output))
 
 
+class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
+    """A bad Anthropic thinking signature loses reasoning, not the tool round."""
+
+    @staticmethod
+    def _native_claude_tool_round():
+        return [
+            Message(role="user", content="inspect the config"),
+            Message(
+                role="assistant",
+                content=[
+                    {"type": "thinking", "thinking": "check it", "signature": "bad-signature"},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "read_file",
+                        "input": {"path": "config.py"},
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "id": "toolu_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path":"config.py"}',
+                        },
+                    }
+                ],
+                reasoning_content="check it",
+                provider_data={"signature": "bad-signature"},
+            ),
+            Message(
+                role="user",
+                content=[
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": "PORT = 8080",
+                    }
+                ],
+            ),
+        ]
+
+    def test_retries_once_with_portable_tool_round_for_stream_and_non_stream(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                messages = self._native_claude_tool_round()
+                calls = {"n": 0}
+                seen_after_repair = []
+
+                async def _respond(messages):
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        raise RuntimeError(
+                            "Anthropic Claude bad request: Invalid `signature` in `thinking` block"
+                        )
+                    seen_after_repair.extend(messages)
+                    return ModelResponse(content="PORT is 8080", finish_reason="stop")
+
+                async def _stream(messages):
+                    response = await _respond(messages)
+                    yield response
+
+                primary = _fake_model("claude-opus-5-5")
+                primary.response = _respond
+                primary.response_stream = _stream
+                fallback = _fake_model("fallback")
+                fallback.response = AsyncMock()
+                fallback.response_stream = MagicMock()
+                agent = _make_agent()
+                agent._run_fallback_models = [fallback]
+                state = LoopState()
+
+                call = asyncio.run(
+                    Runner._call_with_retry(primary, messages, state, agent, stream=stream)
+                )
+                if stream:
+                    async def _consume():
+                        return [chunk async for chunk in call.response]
+
+                    chunks = asyncio.run(_consume())
+                    self.assertEqual(chunks[-1].content, "PORT is 8080")
+                else:
+                    self.assertEqual(call.content, "PORT is 8080")
+
+                self.assertEqual(calls["n"], 2)
+                fallback.response.assert_not_awaited()
+                self.assertTrue(state.thinking_history_sanitized_done)
+                self.assertTrue(state.context_collapsed)
+                assistant = next(m for m in seen_after_repair if m.role == "assistant")
+                self.assertEqual(assistant.content, "")
+                self.assertEqual(assistant.tool_calls[0]["id"], "toolu_1")
+                self.assertIsNone(assistant.reasoning_content)
+                self.assertIsNone(assistant.provider_data)
+                result = next(m for m in seen_after_repair if m.role == "tool")
+                self.assertEqual(result.tool_call_id, "toolu_1")
+                self.assertEqual(result.content, "PORT = 8080")
+
+    def test_bad_signature_repair_is_attempted_only_once(self):
+        calls = {"n": 0}
+
+        async def _always_bad(messages):
+            calls["n"] += 1
+            raise RuntimeError("thinking blocks cannot be modified")
+
+        primary = _fake_model("claude-opus-5-5")
+        primary.response = _always_bad
+        agent = _make_agent()
+        state = LoopState()
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(
+                Runner._call_with_retry(
+                    primary,
+                    self._native_claude_tool_round(),
+                    state,
+                    agent,
+                )
+            )
+
+        self.assertEqual(state.thinking_history_sanitized_done, True)
+        self.assertEqual(calls["n"], 2)
+
+
 class TestToolHistorySanitizeRecovery(unittest.TestCase):
     """Cross-provider tool-call/tool-result mismatch (e.g. resuming a session
     recorded under Claude with a non-Claude model) -> strip tool artifacts

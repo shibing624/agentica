@@ -74,6 +74,9 @@ class LoopState:
 
     # Tool-history sanitize (one-shot per loop invocation)
     tool_history_sanitized_done: bool = False
+    # A provider rejected a signed thinking block. The runner may remove
+    # model-bound reasoning while preserving the tool round and retry once.
+    thinking_history_sanitized_done: bool = False
 
     # Cross-provider fallback bookkeeping for the most recent successful LLM call.
     # Set by Runner._call_with_retry; consumed by Runner._run_impl to keep

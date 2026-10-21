@@ -20,6 +20,7 @@ from typing import (
 )
 
 
+from agentica.agent.history_filter import make_history_portable, to_portable_history
 from agentica.compression.evict import is_irreducible_prompt_too_long
 from agentica.utils.log import logger
 from agentica.model.base import Model
@@ -435,6 +436,39 @@ class RetryMixin:
                             err = str(exc2).lower()
                             # Fall through to the normal classification below
                             # with the post-sanitize exception.
+
+                    # A signed Anthropic thinking block can occasionally become
+                    # unverifiable on the very next tool-result request (observed
+                    # through the Venus native Anthropic endpoint). Re-sending the
+                    # same payload is deterministic, while dropping the whole tool
+                    # round loses the work already completed. Convert both stores
+                    # to the shared shape: model-bound thinking/replay state goes,
+                    # but assistant.tool_calls and their results survive.
+                    invalid_thinking_signature = (
+                        "thinking blocks cannot be modified" in err
+                        or (
+                            "invalid" in err
+                            and "signature" in err
+                            and "thinking" in err
+                        )
+                    )
+                    if (
+                        invalid_thinking_signature
+                        and not state.thinking_history_sanitized_done
+                    ):
+                        state.thinking_history_sanitized_done = True
+                        logger.warning(
+                            "[thinking_signature] %s rejected signed thinking; "
+                            "removing model-bound reasoning and retrying once",
+                            current.id,
+                        )
+                        make_history_portable(agent.working_memory)
+                        messages[:] = to_portable_history(messages)
+                        state.context_collapsed = True
+                        state.input_message_ids.update(id(message) for message in messages)
+                        # A second failure must trim against the rebuilt list.
+                        message_checkpoint = len(messages)
+                        continue
 
                     # Reactive compact: prompt_too_long -> emergency compress.
                     # Only attempted on the primary model; fallbacks inherit the
