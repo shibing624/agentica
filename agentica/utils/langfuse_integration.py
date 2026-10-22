@@ -9,7 +9,7 @@ monitor, and debug your LLM applications.
 This module provides:
     1. One root trace per Agent.run user request
     2. Request input and final response output
-    3. Child observations for real model calls, tool executions, and concrete hooks
+    3. Child observations for real model calls and tool executions
     4. Session, user, and tag attribution
 
 Usage:
@@ -33,7 +33,7 @@ Usage:
         )
 
         response = agent.run("Hello!")
-        # Model calls, tools, and concrete hooks are children of this trace
+        # Model calls and tools are children of this trace; hooks are not
 
     4. Bounded shutdown at process exit (langfuse's own atexit shutdown
        blocks for ~2s: span force_flush + consumer-thread poll joins).
@@ -307,8 +307,8 @@ def langfuse_trace_context(
     """
     Context manager for one user-request Langfuse trace.
 
-    Real model calls, tool executions, and concrete hook overrides are child
-    observations of this trace. A nested agent reuses the active trace.
+    Real model calls and tool executions are child observations of this
+    trace. Hooks stay internal. A nested agent reuses the active trace.
 
     Args:
         name: Name for the trace (e.g., "agent-run", "chat-completion")

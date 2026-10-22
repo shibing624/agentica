@@ -5,7 +5,7 @@
 
 Langfuse provides:
 - One trace per Agent.run user request
-- Child generations, tools, and concrete hooks inside that trace
+- Child generations and tools inside that trace
 - Session grouping for multi-turn conversations
 - Request input and final response output
 
@@ -88,8 +88,8 @@ async def main():
     print("Check your Langfuse dashboard to see:")
     print("- One root trace per user request")
     print("- Request input and final response output")
-    print("- GENERATION, TOOL, and concrete hook children inside the trace")
-    print("- No inherited empty hooks and no second trace for internal steps")
+    print("- GENERATION and TOOL children inside the trace")
+    print("- No hook observations and no second trace for internal steps")
     print("- Traces grouped by session_id with user tracking")
     print("=" * 50)
 

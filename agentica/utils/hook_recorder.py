@@ -9,8 +9,8 @@ _run_tool_hook_with_record, _serialize_hook_result, _has_hook_payload, ...)
 spread across runner.py and model/base.py.
 
 Design goals:
-- Backend-neutral recording for internal hook diagnostics. Only methods
-  overridden by a concrete hook become Langfuse child spans.
+- Backend-neutral recording for internal hook diagnostics. Hook calls are
+  not exported to Langfuse.
 - Safe serialization: depth-bounded, cycle-detecting, length-capped, so a
   hook returning a large/cyclic object cannot blow up trace upload.
 - Override-aware: skips recording for unmodified base hook methods, so a
@@ -23,8 +23,6 @@ a JSON-friendly audit record.
 """
 import time
 from typing import Any, Awaitable, Dict, List, Optional
-
-from agentica.utils.langfuse_integration import langfuse_observation_context
 
 
 # Reserved record fields. Caller-supplied metadata is nested under "meta" to
@@ -90,26 +88,8 @@ class HookRecorder:
         fields.
         """
         start = time.perf_counter()
-        should_observe = (
-            base_class is None
-            or self._method_overridden(hook, base_class, method)
-        )
         try:
-            if should_observe:
-                with langfuse_observation_context(
-                    name=f"hook.{hook_type}.{type(hook).__name__}.{method}",
-                    as_type="span",
-                    input_data=self._serialize(metadata) if metadata else None,
-                    metadata={
-                        "hook_type": hook_type,
-                        "hook_class": type(hook).__name__,
-                        "method": method,
-                    },
-                ) as observation:
-                    result = await awaitable
-                    observation.set_output(self._serialize(result))
-            else:
-                result = await awaitable
+            result = await awaitable
         except Exception as error:
             elapsed_ms = (time.perf_counter() - start) * 1000
             record = self._build_record(
