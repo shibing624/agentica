@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-22
+
 #### breaking
 - **Langfuse 改为每次 `Agent.run` 一条根 Trace，删除 `OpenAIChat.langfuse_trace_name`**：根 observation 类型为 `AGENT`，Input/Output 分别是用户请求与最终回答。每次真实模型请求（含 retry/fallback）是其子 `GENERATION`，每次真实工具执行是其子 `TOOL`。Hook 全部不上报：生命周期回调和模型、工具步骤重复，空实现还会撑开 Trace。这些子 Observation 都挂在同一条 Trace 下，不再另开 Trace，也不再汇总进根 metadata。`OpenAIChat` 使用标准 OpenAI client，不再使用 `langfuse.openai.AsyncOpenAI`。
 - **`num_history_turns`（`AGENTICA_NUM_HISTORY_TURNS` / `settings.num_history_turns`）默认由 `20` 改为 `None`；`WorkingMemory.get_messages_from_last_n_runs` 的 `truncate_tool_results` 默认由 `True` 改为 `False`**：`add_history_to_context=True` 且未显式设置轮数的 Agent / DeepAgent 不再只重放最近 20 轮，而是重放当前上下文窗口内的全部轮次，更早轮次的 tool 结果也不再每轮截成 2000 字符。单次请求的历史 token 会随窗口增长，统一交给 Layer 1（`EVICT_THRESHOLD_RATIO = 0.8` 的 `evict_context`）和 Layer 2（95% 的 `auto_compact`）按 token 水位回收；需要旧行为的调用方显式传 `num_history_turns=20`。此前窗口内满 20 轮后，`runs[-20:]` 会把带 `<context_window>` / `<session_notes>` / `<dropped_span>` 的窗口首轮静默滑出上下文，并且每轮都改写历史前缀，使 prompt cache 失效。`docs/api/agent.md`、`docs/concepts/agent.md`、`docs/guides/config.md`、`.env.example` 中过时的默认值一并修正。
