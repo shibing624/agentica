@@ -9,8 +9,8 @@ _run_tool_hook_with_record, _serialize_hook_result, _has_hook_payload, ...)
 spread across runner.py and model/base.py.
 
 Design goals:
-- Backend-neutral name (no "langfuse" in identifiers); the trace exporter is
-  the only consumer of records().
+- Backend-neutral recording for internal hook diagnostics. Only methods
+  overridden by a concrete hook become Langfuse child spans.
 - Safe serialization: depth-bounded, cycle-detecting, length-capped, so a
   hook returning a large/cyclic object cannot blow up trace upload.
 - Override-aware: skips recording for unmodified base hook methods, so a
@@ -23,6 +23,8 @@ a JSON-friendly audit record.
 """
 import time
 from typing import Any, Awaitable, Dict, List, Optional
+
+from agentica.utils.langfuse_integration import langfuse_observation_context
 
 
 # Reserved record fields. Caller-supplied metadata is nested under "meta" to
@@ -38,8 +40,7 @@ class HookRecorder:
 
     Use ``await recorder.run(hook, hook_type, method, awaitable, base_class=...)``
     to execute a hook awaitable while capturing duration, output, and errors.
-    Call ``recorder.export()`` at run end to dump the records into trace
-    metadata.
+    Call ``recorder.export()`` to inspect the audit records internally.
 
     Not thread-safe: one recorder per run is the assumed model.
     """
@@ -80,7 +81,7 @@ class HookRecorder:
         """Execute the hook awaitable and append its audit record.
 
         - On success, records the call when the method is overridden vs
-          ``base_class`` OR metadata was supplied OR the result has payload.
+          ``base_class`` or the result has payload.
           Unmodified base methods returning None are not recorded.
         - On failure, records the error unconditionally and re-raises.
 
@@ -89,11 +90,29 @@ class HookRecorder:
         fields.
         """
         start = time.perf_counter()
+        should_observe = (
+            base_class is None
+            or self._method_overridden(hook, base_class, method)
+        )
         try:
-            result = await awaitable
+            if should_observe:
+                with langfuse_observation_context(
+                    name=f"hook.{hook_type}.{type(hook).__name__}.{method}",
+                    as_type="span",
+                    input_data=self._serialize(metadata) if metadata else None,
+                    metadata={
+                        "hook_type": hook_type,
+                        "hook_class": type(hook).__name__,
+                        "method": method,
+                    },
+                ) as observation:
+                    result = await awaitable
+                    observation.set_output(self._serialize(result))
+            else:
+                result = await awaitable
         except Exception as error:
             elapsed_ms = (time.perf_counter() - start) * 1000
-            self.records.append(self._build_record(
+            record = self._build_record(
                 hook=hook,
                 hook_type=hook_type,
                 method=method,
@@ -101,13 +120,14 @@ class HookRecorder:
                 ok=False,
                 error=error,
                 metadata=metadata,
-            ))
+            )
+            self.records.append(record)
             raise
 
         elapsed_ms = (time.perf_counter() - start) * 1000
-        if not self._should_record_success(hook, method, base_class, result, metadata):
+        if not self._should_record_success(hook, method, base_class, result):
             return result
-        self.records.append(self._build_record(
+        record = self._build_record(
             hook=hook,
             hook_type=hook_type,
             method=method,
@@ -115,7 +135,8 @@ class HookRecorder:
             ok=True,
             result=result,
             metadata=metadata,
-        ))
+        )
+        self.records.append(record)
         return result
 
     @classmethod
@@ -125,12 +146,7 @@ class HookRecorder:
         method: str,
         base_class: Optional[type],
         result: Any,
-        metadata: Optional[Dict[str, Any]],
     ) -> bool:
-        # Always record when the caller passed metadata (e.g. tool name) — that
-        # is itself the audit value, even if the hook returns None.
-        if metadata:
-            return True
         # Record when there is a non-empty payload.
         if cls._has_payload(cls._serialize(result)):
             return True
@@ -139,7 +155,7 @@ class HookRecorder:
         # matters and should appear on the trace.
         if base_class is not None and cls._method_overridden(hook, base_class, method):
             return True
-        return False
+        return base_class is None
 
     @staticmethod
     def _method_overridden(hook: Any, base_class: type, method: str) -> bool:

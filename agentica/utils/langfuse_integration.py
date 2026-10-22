@@ -7,9 +7,10 @@ Langfuse is an open-source LLM observability platform that helps you trace,
 monitor, and debug your LLM applications.
 
 This module provides:
-1. OpenAI client wrapper with Langfuse instrumentation
-2. Trace context manager for grouping multi-turn conversations
-3. Session and user tracking across traces
+    1. One root trace per Agent.run user request
+    2. Request input and final response output
+    3. Child observations for real model calls, tool executions, and concrete hooks
+    4. Session, user, and tag attribution
 
 Usage:
     1. Install langfuse:
@@ -20,7 +21,7 @@ Usage:
         LANGFUSE_PUBLIC_KEY = "pk-lf-xxx"
         LANGFUSE_BASE_URL = "https://cloud.langfuse.com"  # or your self-hosted URL
 
-    3. Use agentica as normal - Langfuse will automatically trace all LLM calls:
+    3. Use agentica as normal - Langfuse records one root trace per request:
         from agentica import Agent
         from agentica.model.openai import OpenAIChat
 
@@ -32,7 +33,7 @@ Usage:
         )
 
         response = agent.run("Hello!")
-        # All LLM calls within this run are grouped in a single trace
+        # Model calls, tools, and concrete hooks are children of this trace
 
     4. Bounded shutdown at process exit (langfuse's own atexit shutdown
        blocks for ~2s: span force_flush + consumer-thread poll joins).
@@ -45,13 +46,40 @@ Usage:
 import logging
 import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Optional, List, Dict, Any, Generator
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_BASE_URL
+from agentica.security.redact import redact_sensitive_text
 from agentica.utils.log import logger
 
 
 # Global flag to track if Langfuse is available
 _langfuse_available: Optional[bool] = None
+
+
+_langfuse_root_active: ContextVar[bool] = ContextVar(
+    "langfuse_root_active",
+    default=False,
+)
+
+
+def bound_langfuse_value(value: Any, depth: int = 0) -> Any:
+    """Bound and redact a value before sending it to Langfuse."""
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str):
+        text = redact_sensitive_text(value, level="strict") or ""
+        return text if len(text) <= 4000 else text[:4000] + "...[truncated]"
+    if depth >= 6:
+        return f"<depth-truncated: {type(value).__name__}>"
+    if isinstance(value, dict):
+        return {
+            str(key): bound_langfuse_value(item, depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [bound_langfuse_value(item, depth + 1) for item in value]
+    return bound_langfuse_value(str(value), depth + 1)
 
 
 def _suppress_opentelemetry_errors():
@@ -182,64 +210,6 @@ def is_langfuse_available() -> bool:
     return _langfuse_available
 
 
-def build_langfuse_metadata(
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Build metadata dict for Langfuse tracing.
-
-    According to Langfuse docs, the metadata should include:
-    - langfuse_user_id: User identifier
-    - langfuse_session_id: Session identifier
-    - langfuse_tags: List of tags
-
-    Args:
-        user_id: User identifier
-        session_id: Session identifier
-        tags: List of tags
-        extra_metadata: Additional metadata to include
-
-    Returns:
-        Dict with Langfuse metadata
-    """
-    metadata: Dict[str, Any] = {}
-
-    if user_id:
-        metadata["langfuse_user_id"] = user_id
-    if session_id:
-        metadata["langfuse_session_id"] = session_id
-    if tags:
-        metadata["langfuse_tags"] = tags
-    if extra_metadata:
-        metadata.update(extra_metadata)
-
-    return metadata
-
-
-def get_langfuse_openai_client():
-    """
-    Get OpenAI client classes wrapped with Langfuse observability.
-
-    Returns:
-        Tuple of (LangfuseOpenAI, LangfuseAsyncOpenAI) classes,
-        or (None, None) if Langfuse is not available.
-    """
-    if not is_langfuse_available():
-        return None, None
-
-    try:
-        from langfuse.openai import OpenAI as LangfuseOpenAI
-        from langfuse.openai import AsyncOpenAI as LangfuseAsyncOpenAI
-
-        return LangfuseOpenAI, LangfuseAsyncOpenAI
-    except ImportError:
-        logger.warning("langfuse.openai module not available")
-        return None, None
-
-
 def flush_langfuse():
     """Flush any pending Langfuse events."""
     try:
@@ -335,11 +305,10 @@ def langfuse_trace_context(
         input_data: Optional[Any] = None,
 ) -> Generator[Any, None, None]:
     """
-    Context manager for grouping multiple LLM calls into a single Langfuse trace.
+    Context manager for one user-request Langfuse trace.
 
-    This is essential for multi-turn agent interactions where a single Agent.run()
-    may invoke the LLM multiple times (e.g., with tool calls). All calls within
-    this context will be grouped under the same trace with the specified session_id.
+    Real model calls, tool executions, and concrete hook overrides are child
+    observations of this trace. A nested agent reuses the active trace.
 
     Args:
         name: Name for the trace (e.g., "agent-run", "chat-completion")
@@ -358,20 +327,19 @@ def langfuse_trace_context(
             session_id="session-123",
             user_id="user-456"
         ) as trace:
-            response1 = openai.chat.completions.create(...)
-            response2 = openai.chat.completions.create(...)
-            trace.set_output(response2.choices[0].message.content)
+            result = run_agent_workflow()
+            trace.set_output(result)
     """
-    if not is_langfuse_available():
+    if _langfuse_root_active.get() or not is_langfuse_available():
         yield _DummySpanWrapper()
         return
 
     try:
-        from langfuse import get_client
+        from langfuse import get_client, propagate_attributes
 
         langfuse = get_client()
         observation = langfuse.start_as_current_observation(
-            as_type="span",
+            as_type="agent",
             name=name,
             input=input_data,
             metadata=metadata,
@@ -386,65 +354,33 @@ def langfuse_trace_context(
         return
 
     with observation as root_span:
-        root_span.update_trace(
+        with propagate_attributes(
+            trace_name=name,
             session_id=session_id,
             user_id=user_id,
             tags=tags,
-        )
-        wrapper = _LangfuseTraceWrapper(root_span, langfuse)
-
-        try:
-            yield wrapper
-        finally:
+        ):
+            wrapper = _LangfuseTraceWrapper(root_span)
+            root_token = _langfuse_root_active.set(True)
             try:
-                # IMPORTANT: After all child observations are complete,
-                # update trace output as the LAST step using update_current_trace()
-                # This prevents child spans from overwriting the trace output
-                if wrapper._output is not None:
-                    root_span.update(output=wrapper._output)
-                    langfuse.update_current_trace(
-                        input=input_data,
-                        output=wrapper._output,
-                    )
+                yield wrapper
+            finally:
+                _langfuse_root_active.reset(root_token)
+                try:
+                    if wrapper._output is not None:
+                        root_span.update(output=wrapper._output)
 
-                if wrapper._metadata:
-                    root_span.update(metadata=wrapper._metadata)
-            except Exception as e:
-                logger.debug(f"Failed to finalize Langfuse trace context: {e}")
+                    if wrapper._metadata:
+                        root_span.update(metadata=wrapper._metadata)
+                except Exception as e:
+                    logger.debug(f"Failed to finalize Langfuse trace context: {e}")
 
 
 class _LangfuseTraceWrapper:
     """Wrapper to collect output and update trace."""
 
-    def __init__(self, span: Any, langfuse_client: Any):
+    def __init__(self, span: Any):
         self._span = span
-        self._langfuse = langfuse_client
-        self._output: Optional[Any] = None
-        self._metadata: Dict[str, Any] = {}
-
-    def set_output(self, output: Any) -> None:
-        """Set the output to be recorded when the context exits."""
-        self._output = output
-
-    def set_metadata(self, key: str, value: Any) -> None:
-        """Add metadata to be recorded when the context exits."""
-        self._metadata[key] = value
-
-    def update(self, **kwargs) -> None:
-        """Directly update the underlying span."""
-        if self._span:
-            try:
-                self._span.update(**kwargs)
-            except Exception as e:
-                logger.debug(f"Failed to update span: {e}")
-
-
-class _LangfuseSpanWrapper:
-    """Wrapper to collect output and update span before context exits."""
-
-    def __init__(self, span: Any, langfuse_client: Any = None):
-        self._span = span
-        self._langfuse = langfuse_client
         self._output: Optional[Any] = None
         self._metadata: Dict[str, Any] = {}
 
@@ -479,83 +415,49 @@ class _DummySpanWrapper:
 
 
 @contextmanager
-def langfuse_span_context(
+def langfuse_observation_context(
         name: str,
+        *,
+        as_type: str,
         input_data: Optional[Any] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        model: Optional[str] = None,
 ) -> Generator[Any, None, None]:
-    """
-    Context manager for creating a nested span within an existing trace.
-
-    Use this for grouping related operations within an agent run,
-    such as tool execution or retrieval steps.
-
-    Args:
-        name: Name for the span (e.g., "tool-execution", "retrieval")
-        input_data: Optional input data to log
-        metadata: Optional additional metadata
-
-    Yields:
-        The Langfuse span object if available, None otherwise
-    """
-    if not is_langfuse_available():
-        yield None
+    """Create a child observation inside the active user-request trace."""
+    if not _langfuse_root_active.get() or not is_langfuse_available():
+        yield _DummySpanWrapper()
         return
 
     try:
         from langfuse import get_client
 
-        langfuse = get_client()
-        observation = langfuse.start_as_current_observation(
-            as_type="span",
+        observation = get_client().start_as_current_observation(
+            as_type=as_type,
             name=name,
             input=input_data,
             metadata=metadata,
+            model=model,
         )
     except ImportError:
-        yield None
+        yield _DummySpanWrapper()
         return
-    except Exception as e:
-        logger.warning(f"Failed to create Langfuse span: {e}")
-        yield None
+    except Exception as error:
+        logger.warning(f"Failed to create Langfuse observation: {error}")
+        yield _DummySpanWrapper()
         return
 
     with observation as span:
-        yield span
-
-
-def update_langfuse_span(
-        span: Any,
-        output: Optional[Any] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        level: Optional[str] = None,
-        status_message: Optional[str] = None,
-) -> None:
-    """
-    Update a Langfuse span with output and additional information.
-
-    Args:
-        span: The Langfuse span object
-        output: Output data to log
-        metadata: Additional metadata to add
-        level: Log level (DEBUG, DEFAULT, WARNING, ERROR)
-        status_message: Status message
-    """
-    if span is None:
-        return
-
-    try:
-        update_kwargs = {}
-        if output is not None:
-            update_kwargs["output"] = output
-        if metadata is not None:
-            update_kwargs["metadata"] = metadata
-        if level is not None:
-            update_kwargs["level"] = level
-        if status_message is not None:
-            update_kwargs["status_message"] = status_message
-
-        if update_kwargs:
-            span.update(**update_kwargs)
-    except Exception as e:
-        logger.debug(f"Failed to update Langfuse span: {e}")
+        wrapper = _LangfuseTraceWrapper(span)
+        try:
+            yield wrapper
+        except BaseException as error:
+            wrapper.update(level="ERROR", status_message=str(error)[:1000])
+            raise
+        finally:
+            try:
+                if wrapper._output is not None:
+                    span.update(output=wrapper._output)
+                if wrapper._metadata:
+                    span.update(metadata=wrapper._metadata)
+            except Exception as error:
+                logger.debug(f"Failed to finalize Langfuse observation: {error}")

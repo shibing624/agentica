@@ -50,7 +50,11 @@ from agentica.run.response import (
 )
 from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import FunctionCall
-from agentica.utils.langfuse_integration import langfuse_trace_context
+from agentica.utils.langfuse_integration import (
+    bound_langfuse_value,
+    langfuse_observation_context,
+    langfuse_trace_context,
+)
 from agentica.utils.log import _parent_run_id_var, _run_id_var, _short, logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica.utils.tokens import count_tokens
@@ -397,6 +401,8 @@ class LoopMixin:
         This is the Runner-owned tool execution method. It wraps Model.run_function_calls()
         with proper hook dispatch using the Agent reference directly (no _agent_ref needed).
         """
+        tool_observations: Dict[int, tuple[Any, Any]] = {}
+
         def _emit_tool_event(
             event: str,
             function_call: FunctionCall,
@@ -412,6 +418,17 @@ class LoopMixin:
             if preview:
                 payload["preview"] = preview
             if event == "started":
+                observation_context = langfuse_observation_context(
+                    name=function_call.function.name,
+                    as_type="tool",
+                    input_data=bound_langfuse_value(function_call.arguments),
+                    metadata={"tool_call_id": function_call.call_id or ""},
+                )
+                observation = observation_context.__enter__()
+                tool_observations[id(function_call)] = (
+                    observation_context,
+                    observation,
+                )
                 self._emit_event(RunEventType.tool_started, payload)
                 return
             payload["ok"] = bool(ok)
@@ -420,15 +437,35 @@ class LoopMixin:
                 payload["error"] = clip_text(
                     redact_sensitive_text(error, level="strict")
                 )
+            active_observation = tool_observations.pop(id(function_call), None)
+            if active_observation is not None:
+                observation_context, observation = active_observation
+                if error:
+                    observation.set_output({"error": payload["error"]})
+                    observation.update(level="ERROR", status_message=payload["error"])
+                else:
+                    observation.set_output(bound_langfuse_value(function_call.result))
+                observation.set_metadata("tool_call_id", function_call.call_id or "")
+                observation.set_metadata("duration_seconds", duration_seconds)
+                observation.set_metadata("ok", bool(ok))
+                observation_context.__exit__(None, None, None)
             self._emit_event(RunEventType.tool_completed, payload)
 
-        async for tool_response in model.run_function_calls(
-            function_calls=function_calls,
-            function_call_results=function_call_results,
-            tool_role=tool_role,
-            tool_event_callback=_emit_tool_event,
-        ):
-            yield tool_response
+        try:
+            async for tool_response in model.run_function_calls(
+                function_calls=function_calls,
+                function_call_results=function_call_results,
+                tool_role=tool_role,
+                tool_event_callback=_emit_tool_event,
+            ):
+                yield tool_response
+        finally:
+            for observation_context, observation in tool_observations.values():
+                observation.update(
+                    level="ERROR",
+                    status_message="Tool execution ended without a completion event",
+                )
+                observation_context.__exit__(None, None, None)
 
     async def _handle_tool_calls_in_runner(
         self,
@@ -1921,32 +1958,25 @@ class LoopMixin:
                 input_data=trace_input,
             ) as trace:
                 final_response: Optional[RunResponse] = None
-                try:
-                    async for response in _run_core():
-                        final_response = response
-                        yield response
+                async for response in _run_core():
+                    final_response = response
+                    yield response
 
-                    if final_response:
-                        output_content = final_response.content
-                        if isinstance(output_content, BaseModel):
-                            output_content = output_content.model_dump()
-                        trace.set_output(output_content)
-                        trace.set_metadata("run_id", final_response.run_id)
-                        trace.set_metadata("model", final_response.model)
-                        # Symmetric counterpart of the "[user] -> agent" chat log
-                        # at run entry: record the agent's final reply so each
-                        # turn has both inbound and outbound lines at CHAT level.
-                        # Print the full reply for the same reason the inbound
-                        # line is full — CHAT level is the authoritative
-                        # conversation transcript.
-                        reply_preview = str(output_content) if output_content else "<no reply>"
-                        cast(Any, logger).chat(f"[{agent.identifier}] -> user: {reply_preview}")
-                finally:
-                    # Issue #3 fix: dump hook_calls even on exception, so
-                    # failure traces still carry the hook timeline that's
-                    # most valuable for diagnostics.
-                    if agent._hook_recorder:
-                        trace.set_metadata("hook_calls", agent._hook_recorder.export())
+                if final_response:
+                    output_content = final_response.content
+                    if isinstance(output_content, BaseModel):
+                        output_content = output_content.model_dump()
+                    trace.set_output(output_content)
+                    trace.set_metadata("run_id", final_response.run_id)
+                    trace.set_metadata("model", final_response.model)
+                    # Symmetric counterpart of the "[user] -> agent" chat log
+                    # at run entry: record the agent's final reply so each
+                    # turn has both inbound and outbound lines at CHAT level.
+                    # Print the full reply for the same reason the inbound
+                    # line is full — CHAT level is the authoritative
+                    # conversation transcript.
+                    reply_preview = str(output_content) if output_content else "<no reply>"
+                    cast(Any, logger).chat(f"[{agent.identifier}] -> user: {reply_preview}")
         finally:
             Model.reset_run_state(run_state_token)
             # Release async HTTP clients on the (still-alive) run loop so they

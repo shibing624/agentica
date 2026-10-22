@@ -52,11 +52,6 @@ from agentica.model.response import ModelResponse
 from agentica.model.openai.sse_sanitize import TolerantSSETransport
 from agentica.model.stream_retry import stream_with_retry
 from agentica.utils.log import log_file_only, logger
-from agentica.utils.langfuse_integration import (
-    is_langfuse_available,
-    build_langfuse_metadata,
-    get_langfuse_openai_client,
-)
 
 
 class OpenAIImageTypeMeta(EnumMeta):
@@ -420,8 +415,6 @@ class OpenAIChat(Model):
     supports_structured_outputs: bool = True
     # Langfuse tags for tracing (additional tags beyond what Agent provides)
     langfuse_tags: Optional[List[str]] = None
-    # Langfuse trace name (defaults to model id)
-    langfuse_trace_name: Optional[str] = None
     # True while the output cap in the request was chosen by agentica (catalog
     # ceiling or a recovery raise), not by the user. Only such a cap is ever
     # raised or dropped; a user-configured one is sent as given.
@@ -624,12 +617,7 @@ class OpenAIChat(Model):
             transport = TolerantSSETransport(httpx.AsyncHTTPTransport(limits=limits))
             client_params["http_client"] = httpx.AsyncClient(transport=transport)
 
-        # Try to use Langfuse-wrapped client if available
-        _, LangfuseAsyncOpenAI = get_langfuse_openai_client()
-        if LangfuseAsyncOpenAI is not None:
-            self.client = LangfuseAsyncOpenAI(**client_params)
-        else:
-            self.client = AsyncOpenAIClient(**client_params)
+        self.client = AsyncOpenAIClient(**client_params)
         self._client_loop = _loop
         return self.client
 
@@ -1098,31 +1086,6 @@ class OpenAIChat(Model):
         self._last_cache_payload = (out, new_kwargs)
         return out, new_kwargs
 
-    def _get_langfuse_extra_params(self) -> Dict[str, Any]:
-        """Get extra parameters for Langfuse tracing."""
-        if not is_langfuse_available():
-            return {}
-
-        extra_params: Dict[str, Any] = {}
-
-        if self.langfuse_trace_name:
-            trace_name = self.langfuse_trace_name
-        elif self.agent_name:
-            trace_name = f"{self.agent_name}-{self.id}"
-        else:
-            trace_name = f"{self.name}-{self.id}"
-        extra_params["name"] = trace_name
-
-        metadata = build_langfuse_metadata(
-            user_id=self.user_id,
-            session_id=self.session_id,
-            tags=self.langfuse_tags,
-        )
-        if metadata:
-            extra_params["metadata"] = metadata
-
-        return extra_params
-
     async def _send_with_system_position_repair(
         self,
         formatted: List[Dict[str, Any]],
@@ -1163,7 +1126,6 @@ class OpenAIChat(Model):
     @override
     async def invoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
         """Send a chat completion request to the OpenAI API (async-only)."""
-        langfuse_params = self._get_langfuse_extra_params()
         formatted = self.format_messages(messages)
         if self._requires_system_position_repair:
             formatted = _repair_claude_system_positions(formatted) or formatted
@@ -1180,7 +1142,6 @@ class OpenAIChat(Model):
                                 model=self.id,
                                 messages=payload,  # type: ignore
                                 **kwargs,
-                                **langfuse_params,
                             ),
                             request_kwargs,
                         )
@@ -1201,7 +1162,6 @@ class OpenAIChat(Model):
                     model=self.id,
                     messages=payload,  # type: ignore
                     **kwargs,
-                    **langfuse_params,
                 ),
                 request_kwargs,
             )
@@ -1224,7 +1184,6 @@ class OpenAIChat(Model):
         been yielded, any subsequent error propagates verbatim because retrying
         would duplicate output.
         """
-        langfuse_params = self._get_langfuse_extra_params()
         formatted = self.format_messages(messages)
         if self._requires_system_position_repair:
             formatted = _repair_claude_system_positions(formatted) or formatted
@@ -1238,7 +1197,6 @@ class OpenAIChat(Model):
                     stream=True,
                     stream_options={"include_usage": True},
                     **kwargs,
-                    **langfuse_params,
                 ),
                 request_kwargs,
             )

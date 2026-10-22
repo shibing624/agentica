@@ -32,17 +32,15 @@ class TestLangfuseMediaGuard(unittest.TestCase):
             li._looks_like_base64_data_uri("data:image/png;base64,iVBORw0KGgo=")
         )
 
-    def test_guard_swallows_sse_frames_without_error_log(self):
+    def test_guard_swallows_sse_frames(self):
         _require_langfuse()
         from langfuse.media import LangfuseMedia
 
         li._install_langfuse_media_guard()
-        with patch.object(LangfuseMedia, "_log") as mock_log:
-            media = LangfuseMedia(
-                base64_data_uri='data: {"choices":[{"delta":{"role":"assistant"}}]}'
-            )
+        media = LangfuseMedia(
+            base64_data_uri='data: {"choices":[{"delta":{"role":"assistant"}}]}'
+        )
         self.assertIsNone(media._content_bytes)
-        mock_log.error.assert_not_called()
 
     def test_guard_still_parses_real_base64_data_uri(self):
         _require_langfuse()

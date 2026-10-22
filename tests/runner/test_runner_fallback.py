@@ -7,6 +7,7 @@ All tests mock LLM API keys and model calls — no real API usage.
 import asyncio
 import unittest
 import unittest.mock
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -52,6 +53,74 @@ def _fake_model(model_id, response_factory=None, raise_exc=None):
     m.get_retryable_substrings = lambda defaults: tuple(defaults)
     m.extra_retryable_substrings = None
     return m
+
+
+class _CapturedObservation:
+    def __init__(self):
+        self.output = None
+        self.updates = []
+        self.metadata = {}
+
+    def set_output(self, output):
+        self.output = output
+
+    def update(self, **kwargs):
+        self.updates.append(kwargs)
+
+    def set_metadata(self, key, value):
+        self.metadata[key] = value
+
+
+def _capture_observations(calls):
+    @contextmanager
+    def _context(**kwargs):
+        observation = _CapturedObservation()
+        calls.append((kwargs, observation))
+        yield observation
+
+    return _context
+
+
+class TestFallbackLangfuseGenerations(unittest.TestCase):
+    def test_failed_primary_and_successful_fallback_are_child_generations(self):
+        primary = _fake_model(
+            "primary",
+            raise_exc=httpx.ConnectError("provider unavailable"),
+        )
+        primary.provider = "primary-provider"
+        fallback = _fake_model(
+            "fallback",
+            response_factory=lambda: ModelResponse(
+                content="fallback answer",
+                finish_reason="stop",
+            ),
+        )
+        fallback.provider = "fallback-provider"
+        agent = _make_agent()
+        agent._run_fallback_models = [fallback]
+        calls = []
+
+        with unittest.mock.patch(
+            "agentica.runner.retry_fallback.langfuse_observation_context",
+            new=_capture_observations(calls),
+        ):
+            result = asyncio.run(
+                Runner._call_with_retry(
+                    primary,
+                    [Message(role="user", content="hello")],
+                    LoopState(),
+                    agent,
+                    stream=False,
+                )
+            )
+
+        self.assertEqual(result.content, "fallback answer")
+        self.assertEqual([call[0]["as_type"] for call in calls], ["generation", "generation"])
+        self.assertEqual([call[0]["name"] for call in calls], ["primary", "fallback"])
+        self.assertEqual(calls[0][1].updates[-1]["level"], "ERROR")
+        self.assertFalse(calls[0][0]["metadata"]["is_fallback"])
+        self.assertEqual(calls[1][1].output["content"], "fallback answer")
+        self.assertTrue(calls[1][0]["metadata"]["is_fallback"])
 
 
 class TestFallbackContentFilterFinishReason(unittest.TestCase):

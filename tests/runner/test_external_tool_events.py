@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,7 @@ class _Model:
                 "file_path": "/tmp/result.txt",
                 "content": "secret body that must not leave the process",
             },
+            result="Error: https://example.test/run?token=plain-secret",
         )
         callback = _kwargs["tool_event_callback"]
         callback("started", function_call, None, None, None)
@@ -119,6 +121,54 @@ async def test_shared_executor_emits_bounded_tool_events(stream):
     assert "plain-secret" not in completed["error"]
     assert "token=***" in completed["error"]
     assert completed["duration_seconds"] == 1.25
+
+
+class _ToolObservation:
+    def __init__(self):
+        self.output = None
+        self.metadata = {}
+        self.updates = []
+
+    def set_output(self, output):
+        self.output = output
+
+    def set_metadata(self, key, value):
+        self.metadata[key] = value
+
+    def update(self, **kwargs):
+        self.updates.append(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_tool_call_is_a_child_observation(monkeypatch):
+    observations = []
+
+    @contextmanager
+    def capture(**kwargs):
+        observation = _ToolObservation()
+        observations.append((kwargs, observation))
+        yield observation
+
+    monkeypatch.setattr(
+        "agentica.runner.loop.langfuse_observation_context",
+        capture,
+    )
+    runner = Runner(SimpleNamespace())
+    runner._emit_event = lambda _event, _payload: None
+
+    async for _ in runner._execute_tool_calls(
+        [], [], SimpleNamespace(), _Model(), stream=False
+    ):
+        pass
+
+    assert len(observations) == 1
+    kwargs, observation = observations[0]
+    assert kwargs["as_type"] == "tool"
+    assert kwargs["name"] == "write_file"
+    assert observation.metadata["tool_call_id"] == "call-1"
+    assert observation.metadata["ok"] is False
+    assert observation.metadata["duration_seconds"] == 1.25
+    assert observation.updates[-1]["level"] == "ERROR"
 
 
 @pytest.mark.asyncio

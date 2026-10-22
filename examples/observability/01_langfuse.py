@@ -4,9 +4,10 @@
 @description: Langfuse integration demo - Demonstrates LLM observability
 
 Langfuse provides:
-- Automatic tracing of all LLM calls
+- One trace per Agent.run user request
+- Child generations, tools, and concrete hooks inside that trace
 - Session grouping for multi-turn conversations
-- Tool call tracking within agent runs
+- Request input and final response output
 
 Setup:
     1. pip install langfuse
@@ -35,7 +36,8 @@ async def main():
 
     agent = Agent(
         name="Langfuse Demo Agent",
-        # user_id and session_id removed in V2 API
+        user_id="demo-user",
+        session_id="demo-session",
         model=OpenAIChat(
             id="gpt-4o-mini",
             langfuse_tags=["demo", "basic"],
@@ -67,7 +69,8 @@ async def main():
 
     agent_with_tools = Agent(
         name="Research Agent",
-        # user_id and session_id removed in V2 API
+        user_id="demo-user",
+        session_id="research-session",
         model=OpenAIChat(
             id="gpt-4o-mini",
             langfuse_tags=["research", "tools"],
@@ -83,9 +86,11 @@ async def main():
 
     print("=" * 50)
     print("Check your Langfuse dashboard to see:")
-    print("- All traces grouped by session_id")
-    print("- Multi-step tool calls within single traces")
-    print("- User tracking across sessions")
+    print("- One root trace per user request")
+    print("- Request input and final response output")
+    print("- GENERATION, TOOL, and concrete hook children inside the trace")
+    print("- No inherited empty hooks and no second trace for internal steps")
+    print("- Traces grouped by session_id with user tracking")
     print("=" * 50)
 
 

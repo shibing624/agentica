@@ -16,6 +16,7 @@ import asyncio
 import sys
 import types
 import unittest
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import agentica.utils.langfuse_integration as langfuse_integration
@@ -360,9 +361,6 @@ class TestLangfuseContextManagers(unittest.TestCase):
 
     def test_trace_context_does_not_yield_dummy_after_body_exception(self):
         class FakeSpan:
-            def update_trace(self, **_kwargs):
-                pass
-
             def update(self, **_kwargs):
                 pass
 
@@ -377,10 +375,14 @@ class TestLangfuseContextManagers(unittest.TestCase):
             def start_as_current_observation(self, **_kwargs):
                 return FakeObservation()
 
-            def update_current_trace(self, **_kwargs):
-                pass
+        @contextmanager
+        def fake_propagate_attributes(**_kwargs):
+            yield
 
-        fake_langfuse = types.SimpleNamespace(get_client=lambda: FakeClient())
+        fake_langfuse = types.SimpleNamespace(
+            get_client=lambda: FakeClient(),
+            propagate_attributes=fake_propagate_attributes,
+        )
         with (
             patch.object(langfuse_integration, "is_langfuse_available", return_value=True),
             patch.dict(sys.modules, {"langfuse": fake_langfuse}),
@@ -389,6 +391,72 @@ class TestLangfuseContextManagers(unittest.TestCase):
                 with langfuse_integration.langfuse_trace_context(name="test"):
                     raise ValueError("root cause")
 
+    def test_trace_context_uses_langfuse_v5_propagated_attributes(self):
+        propagated = []
+        started = []
+        updates = []
+
+        class FakeSpan:
+            def update(self, **kwargs):
+                updates.append(kwargs)
+
+        class FakeObservation:
+            def __enter__(self):
+                return FakeSpan()
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+        class FakeClient:
+            def start_as_current_observation(self, **kwargs):
+                started.append(kwargs["name"])
+                return FakeObservation()
+
+        @contextmanager
+        def fake_propagate_attributes(**kwargs):
+            propagated.append(kwargs)
+            yield
+
+        fake_langfuse = types.SimpleNamespace(
+            get_client=lambda: FakeClient(),
+            propagate_attributes=fake_propagate_attributes,
+        )
+        with (
+            patch.object(langfuse_integration, "is_langfuse_available", return_value=True),
+            patch.dict(sys.modules, {"langfuse": fake_langfuse}),
+        ):
+            with langfuse_integration.langfuse_trace_context(
+                name="agent-run",
+                session_id="session-123",
+                user_id="user-456",
+                tags=["agentica"],
+            ) as trace:
+                trace.set_output("done")
+                trace.set_metadata("run_id", "run-789")
+                with langfuse_integration.langfuse_observation_context(
+                    name="execute",
+                    as_type="tool",
+                ):
+                    pass
+                with langfuse_integration.langfuse_trace_context(name="nested-agent"):
+                    pass
+            with langfuse_integration.langfuse_observation_context(
+                name="outside",
+                as_type="tool",
+            ):
+                pass
+
+        self.assertEqual(started, ["agent-run", "execute"])
+        self.assertEqual(
+            propagated,
+            [{
+                "trace_name": "agent-run",
+                "session_id": "session-123",
+                "user_id": "user-456",
+                "tags": ["agentica"],
+            }],
+        )
+        self.assertEqual(updates, [{"output": "done"}, {"metadata": {"run_id": "run-789"}}])
 
 class TestGetLastAssistantMessage(unittest.TestCase):
     """Test Runner._get_last_assistant_message helper."""

@@ -19,7 +19,6 @@ from typing import (
     TYPE_CHECKING,
 )
 
-
 from agentica.agent.history_filter import (
     make_history_portable,
     to_portable_history_with_input_ids,
@@ -32,6 +31,7 @@ from agentica.model.message import Message
 from agentica.model.response import ContentFilterError, ModelResponse
 from agentica.model.usage import Usage
 from agentica.run.config import RunConfig
+from agentica.utils.langfuse_integration import langfuse_observation_context
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -67,6 +67,91 @@ async def _replay_stream(first: Any, stream: AsyncGenerator[Any, None], *, empty
             yield chunk
     finally:
         await stream.aclose()
+
+
+def _generation_output(
+        messages: List[Message],
+        checkpoint: int,
+        response: Optional[ModelResponse] = None,
+) -> Any:
+    new_messages = [message.to_model_dict() for message in messages[checkpoint:]]
+    if new_messages:
+        return new_messages[-1] if len(new_messages) == 1 else new_messages
+    if response is None:
+        return None
+    return {
+        key: value
+        for key, value in {
+            "content": response.content,
+            "reasoning_content": response.reasoning_content,
+            "tool_call": response.tool_call,
+            "finish_reason": response.finish_reason,
+        }.items()
+        if value is not None
+    }
+
+
+def _finalize_generation(
+        observation: Any,
+        messages: List[Message],
+        checkpoint: int,
+        response: Optional[ModelResponse] = None,
+) -> None:
+    observation.set_output(_generation_output(messages, checkpoint, response))
+    new_messages = messages[checkpoint:]
+    if new_messages:
+        metrics = new_messages[-1].metrics
+        finish_reason = new_messages[-1].finish_reason
+    else:
+        metrics = {}
+        finish_reason = response.finish_reason if response is not None else None
+    input_tokens = metrics.get("input_tokens", metrics.get("prompt_tokens"))
+    output_tokens = metrics.get("output_tokens", metrics.get("completion_tokens"))
+    total_tokens = metrics.get("total_tokens")
+    if (
+        total_tokens is None
+        and isinstance(input_tokens, int)
+        and isinstance(output_tokens, int)
+    ):
+        total_tokens = input_tokens + output_tokens
+    usage_details = {
+        key: value
+        for key, value in {
+            "input": input_tokens,
+            "output": output_tokens,
+            "total": total_tokens,
+        }.items()
+        if isinstance(value, int)
+    }
+    if usage_details:
+        observation.update(usage_details=usage_details)
+    if finish_reason:
+        observation.set_metadata("finish_reason", finish_reason)
+
+
+async def _trace_model_stream(
+        stream: AsyncIterator[ModelResponse],
+        *,
+        observation_context: Any,
+        observation: Any,
+        messages: List[Message],
+        checkpoint: int,
+) -> AsyncIterator[ModelResponse]:
+    error: Optional[BaseException] = None
+    try:
+        async for chunk in stream:
+            yield chunk
+    except BaseException as stream_error:
+        error = stream_error
+        observation.update(level="ERROR", status_message=str(stream_error)[:1000])
+        raise
+    finally:
+        _finalize_generation(observation, messages, checkpoint)
+        observation_context.__exit__(
+            type(error) if error is not None else None,
+            error,
+            error.__traceback__ if error is not None else None,
+        )
 
 
 class RetryMixin:
@@ -108,6 +193,8 @@ class RetryMixin:
                 loop_state,
                 agent,
                 stream=False,
+                trace_trigger=f"fallback_on_break:{break_reason}",
+                trace_is_fallback=True,
             )
             recovery = recovery_call.response
         except Exception as exc:
@@ -223,6 +310,8 @@ class RetryMixin:
         *,
         stream: bool = False,
         after_content_filter: bool = False,
+        trace_trigger: Optional[str] = None,
+        trace_is_fallback: bool = False,
     ):
         """Call model.response()/response_stream() with retry, reactive compact,
         and cross-provider fallback chain.
@@ -339,13 +428,62 @@ class RetryMixin:
                                     }
                                 )
                 message_checkpoint = len(messages)
+
+                async def _call_current_model() -> Any:
+                    observation_context = langfuse_observation_context(
+                        name=current.id,
+                        as_type="generation",
+                        input_data=[message.to_model_dict() for message in messages],
+                        model=current.id,
+                        metadata={
+                            "provider": current.provider or "",
+                            "attempt": attempt + 1,
+                            "fallback_index": model_idx + (1 if trace_is_fallback else 0),
+                            "is_fallback": is_fallback or trace_is_fallback,
+                            "trigger": trace_trigger or trigger or "primary",
+                        },
+                    )
+                    observation = observation_context.__enter__()
+                    try:
+                        CompressMixin._emit_context_usage(agent, current, messages)
+                        if stream:
+                            opened_stream = await _open_stream(
+                                current.response_stream(messages=messages)
+                            )
+                            return _trace_model_stream(
+                                opened_stream,
+                                observation_context=observation_context,
+                                observation=observation,
+                                messages=messages,
+                                checkpoint=message_checkpoint,
+                            )
+                        response = await current.response(messages=messages)
+                        _finalize_generation(
+                            observation,
+                            messages,
+                            message_checkpoint,
+                            response,
+                        )
+                        observation_context.__exit__(None, None, None)
+                        return response
+                    except BaseException as error:
+                        observation.update(
+                            level="ERROR",
+                            status_message=str(error)[:1000],
+                        )
+                        observation_context.__exit__(
+                            type(error),
+                            error,
+                            error.__traceback__,
+                        )
+                        raise
+
                 try:
                     if stream:
                         # Stream finish_reason is available only after the
                         # consumer exhausts the generator. The Runner checks it
                         # there before accepting the call as complete.
-                        CompressMixin._emit_context_usage(agent, current, messages)
-                        opened = await _open_stream(current.response_stream(messages=messages))
+                        opened = await _call_current_model()
                         state.last_used_model_id = current.id
                         state.last_used_model_idx = model_idx
                         if is_fallback:
@@ -356,8 +494,7 @@ class RetryMixin:
                             used_fallback=is_fallback,
                         )
 
-                    CompressMixin._emit_context_usage(agent, current, messages)
-                    resp = await current.response(messages=messages)
+                    resp = await _call_current_model()
 
                     # Content filtering is deterministic for this model: switch
                     # candidates immediately without same-model retry.
@@ -415,8 +552,7 @@ class RetryMixin:
                         message_checkpoint = len(messages)
                         try:
                             if stream:
-                                CompressMixin._emit_context_usage(agent, current, messages)
-                                opened = await _open_stream(current.response_stream(messages=messages))
+                                opened = await _call_current_model()
                                 state.last_used_model_id = current.id
                                 state.last_used_model_idx = model_idx
                                 if is_fallback:
@@ -426,8 +562,7 @@ class RetryMixin:
                                     used_model=current,
                                     used_fallback=is_fallback,
                                 )
-                            CompressMixin._emit_context_usage(agent, current, messages)
-                            resp = await current.response(messages=messages)
+                            resp = await _call_current_model()
                             state.last_used_model_id = current.id
                             state.last_used_model_idx = model_idx
                             if is_fallback:

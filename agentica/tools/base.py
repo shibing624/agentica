@@ -481,13 +481,18 @@ class FunctionCall(BaseModel):
 
         Async functions are awaited directly.
         Sync functions run in a thread pool to avoid blocking the event loop.
+        The current contextvars are copied into the thread so tracing spans
+        (and anything else context-scoped) stay attached to the caller's
+        trace instead of becoming detached root spans.
         """
+        import contextvars
         import functools
         if inspect.iscoroutinefunction(func):
             return await func(**kwargs)
         loop = asyncio.get_running_loop()
+        ctx = contextvars.copy_context()
         return await loop.run_in_executor(
-            None, functools.partial(func, **kwargs)
+            None, functools.partial(ctx.run, functools.partial(func, **kwargs))
         )
 
     def _build_args(self, func: Callable) -> Dict[str, Any]:

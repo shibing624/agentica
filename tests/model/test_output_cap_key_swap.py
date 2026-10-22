@@ -13,7 +13,6 @@ from unittest import mock
 import httpx
 import openai
 
-from agentica.model.openai import chat as openai_chat_module
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
 
@@ -187,12 +186,6 @@ class TestOutputCapKeySwap(unittest.TestCase):
     def test_real_request_path_swaps_key_end_to_end(self):
         """response() must serialize the swapped key onto the wire payload."""
         seen = []
-        original_available = openai_chat_module.is_langfuse_available
-
-        def transport_available_false():
-            return False
-
-        openai_chat_module.is_langfuse_available = transport_available_false
 
         async def transport(request):
             seen.append(request)
@@ -221,10 +214,7 @@ class TestOutputCapKeySwap(unittest.TestCase):
             finally:
                 await model.client.close()
 
-        try:
-            asyncio.run(scenario())
-        finally:
-            openai_chat_module.is_langfuse_available = original_available
+        asyncio.run(scenario())
         first, second = (json.loads(r.content) for r in seen)
         self.assertEqual(first["max_tokens"], 16384)
         self.assertNotIn("max_tokens", second)
