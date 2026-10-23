@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **换窗后从 `<session>.notes.md` 抽取跨会话记忆**：`MemoryExtractHooks.on_post_compact` 把 notes 交给 aux 模型抽取，结果写入 `memory_candidates/`，`evidence_refs` 指向这个 notes 文件。notes 内容和上次抽取时相同就跳过（reactive compact、notes 重写失败的情况）。
 
 #### fixes
+- **thinking 签名恢复漏掉了 AWS Bedrock 的报错文案**：Venus `llmproxy/anthropic` 会把同一会话的请求分到 Anthropic 直连和 AWS Bedrock 两个上游（`toolu_` 与 `toolu_bdrk_` 前缀交替出现）。Bedrock 拒绝回放的 thinking 块时报的是 ``ValidationException: …content.6: `thinking` or `redacted_thinking` blocks in the latest assistant message cannot be modified``，既不含 `signature`，也不是 `e58210a5` 匹配的连续子串 `thinking blocks cannot be modified`，于是直接 400 退出。现在两种文案集中在 `LoopState.THINKING_SIGNATURE_HINTS`。同时把一次性保护从整个 run 收窄到单次 `_call_with_retry`：修复会删掉全部 thinking 块，之后的工具轮被拒说明是新签发的 thinking 出了问题，长任务里应该还能再修一次；同一次调用修后仍失败则原样抛错。
 - **CLI 下的后台记忆抽取与纠错判定从未真正执行**：CLI 每轮通过 `run_stream_sync` 用一次 `asyncio.run` 跑完；`MemoryExtractHooks` / `ExperienceCaptureHooks` 用 `create_task` 挂在这个 loop 上的后台任务，在本轮结束、loop 关闭时被取消，抽取还没发出 LLM 请求，`memory_candidates/` 一直为空。现在后台任务提交到进程级常驻 loop（`agentica/utils/background_loop.py`），并使用 `Model.detached_copy()` 得到的独立模型副本，避免 Runner 在本轮结束时关闭 aux client 时连带关掉后台请求。`flush_pending()` 仍可从任意 loop 等待这些任务完成。
 - **空闲时手动 `/compact`（CLI 与 Web）不再跳过记忆/经验 hooks**：两处都读取 `agent._run_hooks`，而它在每轮结束后就被清空，空闲时总是 `None`，`on_pre_compact` / `on_post_compact` 从未触发。改为读取 `agent._default_run_hooks`。
 

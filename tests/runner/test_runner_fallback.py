@@ -1235,7 +1235,6 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
 
                 self.assertEqual(calls["n"], 2)
                 fallback.response.assert_not_awaited()
-                self.assertTrue(state.thinking_history_sanitized_done)
                 self.assertTrue(state.context_collapsed)
                 assistant = next(m for m in seen_after_repair if m.role == "assistant")
                 self.assertEqual(assistant.content, "")
@@ -1255,7 +1254,7 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
 
         async def _always_bad(messages):
             calls["n"] += 1
-            raise RuntimeError("thinking blocks cannot be modified")
+            raise RuntimeError("messages.5.content.22: Invalid `signature` in `thinking` block")
 
         primary = _fake_model("claude-opus-5-5")
         primary.response = _always_bad
@@ -1272,8 +1271,88 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(state.thinking_history_sanitized_done, True)
         self.assertEqual(calls["n"], 2)
+
+    def test_bedrock_validation_exception_thinking_cannot_be_modified_recovers(self):
+        """AWS Bedrock Runtime wording (``thinking`` or ``redacted_thinking`` blocks
+        in the latest assistant message cannot be modified) must trigger the same
+        portable-history recovery as Anthropic Direct's ``Invalid signature``."""
+        bedrock_err = (
+            "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', "
+            "'message': 'Anthropic Claude bad request: InvokeModelWithResponseStream: "
+            "operation error Bedrock Runtime: InvokeModelWithResponseStream, https response "
+            "error StatusCode: 400, RequestID: 6b0dbac3-0520-4b25-9eba-12d45a09eeba, "
+            "ValidationException: ***.***.content.6: `thinking` or `redacted_thinking` "
+            "blocks in the latest assistant message cannot be modified. These blocks must "
+            "remain as they were in the original response.'}}"
+        )
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                messages = self._native_claude_tool_round()
+                calls = {"n": 0}
+                seen_after_repair = []
+
+                async def _respond(messages):
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        raise RuntimeError(bedrock_err)
+                    seen_after_repair.extend(messages)
+                    return ModelResponse(content="PORT is 8080", finish_reason="stop")
+
+                async def _stream(messages):
+                    response = await _respond(messages)
+                    yield response
+
+                primary = _fake_model("claude-opus-5-5")
+                primary.response = _respond
+                primary.response_stream = _stream
+                agent = _make_agent()
+                state = LoopState()
+
+                call = asyncio.run(
+                    Runner._call_with_retry(primary, messages, state, agent, stream=stream)
+                )
+                if stream:
+                    async def _consume():
+                        return [chunk async for chunk in call.response]
+
+                    chunks = asyncio.run(_consume())
+                    self.assertEqual(chunks[-1].content, "PORT is 8080")
+                else:
+                    self.assertEqual(call.content, "PORT is 8080")
+
+                self.assertEqual(calls["n"], 2)
+                assistant = next(m for m in seen_after_repair if m.role == "assistant")
+                self.assertEqual(assistant.content, "")
+                self.assertEqual(assistant.tool_calls[0]["id"], "toolu_1")
+
+    def test_later_tool_round_in_same_run_can_also_recover(self):
+        """A later _call_with_retry in the same LoopState that produces a new
+        signed thinking block must still be allowed one recovery if rejected."""
+        state = LoopState()
+        agent = _make_agent()
+
+        for round_idx in (1, 2):
+            messages = self._native_claude_tool_round()
+            calls = {"n": 0}
+
+            async def _respond(messages):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError(
+                        "ValidationException: ***.***.content.6: `thinking` or "
+                        "`redacted_thinking` blocks in the latest assistant message "
+                        "cannot be modified."
+                    )
+                return ModelResponse(content=f"ok-{round_idx}", finish_reason="stop")
+
+            primary = _fake_model("claude-opus-5-5")
+            primary.response = _respond
+            call = asyncio.run(
+                Runner._call_with_retry(primary, messages, state, agent, stream=False)
+            )
+            self.assertEqual(call.content, f"ok-{round_idx}")
+            self.assertEqual(calls["n"], 2)
 
 
 class TestToolHistorySanitizeRecovery(unittest.TestCase):

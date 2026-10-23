@@ -380,6 +380,7 @@ class RetryMixin:
                     logger.warning(f"event callback failed for fallback.recovered: {e}")
 
         candidate_offset = 1 if after_content_filter else 0
+        thinking_sanitized_this_call = False
         for local_idx, current in enumerate(candidates):
             model_idx = local_idx + candidate_offset
             is_fallback = model_idx > 0
@@ -569,24 +570,20 @@ class RetryMixin:
 
                     # A signed Anthropic thinking block can occasionally become
                     # unverifiable on the very next tool-result request (observed
-                    # through the Venus native Anthropic endpoint). Re-sending the
-                    # same payload is deterministic, while dropping the whole tool
-                    # round loses the work already completed. Convert both stores
-                    # to the shared shape: model-bound thinking/replay state goes,
-                    # but assistant.tool_calls and their results survive.
-                    invalid_thinking_signature = (
-                        "thinking blocks cannot be modified" in err
-                        or (
-                            "invalid" in err
-                            and "signature" in err
-                            and "thinking" in err
-                        )
-                    )
+                    # through the Venus native Anthropic endpoint, which routes
+                    # across Anthropic Direct and AWS Bedrock Runtime). Re-sending
+                    # the same payload is deterministic, while dropping the whole
+                    # tool round loses the work already completed. Convert both
+                    # stores to the shared shape: model-bound thinking/replay
+                    # state goes, but assistant.tool_calls and their results
+                    # survive. One repair per call: the rewrite removes every
+                    # thinking block, so a rejection on a later tool round is
+                    # about thinking issued after it and may be repaired again.
                     if (
-                        invalid_thinking_signature
-                        and not state.thinking_history_sanitized_done
+                        any(h in err for h in state.THINKING_SIGNATURE_HINTS)
+                        and not thinking_sanitized_this_call
                     ):
-                        state.thinking_history_sanitized_done = True
+                        thinking_sanitized_this_call = True
                         logger.warning(
                             "[thinking_signature] %s rejected signed thinking; "
                             "removing model-bound reasoning and retrying once",

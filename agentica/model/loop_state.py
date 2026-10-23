@@ -74,9 +74,6 @@ class LoopState:
 
     # Tool-history sanitize (one-shot per loop invocation)
     tool_history_sanitized_done: bool = False
-    # A provider rejected a signed thinking block. The runner may remove
-    # model-bound reasoning while preserving the tool round and retry once.
-    thinking_history_sanitized_done: bool = False
 
     # Cross-provider fallback bookkeeping for the most recent successful LLM call.
     # Set by Runner._call_with_retry; consumed by Runner._run_impl to keep
@@ -176,6 +173,20 @@ class LoopState:
             # OpenAI chat completions / Responses wording for the same shape.
             "must be followed by tool messages responding",
             "no tool output found for function call",
+        ),
+        repr=False,
+    )
+    # Anthropic rejected a replayed signed thinking block. Recovered by
+    # rewriting history to the portable shape (thinking dropped, tool rounds
+    # kept) and re-sending once; see Runner._call_with_retry.
+    THINKING_SIGNATURE_HINTS: tuple = field(
+        default=(
+            # Anthropic Direct.
+            "invalid `signature` in `thinking` block",
+            # AWS Bedrock Runtime (also served behind Venus llmproxy/anthropic):
+            # "`thinking` or `redacted_thinking` blocks in the latest assistant
+            # message cannot be modified."
+            "blocks in the latest assistant message cannot be modified",
         ),
         repr=False,
     )
