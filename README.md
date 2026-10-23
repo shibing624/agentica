@@ -278,11 +278,11 @@ agent = DeepAgent()
 - [2026/10/22] **v1.5.0**：Langfuse 5 每次用户请求一条 Trace，模型调用与工具执行是子 Observation，Hook 不上报。历史默认重放整个窗口（`num_history_turns` 默认 `None`，不再截断旧 tool 结果）。换模型保留工具历史，一轮内跨 provider fallback 能带着本轮工具结果完成。长会话按 provider 实测 token 校准压缩。详见 [Release-v1.5.0](https://github.com/shibing624/agentica/releases/tag/v1.5.0)
 - [2026/10/15] **v1.4.17**：输出上限按用户配置 > 模型目录 > 网关默认；网关空回复会重发，写不完的回答标成未完成；内置 `analyze_image`。公开 `from agentica import …` 不变，子模块按领域收进子包；`worktree` 不再搬家上锁。详见 [Release-v1.4.17](https://github.com/shibing624/agentica/releases/tag/v1.4.17)
 - [2026/09/15] **v1.4.16**：Layer 2 compact 改为空窗换窗（不再 LLM 摘要），旧对话用 `search_session` 查；交互 CLI 可选 attach / 外部 hooks（默认关）；MCP 只支持 2.x。详见 [Release-v1.4.16](https://github.com/shibing624/agentica/releases/tag/v1.4.16)
-- [2026/09/01] **v1.4.15**：新增 TypeScript 客户端 `@agentica-ai/sdk` 与 Gateway Docker 镜像；`/export` 默认出 session JSONL；`apply_patch` 只精确匹配；CLI 不再把工具输出里的 `[/path]` 当成 Rich 标记。详见 [Release-v1.4.15](https://github.com/shibing624/agentica/releases/tag/v1.4.15)
 
 <details>
 <summary>更多版本</summary>
 
+- [2026/09/01] **v1.4.15**：新增 TypeScript 客户端 `@agentica-ai/sdk` 与 Gateway Docker 镜像；`/export` 默认出 session JSONL；`apply_patch` 只精确匹配；CLI 不再把工具输出里的 `[/path]` 当成 Rich 标记。详见 [Release-v1.4.15](https://github.com/shibing624/agentica/releases/tag/v1.4.15)
 - [2026/08/25] **v1.4.14**：权限档更新（ask 不再藏写工具，增加「拒绝类似」）；Web/桌面真正多账号；文件工具收成 `apply_patch` + `write_file`（`read_file` 支持 tail）；Worktree 默认进仓库内；系统 skill 包内加载；桌面版首次打开自动装 Python runtime。详见 [Release-v1.4.14](https://github.com/shibing624/agentica/releases/tag/v1.4.14)
 - [2026/08/20] **v1.4.13**：Web 换成 Vite + React SPA 并新增轨迹页；网页界面默认英文、设置里可切简体中文；新增 **Desktop App 安装包**（macOS dmg / Windows NSIS / Linux AppImage·deb）。详见 [Release-v1.4.13](https://github.com/shibing624/agentica/releases/tag/v1.4.13)
 - [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
