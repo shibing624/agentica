@@ -15,7 +15,7 @@ that already persisted notes and wants a blank page). Production auto and
 ``/compact`` keep the tail.
 
 Budget / notes text is folded into a single user message so we never emit
-consecutive user roles (Bedrock and some gateways 400 on that).
+consecutive user roles (some providers and gateways 400 on that).
 """
 from fractions import Fraction
 from pathlib import Path

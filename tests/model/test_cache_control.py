@@ -524,11 +524,11 @@ def test_keepalive_failure_is_logged_to_file_only(monkeypatch, tmp_path):
     model._last_cache_payload = ([{"role": "system", "content": "S"}], {})
 
     async def _boom():
-        raise RuntimeError("Error code: 400 - venus")
+        raise RuntimeError("Error code: 400 - gateway")
 
     model._cache_keepalive_ping = _boom
     model._cache_keepalive_loop(model._cache_keepalive_generation)
-    assert recorded == ["cache keepalive ping failed, stopping chain: Error code: 400 - venus"]
+    assert recorded == ["cache keepalive ping failed, stopping chain: Error code: 400 - gateway"]
 
 
 def test_keepalive_ping_request_shape(monkeypatch):

@@ -329,7 +329,7 @@ class LoopMixin:
                     # The whole budget went to reasoning and the cap can go up:
                     # re-send the same request with more room. The empty turn is
                     # dropped on the wire. Replaying the run that hit this
-                    # (a034fa4c, 144K tokens, Venus 20000 default cap) with the
+                    # (a034fa4c, 144K tokens, gateway default cap 20000) with the
                     # cap doubled and no added prompt: 6/6 produced a tool call.
                     recovery = "raised output cap"
                 else:
@@ -359,7 +359,7 @@ class LoopMixin:
             if _finish == "length":
                 loop_state.output_truncated = True
             elif empty_reply:
-                # HTTP 200 with nothing in it (seen from the Venus proxy after a
+                # HTTP 200 with nothing in it (seen from an LLM proxy after a
                 # long idle: 5 of 494 requests in one session, no exception, no
                 # error status). No retry layer fires on a clean empty stream,
                 # and ending here looks exactly like the model deciding it was

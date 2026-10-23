@@ -421,7 +421,7 @@ class TestResumeCommandAcrossProjects(unittest.TestCase):
         agent._session_log = SessionLog(
             "bbbbbbbb-2222", work_dir=self.current, user_id="default"
         )
-        agent._session_log.set_profile("venus-opus", "session")
+        agent._session_log.set_profile("proxy-opus", "session")
         ctx = CommandContext(
             agent_config={"work_dir": self.current},
             current_agent=agent,
@@ -436,7 +436,7 @@ class TestResumeCommandAcrossProjects(unittest.TestCase):
         self.assertIn("Project:", printed)
         self.assertIn("beta", printed)
         self.assertIn(f"Work dir: {self.current}", printed)
-        self.assertIn("Profile: venus-opus", printed)
+        self.assertIn("Profile: proxy-opus", printed)
 
     def test_number_after_resume_all_uses_that_listing(self):
         agent = MagicMock()

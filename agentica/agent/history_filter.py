@@ -353,6 +353,21 @@ def make_history_portable(working_memory) -> None:
         working_memory.messages = to_portable_history(working_memory.messages)
 
 
+def carries_signed_thinking(messages: List[Message]) -> bool:
+    """True if an assistant turn replays ``thinking`` / ``redacted_thinking`` blocks.
+
+    Their signature only verifies on the model that issued them.
+    """
+    return any(
+        m.role == "assistant"
+        and (
+            _content_has_block_type(m.content, "thinking")
+            or _content_has_block_type(m.content, "redacted_thinking")
+        )
+        for m in messages
+    )
+
+
 def model_identity(model) -> tuple:
     """What decides whether history written by one model replays on another.
 
@@ -401,8 +416,8 @@ def claude_blocks_to_shared_shape(messages: List[Message]) -> List[Message]:
     the assistant and ``tool_result`` blocks on a user turn. ``/model`` and
     resume convert history ahead of time, but an in-turn fallback does not: a
     Claude primary that fails after a tool round hands that very array to the
-    fallback model, and the OpenAI wires reject the blocks (Venus chat: "type
-    must not be null"; Responses: "Invalid value: 'thinking'").
+    fallback model, and the OpenAI wires reject the blocks (chat: "type must
+    not be null"; Responses: "Invalid value: 'thinking'").
 
     Only messages that carry such blocks are rebuilt (``to_portable_history``
     per message); every other message is passed through as the same object, so

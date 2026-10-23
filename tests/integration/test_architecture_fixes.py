@@ -293,7 +293,7 @@ class TestLoopPostResponse(unittest.TestCase):
         self.assertEqual(messages[-1].role, "user")
         self.assertNotEqual(prompt, "Continue from where you left off.")
         self.assertIn("next concrete step", prompt)
-        # Wording that names the reasoning drew content_filter on Venus.
+        # Wording that names the reasoning drew content_filter on a gateway.
         self.assertNotIn("reasoning", prompt.lower())
 
         model.last_finish_reason = "length"

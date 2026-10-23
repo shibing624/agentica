@@ -118,7 +118,7 @@ class TestCLIUserMessage(unittest.TestCase):
         from agentica.cli.display import console as disp
 
         view = disp._format_agent_execution_error(
-            RuntimeError("Content filter blocked the response from venus: finish_reason='content_filter'")
+            RuntimeError("Content filter blocked the response from gateway: finish_reason='content_filter'")
         )
 
         self.assertEqual(view["summary"], "Response blocked by provider content filter")

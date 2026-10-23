@@ -462,8 +462,8 @@ class OpenAIChat(Model):
     def __post_init__(self):
         super().__post_init__()
         # Output cap precedence: user config > catalog ceiling > gateway default.
-        # Without a cap in the request the gateway picks one — 20000 on Venus
-        # for claude-opus-5-5, which a high-effort thinking turn can spend
+        # Without a cap in the request the gateway picks one — 20000 on one
+        # gateway for claude-opus-5-5, which a high-effort thinking turn can spend
         # entirely on reasoning. The catalog ceiling is models.dev
         # ``limit.output``. It is a ceiling, not a reservation: providers bill
         # what they generate.
@@ -843,7 +843,7 @@ class OpenAIChat(Model):
         A turn that spent its whole output budget on reasoning keeps only
         ``reasoning_content``, which this wire strips. What remains is an
         assistant message with no content, no tool call and no audio: it
-        carries no information, and Venus rejects it (4000 ``message has no
+        carries no information, and some gateways reject it (4000 ``message has no
         content``), which kills every later request of the session. The
         Anthropic path skips such turns the same way.
 
@@ -857,8 +857,8 @@ class OpenAIChat(Model):
         rejects an unsigned one (400 "Function call is missing a
         thought_signature"), which is exactly what an in-turn fallback to
         Gemini replays. Such calls get Google's documented placeholder
-        signature; the other chat endpoints ignore the field (measured: Venus
-        opus / glm / deepseek / hy4, nextoken, openoneapi gpt).
+        signature; the other chat endpoints ignore the field (measured on
+        opus / glm / deepseek / hy4 / gpt chat endpoints).
         """
         # Imported here: agentica.agent imports this module.
         from agentica.agent.history_filter import claude_blocks_to_shared_shape

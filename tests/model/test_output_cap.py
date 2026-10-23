@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Output-token cap: user config > catalog ceiling > gateway default.
 
-Without a cap in the request the gateway picks one: 20000 on Venus for
+Without a cap in the request the gateway picks one: 20000 on one gateway for
 claude-opus-5-5, which a high-effort thinking turn spent entirely on reasoning
 (delegate a034fa4c died there). The catalog ceiling is models.dev
 ``limit.output``; it describes the model, not the deployment, so a deployment

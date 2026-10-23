@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """A content-less 200 reply is retried, not taken as the end of the turn.
 
-Seen from the Venus proxy: 5 of 494 requests in one session came back HTTP 200
+Seen from an LLM proxy: 5 of 494 requests in one session came back HTTP 200
 with no text, no reasoning, no tool call and no exception. No retry layer
 fired, the loop treated it as a deliberate stop, and a multi-hour task ended
 mid-way (twice right after a ``wait`` on a finished training job returned).

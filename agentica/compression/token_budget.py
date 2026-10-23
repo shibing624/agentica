@@ -16,7 +16,7 @@ CONTEXT_WINDOW_OPEN = "<context_window>\n"
 CONTEXT_WINDOW_CLOSE = "\n</context_window>"
 
 # Idle /compact leaves this mark so the next user turn can fold the preamble
-# into that request (avoids consecutive user roles on Bedrock / some gateways).
+# into that request (avoids consecutive user roles on some providers / gateways).
 WINDOW_CONTINUATION_MARK = (
     "New context window started. "
     "Continue from session notes and search_session."

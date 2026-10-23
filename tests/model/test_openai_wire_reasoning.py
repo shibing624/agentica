@@ -43,10 +43,10 @@ class TestReasoningContentNotSentOnWire(unittest.TestCase):
         self.assertEqual(msg.to_replay_dict()["reasoning_content"], "kept")
 
     def test_reasoning_only_assistant_turn_is_omitted_from_request(self):
-        """Venus 4000 ``message has no content``: a truncated thinking turn.
+        """Gateway 4000 ``message has no content``: a truncated thinking turn.
 
         The output budget can be spent entirely on ``reasoning_content``,
-        which the wire strips. Measured on Venus: ``{role: assistant,
+        which the wire strips. Measured on a gateway: ``{role: assistant,
         content: null}`` and ``content: ""`` both 400, while dropping the
         turn (user,user or tool,user) is accepted. The turn carries nothing
         sendable, so it is omitted. A tool-call turn with null content stays.

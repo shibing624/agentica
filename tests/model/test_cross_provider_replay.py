@@ -77,7 +77,7 @@ class TestOpenAIWiresAcceptAClaudeNativeRound(unittest.TestCase):
 
     ``/model`` and resume convert history ahead of time; a fallback inside a
     tool loop does not, so the very blocks Claude needs reached the OpenAI
-    wires. Live: Venus chat answered 400 "type must not be null", Responses
+    wires. Live: chat answered 400 "type must not be null", Responses
     400 "Invalid value: 'thinking'", and the run died mid-turn.
     """
 
@@ -148,7 +148,7 @@ class TestOpenAIWiresAcceptAClaudeNativeRound(unittest.TestCase):
 class TestForeignToolCallsCarryGeminiPlaceholderSignature(unittest.TestCase):
     """Gemini rejects an unsigned call in the current turn.
 
-    Live (venus gemini-3.7-flash): a Claude primary that fails after its tool
+    Live (gemini-3.7-flash): a Claude primary that fails after its tool
     round hands Gemini a call with no ``thought_signature`` and Gemini answers
     400 "Function call is missing a thought_signature"; the placeholder makes
     the same request pass. Gemini's own calls keep their real signature.

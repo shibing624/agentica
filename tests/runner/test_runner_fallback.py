@@ -10,6 +10,7 @@ import unittest.mock
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
+import anthropic
 import httpx
 import openai
 
@@ -1144,8 +1145,16 @@ class TestContextUsageEvent(unittest.TestCase):
         self.assertTrue(any("context.usage" in line for line in logs.output))
 
 
+def _bad_request(message):
+    return anthropic.BadRequestError(
+        message,
+        response=httpx.Response(400, request=httpx.Request("POST", "https://example.invalid")),
+        body=None,
+    )
+
+
 class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
-    """A bad Anthropic thinking signature loses reasoning, not the tool round."""
+    """A 400 on a request replaying signed thinking loses the thinking, not the tool round."""
 
     @staticmethod
     def _native_claude_tool_round():
@@ -1197,9 +1206,7 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
                 async def _respond(messages):
                     calls["n"] += 1
                     if calls["n"] == 1:
-                        raise RuntimeError(
-                            "Anthropic Claude bad request: Invalid `signature` in `thinking` block"
-                        )
+                        raise _bad_request("Invalid `signature` in `thinking` block")
                     seen_after_repair.extend(messages)
                     return ModelResponse(content="PORT is 8080", finish_reason="stop")
 
@@ -1254,14 +1261,14 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
 
         async def _always_bad(messages):
             calls["n"] += 1
-            raise RuntimeError("messages.5.content.22: Invalid `signature` in `thinking` block")
+            raise _bad_request("messages.5.content.22: Invalid `signature` in `thinking` block")
 
         primary = _fake_model("claude-opus-5-5")
         primary.response = _always_bad
         agent = _make_agent()
         state = LoopState()
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(anthropic.BadRequestError):
             asyncio.run(
                 Runner._call_with_retry(
                     primary,
@@ -1273,83 +1280,71 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
 
         self.assertEqual(calls["n"], 2)
 
-    def test_bedrock_validation_exception_thinking_cannot_be_modified_recovers(self):
-        """AWS Bedrock Runtime wording (``thinking`` or ``redacted_thinking`` blocks
-        in the latest assistant message cannot be modified) must trigger the same
-        portable-history recovery as Anthropic Direct's ``Invalid signature``."""
-        bedrock_err = (
-            "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', "
-            "'message': 'Anthropic Claude bad request: InvokeModelWithResponseStream: "
-            "operation error Bedrock Runtime: InvokeModelWithResponseStream, https response "
-            "error StatusCode: 400, RequestID: 6b0dbac3-0520-4b25-9eba-12d45a09eeba, "
-            "ValidationException: ***.***.content.6: `thinking` or `redacted_thinking` "
-            "blocks in the latest assistant message cannot be modified. These blocks must "
-            "remain as they were in the original response.'}}"
-        )
-        for stream in (False, True):
-            with self.subTest(stream=stream):
-                messages = self._native_claude_tool_round()
+    def test_any_400_wording_triggers_repair_when_request_replays_thinking(self):
+        """Upstreams and proxies word the rejection differently; the request shape decides."""
+        for wording in (
+            "messages.5.content.22: Invalid `signature` in `thinking` block",
+            "content.6: `thinking` or `redacted_thinking` blocks in the latest "
+            "assistant message cannot be modified.",
+            "some wording nobody has seen yet",
+        ):
+            with self.subTest(wording=wording):
                 calls = {"n": 0}
                 seen_after_repair = []
 
                 async def _respond(messages):
                     calls["n"] += 1
                     if calls["n"] == 1:
-                        raise RuntimeError(bedrock_err)
+                        raise _bad_request(wording)
                     seen_after_repair.extend(messages)
-                    return ModelResponse(content="PORT is 8080", finish_reason="stop")
-
-                async def _stream(messages):
-                    response = await _respond(messages)
-                    yield response
+                    return ModelResponse(content="ok", finish_reason="stop")
 
                 primary = _fake_model("claude-opus-5-5")
                 primary.response = _respond
-                primary.response_stream = _stream
-                agent = _make_agent()
-                state = LoopState()
-
                 call = asyncio.run(
-                    Runner._call_with_retry(primary, messages, state, agent, stream=stream)
+                    Runner._call_with_retry(
+                        primary, self._native_claude_tool_round(), LoopState(), _make_agent()
+                    )
                 )
-                if stream:
-                    async def _consume():
-                        return [chunk async for chunk in call.response]
-
-                    chunks = asyncio.run(_consume())
-                    self.assertEqual(chunks[-1].content, "PORT is 8080")
-                else:
-                    self.assertEqual(call.content, "PORT is 8080")
-
+                self.assertEqual(call.content, "ok")
                 self.assertEqual(calls["n"], 2)
                 assistant = next(m for m in seen_after_repair if m.role == "assistant")
-                self.assertEqual(assistant.content, "")
                 self.assertEqual(assistant.tool_calls[0]["id"], "toolu_1")
 
+    def test_400_without_thinking_in_request_is_raised_unchanged(self):
+        calls = {"n": 0}
+
+        async def _bad(messages):
+            calls["n"] += 1
+            raise _bad_request("Invalid `signature` in `thinking` block")
+
+        primary = _fake_model("claude-opus-5-5")
+        primary.response = _bad
+        messages = [Message(role="user", content="hi")]
+        with self.assertRaises(anthropic.BadRequestError):
+            asyncio.run(Runner._call_with_retry(primary, messages, LoopState(), _make_agent()))
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(messages[0].content, "hi")
+
     def test_later_tool_round_in_same_run_can_also_recover(self):
-        """A later _call_with_retry in the same LoopState that produces a new
-        signed thinking block must still be allowed one recovery if rejected."""
+        """The repair drops every thinking block, so a later round that replays
+        newly issued thinking may be repaired again within the same run."""
         state = LoopState()
         agent = _make_agent()
 
         for round_idx in (1, 2):
-            messages = self._native_claude_tool_round()
             calls = {"n": 0}
 
             async def _respond(messages):
                 calls["n"] += 1
                 if calls["n"] == 1:
-                    raise RuntimeError(
-                        "ValidationException: ***.***.content.6: `thinking` or "
-                        "`redacted_thinking` blocks in the latest assistant message "
-                        "cannot be modified."
-                    )
+                    raise _bad_request("thinking blocks cannot be modified")
                 return ModelResponse(content=f"ok-{round_idx}", finish_reason="stop")
 
             primary = _fake_model("claude-opus-5-5")
             primary.response = _respond
             call = asyncio.run(
-                Runner._call_with_retry(primary, messages, state, agent, stream=False)
+                Runner._call_with_retry(primary, self._native_claude_tool_round(), state, agent)
             )
             self.assertEqual(call.content, f"ok-{round_idx}")
             self.assertEqual(calls["n"], 2)

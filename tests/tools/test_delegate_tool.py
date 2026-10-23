@@ -584,7 +584,7 @@ class TestOnlyTheUserChangesTheModel:
             model=main.id,
             sdk_model=main,
             sdk_auxiliary_model=aux,
-            session_profile="venus-ds-v4-1-flash",
+            session_profile="proxy-ds-v4-1-flash",
             **kw,
         )
 
@@ -626,7 +626,7 @@ class TestOnlyTheUserChangesTheModel:
         _delegate(self._session_tool(registry), task="research it", model="gpt-4o-mini")
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
+        assert argv[argv.index("--profile") + 1] == "proxy-ds-v4-1-flash"
         assert "--base_url" not in argv
 
     def test_an_empty_model_still_inherits_the_session(self):
@@ -635,7 +635,7 @@ class TestOnlyTheUserChangesTheModel:
         _delegate(self._session_tool(registry), task="research it")
 
         argv = _argv(registry.started[0])
-        assert argv[argv.index("--profile") + 1] == "venus-ds-v4-1-flash"
+        assert argv[argv.index("--profile") + 1] == "proxy-ds-v4-1-flash"
 
     def test_an_sdk_session_obeys_the_same_rule(self):
         """No profile involved, and the rule still holds: the SDK caller picked
@@ -674,7 +674,7 @@ class TestOnlyTheUserChangesTheModel:
         tool.refresh_session_models(
             model=new_main,
             auxiliary_model=new_aux,
-            session_profile="venus-glm-5-3",
+            session_profile="proxy-glm-5-3",
         )
 
         # The new profile's two models are now the offered ones, and both run
@@ -684,7 +684,7 @@ class TestOnlyTheUserChangesTheModel:
             assert _delegate(tool, task=task, model=model).startswith("Delegated")
             argv = _argv(registry.started[-1])
             assert argv[argv.index("--model_name") + 1] == model
-            assert argv[argv.index("--profile") + 1] == "venus-glm-5-3"
+            assert argv[argv.index("--profile") + 1] == "proxy-glm-5-3"
         # The profile that was switched away from is no longer available.
         assert _delegate(
             tool, task="c", model="deepseek-v4.1-flash-official",

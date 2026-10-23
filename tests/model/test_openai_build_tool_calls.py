@@ -94,7 +94,7 @@ class TestBuildToolCalls(unittest.TestCase):
 
 
 class TestGeminiToolCallsSurviveParsing(unittest.TestCase):
-    """Gemini (Venus chat wire) tool calls, as measured on gemini-3.7-flash.
+    """Gemini (chat wire) tool calls, as measured on gemini-3.7-flash.
 
     Main before this fix: a two-step tool task streamed 400 "Function call is
     missing a thought_signature" on the second request (the signature was

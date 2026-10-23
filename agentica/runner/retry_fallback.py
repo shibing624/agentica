@@ -19,6 +19,7 @@ from typing import (
 )
 
 from agentica.agent.history_filter import (
+    carries_signed_thinking,
     make_history_portable,
     to_portable_history_with_input_ids,
 )
@@ -37,6 +38,13 @@ if TYPE_CHECKING:
 from agentica.runner.types import ModelCallResult
 from agentica.runner.compress import CompressMixin
 from agentica.runner.persist import PersistMixin
+
+
+def _http_status(exc: BaseException) -> Optional[int]:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code
+    status = getattr(exc, "status_code", None)
+    return status if isinstance(status, int) else None
 
 
 async def _open_stream(stream: AsyncGenerator[Any, None]) -> AsyncIterator[Any]:
@@ -272,10 +280,8 @@ class RetryMixin:
         # and CLI startup from loading the provider SDK.
         from openai import APIConnectionError, APITimeoutError
 
-        status = getattr(exc, "status_code", None)
-        if isinstance(exc, httpx.HTTPStatusError):
-            status = exc.response.status_code
-        if isinstance(status, int):
+        status = _http_status(exc)
+        if status is not None:
             if status in (408, 409, 429, 504):
                 return True, False
             if 500 <= status < 600:
@@ -380,7 +386,6 @@ class RetryMixin:
                     logger.warning(f"event callback failed for fallback.recovered: {e}")
 
         candidate_offset = 1 if after_content_filter else 0
-        thinking_sanitized_this_call = False
         for local_idx, current in enumerate(candidates):
             model_idx = local_idx + candidate_offset
             is_fallback = model_idx > 0
@@ -568,39 +573,6 @@ class RetryMixin:
                             # Fall through to the normal classification below
                             # with the post-sanitize exception.
 
-                    # A signed Anthropic thinking block can occasionally become
-                    # unverifiable on the very next tool-result request (observed
-                    # through the Venus native Anthropic endpoint, which routes
-                    # across Anthropic Direct and AWS Bedrock Runtime). Re-sending
-                    # the same payload is deterministic, while dropping the whole
-                    # tool round loses the work already completed. Convert both
-                    # stores to the shared shape: model-bound thinking/replay
-                    # state goes, but assistant.tool_calls and their results
-                    # survive. One repair per call: the rewrite removes every
-                    # thinking block, so a rejection on a later tool round is
-                    # about thinking issued after it and may be repaired again.
-                    if (
-                        any(h in err for h in state.THINKING_SIGNATURE_HINTS)
-                        and not thinking_sanitized_this_call
-                    ):
-                        thinking_sanitized_this_call = True
-                        logger.warning(
-                            "[thinking_signature] %s rejected signed thinking; "
-                            "removing model-bound reasoning and retrying once",
-                            current.id,
-                        )
-                        make_history_portable(agent.working_memory)
-                        portable, portable_input_ids = to_portable_history_with_input_ids(
-                            messages,
-                            state.input_message_ids,
-                        )
-                        messages[:] = portable
-                        state.context_collapsed = True
-                        state.input_message_ids = portable_input_ids
-                        # A second failure must trim against the rebuilt list.
-                        message_checkpoint = len(messages)
-                        continue
-
                     # Reactive compact: prompt_too_long -> emergency compress.
                     # Only attempted on the primary model; fallbacks inherit the
                     # already-compacted message list. An oversized *trailing*
@@ -671,7 +643,35 @@ class RetryMixin:
                         break
 
                     # Truly non-retryable (auth, malformed request, etc.).
-                    # Fallback would not help — propagate immediately.
+                    # Fallback would not help — propagate immediately, except
+                    # for one case: a 400 on a request that replays signed
+                    # thinking blocks. A signature can stop verifying on the
+                    # next request, and every upstream or proxy words that
+                    # rejection differently, so it is decided by request shape,
+                    # not error text. Re-sending the same payload fails the
+                    # same way, while dropping the tool rounds loses completed
+                    # work. Rewrite both stores to the portable shape (thinking
+                    # and replay state go, tool_calls and results stay) and
+                    # re-send. The rewritten request has no thinking blocks, so
+                    # this runs at most once per call and a second 400 is
+                    # raised as is; a 400 caused by something else costs one
+                    # extra request and the thinking history.
+                    if _http_status(last_exc) == 400 and carries_signed_thinking(messages):
+                        logger.warning(
+                            f"[thinking_signature] {current.id} rejected a request replaying "
+                            f"signed thinking (400); removing it and retrying once: {exc}"
+                        )
+                        make_history_portable(agent.working_memory)
+                        portable, portable_input_ids = to_portable_history_with_input_ids(
+                            messages,
+                            state.input_message_ids,
+                        )
+                        messages[:] = portable
+                        state.context_collapsed = True
+                        state.input_message_ids = portable_input_ids
+                        # A second failure must trim against the rebuilt list.
+                        message_checkpoint = len(messages)
+                        continue
                     raise
 
         # All models in the chain failed.

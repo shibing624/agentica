@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """A reply that never fits in max_tokens is reported, not returned as complete.
 
-Measured on real providers (venus opus-5-5 / glm-5.3 / deepseek-v4.1-flash,
+Measured on real providers (opus-5-5 / glm-5.3 / deepseek-v4.1-flash,
 max_tokens=1500, 15 long-answer prompts): 5 of 15 runs ended on a hop with no
 visible text, so ``content`` came back "" with ``is_complete=True``, once after
 an earlier hop had written 5056 characters.
