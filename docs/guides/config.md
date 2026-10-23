@@ -1,158 +1,173 @@
-# Unified Configuration (`~/.agentica/config.yaml`)
+# 统一配置文件 (`~/.agentica/config.yaml`)
 
-`~/.agentica/config.yaml`（路径受 `AGENTICA_HOME` 影响）是 SDK 与 CLI 共享的唯一配置源。YAML（用 `ruamel.yaml` 读写以保留注释），支持命名 profile、顶层 `settings` 块和自由格式的 `env` 块。写入时 `chmod 0o600`，因为 profile 含密钥。`cli_config.json` 已不存在——`config.yaml` 取代它成为 key 与模型配置的唯一存储（无向后兼容）。
+`~/.agentica/config.yaml` 是 CLI、Web、Desktop 和 SDK 共用的配置文件，用来管理你的模型列表（`profiles`）、全局行为开关（`settings`）和环境变量（`env`）。
 
-## 两个模型概念：main + auxiliary
+你可以运行向导交互生成它，也可以直接用编辑器修改（修改注释会被保留）：
 
-每个 profile 顶部是 main model 字段，可选一个 `auxiliary_model` 子块。auxiliary model 是便宜/快速模型，用于**所有**非用户面对的 LLM 工作：记忆抽取、用户纠正分类、goal 判断、skill 升级，以及 `task` subagent 工具。Layer 2 换窗不走 auxiliary；有 session log 时，notes 由**主模型**在换窗前重写。省略 `auxiliary_model` 则复用 main model。CLI 只暴露 `--auxiliary_model_*`（没有 `--task_model_*`）；`cli/runtime.py::create_agent` 把 auxiliary model 同时作为 `auxiliary_model=` 和 `task_model=` 传入。
-
-## SDK 契约
-
-SDK 仍读纯环境变量。import 时 `agentica/config/env.py` 调 `apply_global_config()`（实现在 `agentica/config/profiles.py`），把**活动** profile 的 `api_key`（通过 `PROVIDER_API_KEY_ENV` 投射到 provider 专属 env 变量）和自由 `env` 块用 **`setdefault` 语义**注入 `os.environ`（绝不覆盖已有变量）。无 model 类或工具改动。
-
-## 优先级（从高到低）：shell env > `.env` > `config.yaml`
-
-`~/.agentica/.env` 仍由 dotenv 加载，用于手维护的 key / MCP 工具——`.env` 与 `config.yaml` 共存。`openai` provider 带自定义 `base_url` 时，`OPENAI_BASE_URL` 也会被注入，使自定义端点无需额外 flag。
-
-## Profile schema
-
-必填：`model_provider`、`model_name`、`base_url`、`api_key`。可选调优（省略则用 model/factory 默认）：
-
-| Field | Type | Purpose |
-|-------|------|---------|
-| `reasoning_effort` | str | 思考深度，**原样发给** Chat Completions（CLI / setup / gateway 不再白名单拦截）。常见 `low`/`medium`/`high`/`max`；Kimi K3 是 `low`/`high`/`max`。Claude 用独立 thinking budget，`wire_api: responses` 用 `reasoning`，均跳过此项 |
-| `wire_api` | chat_completions/responses | 线协议（仅 `model_provider: openai`）；省略默认 `chat_completions`，`responses` 启用 OpenAI Responses API |
-| `reasoning` | str | Responses API 的 reasoning 配置（仅 `wire_api: responses` 时生效） |
-| `max_tokens` | int | 输出 token 上限 |
-| `context_window` | int | 上下文上限；**覆盖** catalog 自动检测值。不发给 API——仅用于 budget/compression/status 显示 |
-| `temperature` | float | 采样 |
-| `top_p` | float | 采样 |
-| `extra_body` | dict | 原样透传给 API 的额外请求体参数 |
-| `extra_headers` | dict | 原样透传的额外 HTTP 头（**非 anthropic**；`/v1/messages` 没有 per-request header 通道，用 `default_headers`） |
-| `default_headers` | dict | 写死值的静态 HTTP 头，建客户端时注入（**仅 anthropic**）。见下节 |
-| `enable_cache_control` | bool | prompt cache 断点注入。Claude 默认 **开**（原生 `cache_control`）；OpenAI 兼容端点默认 **关**，显式开启后才注入 |
-| `cache_control_session_header` | str | 粘性路由 header 的**名字**，值自动填当前会话 id。anthropic 与 openai 两侧都生效。见下节 |
-| `cache_control_messages` | int | 最近若干条消息上打断点（默认 3；仅 `wire_api: chat_completions`，Claude 自己管断点） |
-| `cache_keepalive` | bool | 空闲时定期 ping 保活缓存（默认 true；仅 `wire_api: chat_completions`） |
-| `auxiliary_model` | block | 可选廉价模型（provider/name/base_url/api_key + 同上调优项）用于后台调用 + `task` subagent。同 provider 省略字段继承 main model；跨 provider 不继承 main 的 key/base_url；无论是否同 provider 都不继承 main 的 `extra_body`/`extra_headers` |
-
-profile 之外的顶层块：`settings`（CLI 行为开关，与 model 无关，如 `num_history_turns`，经 `get_setting`/`set_setting` 读写）和 `env`（任意 key-value，注入 `os.environ`）。
-
-### CLI 开关存在项目目录 / session sidecar，不在 config.yaml
-
-`/reasoning`、`/statusbar`、`/debug`、`/peername`、`/permissions`、`/tools add|remove` 属于"我怎么用这个目录/这段对话"，写两处（都在 `~/.agentica/projects/<user>/<slug>/` 下，不进用户 git 工作区）：
-
-| 位置 | 记什么 | 谁读 |
-| --- | --- | --- |
-| `project.json` 的 `cli` 块 | 这个 work_dir 最近一次的开关 | 该目录新开的 CLI |
-| `<session_id>.meta.json` 的 `cli` 块 | 这个 session 自己的开关 | `/resume`（跨目录也对） |
-
-启动取值优先级：命令行 flag（`--debug`、`--permissions`）> 被 resume 的 session sidecar > 本 work_dir `project.json` > 内置默认。不用 `config.yaml.settings` 的原因同 session profile：`settings` 是机器级、与目录无关的默认，而这些是"这个项目/这段对话"的选择，且 `/reasoning off` 换到另一个项目通常不该跟着走。`/tools add-from` 加载的模块不落盘——它在加载时执行用户 .py，且该命令本来就要人确认；只有 `--tools` 认识的 registry 名字会被记下并复现（手改坏的文件名会被过滤掉）。
-
-## 代理网关的粘性路由（prompt cache 的前提）
-
-prompt cache 只在**连续请求落到同一台上游**时才有意义。多数聚合型代理网关为了吞吐会把请求扇出到多个上游，缓存不会跟着走——于是每一轮都是 cache write，账单反而更高。这类网关通常允许用一个请求头把路由钉住，agentica 有两种配法，区别只在**粘性的粒度**。
-
-### 账号级：`default_headers` 写死一个值
-
-```yaml
-default_headers: {X-Sticky-Routing: token}
+```bash
+agentica setup
 ```
 
-原样注入客户端静态头。上例是按 Bearer token 粘——**同一个 key 的所有会话共用一台上游**，于是缓存跨会话共享：今天在同一个项目里开的第十个会话，命中的还是第一个会话写下的缓存。
+---
 
-### 会话级：`cache_control_session_header` 只给名字
+## 完整配置示例
 
-```yaml
-cache_control_session_header: X-Session-Id
-```
-
-只配 header 的**名字**，值由 `agentica/model/cache_routing.py::resolve_cache_session_id` 每次请求现算：有会话用 `session_id`，没有（裸 SDK）才回落到 `~/.agentica/cache/cache_routing.json` 里按 `base_url` 存的持久 id。
-
-> 这个值**不能缓存到实例字段上**。`Model.session_id` 由 `Agent.update_model()` 每轮赋值，在更早的调用里合法地为 `None`；把第一次的答案冻住，真实会话就永远上不了线。
-
-### 怎么选
-
-| | 缓存命中 | 并发 | 路由稳定性 |
-|---|---|---|---|
-| 账号级（写死） | 跨会话共享，命中率高 | 所有会话挤一台上游，网关侧并发能力下降 | 稳定，除非改配置 |
-| 会话级（按 session） | 每个新会话冷启动一次 | 天然分散到多台 | **每开一个会话重新路由一次** |
-
-会话级那条"重新路由"有个反直觉的后果：它等于周期性地回到**未钉住**的状态。如果网关后面有一台行为异常的上游（例如对合法的 tool schema 回 `invalid_request_error`），会话级粒度会让你隔三差五撞上它一次；账号级钉住之后反而再也碰不到。反过来，真撞上了，账号级只能改配置才能换走，会话级开个新会话就换了。
-
-经验法则：**长期在同一个项目里反复开会话，选账号级**；需要逃生能力或要避免并发挤压，选会话级。
-
-### 两个都配时
-
-`default_headers` 是用户写死的显式值，**优先**——注入用的是 `setdefault`（`agentica/model/anthropic/claude.py:327`），同名 header 不会被会话 id 覆盖。
-
-### 缓存前缀什么时候会变
-
-粘住了路由，缓存仍然按**字节精确的前缀**匹配。system prompt 里带工作目录和 AGENTS.md 注入，所以**换项目目录 = 换前缀 = 重写一次缓存**，这是预期行为。会话中途哪些内容被冻结、为什么，见 [Memory & Workspace · 会话快照与 prompt cache](../concepts/memory.md#prompt-cache)。
-
-## Key functions（`agentica/config/profiles.py`）
-
-读写：`global_config_path`、`load_global_config`/`save_global_config`、`get_profile`/`get_profiles`、`get_active_profile_name`/`set_active_profile`、`upsert_profile`/`delete_profile`、`find_profile_for_provider`、`apply_global_config`、`provider_api_key_env`、`resolve_active_profile_name`、`write_commented_template`、`get_setting`/`set_setting`。其中 9 个核心读/写 API（`global_config_path`、`load_global_config`、`save_global_config`、`get_profile`、`get_profiles`、`get_active_profile_name`、`set_active_profile`、`upsert_profile`、`apply_global_config`）从 `agentica/__init__.py` re-export；其余用 `from agentica.config.profiles import ...`。所有写路径都 round-trip YAML 文件以保留用户注释。
-
-## Profile 生效顺序：project override > global active > default
-
-`resolve_active_profile_name(work_dir)` 回答"config 层认为哪个 profile 生效"：**project override**（按项目目录记录在 project store，由 `/model <name>` 写入）> `config.yaml` 的 `active_profile` > 内置 `default`。返回 `(name, source)`，source ∈ `project`/`global`/`default`（启动时经 `--profile` 指定则为 `flag`）。
-
-## CLI wiring
-
-- `cli/setup.py::resolve_model_config` 按优先级解析 provider/model/base_url/api_key + 7 个调优参数（`wire_api`/`reasoning`/`reasoning_effort`/`max_tokens`/`context_window`/`temperature`/`top_p`）+ 可选 auxiliary model：CLI flag > `--profile <name>` > 生效 profile（见上节顺序，含其 `auxiliary_model` 块）> preset 默认。`--profile` 仅当前会话有效（不写盘），且指定的 profile 不存在时直接退出。`--model_name` 只替换模型名，无法离开当前端点（base_url/key 仍来自 profile）；`--model_provider` 可换 provider，但会放弃当前 profile 的调优参数，key 改由 `get_profile_api_key` 从匹配 profile 解析。它还报告会话所用 profile 为 `profile_name`/`profile_source`，存于 `agent_config`，通过 `setup.session_profile()` 处处读回；空名表示"无 profile 描述此会话"（flag 替换了 model）且不可 fallback，而缺失 key（手建 `agent_config`）才 fallback 到 `resolve_active_profile_name`。**绝不把 `resolve_active_profile_name` 的结果当成"当前会话正在跑的 profile"直接展示**：它回答的是 config 层指向什么，而非正在运行什么。onboarding wizard（`run_onboarding`）首次写注释模板（`write_commented_template`），再通过 `upsert_profile(make_active=True)` 写 profile；`_prompt_advanced_params` 收集调优；`_prompt_auxiliary_model` 可选收集 auxiliary model。`should_onboard`/`has_api_key` 把完整活动 profile（或任意含该 provider key 的 profile）视为足以跳过 onboarding。自定义 OpenAI 兼容端点用 host 后缀的 profile 名（如 `openai@my-llm.local`，由 `_profile_name_for` 生成）；`get_profile_api_key` 取代旧的 `get_saved_api_key`（key 现在 profile 里）。
-- `cli/runtime.py::get_model`/`create_agent`/`_build_sibling_model` 接受并透传调优参数。`_build_sibling_model(cfg, "auxiliary")` 构建 auxiliary model；`create_agent` 把它同时作为 `auxiliary_model=` 和 `task_model=` 传入。
-- `cli/main.py` 按优先级 `CLI flag > profile > None` 填充 `agent_config` 调优 + auxiliary 字段。
-- `cli/commands/model_config.py`：`/model`（或旧写法 `/model profile`）列出 profiles；`/model <name>` 运行时切换——写入的是 **project-scoped override**（只动 override 指针，绝不重写 profile body，那是 `agentica setup` 的职责）；`/model --clear` 清除 override 并回落到 global default。自由格式 `/model provider/name` 已被拒绝（提示改用 `agentica setup`），旧的 `_persist_model_choice` 写回逻辑已移除。`_apply_profile` 应用完整调优集并刷新 task subagent 的 auxiliary 指针；`/config set <field> <value> [profile]` 原地编辑某个 profile 字段；跨 provider key 解析用 `get_profile_api_key`。
-
-## 示例
+把下面需要的那几行拷进 `~/.agentica/config.yaml` 即可：
 
 ```yaml
-# ~/.agentica/config.yaml — 手可编辑；写入时保留注释。
+# 当前默认使用的模型 profile
 active_profile: default
 
 profiles:
+  # 主力模型（可配多个 profile，在 CLI 里用 /model <名字> 切换）
   default:
-    # main model（用户面对的轮次）
     model_provider: deepseek
     model_name: deepseek-v4-flash
     base_url: https://api.deepseek.com
     api_key: sk-...
-    # 可选调优（省略则用默认）
-    reasoning_effort: max
+    # 可选调优参数（不填则使用模型默认值）
+    reasoning_effort: high
     max_tokens: 8192
     context_window: 1000000
-    compact_token_limit: 300000  # 压缩工作阈值；不改 context_window
+    compact_token_limit: 300000    # 上下文达到 30 万 token 时提前触发换窗压缩
     temperature: 0.7
-    top_p: 0.95
-    # 可选 auxiliary model（后台调用 + `task` subagent）；省略则复用 main
+
+    # 可选：给子任务（task）和后台记忆提取配一个更便宜、更快的副模型
     auxiliary_model:
       model_provider: zhipuai
       model_name: glm-4.7-flash
       base_url: https://open.bigmodel.cn/api/paas/v4
-      api_key: sk-...
+      api_key: your-zhipu-key
 
-# CLI / gateway 行为开关（与 model profile 无关）
+  # 第二个 profile 示例：使用 OpenAI Responses API
+  gpt_responses:
+    model_provider: openai
+    model_name: gpt-5.6-sol
+    base_url: https://api.openai.com/v1
+    api_key: sk-...
+    wire_api: responses
+    reasoning: high
+    max_tokens: 4096
+
+# 全局行为开关（CLI 与 Gateway 共用）
 settings:
-  # num_history_turns: 20      # 历史轮数上限；不配 = 重放当前窗口全部轮次，由 Layer 1/2 按 token 水位回收
-  # enable_evict: true         # Layer 1 淘汰旧工具结果（默认开）
-  # enable_auto_compact: true  # Layer 2 窗口满时自动换窗（默认开；/compact 仍可用）
-  # compact_token_limit: 300000  # 可选工作阈值；不配 = 窗口×0.95 才换窗
-  # gateway 入站图片/语音/视频：底模看不了时用这个 Gemini 描述/转写
-  # media_model:
-  #   model_provider: openai
-  #   model_name: gemini-3.6-flash
-  #   base_url: https://generativelanguage.googleapis.com/v1beta/openai
-  #   api_key: sk-...
+  enable_evict: true               # 窗口占用超 80% 时清理旧工具结果（默认 true）
+  enable_auto_compact: true        # 窗口占用近 95% 时自动换新窗（默认 true）
+  # compact_token_limit: 300000    # 全局压缩工作上限（可选）
+  # num_history_turns: 20          # 限制最多重放最近 N 轮（默认不限，重放当前窗口全部轮次）
+  # sandbox: workspace-write       # 开启系统级沙箱（macOS Seatbelt / Linux bwrap）
+  # cron.enabled: true             # 开启定时任务调度器
 
-# 自由 env 块（shell/.env 值仍优先于此）
+# 附加环境变量（会自动注入进程环境，适合放搜索引擎等第三方 Key）
 env:
-  SERPER_API_KEY: "..."
+  AGENTICA_WEB_SEARCH: bocha
+  BOCHA_API_KEY: "sk-..."
 ```
 
-> Note: gateway（web 服务）同样走统一流——`gateway/config.py::Settings.from_env` 调 `apply_global_config()` 读取活动 profile 的 main + auxiliary model（含 `wire_api`/`reasoning`），独立的 `task_model_*` 配置已移除（task model 即 auxiliary model）。gateway 自身的服务设置（端口、上传限制、飞书凭证等）仍是 env var，不进 config.yaml。
+---
+
+## 配置优先级
+
+当同一个配置在多处出现时，按从高到低生效：
+
+1. **命令行参数**（如 `agentica --profile gpt_responses`、`--max_tokens 4096`）
+2. **Shell 环境变量 / `.env` 文件**（当前项目 `.env` 或 `~/.agentica/.env`）
+3. **`~/.agentica/config.yaml`**
+
+---
+
+## 日常怎么切换和修改
+
+### 在交互式 CLI 里切换模型
+
+```text
+> /model                  # 列出所有已配置的 profile
+> /model gpt_responses    # 将当前项目切换到 gpt_responses（记在项目目录下，不影响其他项目）
+> /model --clear          # 清除当前项目的模型覆盖，恢复使用 config.yaml 的 active_profile
+```
+
+### 在启动时临时指定某次会话的 profile
+
+```bash
+agentica --profile gpt_responses
+```
+
+### 在 CLI 里直接改配置项
+
+```text
+> /config                                  # 查看当前生效的模型、目录与配置
+> /config set compact_token_limit 300000   # 修改配置项
+> /config env BOCHA_API_KEY sk-xxx         # 写入环境变量到 config.yaml
+```
+
+---
+
+## Profile 字段一览
+
+每个 `profiles.<名字>` 下可配置以下字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `model_provider` | `str` | 提供商标识，如 `openai`、`anthropic`、`deepseek`、`zhipuai`、`qwen`、`moonshot`、`ark`、`ollama` |
+| `model_name` | `str` | 模型 ID，如 `gpt-4o`、`claude-sonnet-4-20250514`、`deepseek-chat`、`glm-4.7-flash` |
+| `base_url` | `str` | API 接口地址（官方地址或你的代理网关地址） |
+| `api_key` | `str` | API 密钥 |
+| `auxiliary_model` | `dict` | 副模型配置块（支持与主模型相同的字段），用于 `task` 子任务、记忆提取、`/goal` 裁判等后台任务；不配则默认复用主模型 |
+| `wire_api` | `str` | 仅 `model_provider: openai` 使用：`chat_completions`（默认）或 `responses`（启用 OpenAI Responses API） |
+| `reasoning_effort` | `str` | Chat Completions 思考强度（如 `low` / `medium` / `high` / `max`），原样传给服务端 |
+| `reasoning` | `str` | Responses API 思考强度（仅 `wire_api: responses` 时生效） |
+| `max_tokens` | `int` | 单次回复的最大输出 token 数 |
+| `context_window` | `int` | 模型上下文窗口大小（用于状态栏显示和压缩水位计算，覆盖内置目录默认值） |
+| `compact_token_limit` | `int` | 压缩工作阈值（见 [上下文压缩](../advanced/compression.md)） |
+| `temperature` / `top_p` | `float` | 采样温度与 top_p |
+| `extra_body` | `dict` | 原样透传给请求体的额外 JSON 字段 |
+| `extra_headers` | `dict` | 原样透传的 HTTP 请求头（非 `anthropic` 提供商使用） |
+| `default_headers` | `dict` | 静态 HTTP 请求头（`anthropic` 提供商使用，或用于固定路由头） |
+| `enable_cache_control` | `bool` | 是否注入显式缓存断点（`anthropic` 默认开启；OpenAI 兼容代理网关可按需设为 `true`） |
+| `cache_control_session_header` | `str` | 按会话粘性路由的请求头名称（见下节） |
+
+---
+
+## 进阶：代理网关的缓存粘性路由
+
+如果你使用的是多节点负载均衡的内部代理网关，要让 Prompt Cache 命中，需要让同一个会话（或同一个账号）的连续请求落到同一台上游机器上。
+
+Depending on your gateway's supported header, choose one of the two modes inside your profile:
+
+### 方式 A：账号级固定路由（跨会话共享缓存，推荐日常单项目开发）
+
+```yaml
+profiles:
+  my_proxy:
+    model_provider: anthropic
+    model_name: claude-sonnet-4-20250514
+    base_url: https://your-gateway.example.com
+    api_key: sk-...
+    default_headers:
+      X-Sticky-Routing: "my-fixed-key"
+```
+
+同一个账号开的所有会话都发往同一台上游，新开会话也能直接命中之前写下的系统提示词缓存。
+
+### 方式 B：会话级路由（每个会话独立分配节点，适合多会话高并发）
+
+```yaml
+profiles:
+  my_proxy:
+    model_provider: openai
+    model_name: gpt-4o
+    base_url: https://your-gateway.example.com/v1
+    api_key: sk-...
+    cache_control_session_header: X-Session-Id
+```
+
+只需填写请求头**名称**，Agentica 会在每次请求时自动填入当前会话的 `session_id`。
+
+---
 
 ## 下一步
 
-- [安装](../getting-started/installation.md) -- provider env 配置与多 provider 组合
-- [Agent](../concepts/agent.md) -- auxiliary/fallback model 的 SDK 用法
+- [安装与配置](../getting-started/installation.md) — 环境变量与首次安装
+- [模型提供商速查](models.md) — 各家模型的类名与默认配置
+- [OpenAI Responses API](openai-responses.md) — `wire_api: responses` 的详细用法
+- [架构与内部实现（开发者选读）](../introduction/architecture.md) — 了解配置解析优先级与项目级侧车文件的内部实现

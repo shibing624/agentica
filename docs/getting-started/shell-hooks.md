@@ -1,4 +1,6 @@
-# 外部 hook 出口（shell hooks）
+# 外部进程协议：Shell Hooks（开发者选读）
+
+> **阅读提示**：本文档面向需要将外部桌面组件（如桌宠 VPet、灵动岛 Open Island、系统通知器）接入 Agentica 事件流与审批交互的开发者。日常使用 CLI/SDK 无需配置此项。
 
 让 agentica 在生命周期节点上并行运行用户配置的具名消费者，把 JSON 喂给各自的
 stdin，再从 stdout 收回答。VPet、Open Island、cc-beeper 可以各自订阅事件，安装和

@@ -1,289 +1,129 @@
-# Standing Goal Loop (`/goal`)
+# 长任务自主循环 (`/goal`)
 
-让 Agent **持续向一个用户目标推进**，每轮结束自动判断是否完成，没完成就续跑——直到 judge 判 done、预算耗尽、或用户主动停下。CLI 用户用 `/goal xxx`，SDK 用户一行 `await agent.run_goal(...)`。
+当你有一项需要多轮探索、修改、跑测试、修报错才能完成的较长任务时，可以用 **`/goal`**（CLI / Web）或 **`agent.run_goal()`**（Python SDK）。
 
-> **主成本闸是 `token_budget`（默认 `None` / 不限，CLI、SDK、Web 一致）。要限额度显式传正整数。`turn_budget` 默认 `None`（不限轮数），仅在显式传入时生效。`wall_clock_budget_sec` 仍为可选 SLA 闸。**
-
-> 本特性已包含 P0 基础环 + P1 S/A 档（Runner 锚点、token/wall-clock 预算、`update_goal` 受限工具、`goal.*` 事件）。设计文档：`docs/learn_cc/goal.md`（内部）。
+开启后，Agent 每跑完一轮都会自动核对目标是否真正完成：没完成就继续下一轮，直到任务达标、达到你设定的预算上限，或者被你手动暂停。
 
 ---
 
-## SDK 用法（推荐）
+## 一、在 CLI 终端里使用
 
-### 一行起飞
+进入 `agentica` 交互终端后：
+
+```text
+/goal 为 auth 模块补齐单元测试并跑通 pytest         # 启动长任务循环（默认不限额度）
+/goal --tokens 200000 --wall 1800 重构日志模块     # 限制最多用 20 万 token、跑 30 分钟
+/goal status                                     # 查看当前进度、已用 token 与验收条件
+/goal pause                                      # 暂停自动续跑
+/goal resume                                     # 恢复续跑（超预算停下后也可用来继续）
+/goal clear                                      # 清除当前目标
+```
+
+### 给目标加验收条件（`/subgoal`）
+
+你可以随时追加具体的验收标准，Agent 每一轮结束时都会逐条核对是否有实际证据（如测试输出或文件内容）：
+
+```text
+/subgoal 必须包含边界条件与异常输入的测试
+/subgoal 所有原有测试不能报错
+/subgoal list                                    # 查看当前验收条件
+/subgoal remove 1                                # 按编号删除某条条件
+/subgoal clear                                   # 清空验收条件
+```
+
+### 运行中途怎么插话纠偏？
+
+长任务跑起来之后，你不需要干等：
+
+| 你想做的事 | 怎么操作 | 效果 |
+|---|---|---|
+| **马上纠正当前方向** | 直接打字回车，或 `/steer 别改公开接口签名` | 在当前这一轮的下一次模型推理前立即注入你的指令 |
+| **加一条全程都要满足的验收标准** | `/subgoal <条件>` | 写入目标状态，后续每一轮续跑和裁判都会检查 |
+| **插一件别的事让它先做** | `/queue 先帮我看眼报错日志` | 当前这轮结束后先处理你的新消息，再继续跑 goal |
+| **随时喊停** | 按 `Ctrl+C` 或敲 `/goal pause` | 立即暂停自动续跑；想接着跑时敲 `/goal resume` |
+
+> **安全保护**：如果重启了终端并用 `/resume` 恢复一个之前还在跑 `/goal` 的会话，它会自动处于 `paused` 暂停状态，不会在你刚打开旧会话时自己偷偷往外跑，等你敲 `/goal resume` 才会继续。
+
+---
+
+## 二、在 Web 与桌面端里使用
+
+在输入框输入 `/goal`（或从斜杠菜单选择）：
+1. 默认显示「预算不限」；点击预算标签可填入 Token 上限（支持 `200k`、`1m` 等写法）。
+2. 输入你的目标并发送，页面会实时流式展示每一轮的思考、工具调用和进度，状态栏会显示已用 Token。
+
+---
+
+## 三、在 Python SDK 里使用 (`agent.run_goal`)
+
+在代码中只需一行 `await agent.run_goal(...)`：
 
 ```python
 from agentica import Agent, DeepSeekChat
 
 agent = Agent(
-    session_id="my-task",
-    # 主模型 + 便宜的 auxiliary 模型：judge / 记忆抽取等次要工作都走 auxiliary。
-    # 不区分也能跑，但 judge 每轮都调一次，分开后能省 5-10x 成本。
+    session_id="refactor-task",
     model=DeepSeekChat(id="deepseek-v4-pro"),
+    # 推荐配一个便宜的 auxiliary_model 用于每轮结束时的完成度判断，节省成本
     auxiliary_model=DeepSeekChat(
         id="deepseek-v4-flash",
-        max_completion_tokens=4096,   # judge JSON 输出预算
+        max_completion_tokens=4096,
     ),
 )
 
-# 最简：默认 token_budget=None（不限），turn_budget=None
-result = await agent.run_goal("compute 17+9+16 and state the integer answer")
-
-print(result.status)            # "complete" / "paused" / "budget_limited"
-print(result.reason)
-print(result.response_content)  # == result.run_response.content or ""
-```
-
-`agent.run_goal()` 内部会：
-
-1. 懒建 `SessionLog` + `GoalManager`（绑到 `agent._session_log`，复用 CLI 同一套持久化路径）
-2. `mgr.set(objective, ...)` 写持久化状态
-3. 把 `TaskAnchor` 钉到 objective（SDK 路径 + Runner S1 自动生效）
-4. 默认挂 `GoalTool`，让模型可以 `update_goal(status="complete"|"paused")` 短路 judge
-5. 循环 `agent.run() → mgr.evaluate_after_turn(token_delta=..., elapsed_sec=...)`
-6. 终止时返回 `GoalRunResult(status, reason, run_response, goal, turns_used)`
-
-### `GoalRunResult`
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `status` | `str` | `"complete"` / `"paused"` / `"budget_limited"` |
-| `reason` | `str` | 人类可读的原因（judge verdict / 预算消息 / 工具理由） |
-| `run_response` | `Optional[RunResponse]` | 最后一次 `agent.run()` 的完整响应，含 `content`、`cost_tracker`、`messages`、`tool_calls` |
-| `goal` | `GoalState` | 终态快照：`objective` / `turns_used` / `tokens_used` / `wall_clock_used_sec` / `subgoals` / `last_verdict` |
-| `turns_used` | `int` | 实际跑了多少轮 |
-| `response_content` (property) | `str` | `run_response.content or ""` 的便捷访问 |
-
-### 预算（hard caps）
-
-三个预算**互相独立、任一触发即停**（取最严的那个先停）。
-
-| 参数 | 默认 | 不传时 | 含义 |
-|---|---|---|---|
-| `token_budget` | `DEFAULT_TOKEN_BUDGET = None` | **不限** | 累计输入+输出 token 上限（主成本闸，显式传入才生效） |
-| `turn_budget` | `None` | **不限**（不计轮数） | LLM 循环总轮数上限（可选） |
-| `wall_clock_budget_sec` | `None` | **不限**（不计时） | agent wall-clock 秒数上限 |
-
-> **无限预算**：不传 `token_budget`，或显式传 `-1`（CLI：`/goal --tokens -1 ...`；SDK：`token_budget=-1`），都会存成 `None`，关闭该闸。`turn` / `wall` 同样认 `-1`。`0` 会被拒绝（避免和「零额度」混淆）。
-
-> 想要有限预算就传正整数，例如 `token_budget=500_000` 或 `/goal --tokens 500000 ...`。`turn_budget` 只有显式传入正整数时才生效。
-
-**判定优先级**（在 `evaluate_after_turn` 里固定为）：
-
-```
-turn accounting → budget check → tool short-circuit → judge
-```
-
-即：即便模型自己通过 `update_goal` 标了 `complete`，只要 token / wall-clock 已超 cap，最终 status 仍是 `budget_limited`。budget 是 hard cap，模型短路改不了。
-
-预算耗尽时 status 是独立的 `budget_limited`（不是 `paused`），语义"用户必须决定加额度或接受部分结果"。用 `mgr.resume()` 或 `/goal resume` 可从 `budget_limited` / `paused` 两种状态恢复。
-
-### 预算耗尽的收尾轮（wrap-up turn）
-
-超预算不是当场砍断。任一 cap 触发时，循环会**再给一轮**，喂一条 `[Standing goal budget reached]` 开头的收尾 prompt，要求模型交接而不是继续干活：做完了什么（点名文件 / 命令 / 结果）、还剩什么（按下一步的顺序）、有什么坑或阻塞。prompt 里明确禁止 `verify_completion`——已经没有预算去处理一次失败的校验了。
-
-这一轮跑完，下一次 `evaluate_after_turn` 才落到 `budget_limited` 终态。几个刻意的设计点：
-
-- **只给一次。** 收尾轮自己也烧 token，所以 `GoalState.budget_wrapup_sent` 持久化标记，避免"每轮都超预算 → 每轮都发收尾"变成死循环。
-- **收尾轮期间 status 仍是 `active`。** CLI hook 和 `run_goal()` 都以 `is_active()` 为闸；提前翻成 `budget_limited` 会让这一轮完全不计账（token 不扣、轮数不加）。
-- **因此最终会略微超出 cap**（多一轮）。这是诚实的代价，`Budget:` 那一行会如实显示，比如 `turns 6/5`。
-- **`resume()` 会重置这个标记**，所以加大额度后再次超预算能拿到新的收尾轮。
-
-CLI `/goal status` 用一行 `Budget:` 汇总三个预算（未设上限的只显示已用量）；状态栏在 goal 执行期间、且设了 token 上限时实时显示 `goal 12.3K/500K`：
-
-```
-Goal [active]: 实现 xxx 功能并跑通 pytest
-  Budget: tokens 42,100 · turns 6 · wall 310s/1800s
-```
-
-### Best Practices：怎么设预算
-
-| 场景 | `token_budget` | `turn_budget` | `wall_clock_budget_sec` |
-|---|---|---|---|
-| 试玩 / 调试 | `50_000` | `5` | 不传 |
-| 一次性短任务（算个数、写一句话） | 不传（默认不限） | 不传 | 不传 |
-| 修个 bug | `50_000`–`100_000` | 不传 | `600` (10 分钟) |
-| 实现完整功能 + 测试 | 不传（默认不限） | 不传 | `1800` (30 分钟) |
-| 长 refactor / migration | `1_000_000`+ | 不传 | `3600` (1 小时) |
-| 严控成本，定额执行 | 三个都传 | 按轮数兜底 | 按 SLA 算 |
-
-经验法则：
-
-- **默认不限 token**——CLI `/goal xxx` 与 SDK `run_goal()` 未传时都是 `None`
-- **需要成本闸就显式传 `token_budget`**——例如 `/goal --tokens 80000 ...`；不限也可 `/goal --tokens -1 ...`
-- **`turn_budget` 可选**——只在你想额外限制轮数时用 `--turns N`
-- **`wall_clock_budget_sec` 主要给 SLA 用**——例如"30 分钟内出个结果"
-
-示例：
-
-```python
-# 真实编码任务的常见组合
 result = await agent.run_goal(
-    "在 examples/ 下加一个 mcp_client 示例并跑通",
-    token_budget=200_000,
-    wall_clock_budget_sec=1800,
+    "在 examples/ 下新增一个 mcp_client 示例并验证可运行",
+    token_budget=200_000,         # 可选：总输入+输出 token 上限（默认 None 不限）
+    wall_clock_budget_sec=1800,   # 可选：总耗时秒数上限（默认 None 不限）
+    turn_budget=None,             # 可选：最大轮数上限（默认 None 不限）
 )
+
+print(result.status)              # "complete" | "paused" | "budget_limited"
+print(result.reason)              # 完成或停止的原因说明
+print(result.turns_used)          # 实际执行的轮数
+print(result.response_content)    # 最后一轮的总结回复
 ```
 
-### Judge 鲁棒性（自动启用，无需配置）
+### 预算怎么设最合适？
 
-每轮 judge 调用会自动：
+三个预算参数互相独立，任一达到上限就会触发收尾（让 Agent 用最后一轮把已完成的文件、剩余步骤和阻塞点交接清楚），然后停在 `budget_limited` 状态：
 
-1. **看 tool call 名字**——`agent.run_goal()` 会把本轮 `RunResponse.tool_calls` 的 `(tool_name, is_error)` 列表传给 judge，让它分清"啥也没干就嘴硬"和"跑了 5 个工具实际产出"。**零额外 LLM 调用**，只是名字。
-2. **强制 evidence rule for subgoals**——当存在 subgoals 时，judge prompt 自动加一句"为每条验收条件找具体证据（文件片段 / 命令输出 / 结果值），不接受 'all requirements met' 这种泛泛之言"。来自 hermes 的实战经验。
-3. **JSON 解析容错**——支持 `{"done": "yes"}`、`{"done": "TRUE"}`、`{"done": 1}` 这类弱 judge 模型的偏差输出，以及 markdown fence 包裹。
-4. **Tool-stuck 自动 pause**——连续 N（默认 3）轮"所有 tool call 都失败"时，自动 pause 状态为 `tool-stuck`，避免烧穿整个 turn_budget。任意一次 tool 成功就重置计数；"光思考不调 tool"的轮**不重置**计数。
-
-### Reasoning judge 的特别注意
-
-如果你想用 reasoning 模型当 judge（DeepSeek-Reasoner、o-series、qwq、GLM-4 Reasoning 等），hidden CoT 会先烧掉一大块 output token，**必须在构造时显式给足 `max_completion_tokens`**（推荐 `≥ 4096`），否则 JSON 还没输出完就被截断，会被 GoalManager 当成 parse failure，连续 3 次后 auto-pause 为 `judge-broken`：
-
-```python
-agent = Agent(
-    model=DeepSeekChat(id="deepseek-v4-pro"),
-    auxiliary_model=DeepSeekChat(
-        id="deepseek-reasoner",
-        max_completion_tokens=4096,   # judge 必备
-    ),
-)
-```
-
-非 reasoning 的小 chat 模型（`deepseek-v4-flash`、`gpt-4o-mini` 等）默认输出预算就够用，不用设。
-
-### Power-user 路径
-
-需要更细粒度控制（例如自己写循环、自定义 logging、与 streaming 配合）时：
-
-```python
-mgr = agent.get_goal_manager(default_token_budget=50_000)
-agent.enable_goal_tool()
-mgr.set("xxx", token_budget=1000)  # override for this goal
-
-while True:
-    resp = await agent.run(mgr.next_continuation_prompt())
-    ct = resp.cost_tracker
-    delta = (ct.total_input_tokens + ct.total_output_tokens) if ct else 0
-    # Recommended: pass tool-call names so the judge sees what work
-    # actually happened + the tool-stuck counter advances correctly.
-    tool_pairs = [(t.tool_name, bool(t.is_error)) for t in resp.tool_calls if t.tool_name]
-    decision = await mgr.evaluate_after_turn(
-        resp.content or "", token_delta=delta, tool_calls=tool_pairs or None,
-    )
-    if not decision.should_continue:
-        break
-```
-
-`agent.get_goal_manager()` 返回的 `GoalManager` 是持久化到 `SessionLog` 的，下次进程启动 / `/resume` 后能拾回状态。
-
----
-
-## CLI 用法
-
-进入交互式 CLI 后：
-
-```text
-/goal 实现 xxx 功能并跑通 pytest    # 设置目标，自动塞入首轮
-/goal status                       # 显示当前状态、预算条、subgoals
-/goal pause                         # 暂停自动续跑
-/goal resume                        # 恢复续跑（含 budget_limited 也可恢复）
-/goal clear                         # 清空目标
-
-/subgoal 必须补单测                  # 给目标加验收条件，会渲染到 continuation prompt
-/subgoal list                       # 列出 subgoals
-/subgoal clear                      # 清空 subgoals
-/subgoal remove 2                   # 按编号删除
-
-/steer 别动公开 API                  # 中途纠偏当前这一轮
-```
-
-### 循环跑起来之后怎么干预
-
-| 想做的事 | 用什么 | 生效范围 |
+| 常见场景 | `token_budget`（或 `--tokens`） | `wall_clock_budget_sec`（或 `--wall`） |
 |---|---|---|
-| 立刻纠偏正在跑的这一轮 | 直接打字（普通消息）或 `/steer <指引>` | 当前 run，在下一次推理前注入 |
-| 加一条长期约束 / 验收条件 | `/subgoal <文本>` | 持久化到 `GoalState`，每轮 continuation prompt 都带上 |
-| 插一个完整的新任务 | `/queue <prompt>` | 排到队列，抢在续跑之前执行 |
-| 停下来 | `/goal pause` 或 Ctrl+C | 停止自动续跑，`/goal resume` 恢复 |
+| 日常修 Bug / 补单测 | `100_000` ~ `200_000` | `600`（10 分钟） |
+| 完整功能开发 + 验证 | 不传（默认不限）或 `500_000` | `1800`（30 分钟） |
+| 大型重构 / 迁移 | `1_000_000`+ | `3600`（1 小时） |
 
-`/steer` 只影响当前这一轮：它以 user 消息的形式进入对话历史，后续轮次靠上下文延续。要让约束在整个循环里都成立，用 `/subgoal`——它会渲染进每一轮的 continuation prompt。
+> **注意**：如果你把推理模型（如 `deepseek-reasoner`、`o3` 等带长思维链的模型）设为 `auxiliary_model`，请务必给它加上 `max_completion_tokens=4096`，避免思维链把默认输出额度占满导致裁判 JSON 被截断。
 
-普通输入默认 steer 不会丢词。agent 不在 run 中时（典型场景：一轮刚结束、goal 正在跑 judge 的那几秒），它会自动降级成"下一轮消息"，并插在待执行的 continuation prompt **之前**，这样纠偏不会被一整轮无关工作挡在后面；在 run 的最后一次推理期间输入、没被消费到的 steer 也一样，会在 run 结束时自动转成下一轮输入。带图片的输入和 `/requesting-code-review ...` 这类 skill 调用仍按新任务排队。
-
-CLI 行为：
-
-- 用户真实输入永远抢占 goal 循环（在队列里发现非续跑消息就让位）
-- Ctrl+C 取消 agent 时自动 `pause(reason="user-interrupted")`，不会偷偷重启
-- `/resume <session_id>` 重进旧 session 时，goal 强制改为 `paused(reason="resume-safety")`，等用户显式 `/goal resume`
-- judge 连续 3 次 JSON 解析失败 → `paused(reason="judge-broken")`，避免 silent 死循环
-
-## Web 用法
-
-网页输入 `/goal`（或斜杠菜单选中）进入目标模式：默认显示「预算不限」，点芯片才打开 **Token 预算** 输入（留空 = 不限，支持 `500k` / `2m`），再写目标内容后发送。网关只把 `token_budget` 传给 `run_goal`（默认 `-1`），不设 turns / wall，并传 `isolate=False`——loop 打在该会话缓存的 agent 上，插话 / 停止 / 下一轮聊天才能看见同一只实例。运行中状态条只显示 `tokens used` 或 `tokens used/budget`。每一轮的思考、工具调用和正文与普通对话同一套 SSE 流式画出，不再等整轮结束才出字。CLI `--turns` / `--wall` 仍只在终端生效。
-
----
-
-## 事件（用于 tracing / 观测）
+### 监听进度事件（可选）
 
 ```python
 from agentica.run.events import RunEventType
 
-def on_goal(event_type: RunEventType, payload: dict) -> None:
+def on_goal_event(event_type: RunEventType, payload: dict) -> None:
     print(event_type.value, payload)
 
-await agent.run_goal("xxx", event_callback=on_goal)
+await agent.run_goal("完成数据清洗脚本", event_callback=on_goal_event)
 ```
 
-会触发的事件：`goal.set`、`goal.continuing`、`goal.completed`、`goal.paused`。Payload 包含 `session_id` / `objective` / `status` / `turns_used` / `turn_budget` / `tokens_used` / `token_budget` / `wall_clock_used_sec` / `wall_clock_budget_sec` 等。
+可收到 `goal.set`、`goal.continuing`、`goal.completed`、`goal.paused` 四类事件，包含当前轮数、已用 token 与耗时。
 
 ---
 
-## `update_goal` 模型工具
+## 四、常见停止状态与恢复办法
 
-`agent.run_goal()` 默认会挂 `GoalTool`，模型可以通过它**自己标记 complete / paused**：
-
-| 参数 | 取值 | 说明 |
+| 状态 (`status` / `paused_reason`) | 含义 | 怎么处理 |
 |---|---|---|
-| `status` | `"complete"` | 任务真正完成；evaluator 会跳过 judge，状态置为 `complete` |
-| `status` | `"paused"` | 被卡住需要用户输入（缺凭据、需澄清等），停止自动续跑 |
-| `reason` | `str` | 一句话理由，会显示给用户 |
-
-**安全约束**：工具只能改 `status` 和 `reason`，**不能**修改 objective、不能 clear、不能调预算。这些仍归用户控制。
-
-如果不想让模型有这个能力（让 external judge 唯一裁判）：
-
-```python
-result = await agent.run_goal("xxx", attach_goal_tool=False)
-```
+| `complete` | 目标已完成并通过核验 | 无需处理 |
+| `budget_limited` | 达到了你设定的 Token、轮数或时间上限（已自动生成交接总结） | 提高预算后执行 `/goal resume`（或 `mgr.resume()`）继续 |
+| `paused` (`user` / `user-interrupted`) | 你敲了 `/goal pause` 或按了 `Ctrl+C` | 敲 `/goal resume` 继续 |
+| `paused` (`agent-tool`) | Agent 发现缺少权限、凭据或需要你拍板，主动暂停请求输入 | 回答它的问题后敲 `/goal resume` |
+| `paused` (`tool-stuck`) | 连续 3 轮所有工具调用都报错，自动暂停防止空烧额度 | 看一眼报错原因，提示它换个思路后 `/goal resume` |
 
 ---
 
-## 持久化与 `/resume`
+## 下一步
 
-`GoalState` 以 `type="goal"` 条目写在 `SessionLog`（JSONL）末尾，**不会**污染模型对话历史（`SessionLog._build_messages()` 只回放 `user/assistant/system/tool` 四类）。
-
-- 重启进程、`/resume <session_id>` 后，`Agent.get_goal_manager()` 会自动 `load()` 最近一条 goal 条目
-- 出于安全考虑，resume 时 active 状态会被强制改为 `paused(reason="resume-safety")`——避免"打开旧会话偷偷自动跑"
-- `Runner._run_impl()` 在 anchor 初始化时也会 `load_goal()`，若有 active goal 则把 `TaskAnchor` 绑到 objective 上，所有 SDK 路径（gateway / ACP / 脚本）都受益
-
----
-
-## 失败 / 暂停时的行为对照
-
-| 触发条件 | 终态 | `paused_reason` | 恢复方式 |
-|---|---|---|---|
-| Judge 判 done | `complete` | — | — |
-| 模型调 `update_goal(complete)` | `complete` | — | — |
-| 用户 Ctrl+C | `paused` | `user-interrupted` | `/goal resume` |
-| 用户 `/goal pause` | `paused` | `user` | `/goal resume` |
-| 模型调 `update_goal(paused)` | `paused` | `agent-tool` | `/goal resume` |
-| `/resume <sid>` 拾回 active goal | `paused` | `resume-safety` | `/goal resume` |
-| Judge 连续 3 次 JSON 解析失败 | `paused` | `judge-broken` | `/goal resume`（先排查 judge） |
-| 连续 3 轮所有 tool call 都失败 | `paused` | `tool-stuck` | 看最后几轮 tool 报错 → 修 → `/goal resume` |
-| `turn_budget` 超 | `budget_limited`（先跑一轮收尾） | `budget` | `/goal resume` |
-| `token_budget` / `wall_clock_budget_sec` 超 | `budget_limited`（先跑一轮收尾） | `budget` | `/goal resume` |
-
----
-
-## 完整可运行示例
-
-- `examples/cli/03_goal_loop_demo.py` — 4 个 SDK Example：one-liner、budgets、event_callback、手动循环（依赖 `DEEPSEEK_API_KEY`）
+- [CLI 终端指南](../getting-started/terminal.md) — 更多交互终端命令
+- [运行预算与控制 (RunConfig)](run-config.md) — 单次 `agent.run()` 的超时与费用控制

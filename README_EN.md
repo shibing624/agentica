@@ -38,25 +38,25 @@ A deliberately narrow toolset over clean low-level interfaces, tuned for open mo
 
 ### 2. 🤝 One session is an agent; several are a team
 
-A terminal session *is* a collaborator. In-process `task` spawns a cheap read-only subagent, process-level `delegate` starts a whole other agent for work that deserves its own context window, and cross-terminal peer messaging lets two sessions talk. Nothing extra to deploy.
+Each terminal is an agent. It can spawn fast read-only subagents (`task`) to search code or gather facts, hand off large self-contained jobs to a background process (`delegate`), or talk directly to other open terminals (`/list-agents`, `/send-message`) — with nothing extra to deploy.
 
-### 3. 🧬 Self-evolving
+### 3. 🧬 Learns your project over time
 
-What a session learned is compiled into a reusable `SKILL.md`, so the next run of a similar task starts from last time's conclusion instead of from scratch. See the [Skills docs](https://shibing624.github.io/agentica/advanced/skills).
+Lessons learned can be compiled into reusable `SKILL.md` playbooks; standing preferences live in `AGENTS.md`, and project facts are saved to long-term memory. Next time a similar task comes up, the agent starts from what it already learned instead of from scratch. See the [Skills docs](https://shibing624.github.io/agentica/advanced/skills).
 
-### 4. 🧠 Long sessions never lose the thread: a new window does not delete the transcript
+### 4. 🧠 Long sessions stay sharp without overflowing the window
 
-The industry-standard compact asks an LLM to summarise the transcript and then replaces history with that summary — whatever got summarised away is gone for good. Agentica's window cut **does not replace history**:
+Large command outputs and long debugging sessions quickly blow up a normal context window or summarise away the exact detail you needed. Agentica manages context automatically:
 
-- **Oversized tool output spills to disk the moment it is produced** — the context keeps a 2000-char preview (40% head + 60% tail) plus the file path, and the model reads the path back when it needs the detail; when the session has no file-reading tool, the output is truncated honestly instead of handing out a path nobody can open
-- **Eviction only under pressure** — nothing moves below 80% window occupancy, then oldest-first eviction down to 50%; the placeholder names the evicted call so the model can re-issue it verbatim. The live tool round (in-flight calls + the trailing result batch) is never touched. Thresholds are scaled by the provider-reported prompt size, so a low local estimate cannot skip eviction forever
-- **A full window opens a fresh one** — `<context_window>` and no synthetic summary turn. When a session log exists, the harness rewrites `<session>.notes.md` with the main model first (the request reads the prompt cache and only writes the notes); if that fails, `<dropped_span>` carries the handover
+- **Oversized tool outputs are saved to files** — the context keeps a short preview and the file path, so the agent can read back the exact slice it needs
+- **Old tool results are cleaned up when the window gets full** — earlier tool outputs are compacted into placeholders while keeping your conversation and the current step intact
+- **Full windows roll over cleanly** — when the window fills up, Agentica writes the current goals, constraints, and open items to `<session>.notes.md` and opens a fresh window. The full transcript stays in the local session log, searchable anytime via `search_session`, and you can run `/compact` or `/resume` whenever you like
 
-The transcript always stays in the session JSONL, retrievable any time via `search_session`. History replays the whole window by default (`num_history_turns` defaults to `None`) instead of the last 20 turns. See the [compression docs](https://shibing624.github.io/agentica/advanced/compression).
+See the [context compression docs](https://shibing624.github.io/agentica/advanced/compression).
 
-### 5. 📱 You can leave the desk
+### 5. 📱 Direct your agents from your phone
 
-WeChat / WeCom / Feishu / Telegram reach the agents on this machine: address one with `@session-name`, or just say what you want and let the gateway agent direct every session on the box.
+Connect WeChat / WeCom / Feishu / Telegram to your machine: send `@list` to see running terminal sessions, `@session-name <message>` to type into a specific terminal, or ask the gateway agent in plain language to coordinate them for you.
 
 ## Installation
 
@@ -85,9 +85,7 @@ The window is the same web UI, on the same `~/.agentica` — mixing it with the 
 
 > [!IMPORTANT]
 > These builds are **unsigned**, so the OS may block the first launch — one step, once.
-> If this machine has no `agentica-gateway` yet, the first launch installs a managed
-> runtime (uv + Python 3.12 + `agentica[gateway]`) under Application Support, not
-> inside `~/.agentica`. An existing `uv tool install` (or an older `pip install`) is used as-is.
+> If this machine does not have `agentica-gateway` yet, the first launch automatically installs a managed runtime; if you already installed it with `uv tool install`, the desktop app uses your existing installation.
 
 | OS | Installer |
 |---|---|
@@ -221,38 +219,26 @@ agent = DeepAgent()
 
 ## Features
 
-**Core engine**
+**Core capabilities**
 
-- **Async-First** — Native async API, `asyncio.gather()` parallel tool execution, sync adapter included
-- **Built-in tools** — `read_file` / `write_file` / `apply_patch` / `grep` / `glob`, `execute`, web search; long reports are HTML via `write_file`
-- **Many models** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses), DeepSeek, Claude, ZhipuAI, Qwen, Moonshot, Ollama, LiteLLM and more
-- **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
-- **Multi-Modal** — Text, image, audio, video understanding
+- **Batteries-included tools** — File editing (`read_file` / `write_file` / `apply_patch`), code search (`grep` / `glob`), shell execution (`execute`), web search & fetch (`web_search` / `fetch_url`), image analysis (`analyze_image`)
+- **Swap models freely** — OpenAI (Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)), DeepSeek, Claude, ZhipuAI, Qwen, Moonshot, Volcengine Ark, Ollama, LiteLLM; switch anytime with `/model`
+- **Multi-modal & Guardrails** — Text, image, audio, and video inputs; input / output / tool guardrails and OS-level sandboxing (`--sandbox workspace-write`)
+- **Async-first Python SDK** — Native `async` and `sync` APIs with automatic parallel execution for read-only tools
 
-**Product surfaces**
+**Ways to use Agentica**
 
-- **CLI** — `agentica` interactive terminal; in-process `task`, process-level `delegate`, cross-terminal peer messaging
-- **Web** — `agentica-gateway` local SPA (chat / traces / settings) plus IM channels
-- **Desktop app** — Thin Electron shell over the same web UI; attaches to a running gateway before starting one
+- **CLI terminal** — `agentica` interactive coding assistant with `/goal` autonomous loops, `/resume` cross-directory session recovery, and `/worktree` branch isolation
+- **Web & Desktop app** — `agentica-gateway` local web UI and desktop app (chat / traces / settings / multi-account isolation), plus WeChat, Feishu, WeCom, Telegram, QQ, DingTalk, and Slack channels
 
-**Collaboration**
+**Multi-agent & memory**
 
-- **Multi-Agent** — SDK: `Agent.as_tool()`, Workflow, Swarm, [Markdown Subagents](https://shibing624.github.io/agentica/multi-agent/subagent); CLI: `task` / `delegate` / peer messaging (see [Terminal docs](https://shibing624.github.io/agentica/getting-started/terminal))
-- **Actor-Critic Refinement** — `refine()` with parallel multi-critic review, `SchemaCritic` for zero-cost program-level validation, `AgentCritic` for heterogeneous strong-model gating, automatic loop-detection early-stop
+- **Multi-agent collaboration** — CLI `task` (subagents), `delegate` (background worker processes), and peer messaging; Python SDK `Agent.as_tool()`, Workflow, Swarm, and [Markdown Subagents](https://shibing624.github.io/agentica/multi-agent/subagent)
+- **Long-term memory & skills** — Remembers user preferences and project context (`MEMORY.md` + `AGENTS.md` standing rules), and compiles reusable workflows into `SKILL.md`
+- **Long-session context management** — Oversized outputs spill to disk, old tool outputs are compacted under pressure, and full windows roll over with handover notes while keeping the full log searchable via `search_session`
+- **MCP / ACP / RAG** — Connect external MCP servers, integrate with IDEs via ACP, and query local document knowledge bases (RAG)
 
-**Memory & evolution**
-
-- **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense; standing rules live in `AGENTS.md`
-- **Lossless context compression** — A window cut does not replace history with a summary: oversized tool output spills to disk on production, eviction starts only past 80% window occupancy, a full window opens an empty one. The transcript stays in the session JSONL, retrievable via `search_session`. When a session log exists, the harness rewrites `<session>.notes.md` with the main model before the cut
-- **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
-- **Self-Evolution** — Experience cards auto-compile into reusable `SKILL.md` across sessions
-
-**Integrations**
-
-- **MCP / ACP** — Model Context Protocol and Agent Communication Protocol support
-- **RAG** — Knowledge base management, hybrid retrieval, Rerank, LangChain / LlamaIndex integration
-
-For the architecture and the execution engine (agentic loop, two-layer context compression, four-layer guardrails), see the [architecture docs](https://shibing624.github.io/agentica/introduction/architecture).
+For internal architecture and execution engine details (optional developer reading), see the [architecture docs](https://shibing624.github.io/agentica/introduction/architecture).
 
 ## Multi-session collaboration: `task` / `delegate` / peer
 

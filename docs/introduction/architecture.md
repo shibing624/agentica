@@ -1,348 +1,145 @@
-# Architecture Overview
+# 架构与内部实现（开发者选读）
 
-Agentica 采用分层架构，将 Agent 的**身份定义**与**执行引擎**解耦，同时内置了上下文压缩、会话持久化和并发安全工具执行等生产级能力。从底层模型路由到顶层多智能体协作：
+> **阅读提示**：本文档面向想要了解 Agentica 内部执行机制、Prompt Cache 优化原理、上下文压缩底层不变量以及参与本仓库开发的工程师。**日常使用 CLI、Web 或 Python SDK 无需阅读本页**，请直接看 [快速上手](../index.md)。
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/architecturev2.jpg" width="800" alt="Agentica 架构图" />
-</div>
+---
 
-## 五层架构
+## 五层架构总览
 
+Agentica 采用自底向上的模块化分层设计：
+
+```text
++-------------------------------------------------------------------+
+|                        编排层 (Orchestration)                      |
+|   Agent.as_tool()  ·  Subagent (task)  ·  Workflow  ·  Swarm      |
++-------------------------------------------------------------------+
+|                           代理层 (Agent)                           |
+|   Agent / DeepAgent  ·  Runner (Agentic Loop)  ·  PromptsMixin    |
++-------------------------------------------------------------------+
+|                工具层 (Tools)       |        记忆层 (Memory)        |
+|   Function / Tool / @tool          |   WorkingMemory / SessionLog |
+|   Builtin Tools / MCP              |   Workspace (MEMORY/AGENTS)  |
++-------------------------------------------------------------------+
+|                     安全与可观测层 (Safety & Trace)                 |
+|   Guardrails  ·  OS Sandbox  ·  ApprovalRegistry  ·  Langfuse v5  |
++-------------------------------------------------------------------+
+|                           模型层 (Model)                           |
+|   OpenAIChat / OpenAIResponses / Claude / DeepSeek / Ollama / ... |
++-------------------------------------------------------------------+
 ```
-+------------------------------------------------------------------+
-|                        Application Layer                          |
-|  CLI (agentica)  /  FastAPI  /  ACP Server  /  Web UI            |
-+------------------------------------------------------------------+
-|                        Orchestration Layer                         |
-|  as_tool (composition) | Workflow (pipeline) | Swarm (mesh)       |
-|  BuiltinTaskTool / SubagentRegistry (subagent runtime)            |
-+------------------------------------------------------------------+
-|                          Agent Layer                               |
-|  Agent  <--->  Runner (execution engine)                          |
-|  PromptsMixin | ToolsMixin | AsToolMixin | PrinterMixin           |
-+------------------------------------------------------------------+
-|                          Model Layer                               |
-|  OpenAI | Anthropic | ZhipuAI | DeepSeek | Ollama | LiteLLM    |
-|  Tool loop | Compression | Death spiral | Cost budget            |
-+------------------------------------------------------------------+
-|                        Infrastructure Layer                        |
-|  Tools | Knowledge(RAG) | Memory | VectorDB | MCP | Hooks        |
-+------------------------------------------------------------------+
-```
-
-## Agent 与 Runner 的分离
-
-**Agent** 定义"我是谁、我能做什么"（静态配置）；  
-**Runner** 负责"怎么执行"（动态执行引擎）。
-
-两者解耦的好处：Runner 可独立测试，Agent 配置可以序列化，不同的 Runner 策略可以插拔。
-
-```python
-# agentica/agent/base.py（简化）
-@dataclass(init=False)
-class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
-    def __init__(self, ...):
-        self._runner = Runner(self)   # Runner 持有 Agent 弱引用
-
-    async def run(self, message, **kw) -> RunResponse:
-        return await self._runner.run(message, **kw)
-```
-
-`GoalMixin`（`agent/goal_mixin.py`）持有 standing-goal 闭环（`get_goal_manager` /
-`enable_goal_tool` / `run_goal` / `run_goal_step`），使 `base.py` 只留公开 run API
-面与薄委托，不再内嵌 goal 闭环。
-
-### 模块布局（诚实拆包）
-
-大文件拆成包后，**不保留“旧路径假装一切都还在 `__init__`”的兼容层**。SDK 对外入口仍是 `agentica` / `Agent` / `Runner`；CLI 内部与测试应直接引用真实子模块。
-
-| 包 | 包根导出 | 主要子模块 |
-|----|----------|------------|
-| `agentica/runner/` | `Runner`, `LoopBreak`, `ModelCallResult`, `ToolHandlingResult` | `core.py`, `loop.py`（`_run_impl`）, `compress.py`, `retry_fallback.py` |
-| `agentica/cli/commands/` | `CommandContext`, `PendingQueue`, `COMMAND_REGISTRY` / `COMMAND_HANDLERS` | `session.py`, `model_config.py`, `runtime.py`, `goal.py`, `registry.py` |
-| `agentica/cli/display/` | TUI 公共渲染 API | `stream.py`, `console.py`, `messages.py`, `status_bar.py` |
-| `agentica/cli/interactive/` | `run_interactive` | `app.py`, `console_io.py`, `stream_loop.py`, `attachments.py` |
-| `agentica/tools/builtin/` | `get_builtin_tools` + 内置工具类 | `file_tool.py`, `execute_tool.py`, `delegate_tool.py`, `task_state_tools.py`, `web_tools.py` |
-
-示例：
-
-```python
-from agentica.runner import Runner
-from agentica.cli.interactive import run_interactive
-from agentica.cli.commands.runtime import _cmd_steer   # 私有命令实现走子模块
-from agentica.compression import evict_context          # 压缩逻辑在 compression 包
-```
-
-Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，**状态全部存在 Agent 的 dataclass fields 上**：
-
-| Mixin | 职责 |
-|-------|------|
-| `PromptsMixin` | System Prompt 三区组装、PromptBuilder 集成 |
-| `ToolsMixin` | 工具注册、tool system prompt 合并、builtin tool 管理 |
-| `AsToolMixin` | `Agent.as_tool()` — 把当前 Agent 包装成可被其它 Agent 调用的 Function |
-| `PrinterMixin` | 流式事件打印、格式化输出 |
-
-## 核心执行引擎（Agentic Loop）
-
-单体 Agent 跑在一个纯控制流的 `while(true)` 引擎里，严格由工具调用驱动，内置防死循环、成本追踪、[两层上下文压缩](../advanced/compression.md)（免费淘汰 → 空窗换窗）和四层安全护栏：
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Agent Loop 架构图" />
 </div>
 
-## Runner 执行流程
+---
 
-```
+## Runner 执行循环 (`agentica/runner/`)
+
+每次 `Agent.run()` / `Agent.run_stream()` 都由 `Runner` 驱动：
+
+```text
 User Message
     │
     ▼
-[InputGuardrail]          ← 拦截不合规输入
+[InputGuardrail]
     │
     ▼
 Runner._run_impl()
+    ├─► 构建 System Prompt (PromptsMixin.get_system_message)
+    │       ├── Static Zone:      description / instructions / guidelines
+    │       ├── Semi-static Zone: workspace context (AGENTS.md) + skills 目录（首轮冻结）
+    │       └── Volatile Zone:    冻结的 memory/experiences + YYYY-MM-DD 日期
     │
-    ├─► 构建 System Prompt  (PromptsMixin.get_system_message)
-    │       ├── Static Zone:    description + instructions
-    │       ├── Semi-static:    workspace context + git status
-    │       └── Dynamic Zone:   workspace memory + datetime
+    ├─► 上下文压缩检查 (CompressMixin)
+    │       ├── Layer 1: evict_context() — 80% 水位起免费淘汰旧工具结果与超长参数
+    │       └── Layer 2: CompressionManager.auto_compact() — 95% 水位换空窗 + 重写 notes
     │
-    ├─► 上下文压缩检查       (Runner._maybe_compress_messages)
-    │       ├── Layer 1: evict_context() — 淘汰旧结果 + 收缩参数（免费；`enable_evict`）
-    │       └── Layer 2: CompressionManager.auto_compact() — 空窗换窗（`enable_auto_compact`）
-    │
-    ├─► LLM API 调用         (Model.response / response_stream)
+    ├─► 模型调用 (RetryMixin._call_with_retry)
+    │       └── 自动处理流式首包重试、跨 provider fallback、thinking 签名修复、reactive compact
     │
     ▼
 Model Response
+    ├─[有 tool_calls]─► 拆分为并发组 (concurrency_safe=True → asyncio.gather)
+    │                   与串行组 (按顺序执行，支持 sibling-abort)
+    │                   ├─► ToolInputGuardrail & Approval 审批检查
+    │                   ├─► 执行工具 → Layer 0 输出预算限流 (tool_result_storage)
+    │                   ├─► ToolOutputGuardrail
+    │                   └─► 追加结果并继续下一轮循环（中途可注入 steer / peer 消息）
     │
-    ├─[有 tool_calls]──────────────────────────────────────┐
-    │                                                       │
-    │       ┌── concurrency_safe=True ──────┐              │
-    │       │  asyncio.gather() 并发执行    │              │
-    │       └──────────────────────────────┘              │
-    │       [ToolInputGuardrail] → 执行工具 → [ToolOutputGuardrail]
-    │                                   │                  │
-    │                      工具结果加入消息历史              │
-    │                                   │                  │
-    │                      Session Log 追加                │
-    │                                   │                  │
-    │                      继续循环 ────┘                  │
-    │                                                       │
-    └─[无 tool_calls]──────────────────────────────────────┘
-                │
-                ▼
-    [OutputGuardrail]
-                │
-                ▼
-           RunResponse
+    └─[无 tool_calls]─► OutputGuardrail ─► 写入 WorkingMemory & SessionLog ─► 返回 RunResponse
 ```
 
-## 上下文压缩机制
+---
 
-让一个超窗口的请求装下只有两种办法，按代价从低到高尝试。换窗不把历史概括成假摘要——离开 prompt 的内容仍在 session JSONL / 落盘文件里，这是 Agentica 压缩「无损」的含义（见 [无损压缩](../advanced/compression.md#为什么叫无损)）。有 session log 的自动换窗和 `/compact` 会先用主模型重写 notes，这次请求读缓存，不替换历史：
+## System Prompt 前缀缓存与会话快照 (`agentica/agent/prompts.py`)
 
-```
-Layer 1 淘汰（免费，无 LLM）:
-    触发：token_count >= context_window × 0.8
-    按最旧优先把 tool result 内容换成写明调用的占位符
-    同时收缩过大的 tool_call 参数字符串（JSON 仍然合法）
-    降回 context_window × 0.5 就停；模型还没看过的当前批次永不淘汰
+Prompt Cache（无论是 Anthropic 的显式 `cache_control` 断点，还是 OpenAI 的隐式前缀匹配 + `prompt_cache_key`）都要求**连续请求的前缀逐字节一致**。因为 System Message 位于后续每一个消息缓存断点的最前面，一旦 System Message 里有任何一行每轮变动，失效的不只是系统提示词本身，而是**整段历史对话的缓存全部重算**。
 
-Layer 2 换窗:
-    淘汰兜不住时才走这层。触发水位按 provider 实测校准后的 token 数
-    活动窗 → <context_window> + <session_notes> + <dropped_span>
-    auto / /compact：先用主模型重写 notes，再保留 system prompt 和正在问的尾巴
-    prompt_too_long 与跨 provider fallback 前的换窗不重写 notes
-    空 summary 的 compact_boundary 写入 Session Log，恢复时不合成假摘要轮
-    旧轮次用 search_session 从 JSONL 取回
-```
+因此，Agentica 的设计原则是**让整个 System Message 在一次会话期间保持静止**：
 
-淘汰没有「保留最近 N 条」这类计数参数：任何固定条数都会输给 N+1 大小的并行批次，最近的结果靠「够到之前就停」自然幸存。
+1. **会话首轮一次性冻结快照**：
+   - `Workspace.freeze_snapshots()` 在第一轮运行时冻结 `AGENTS.md`、记忆索引（`MEMORY.md`）和经验卡片（`EXPERIENCE.md`）。
+   - `Agent.freeze_session_guidance()` 冻结技能目录（避免后台技能升级钩子中途刷新系统提示词导致缓存失效）。
+   - 快照中会附带磁盘文件的真实路径说明，告知模型若需最新状态可自行调用 `read_file`。
+2. **不往 System Prompt 注入每轮变化的 Git 状态**：
+   - 分支和脏文件列表每经过一次编辑就会改变。Agentica 不在系统提示词里塞 `git status`，模型需要时自己调工具查看。
+3. **日期精度到天（`YYYY-MM-DD`）**，放在 `VOLATILE_SYSTEM_MARKER` 之后的末尾。
+4. **连接池每轮关闭，亲和性靠应用层路由**：
+   - CLI 每轮运行在独立的事件循环中，`Runner` 在每轮结束调用 `Model.close_client()`。因此缓存亲和性不依赖底层的 HTTP 连接复用，而是依赖 OpenAI 的 `prompt_cache_key`（默认填入 `session_id`）或代理网关的粘性路由头（`default_headers` / `cache_control_session_header`）。
 
-两层都以「一条工具结果」而非「一条消息」为单位判断，因为 provider 的打包形态不同：OpenAI 系是一条结果一条 `role="tool"` 消息，Anthropic 则把一整轮塞进单条 `role="user"` 消息的 `tool_result` block 列表。细节见 [Compression](../advanced/compression.md)。
+---
 
-**Layer 0 工具输出预算**（`tool_result_storage`）：在结果产生的那一刻限住单条结果和本轮批次
-（批次上限为 `0.25 × context_window`）。收缩形态取决于这个 session 有没有 `read_file` / `execute`
-能把副本读回来——能，就落盘并给出路径；不能，就直接如实截断，不留一个没人能打开的路径：
+## 上下文压缩的底层机制与不变量 (`agentica/compression/`)
 
-```
-~/.agentica/projects/<user>/<cwd>/<session_id>/tool-results/<tool_use_id>.txt
-```
+### 1. 为什么淘汰和打包以「单条工具结果」为单位？
 
-## Session Log（JSONL 会话日志）
+OpenAI 与 Anthropic 对工具结果的协议形状完全不同：
+- **OpenAI 系**：一条工具结果是一条独立的 `role="tool"` 消息。
+- **Anthropic (`Claude`)**：同一轮的所有工具结果被打包进**一条** `role="user"` 消息的 `content` 数组（每个元素是 `{"type": "tool_result", "tool_use_id": ...}`）。
 
-基于追加写 JSONL 的持久化会话日志，每次 `run()` 自动追加：
+如果只扫描 `role == "tool"`，Layer 1 在 Claude 上就永远不会生效。因此 `evict.py` 使用 `carries_tool_results()` / `tool_result_blocks()` 按单条结果遍历，并通过发起调用的 assistant `tool_calls` 反查 `tool_use_id` 对应的工具名。同理，Layer 2 在保留「最后一条 user 消息起的尾部」时，必须跳过承载 `tool_result` 的 user 消息，否则会留下失去 `tool_use` 配对的孤儿结果块，导致 API 报 400。
 
-```jsonl
-{"type":"user","uuid":"a1b2...","parent_uuid":null,"session_id":"sess-001","timestamp":"2026-04-05T10:00:00.000Z","content":"分析这段代码"}
-{"type":"assistant","uuid":"c3d4...","parent_uuid":"a1b2...","timestamp":"...","content":"好的...","model":"gpt-4o","usage":{"input_tokens":1024,"output_tokens":256}}
-{"type":"tool","uuid":"e5f6...","parent_uuid":"c3d4...","tool_name":"read_file","content":"..."}
-{"type":"compact_boundary","uuid":"g7h8...","parent_uuid":null,"summary":""}
-```
+### 2. 保护当前工具轮次 (`live_tool_round_start`)
 
-`summary` 为空：换窗不再合成假摘要轮。旧轮次仍在这条 boundary **之前**的 JSONL 里，用 `search_session` 取。
+Layer 1 绝不淘汰模型还没看过的尾部工具结果，也绝不收缩正在执行的调用参数。`live_tool_round_start` 在定位尾部边界时会先跳过带 `_injected=True` 标记的中途插话消息（`_inject_steering` / `_inject_peer_messages`），防止插话把边界抬高而误伤刚返回的工具结果。
 
-**恢复机制**：重新创建相同 `session_id` 的 Agent 时，从最后一个 `compact_boundary` 开始加载消息，跳过历史数据（大文件优化）。
+此外，被收缩的超长工具参数叶节点会被替换为 JSON 对象 `{"$evicted": N}`，而不是字符串标记（防止模型把字符串占位符当成正文内容抄进下一次 `write_file` 或 `send_message`）。
 
-**存储路径**：
+### 3. 水位校准 (`ContextCalibration`)
 
-```
-~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.jsonl
-~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
-```
+本地 `count_tokens`（基于 tiktoken）看不见服务端额外计入的开销（如 OpenAI Responses 回放的加密 reasoning 项）。各模型适配器将服务端返回的完整输入 token 数写入 `Message.metrics["context_tokens"]`，`ContextCalibration` 计算 `max(1.0, 实测 / 本地估算)` 比例，后续水位判断全部乘以该比例（只向上放大，不向下缩小）。
 
-jsonl 是对话档案（`search_session` 的主库）。notes 是 harness 在换窗前用主模型重写的 standing state，不是第二份 log，也不是模型自己记得去写的文件。每次换窗同时注入 `<session_notes>` 和 `<dropped_span>`；skim 不写进 notes.md。没有 session log 时不发 notes 请求。
+### 4. 三处消息存储的一致性
 
-同一份文件的三个出口：Web `/traces`、CLI `/trace` / `/export`、SDK `agent.session_log.analyze()` / `.export()`。`type=event` 行只给观测，`load()` 不回放它们。
+换窗（Layer 2）发生时，以下三处存储必须同步更新：
+1. **`working_memory.runs[].response.messages`**：下一轮请求的 prompt 来源，必须调用 `WorkingMemory.collapse_runs()` 折叠旧轮次。
+2. **`working_memory.messages`**：供 `/history`、`/export` 读取。
+3. **`<session>.jsonl`**：必须写入空的 `compact_boundary` 并追加保留的尾部消息，否则 `/resume` 时会从头回放压缩前的全部历史。同时 `LoopState.context_collapsed` 置为 `True`，回合结束时直接持久化存活列表，不再按压缩前的旧下标切片。
 
-## 工具并发执行
+---
 
-LLM 一次性返回多个工具调用时，Agentica 自动并发执行安全的只读工具：
+## 配置解析与 CLI 装配内部链路 (`agentica/config/` & `agentica/cli/`)
 
-```
-LLM 返回: [read_file("a.py"), grep("TODO"), read_file("b.py")]
+- **核心读写函数（`agentica/config/profiles.py`）**：`global_config_path`、`load_global_config`、`save_global_config`、`get_profile`、`get_profiles`、`get_active_profile_name`、`set_active_profile`、`upsert_profile`、`delete_profile`、`resolve_active_profile_name`、`apply_global_config`。写操作使用 `ruamel.yaml` round-trip 保留注释。
+- **Profile 解析顺序**：`resolve_active_profile_name(work_dir)` 按 `项目级 override (project.json)` > `config.yaml active_profile` > `default` 解析。
+- **CLI 会话级状态隔离**：`/reasoning`、`/statusbar`、`/debug`、`/peername`、`/permissions`、`/tools` 存储在 `~/.agentica/projects/<user>/<slug>/project.json` 与 `<session_id>.meta.json` 中，不污染全局 `config.yaml`。
 
-                    asyncio.gather()
-                    ┌─────────────────────┐
-  ──► read_file("a.py")  (concurrency_safe=True)
-  ──► grep("TODO")       (concurrency_safe=True)
-  ──► read_file("b.py")  (concurrency_safe=True)
-                    └─────────────────────┘
-                    等待全部完成，一起写入消息历史
+---
 
-  ──► execute("git commit")  (concurrency_safe=False) → 串行执行
-```
+## Gateway 审批与鉴权内部设计 (`agentica/gateway/`)
 
-**安全标注**：每个工具函数通过 `is_read_only`、`is_destructive`、`concurrency_safe` 元数据声明其行为语义，Guardrail 和权限系统据此决策。
+1. **机器令牌与浏览器会话分离**：
+   - 每次启动生成的随机 `token` 写入 `0600` 的 `runtime.json`，仅供本机进程（Desktop 壳、CLI、本机脚本）通过 `Authorization: Bearer` 调用。
+   - 浏览器登录后下发 `agentica_session` HttpOnly Cookie，服务端 `auth.json` 只存其 SHA-256 摘要，密码使用 `hashlib.scrypt` 存储。这样重启 Gateway 不会让浏览器掉线，修改密码也能立即吊销其他浏览器的会话。
+2. **工具审批绑定在 `LiveTurn` 上 (`gateway/services/live_turn.py`)**：
+   - `ApprovalRegistry` 挂在当前正在运行的 `LiveTurn` 上，而不挂在 LRU 缓存的 `Agent` 实例或当前 SSE 连接数上。
+   - 浏览器刷新瞬间 SSE 订阅数为 0，但 `LiveTurn` 仍在运行，审批卡不会被误拒；重连时通过 `GET /api/chat/runs/{run_id}/events?after=` 按序号回放事件并调用 `republish_pending_approvals()` 重新推送未决审批卡。
+   - 没有交互前端的通道（IM、定时任务、非流式 `/api/chat`）没有 `LiveTurn`，需要审批的调用会立即返回 `deny`，不会挂死后台协程。
 
-## 安全机制
+---
 
-### 四层 Guardrails
+## 延伸阅读
 
-```
-输入 → [InputGuardrail] → Agent → [OutputGuardrail] → 输出
-
-工具调用: Agent → [ToolInputGuardrail] → 工具执行 → [ToolOutputGuardrail] → Agent
-```
-
-```python
-from agentica.guardrails.agent import InputGuardrail, OutputGuardrail
-
-def check_language(message: str) -> bool:
-    # 拦截非中文输入
-    return True  # False = 拦截
-
-agent = Agent(
-    model=ZhipuAI(),
-    input_guardrails=[InputGuardrail(check_language)],
-)
-```
-
-### Death Spiral 检测
-
-当连续 N 轮（默认 5）所有工具调用都失败时，自动停止，防止无限 error-retry 循环。
-
-### Cost Budget
-
-通过 `RunConfig` 设置单次运行的成本上限：
-
-```python
-from agentica.run.config import RunConfig
-
-result = await agent.run(
-    "复杂的分析任务",
-    config=RunConfig(
-        max_cost_usd=0.5,      # 最多花 0.5 美元
-        max_tokens=10000,      # 最多输出 10000 tokens
-        timeout=120,           # 最长运行 120 秒
-    ),
-)
-```
-
-## 多 Agent 编排
-
-### as_tool（编排器模式）
-
-```
-Orchestrator Agent
-    ├── tools=[search_agent.as_tool(), analyst_agent.as_tool()]
-    └── 由 LLM 决定调用哪个 worker、传什么参数
-```
-
-任意 Agent 通过 `agent.as_tool(tool_name=..., tool_description=...)` 转换为可被
-其他 Agent 调用的 `Function`。每次调用内部会 `clone()` 一个新 worker 运行任务，
-保持调用方与被调用方的隔离。
-
-```python
-from agentica import Agent, ZhipuAI
-
-search_agent = Agent(name="Searcher", tools=[DuckDuckGoTool()])
-analyst_agent = Agent(name="Analyst", instructions=["分析数据，输出洞察"])
-
-leader = Agent(
-    model=ZhipuAI(),
-    tools=[
-        search_agent.as_tool(tool_name="search"),
-        analyst_agent.as_tool(tool_name="analyze"),
-    ],
-)
-```
-
-### Subagent（受治理的 spawn）
-
-通过 `BuiltinTaskTool` / `SubagentRegistry.spawn()` 启动结构化子 Agent，附带：
-工具白/黑名单、`MAX_DEPTH=2` 嵌套限制、超时控制、并发上限、注册表追踪。
-适合那些需要"沙箱化执行 + 复用父 Agent 模型/工具/工作区"的子任务。
-
-### Workflow（管道模式）
-
-```
-Input
-  → Agent A (数据收集)
-  → Agent B (数据分析)
-  → Agent C (报告生成)
-  → Output
-```
-
-确定性管道，每步输出作为下步输入，适合结构化多步骤任务。
-
-### Swarm（网状模式）
-
-多 Agent 自主协作，动态决定任务分配，适合复杂、不可预测的任务场景。
-
-## 钩子系统（Hooks）
-
-生命周期钩子允许在 Agent 运行的各个阶段插入自定义逻辑：
-
-```python
-from agentica.agent.hooks import AgentHooks, RunHooks
-from agentica.run.response import RunResponse
-
-class MyHooks(RunHooks):
-    async def on_agent_start(self, agent, message):
-        print(f"开始处理: {message[:50]}")
-
-    async def on_agent_end(self, agent, response: RunResponse):
-        print(f"完成 | tokens: {response.metrics.get('total_tokens')}")
-
-    async def on_tool_call_completed(self, agent, tool_name, result):
-        print(f"工具 {tool_name} 完成")
-
-agent = Agent(model=ZhipuAI())
-result = await agent.run("你好", hooks=MyHooks())
-```
-
-内置 Hooks 实现：
-
-| Hook 类 | 功能 |
-|---------|------|
-| `MemoryExtractHooks` | 对话结束后自动提取记忆 |
-| `ConversationArchiveHooks` | 对话结束后自动归档 |
-
-## 下一步
-
-- [Agent 核心概念](../concepts/agent.md) -- Agent API 详解
-- [Tools](../concepts/tools.md) -- 工具系统深度解析
-- [Memory & Workspace](../concepts/memory.md) -- 记忆和持久化
-- [Hooks](../advanced/hooks.md) -- 生命周期钩子完整 API
-- [Compression](../advanced/compression.md) -- 上下文压缩配置
+- [内置工具设计判据](../concepts/builtin-tool-bar.md) — 什么能力应该放进内置工具、CLI 与 SDK 的物理边界
+- [Shell Hooks 协议](../getting-started/shell-hooks.md) / [Notify Sink 协议](../getting-started/notify-sink.md) / [Attach Socket 协议](../getting-started/attach.md)

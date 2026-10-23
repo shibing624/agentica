@@ -1,4 +1,6 @@
-# 外部通知汇（notify sink）
+# 外部进程协议：Notify Sink（开发者选读）
+
+> **阅读提示**：本文档面向开发本机状态监听组件（如桌宠气泡提示）的开发者。日常使用 CLI/SDK 无需配置此项。
 
 把 agentica 一轮跑到什么节点告诉本机的一个 app（目前是 [VPet](https://github.com/shibingtan/VPet) 桌宠）。
 **只看，不问** —— 这条通道不接收回答。要让用户能在桌宠上按 y/n、输文本，

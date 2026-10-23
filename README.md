@@ -38,25 +38,25 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 ### 2. 🤝 一个会话是一个 agent，多个会话是一支队伍
 
-一个终端会话就是一个可协作的 agent。进程内 `task` 拉临时 subagent，进程级 `delegate` 另起一整个 agent 去干独立的大活，跨终端 peer 消息让两个会话互相说话——都不需要额外部署任何东西。
+一个终端就是一个 agent。查资料、读代码可以让它拉起只读的子任务（`task`）；独立的大功能可以派给后台新进程（`delegate`）；开了多个终端还能直接互通消息（`/list-agents`、`/send-message`）——不需要额外部署任何服务。
 
-### 3. 🧬 自进化，越用越强
+### 3. 🧬 越用越懂你的项目
 
-跑完的经验自动编译成可跨会话复用的 `SKILL.md`；下次遇到同类任务，agent 读的是自己上次的结论，不是从零开始。流程见 [Skills 文档](https://shibing624.github.io/agentica/advanced/skills)。
+踩过的坑和总结出的做法会自动沉淀为可复用的 `SKILL.md`；你的长期偏好写在 `AGENTS.md`，项目事实存进长期记忆。下次做同类任务直接接着上回的结论走，不用每次重头交代背景。详见 [Skills 文档](https://shibing624.github.io/agentica/advanced/skills)。
 
-### 4. 🧠 长会话不失忆：换窗不丢原文
+### 4. 🧠 长对话不失忆，也不怕超窗口
 
-业界主流的 compact 是让 LLM 把前文概括成摘要，再用这条摘要替换历史——被概括掉的细节再也拿不回来。Agentica 的换窗**不替换历史**：
+普通工具动辄把上万行日志塞进上下文，聊几轮就报错或把你最早的要求忘掉。Agentica 自动替你管好上下文：
 
-- **超大工具输出产生即落盘** — 上下文里只留 2000 字预览（40% 头 + 60% 尾）加一个文件路径，模型要细节自己 `read_file` 取回；会话本身没有读文件能力时就老实截断并说明，绝不发一个没人打得开的路径
-- **窗口吃紧才淘汰** — 占用超过窗口 80% 才动手，最旧优先淘汰回 50%；占位符写明被淘汰的是哪个调用，模型可以原样重发。正在跑的那一轮（未返回的调用 + 末批结果）永不触碰。水位按 provider 实测的 prompt 大小校准，本地估算偏低时不会一直不触发
-- **真满窗才换窗** — 装上 `<context_window>` 开一个空活动窗，不合成假摘要轮。有 session log 时，换窗前用主模型重写 `<session>.notes.md`（读缓存，只新写 notes）；失败就靠 `<dropped_span>` 交接
+- **超大输出自动存文件** — 命令或工具输出太长时自动落盘，上下文里只留预览和文件路径，需要细节时 Agent 自己读回
+- **窗口快满时先清旧工具输出** — 优先清掉早期的工具结果，保留你的对话和当前正在执行的步骤
+- **满窗自动换新窗并交接进度** — 自动把当前目标、约束和未完事项写进 `<session>.notes.md` 带入新窗口；完整历史始终留在本地会话日志里，Agent 随时用 `search_session` 查回原文，你也可以随时敲 `/compact` 手动换窗或 `/resume` 恢复会话
 
-原文始终留在 session JSONL 里，`search_session` 随时按词取回。历史默认重放整个窗口（`num_history_turns` 默认 `None`），不再先截成最近 20 轮。细节见 [压缩文档](https://shibing624.github.io/agentica/advanced/compression)。
+细节见 [上下文压缩文档](https://shibing624.github.io/agentica/advanced/compression)。
 
-### 5. 📱 人可以离开现场
+### 5. 📱 人离开电脑也能接着指挥
 
-微信 / 企微 / 飞书 / Telegram 直连本机 agent：`@会话名` 自己寻址，或者只说一句人话，让网关 agent 去指挥这台机器上的所有会话。
+微信 / 企微 / 飞书 / Telegram 直连本机：发 `@list` 看电脑上哪些终端会话还在跑，发 `@会话名 指令` 直接把话敲进那个终端，或者直接用自然语言让网关替你安排。
 
 ## 安装
 
@@ -84,7 +84,7 @@ uv tool install "agentica[gateway]"
 窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
 
 > [!IMPORTANT]
-> 当前构建**未签名**，系统可能拦第一次启动，按对应系统操作一次即可。机器上还没有 `agentica-gateway` 时，桌面版会在**第一次打开**时用 uv 安装一份托管 runtime（Python 3.12 + `agentica[gateway]`），放在 Application Support，不进 `~/.agentica`。已经 `uv tool install`（或旧的 `pip install`）过的继续用你原来的。
+> 安装包当前**未签名**，首次启动若被系统拦截，按下方对应系统操作一次即可。如果机器上还没装过 `agentica-gateway`，桌面版首次打开会自动安装运行环境；已经用 `uv tool install` 装过的会直接共用。
 
 <details>
 <summary><b>🍎 macOS 提示「Agentica 已损坏，无法打开」</b></summary>
@@ -212,38 +212,26 @@ agent = DeepAgent()
 
 ## 功能特性
 
-**核心引擎**
+**核心能力**
 
-- **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
-- **内置工具** — `read_file` / `write_file` / `apply_patch` / `grep` / `glob`、`execute`、网页搜索；长报告用 `write_file` 写 HTML
-- **多模型** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM 等
-- **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
-- **多模态** — 文本、图像、音频、视频理解
+- **开箱即用的内置工具** — 读写文件（`read_file` / `write_file` / `apply_patch`）、搜索代码（`grep` / `glob`）、执行命令（`execute`）、联网搜索与抓取（`web_search` / `fetch_url`）、看图（`analyze_image`）
+- **多模型自由切换** — 支持 OpenAI（Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)）、DeepSeek、Claude、智谱、通义千问、Kimi、豆包、Ollama 等，会话中随时 `/model` 切换
+- **多模态与安全护栏** — 支持文本、图像、音频、视频理解；提供输入、输出、工具调用四层 Guardrails 与系统沙箱（`--sandbox workspace-write`）
+- **原生异步 SDK** — `async` / `sync` 双接口，只读工具自动并发执行
 
-**产品入口**
+**使用方式**
 
-- **CLI** — `agentica` 交互终端；进程内 `task`、进程级 `delegate`、跨终端 peer 消息
-- **Web** — `agentica-gateway` 本机 SPA（聊天 / 轨迹 / 设置）+ IM 渠道
-- **Desktop App** — App 跟 Web、CLI 共用同一套历史记录、工作目录、模型、配置等状态
+- **CLI 终端** — `agentica` 交互编程助手，支持 `/goal` 持续推进长任务、`/resume` 跨目录恢复会话、`/worktree` 多任务隔离
+- **Web 与桌面端** — `agentica-gateway` 提供本地网页与桌面 App（聊天 / 执行轨迹 / 设置 / 多账号隔离），并可接入微信、飞书、企微、Telegram、QQ、钉钉、Slack
 
-**协作**
+**多智能体与记忆**
 
-- **多智能体** — SDK：`Agent.as_tool()`、Workflow、Swarm、[Markdown Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)；CLI：`task` / `delegate` / peer 消息（见 [终端文档](https://shibing624.github.io/agentica/getting-started/terminal)）
-- **Actor-Critic 精炼** — `refine()` + 多 Critic 并行评审，`SchemaCritic` 程序级零成本验证 / `AgentCritic` 异构强模型把关，循环检测自动早停
+- **多智能体编排** — CLI 内置 `task`（子任务）、`delegate`（后台独立进程）、peer（跨终端通信）；Python SDK 提供 `Agent.as_tool()`、Workflow、Swarm、[自定义 Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)
+- **长期记忆与自进化** — 自动记住用户偏好与项目背景（`MEMORY.md` + `AGENTS.md` 常驻规则），任务经验可沉淀为 `SKILL.md` 跨会话复用
+- **长会话上下文管理** — 大输出自动落盘、旧工具结果按需清理、满窗自动换新窗并交接笔记，历史原文随时通过 `search_session` 查回
+- **MCP / ACP / RAG** — 支持接入外部 MCP 工具、连接 Zed / JetBrains 等 IDE（ACP 协议），以及本地文档知识库检索（RAG）
 
-**记忆与进化**
-
-- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `AGENTS.md`
-- **无损上下文压缩** — 换窗不把历史概括成假摘要：超大 tool 输出产生即落盘、窗口超 80% 才淘汰最旧结果、满窗换空窗；原文留在 session JSONL，`search_session` 随时取回。有 session log 时换窗前用主模型重写 `<session>.notes.md`
-- **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
-- **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`
-
-**集成**
-
-- **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
-- **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
-
-架构与执行引擎（Agentic Loop、两层上下文压缩、四层护栏）见 [架构文档](https://shibing624.github.io/agentica/introduction/architecture)。
+想要了解内部执行机制与架构设计（开发者选读），见 [架构文档](https://shibing624.github.io/agentica/introduction/architecture)。
 
 ## 多会话协作：`task` / `delegate` / peer
 

@@ -1,67 +1,61 @@
-# What is Agentica
+# Agentica 是什么
 
-**Agentica** 是一个轻量级、功能强大的 Python 框架，用于构建自主 AI 智能体。
+**Agentica** 既是一套开箱即用的本地 AI 智能体工作台（CLI 终端、本地 Web、桌面 App、手机微信/IM 遥控），也是一个轻量、模块化的 Python Agent SDK。
 
-## 一句话定义
+## 两种使用方式，共享同一套状态
 
-> Async-first Python Agent Framework -- 用最少的代码构建能思考、决策和执行动作的 AI 智能体。
+你可以直接把它当现成工具用，也可以把它嵌进自己的 Python 代码里：
 
-## 定位
+| 使用方式 | 适合谁 | 怎么启动 |
+|---|---|---|
+| **CLI 终端 (`agentica`)** | 日常写代码、查 Bug、重构、跑测试 | `uv tool install agentica` → `agentica` |
+| **本地 Web / 桌面端 (`agentica-gateway`)** | 喜欢图形界面、查看可视化执行轨迹、多账号管理、接入微信/飞书/企微/Telegram | `uv tool install "agentica[gateway]"` → `agentica-gateway`（或直接装 Desktop App） |
+| **Python SDK (`from agentica import Agent`)** | 在自己的业务服务、数据处理脚本或研究项目里构建智能体 | `uv add agentica` |
 
-| 维度 | 说明 |
-|------|------|
-| **类型** | Python Agent Framework |
-| **架构** | Async-first, 同步适配器无缝兼容 |
-| **设计哲学** | 开发者友好，面向对象 API，极低学习曲线 |
-| **模型支持** | 多 LLM 提供商，本地/云端模型 |
-| **核心能力** | Agent, Tools, RAG, Workflow, Swarm, Subagent, MCP/ACP |
+在默认配置下，CLI、Web 和桌面端共用同一个 `~/.agentica` 目录：你在终端里配好的模型（`config.yaml`）、积累的长期记忆（`MEMORY.md` / `AGENTS.md`）、安装的技能（`skills/`）和聊过的会话历史，打开网页或桌面端都在。
 
-## 核心特性
+## 为什么选择 Agentica？
 
-- **Async-First 架构** -- 所有核心方法原生 async，同步适配器无缝兼容
-- **开发者友好** -- 简洁直观的面向对象 API，5 行代码创建一个 Agent
-- **模块化可扩展** -- 模型、记忆后端、向量存储均可自由替换
-- **功能完备** -- 内置工具、RAG、多智能体协作（Swarm/Subagent/Workflow；CLI 另有 `task`/`delegate`/peer）、工作流编排、安全守卫
-- **生产就绪** -- CLI / Web UI / API 服务多种部署方式
-- **协议支持** -- MCP (Model Context Protocol) + ACP (Agent Client Protocol)
-- **安全机制** -- Death Spiral 检测、Cost Budget、Guardrails 三层守卫
+- **不绑定单一模型厂商** — 支持 OpenAI、Claude、DeepSeek、智谱（含免费模型 `glm-4.7-flash`）、通义千问、Kimi、火山引擎豆包、Ollama 本地模型等，终端里敲 `/model` 随时切换，还能给子任务单配便宜的 `auxiliary_model`，给线上配 `fallback_models` 自动容灾。
+- **长对话不失忆、不爆窗口** — 超大命令输出自动存文件，窗口吃紧时自动清理早期工具结果，满窗时自动把目标和进度整理进 `<session>.notes.md` 并开启新窗口，原始对话随时可通过 `search_session` 查回。
+- **多会话像团队一样配合** — 进程内可并行派发只读子任务（`task`），大任务可交给独立后台进程（`delegate`），多个开着的终端可以互相看状态、发消息（`/list-agents`、`/send-message`），共用同一个仓库时还能用 `/worktree` 自动隔离分支。
+- **人离开电脑也能管** — 开启 Gateway 后，在微信、飞书、企微或 Telegram 里发 `@list` 就能看到家里或开发机上跑着的终端会话，发 `@会话名 指令` 直接把话敲进那个终端。
+- **代码简洁、异步优先** — Python SDK 5 行代码即可跑起一个 Agent，所有接口同时提供 `async`（`await agent.run()`）与 `sync`（`agent.run_sync()`），只读工具自动并发执行。
 
-## 快速上手
+## 5 行代码跑起第一个 Agent
 
 ```python
-import asyncio
 from agentica import Agent, ZhipuAI
 
-async def main():
-    agent = Agent(model=ZhipuAI())
-    result = await agent.run("Hello!")
-    print(result.content)
-
-asyncio.run(main())
+agent = Agent(model=ZhipuAI())
+result = agent.run_sync("Hello!")
+print(result.content)
 ```
 
-## 与其他框架的对比
+需要全套文件读写、命令执行、网页搜索、长期记忆和自动压缩时，直接用 `DeepAgent`：
 
-| 特性 | Agentica | LangChain | CrewAI | OpenAI Agents SDK |
-|------|----------|-----------|--------|-------------------|
-| **架构** | Async-first | Sync-first | Sync | Async |
-| **学习曲线** | 低 | 高 | 中 | 低 |
-| **模型支持** | 多提供商 | 多 | 少 | 仅 OpenAI |
-| **Tool 系统** | 函数/类/MCP | Chain/Tool | Tool | Function |
-| **多智能体** | as_tool/Swarm/Subagent/Workflow | Agent Executor | Crew | Handoff |
-| **RAG** | 内置完整 | 需组合 | 无 | 无 |
-| **安全守卫** | 4 层 Guardrails | 无 | 无 | 无 |
-| **IDE 集成** | ACP 协议 | 无 | 无 | 无 |
+```python
+from agentica import DeepAgent, OpenAIChat
 
-## Agentica 不是什么
+agent = DeepAgent(model=OpenAIChat(id="gpt-4o"), work_dir="./my-project")
+result = agent.run_sync("检查这个项目的测试为什么失败，并给出修复方案")
+print(result.content)
+```
 
-- **不是 LLM 本身** -- Agentica 是框架，不提供模型推理能力
-- **不是 LangChain 替代品** -- 虽然功能有重叠，但设计哲学不同（简洁 vs 抽象）
-- **不是低代码平台** -- 面向开发者的 Python 框架，不是拖拽式 UI
-- **不是 RAG 专用工具** -- RAG 是众多能力之一，不是核心定位
+## 与其他工具/框架的对比
+
+| 特性 | Agentica | Claude Code / Codex CLI | LangChain / CrewAI |
+|------|----------|-------------------------|--------------------|
+| **模型选择** | 多厂商自由切换 + 本地 Ollama | 绑定单一厂商 | 多厂商 |
+| **开箱即用 CLI + Web + Desktop** | ✅ 三端共用本地状态 | 仅 CLI / 专属客户端 | ❌ 需自行开发前端 |
+| **微信 / 飞书 / 企微手机直连** | ✅ 内置 Gateway，无需公网 IP | ❌ | ❌ |
+| **跨终端多会话协作** | ✅ `task` + `delegate` + peer 消息 | 仅会话内子任务 | 仅代码内编排 |
+| **Python SDK 可嵌入** | ✅ 原生 async/sync，极简面向对象 API | 部分或无 | ✅（但抽象层较重） |
+| **开源协议** | Apache 2.0 | 部分开源 | MIT / Apache |
 
 ## 下一步
 
-- [架构总览](architecture.md) -- 理解 Agentica 的技术架构
-- [安装指南](../getting-started/installation.md) -- 开始安装和配置
-- [快速入门](../getting-started/quickstart.md) -- 5 分钟上手
+- [安装与配置](../getting-started/installation.md) — 安装 CLI、Web 或 SDK，配好第一个 API Key
+- [CLI 终端指南](../getting-started/terminal.md) — 终端交互、斜杠命令与多任务用法
+- [5 分钟上手 (SDK)](../getting-started/quickstart.md) — 用 Python 编写带工具和结构化输出的 Agent
+- [架构与内部实现（开发者选读）](architecture.md) — 深入了解执行循环与上下文压缩的底层机制

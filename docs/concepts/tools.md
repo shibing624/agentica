@@ -208,27 +208,11 @@ self.register(self.read_schema, concurrency_safe=True, is_read_only=True)
 self.register(self.write_output)  # concurrency_safe=False (默认)
 ```
 
-### 由调用方逐次决定：`execute`
+### `execute` 的并发与后台运行
 
-`execute` 在注册时无法回答「能不能并行」——同一个工具既跑 `pytest`，也跑 `git commit`。
-固定成 `False` 会把互相独立的命令白白串起来，固定成 `True` 会让 `git add` 和 `git commit`
-互相竞争。所以这个判断下放到每一次调用：
-
-```python
-# 工具侧：声明由哪个参数决定
-self.functions["execute"].parallel_arg = "parallel_safe"
-```
-
-模型在同一条消息里发多个 `execute(command=..., parallel_safe=True)` 才会真正并发；
-不带这个参数时整批串行、保持顺序，并且其中一条报错会取消后面的（sibling-abort）。
-有依赖的步骤可以用 `&&` / 管道写在一条 `command` 里；互不依赖的探查可以同一轮
-多条 `execute(parallel_safe=True)`。怎么拆交给模型，不要规定必须焊成一条。
-
-调度器读的是 `FunctionCall.is_concurrency_safe()`：未设置 `parallel_arg` 的工具沿用
-函数级的 `concurrency_safe`，设置了的则以本次调用传入的值为准（缺省仍回落到函数级）。
-
-> `background=True` 是**生命周期**开关（命令能否活过这一轮），不是并行入口。需要同时跑多条
-> 且这轮就要结果，用 `parallel_safe`；`wait` 只服务于 `background`。
+内置的 `execute` 工具支持两种特殊参数：
+- **同轮并行（`parallel_safe=True`）**：当多条命令互不依赖、且都是只读探查（如同时跑几个不同的测试或状态检查）时，模型可传入 `parallel_safe=True` 让它们并发执行；默认不传时按顺序串行执行，且前一条报错会自动中止同批后续命令。
+- **后台长任务（`background=True`）**：需要跨轮次持续运行的命令（如启动服务或长耗时构建）可传 `background=True` 放入后台，并通过 `wait` 工具（或 CLI 的 `/ps`、`/stop`）管理。
 
 ## 流控异常
 
@@ -314,20 +298,22 @@ tools = get_builtin_tools(work_dir="./")
 
 | 工具 | 模块 | 功能 |
 |------|------|------|
-| `read_file` | `BuiltinFileTool` | 读文件。从头：`offset`/`limit`（默认 0/500；`tail=0` 等于省略）。取尾：`tail=N`（N>=1；负 N 当末尾 \|N\| 行）。大文件守卫只拦从头分页，从尾扫描 20s 超时。空文件返回 `File is empty: …` |
-| `write_file` | `BuiltinFileTool` | 创建/覆写文件。长报告可直接写成 HTML，方便用户在浏览器打开 |
-| `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件。按整行匹配，超长单行（JSONL）不支持。同一文件多处是一个 `*** Update File` 下多个 `@@`（几处就几个），不要拆成多次调用，也不要写两个同路径的 Update File。要改的文件先并行 `read_file`，再一条补丁。规范信封 `*** Begin Patch` … `*** End Patch`；围栏 / heredoc / 漏信封但有 `*** Update/Add/Delete File:` 也会收。hunk 行以空格（保留）/ `-`（删）/ `+`（增）开头；忘了空格但能在文件里唯一对上的 keep 行会补上。**上下文精确匹配**；对不上报出那一行。编辑后可附 LSP/Pyright 诊断（`--enable-diagnostics`） |
-| `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
-| `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep）。参数只有 `pattern` / `path` / `limit`；`limit` 是全局条数上限，读满即停 rg。按文件名过滤走更窄的 `path`。超过 2000 字的行只返回匹配附近窗口（`col` / `line_len`），不是整行 |
-| `execute` | `BuiltinExecuteTool` | Shell：探查 / 分析 / 验证 / 构建 / git。依赖可用管道和 `&&`，互不依赖可同一轮多条 `execute(parallel_safe=True)`。搜文本优先 `rg`（按扩展名用 `-g '*.py'` / `-t py`）。不要写 `rg -rn`：ripgrep 的 `-r` 是 `--replace`，会把匹配静默换成 `n`。不要用 shell 倒整份源码（`| head` / `| tail`）。从 `.` 或已知目录搜；候选加 `2>/dev/null`，不要凭包布局拼长绝对路径。`background=True` 进后台。 |
-| `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
-| `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
-| `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |
-| `write_todos` | `BuiltinTodoTool` | 任务清单管理 |
-| `task` | `BuiltinTaskTool` | 同进程启动子 Agent（subagent，默认 auxiliary、偏只读） |
-| `delegate` | `BuiltinDelegateTool` | **交互 CLI 专用**：另起完整 `agentica --query --print` 进程；不阻塞，经 `/ps`/`wait`/`/stop` 托管 |
-| `list_agents` / `send_message` | `PeerMessagingTool` | **交互 CLI 专用**：跨终端对等会话发现与纯文本消息 |
-| `search_session` | `BuiltinContextTool` | 搜本会话 JSONL（含最近一条 `compact_boundary` **之前**），以及**当前** `<session>.notes.md`。重写替换后的上一份 notes 不在索引里。旧工具结果用 `role="tool"`，再用命中的 `[uuid]` 取全文。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果附带最近用户问题（倒序最多 20 条、带时间戳、截断）。不搜跨会话记忆（那是 `search_memory`） |
+| `read_file` | `BuiltinFileTool` | 读取文件（支持按行 `offset`/`limit` 分页，或传 `tail=N` 读取末尾 N 行） |
+| `write_file` | `BuiltinFileTool` | 创建或完整覆写文件 |
+| `apply_patch` | `BuiltinFileTool` | 用一个补丁同时新增、修改或删除多个文件（上下文精确匹配；开启诊断时自动附带 Pyright/LSP 检查结果） |
+| `glob` | `BuiltinFileTool` | 按文件名通配符查找文件（如 `**/*.py`） |
+| `grep` | `BuiltinFileTool` | 基于 ripgrep 的代码内容搜索（支持 `pattern`、`path`、`limit`） |
+| `execute` | `BuiltinExecuteTool` | 执行 Shell 命令（支持 `parallel_safe=True` 并行只读命令，以及 `background=True` 后台运行） |
+| `wait` | `BuiltinExecuteTool` | 等待后台命令或 `delegate` 任务完成并取回输出 |
+| `web_search` | `BuiltinWebSearchTool` | 联网搜索（搜索引擎可切换，见下节） |
+| `fetch_url` | `BuiltinFetchUrlTool` | 抓取指定网页正文 |
+| `analyze_image` | `BuiltinVisionTool` | 查看并分析本地或指定路径的图片 |
+| `write_todos` | `BuiltinTodoTool` | 创建并更新多步骤任务清单 |
+| `task` | `BuiltinTaskTool` | 在同进程内启动只读 Subagent 处理子任务（默认使用便宜的 `auxiliary_model`） |
+| `delegate` | `BuiltinDelegateTool` | **交互 CLI 专用**：在后台启动独立的 `agentica` 进程处理大任务（通过 `/ps`、`wait`、`/stop` 管理） |
+| `list_agents` / `send_message` | `PeerMessagingTool` | **交互 CLI / Gateway 专用**：查看本机其他活跃会话并互发消息 |
+| `search_session` | `BuiltinContextTool` | 检索当前会话的完整 JSONL 历史（含换窗前的对话与工具结果，可用 `role="tool"` + `uuid` 取全文）及当前 `<session>.notes.md` |
+| `save_memory` / `search_memory` | `BuiltinMemoryTool` | 写入或检索跨会话的 Workspace 长期记忆 |
 
 #### `task` vs `delegate` vs peer
 
