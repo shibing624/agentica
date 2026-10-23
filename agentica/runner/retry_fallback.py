@@ -5,7 +5,6 @@
 """
 
 import asyncio
-import copy
 import random
 
 import httpx
@@ -29,7 +28,6 @@ from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ContentFilterError, ModelResponse
-from agentica.model.usage import Usage
 from agentica.run.config import RunConfig
 from agentica.utils.langfuse_integration import langfuse_observation_context
 
@@ -254,13 +252,7 @@ class RetryMixin:
             if not isinstance(source, Model):
                 isolated.append(source)
                 continue
-            cloned = copy.copy(source)
-            cloned.metrics = {}
-            cloned.usage = Usage()
-            for attr in ("client", "http_client", "async_client"):
-                if hasattr(cloned, attr):
-                    setattr(cloned, attr, None)
-            isolated.append(cloned)
+            isolated.append(source.detached_copy())
         return isolated
 
     @staticmethod

@@ -1064,7 +1064,9 @@ class AgentService:
             if msg_count == 0:
                 return {"ok": False, "error": "No messages to compact."}
 
-            hooks = agent._run_hooks
+            # Idle: _run_hooks is cleared after every run, so the agent's own
+            # memory/experience hooks are only reachable through the defaults.
+            hooks = agent._default_run_hooks
             if hooks is not None:
                 await hooks.on_pre_compact(agent=agent, messages=messages)
 

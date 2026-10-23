@@ -74,7 +74,10 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
             async def on_post_compact(self, agent, messages=None, **kwargs):
                 pass
 
-        agent._run_hooks = Hooks()
+        # As in a live idle session: the agent's hooks are its defaults, and
+        # the per-run slot was cleared when the last run ended.
+        agent._default_run_hooks = Hooks()
+        self.assertIsNone(agent._run_hooks)
         ctx = CommandContext(
             agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
             current_agent=agent,

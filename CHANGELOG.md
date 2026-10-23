@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### changes
 - **`search_session` / `search_memory` 的工具说明补上检索边界**：`search_session` 写明旧工具结果用 `role="tool"` 再按命中的 `[uuid]` 取全文，notes 命中只是当前文件，重写后的上一份不在索引里。`search_memory` 写明不搜本会话 JSONL 和 notes。`<context_window>` 未加长。
+- **`save_memory` 新增可选参数 `description`，作为 `MEMORY.md` 索引行的 hook**：之前 hook 被写死成 title，索引每行都是「标题 — 标题」，看不出什么时候该打开。不传时用 content 的第一行。自动抽取的记忆也用同样的默认值。
+- **`search_memory` 结果按来源分层排序**：`memory` → `memory_candidate` → `conversation`，同层内按相关度排序。打分同时匹配 title + description，取较高者。此前几千字的对话归档块包含常见双字词的概率高，经常排在精炼记忆前面。
+- **记忆 prompt 补上仓库外的环境事实和实验结论**：`reference` 涵盖服务端口、共享目录、重启脚本、外部 API 实测限制；`project` 涵盖费力得到、仓库中没有记录的实验结论。此前长程会话把这些事实只写进只属于本会话的 notes.md，换个会话就搜不到。
+- **换窗后从 `<session>.notes.md` 抽取跨会话记忆**：`MemoryExtractHooks.on_post_compact` 把 notes 交给 aux 模型抽取，结果写入 `memory_candidates/`，`evidence_refs` 指向这个 notes 文件。notes 内容和上次抽取时相同就跳过（reactive compact、notes 重写失败的情况）。
+
+#### fixes
+- **CLI 下的后台记忆抽取与纠错判定从未真正执行**：CLI 每轮通过 `run_stream_sync` 用一次 `asyncio.run` 跑完；`MemoryExtractHooks` / `ExperienceCaptureHooks` 用 `create_task` 挂在这个 loop 上的后台任务，在本轮结束、loop 关闭时被取消，抽取还没发出 LLM 请求，`memory_candidates/` 一直为空。现在后台任务提交到进程级常驻 loop（`agentica/utils/background_loop.py`），并使用 `Model.detached_copy()` 得到的独立模型副本，避免 Runner 在本轮结束时关闭 aux client 时连带关掉后台请求。`flush_pending()` 仍可从任意 loop 等待这些任务完成。
+- **空闲时手动 `/compact`（CLI 与 Web）不再跳过记忆/经验 hooks**：两处都读取 `agent._run_hooks`，而它在每轮结束后就被清空，空闲时总是 `None`，`on_pre_compact` / `on_post_compact` 从未触发。改为读取 `agent._default_run_hooks`。
 
 ## [1.5.0] - 2026-10-22
 

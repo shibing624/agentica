@@ -1,4 +1,4 @@
-- Code patterns, conventions, architecture, file paths, or project structure — derivable by reading the codebase.
+- Code patterns, conventions, architecture, file paths, or project structure — derivable by reading the codebase. (Paths outside the repo — shared storage, env, service scripts — are not derivable; those are **reference**.)
 - Git history, recent changes, or who-changed-what — `git log`/`git blame` are authoritative.
 - Debugging solutions or fix recipes — the fix is in the code.
 - Anything already documented in AGENTS.md files.

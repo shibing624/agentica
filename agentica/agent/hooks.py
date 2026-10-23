@@ -30,6 +30,7 @@ from agentica.experience.learning_report import (
     LearningStatus,
     write_learning_report,
 )
+from agentica.compression.new_window import notes_path_for
 from agentica.model.message import Message
 from agentica.prompts.memory import (
     BATCH_JUDGE_PROMPT,
@@ -37,6 +38,7 @@ from agentica.prompts.memory import (
     MEMORY_EXTRACT_PROMPT,
 )
 from agentica.tools.skill_tool import SkillTool
+from agentica.utils import background_loop
 from agentica.utils.log import logger
 
 
@@ -326,8 +328,8 @@ class MemoryExtractHooks(RunHooks):
             background: Run periodic extraction as a fire-and-forget task so
                 the user's turn returns immediately. ``on_pre_compact`` and
                 ``flush_pending`` always run synchronously (data-loss
-                boundaries). Under ``run_sync`` the temp event loop may
-                cancel pending tasks on close — call ``await
+                boundaries). Background flushes run on a process-wide loop,
+                so they outlive a ``run_sync`` turn; call ``await
                 agent.flush_pending()`` from your shutdown hook to drain.
             timeout: Hard wall-clock cap on a single extraction LLM call so
                 a slow/broken model can't pin a background task forever.
@@ -355,6 +357,9 @@ class MemoryExtractHooks(RunHooks):
         # background task survives Python's task-GC (asyncio only holds a
         # weak ref). Tasks self-discard via ``add_done_callback``.
         self._pending_tasks: set = set()
+        # notes path -> the notes text last mined, so a rollover that left the
+        # file as it was (reactive compact, notes rewrite failed) costs nothing.
+        self._mined_notes: Dict[str, str] = {}
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         self._tool_calls[agent.agent_id] = []
@@ -422,42 +427,36 @@ class MemoryExtractHooks(RunHooks):
     ) -> None:
         """Run the periodic flush either in background or inline.
 
-        Background path schedules an ``asyncio.create_task`` so the user's
+        Background path hands the flush to another loop so the user's
         turn returns immediately — a slow/broken auxiliary LLM cannot block
-        the main dialogue. The task is wrapped in ``asyncio.wait_for`` so a
-        hung HTTP connection cannot pin resources forever.
-
-        Falls back to inline ``await`` when ``background=False`` or no
-        running event loop is available (rare; only happens if a hook
-        somehow fires outside the agent's loop).
+        the main dialogue. It runs on the process-wide background loop, not
+        the turn's loop: sync callers (the CLI) close the turn's loop right
+        after ``on_agent_end``, which used to cancel the extraction before
+        its LLM call. ``asyncio.wait_for`` caps a hung HTTP connection.
         """
         if not self._background:
             await self._flush_with_timeout(agent, workspace, session_key)
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            await self._flush_with_timeout(agent, workspace, session_key)
-            return
-        task = loop.create_task(
-            self._flush_with_timeout(agent, workspace, session_key)
+        future = background_loop.submit(
+            self._flush_with_timeout(agent, workspace, session_key, detach_model=True)
         )
-        self._pending_tasks.add(task)
-        task.add_done_callback(self._pending_tasks.discard)
+        self._pending_tasks.add(future)
+        future.add_done_callback(self._pending_tasks.discard)
 
     async def _flush_with_timeout(
         self, agent: Any, workspace: Any, session_key: Tuple[str, str],
+        detach_model: bool = False,
     ) -> None:
         """Wrap ``_flush`` with a hard wall-clock cap. Errors are swallowed
         with a warning — this is a background best-effort path."""
         try:
             if self._timeout > 0:
                 await asyncio.wait_for(
-                    self._flush(agent, workspace, session_key),
+                    self._flush(agent, workspace, session_key, detach_model=detach_model),
                     timeout=self._timeout,
                 )
             else:
-                await self._flush(agent, workspace, session_key)
+                await self._flush(agent, workspace, session_key, detach_model=detach_model)
         except asyncio.TimeoutError:
             logger.warning(
                 "Memory extraction timed out after %.1fs (session=%s); buffer forfeited",
@@ -496,12 +495,19 @@ class MemoryExtractHooks(RunHooks):
             # Force-flush this session's buffer SYNCHRONOUSLY (don't race
             # with a background task on the same buffer — we just popped it).
             await self._flush_with_timeout(agent, workspace, session_key)
-        if self._pending_tasks:
-            # Snapshot — tasks self-remove from the set via done_callback.
-            await asyncio.gather(*list(self._pending_tasks), return_exceptions=True)
+        # Snapshot — futures self-remove from the set via done_callback.
+        await background_loop.wait_all(list(self._pending_tasks))
 
-    async def _flush(self, agent: Any, workspace: Any, session_key: Tuple[str, str]) -> None:
-        """Drain buffer for ``session_key`` and run one LLM extraction over it."""
+    async def _flush(
+        self, agent: Any, workspace: Any, session_key: Tuple[str, str],
+        detach_model: bool = False,
+    ) -> None:
+        """Drain buffer for ``session_key`` and run one LLM extraction over it.
+
+        ``detach_model``: the flush runs on the background loop, so it uses its
+        own copy of the model — the agent's copy holds a client bound to the
+        turn's loop, which the Runner closes when the turn ends.
+        """
         buf = self._buffers.pop(session_key, [])
         if not buf:
             return
@@ -539,6 +545,18 @@ class MemoryExtractHooks(RunHooks):
             )
             return
 
+        await self._extract_with_aux_model(
+            agent, workspace, conversation_text, evidence_refs, detach_model,
+        )
+
+    async def _extract_with_aux_model(
+        self,
+        agent: Any,
+        workspace: Any,
+        text: str,
+        evidence_refs: List[str],
+        detach_model: bool,
+    ) -> None:
         model = agent.resolve_auxiliary_model("memory_extract")
         if model is None:
             return
@@ -547,10 +565,57 @@ class MemoryExtractHooks(RunHooks):
         # (e.g. main 1M, aux 128k). Cap the transcript to the aux window so
         # extraction fails closed with a truncated recent slice instead of a
         # silent context_length_exceeded on the side call.
-        conversation_text = self._fit_text_to_model(model, conversation_text)
-        await self._extract_and_save(
-            model, workspace, conversation_text, evidence_refs=evidence_refs,
+        text = self._fit_text_to_model(model, text)
+        if not detach_model:
+            await self._extract_and_save(model, workspace, text, evidence_refs=evidence_refs)
+            return
+        model = model.detached_copy()
+        try:
+            await self._extract_and_save(model, workspace, text, evidence_refs=evidence_refs)
+        finally:
+            await model.close_client()
+
+    async def on_post_compact(self, agent: Any, messages=None, **kwargs) -> None:
+        """Mine the session notes the window rollover just rewrote.
+
+        In long sessions the model keeps its working facts (service ports,
+        shared paths, measured results) in ``<session>.notes.md`` instead of
+        calling ``save_memory``, and that file belongs to one session:
+        nothing else ever reads it. Each rollover is when it is freshest.
+        The buffered turns were already flushed by ``on_pre_compact``.
+        """
+        workspace = agent.workspace
+        if workspace is None or not agent.long_term_memory_config.auto_extract_memory:
+            return
+        notes_path = notes_path_for(agent._session_log)
+        if notes_path is None or not Path(notes_path).is_file():
+            return
+        notes = Path(notes_path).read_text(encoding="utf-8").strip()
+        if not notes or self._mined_notes.get(notes_path) == notes:
+            return
+        self._mined_notes[notes_path] = notes
+        text = f"Session notes the assistant kept during a long task:\n\n{notes}"
+        if not self._background:
+            await self._extract_with_aux_model(agent, workspace, text, [notes_path], False)
+            return
+        future = background_loop.submit(
+            self._extract_notes_with_timeout(agent, workspace, text, notes_path)
         )
+        self._pending_tasks.add(future)
+        future.add_done_callback(self._pending_tasks.discard)
+
+    async def _extract_notes_with_timeout(
+        self, agent: Any, workspace: Any, text: str, notes_path: str,
+    ) -> None:
+        try:
+            await asyncio.wait_for(
+                self._extract_with_aux_model(agent, workspace, text, [notes_path], True),
+                timeout=self._timeout or None,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Memory extraction from session notes timed out after %.1fs", self._timeout)
+        except Exception as e:
+            logger.warning(f"Memory extraction from session notes failed: {e}")
 
     async def _archive_extract_evidence(
         self,
@@ -649,7 +714,6 @@ class MemoryExtractHooks(RunHooks):
                     title=title,
                     content=content,
                     memory_type=mem_type,
-                    description=title,
                     source="auto_extract",
                     evidence_refs=evidence_refs or None,
                 )
@@ -1360,20 +1424,21 @@ class ExperienceCaptureHooks(RunHooks):
                 model, event_store, compiled_store, session_key, user_id,
             )
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            await self._flush_judge_with_timeout(
-                model, event_store, compiled_store, session_key, user_id,
-            )
-            return
-        task = loop.create_task(
-            self._flush_judge_with_timeout(
-                model, event_store, compiled_store, session_key, user_id,
-            )
-        )
-        self._pending_judge_tasks.add(task)
-        task.add_done_callback(self._pending_judge_tasks.discard)
+        # Runs on the process-wide background loop with its own model copy;
+        # see MemoryExtractHooks._dispatch_flush for why not the turn's loop.
+        detached = model.detached_copy()
+
+        async def _run() -> None:
+            try:
+                await self._flush_judge_with_timeout(
+                    detached, event_store, compiled_store, session_key, user_id,
+                )
+            finally:
+                await detached.close_client()
+
+        future = background_loop.submit(_run())
+        self._pending_judge_tasks.add(future)
+        future.add_done_callback(self._pending_judge_tasks.discard)
 
     async def _flush_judge_with_timeout(
         self,
@@ -1426,8 +1491,7 @@ class ExperienceCaptureHooks(RunHooks):
                 await self._flush_judge_with_timeout(
                     model, event_store, compiled_store, session_key, workspace.user_id,
                 )
-        if self._pending_judge_tasks:
-            await asyncio.gather(*list(self._pending_judge_tasks), return_exceptions=True)
+        await background_loop.wait_all(list(self._pending_judge_tasks))
 
     @staticmethod
     async def _persist_feedback_classification(

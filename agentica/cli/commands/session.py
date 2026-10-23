@@ -792,7 +792,9 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
             "write them to the session notes file instead.[/dim]"
         )
 
-    hooks = agent._run_hooks
+    # Idle: _run_hooks is cleared after every run, so the agent's own
+    # memory/experience hooks are only reachable through the defaults.
+    hooks = agent._default_run_hooks
     if hooks is not None:
         _run_async_safe(hooks.on_pre_compact(agent=agent, messages=messages))
 

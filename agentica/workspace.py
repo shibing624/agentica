@@ -885,7 +885,8 @@ class Workspace:
             title: Short display name for the memory
             content: Full memory content (why + how to apply)
             memory_type: One of "user", "feedback", "project", "reference"
-            description: One-line hook for relevance scoring (defaults to title)
+            description: One-line hook for relevance scoring (defaults to the
+                first line of content)
             source: Provenance string — controls which folder the entry lands in.
             evidence_refs: Optional list of supporting references (file paths,
                 URLs, run_ids). Persisted in the frontmatter so reviewers can
@@ -907,7 +908,10 @@ class Workspace:
         filename = f"{memory_type}_{safe_title}.md"
         filepath = target_dir / filename
 
-        hook = description or title
+        # The hook is what MEMORY.md shows to decide whether to open the file;
+        # repeating the title there says nothing, so default to the content's
+        # opening line. Frontmatter is line-based, hence one line only.
+        hook = " ".join((description or content.strip().partition("\n")[0] or title).split())
         evidence_lines = ""
         if evidence_refs:
             cleaned = [str(r) for r in evidence_refs if r]

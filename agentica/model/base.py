@@ -6,6 +6,7 @@ part of the code is from phidata
 """
 import asyncio
 import collections.abc
+import copy
 import contextvars
 import inspect
 import io
@@ -411,6 +412,22 @@ class Model(ABC):
     @staticmethod
     def current_run_state() -> Optional[ModelRunState]:
         return _MODEL_RUN_STATE.get()
+
+    def detached_copy(self) -> "Model":
+        """Shallow clone that owns no HTTP client and starts with fresh metrics.
+
+        For callers that drive this model on another event loop than its owner
+        (per-run fallback isolation, background memory/judge flushes that outlive
+        the turn): sharing one cached async client across loops lets either side
+        close the other's connection pool.
+        """
+        cloned = copy.copy(self)
+        cloned.metrics = {}
+        cloned.usage = Usage()
+        for attr in ("client", "http_client", "async_client"):
+            if hasattr(cloned, attr):
+                setattr(cloned, attr, None)
+        return cloned
 
     async def close_client(self) -> None:
         """Release the underlying async HTTP client, if any.

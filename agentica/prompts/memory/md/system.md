@@ -42,6 +42,8 @@ Call `save_memory` with:
 - `title`: short, searchable name (e.g. "user_role", "prefer_pytest")
 - `content`: what to remember and how to apply it
 - `memory_type`: one of "user", "feedback", "project", "reference"
+- `description`: one line saying when this memory is relevant, with the
+  keywords a later search would use; it becomes the MEMORY.md index hook
 
 `save_memory` takes no file path — it writes both the entry file and its
 MEMORY.md index row. Do not create the entry file by hand: the index will not

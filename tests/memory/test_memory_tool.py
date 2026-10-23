@@ -108,7 +108,7 @@ class TestBuiltinMemoryTool:
         fn = self.tool.functions["save_memory"]
         params = fn._parse_parameters(fn.entrypoint, strict=False)["properties"]
         assert "file_path" not in params
-        assert set(params) == {"title", "content", "memory_type"}
+        assert set(params) == {"title", "content", "memory_type", "description"}
 
     def test_save_memory(self):
         """Test saving a memory entry."""
@@ -183,6 +183,63 @@ class TestBuiltinMemoryTool:
         """Test searching with no matching results."""
         result = self.tool.search_memory("nonexistent_term_xyz")
         assert "No memories found" in result
+
+    def test_save_memory_description_is_the_index_hook(self):
+        """MEMORY.md shows the description, not a repeat of the title."""
+        asyncio.run(self.tool.save_memory(
+            title="h20_services",
+            content="bge-m3 on :8011, qwen3-4b on :8039.\nRestart: restart_services.sh",
+            memory_type="reference",
+            description="H20 机器常驻服务端口与重启脚本",
+        ))
+        asyncio.run(self.tool.save_memory(
+            title="no_desc",
+            content="  bamboo API QPM is 60,\n  bursts above 10 get 429",
+            memory_type="reference",
+        ))
+        index = self.workspace._get_user_memory_md().read_text(encoding="utf-8")
+        assert "- [h20_services](memory/reference_h20_services.md) — H20 机器常驻服务端口与重启脚本" in index
+        # Without one, the opening line of content stands in.
+        assert "- [no_desc](memory/reference_no_desc.md) — bamboo API QPM is 60," in index
+
+        # SDK callers may write an empty body; the title is the last resort.
+        asyncio.run(self.workspace.write_memory_entry(title="empty_body", content=""))
+        index = self.workspace._get_user_memory_md().read_text(encoding="utf-8")
+        assert "- [empty_body](memory/project_empty_body.md) — empty_body" in index
+
+    def test_search_memory_matches_description_hook(self):
+        """A query naming the hook finds the memory even if the body never says it."""
+        asyncio.run(self.tool.save_memory(
+            title="h20_services",
+            content="bge-m3 on :8011, qwen3-4b on :8039.",
+            memory_type="reference",
+            description="重启脚本 restart_services.sh 的位置",
+        ))
+        parsed = json.loads(self.tool.search_memory("重启脚本"))
+        assert [item["title"] for item in parsed] == ["h20_services"]
+
+    def test_search_memory_ranks_curated_memory_above_conversation(self):
+        """A long archive block matching more words still ranks below a memory hit."""
+        asyncio.run(self.tool.save_memory(
+            title="gpu_rule",
+            content="Never touch gpu_occupier.py.",
+            memory_type="reference",
+            description="gpu occupier must not be killed",
+        ))
+        asyncio.run(self.workspace.write_memory_entry(
+            title="gpu_candidate",
+            content="gpu occupier runs on all 8 cards.",
+            memory_type="reference",
+            source="auto_extract",
+        ))
+        asyncio.run(self.workspace.archive_conversation(
+            [{"role": "user", "content": "gpu occupier training model killed restart " * 50}],
+            session_id="run-1",
+        ))
+        parsed = json.loads(self.tool.search_memory("gpu occupier training model killed", limit=10))
+        assert [item["source"] for item in parsed] == ["memory", "memory_candidate", "conversation"]
+        # The archive block really is the stronger raw match; tier, not score, puts it last.
+        assert parsed[2]["score"] > parsed[0]["score"]
 
     def test_search_memory_no_fallback_on_miss(self):
         """No fallback to recent memories: a true miss returns a no-match message."""
@@ -371,6 +428,52 @@ class TestMemoryExtractHooks:
         hooks = MemoryExtractHooks()
         assert isinstance(hooks._tool_calls, dict)
 
+    def test_background_extract_survives_run_stream_sync(self, tmp_path):
+        """Background extraction must finish after a sync turn closes its loop.
+
+        run_stream_sync runs each turn under its own asyncio.run; a task on
+        that loop was cancelled before reaching the LLM, so the CLI never
+        produced a single memory candidate.
+        """
+        from agentica.agent import Agent
+        from agentica.agent.config import WorkspaceMemoryConfig
+        from agentica.model.openai import OpenAIChat
+        from agentica.model.response import ModelResponseEvent
+
+        calls = []
+
+        class SlowExtractModel(OpenAIChat):
+            async def response(self, messages, **kwargs):
+                calls.append(self)
+                await asyncio.sleep(0.2)
+                return ModelResponse(content=json.dumps([
+                    {"title": "bge_port", "content": "bge-m3 serves on :8011", "type": "reference"},
+                ]))
+
+        async def main_stream(messages, **kwargs):
+            yield ModelResponse(content="a" * 300, event=ModelResponseEvent.assistant_response.value)
+
+        workspace = Workspace(str(tmp_path))
+        workspace.initialize()
+        aux = SlowExtractModel(id="aux", api_key="fake_openai_key")
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            workspace=workspace,
+            enable_long_term_memory=True,
+            long_term_memory_config=WorkspaceMemoryConfig(
+                auto_extract_memory=True, extract_every_n_turns=1, extract_min_seconds_between=0,
+            ),
+            auxiliary_task_models={"memory_extract": aux},
+        )
+        with patch.object(OpenAIChat, "response_stream", side_effect=main_stream):
+            for _ in agent.run_stream_sync("q" * 300):
+                pass
+        agent.flush_pending_sync()
+
+        assert [c["name"] for c in workspace.list_memory_candidates()] == ["bge_port"]
+        # Ran on its own copy, so the turn closing aux's client cannot kill it.
+        assert len(calls) == 1 and calls[0] is not aux
+
     def test_skips_when_save_memory_called(self):
         """Even at flush time, skip extraction when save_memory was called in the batch."""
         hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False)
@@ -511,6 +614,57 @@ class TestMemoryExtractHooks:
             agent.model.response.assert_awaited_once()
 
         asyncio.run(scenario())
+
+    def test_on_post_compact_mines_session_notes(self, tmp_path):
+        """Facts kept only in <session>.notes.md reach memory at each rollover."""
+        workspace = Workspace(str(tmp_path / "ws"))
+        workspace.initialize()
+        session_log = MagicMock()
+        session_log.path = str(tmp_path / "sess.jsonl")
+        (tmp_path / "sess.notes.md").write_text(
+            "## Env\n- bge-m3 on :8011; restart via /data/restart_services.sh\n", encoding="utf-8",
+        )
+        seen = []
+
+        class ExtractModel:
+            context_window = 128_000
+
+            async def response(self, messages):
+                seen.append(messages[0].content)
+                return ModelResponse(content=json.dumps([
+                    {"title": "bge_restart", "content": "restart via /data/restart_services.sh", "type": "reference"},
+                ]))
+
+        agent = MagicMock()
+        agent.workspace = workspace
+        agent._session_log = session_log
+        agent.long_term_memory_config.auto_extract_memory = True
+        agent.resolve_auxiliary_model.return_value = ExtractModel()
+
+        asyncio.run(MemoryExtractHooks(background=False).on_post_compact(agent=agent, messages=[]))
+
+        assert "restart_services.sh" in seen[0]
+        [cand] = workspace.list_memory_candidates()
+        assert cand["name"] == "bge_restart"
+        assert cand["evidence_refs"] == [str(tmp_path / "sess.notes.md")]
+
+        # A rollover that left the notes as they were (reactive compact, or
+        # the rewrite failed) does not mine the same text again.
+        hooks = MemoryExtractHooks(background=False)
+        asyncio.run(hooks.on_post_compact(agent=agent, messages=[]))
+        asyncio.run(hooks.on_post_compact(agent=agent, messages=[]))
+        assert len(seen) == 2
+        (tmp_path / "sess.notes.md").write_text("## Env\n- moved to :8012\n", encoding="utf-8")
+        asyncio.run(hooks.on_post_compact(agent=agent, messages=[]))
+        assert len(seen) == 3 and ":8012" in seen[2]
+
+    def test_on_post_compact_without_notes_makes_no_call(self, tmp_path):
+        agent = MagicMock()
+        agent.workspace = Workspace(str(tmp_path / "ws"))
+        agent._session_log.path = str(tmp_path / "sess.jsonl")
+        agent.long_term_memory_config.auto_extract_memory = True
+        asyncio.run(MemoryExtractHooks(background=False).on_post_compact(agent=agent, messages=[]))
+        agent.resolve_auxiliary_model.assert_not_called()
 
     def test_prefers_auxiliary_model_over_main_model(self):
         """Extraction should run on auxiliary_model when configured, not main model."""

@@ -1552,7 +1552,11 @@ class TestCompactSession:
         agent.working_memory.messages = messages
         agent.model.supports_native_compaction = False
         agent.model.id = "gpt-4o-mini"
+        # Idle session: the per-run slot is empty, the agent's own hooks
+        # (memory extraction, experience capture) are its defaults.
         agent._run_hooks = None
+        agent._default_run_hooks.on_pre_compact = AsyncMock()
+        agent._default_run_hooks.on_post_compact = AsyncMock()
         agent._session_log = None
         agent.tool_config.compression_manager.auto_compact = AsyncMock(return_value=True)
         agent.get_messages_for_notes = AsyncMock(return_value=messages)
@@ -1571,6 +1575,8 @@ class TestCompactSession:
         assert result["messages_before"] == 3
         agent.working_memory.collapse_runs.assert_called_once()
         agent.tool_config.compression_manager.auto_compact.assert_awaited_once()
+        agent._default_run_hooks.on_pre_compact.assert_awaited_once()
+        agent._default_run_hooks.on_post_compact.assert_awaited_once()
 
     def test_compact_refused_when_session_locked(self, tmp_path):
         agent = MagicMock()

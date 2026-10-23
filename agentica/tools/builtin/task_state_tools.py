@@ -166,6 +166,7 @@ class BuiltinMemoryTool(Tool):
     DEFAULT_MAX_SEARCH_CHARS: int = 6000
     DEFAULT_CONVERSATION_DAYS: int = 7
     MIN_SEARCH_SCORE: float = 0.1
+    _SOURCE_RANK: Dict[str, int] = {"memory": 0, "memory_candidate": 1, "conversation": 2}
 
     def __init__(self):
         super().__init__(name="builtin_memory_tool")
@@ -210,8 +211,14 @@ class BuiltinMemoryTool(Tool):
         title: str,
         content: str,
         memory_type: str = "project",
+        description: str = "",
     ) -> str:
-        """Save important information to long-term memory for future sessions."""
+        """Save important information to long-term memory for future sessions.
+
+        description: one line saying when this memory is relevant, with the
+        keywords a later search would use. It is the MEMORY.md index hook;
+        omit it and the first line of content is used.
+        """
         if self._workspace is None:
             raise RuntimeError("No workspace configured. Memory cannot be saved.")
 
@@ -230,7 +237,7 @@ class BuiltinMemoryTool(Tool):
             title=title.strip(),
             content=content.strip(),
             memory_type=memory_type,
-            description=title.strip(),
+            description=description.strip(),
         )
 
         logger.debug(f"Memory saved: {title} -> {filepath}")
@@ -266,19 +273,30 @@ class BuiltinMemoryTool(Tool):
         conversation_days = max(1, int(conversation_days))
 
         query_lower = query.lower().strip()
-        scored: List[Tuple[float, float, Dict]] = []
+        scored: List[Tuple[int, float, float, Dict]] = []
         for mtime, entry in self._collect_searchable_memory_entries(conversation_days):
-            score = self._workspace.compute_relevance_score(query_lower, entry["content"].lower())
+            # Title and hook are the curated summary of a memory file, so they
+            # are scored on their own and the stronger of the two matches wins:
+            # a long body or conversation block cannot outscore a hook that
+            # names exactly what was asked.
+            score = max(
+                self._workspace.compute_relevance_score(query_lower, entry["content"].lower()),
+                self._workspace.compute_relevance_score(
+                    query_lower, f"{entry['title']} {entry['description']}".lower(),
+                ),
+            )
             if score >= self.MIN_SEARCH_SCORE:
                 entry = {**entry, "score": round(score, 4)}
-                scored.append((score, mtime, entry))
+                scored.append((self._SOURCE_RANK[entry["source"]], score, mtime, entry))
 
         if not scored:
             return f"No memories found matching '{query}'"
 
-        scored.sort(key=lambda item: (-item[0], -item[1]))
+        # Curated memory first, then quarantined candidates, then raw
+        # conversation archive; relevance orders within each tier.
+        scored.sort(key=lambda item: (item[0], -item[1], -item[2]))
         return json.dumps(
-            self._limit_search_results([entry for _, _, entry in scored], limit=limit, max_chars=max_chars),
+            self._limit_search_results([entry for *_, entry in scored], limit=limit, max_chars=max_chars),
             ensure_ascii=False,
             indent=2,
         )
@@ -330,6 +348,7 @@ class BuiltinMemoryTool(Tool):
             "file_path": str(file_path.relative_to(self._workspace.path)),
             "source": source,
             "title": extract_frontmatter_value(raw_content, "name") or file_path.stem,
+            "description": extract_frontmatter_value(raw_content, "description") or "",
             "memory_type": extract_frontmatter_value(raw_content, "type") or "",
             "memory_source": extract_frontmatter_value(raw_content, "source") or "",
             "evidence_refs": extract_frontmatter_list(raw_content, "evidence_refs"),
@@ -374,6 +393,7 @@ class BuiltinMemoryTool(Tool):
                 "file_path": rel_path,
                 "source": "conversation",
                 "title": file_path.stem,
+                "description": "",
                 "memory_type": "conversation",
                 "memory_source": "conversation_archive",
                 "evidence_refs": [f"{rel_path}#block={block_index}"],
