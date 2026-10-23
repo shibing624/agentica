@@ -139,7 +139,7 @@ Model Response
 
 ## 上下文压缩机制
 
-让一个超窗口的请求装下只有两种办法，按代价从低到高尝试。两层都不调 LLM 做摘要——信息离开 prompt 但不离开磁盘，全文始终可从 session JSONL / 落盘文件回取，这是 Agentica 压缩「无损」的含义（见 [无损压缩](../advanced/compression.md#为什么叫无损)）：
+让一个超窗口的请求装下只有两种办法，按代价从低到高尝试。换窗不把历史概括成假摘要——离开 prompt 的内容仍在 session JSONL / 落盘文件里，这是 Agentica 压缩「无损」的含义（见 [无损压缩](../advanced/compression.md#为什么叫无损)）。有 session log 的自动换窗和 `/compact` 会先用主模型重写 notes，这次请求读缓存，不替换历史：
 
 ```
 Layer 1 淘汰（免费，无 LLM）:
@@ -148,10 +148,11 @@ Layer 1 淘汰（免费，无 LLM）:
     同时收缩过大的 tool_call 参数字符串（JSON 仍然合法）
     降回 context_window × 0.5 就停；模型还没看过的当前批次永不淘汰
 
-Layer 2 换窗（免费，无 LLM）:
-    淘汰兜不住时才走这层
-    活动窗 → <context_window> + session notes 摘录
-    auto / /compact 保留 system prompt 和正在问的尾巴
+Layer 2 换窗:
+    淘汰兜不住时才走这层。触发水位按 provider 实测校准后的 token 数
+    活动窗 → <context_window> + <session_notes> + <dropped_span>
+    auto / /compact：先用主模型重写 notes，再保留 system prompt 和正在问的尾巴
+    prompt_too_long 与跨 provider fallback 前的换窗不重写 notes
     空 summary 的 compact_boundary 写入 Session Log，恢复时不合成假摘要轮
     旧轮次用 search_session 从 JSONL 取回
 ```
@@ -190,7 +191,7 @@ Layer 2 换窗（免费，无 LLM）:
 ~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
 ```
 
-jsonl 是对话档案（`search_session` 的主库）。notes 是模型手写的 standing state，不是第二份 log。切窗时已有 notes 注入 `<session_notes>`；仍空只注入 `<dropped_span>`，不把 skim 写进 notes.md。
+jsonl 是对话档案（`search_session` 的主库）。notes 是 harness 在换窗前用主模型重写的 standing state，不是第二份 log，也不是模型自己记得去写的文件。每次换窗同时注入 `<session_notes>` 和 `<dropped_span>`；skim 不写进 notes.md。没有 session log 时不发 notes 请求。
 
 同一份文件的三个出口：Web `/traces`、CLI `/trace` / `/export`、SDK `agent.session_log.analyze()` / `.export()`。`type=event` 行只给观测，`load()` 不回放它们。
 

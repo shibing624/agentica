@@ -44,15 +44,15 @@ A terminal session *is* a collaborator. In-process `task` spawns a cheap read-on
 
 What a session learned is compiled into a reusable `SKILL.md`, so the next run of a similar task starts from last time's conclusion instead of from scratch. See the [Skills docs](https://shibing624.github.io/agentica/advanced/skills).
 
-### 4. 🧠 Long sessions never lose the thread: compaction without an LLM
+### 4. 🧠 Long sessions never lose the thread: a new window does not delete the transcript
 
-The industry-standard compact asks an LLM to summarise the transcript — an extra call, lossy, and whatever got summarised away is gone for good. Agentica's compaction path uses **no LLM summary at all**:
+The industry-standard compact asks an LLM to summarise the transcript and then replaces history with that summary — whatever got summarised away is gone for good. Agentica's window cut **does not replace history**:
 
 - **Oversized tool output spills to disk the moment it is produced** — the context keeps a 2000-char preview (40% head + 60% tail) plus the file path, and the model reads the path back when it needs the detail; when the session has no file-reading tool, the output is truncated honestly instead of handing out a path nobody can open
-- **Eviction only under pressure** — nothing moves below 80% window occupancy, then oldest-first eviction down to 50%; the placeholder names the evicted call so the model can re-issue it verbatim. The live tool round (in-flight calls + the trailing result batch) is never touched
-- **A full window opens a fresh one** — `<context_window>` plus handover notes, with no synthetic summary turn
+- **Eviction only under pressure** — nothing moves below 80% window occupancy, then oldest-first eviction down to 50%; the placeholder names the evicted call so the model can re-issue it verbatim. The live tool round (in-flight calls + the trailing result batch) is never touched. Thresholds are scaled by the provider-reported prompt size, so a low local estimate cannot skip eviction forever
+- **A full window opens a fresh one** — `<context_window>` and no synthetic summary turn. When a session log exists, the harness rewrites `<session>.notes.md` with the main model first (the request reads the prompt cache and only writes the notes); if that fails, `<dropped_span>` carries the handover
 
-The transcript always stays in the session JSONL, retrievable any time via `search_session`. The result: **long sessions keep their memory, compaction costs no extra tokens, and every compaction point is auditable.** See the [compression docs](https://shibing624.github.io/agentica/advanced/compression).
+The transcript always stays in the session JSONL, retrievable any time via `search_session`. History replays the whole window by default (`num_history_turns` defaults to `None`) instead of the last 20 turns. See the [compression docs](https://shibing624.github.io/agentica/advanced/compression).
 
 ### 5. 📱 You can leave the desk
 
@@ -243,7 +243,7 @@ agent = DeepAgent()
 **Memory & evolution**
 
 - **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense; standing rules live in `AGENTS.md`
-- **Lossless context compression** — No LLM summary anywhere: oversized tool output spills to disk on production, eviction starts only past 80% window occupancy, a full window opens an empty one. The transcript stays in the session JSONL, retrievable via `search_session`; handover goes in `<session>.notes.md`
+- **Lossless context compression** — A window cut does not replace history with a summary: oversized tool output spills to disk on production, eviction starts only past 80% window occupancy, a full window opens an empty one. The transcript stays in the session JSONL, retrievable via `search_session`. When a session log exists, the harness rewrites `<session>.notes.md` with the main model before the cut
 - **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
 - **Self-Evolution** — Experience cards auto-compile into reusable `SKILL.md` across sessions
 

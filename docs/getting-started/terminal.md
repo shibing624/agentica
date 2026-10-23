@@ -393,9 +393,9 @@ settings:
 ```
 
 !!! tip "自动压缩"
-    占用升高时会先做免费的 Layer 1 淘汰（80% 起）；接近窗口上限时再跑 Layer 2
-    换窗。`/compact` 始终强制换窗。旧轮次留在 JSONL，用 `search_session` 查。
-    目标 / 约束 / 进度写到旁边的 `<session>.notes.md`。多余参数不再当摘要指令。
+    占用升高时会先做免费的 Layer 1 淘汰（80% 起，按 provider 实测校准）；接近窗口上限时再跑 Layer 2
+    换窗。`/compact` 始终强制换窗，并先用主模型重写 `<session>.notes.md`。
+    旧轮次留在 JSONL，用 `search_session` 查。多余参数不再当摘要指令。
 
 ### `/new`
 开启全新会话（清除消息历史，保留模型和工具配置）。切换前会显示当前会话的

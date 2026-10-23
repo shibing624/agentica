@@ -26,15 +26,17 @@ _SEARCH_QUERY_DESC = (
     "A Chinese question is also split into overlapping bigrams: 工单号 matches "
     "工单 ZX-41827. Prefer distinctive tokens — ticket ids, file paths, numbers. "
     "Generic words (the, dump, 什么) are ignored. Hits are ranked by relevance; "
-    "equal scores prefer later turns. Also searches model-authored "
+    "equal scores prefer later turns. Also searches the current "
     "<session>.notes.md (standing state, not a transcript copy). "
+    "A rewrite replaces that file; the previous notes are not searchable. "
     "Every result includes the newest user questions (up to 20, truncated, "
     "with timestamps). Empty query returns only that index."
 )
 
 _SEARCH_ROLE_DESC = (
     "Restrict keyword hits to this role. Omit to search user, assistant, "
-    "and tool. Does not change the user-question index."
+    "and tool. Pass tool for earlier tool-call results, then uuid for that "
+    "entry's full text. Does not change the user-question index."
 )
 
 _SEARCH_LIMIT_DESC = (
@@ -147,8 +149,10 @@ class BuiltinContextTool(Tool):
         query: literal substring, plus CJK bigrams so 工单号 matches 工单 ZX-41827.
         Prefer ticket ids, paths, numbers. Hits ranked by relevance.
         Every result includes the newest user questions (up to 20, truncated).
-        Also searches the session notes file. Empty query returns only the index.
-        role: restrict keyword hits to user | assistant | tool.
+        Also searches the current session notes file. A rewrite replaces it;
+        the previous notes are not searchable. Empty query returns only the index.
+        role: user | assistant | tool. Pass tool for earlier tool results,
+        then uuid for the full entry.
         limit: max keyword hits 1-20.
         uuid: full text of one entry, by the [8-char] prefix shown on a hit.
         """

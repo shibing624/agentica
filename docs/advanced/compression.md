@@ -1,18 +1,22 @@
 # Context Compression
 
-Agentica 提供两层上下文压缩策略，防止长对话或大量工具输出导致 token 超限。Layer 2 对齐 Codex TokenBudget compact：满窗时换一个空的活动窗，**不再**调用 LLM 或 `/responses/compact` 做摘要。旧对话留在 session JSONL，用 `search_session` 查。
+Agentica 把超窗请求收回来只做两件事，按代价从低到高：先免费淘汰旧工具结果（Layer 1），兜不住再换一个空的活动窗（Layer 2）。换窗**不**把前文概括成一条假摘要，也不调用 `/responses/compact`。旧对话留在 session JSONL，用 `search_session` 查。
+
+`add_history_to_context=True` 且未设置 `num_history_turns` 时，重放当前窗口里的全部轮次（默认 `None`，不再截成最近 20 轮；旧 tool 结果也不再每轮截成 2000 字符）。窗口涨到下面两层的水位才回收。
+
+有 session log 时，自动换窗和 `/compact` 之前，harness 用**主模型**重写旁边的 `<session>.notes.md`（goals / constraints / IDs / decisions）。这是一次读缓存的请求，不是用摘要替换历史：全文仍在 JSONL。请求失败就保持旧文件，靠 `<dropped_span>` 交接，换窗照常发生。没有 session log 的 SDK agent 不发这次请求。`prompt_too_long` 之后的 reactive 换窗、以及跨 provider fallback 之前的换窗，也不发——同一份 prompt 会再被拒，或窗口里还带着失败 provider 的 checkpoint。
 
 ## 为什么叫「无损」
 
-业界主流的 compact 是让 LLM 把前文概括成摘要：花一次额外调用、结果有损，且被概括掉的细节再也拿不回来。Agentica 的压缩路径上**没有任何一步调用 LLM 做摘要**（`tests/compression/test_compression.py::test_new_window_does_not_call_an_llm` 钉住这条不变量），信息只是离开 prompt，不离开磁盘：
+业界主流的 compact 是让 LLM 把前文概括成摘要，再用这条摘要替换历史：被概括掉的细节从 prompt 和磁盘一起消失。Agentica 的换窗不替换历史。离开 prompt 的内容仍在磁盘上：
 
 | 离开 prompt 的东西 | 去哪了 | 怎么拿回来 |
 |---|---|---|
 | 超大单条 tool 结果（Layer 0） | `~/.agentica/projects/<user>/<project>/<session>/tool-results/<id>.txt` | 上下文里留了路径，`read_file` 直接读 |
 | 旧轮次的 tool 结果 / 超长调用参数（Layer 1） | 不额外落盘（原文仍在 session JSONL） | 占位符写明是哪个调用，模型原样重发；取回成本与重跑相同，而文件读取的原路径比快照更新鲜 |
-| 活动窗里的旧轮次（Layer 2） | 留在 session JSONL 的 `compact_boundary` 之前 | `search_session` 按词检索；交接摘要在 `<session>.notes.md` |
+| 活动窗里的旧轮次（Layer 2） | 留在 session JSONL 的 `compact_boundary` 之前 | `search_session` 按词检索；standing state 在 `<session>.notes.md` |
 
-所以「无损」指的是**全文始终可回取、且压缩本身不花 token**，不是「prompt 里什么都不丢」——prompt 一定会瘦，否则就没有压缩。
+所以「无损」指的是**全文始终可回取**，不是「prompt 里什么都不丢」，也不是「压缩完全不调用模型」。有 session log 的自动换窗和 `/compact` 会多一次 notes 请求：前缀与上一轮相同，因此读的是 prompt cache，只新写末尾那条指令和 notes 正文。Layer 1 淘汰本身不调用模型。
 
 ## 两层设计
 
@@ -21,7 +25,7 @@ Agentica 提供两层上下文压缩策略，防止长对话或大量工具输�
 | 层 | 做什么 | 代价 | 可逆性 |
 |----|--------|------|--------|
 | Layer 1 淘汰 | 把更早回合的工具结果换成占位符；超长 tool_call 参数换成 JSON 对象 `{"$evicted": N}`（不是一段可当正文的字符串）。**正在跑的那一轮（未返回的调用 + 末批 result）不动**，含 SDK / CLI / Web 自定义工具 | 免费，无 LLM | 参数还在时可重发；payload 已丢掉则不可恢复 |
-| Layer 2 换窗 | 丢掉活动窗里的旧轮次，装上 `<context_window>` + session notes 摘录 | 一次缓存命中的请求（写 notes） | 原文在 JSONL，不在 prompt 里 |
+| Layer 2 换窗 | 丢掉活动窗里的旧轮次，装上 `<context_window>`、`<session_notes>` 和 `<dropped_span>` | 有 session log 的自动换窗 / `/compact`：一次读缓存的 notes 请求。reactive 与跨 provider fallback 前的换窗不发这次请求 | 原文在 JSONL，不在 prompt 里 |
 
 在这两层之前还有一个 **Layer 0**，它不是压缩而是工具输出策略：单条结果超过阈值时在产生的那一刻就落盘，从不以全量进入上下文。
 
@@ -38,11 +42,17 @@ Context Messages
 [Layer 1 淘汰] -- 窗口紧时免费收缩 tool result / 超长参数
     |
     v
-[Layer 2 换窗] -- 空摘要 compact_boundary；同一 session_id
+[Layer 2 换窗] -- 空窗 + notes；同一 session_id
     |
-    +--> auto / /compact：保留 system + 正在问的尾巴
-    +--> prompt-too-long: 强制换窗后再重试
+    +--> auto / /compact：先重写 notes，再保留 system + 正在问的尾巴
+    +--> prompt-too-long / 跨 provider fallback：不重写 notes，强制换窗
 ```
+
+### 水位按 provider 实测校准
+
+各层比较的是本地 `count_tokens`（tiktoken 估算）。估算看不到 provider 另外计入的部分，例如 OpenAI Responses 回放的加密 reasoning：同一个请求本地估约 640K，网关可以计到 1M，于是 80% 淘汰和 95% 换窗都不触发，最后直接被拒。
+
+adapter 把 provider 报告的整段 prompt 大小（fresh + cache read + cache write）写入 `Message.metrics["context_tokens"]`。`ContextCalibration` 用它和同一次请求的本地估算求比例，之后的估算都乘上这个比例。比例只会往上调（`max(1, 实测/估算)`）：本地估高了保持现状，最多早一点压缩。比例存在当前 Model 上，`/model` 换模型后从 1.0 重新开始。evict 仍按本地 tokenizer 计算能省多少，对应的窗口按同一比例缩小。
 
 ### Layer 1：淘汰（`agentica.compression.evict`）
 
@@ -87,8 +97,8 @@ Context Messages
 ~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>.notes.md
 ```
 
-- `search_session` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词打在 `strip_window_preamble` 之后的正文上：油表 / `<dropped_span>` 不是命中，折在 preamble 后面的那句 user 问题还在。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断、带 JSONL 时间戳）。空 query 只返回这份索引。不要扫 JSONL。不提供 `read_session_item`
-- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），不是第二份 transcript；**由 harness 在每次换窗前自动重写**，不需要模型自己记得写、也不需要用户知道文件在哪。实现是 `agentica/compression/notes_author.py`：切窗之前，用**主模型**、**同一份 messages**（system 前缀、正文、tools、`tool_choice`、thinking 配置全部照旧，只在末尾追加一条指令）发一次请求——因此这次请求读的是已经缓存的前缀，只新写末尾那条指令和输出，Venus Anthropic 接口实测一次 `/compact`：`cache_read=3715`、新写缓存 639（上一轮的回答加这条指令）、输出 207 token。这次请求里 `run_tools=False`，模型即使想调工具也不会执行，只取回复正文；回复即整份新文件，经临时文件 + `os.replace` 原子替换，避免半个文件被后续每个窗口注入。请求失败、被内容过滤或返回空时，文件保持原样，仅靠 `<dropped_span>` 交接，换窗不因此卡住。旧的实现是「触及 Layer 2 阈值时注入 fallback 催写并推迟约 4% 窗口」，已删除：催写可能撞上工具循环发不出去，模型也可能不写，`<session_notes>` 与 `<dropped_span>` 现在每次换窗都同时注入。`search_session` 搜 JSONL，旁边的 notes 文件也会被搜到
+- `search_session` — 查整份 JSONL，**包括**每一条 `compact_boundary` 之前。关键词打在 `strip_window_preamble` 之后的正文上：油表 / `<dropped_span>` 不是命中，折在 preamble 后面的那句 user 问题还在。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果都附带最近用户问题（倒序最多 20 条、截断、带 JSONL 时间戳）。空 query 只返回这份索引。旧工具结果用 `role="tool"`，再用命中的 `[uuid]` 取全文。不要扫 JSONL。不提供 `read_session_item`
+- `<session-id>.notes.md` 是 **standing state**（goals / constraints / IDs / decisions），不是第二份 transcript；**由 harness 在每次换窗前自动重写**，不需要模型自己记得写、也不需要用户知道文件在哪。实现是 `agentica/compression/notes_author.py`：切窗之前，用**主模型**、**同一份 messages**（system 前缀、正文、tools、`tool_choice`、thinking 配置全部照旧，只在末尾追加一条指令）发一次请求——因此这次请求读的是已经缓存的前缀，只新写末尾那条指令和输出，Venus Anthropic 接口实测一次 `/compact`：`cache_read=3715`、新写缓存 639（上一轮的回答加这条指令）、输出 207 token。这次请求里 `run_tools=False`，模型即使想调工具也不会执行，只取回复正文；回复即整份新文件，经临时文件 + `os.replace` 原子替换，避免半个文件被后续每个窗口注入。请求失败、被内容过滤或返回空时，文件保持原样，仅靠 `<dropped_span>` 交接，换窗不因此卡住。旧的实现是「触及 Layer 2 阈值时注入 fallback 催写并推迟约 4% 窗口」，已删除：催写可能撞上工具循环发不出去，模型也可能不写，`<session_notes>` 与 `<dropped_span>` 现在每次换窗都同时注入。`search_session` 搜 JSONL，也搜当前这份 notes；重写替换后的上一份不在索引里
 
 油表是 `<context_window>` user 片段：新窗写满窗身份，`window_id > 1` 且**有 session log** 时另加一行「本窗跟在一次 context reset 之后、更早的轮次不在这里」（对齐 Codex `#29256` 的 `Previous context window id`；第 1 个窗不写，无 log 时也不写——那时 `search_session` 只会回「No session log on this agent」，与「只提做得到的事」同一条规则）；剩余 token 降到工作窗口的 25% 时每窗提醒一次。不写进冻结的 system 前缀。
 
@@ -212,9 +222,9 @@ class CompactionTracker(RunHooks):
 
 `CompressionManager.auto_compact` 在以下条件触发：
 
-1. 当前 token 数达到 `min(compact_token_limit or ∞, int(window × 0.95))`；换窗前先用主模型重写 session notes（一次缓存命中的请求），失败则只用 skim
-2. 用户执行 `/compact`（始终强制换窗；多余参数不再当摘要指令）
-3. provider 返回 `prompt_too_long` 之后的 reactive 换窗
+1. 校准后的 token 数达到 `min(compact_token_limit or ∞, int(window × 0.95))`。有 session log 时换窗前先用主模型重写 session notes（一次读缓存的请求），失败则只用 skim
+2. 用户执行 `/compact`（始终强制换窗，同样先重写 notes；多余参数不再当摘要指令）
+3. provider 返回 `prompt_too_long` 之后的 reactive 换窗，以及跨 provider fallback 之前的换窗：这两条不重写 notes
 
 本地换窗几乎不会失败；失败则对话不变。
 

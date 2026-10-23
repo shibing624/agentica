@@ -107,7 +107,7 @@ print(agent.run_sync("Research RAG 最新进展并写到 report.md").content)
 | 参数 | 何时该开 | 默认 |
 |---|---|---|
 | `add_history_to_context` | 多轮对话场景 | `False` |
-| `num_history_turns` | 上下文窗口预算紧时调小 | `3` |
+| `num_history_turns` | 上下文窗口预算紧时调小 | `None`（重放当前窗口全部轮次） |
 | `enable_long_term_memory` | 需要跨会话记忆/归档时 | `False` |
 | `workspace` | 需要长期记忆/skill/AGENTS.md 时 | `None` |
 | `session_id` | 需要落盘 jsonl 会话日志时 | `None`（不落盘） |
@@ -409,7 +409,7 @@ agent = Agent(
 
 ## 历史消息定制
 
-`Agent` 默认把最近 N 轮历史原样塞进 prompt（`num_history_turns`）。长会话场景下这会很快撑爆 context，常见痛点：
+`Agent` 默认把当前窗口里的全部历史放进 prompt（`num_history_turns=None`）。需要硬上限时再传整数。长会话仍会涨到压缩水位，常见痛点：
 
 - 搜索 / fetch_url 等工具的结果几 KB 起步，后续轮次根本用不上但还在烧 token
 - AI 上一轮回复啰嗦了 2000 字，下一轮其实只需要结论
@@ -589,7 +589,7 @@ from agentica.agent.config import ToolConfig
 agent = Agent(
     tool_config=ToolConfig(
         enable_evict=True,           # Layer 1, default on
-        enable_auto_compact=True,    # Layer 2 空窗换窗，默认开
+        enable_auto_compact=True,    # Layer 2 空窗换窗，默认开；有 session log 时先重写 notes
         compression_manager=CompressionManager(
             compact_token_limit=50000,
         ),

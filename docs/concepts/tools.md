@@ -327,7 +327,7 @@ tools = get_builtin_tools(work_dir="./")
 | `task` | `BuiltinTaskTool` | 同进程启动子 Agent（subagent，默认 auxiliary、偏只读） |
 | `delegate` | `BuiltinDelegateTool` | **交互 CLI 专用**：另起完整 `agentica --query --print` 进程；不阻塞，经 `/ps`/`wait`/`/stop` 托管 |
 | `list_agents` / `send_message` | `PeerMessagingTool` | **交互 CLI 专用**：跨终端对等会话发现与纯文本消息 |
-| `search_session` | `BuiltinContextTool` | 搜本会话 JSONL（含最近一条 `compact_boundary` **之前**），以及模型手写的 `<session>.notes.md`（standing state，不是 log 副本）。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果附带最近用户问题（倒序最多 20 条、带时间戳、截断） |
+| `search_session` | `BuiltinContextTool` | 搜本会话 JSONL（含最近一条 `compact_boundary` **之前**），以及**当前** `<session>.notes.md`。重写替换后的上一份 notes 不在索引里。旧工具结果用 `role="tool"`，再用命中的 `[uuid]` 取全文。`query` 先当字面子串，中文问法再叠字（`工单号` 能命中 `工单 ZX-41827`），按相关度排序。每次结果附带最近用户问题（倒序最多 20 条、带时间戳、截断）。不搜跨会话记忆（那是 `search_memory`） |
 
 #### `task` vs `delegate` vs peer
 

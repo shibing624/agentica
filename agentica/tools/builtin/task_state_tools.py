@@ -253,6 +253,8 @@ class BuiltinMemoryTool(Tool):
         JSON of the top matches, capped by `limit` and total `max_chars`. The
         aggregated ``MEMORY.md`` is excluded because the index is already
         injected into the system prompt (title + hook + path).
+        Does not search this session's JSONL or its notes file; use
+        search_session for those.
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")

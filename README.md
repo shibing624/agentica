@@ -44,15 +44,15 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 跑完的经验自动编译成可跨会话复用的 `SKILL.md`；下次遇到同类任务，agent 读的是自己上次的结论，不是从零开始。流程见 [Skills 文档](https://shibing624.github.io/agentica/advanced/skills)。
 
-### 4. 🧠 长会话不失忆：压缩不调 LLM，全文可回取
+### 4. 🧠 长会话不失忆：换窗不丢原文
 
-业界主流的 compact 是让 LLM 把前文概括成摘要——花一次额外调用、有损，而且被概括掉的细节再也拿不回来。Agentica 的压缩路径**全程零 LLM 摘要**：
+业界主流的 compact 是让 LLM 把前文概括成摘要，再用这条摘要替换历史——被概括掉的细节再也拿不回来。Agentica 的换窗**不替换历史**：
 
 - **超大工具输出产生即落盘** — 上下文里只留 2000 字预览（40% 头 + 60% 尾）加一个文件路径，模型要细节自己 `read_file` 取回；会话本身没有读文件能力时就老实截断并说明，绝不发一个没人打得开的路径
-- **窗口吃紧才淘汰** — 占用超过窗口 80% 才动手，最旧优先淘汰回 50%；占位符写明被淘汰的是哪个调用，模型可以原样重发。正在跑的那一轮（未返回的调用 + 末批结果）永不触碰
-- **真满窗才换窗** — 装上 `<context_window>` 和交接 notes 开一个空活动窗，不合成假摘要轮
+- **窗口吃紧才淘汰** — 占用超过窗口 80% 才动手，最旧优先淘汰回 50%；占位符写明被淘汰的是哪个调用，模型可以原样重发。正在跑的那一轮（未返回的调用 + 末批结果）永不触碰。水位按 provider 实测的 prompt 大小校准，本地估算偏低时不会一直不触发
+- **真满窗才换窗** — 装上 `<context_window>` 开一个空活动窗，不合成假摘要轮。有 session log 时，换窗前用主模型重写 `<session>.notes.md`（读缓存，只新写 notes）；失败就靠 `<dropped_span>` 交接
 
-原文始终留在 session JSONL 里，`search_session` 随时按词取回。结果：**长会话不失忆、不为压缩额外付 token、每个压缩点都可回溯。** 细节见 [压缩文档](https://shibing624.github.io/agentica/advanced/compression)。
+原文始终留在 session JSONL 里，`search_session` 随时按词取回。历史默认重放整个窗口（`num_history_turns` 默认 `None`），不再先截成最近 20 轮。细节见 [压缩文档](https://shibing624.github.io/agentica/advanced/compression)。
 
 ### 5. 📱 人可以离开现场
 
@@ -234,7 +234,7 @@ agent = DeepAgent()
 **记忆与进化**
 
 - **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御；常驻规则写在 `AGENTS.md`
-- **无损上下文压缩** — 全程零 LLM 摘要：超大 tool 输出产生即落盘、窗口超 80% 才淘汰最旧结果、满窗换空窗；原文留在 session JSONL，`search_session` 随时取回，交接写 `<session>.notes.md`
+- **无损上下文压缩** — 换窗不把历史概括成假摘要：超大 tool 输出产生即落盘、窗口超 80% 才淘汰最旧结果、满窗换空窗；原文留在 session JSONL，`search_session` 随时取回。有 session log 时换窗前用主模型重写 `<session>.notes.md`
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
 - **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`
 

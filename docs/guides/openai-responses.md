@@ -51,7 +51,7 @@ model = OpenAIResponses(
 
 ## 上下文压缩
 
-Layer 2 不再调用 `/responses/compact`。满窗、`/compact` 和 `prompt_too_long` 都走本地空窗换窗，见 [Context Compression](../advanced/compression.md)。
+Layer 2 不再调用 `/responses/compact`。满窗和 `/compact` 走本地空窗换窗，有 session log 时先用主模型重写 notes；`prompt_too_long` 的 reactive 换窗不重写 notes。见 [Context Compression](../advanced/compression.md)。
 
 `OpenAIResponses.compact_context()` 仍在模型适配器上，但 runner 不再把它当作压缩路径。跨 provider fallback 若遇到旧会话里的 opaque checkpoint，会先换成 portable transcript 再继续。
 
@@ -110,7 +110,7 @@ profiles:
       max_tokens: 4096
 ```
 
-这样主对话使用较高推理强度，资料搜索和默认 Subagent 等辅助任务使用单独模型。Layer 2 compact 不再走 auxiliary。Subagent 的 `model_tier` 配置见 [Subagent 文档](../multi-agent/subagent.md)。
+这样主对话使用较高推理强度，资料搜索和默认 Subagent 等辅助任务使用单独模型。换窗 notes 走主模型，不走 auxiliary。Subagent 的 `model_tier` 配置见 [Subagent 文档](../multi-agent/subagent.md)。
 
 ## Chat Completions 还是 Responses
 

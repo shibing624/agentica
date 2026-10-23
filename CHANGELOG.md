@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### changes
+- **`search_session` / `search_memory` 的工具说明补上检索边界**：`search_session` 写明旧工具结果用 `role="tool"` 再按命中的 `[uuid]` 取全文，notes 命中只是当前文件，重写后的上一份不在索引里。`search_memory` 写明不搜本会话 JSONL 和 notes。`<context_window>` 未加长。
+
 ## [1.5.0] - 2026-10-22
 
 #### breaking
