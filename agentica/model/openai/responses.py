@@ -16,7 +16,7 @@ from agentica.model.base import Model, NativeCompactionResult
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.openai.chat import OpenAIChat
-from agentica.model.response import ModelResponse
+from agentica.model.response import ModelResponse, StreamEndedError
 from agentica.model.stream_retry import stream_with_retry
 from agentica.utils.tokens import count_schema_tokens, count_text_tokens, count_tool_tokens
 
@@ -634,7 +634,7 @@ class OpenAIResponses(OpenAIChat):
         metrics.response_timer.stop()
 
         if final_response is None:
-            raise RuntimeError("Responses API stream ended without a terminal response event.")
+            raise StreamEndedError("Responses API stream ended without a terminal response event.")
         self._raise_failed_response(final_response)
 
         final_content = self._output_text(final_response.output).lstrip("\n")

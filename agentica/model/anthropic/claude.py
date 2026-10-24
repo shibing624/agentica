@@ -27,7 +27,7 @@ from agentica.model.anthropic._max_tokens import (
     resolve_anthropic_messages_max_tokens,
     parse_available_output_tokens_from_error,
 )
-from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
+from agentica.tools.base import FunctionCall, get_function_call_for_tool_call, unknown_tool_error
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
@@ -1102,7 +1102,10 @@ class Claude(Model):
             for tool_call in assistant_message.tool_calls:
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
-                    messages.append(self.refused_tool_result(tool_call, "Could not find function to call."))
+                    messages.append(self.refused_tool_result(
+                        tool_call,
+                        unknown_tool_error(tool_call["function"]["name"], self.functions),
+                    ))
                     continue
                 if _function_call.error is not None:
                     messages.append(self.refused_tool_result(tool_call, _function_call.error))

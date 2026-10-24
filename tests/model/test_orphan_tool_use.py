@@ -622,7 +622,9 @@ class TestClaudeRefusedToolCallAnswersItsId(unittest.TestCase):
         ])
         self.assertEqual([m["role"] for m in second], ["user", "assistant", "user"])
         results = {b["tool_use_id"]: b for b in second[2]["content"]}
-        self.assertEqual(results["toolu_unknown"]["content"], "Could not find function to call.")
+        refused = results["toolu_unknown"]["content"]
+        self.assertIn("no_such_tool", refused)
+        self.assertIn("echo", refused)
         self.assertTrue(results["toolu_unknown"]["is_error"])
         self.assertEqual(results["toolu_echo"]["content"], "echo:hi")
 

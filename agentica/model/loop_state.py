@@ -114,6 +114,7 @@ class LoopState:
         default=(
             "prompt_too_long", "context_length_exceeded",
             "maximum context", "too many tokens", "413",
+            "exceeds the context",
         ),
         repr=False,
     )

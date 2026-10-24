@@ -87,7 +87,9 @@ class TestModelParseToolCalls(unittest.TestCase):
         # Error message should have been appended
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].role, "tool")
-        self.assertIn("Could not find", messages[0].content)
+        self.assertIn("unknown_fn", messages[0].content)
+        self.assertIn("No tool named", messages[0].content)
+        self.assertIn("not run", messages[0].content)
 
     def test_format_tool_results_default(self):
         """Default format_tool_results extends messages."""

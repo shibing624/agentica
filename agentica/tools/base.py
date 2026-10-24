@@ -98,7 +98,24 @@ class StopAgentRun(ToolCallException):
         )
 
 
-def _format_tool_error(tool_name: str, exc: Exception) -> str:
+def unknown_tool_error(name: str, functions: Optional[Dict[str, "Function"]]) -> str:
+    """Tool result for a call to a tool that does not exist here.
+
+    Names the rejected call and the real tools, so a model reaching for a name
+    from another harness (``Bash``, ``ToolSearch``) can correct itself instead
+    of repeating the call.
+    """
+    names = list(functions or {})
+    message = f"No tool named {name!r} exists; the call was not run."
+    if names:
+        listed = ", ".join(names[:30])
+        if len(names) > 30:
+            listed += f", ... ({len(names) - 30} more)"
+        message += f" Available tools: {listed}."
+    return message
+
+
+def _format_tool_error(function: "Function", exc: Exception) -> str:
     """Render a tool execution error as a single human-readable line.
 
     The CLI surfaces this string to the end user (and the model also sees it
@@ -106,12 +123,22 @@ def _format_tool_error(tool_name: str, exc: Exception) -> str:
     pydantic ``ValidationError`` — extract just the offending field + reason
     instead of dumping the multi-line pydantic banner with a ``errors.pydantic.dev``
     URL.
+
+    A wrong argument name shows up as ``missing_argument`` (whose ``input`` is
+    pydantic's ``ArgsKwargs`` repr of the whole call) plus
+    ``unexpected_keyword_argument``; the value is noise there, so it is left out
+    and the accepted parameter names are appended instead.
     """
     if isinstance(exc, ValidationError):
         parts: List[str] = []
+        wrong_name = False
         for err in exc.errors():
             loc = ".".join(str(p) for p in err.get("loc", ())) or "?"
             msg = err.get("msg", "invalid value")
+            if err.get("type") in ("missing_argument", "unexpected_keyword_argument"):
+                wrong_name = True
+                parts.append(f"{loc}: {msg}")
+                continue
             given = err.get("input")
             given_repr = ""
             if given is not None:
@@ -120,8 +147,11 @@ def _format_tool_error(tool_name: str, exc: Exception) -> str:
                     gs = gs[:57] + "..."
                 given_repr = f" (got {gs})"
             parts.append(f"{loc}: {msg}{given_repr}")
-        joined = "; ".join(parts)
-        return f"invalid arguments for {tool_name}: {joined}"
+        message = f"invalid arguments for {function.name}: {'; '.join(parts)}"
+        accepted = list(function.parameters.get("properties", {}))
+        if wrong_name and accepted:
+            message += f". Accepted parameters: {', '.join(accepted)}"
+        return message
 
     text = str(exc).strip()
     if not text:
@@ -585,7 +615,7 @@ class FunctionCall(BaseModel):
             # The friendly message is logged at DEBUG (not WARNING) so it does
             # not duplicate the CLI's own tool-error line (``🔎 ... - error:
             # ...``); the traceback is preserved at DEBUG for developers.
-            friendly = _format_tool_error(self.function.name, e)
+            friendly = _format_tool_error(self.function, e)
             # Mirror the success-path INFO line: every tool call gets one
             # visible outcome line at INFO, success or failure.
             logger.info(f"[tool] {self.function.name} -> error: {friendly}")

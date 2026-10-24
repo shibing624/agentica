@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 import time
 from typing import (
     TYPE_CHECKING,
@@ -63,6 +62,7 @@ if TYPE_CHECKING:
     from agentica.agent import Agent
 
 from agentica.compression.evict import is_irreducible_prompt_too_long
+from agentica.runner.retry_fallback import _retry_wait_seconds
 from agentica.runner.types import LoopBreak, ToolHandlingResult
 
 
@@ -1301,12 +1301,23 @@ class LoopMixin:
                                     # payload the decoder cannot parse is a
                                     # framing failure, and the request is
                                     # worth re-issuing.
-                                    _midstream_retryable = any(
-                                        r in err
-                                        for r in active_model.get_retryable_substrings(
+                                    # Same classifier as the pre-stream path,
+                                    # so an SSE ``error`` event (server_error,
+                                    # rate limit) or a stream that ended without
+                                    # a terminal event is not fatal just because
+                                    # it arrived after the first chunk. There is
+                                    # no fallback switch here, so an outage is
+                                    # retried on the same model.
+                                    _retryable, _outage = self._classify_api_error(
+                                        exc,
+                                        active_model.get_retryable_substrings(
                                             loop_state.RETRYABLE_SUBSTRINGS
-                                        )
-                                    ) or isinstance(exc, json.JSONDecodeError)
+                                        ),
+                                        loop_state.FALLBACK_ONLY_SUBSTRINGS,
+                                    )
+                                    _midstream_retryable = (
+                                        _retryable or _outage or isinstance(exc, json.JSONDecodeError)
+                                    )
                                     if (
                                         _midstream_retryable
                                         and _ms_attempt < loop_state.max_api_retry - 1
@@ -1315,7 +1326,7 @@ class LoopMixin:
                                         del messages_for_model[call_start:]
                                         model_response.content = content_at_call_start
                                         model_response.reasoning_content = reasoning_at_call_start
-                                        _wait = (2 ** (_ms_attempt - 1)) + random.uniform(0.0, 1.0)
+                                        _wait = _retry_wait_seconds(exc, _ms_attempt - 1)
                                         logger.warning(
                                             f"[midstream-retry] {active_model.id} stream dropped "
                                             f"mid-turn (retry {_ms_attempt}/"

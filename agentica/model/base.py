@@ -43,7 +43,9 @@ from agentica.security.redact import (
     redact_streamed_text_enabled,
     redact_tool_outputs_enabled,
 )
-from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
+from agentica.tools.base import (
+    ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call, unknown_tool_error,
+)
 from agentica.tools.helpers import ToolDisplayOutput
 from agentica.utils.timer import Timer
 from agentica.model.cost import CostTracker, get_model_context_window, get_model_supports_images
@@ -903,7 +905,11 @@ class Model(ABC):
             _function_call = get_function_call_for_tool_call(tool_call, self.functions)
             if _function_call is None:
                 messages.append(
-                    self.refused_tool_result(tool_call, "Could not find function to call.", tool_role)
+                    self.refused_tool_result(
+                        tool_call,
+                        unknown_tool_error(tool_call["function"]["name"], self.functions),
+                        tool_role,
+                    )
                 )
                 continue
             if _function_call.error is not None:
@@ -1637,7 +1643,11 @@ class Model(ABC):
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
                     messages.append(
-                        self.refused_tool_result(tool_call, "Could not find function to call.", tool_role)
+                        self.refused_tool_result(
+                            tool_call,
+                            unknown_tool_error(tool_call["function"]["name"], self.functions),
+                            tool_role,
+                        )
                     )
                     continue
                 if _function_call.error is not None:
@@ -1674,7 +1684,11 @@ class Model(ABC):
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
                     messages.append(
-                        self.refused_tool_result(tool_call, "Could not find function to call.", tool_role)
+                        self.refused_tool_result(
+                            tool_call,
+                            unknown_tool_error(tool_call["function"]["name"], self.functions),
+                            tool_role,
+                        )
                     )
                     continue
                 if _function_call.error is not None:

@@ -20,6 +20,10 @@ class ContentFilterError(RuntimeError):
         super().__init__(f"Content filter blocked the response from {model_id}: {detail}")
 
 
+class StreamEndedError(RuntimeError):
+    """The stream closed cleanly without a terminal event; worth re-issuing."""
+
+
 class ModelResponseEvent(str, Enum):
     """Events that can be sent by the Model.response() method"""
 

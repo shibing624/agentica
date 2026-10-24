@@ -6,6 +6,7 @@
 
 import asyncio
 import random
+import sys
 
 import httpx
 
@@ -28,7 +29,7 @@ from agentica.utils.log import logger
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
-from agentica.model.response import ContentFilterError, ModelResponse
+from agentica.model.response import ContentFilterError, ModelResponse, StreamEndedError
 from agentica.run.config import RunConfig
 from agentica.utils.langfuse_integration import langfuse_observation_context
 
@@ -54,14 +55,67 @@ def _is_request_rejected(exc: BaseException) -> bool:
     rejection arrives as an SSE ``error`` event, and the SDK raises it with the
     stream's status (200). Its body still carries the structured error type.
     """
-    import anthropic
-    import openai
-
     if _http_status(exc) == 400:
         return True
-    if isinstance(exc, (anthropic.APIStatusError, openai.APIError)):
-        return exc.type == "invalid_request_error"
-    return False
+    return _error_body_type(exc) == "invalid_request_error"
+
+
+def _error_body_type(exc: BaseException) -> Optional[str]:
+    """The structured ``error.type`` from the response body, if the SDK parsed one.
+
+    A failure streamed as an SSE ``error`` event has no error status (the SDK
+    builds it from the frame, after HTTP 200), so this protocol field is the
+    only structured signal it carries. Read from ``sys.modules``: an SDK error
+    can only exist if that SDK is already loaded.
+    """
+    openai = sys.modules.get("openai")
+    if openai is not None and isinstance(exc, openai.APIError):
+        return exc.type
+    anthropic = sys.modules.get("anthropic")
+    if anthropic is not None and isinstance(exc, anthropic.APIStatusError):
+        return exc.type
+    return None
+
+
+def _error_response(exc: BaseException) -> Optional[httpx.Response]:
+    openai = sys.modules.get("openai")
+    anthropic = sys.modules.get("anthropic")
+    if isinstance(exc, httpx.HTTPStatusError) or (
+        openai is not None and isinstance(exc, openai.APIStatusError)
+    ) or (anthropic is not None and isinstance(exc, anthropic.APIStatusError)):
+        return exc.response
+    return None
+
+
+# Structured ``error.type`` values of a streamed ``error`` event.
+_RATE_LIMIT_ERROR_TYPES = frozenset({"rate_limit", "rate_limit_error", "requests", "tokens"})
+_OUTAGE_ERROR_TYPES = frozenset({
+    "server_error", "internal_server_error", "connection_error", "overloaded_error", "overloaded",
+})
+
+# Upper bound on any retry wait, ``Retry-After`` included: past this a retry is
+# a stall the user cannot see.
+MAX_RETRY_WAIT_SECONDS = 120
+# A rate limit without ``Retry-After`` is a window, not a hiccup: a 1-3s retry
+# lands in the same closed window (production failed TPM limits this way).
+RATE_LIMIT_BASE_WAIT_SECONDS = 15
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    return _http_status(exc) == 429 or _error_body_type(exc) in _RATE_LIMIT_ERROR_TYPES
+
+
+def _retry_wait_seconds(exc: BaseException, attempt: int) -> float:
+    """Seconds to wait before attempt ``attempt + 1``: ``Retry-After`` first."""
+    response = _error_response(exc)
+    header = response.headers.get("retry-after") if response is not None else None
+    if header:
+        try:
+            return min(max(float(header), 0.0), MAX_RETRY_WAIT_SECONDS)
+        except ValueError:
+            pass  # HTTP-date form: use the computed backoff below
+    base = RATE_LIMIT_BASE_WAIT_SECONDS if _is_rate_limited(exc) else 1
+    return min(base * 2**attempt, MAX_RETRY_WAIT_SECONDS) + random.uniform(0.0, 1.0)
 
 
 async def _open_stream(stream: AsyncGenerator[Any, None]) -> AsyncIterator[Any]:
@@ -292,7 +346,7 @@ class RetryMixin:
     def _classify_api_error(
         exc: BaseException, retryable_substrings: tuple, fallback_only_substrings: tuple,
     ) -> tuple[bool, bool]:
-        """Return (retryable, fallback_only), preferring status/type to error prose."""
+        """Return (retryable, fallback_only): status, then exception/body type, then prose."""
         # openai is a core dependency, but importing it here keeps `import agentica`
         # and CLI startup from loading the provider SDK.
         from openai import APIConnectionError, APITimeoutError
@@ -307,6 +361,13 @@ class RetryMixin:
                 return False, False
         if isinstance(exc, (APITimeoutError, httpx.TimeoutException, TimeoutError)):
             return True, False
+        if isinstance(exc, StreamEndedError):
+            return True, False
+        error_type = _error_body_type(exc)
+        if error_type in _RATE_LIMIT_ERROR_TYPES:
+            return True, False
+        if error_type in _OUTAGE_ERROR_TYPES:
+            return False, True
 
         err = str(exc).lower()
         retryable = any(marker in err for marker in retryable_substrings)
@@ -635,13 +696,17 @@ class RetryMixin:
                     is_retryable, is_fallback_only = RetryMixin._classify_api_error(
                         last_exc, _retryable, state.FALLBACK_ONLY_SUBSTRINGS,
                     )
-                    if is_fallback_only:
+                    if is_fallback_only and local_idx < len(candidates) - 1:
                         logger.warning(f"[fallback] {current.id} hit non-retry outage: {exc}; trying next fallback")
                         trigger = "fallback_only"
                         break
 
+                    # An outage on the last candidate is retried like a
+                    # transient error: there is nothing left to switch to, and
+                    # giving up ends the run on a connection blip.
+                    is_retryable = is_retryable or is_fallback_only
                     if is_retryable and attempt < state.max_api_retry - 1:
-                        wait = (2**attempt) + random.uniform(0.0, 1.0)
+                        wait = _retry_wait_seconds(last_exc, attempt)
                         logger.warning(
                             f"[APIRetry] {current.id} attempt "
                             f"{attempt + 1}/{state.max_api_retry}, "

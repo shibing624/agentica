@@ -14,7 +14,7 @@ from agentica.model.base import Model
 from agentica.model.message import Message, strip_volatile_marker
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
-from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
+from agentica.tools.base import FunctionCall, get_function_call_for_tool_call, unknown_tool_error
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
@@ -227,10 +227,13 @@ class Ollama(Model):
             for tool_call in assistant_message.tool_calls:
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
-                    messages.append(Message(role="user", content="Could not find function to call."))
+                    messages.append(self.refused_tool_result(
+                        tool_call,
+                        unknown_tool_error(tool_call["function"]["name"], self.functions),
+                    ))
                     continue
                 if _function_call.error is not None:
-                    messages.append(Message(role="user", content=_function_call.error))
+                    messages.append(self.refused_tool_result(tool_call, _function_call.error))
                     continue
                 function_calls_to_run.append(_function_call)
         return function_calls_to_run
@@ -244,7 +247,7 @@ class Ollama(Model):
     def parse_tool_calls(
         self, assistant_message: Message, messages: List[Message], tool_role: str = "tool",
     ) -> tuple:
-        """Parse tool calls for Ollama format (uses role='user' for errors)."""
+        """Parse tool calls; refused calls answer their own id as ``role='tool'``."""
         function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
         # Carry tool_ids so format_tool_results can pad an interrupted round.
         return function_calls_to_run, {
