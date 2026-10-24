@@ -356,10 +356,30 @@ class TestBuiltinFileToolReadCorrectness:
         result = asyncio.run(file_tool.read_file(str(p), offset=-3))
         assert f"row{n}" in result and f"row{n - 2}" in result
 
-        # front-paged reads on the same file still hit the guard
-        with pytest.raises(ValueError, match="Use tail to read the end") as exc:
+    def test_read_file_bounded_read_of_large_file_is_allowed(self, file_tool, tmp_dir):
+        """The guard measures what is returned, not the file: `limit=1` on a
+        multi-MB JSONL must return its first record (production refused it)."""
+        p = Path(tmp_dir, "big.jsonl")
+        p.write_text("\n".join(f'{{"id": {i}, "pad": "{"y" * 4000}"}}' for i in range(800)))
+        assert p.stat().st_size > file_tool.MAX_FILE_SIZE_BYTES
+
+        result = asyncio.run(file_tool.read_file(str(p), limit=1))
+        assert '{"id": 0,' in result
+        assert '"id": 1,' not in result
+        assert "[Showing lines 1-1 of 800 total lines]" in result
+
+    def test_read_file_window_over_the_cap_is_refused(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "wide.txt")
+        p.write_text("\n".join("z" * 1900 for _ in range(600)))
+
+        with pytest.raises(ValueError, match="Pass a smaller limit") as exc:
             asyncio.run(file_tool.read_file(str(p)))
-        assert "offset/limit" not in str(exc.value)
+        message = str(exc.value)
+        assert "Lines 1-500" in message and "600 lines" in message
+        assert "zzzz" not in message
+
+        result = asyncio.run(file_tool.read_file(str(p), limit=50))
+        assert "[Showing lines 1-50 of 600 total lines]" in result
 
     def test_read_file_tail_times_out_on_slow_scan(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "slow.log")
@@ -447,6 +467,31 @@ class TestBuiltinFileToolGlob:
             with pytest.raises(TimeoutError, match=r"Narrow `path`"):
                 asyncio.run(tool.glob("**/*", str(tmp_dir)))
 
+    def test_glob_timeout_reports_matches_found_before_it(self, tmp_dir):
+        """A slow mount that times out mid-walk still names what it reached,
+        and the walk thread stops instead of running on behind the next call."""
+        import time as _time
+        tool = BuiltinFileTool(work_dir=tmp_dir)
+        yielded_after_stop = []
+
+        def slow_glob(self, pattern):
+            yield self / "found_early.py"
+            _time.sleep(0.2)
+            yield self / "found_late.py"
+            yielded_after_stop.append(True)
+            yield self / "never.py"
+
+        with patch("agentica.tools.builtin.file_tool._GLOB_TIMEOUT", 0.05), \
+             patch.object(Path, "glob", slow_glob):
+            with pytest.raises(TimeoutError) as exc:
+                asyncio.run(tool.glob("**/*.py", str(tmp_dir)))
+            _time.sleep(0.3)
+        message = str(exc.value)
+        assert "1 matches before it stopped" in message
+        assert "found_early.py" in message
+        assert "found_late.py" not in message
+        assert yielded_after_stop == []
+
     def test_glob_recursive(self, file_tool, tmp_dir):
         sub = Path(tmp_dir, "sub")
         sub.mkdir()
@@ -510,6 +555,25 @@ class TestBuiltinFileToolGrep:
         assert '"timeout": 30' in result
         assert "line_len=10013" in result
         assert "col=5001" in result
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell script stands in for rg")
+    def test_grep_timeout_reports_matches_found_before_it(self, file_tool, tmp_dir):
+        """rg on a slow mount that found the definition, then kept walking."""
+        fake_rg = Path(tmp_dir, "rg")
+        fake_rg.write_text(
+            "#!/bin/sh\n"
+            f"echo '{tmp_dir}/data/sample.py:12:1:def stratified_sample(rows):'\n"
+            "exec sleep 30\n"
+        )
+        fake_rg.chmod(0o755)
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=str(fake_rg)), \
+             patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 1):
+            with pytest.raises(TimeoutError) as exc:
+                asyncio.run(file_tool.grep("def stratified_sample", tmp_dir, limit=3))
+        message = str(exc.value)
+        assert "the search is incomplete" in message
+        assert "sample.py:12:" in message and "def stratified_sample(rows)" in message
+        assert message.endswith("Narrow `path`.")
 
     def test_format_rg_output_does_not_treat_time_as_line_number(self):
         from agentica.tools.builtin.file_tool import _format_rg_output

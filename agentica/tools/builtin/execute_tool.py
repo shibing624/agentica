@@ -100,6 +100,23 @@ _PIPE_CHUNK = 65536
 # After a cap-triggered SIGKILL the pipes hit EOF on their own; this bounds
 # the wait for a grandchild that outlived the group and still holds one.
 _POST_KILL_DRAIN_SECONDS = 5
+# The command reaches /bin/sh through its environment, not its argv. As
+# ``sh -c <command>`` the command text is the shell's own cmdline, so a
+# ``pkill -f <pattern>`` inside it matches the shell running it and SIGTERMs
+# it: whatever follows the pkill never runs and the call reports exit -15.
+# Every exit -15 in two long production sessions (18 of 18) was this.
+_COMMAND_ENV = "AGENTICA_COMMAND"
+_RUN_COMMAND_FROM_ENV = f'eval "unset {_COMMAND_ENV}; ${_COMMAND_ENV}"'
+
+
+def _spool_size_and_lines(spool) -> tuple[int, int]:
+    """Bytes and newlines already in ``spool`` (a drain cut off mid-way)."""
+    spool.seek(0)
+    size = newlines = 0
+    for chunk in iter(lambda: spool.read(_PIPE_CHUNK), b""):
+        size += len(chunk)
+        newlines += chunk.count(b"\n")
+    return size, newlines
 
 
 async def _drain_stream(stream, spool, hard_cap: int) -> tuple[int, int, bool]:
@@ -765,7 +782,10 @@ class BuiltinExecuteTool(Tool):
         argv = None
         if self._os_sandbox and not escalate:
             policy = await self._sandbox_policy()
-            argv = wrap_command(command, policy)
+            argv = wrap_command(_RUN_COMMAND_FROM_ENV, policy)
+        elif os.name != "nt":
+            argv = ["/bin/sh", "-c", _RUN_COMMAND_FROM_ENV]
+        env = {_COMMAND_ENV: command} if argv is not None else None
 
         if background:
             if self._background_process_registry is None:
@@ -780,7 +800,9 @@ class BuiltinExecuteTool(Tool):
                     "fork the work away and exit at once, reporting a completion "
                     "while the command is still running. Pass the plain command."
                 )
-            item = self._background_process_registry.start(command, cwd=cwd, argv=argv)
+            item = self._background_process_registry.start(
+                command, cwd=cwd, argv=argv, env=env,
+            )
             return (
                 f"Started background command #{item.num} "
                 f"(PID {item.pid}, id: {item.id}).\n"
@@ -815,6 +837,7 @@ class BuiltinExecuteTool(Tool):
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
                             cwd=cwd,
+                            env={**os.environ, **(env or {})},
                             start_new_session=True,
                         )
                     else:
@@ -854,9 +877,6 @@ class BuiltinExecuteTool(Tool):
             except asyncio.TimeoutError:
                 timed_out = True
                 logger.warning(f"Command timed out after {effective_timeout}s: {command}")
-                raise TimeoutError(
-                    f"Command timed out after {effective_timeout} seconds"
-                ) from None
             finally:
                 # A timeout or a cancelled turn leaves the group running with our
                 # pipes open. `not drained` rather than `returncode is None`: the
@@ -872,6 +892,13 @@ class BuiltinExecuteTool(Tool):
                     )
                 close_subprocess_transport(proc)
 
+            if timed_out:
+                # The drain was cut off, so its counts never came back; what it
+                # wrote is still in the spools. Returning it is the difference
+                # between "hung" and "hung after listing two of three dirs" or
+                # "hung in test_foo" — the line that says what to do next.
+                out_bytes, out_lines = _spool_size_and_lines(stdout_spool)
+                err_bytes, err_lines = _spool_size_and_lines(stderr_spool)
             output = self._finish_captured_output(
                 stdout_spool, stderr_spool,
                 out_bytes=out_bytes, err_bytes=err_bytes,
@@ -879,6 +906,15 @@ class BuiltinExecuteTool(Tool):
                 hit_hard_cap=hit_hard_cap,
                 cwd=cwd,
             )
+            if timed_out:
+                if redact_tool_outputs_enabled():
+                    output = redact_sensitive_text(output)
+                raise TimeoutError(
+                    f"Command timed out after {effective_timeout} seconds and was "
+                    "killed. "
+                    + (f"Output before the timeout:\n{output}" if output
+                       else "It printed nothing before that.")
+                )
 
             # -9 is the SIGKILL *we* sent for crossing the cap, not the
             # command failing. Reporting it as "[Exit code: -9]" (and then
@@ -949,11 +985,22 @@ class BuiltinExecuteTool(Tool):
         """
         item = self._background_process_registry.get(id)
         if item is None:
-            known = [p.id for p in self._background_process_registry.list(include_finished=True)]
+            started = self._background_process_registry.list(include_finished=True)
+            known = [p.id for p in started]
+            # Listing every id ever started (92 at the top of a long session)
+            # said nothing about which one is meant; the recent few and the
+            # ones still running are what the model can act on.
+            running = [p.id for p in started if p.running]
+            recent = known[-5:]
+            hint = (
+                f"Still running: {', '.join(running)}. "
+                if running else "Nothing is running now. "
+            ) + (
+                f"Most recent ids: {', '.join(recent)} ({len(known)} started this session)."
+                if known else "None have been started in this session."
+            )
             raise ValueError(
-                f"No background command {id!r}. "
-                + (f"Started so far: {', '.join(known)}." if known
-                   else "None have been started in this session.")
+                f"No background command {id!r}. {hint}"
             )
 
         effective_timeout = max(1, int(timeout))

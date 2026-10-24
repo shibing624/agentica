@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 from collections import deque
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -328,6 +329,7 @@ async def _collect_rg_output(
     *,
     with_column: bool = False,
     root: Optional[Path] = None,
+    sink: Optional[List[bytes]] = None,
 ) -> Tuple[bytes, bytes, bool]:
     """Read rg stdout until EOF or ``max_lines``, then reap the process.
 
@@ -336,9 +338,11 @@ async def _collect_rg_output(
     what makes ``limit`` bound I/O, not just the string we return. Reads one
     line past ``max_lines`` so a result set that ends exactly at the cap is
     not reported as truncated; the lookahead line is dropped.
+    Lines also land in ``sink`` as they arrive, so a caller whose timeout
+    cancels this still has the matches found before it.
     Returns ``(stdout, stderr, hit_cap)``.
     """
-    chunks: List[bytes] = []
+    chunks: List[bytes] = sink if sink is not None else []
     hit_cap = False
     max_chunks = max_lines + 1 if max_lines is not None else None
     out_stream = proc.stdout
@@ -771,7 +775,7 @@ class BuiltinFileTool(Tool):
             )
         return path
 
-    # Maximum file size (bytes) for read_file.  Larger files must use offset+limit.
+    # Maximum size (bytes) of what one front-paged read_file returns.
     # Mirrors CC's FileReadTool maxSizeBytes (256KB).
     MAX_FILE_SIZE_BYTES = 256_000
     # read_file content cache: each entry is inherently bounded by
@@ -862,27 +866,6 @@ class BuiltinFileTool(Tool):
         limit = limit if limit is not None else self.max_read_lines
         max_line_len = self.max_line_length
 
-        # --- Large-file guard (mirrors CC's maxSizeBytes) ---
-        # Front-paged reads only: the guard keeps unbounded content out of the
-        # context. A tail read holds at most `keep` lines on any file size, so
-        # it is exempt — the guard used to fire first and reject the exact
-        # tail call its own error message recommends for large files.
-        if offset >= 0:
-            try:
-                file_size = path.stat().st_size
-            except OSError:
-                file_size = None
-            if file_size is not None and file_size > self.MAX_FILE_SIZE_BYTES:
-                loop = asyncio.get_running_loop()
-                total_lines = await loop.run_in_executor(
-                    None, lambda: sum(1 for _ in open(path, errors='ignore'))
-                )
-                raise ValueError(
-                    f"File too large ({file_size:,} bytes, {total_lines:,} lines). "
-                    f"Use tail to read the end, "
-                    f"e.g. read_file('{file_path}', tail=50)."
-                )
-
         if offset < 0:
             try:
                 result, total_lines, start_shown, actual_end = await asyncio.wait_for(
@@ -901,6 +884,18 @@ class BuiltinFileTool(Tool):
             result, total_lines, start_shown, actual_end = await self._read_from_start(
                 path, offset=offset, limit=limit, max_line_len=max_line_len,
             )
+            # The guard bounds what enters the context, so it measures the
+            # window, not the file: it used to refuse `limit=1` on any file
+            # over 256KB — the first record of a big JSONL was unreadable,
+            # while the same call with `tail` went through.
+            window_bytes = len(result.encode("utf-8"))
+            if window_bytes > self.MAX_FILE_SIZE_BYTES:
+                raise ValueError(
+                    f"Lines {start_shown}-{actual_end} of {file_path} are "
+                    f"{window_bytes:,} bytes, over the {self.MAX_FILE_SIZE_BYTES:,}-byte "
+                    f"read limit (the file has {total_lines:,} lines). "
+                    f"Pass a smaller limit."
+                )
 
         if total_lines == 0:
             result = f"File is empty: {path}"
@@ -1308,29 +1303,45 @@ class BuiltinFileTool(Tool):
         if not base_path.exists():
             raise FileNotFoundError(self._missing_path_error("Directory", path, base_path))
 
-        # Run glob in executor to avoid blocking on large directory trees
-        def _glob_sync():
-            matches = list(base_path.glob(pattern))
-            nested = _nested_checkouts(base_path)
-            return sorted(
-                str(m) for m in matches
-                if not _in_noise_dir(m, base_path, _NOISE_DIRS, nested)
-            )
+        # The walk runs in a thread and fills `found` as it goes: a timeout on
+        # a slow (network) mount then still reports what it reached, and
+        # `stop` ends the thread at its next match instead of letting it walk
+        # on behind the next call.
+        found: List[str] = []
+        stop = threading.Event()
 
-        loop = asyncio.get_event_loop()
+        def _glob_sync():
+            nested = _nested_checkouts(base_path)
+            for m in base_path.glob(pattern):
+                if stop.is_set():
+                    return
+                if not _in_noise_dir(m, base_path, _NOISE_DIRS, nested):
+                    found.append(str(m))
+
+        loop = asyncio.get_running_loop()
         try:
-            filtered = await asyncio.wait_for(
+            await asyncio.wait_for(
                 loop.run_in_executor(None, _glob_sync),
                 timeout=_GLOB_TIMEOUT,
             )
         except asyncio.TimeoutError:
+            stop.set()
+            partial = sorted(found)
+            reached = (
+                f"{len(partial)} matches before it stopped (the walk is incomplete):\n"
+                + truncate_if_too_long(json.dumps(partial, ensure_ascii=False, indent=2))
+                + "\n"
+                if partial else ""
+            )
             raise TimeoutError(
                 f"glob timed out after {_GLOB_TIMEOUT} seconds "
                 f"(pattern={pattern!r}, path={path!r}). "
+                f"{reached}"
                 f"Narrow `path` or use a more specific pattern; "
                 f"do not retry the same walk."
-            )
+            ) from None
 
+        filtered = sorted(found)
         logger.debug(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
         # Convert to formatted JSON string
         result = json.dumps(filtered, ensure_ascii=False, indent=2)
@@ -1386,6 +1397,7 @@ class BuiltinFileTool(Tool):
         proc = None
         drained = False
         hit_cap = False
+        found: List[bytes] = []
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -1396,15 +1408,22 @@ class BuiltinFileTool(Tool):
             stdout, stderr, hit_cap = await asyncio.wait_for(
                 _collect_rg_output(
                     proc, max_lines, pattern=pattern, with_column=True,
-                    root=self.work_dir,
+                    root=self.work_dir, sink=found,
                 ),
                 timeout=_GREP_TIMEOUT,
             )
             drained = True
         except asyncio.TimeoutError:
+            partial = b"".join(found[:limit] if limit >= 0 else found)
+            partial_text = partial.decode("utf-8", errors="replace").rstrip("\n")
+            reached = (
+                f" Matches before it stopped (the search is incomplete):\n"
+                f"{truncate_if_too_long(partial_text)}\n"
+                if partial_text else " "
+            )
             raise TimeoutError(
-                f"grep timed out after {_GREP_TIMEOUT} seconds. "
-                f"Narrow `path`."
+                f"grep timed out after {_GREP_TIMEOUT} seconds."
+                f"{reached}Narrow `path`."
             ) from None
         finally:
             if proc is not None and not drained:

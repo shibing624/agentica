@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### fixes
 - **`apply_patch` 的 context not found 能说出是哪种不匹配，hunk 顺序反了也能应用**：长程会话日志里 apply_patch 错误率 6.5%（29/446），其中 17 次是 context not found，返回给模型的只有它自己发的那一行，分不出缩进错、行不存在、还是块写在了上一个 hunk 之前，三种修法不同。现在报错附带分类和行号，但不引用模型没读过的文件内容：同样文字但缩进/空格不同时给出行号，整块逐字存在但都在上一个 hunk 之前时提示按文件顺序排，否则提示重读文件。块在文件里逐字只出现一次时，即使 hunk 顺序反了也直接应用（精确匹配，不做空白/引号 fuzz）；出现多次仍报错，两个 hunk 改动重叠时由 `applyDiff` 拒绝。17 次里有 6 次属于这一类。同时修正「块不连续」提示里的行号，此前指向块的起始行而不是断开的那一行。
+- **`execute` 及几个文件工具在长任务和慢盘上的明显错误**：
+  - POSIX 上命令改为经环境变量交给 `/bin/sh`（`eval "$AGENTICA_COMMAND"`，执行前 unset），不再作为 `sh -c` 的 argv。Linux 的 `pkill -f <pat>` 会匹配到执行它的那个 `sh -c '<cmd>'`，把自己的 shell 杀掉，pkill 之后的命令都不执行，返回 exit -15；日志里 18 次 -15 全是这种情况。OS 沙箱与后台命令同样处理，Windows 不变。
+  - `execute` 超时不再丢掉已经打印的输出，`TimeoutError` 里带上超时前的输出。
+  - `read_file` 的 256KB 上限改为限制本次返回窗口的大小，不再按文件大小拒绝：此前对超过 256KB 的文件，`limit=1` 也会被拒绝，并被引导去用 `tail`。超出上限时提示减小 `limit`。
+  - `glob` / `grep` 超时时附上超时前已找到的结果；`glob` 超时后，后台遍历线程在下一个匹配处停止，不再在网络盘上继续扫描。
+  - `wait` 传入未知 id 时只列出仍在运行的 id 和最近 5 个 id，不再列出本会话启动过的全部 id。
 - **长程任务里几类瞬时模型错误不再直接终止整轮 run**：从长程会话日志逐条归因。① 流式请求以 SSE `error` 事件下发的失败不带错误状态码，现在按响应体结构化的 `error.type` 分类（`server_error` / `overloaded_error` / `rate_limit*` 等）；流式消费端（首个 chunk 之后）此前只做文案匹配，现在和请求端共用同一个分类器，`server_error`、限流、`StreamEndedError`（Responses 流没收到终止事件）在本轮内重发，而 400 不再因为报错里碰巧有 `timeout` 之类字样被重发。② 上下文溢出补上 `exceeds the context` 措辞，能进 reactive compact。③ 429 优先按 `Retry-After` 等待，缺失时从 15s 起退避（封顶 120s），此前 1-3s 重试总落在同一个限流窗口里。④ 连接类故障发生在最后一个候选模型（含未配置 fallback）时，按可重试处理，而不是「切下一个 fallback」——那时已经没有下一个了。
 - **调错工具时的反馈能让模型自我纠正**：调不存在的工具（日志里有 `Bash`、`ToolSearch`、`patch`）此前只回 `Could not find function to call.`，现在回被拒的名字和可用工具清单（`unknown_tool_error`）。参数名写错时不再把 pydantic 的 `ArgsKwargs(...)` 整个调用 repr 塞给模型，改为列出该工具接受的参数名。Ollama 此前把被拒的调用回成不带 id 的 `user` 消息，该 id 随后又被补一条「执行可能被中断」，模型同时收到两条矛盾反馈；现在和其他 provider 一样以 `role="tool"` 回答原 id。
 - **流式请求里以 SSE `error` 事件下发的 thinking 签名拒绝也能恢复**：网关先回 HTTP 200 再推 `error` 事件时，SDK 抛出的是 `status_code == 200` 的 `APIStatusError`，上一条的「状态码 400」判定不成立，长任务整轮失败退出。现在请求被拒的判定同时接受异常 body 里结构化的 `error.type == "invalid_request_error"`（`_is_request_rejected`）。

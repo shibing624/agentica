@@ -500,6 +500,29 @@ class TestBuiltinExecuteTool:
 
         assert "term_1" in str(excinfo.value)
 
+    def test_wait_unknown_id_lists_recent_ids_not_all(self, tmp_dir):
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')}"
+
+        async def scenario():
+            for _ in range(8):
+                await tool.execute(command, background=True)
+            for item in registry.list(include_finished=True):
+                await asyncio.to_thread(item.finished.wait, 10)
+            await tool.wait("term_99", timeout=1)
+
+        try:
+            with pytest.raises(ValueError) as excinfo:
+                asyncio.run(scenario())
+        finally:
+            registry.stop()
+
+        message = str(excinfo.value)
+        assert "Most recent ids: term_4, term_5, term_6, term_7, term_8 (8 started" in message
+        assert "term_3" not in message
+        assert "Nothing is running now." in message
+
     def test_wait_honors_timeout_above_default(self, bg_execute_tool):
         """Caller-supplied timeout is applied as-is — same as execute(timeout=...).
 
@@ -684,6 +707,49 @@ class TestBuiltinExecuteTool:
         with pytest.raises(TimeoutError, match="timed out"):
             asyncio.run(tool.execute("sleep 30"))
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")
+    def test_execute_timeout_keeps_output_printed_before_it(self, tmp_dir):
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, timeout=1)
+        with pytest.raises(TimeoutError) as excinfo:
+            asyncio.run(tool.execute("echo step-one-done; sleep 30"))
+        message = str(excinfo.value)
+        assert "timed out after 1 seconds" in message
+        assert "step-one-done" in message
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")
+    def test_execute_timeout_with_no_output_says_so(self, tmp_dir):
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, timeout=0.2)
+        with pytest.raises(TimeoutError, match="printed nothing"):
+            asyncio.run(tool.execute("sleep 30"))
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")
+    def test_command_text_is_not_in_the_shells_own_cmdline(self, tmp_dir):
+        """``pkill -f <pat>`` on Linux matches the ``sh -c '<cmd>'`` running it.
+
+        The command must not be the shell's argv, or the pkill SIGTERMs the
+        shell and everything after it is lost (exit -15).
+        """
+        marker = "zz_unique_marker_9f3c"
+        tool = BuiltinExecuteTool(work_dir=tmp_dir)
+        result = asyncio.run(tool.execute(f"ps -o args= -p $$; : {marker}"))
+        assert "/bin/sh" in result or "sh " in result
+        assert marker not in result
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")
+    def test_command_env_carrier_does_not_leak_to_the_command(self, tmp_dir):
+        tool = BuiltinExecuteTool(work_dir=tmp_dir)
+        result = asyncio.run(tool.execute("echo \"[${AGENTICA_COMMAND-unset}]\""))
+        assert result.strip() == "[unset]"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell")
+    def test_shell_semantics_survive_the_env_carrier(self, tmp_dir):
+        tool = BuiltinExecuteTool(work_dir=tmp_dir)
+        command = "x='a b'; printf '%s|' \"$x\" 'c$HOME'; cat <<EOF\nhd\nEOF\nexit 3"
+        with pytest.raises(RuntimeError, match="code 3") as excinfo:
+            asyncio.run(tool.execute(command))
+        assert "a b|c$HOME|" in str(excinfo.value)
+        assert "hd" in str(excinfo.value)
+
     def test_execute_cancellation_reaps_from_finally(self, tmp_dir):
         """Ctrl+C must reap from `finally`, which also covers the timeout path.
 
@@ -695,6 +761,9 @@ class TestBuiltinExecuteTool:
             cleanup = AsyncMock()
             with patch(
                 "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
+                new=AsyncMock(return_value=process),
+            ), patch(
+                "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_exec",
                 new=AsyncMock(return_value=process),
             ), patch(
                 "agentica.tools.builtin.execute_tool.terminate_subprocess",

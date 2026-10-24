@@ -207,6 +207,9 @@ class TestSandboxCommandBlocking:
         with patch(
             "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
             new=AsyncMock(return_value=proc),
+        ), patch(
+            "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=proc),
         ):
             result = asyncio.run(tool.execute("rm -rf agentica/memory/__pycache__"))
         assert "gone" in result
@@ -224,6 +227,9 @@ class TestSandboxCommandBlocking:
             with patch(
                 "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
                 new=AsyncMock(return_value=proc),
+            ), patch(
+                "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_exec",
+                new=AsyncMock(return_value=proc),
             ):
                 result = asyncio.run(tool.execute("rm -rf /"))
         finally:
@@ -238,6 +244,9 @@ class TestSandboxCommandBlocking:
         proc = self._mock_process()
         with patch(
             "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell",
+            new=AsyncMock(return_value=proc),
+        ), patch(
+            "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=proc),
         ):
             result = asyncio.run(tool.execute("rm -rf /"))
