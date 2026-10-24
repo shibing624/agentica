@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **交互 CLI 的 Ctrl+D 要连按两次才退出**：此前按一次就离开会话。Ctrl+D 同时也是终端的 EOF，误触一下会把正在跑的回合和输入一起结束。现在第一次只在状态栏提示 `Press Ctrl+D again to exit`，0.8 秒内再按一次才退出；超时提示消失，下一次又从第一次算。`/exit` 仍是一次退出。
 - **`search_session` / `search_memory` 的工具说明补上检索边界**：`search_session` 写明旧工具结果用 `role="tool"` 再按命中的 `[uuid]` 取全文，notes 命中只是当前文件，重写后的上一份不在索引里。`search_memory` 写明不搜本会话 JSONL 和 notes。`<context_window>` 未加长。
 - **`save_memory` 新增可选参数 `description`，作为 `MEMORY.md` 索引行的 hook**：之前 hook 被写死成 title，索引每行都是「标题 — 标题」，看不出什么时候该打开。不传时用 content 的第一行。自动抽取的记忆也用同样的默认值。
 - **`search_memory` 结果按来源分层排序**：`memory` → `memory_candidate` → `conversation`，同层内按相关度排序。打分同时匹配 title + description，取较高者。此前几千字的对话归档块包含常见双字词的概率高，经常排在精炼记忆前面。

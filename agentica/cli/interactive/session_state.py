@@ -94,6 +94,8 @@ class SessionState:
     attached_images: List = field(default_factory=list)
     pasted_files: List = field(default_factory=list)
     last_ctrl_c: float = 0.0
+    # monotonic time of an armed Ctrl+D. 0 means the confirm window is closed.
+    last_ctrl_d: float = 0.0
     # Background tasks — owned by session, not module-global
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0

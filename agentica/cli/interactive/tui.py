@@ -235,6 +235,43 @@ class _CleanResizeApplication(Application):
 # an answer is pending. So this prompt is the one place the hint is true.
 _ASK_KEY_HINT = "    Enter to answer · Ctrl+C to cancel · Ctrl+\\ if frozen"
 
+# Claude Code confirms Ctrl+D inside this window (its double-press helper
+# defaults to 800ms). One press is the terminal's EOF and fires by accident;
+# the second press inside the window is the exit. The hint lives in
+# ``tui_state["exit_hint"]`` and the status bar paints it in the spinner slot.
+CTRL_D_EXIT_WINDOW_SECONDS = 0.8
+CTRL_D_EXIT_HINT = "Press Ctrl+D again to exit"
+
+
+def handle_ctrl_d(state, tui_state, *, now: float, schedule, exit_app) -> None:
+    """Arm or complete the double Ctrl+D exit.
+
+    The first press only shows :data:`CTRL_D_EXIT_HINT`. A second press within
+    :data:`CTRL_D_EXIT_WINDOW_SECONDS` exits. ``schedule(delay, fn)`` runs
+    ``fn`` on the UI loop so the hint disappears when the window expires;
+    a later press starts over.
+    """
+    armed_at = state.last_ctrl_d
+    # Compare against the deadline taken from the arming timestamp. Subtracting
+    # the window from ``now`` misses a press that lands on the edge: the two
+    # sums are not the same float.
+    if armed_at > 0 and now <= armed_at + CTRL_D_EXIT_WINDOW_SECONDS:
+        state.last_ctrl_d = 0.0
+        tui_state["exit_hint"] = ""
+        state.should_exit = True
+        exit_app()
+        return
+    state.last_ctrl_d = now
+    tui_state["exit_hint"] = CTRL_D_EXIT_HINT
+
+    def _expire() -> None:
+        if state.last_ctrl_d != now:
+            return
+        state.last_ctrl_d = 0.0
+        tui_state["exit_hint"] = ""
+
+    schedule(CTRL_D_EXIT_WINDOW_SECONDS, _expire)
+
 
 def _ask_prompt_text(req) -> str:
     """Plain text shown above the input box while a question is armed."""
@@ -429,10 +466,28 @@ def _setup_tui(
     def _newline2(event):
         event.current_buffer.insert_text("\n")
 
-    @kb.add("c-d")
+    @kb.add("c-d", eager=True)
     def _exit_app(event):
-        state.should_exit = True
-        event.app.exit()
+        def _schedule(delay, fn):
+            loop = event.app.loop
+            if loop is None:
+                return
+
+            def _fire():
+                fn()
+                if event.app.is_running:
+                    event.app.invalidate()
+
+            loop.call_later(delay, _fire)
+
+        handle_ctrl_d(
+            state,
+            tui_state,
+            now=time.monotonic(),
+            schedule=_schedule,
+            exit_app=event.app.exit,
+        )
+        event.app.invalidate()
 
     @kb.add("c-c")
     def _handle_ctrl_c(event):
@@ -787,10 +842,16 @@ def _setup_tui(
     def _get_status_bar():
         tw = shutil.get_terminal_size().columns
         spinner = tui_state.get("spinner_text", "")
-        # spinner_text is set exclusively while the agent is producing output
-        # (streaming, tool execution, thinking). Use its presence as the
-        # ground-truth signal for "agent is working right now" — avoids a
-        # separate flag we'd have to keep in sync.
+        # An armed Ctrl+D confirm replaces the spinner glyph for its window,
+        # so the hint stays visible while the spinner thread keeps rewriting
+        # spinner_text. The hint uses that same left slot, idle or running.
+        exit_hint = tui_state.get("exit_hint") or ""
+        if exit_hint:
+            spinner = exit_hint
+        # spinner_text is set while the agent is producing output. Its
+        # presence is the "working" signal for the bar. The exit hint is
+        # the exception: it occupies the slot (and the active style) without
+        # a live run, for the confirm window only.
         return build_status_bar_fragments(
             model_name=tui_state.get("model_name", ""),
             model_provider=tui_state.get("model_provider", ""),
@@ -1062,4 +1123,7 @@ __all__ = [
     '_input_prompt_fragments',
     '_live_tool_window_height',
     '_setup_tui',
+    'CTRL_D_EXIT_HINT',
+    'CTRL_D_EXIT_WINDOW_SECONDS',
+    'handle_ctrl_d',
 ]

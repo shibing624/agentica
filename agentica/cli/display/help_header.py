@@ -62,7 +62,7 @@ def print_header(
     # Keyboard shortcuts
     console.print("  [bright_green]Enter[/bright_green]       Submit your message")
     console.print("  [bright_green]Ctrl+J[/bright_green]      Insert newline (Alt+Enter also works)")
-    console.print("  [bright_green]Ctrl+D[/bright_green]      Exit and show session summary")
+    console.print("  [bright_green]Ctrl+D[/bright_green]      Press twice to exit and show session summary")
     console.print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation (press twice to exit)")
     console.print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
     console.print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool commands and output in pager (Ctrl+O or Esc to return)")
@@ -207,7 +207,7 @@ def show_help(skills_registry=None):
     shortcuts = {
         "Enter":             "Submit your message",
         "Ctrl+J, Alt+Enter": "Insert newline for multi-line input",
-        "Ctrl+D":            "Exit and show session summary",
+        "Ctrl+D":            "Press twice to exit and show session summary",
         "Ctrl+C":            "Interrupt the current task; press twice to exit",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Ctrl+V":            "Paste image from clipboard",

@@ -44,7 +44,7 @@ agentica --profile deepseek_pro
 | `Esc + Enter` | 换行（适合直接粘贴多行代码或报错栈） |
 | `Tab` | 补全 `@文件路径` 或 `/斜杠命令` |
 | `Ctrl+C` | 中止当前正在生成的回复；输入框为空时连按两次退出 |
-| `Ctrl+D` | 退出 CLI（退出时会打印本次会话的恢复命令 `agentica resume <id>`） |
+| `Ctrl+D` | 连按两次退出 CLI（第一次只在状态栏提示，0.8 秒内再按一次才离开；退出时会打印本次会话的恢复命令 `agentica resume <id>`） |
 | `↑` / `↓` / `Ctrl+R` | 浏览或搜索历史输入 |
 
 ---
