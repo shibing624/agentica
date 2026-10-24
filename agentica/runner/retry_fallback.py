@@ -47,6 +47,23 @@ def _http_status(exc: BaseException) -> Optional[int]:
     return status if isinstance(status, int) else None
 
 
+def _is_request_rejected(exc: BaseException) -> bool:
+    """True when the provider rejected the request itself (HTTP 400 semantics).
+
+    A streamed request can be rejected after the HTTP 200 headers: the
+    rejection arrives as an SSE ``error`` event, and the SDK raises it with the
+    stream's status (200). Its body still carries the structured error type.
+    """
+    import anthropic
+    import openai
+
+    if _http_status(exc) == 400:
+        return True
+    if isinstance(exc, (anthropic.APIStatusError, openai.APIError)):
+        return exc.type == "invalid_request_error"
+    return False
+
+
 async def _open_stream(stream: AsyncGenerator[Any, None]) -> AsyncIterator[Any]:
     """Pull the first chunk now, then hand back an iterator over the whole stream.
 
@@ -656,10 +673,10 @@ class RetryMixin:
                     # this runs at most once per call and a second 400 is
                     # raised as is; a 400 caused by something else costs one
                     # extra request and the thinking history.
-                    if _http_status(last_exc) == 400 and carries_signed_thinking(messages):
+                    if _is_request_rejected(last_exc) and carries_signed_thinking(messages):
                         logger.warning(
                             f"[thinking_signature] {current.id} rejected a request replaying "
-                            f"signed thinking (400); removing it and retrying once: {exc}"
+                            f"signed thinking; removing it and retrying once: {exc}"
                         )
                         make_history_portable(agent.working_memory)
                         portable, portable_input_ids = to_portable_history_with_input_ids(

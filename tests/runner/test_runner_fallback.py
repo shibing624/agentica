@@ -1311,6 +1311,44 @@ class TestInvalidThinkingSignatureRecovery(unittest.TestCase):
                 assistant = next(m for m in seen_after_repair if m.role == "assistant")
                 self.assertEqual(assistant.tool_calls[0]["id"], "toolu_1")
 
+    def test_rejection_streamed_as_sse_error_event_also_recovers(self):
+        """A rejection sent as an SSE ``error`` event after HTTP 200 has status 200."""
+        body = {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "Invalid `signature` in `thinking` block. "
+                "The block is bound to a different conversation.",
+            },
+        }
+        calls = {"n": 0}
+        seen_after_repair = []
+
+        async def _respond(messages):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise anthropic.APIStatusError(
+                    str(body),
+                    response=httpx.Response(200, request=httpx.Request("POST", "https://example.invalid")),
+                    body=body,
+                )
+            seen_after_repair.extend(messages)
+            return ModelResponse(content="ok", finish_reason="stop")
+
+        primary = _fake_model("claude-opus-5-5")
+        primary.response = _respond
+        call = asyncio.run(
+            Runner._call_with_retry(primary, self._native_claude_tool_round(), LoopState(), _make_agent())
+        )
+        self.assertEqual(call.content, "ok")
+        self.assertEqual(calls["n"], 2)
+        assistant = next(m for m in seen_after_repair if m.role == "assistant")
+        self.assertEqual(assistant.tool_calls[0]["id"], "toolu_1")
+        self.assertFalse(any(
+            isinstance(b, dict) and b.get("type") == "thinking"
+            for m in seen_after_repair if isinstance(m.content, list) for b in m.content
+        ))
+
     def test_400_without_thinking_in_request_is_raised_unchanged(self):
         calls = {"n": 0}
 
