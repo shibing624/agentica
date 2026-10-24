@@ -99,7 +99,7 @@ class TestGeminiToolCallsSurviveParsing(unittest.TestCase):
     Main before this fix: a two-step tool task streamed 400 "Function call is
     missing a thought_signature" on the second request (the signature was
     dropped while assembling deltas), and non-streamed it never ran a tool
-    ("Could not find function to call": ``type`` came back null).
+    — the call was refused as an unknown tool because ``type`` came back null.
     """
 
     SIG = "AY89a18-real-signature"
