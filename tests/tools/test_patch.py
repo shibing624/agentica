@@ -177,7 +177,9 @@ def world():
 
         message = str(exc.exception)
         self.assertIn("Hunk 1: context not found as a contiguous block", message)
-        self.assertIn("line 1", message)
+        # The line that breaks the block is line 2 ('middle'), not where the
+        # block starts: the number must point at the line it quotes.
+        self.assertIn("(line 2). file: 'middle', hunk: 'gamma'", message)
         self.assertIn("middle", message)
         self.assertIn("gamma", message)
         self.assertNotIn("not found: 'alpha'", message)

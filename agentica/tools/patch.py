@@ -69,6 +69,18 @@ class ContextFailure:
     eof: bool = False
     unmatched: str = ""
     contiguous: bool = False
+    # Why the hunk missed, when the file can explain it without being quoted
+    # back. Kept as a classification, never as the file's text: the tool must
+    # not hand the model a line it has not read (that is what the old
+    # Expected/Actual preview did, and it was removed on purpose).
+    #   "near"     — the file has this text, with different indentation or
+    #                spacing (covers a dropped internal space: the model
+    #                squeezing prose is the production case)
+    #   "above"    — the block is in the file as written, more than once, but
+    #                only above where the previous hunk matched
+    #   "absent"   — no line in the file resembles it
+    reason: str = ""
+    line_number: int = 0
 
     def render(self) -> str:
         location = "EOF context" if self.eof else "context"
@@ -78,7 +90,31 @@ class ContextFailure:
         if not self.unmatched:
             return f"{prefix}."
         tip = self.unmatched if len(self.unmatched) <= 120 else self.unmatched[:119] + "…"
-        return f"{prefix}: {tip!r}."
+        detail = self._diagnosis()
+        return f"{prefix}: {tip!r}.{detail}"
+
+    def _diagnosis(self) -> str:
+        """Which repair the caller should make, without quoting the file.
+
+        Echoing the hunk's own text back is not an answer: it cannot tell
+        "wrong indentation" from "that line is not in this file" from "the
+        spaces got dropped", and those need different fixes. Naming the class
+        of mismatch is enough to choose the repair, and it never shows a line
+        the model has not read.
+        """
+        if self.reason == "near":
+            return (
+                f" The file has this text at line {self.line_number} with "
+                f"different indentation or spacing; send it exactly as the "
+                f"file has it."
+            )
+        if self.reason == "above":
+            return (
+                f" It matches at line {self.line_number} and elsewhere, all above "
+                f"where the previous hunk matched; order the hunks as they "
+                f"appear in the file."
+            )
+        return " No line in the file matches it; read the file again before patching."
 
 
 class PatchContextError(ValueError):
@@ -357,7 +393,13 @@ def _contiguous_break_note(
     input_lines: List[str],
     start: int,
 ) -> str:
-    """Where a hunk whose lines all exist fails to match as one block."""
+    """Where a hunk whose lines all exist fails to match as one block.
+
+    Quotes the file's line here on purpose (db165e12): every line of this hunk
+    exists in the file, so the model is patching a span it has already read.
+    Naming the line that breaks the block answers "which one is out of order"
+    without sending it back to re-read what it already has.
+    """
     if not context:
         return ""
     first = context[0]
@@ -373,7 +415,7 @@ def _contiguous_break_note(
             if actual != expected:
                 got = "EOF" if actual is None else repr(_trim_context_tip(actual))
                 want = repr(_trim_context_tip(expected))
-                return f" (line {i + 1}). file: {got}, hunk: {want}."
+                return f" (line {pos + 1}). file: {got}, hunk: {want}."
         break
     return ""
 
@@ -385,24 +427,46 @@ def _context_failure(
     input_lines: List[str],
     start: int,
 ) -> ContextFailure:
-    missing = ""
     present = set(input_lines)
-    for line in context:
-        if line not in present:
-            missing = line
-            break
-    if missing:
-        return ContextFailure(hunk_number=hunk_number, eof=eof, unmatched=missing)
+    # A line the file does not have at all is the simplest answer and must win
+    # over the contiguous-block note: with one line missing, the block cannot
+    # match either, and "block does not line up" would send the model hunting
+    # for an ordering problem it does not have.
+    missing = next((line for line in context if line not in present), None)
+    if missing is not None:
+        line_number = _near_line_number(missing, input_lines, start)
+        return ContextFailure(
+            hunk_number=hunk_number, eof=eof, unmatched=missing,
+            reason="near" if line_number else "absent", line_number=line_number,
+        )
     note = _contiguous_break_note(context, input_lines, start)
     if note:
         return ContextFailure(
-            hunk_number=hunk_number, eof=eof, unmatched=note, contiguous=True
+            hunk_number=hunk_number, eof=eof, unmatched=note, contiguous=True,
         )
+    # Every line is there and the block lines up, so it matches as written —
+    # only above ``start``, and more than once (a single match is applied).
     return ContextFailure(
-        hunk_number=hunk_number,
-        eof=eof,
-        unmatched=context[0] if context else "",
+        hunk_number=hunk_number, eof=eof, unmatched=context[0], reason="above",
+        line_number=_find_context_core(input_lines, context, 0).new_index + 1,
     )
+
+
+def _near_line_number(wanted: str, input_lines: List[str], start: int) -> int:
+    """1-based line equal to ``wanted`` once all whitespace is removed, else 0.
+
+    Prefers the first such line at or after ``start`` (where the hunk was
+    aimed). Only the number is reported, never the line: the model may not
+    have read it.
+    """
+    squeezed = "".join(wanted.split())
+    first = 0
+    for index, line in enumerate(input_lines):
+        if "".join(line.split()) == squeezed:
+            if index >= start:
+                return index + 1
+            first = first or index + 1
+    return first
 
 
 def _recover_unprefixed_keep_lines(
@@ -474,6 +538,11 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
 
         section = _read_section(parser.lines, parser.index)
         find_result = _find_context(input_lines, section.next_context, cursor, section.eof)
+        if find_result.new_index == -1 and not section.eof:
+            # Hunks out of file order: the block is not after the previous
+            # hunk, but the file has it verbatim exactly once, so where it goes
+            # is not in doubt. Exact match only; ambiguity still fails.
+            find_result = _find_unique_context(input_lines, section.next_context)
         parser.index = section.end_index
         if find_result.new_index == -1:
             failures.append(
@@ -483,7 +552,7 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
             )
             continue
 
-        cursor = find_result.new_index + len(section.next_context)
+        cursor = max(cursor, find_result.new_index + len(section.next_context))
         parser.fuzz += find_result.fuzz
 
         for ch in section.section_chunks:
@@ -497,6 +566,7 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
 
     if failures:
         raise PatchContextError(failures)
+    chunks.sort(key=lambda chunk: chunk.orig_index)
     return ParsedUpdateDiff(chunks=chunks, fuzz=parser.fuzz)
 
 
@@ -607,6 +677,16 @@ def _find_context(lines: List[str], context: List[str], start: int, eof: bool) -
         fallback = _find_context_core(lines, context, start)
         return ContextMatch(new_index=fallback.new_index, fuzz=fallback.fuzz + 10000)
     return _find_context_core(lines, context, start)
+
+
+def _find_unique_context(lines: List[str], context: List[str]) -> ContextMatch:
+    """The block's position if it occurs exactly once in ``lines``."""
+    first = _find_context_core(lines, context, 0)
+    if first.new_index == -1:
+        return first
+    if _find_context_core(lines, context, first.new_index + 1).new_index != -1:
+        return ContextMatch(new_index=-1, fuzz=0)
+    return first
 
 
 def _find_context_core(lines: List[str], context: List[str], start: int) -> ContextMatch:
