@@ -431,6 +431,22 @@ class Model(ABC):
                 setattr(cloned, attr, None)
         return cloned
 
+    def side_call_copy(self) -> "Model":
+        """``detached_copy`` for a one-shot side question asked on this model.
+
+        Drops the agent's tools so the request carries no tool schemas and
+        cannot come back as a tool call, and detaches the cost tracker so a
+        small side prompt is not read as this session's context watermark.
+        Callers own the copy and must ``close_client()`` it.
+        """
+        cloned = self.detached_copy()
+        cloned.tools = None
+        cloned.functions = None
+        cloned.function_call_stack = None
+        cloned.tool_choice = None
+        cloned._cost_tracker = None
+        return cloned
+
     async def close_client(self) -> None:
         """Release the underlying async HTTP client, if any.
 

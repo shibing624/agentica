@@ -732,6 +732,8 @@ class Workspace:
         content = (await async_read_text(index_path)).strip()
         if not content:
             return ""
+        # Entries written before memory redaction existed are masked here too.
+        content = redact_sensitive_text(content, level="memory")
 
         lines = [line for line in content.splitlines() if line.strip()]
         truncated = False
@@ -761,6 +763,35 @@ class Workspace:
                 f"{self._MEMORY_INJECT_MAX_BYTES} bytes for the system prompt."
             )
         return f"{note}\n\n{body}"
+
+    async def list_memory_index_entries(self) -> List[Dict[str, str]]:
+        """Live MEMORY.md entries as ``{title, filename, hook}``, oldest first.
+
+        Read from disk on every call (not the session-start snapshot), so a
+        memory written by another session after this one started is visible
+        to per-turn recall.
+        """
+        self._initialize_user_dir()
+        index_path = self._get_user_memory_md()
+        if not index_path.is_file():
+            return []
+        content = (await async_read_text(index_path)).strip()
+        if not content:
+            return []
+        return self._parse_memory_index(redact_sensitive_text(content, level="memory"))
+
+    async def read_memory_body(self, filename: str) -> str:
+        """Body of one memory topic file (frontmatter stripped, redacted).
+
+        ``filename`` must be a bare name inside the memory folder; anything
+        that would resolve outside it reads as empty.
+        """
+        memory_dir = self._get_user_memory_dir()
+        path = memory_dir / filename
+        if Path(filename).name != filename or not path.is_file():
+            return ""
+        body = strip_frontmatter((await async_read_text(path)).strip())
+        return redact_sensitive_text(body, level="memory") or ""
 
     async def get_relevant_memories(
         self,
@@ -896,6 +927,12 @@ class Workspace:
             Absolute path to the written memory file.
         """
         self._initialize_user_dir()
+
+        # Memories are re-injected into every later session's prompt, so a
+        # credential pasted into a conversation must not be persisted verbatim.
+        title = redact_sensitive_text(title, level="memory")
+        content = redact_sensitive_text(content, level="memory")
+        description = redact_sensitive_text(description, level="memory")
 
         is_trusted = source in self._MEMORY_TRUSTED_SOURCES
         if is_trusted:

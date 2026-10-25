@@ -42,6 +42,11 @@ FEEDBACK_CLASSIFY_PROMPT: str = _load("feedback_classify.md")
 BATCH_JUDGE_PROMPT: str = _load("batch_judge.md") + "\n"
 
 
+def get_memory_recall_select_prompt(limit: int) -> str:
+    """System prompt for the per-turn recall selection call."""
+    return _load("recall_select.md", limit=limit)
+
+
 __all__ = [
     "MEMORY_TYPE_SPEC",
     "MEMORY_EXCLUSION_SPEC",
@@ -49,4 +54,5 @@ __all__ = [
     "MEMORY_SYSTEM_PROMPT",
     "FEEDBACK_CLASSIFY_PROMPT",
     "BATCH_JUDGE_PROMPT",
+    "get_memory_recall_select_prompt",
 ]

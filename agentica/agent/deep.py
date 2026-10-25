@@ -349,7 +349,8 @@ class DeepAgent(Agent):
                 extract_min_seconds_between=60,
                 load_workspace_context=True,
                 load_workspace_memory=True,
-                max_memory_entries=10,
+                recall_memories=True,
+                max_memory_entries=5,
             )
 
         # DeepAgent is the product preset: capture errors + corrections only.

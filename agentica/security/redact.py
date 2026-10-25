@@ -32,6 +32,7 @@ Unterminated ``-----BEGIN PRIVATE KEY-----`` blocks are *always* redacted
 regardless of these toggles — that's a hard safety floor.
 """
 
+import math
 import os
 import re
 from typing import Optional
@@ -108,6 +109,58 @@ _KEY_VALUE_SECRET_RE = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# Memory patterns — for prose that is persisted across sessions and pushed
+# back into future prompts. A memory is never round-tripped into source, so
+# credential-named assignments can be masked; but memories routinely record
+# tuning such as ``compact_token_limit=300000`` / ``max_tokens: 50``, so only
+# values that are not plain numbers or literals are treated as secrets.
+# ---------------------------------------------------------------------------
+
+_PLAIN_VALUE_RE = re.compile(r"^(?:[0-9][0-9._]*|true|false|none|null)[;,.)\]]*$", re.IGNORECASE)
+
+# Bare high-entropy tokens (e.g. personal access tokens without a known vendor
+# prefix). Path / dotted segments split on ``/`` and ``.`` so file paths and
+# hostnames are scored piecewise; hex digests and lowercase ids carry no
+# uppercase and are never candidates.
+_ENTROPY_CANDIDATE_RE = re.compile(r"(?<![A-Za-z0-9_+=#-])[A-Za-z0-9_+=#-]{32,}(?![A-Za-z0-9_+=#-])")
+_ENTROPY_MIN_BITS = 4.2
+
+
+def _shannon_bits(token: str) -> float:
+    counts: dict = {}
+    for ch in token:
+        counts[ch] = counts.get(ch, 0) + 1
+    total = len(token)
+    return -sum((n / total) * math.log2(n / total) for n in counts.values())
+
+
+def _mask_high_entropy(match: "re.Match") -> str:
+    token = match.group(0)
+    if (
+        any(c.isupper() for c in token)
+        and any(c.islower() for c in token)
+        and any(c.isdigit() for c in token)
+        and _shannon_bits(token) >= _ENTROPY_MIN_BITS
+    ):
+        return "***REDACTED_SECRET***"
+    return token
+
+
+def _mask_secret_assignment(match: "re.Match") -> str:
+    name, quote, value = match.group(1), match.group(2), match.group(3)
+    if _PLAIN_VALUE_RE.match(value):
+        return match.group(0)
+    return f"{name}={quote}***REDACTED***{quote}"
+
+
+def _mask_secret_key_value(match: "re.Match") -> str:
+    prefix, quote, value = match.group(1), match.group(2), match.group(3)
+    if _PLAIN_VALUE_RE.match(value):
+        return match.group(0)
+    return f"{prefix}{quote}***REDACTED***{quote}"
+
+
 def _env_truthy(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -153,6 +206,10 @@ def redact_sensitive_text(
             ``"strict"`` — additionally masks env-style and key:value forms.
             Aggressive; will rewrite source code containing ``key``/``token``/
             ``password`` identifiers.
+            ``"memory"`` — high-confidence plus credential-named assignments
+            whose value is not a plain number/literal, and bare high-entropy
+            tokens. For long-term memory text, which is re-injected into
+            future prompts but never patched back into source.
 
     This is a logging and persistence safety net, not a permission boundary.
     Callers should still avoid sending secrets into prompts or archives.
@@ -172,5 +229,9 @@ def redact_sensitive_text(
     if level == "strict":
         redacted = _ENV_ASSIGN_RE.sub(r"\1=***REDACTED***", redacted)
         redacted = _KEY_VALUE_SECRET_RE.sub(r"\1\2***REDACTED***\2", redacted)
+    elif level == "memory":
+        redacted = _ENV_ASSIGN_RE.sub(_mask_secret_assignment, redacted)
+        redacted = _KEY_VALUE_SECRET_RE.sub(_mask_secret_key_value, redacted)
+        redacted = _ENTROPY_CANDIDATE_RE.sub(_mask_high_entropy, redacted)
 
     return redacted

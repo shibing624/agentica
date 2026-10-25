@@ -567,7 +567,8 @@ class AgentService:
                 extract_min_seconds_between=60,
                 load_workspace_context=True,
                 load_workspace_memory=True,
-                max_memory_entries=10,
+                recall_memories=True,
+                max_memory_entries=5,
             ),
         )
 

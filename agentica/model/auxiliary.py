@@ -27,6 +27,7 @@ from typing import Dict, Optional
 COMPRESSION = "compression"
 GOAL_JUDGE = "goal_judge"
 MEMORY_EXTRACT = "memory_extract"
+MEMORY_RECALL = "memory_recall"
 TITLE = "title"
 DEFAULT = "default"
 

@@ -9,7 +9,7 @@
 | 你想让 Agent 记住什么 | 存在哪里 | 怎么写入 | 怎么查回 |
 |---|---|---|---|
 | **1. 当前这次对话的上下文**<br>（刚才问了什么、刚读过哪个文件、刚跑了什么命令） | **会话历史 (`WorkingMemory` / `SessionLog`)**<br>`~/.agentica/projects/<user>/<项目>/<session_id>.jsonl` | 对话时自动记录 | 当前窗口内自动带入；换窗后用 **`search_session`** 检索，或用 `/resume` 恢复整个会话 |
-| **2. 跨会话的事实与经验**<br>（比如「我是数据科学家」「发布截止日是月底」「上次修这个报错的方案」） | **Workspace 长期记忆**<br>`~/.agentica/workspace/users/<user_id>/MEMORY.md` 及 `memory/*.md` | 对话中让 Agent 记下（调用 `save_memory`），或开启自动抽取 | 索引自动带入新会话；具体内容用 **`search_memory`** 检索 |
+| **2. 跨会话的事实与经验**<br>（比如「我是数据科学家」「发布截止日是月底」「上次修这个报错的方案」） | **Workspace 长期记忆**<br>`~/.agentica/workspace/users/<user_id>/MEMORY.md` 及 `memory/*.md` | 对话中让 Agent 记下（调用 `save_memory`），或开启自动抽取 | 索引自动带入新会话；每轮由辅助模型挑出相关条目，正文附在你的消息后（`<memory_recall>`）；也可用 **`search_memory`** 检索 |
 | **3. 每次都要遵守的常驻规则**<br>（比如「永远用简体中文回答」「不要用 mock 数据库」「提交前先跑测试」） | **`AGENTS.md` 规则文件**<br>项目级：`<仓库根目录>/AGENTS.md`<br>用户级：`~/.agentica/AGENTS.md` | 你直接用编辑器改，或在对话里说「把这条写进 AGENTS.md」 | 每个新会话启动时**全文自动加载**进系统提示词（修改后从**下一个新会话**起生效） |
 
 ---
@@ -40,7 +40,16 @@
 > 记住：我们的测试环境数据库端口是 15432， staging 分支每周四下午封版。
 ```
 
-Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/users/default/memory/`，并更新 `MEMORY.md` 索引。之后你新开任何会话问起「测试库端口是多少」，它都能通过索引或 `search_memory` 找出来。
+Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/users/default/memory/`，并更新 `MEMORY.md` 索引。之后你新开任何会话问起「测试库端口是多少」，它都能找出来。
+
+**每轮自动召回**：CLI、Web 和 `DeepAgent` 默认开启。每次你发消息前，辅助模型（`auxiliary_model`，未配置时用主模型）会读一次**最新的** `MEMORY.md` 索引，挑出这条消息真正需要的条目（最多 5 条），把正文附在你的消息末尾的 `<memory_recall>` 块里。要点：
+- 系统提示词里仍然只有会话开始时冻结的索引，召回块追加在本轮用户消息上，不改动已发送的前缀，不影响缓存命中。
+- 读的是实时索引，所以**另一个会话刚存下的记忆，这个会话下一轮就能召回**。
+- 当前窗口里已经召回过的条目不会重复召回；换窗后旧召回块被移出，相关时会再次召回。
+- 大多数消息不会召回任何条目；选择调用失败或超时（默认 10 秒）时本轮照常进行，只是没有召回。
+- 召回块不写入会话日志，`search_session` 搜不到它。
+
+**密钥过滤**：写入记忆前（以及读取旧记忆时）会屏蔽密钥形态的内容：厂商前缀 key、JWT、私钥块、`XXX_API_KEY=...` 这类凭据赋值（数字取值如 `max_tokens=50` 保留），以及无前缀的高熵 token。端口、路径、commit hash 不受影响。
 
 长期记忆分为四类：
 - `user`：你的角色、技术栈、个人偏好
@@ -99,6 +108,8 @@ agent = Agent(
     long_term_memory_config=WorkspaceMemoryConfig(
         load_workspace_context=True,   # 加载 AGENTS.md 常驻规则
         load_workspace_memory=True,    # 加载 MEMORY.md 记忆索引
+        recall_memories=True,          # 每轮由辅助模型挑选相关记忆，正文附在用户消息后（普通 Agent 默认关闭）
+        max_memory_entries=5,          # 单轮最多召回条数
         auto_archive=True,             # 每轮结束后将原始对话归档到 conversations/YYYY-MM-DD.md（不调 LLM）
         auto_extract_memory=False,     # 是否在后台自动用副模型抽取记忆条目（会消耗少量 token）
     ),

@@ -117,9 +117,19 @@ class WorkspaceMemoryConfig:
     """Workspace memory loading configuration."""
     load_workspace_context: bool = True
     load_workspace_memory: bool = True
-    # Maximum number of memory entries to inject per run (relevance-ranked).
-    # Maps to CC's "select up to N memories" in sidequery.
+    # Per-turn recall: before each human turn, one auxiliary-model call
+    # ("memory_recall" task) picks the MEMORY.md entries this message needs,
+    # and their bodies are appended to the user message in <memory_recall>.
+    # The system prompt only carries the session-start index (title + hook);
+    # recall reads the live index, so memories written by other sessions
+    # reach this one. An entry already recalled in the current window is not
+    # recalled again. Off by default: it adds one side call per turn.
+    recall_memories: bool = False
+    # Upper bound on entries one turn's recall may inject.
     max_memory_entries: int = 5
+    # Wall-clock cap on the selection call; on expiry the turn proceeds
+    # without recall. 0 disables the cap.
+    recall_timeout: float = 10.0
     # Auto-archive conversation to workspace after each run() (zero LLM cost,
     # just appends raw messages to conversations/ directory).
     auto_archive: bool = False

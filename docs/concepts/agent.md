@@ -310,8 +310,9 @@ agent = Agent(
     workspace=Workspace("./workspace"),
     long_term_memory_config=WorkspaceMemoryConfig(
         load_workspace_context=True,   # 加载 AGENTS.md 链（user 级 / 项目 / workspace 级）
-        load_workspace_memory=True,    # 加载相关记忆到 System Prompt
-        max_memory_entries=5,          # 最多注入 5 条最相关的记忆
+        load_workspace_memory=True,    # 会话开始时冻结 MEMORY.md 索引进 System Prompt
+        recall_memories=True,          # 每轮由辅助模型挑选相关记忆，附在用户消息后
+        max_memory_entries=5,          # 单轮最多召回 5 条
         auto_archive=True,             # 每次 run 后自动归档对话（无 LLM 成本）
         auto_extract_memory=False,     # 自动提取关键信息存记忆（有 LLM 成本）
     ),

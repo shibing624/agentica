@@ -17,6 +17,7 @@ from agentica.compression.token_budget import (
     is_pending_window_preamble,
 )
 from agentica.knowledge.document import Document
+from agentica.memory.recall import build_memory_recall
 from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
 from agentica.prompts.base.soul import get_soul_prompt
@@ -690,6 +691,24 @@ class PromptsMixin:
             audio=audio, images=images, videos=videos, **kwargs,
         )
 
+    async def _get_memory_recall_block(self, query: str, context: List[Message]) -> Optional[str]:
+        """Per-turn ``<memory_recall>`` block for a human message, if enabled.
+
+        ``context`` is what is about to be sent before this turn's message;
+        entries already recalled there are skipped.
+        """
+        cfg = self.long_term_memory_config
+        if not (self.enable_long_term_memory and self.workspace is not None and cfg.recall_memories):
+            return None
+        return await build_memory_recall(
+            self.workspace,
+            self.resolve_auxiliary_model("memory_recall"),
+            query,
+            context,
+            limit=cfg.max_memory_entries,
+            timeout=cfg.recall_timeout,
+        )
+
     async def get_messages_for_run(
             self,
             *,
@@ -759,6 +778,11 @@ class PromptsMixin:
 
         if any(user_message.images for user_message in user_messages):
             self.model.validate_image_input()
+
+        if isinstance(message, str) and user_messages and isinstance(user_messages[-1].content, str):
+            recall = await self._get_memory_recall_block(message, messages_for_model)
+            if recall:
+                user_messages[-1].content = f"{user_messages[-1].content}\n\n{recall}"
 
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)
