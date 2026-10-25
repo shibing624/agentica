@@ -45,7 +45,8 @@ _SEARCH_LIMIT_DESC = (
 
 _SEARCH_UUID_DESC = (
     "Fetch the full content of one session-log entry by passing its full uuid "
-    "or the 8-char uuid prefix (without brackets) shown in search hits."
+    "or the 8-char uuid prefix (without brackets) shown in search hits, or "
+    "the tool-call id quoted in an evicted-result placeholder."
 )
 
 _SEARCH_SCHEMA = {
@@ -154,7 +155,8 @@ class BuiltinContextTool(Tool):
         role: user | assistant | tool. Pass tool for earlier tool results,
         then uuid for the full entry.
         limit: max keyword hits 1-20.
-        uuid: full text of one entry, by the [8-char] prefix shown on a hit.
+        uuid: full text of one entry, by the [8-char] prefix shown on a hit or
+        the tool-call id quoted in an evicted-result placeholder.
         """
         slog = self._session_log()
         if slog is None:

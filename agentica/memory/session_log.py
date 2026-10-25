@@ -878,14 +878,34 @@ class SessionLog:
             rows = [e for e in rows if e.get("type") == want]
         return rank_entries(rows, q, limit=min(20, max(1, int(limit))))
 
-    def find_entries(self, uuid_prefix: str) -> List[Dict[str, Any]]:
-        """Conversation rows whose uuid starts with ``uuid_prefix``, full text.
+    def find_entries(self, handle: str) -> List[Dict[str, Any]]:
+        """Conversation rows addressed by ``handle``, full text.
 
-        Returns every match so the caller can tell "none" from "ambiguous"
-        instead of this layer picking one.
+        ``handle`` is either a tool-call id (the handle Layer 1 leaves in an
+        evicted-result placeholder) or a uuid prefix. A tool-call id is matched
+        exactly against the raw log and resolves to the earliest row carrying
+        it. That is the row written when the tool ran; a preserved tail
+        re-logged after a compact boundary repeats it, possibly already as an
+        evicted placeholder, and (on the Anthropic wire) as a ``user`` row with
+        no call id at all. The search index drops the original in favour of that
+        copy, so the index cannot be used to resolve a handle. Otherwise every
+        uuid-prefix match is returned so the caller can tell "none" from
+        "ambiguous" instead of this layer picking one.
         """
         from agentica.memory.session_search import _entry_text, strip_window_preamble
 
+        original = next(
+            (
+                e for e in self._iter_entries()
+                if handle
+                and e.get("type") in ("tool", "tool_audit")
+                and e.get("tool_call_id") == handle
+            ),
+            None,
+        )
+        matched = [original] if original is not None else [
+            e for e in self._conversation_rows() if e["uuid"].startswith(handle)
+        ]
         return [
             {
                 "uuid": e["uuid"],
@@ -893,8 +913,7 @@ class SessionLog:
                 "timestamp": e.get("timestamp", ""),
                 "content": strip_window_preamble(_entry_text(e)),
             }
-            for e in self._conversation_rows()
-            if e["uuid"].startswith(uuid_prefix)
+            for e in matched
         ]
 
     def list_user_questions(self, limit: int = 20) -> List[Dict[str, Any]]:

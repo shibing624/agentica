@@ -17,9 +17,13 @@ Two rules, both learned from a real re-read loop:
   stops once the request is small enough to reach them.
 
 Evicted content is replaced by a placeholder naming the call, so the model can
-re-issue it. It is deliberately *not* copied to disk first: recovering from a
-spill file costs the same one tool call as re-running the original, and for a
-file read the original path holds fresher content than the snapshot would.
+re-issue it. It is deliberately *not* copied to a spill file: the session log
+already holds the full result. When the agent can read that log
+(``recoverable``: a session log plus ``search_session``), the placeholder also
+quotes the tool-call id, which ``search_session(uuid=...)`` resolves to the
+original output. Re-running is not an equivalent recovery: a non-idempotent
+call (``execute`` reading changing state) returns different evidence, and a
+call whose arguments were dropped cannot be re-run at all.
 
 Tool *results* are not the only bulk in a transcript: a ``write_file`` or
 ``apply_patch`` call carries its whole payload in the assistant message's
@@ -293,16 +297,27 @@ def _render_arg_value(value: Any) -> str:
     return repr(value)
 
 
-def _placeholder(name: Optional[str], args: Any) -> str:
+def _result_call_id(msg: "Message", block: Optional[dict]) -> Optional[str]:
+    """The tool-call id a result answers, whichever shape holds it."""
+    if block is not None:
+        return block.get("tool_use_id") or None
+    return msg.tool_call_id or None
+
+
+def _placeholder(name: Optional[str], args: Any, handle: Optional[str] = None) -> str:
     """Name the call that produced the evicted result.
 
     Re-issue is only invited when the original arguments are still in the
     transcript. After Layer 1 drops a payload, telling the model to re-run
     ``send_message`` / ``execute`` / ``write_file`` with the marker as the
     body is how that marker reaches a peer, a shell, or the disk.
+
+    ``handle`` is the tool-call id under which the session log keeps the full
+    result; it is only passed when the model can actually read that log.
     """
+    recover = f' Original output: search_session(uuid="{handle}").' if handle else ""
     if not name:
-        return f"[{_EVICTED}.]"
+        return f"[{_EVICTED}.{recover}]"
     if isinstance(args, str):
         try:
             args = json.loads(args)
@@ -321,9 +336,12 @@ def _placeholder(name: Optional[str], args: Any) -> str:
         return (
             f"[{_EVICTED}: {name}({rendered}). "
             f"The argument payload was dropped from context and cannot be "
-            f"recovered; do not re-issue this call.]"
+            f"recovered; do not re-issue this call.{recover}]"
         )
-    return f"[{_EVICTED}: {name}({rendered}). Re-run the call if you still need it.]"
+    return (
+        f"[{_EVICTED}: {name}({rendered}). "
+        f"Re-run the call if you still need it.{recover}]"
+    )
 
 
 def _evictable_results(
@@ -358,6 +376,7 @@ def evict_tool_results(
     context_tokens: int,
     context_window: int,
     model_id: str = "gpt-4o",
+    recoverable: bool = False,
 ) -> int:
     """Evict the oldest tool results until the request is back under target.
 
@@ -367,6 +386,9 @@ def evict_tool_results(
         context_window: Model context window. Zero disables eviction — without a
                         window there is no way to tell pressure from comfort.
         model_id:       Tokenizer selection for measuring what each eviction saves.
+        recoverable:    The model can read the session log (``search_session``),
+                        so each placeholder quotes the tool-call id to fetch the
+                        original output with.
 
     Returns:
         Number of tool results whose content was replaced.
@@ -391,7 +413,9 @@ def evict_tool_results(
             # is the only handle on output too large to re-read into context.
             continue
         name, args = _resolve_call(msg, block, calls)
-        placeholder = _placeholder(name, args)
+        placeholder = _placeholder(
+            name, args, _result_call_id(msg, block) if recoverable else None,
+        )
         if len(placeholder) >= len(text):
             continue
 
@@ -530,6 +554,7 @@ def evict_context(
     context_tokens: int,
     context_window: int,
     model_id: str = "gpt-4o",
+    recoverable: bool = False,
 ) -> EvictionResult:
     """Run Layer 1: reclaim context without an LLM call.
 
@@ -548,5 +573,6 @@ def evict_context(
         context_tokens=context_tokens,
         context_window=context_window,
         model_id=model_id,
+        recoverable=recoverable,
     )
     return EvictionResult(tool_results=evicted, tool_call_args=shrunk)

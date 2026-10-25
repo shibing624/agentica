@@ -19,7 +19,7 @@ from typing import (
 
 from agentica.utils.log import logger
 from agentica.compression.calibration import ContextCalibration
-from agentica.compression.evict import evict_context
+from agentica.compression.evict import evict_context, under_pressure
 from agentica.compression.manager import compact_token_limit_of, working_context_window
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
@@ -121,8 +121,8 @@ class CompressMixin:
         # threshold there is nothing to buy by dropping a result the window had
         # room for, and the model pays for it by re-running the tool.
         # compact_token_limit is a working cap on the same layers, not a lie
-        # about model.context_window — Layer 0 batch budget still uses the
-        # provider window.
+        # about model.context_window — Layer 0's batch budget reads the same
+        # working window, so all three layers measure pressure against one number.
         _window = model.context_window if isinstance(model.context_window, int) else 0
         _cap = None
         if cm is not None:
@@ -140,16 +140,43 @@ class CompressMixin:
             # Eviction measures what each placeholder saves with the local
             # tokenizer, so it works in raw units against a window shrunk by
             # the same ratio.
+            evict_window = int(_working / calibration.ratio)
+            # A placeholder may only point at the session log when the model
+            # can both have one written and read it back.
+            recoverable = (
+                agent._session_log is not None
+                and "search_session" in (model.functions or {})
+            )
+            digests_before = (
+                _prefix_digests(messages) if under_pressure(raw_tokens, evict_window) else None
+            )
             reclaimed = evict_context(
                 messages,
                 context_tokens=raw_tokens,
-                context_window=int(_working / calibration.ratio),
+                context_window=evict_window,
                 model_id=model.id,
+                recoverable=recoverable,
             )
             if reclaimed.total:
+                # Eviction rewrote content, so the count taken above is stale — and
+                # too high. Re-measure before deciding on Layer 2: an LLM summary
+                # bought for a request eviction already made fit is pure waste.
+                tokens_before = raw_tokens
+                raw_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
+                context_tokens = calibration.scale(raw_tokens)
+                # What this eviction cost the provider cache: every message from
+                # the first rewritten one onward has to be written again.
+                break_index = _first_prefix_break(digests_before, _prefix_digests(messages))
+                invalidated_tokens = (
+                    count_tokens(messages[break_index:], None, model.id)
+                    if break_index is not None else 0
+                )
                 logger.debug(
                     f"Layer 1 (evict): {reclaimed.tool_results} tool result(s), "
-                    f"{reclaimed.tool_call_args} tool-call argument(s)"
+                    f"{reclaimed.tool_call_args} tool-call argument(s), "
+                    f"freed {tokens_before - raw_tokens} tokens, "
+                    f"prefix break at message {break_index} "
+                    f"({invalidated_tokens} tokens to re-cache)"
                 )
                 if cb is not None:
                     cb(
@@ -159,13 +186,12 @@ class CompressMixin:
                             "is_main_agent": is_main_agent,
                             "evicted": reclaimed.tool_results,
                             "shrunk": reclaimed.tool_call_args,
+                            "freed_tokens": tokens_before - raw_tokens,
+                            "break_index": break_index,
+                            "invalidated_tokens": invalidated_tokens,
+                            "tokens_after": raw_tokens,
                         }
                     )
-                # Eviction rewrote content, so the count taken above is stale — and
-                # too high. Re-measure before deciding on Layer 2: an LLM summary
-                # bought for a request eviction already made fit is pure waste.
-                raw_tokens = count_tokens(messages, model.tools, model.id) if _working else 0
-                context_tokens = calibration.scale(raw_tokens)
 
         if not enable_auto_compact or cm is None:
             calibration.record_send(messages, raw_tokens)

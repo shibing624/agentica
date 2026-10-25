@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **被淘汰的工具结果占位符带上 tool-call id，可用 `search_session` 取回原文**：之前占位符只提示「重跑这个调用」，但重跑并不等价：`execute` 这类非幂等调用读到的状态已变，参数被 Layer 1 清掉的调用根本无法重跑。现在当 agent 有会话日志且工具集里有 `search_session` 时（`recoverable`），占位符附带 `Original output: search_session(uuid="<tool-call id>")`；OpenAI 与 Anthropic 两种结果形态都取各自的 id。`SessionLog.find_entries` 先按 tool-call id 在原始日志里精确匹配，返回最早的一行（工具执行时写入的完整结果）：换窗后保留尾部会被重写，搜索索引会剔除原始行，重写出的副本可能已是占位符，Anthropic 形态下还是不带 id 的 `user` 行，所以不能走索引；未命中再按 uuid 前缀匹配；`search_session` 的 `uuid` 说明同步更新。
+- **Layer 1 淘汰记录释放量与前缀缓存代价**：`compact.evict` 回调事件新增 `freed_tokens`、`break_index`、`invalidated_tokens`、`tokens_after`，debug 日志同步输出，可看出一次淘汰省了多少 token、从第几条消息起 provider 缓存要重写。淘汰后的重新计数移到回调之前。
+- **Layer 0 工具批预算与 Layer 1/2 共用同一工作窗口**：`enforce_tool_batch_budget` 之前用 provider 的 `context_window`，设了较小的 `compact_token_limit` 时单批工具结果仍按大窗口放行；现在用 `working_context_window(context_window, compact_token_limit)`。
 - **上游流式返回内部错误时重试，不再直接结束运行**：Anthropic 在 HTTP 200 之后用 SSE `error` 事件报的 `api_error`（内部错误）之前被判为不可重试，也不切 fallback，headless 的 delegate worker 一碰到就以 `[Run failed: ...]` 退出，主模型只能自己重跑。现在它和 `overloaded_error` 一样按上游故障处理：首包前切 fallback，流中途在同一模型上重发。另外，SSE 帧解析失败（`json.JSONDecodeError`）此前只在流中途会重试，首包前也改为可重试。两处都按结构化信号（`error.type`、异常类型）判断，不看报错原文。
 - **交互 CLI 的 Ctrl+D 要连按两次才退出**：此前按一次就离开会话。Ctrl+D 同时也是终端的 EOF，误触一下会把正在跑的回合和输入一起结束。现在第一次只在状态栏提示 `Press Ctrl+D again to exit`，0.8 秒内再按一次才退出；超时提示消失，下一次又从第一次算。`/exit` 仍是一次退出。
 - **`search_session` / `search_memory` 的工具说明补上检索边界**：`search_session` 写明旧工具结果用 `role="tool"` 再按命中的 `[uuid]` 取全文，notes 命中只是当前文件，重写后的上一份不在索引里。`search_memory` 写明不搜本会话 JSONL 和 notes。`<context_window>` 未加长。

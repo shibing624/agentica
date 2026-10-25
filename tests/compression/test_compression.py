@@ -590,6 +590,123 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
         self.assertNotIn("<evicted-tool-arg", placeholder)
         self.assertIn("cannot be recovered", placeholder)
 
+    def _round(self, call_id, name="execute"):
+        return [
+            Message(role="user", content="hi"),
+            Message(role="assistant", tool_calls=[{
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps({"command": "ls"})},
+            }]),
+            Message(
+                role="tool", tool_call_id=call_id, tool_name=name,
+                content=" ".join(f"line-token{i}" for i in range(200)),
+            ),
+            Message(role="user", content="next"),
+            Message(role="assistant", content="ok"),
+        ]
+
+    def test_placeholder_quotes_a_handle_only_when_the_log_is_readable(self):
+        from agentica.compression.evict import evict_tool_results
+
+        with_log, without_log = self._round("call_a1"), self._round("call_b2")
+        for msgs, recoverable in ((with_log, True), (without_log, False)):
+            evict_tool_results(
+                msgs, context_tokens=9_000, context_window=10_000,
+                model_id="gpt-4o", recoverable=recoverable,
+            )
+
+        self.assertIn('search_session(uuid="call_a1")', with_log[2].content)
+        self.assertNotIn("search_session", without_log[2].content)
+
+    def test_anthropic_placeholder_quotes_the_tool_use_id(self):
+        from agentica.compression.evict import evict_tool_results
+
+        msgs = [
+            Message(role="user", content="hi"),
+            Message(role="assistant", tool_calls=[{
+                "id": "toolu_9",
+                "type": "function",
+                "function": {"name": "execute", "arguments": json.dumps({"command": "ls"})},
+            }]),
+            Message(role="user", content=[{
+                "type": "tool_result", "tool_use_id": "toolu_9",
+                "content": " ".join(f"line-token{i}" for i in range(200)),
+            }]),
+            Message(role="user", content="next"),
+            Message(role="assistant", content="ok"),
+        ]
+
+        evict_tool_results(
+            msgs, context_tokens=9_000, context_window=10_000,
+            model_id="gpt-4o", recoverable=True,
+        )
+
+        self.assertIn('search_session(uuid="toolu_9")', msgs[2].content[0]["content"])
+
+    def test_dropped_arguments_still_point_at_the_original_result(self):
+        from agentica.compression.evict import evict_tool_results
+        from agentica.compression.tool_call_args import omitted_tool_arg
+
+        msgs = self._round("call_c3", name="send_message")
+        msgs[1].tool_calls[0]["function"]["arguments"] = json.dumps(
+            {"message": omitted_tool_arg(900)}
+        )
+
+        evict_tool_results(
+            msgs, context_tokens=9_000, context_window=10_000,
+            model_id="gpt-4o", recoverable=True,
+        )
+
+        self.assertIn("do not re-issue", msgs[2].content)
+        self.assertIn('search_session(uuid="call_c3")', msgs[2].content)
+
+
+class TestSessionLogToolCallHandle(unittest.TestCase):
+    """The handle in an evicted placeholder must resolve to the full result."""
+
+    def test_find_entries_resolves_a_tool_call_id(self):
+        from agentica.memory.session_log import SessionLog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s-handle", base_dir=tmp)
+            log.append("user", "run it")
+            log.append("tool", "FULL-OUTPUT-XYZ", tool_call_id="call_h1", tool_name="execute")
+
+            hits = log.find_entries("call_h1")
+
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["type"], "tool")
+        self.assertIn("FULL-OUTPUT-XYZ", hits[0]["content"])
+
+    def test_a_relogged_tool_row_is_not_ambiguous(self):
+        from agentica.memory.session_log import SessionLog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s-handle2", base_dir=tmp)
+            log.append("tool", "same", tool_call_id="call_h2", tool_name="execute")
+            log.append("tool", "same", tool_call_id="call_h2", tool_name="execute")
+
+            self.assertEqual(len(log.find_entries("call_h2")), 1)
+
+    def test_handle_survives_a_compact_that_shadows_the_original_row(self):
+        from agentica.memory.session_log import SessionLog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = SessionLog("s-handle3", base_dir=tmp)
+            log.append("user", "fetch the report")
+            log.append("tool", "FULL-OUTPUT-XYZ", tool_call_id="toolu_h3", tool_name="execute")
+            log.append_compact_boundary("", window_id=1)
+            # The preserved tail is re-logged: same question, and on the
+            # Anthropic wire the result comes back as a user row with no id.
+            log.append("user", "fetch the report")
+            log.append("user", '[{"type": "tool_result", "tool_use_id": "toolu_h3", "content": "[evicted]"}]')
+
+            hits = log.find_entries("toolu_h3")
+
+        self.assertEqual(len(hits), 1)
+        self.assertIn("FULL-OUTPUT-XYZ", hits[0]["content"])
+
 
 class TestSanitizePath(unittest.TestCase):
     """Tests for sanitize_path."""
