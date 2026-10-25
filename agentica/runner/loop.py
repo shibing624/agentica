@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from typing import (
     TYPE_CHECKING,
@@ -1292,22 +1291,14 @@ class LoopMixin:
                                     # loop (that would increment turn_count).
                                     # Already-yielded chunks stay on the wire
                                     # (--print concatenates partial + retry).
-                                    # A malformed SSE frame arrives as
-                                    # ``json.JSONDecodeError``, whose text is
-                                    # only "Extra data: line 1 column N" — it
-                                    # names no transport condition, so the
-                                    # substring list can never classify it.
-                                    # The exception type is the signal: a
-                                    # payload the decoder cannot parse is a
-                                    # framing failure, and the request is
-                                    # worth re-issuing.
                                     # Same classifier as the pre-stream path,
                                     # so an SSE ``error`` event (server_error,
-                                    # rate limit) or a stream that ended without
-                                    # a terminal event is not fatal just because
-                                    # it arrived after the first chunk. There is
-                                    # no fallback switch here, so an outage is
-                                    # retried on the same model.
+                                    # rate limit), a malformed frame, or a stream
+                                    # that ended without a terminal event is not
+                                    # fatal just because it arrived after the
+                                    # first chunk. There is no fallback switch
+                                    # here, so an outage is retried on the same
+                                    # model.
                                     _retryable, _outage = self._classify_api_error(
                                         exc,
                                         active_model.get_retryable_substrings(
@@ -1315,11 +1306,8 @@ class LoopMixin:
                                         ),
                                         loop_state.FALLBACK_ONLY_SUBSTRINGS,
                                     )
-                                    _midstream_retryable = (
-                                        _retryable or _outage or isinstance(exc, json.JSONDecodeError)
-                                    )
                                     if (
-                                        _midstream_retryable
+                                        (_retryable or _outage)
                                         and _ms_attempt < loop_state.max_api_retry - 1
                                     ):
                                         _ms_attempt += 1

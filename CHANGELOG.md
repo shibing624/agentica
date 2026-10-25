@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **上游流式返回内部错误时重试，不再直接结束运行**：Anthropic 在 HTTP 200 之后用 SSE `error` 事件报的 `api_error`（内部错误）之前被判为不可重试，也不切 fallback，headless 的 delegate worker 一碰到就以 `[Run failed: ...]` 退出，主模型只能自己重跑。现在它和 `overloaded_error` 一样按上游故障处理：首包前切 fallback，流中途在同一模型上重发。另外，SSE 帧解析失败（`json.JSONDecodeError`）此前只在流中途会重试，首包前也改为可重试。两处都按结构化信号（`error.type`、异常类型）判断，不看报错原文。
 - **交互 CLI 的 Ctrl+D 要连按两次才退出**：此前按一次就离开会话。Ctrl+D 同时也是终端的 EOF，误触一下会把正在跑的回合和输入一起结束。现在第一次只在状态栏提示 `Press Ctrl+D again to exit`，0.8 秒内再按一次才退出；超时提示消失，下一次又从第一次算。`/exit` 仍是一次退出。
 - **`search_session` / `search_memory` 的工具说明补上检索边界**：`search_session` 写明旧工具结果用 `role="tool"` 再按命中的 `[uuid]` 取全文，notes 命中只是当前文件，重写后的上一份不在索引里。`search_memory` 写明不搜本会话 JSONL 和 notes。`<context_window>` 未加长。
 - **`save_memory` 新增可选参数 `description`，作为 `MEMORY.md` 索引行的 hook**：之前 hook 被写死成 title，索引每行都是「标题 — 标题」，看不出什么时候该打开。不传时用 content 的第一行。自动抽取的记忆也用同样的默认值。

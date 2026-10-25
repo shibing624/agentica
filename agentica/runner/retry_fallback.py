@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 import random
 import sys
 
@@ -89,8 +90,11 @@ def _error_response(exc: BaseException) -> Optional[httpx.Response]:
 
 # Structured ``error.type`` values of a streamed ``error`` event.
 _RATE_LIMIT_ERROR_TYPES = frozenset({"rate_limit", "rate_limit_error", "requests", "tokens"})
+# ``api_error`` is Anthropic's type for an internal (HTTP 500-class) failure.
+# Streamed after HTTP 200 it carries no error status, so the type is the signal.
 _OUTAGE_ERROR_TYPES = frozenset({
     "server_error", "internal_server_error", "connection_error", "overloaded_error", "overloaded",
+    "api_error",
 })
 
 # Upper bound on any retry wait, ``Retry-After`` included: past this a retry is
@@ -362,6 +366,11 @@ class RetryMixin:
         if isinstance(exc, (APITimeoutError, httpx.TimeoutException, TimeoutError)):
             return True, False
         if isinstance(exc, StreamEndedError):
+            return True, False
+        # A payload the decoder cannot parse is a framing failure (a malformed
+        # SSE frame reads "Extra data: line 1 column N", naming no transport
+        # condition), so the request is worth re-issuing.
+        if isinstance(exc, json.JSONDecodeError):
             return True, False
         error_type = _error_body_type(exc)
         if error_type in _RATE_LIMIT_ERROR_TYPES:

@@ -9,6 +9,7 @@ routed to a fallback.
 """
 
 import asyncio
+import json
 import unittest
 import unittest.mock
 from unittest.mock import AsyncMock, MagicMock
@@ -250,6 +251,17 @@ class TestAnthropicSSEErrorEvent(unittest.TestCase):
         self.assertEqual(exc.status_code, 200)
         self.assertEqual(self._classify(exc), (False, True))
 
+    def test_api_error_event_is_an_outage(self):
+        # Anthropic's internal-error type, streamed after HTTP 200: before it was
+        # classified it ended delegated workers outright.
+        exc = self._sse_error("api_error")
+        self.assertEqual(exc.status_code, 200)
+        self.assertEqual(self._classify(exc), (False, True))
+
+    def test_malformed_frame_is_retryable_before_the_first_chunk_too(self):
+        exc = json.JSONDecodeError("Extra data", '{"a": 1}{"b": 2}', 8)
+        self.assertEqual(self._classify(exc), (True, False))
+
     def test_rate_limit_event_is_retryable_with_the_long_wait(self):
         exc = self._sse_error("rate_limit_error")
         self.assertEqual(self._classify(exc), (True, False))
@@ -344,6 +356,21 @@ class TestMidStreamErrorsUseTheSameClassifier(unittest.TestCase):
         from agentica.model.response import StreamEndedError
 
         attempts, content, _ = self._run_with_midstream_error(StreamEndedError("no terminal event"))
+        self.assertEqual((attempts, content), (2, "recovered"))
+
+    def test_anthropic_api_error_event_after_first_chunk_is_reissued(self):
+        response = httpx.Response(200, request=_request())
+        # A neutral message, so only the structured type can classify it.
+        body = {"type": "error", "error": {"type": "api_error", "message": "m"}}
+        error = anthropic.AsyncAnthropic(api_key="x")._make_status_error("m", body=body, response=response)
+        attempts, content, _ = self._run_with_midstream_error(error)
+        self.assertEqual((attempts, content), (2, "recovered"))
+
+    def test_peer_closed_mid_body_is_reissued(self):
+        error = httpx.RemoteProtocolError(
+            "peer closed connection without sending complete message body (incomplete chunked read)"
+        )
+        attempts, content, _ = self._run_with_midstream_error(error)
         self.assertEqual((attempts, content), (2, "recovered"))
 
     def test_midstream_rate_limit_waits_the_rate_limit_backoff(self):
