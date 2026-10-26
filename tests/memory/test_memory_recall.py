@@ -66,7 +66,7 @@ class TestRedactMemoryLevel(unittest.TestCase):
 
     def test_keeps_paths_hex_digests_and_identifiers(self):
         text = (
-            "see /Users/xuming/Documents/Codes/agentica/agentica/compression/evict.py, "
+            "see /Users/somebody/Documents/Codes/agentica/agentica/compression/evict.py, "
             "commit 093c23d2a8b1c4e5f6a7b8c9d0e1f2a3b4c5d6e7, "
             "fn test_handle_survives_a_compact_that_shadows_the_original_row"
         )
@@ -83,7 +83,7 @@ class TestWorkspaceMemoryRedaction(unittest.TestCase):
             ws = Workspace(tmp)
             path = asyncio.run(ws.write_memory_entry(
                 title="agentlens setup",
-                content="Set AI_SALES_AGENTLENS_API_KEY=7804#apm-log-9d96db8ad9126d4a then restart.",
+                content="Set AI_SALES_AGENTLENS_API_KEY='7804#apm-log-9d96db8ad9126d4a' then restart.",
                 memory_type="reference",
             ))
             with open(path, encoding="utf-8") as f:

@@ -138,9 +138,9 @@ async def select_memories(
     fails or times out the turn proceeds without recall rather than failing.
     """
     side = model.side_call_copy()
-    request = build_selection_request(query, entries, limit)
+    req = build_selection_request(query, entries, limit)
     try:
-        call = side.response(messages=request)
+        call = side.response(messages=req)
         response = await (asyncio.wait_for(call, timeout=timeout) if timeout > 0 else call)
     except asyncio.TimeoutError:
         logger.warning(f"Memory recall selection timed out after {timeout:.1f}s; turn continues without recall")
