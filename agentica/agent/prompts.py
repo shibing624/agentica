@@ -785,12 +785,15 @@ class PromptsMixin:
         # - ``message=str``: the string is the query.
         # - ``messages=list``: callers that rebuild history every turn (e.g. IM
         #   adapters) pass [history..., this turn's user message]; the last
-        #   user message is the query and the block is appended to it. History
+        #   user message is the query and the block is prepended to it. History
         #   items themselves are never modified. Because such callers rebuild
         #   history from an external source, earlier recall blocks are not in
         #   it, so dedup only sees blocks from this turn's own list — same
         #   entry may be re-recalled next turn, which is the intended
         #   "every turn carries its memories" behavior for stateless callers.
+        # The block goes *before* the user's question: long-context models pay
+        # least attention to the middle, so the fresh question sits at the
+        # very bottom where it is read last and weighs most.
         recall_query: Optional[str] = None
         if isinstance(message, str):
             recall_query = message
@@ -801,7 +804,7 @@ class PromptsMixin:
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
             recall = await self._get_memory_recall_block(recall_query, messages_for_model)
             if recall:
-                user_messages[-1].content = f"{user_messages[-1].content}\n\n{recall}"
+                user_messages[-1].content = f"{recall}\n\n{user_messages[-1].content}"
 
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)

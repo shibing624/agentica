@@ -11,9 +11,11 @@ exactly when it does not know a relevant memory exists.
 Recall pushes them instead: before each human turn an auxiliary model picks
 the entries this message needs from the *live* index (so memories written by
 other sessions after this one started are eligible), and their bodies are
-appended to the user message inside ``<memory_recall>``. Appending to the
-newest user message keeps the conversation append-only, so the provider cache
-is untouched; earlier turns' blocks stay byte-identical in history.
+prepended to the user message inside ``<memory_recall>``. The user's own
+question stays at the very bottom — long-context models attend least to the
+middle, so the fresh question reads last. Prepending to the newest user
+message keeps the conversation append-only, so the provider cache is
+untouched; earlier turns' blocks stay byte-identical in history.
 
 Dedup reads the context itself: a file whose block is still in the messages
 being sent is not recalled again. After a window rollover drops that block,

@@ -264,7 +264,7 @@ class TestAgentRecallInjection(unittest.TestCase):
         agent.run_response = RunResponse()
         return agent
 
-    def test_recall_is_appended_to_the_user_message_not_the_system_prompt(self):
+    def test_recall_is_prepended_to_the_user_message_not_the_system_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
             asyncio.run(_seed(agent.workspace))
@@ -273,7 +273,9 @@ class TestAgentRecallInjection(unittest.TestCase):
                 new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
             ):
                 system, users, _ = asyncio.run(agent.get_messages_for_run(message="install deps please"))
-        self.assertTrue(users[0].content.startswith("install deps please"))
+        # 块前置、用户问题压底部（lost-in-the-middle：最新问题放最后读）
+        self.assertTrue(users[0].content.startswith(MEMORY_RECALL_OPEN))
+        self.assertTrue(users[0].content.endswith("install deps please"))
         self.assertIn("Use uv, never pip", users[0].content)
         self.assertNotIn("Use uv, never pip", system.content)
 
@@ -307,8 +309,9 @@ class TestAgentRecallInjection(unittest.TestCase):
             self.assertEqual(len(users), 3)
             self.assertEqual(users[0].content, "earlier question")          # 历史不动
             self.assertEqual(users[1].content, "earlier answer")
-            self.assertTrue(users[2].content.startswith("how do I install deps?"))
-            self.assertIn("Use uv, never pip", users[2].content)             # 块只追加本轮
+            self.assertTrue(users[2].content.startswith(MEMORY_RECALL_OPEN))
+            self.assertTrue(users[2].content.endswith("how do I install deps?"))
+            self.assertIn("Use uv, never pip", users[2].content)             # 块只拼本轮
             # selector 的 query 是本轮用户消息，context 去重看得到历史
             request = mock.await_args.kwargs["messages"]
             self.assertIn("how do I install deps?", request[1].content)
