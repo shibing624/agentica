@@ -286,6 +286,43 @@ class TestAgentRecallInjection(unittest.TestCase):
         self.assertEqual(users[0].content, "install deps please")
         mock.assert_not_awaited()
 
+    def test_recall_fires_for_messages_entry_style_and_only_touches_the_last_user_turn(self):
+        """IM-adapter style: caller rebuilds history every turn via ``messages=``."""
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            history = [
+                Message(role="user", content="earlier question"),
+                Message(role="assistant", content="earlier answer"),
+            ]
+            with patch.object(
+                OpenAIChat, "response",
+                new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
+            ) as mock:
+                _, users, _ = asyncio.run(agent.get_messages_for_run(
+                    messages=[{"role": "user", "content": "earlier question"},
+                              {"role": "assistant", "content": "earlier answer"},
+                              {"role": "user", "content": "how do I install deps?"}],
+                ))
+            self.assertEqual(len(users), 3)
+            self.assertEqual(users[0].content, "earlier question")          # 历史不动
+            self.assertEqual(users[1].content, "earlier answer")
+            self.assertTrue(users[2].content.startswith("how do I install deps?"))
+            self.assertIn("Use uv, never pip", users[2].content)             # 块只追加本轮
+            # selector 的 query 是本轮用户消息，context 去重看得到历史
+            request = mock.await_args.kwargs["messages"]
+            self.assertIn("how do I install deps?", request[1].content)
+
+    def test_messages_entry_style_without_a_trailing_user_message_skips_recall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            with patch.object(OpenAIChat, "response", new=AsyncMock()) as mock:
+                _, _, _ = asyncio.run(agent.get_messages_for_run(
+                    messages=[{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}],
+                ))
+        mock.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

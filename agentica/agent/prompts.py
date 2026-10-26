@@ -781,8 +781,25 @@ class PromptsMixin:
         if any(user_message.images for user_message in user_messages):
             self.model.validate_image_input()
 
-        if isinstance(message, str) and user_messages and isinstance(user_messages[-1].content, str):
-            recall = await self._get_memory_recall_block(message, messages_for_model)
+        # Per-turn recall fires for both entry styles:
+        # - ``message=str``: the string is the query.
+        # - ``messages=list``: callers that rebuild history every turn (e.g. IM
+        #   adapters) pass [history..., this turn's user message]; the last
+        #   user message is the query and the block is appended to it. History
+        #   items themselves are never modified. Because such callers rebuild
+        #   history from an external source, earlier recall blocks are not in
+        #   it, so dedup only sees blocks from this turn's own list — same
+        #   entry may be re-recalled next turn, which is the intended
+        #   "every turn carries its memories" behavior for stateless callers.
+        recall_query: Optional[str] = None
+        if isinstance(message, str):
+            recall_query = message
+        elif message is None and messages is not None and user_messages:
+            last_msg = user_messages[-1]
+            if getattr(last_msg, "role", None) == "user" and isinstance(last_msg.content, str):
+                recall_query = last_msg.content
+        if recall_query and user_messages and isinstance(user_messages[-1].content, str):
+            recall = await self._get_memory_recall_block(recall_query, messages_for_model)
             if recall:
                 user_messages[-1].content = f"{user_messages[-1].content}\n\n{recall}"
 
