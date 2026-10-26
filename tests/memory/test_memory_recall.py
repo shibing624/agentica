@@ -293,10 +293,6 @@ class TestAgentRecallInjection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
             asyncio.run(_seed(agent.workspace))
-            history = [
-                Message(role="user", content="earlier question"),
-                Message(role="assistant", content="earlier answer"),
-            ]
             with patch.object(
                 OpenAIChat, "response",
                 new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
@@ -312,7 +308,7 @@ class TestAgentRecallInjection(unittest.TestCase):
             self.assertTrue(users[2].content.startswith(MEMORY_RECALL_OPEN))
             self.assertTrue(users[2].content.endswith("how do I install deps?"))
             self.assertIn("Use uv, never pip", users[2].content)             # 块只拼本轮
-            # selector 的 query 是本轮用户消息，context 去重看得到历史
+            # selector 的 query 是本轮用户消息
             request = mock.await_args.kwargs["messages"]
             self.assertIn("how do I install deps?", request[1].content)
 
@@ -325,6 +321,35 @@ class TestAgentRecallInjection(unittest.TestCase):
                     messages=[{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}],
                 ))
         mock.assert_not_awaited()
+
+    def test_messages_entry_style_does_not_mutate_the_callers_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            caller_history = [Message(role="user", content="how do I install deps?")]
+            with patch.object(
+                OpenAIChat, "response",
+                new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
+            ):
+                _, users, _ = asyncio.run(agent.get_messages_for_run(messages=caller_history))
+        self.assertEqual(caller_history[0].content, "how do I install deps?")
+        self.assertTrue(users[0].content.startswith(MEMORY_RECALL_OPEN))
+
+    def test_messages_entry_style_dedups_against_earlier_items_in_the_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            prior = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")])
+            pick = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
+            with patch.object(OpenAIChat, "response", new=pick):
+                _, users, _ = asyncio.run(agent.get_messages_for_run(messages=[
+                    {"role": "user", "content": f"{prior}\n\nhow do I install deps?"},
+                    {"role": "assistant", "content": "use uv"},
+                    {"role": "user", "content": "and for the lockfile?"},
+                ]))
+        offered = pick.await_args.kwargs["messages"][1].content
+        self.assertNotIn("user_prefer_uv.md", offered)
+        self.assertEqual(users[-1].content, "and for the lockfile?")
 
 
 if __name__ == "__main__":

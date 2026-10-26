@@ -42,7 +42,7 @@
 
 Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/users/default/memory/`，并更新 `MEMORY.md` 索引。之后你新开任何会话问起「测试库端口是多少」，它都能找出来。
 
-**每轮自动召回**：CLI、Web 和 `DeepAgent` 默认开启。每次你发消息前，辅助模型（`auxiliary_model`，未配置时用主模型）会读一次**最新的** `MEMORY.md` 索引，挑出这条消息真正需要的条目（最多 5 条），把正文附在你的消息末尾的 `<memory_recall>` 块里。要点：
+**每轮自动召回**：CLI、Web 和 `DeepAgent` 默认开启。每次你发消息前，辅助模型（`auxiliary_model`，未配置时用主模型）会读一次**最新的** `MEMORY.md` 索引，挑出这条消息真正需要的条目（最多 5 条），把正文放进 `<memory_recall>` 块，拼在你这条消息的**前面**，你的原话留在消息最底部（长上下文模型对中间部分注意力最弱，最新的问题放在最后读）。用 SDK 时，不论传 `message="..."` 还是 `messages=[历史..., 本轮 user]`（IM 适配器每轮自己重建历史的写法）都会触发召回，后者只改写列表最后一条 user 消息的副本，不动调用方传进来的对象。要点：
 - 系统提示词里仍然只有会话开始时冻结的索引，召回块追加在本轮用户消息上，不改动已发送的前缀，不影响缓存命中。
 - 读的是实时索引，所以**另一个会话刚存下的记忆，这个会话下一轮就能召回**。
 - 当前窗口里已经召回过的条目不会重复召回；换窗后旧召回块被移出，相关时会再次召回。
@@ -108,7 +108,7 @@ agent = Agent(
     long_term_memory_config=WorkspaceMemoryConfig(
         load_workspace_context=True,   # 加载 AGENTS.md 常驻规则
         load_workspace_memory=True,    # 加载 MEMORY.md 记忆索引
-        recall_memories=True,          # 每轮由辅助模型挑选相关记忆，正文附在用户消息后（普通 Agent 默认关闭）
+        recall_memories=True,          # 每轮由辅助模型挑选相关记忆，正文拼在用户消息前（普通 Agent 默认关闭）
         max_memory_entries=5,          # 单轮最多召回条数
         auto_archive=True,             # 每轮结束后将原始对话归档到 conversations/YYYY-MM-DD.md（不调 LLM）
         auto_extract_memory=False,     # 是否在后台自动用副模型抽取记忆条目（会消耗少量 token）

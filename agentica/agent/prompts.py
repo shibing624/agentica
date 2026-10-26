@@ -786,11 +786,10 @@ class PromptsMixin:
         # - ``messages=list``: callers that rebuild history every turn (e.g. IM
         #   adapters) pass [history..., this turn's user message]; the last
         #   user message is the query and the block is prepended to it. History
-        #   items themselves are never modified. Because such callers rebuild
-        #   history from an external source, earlier recall blocks are not in
-        #   it, so dedup only sees blocks from this turn's own list — same
-        #   entry may be re-recalled next turn, which is the intended
-        #   "every turn carries its memories" behavior for stateless callers.
+        #   items themselves are never modified.
+        # Dedup sees everything sent before this turn's message — the system
+        # prompt, replayed history, and the earlier items of a ``messages=``
+        # list — so a block the caller carried over is not recalled twice.
         # The block goes *before* the user's question: long-context models pay
         # least attention to the middle, so the fresh question sits at the
         # very bottom where it is read last and weighs most.
@@ -799,12 +798,18 @@ class PromptsMixin:
             recall_query = message
         elif message is None and messages is not None and user_messages:
             last_msg = user_messages[-1]
-            if getattr(last_msg, "role", None) == "user" and isinstance(last_msg.content, str):
+            if last_msg.role == "user" and isinstance(last_msg.content, str):
                 recall_query = last_msg.content
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
-            recall = await self._get_memory_recall_block(recall_query, messages_for_model)
+            recall = await self._get_memory_recall_block(
+                recall_query, messages_for_model + user_messages[:-1],
+            )
             if recall:
-                user_messages[-1].content = f"{recall}\n\n{user_messages[-1].content}"
+                # A ``messages=`` item may be the caller's own Message object,
+                # kept in its history and passed again next turn; rewrite a
+                # copy so the block never leaks into the caller's state.
+                last = user_messages[-1]
+                user_messages[-1] = last.model_copy(update={"content": f"{recall}\n\n{last.content}"})
 
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)

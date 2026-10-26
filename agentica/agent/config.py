@@ -119,7 +119,7 @@ class WorkspaceMemoryConfig:
     load_workspace_memory: bool = True
     # Per-turn recall: before each human turn, one auxiliary-model call
     # ("memory_recall" task) picks the MEMORY.md entries this message needs,
-    # and their bodies are appended to the user message in <memory_recall>.
+    # and their bodies are prepended to the user message in <memory_recall>.
     # The system prompt only carries the session-start index (title + hook);
     # recall reads the live index, so memories written by other sessions
     # reach this one. An entry already recalled in the current window is not
