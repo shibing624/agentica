@@ -431,13 +431,15 @@ class Model(ABC):
                 setattr(cloned, attr, None)
         return cloned
 
-    def side_call_copy(self) -> "Model":
+    def side_call_copy(self, max_output_tokens: Optional[int] = None) -> "Model":
         """``detached_copy`` for a one-shot side question asked on this model.
 
         Drops the agent's tools so the request carries no tool schemas and
         cannot come back as a tool call, and detaches the cost tracker so a
         small side prompt is not read as this session's context watermark.
-        Callers own the copy and must ``close_client()`` it.
+        ``max_output_tokens`` replaces the turn-sized output cap: the catalog
+        ceiling a main turn uses makes the Anthropic SDK refuse a non-streaming
+        request outright. Callers own the copy and must ``close_client()`` it.
         """
         cloned = self.detached_copy()
         cloned.tools = None
@@ -445,7 +447,16 @@ class Model(ABC):
         cloned.function_call_stack = None
         cloned.tool_choice = None
         cloned._cost_tracker = None
+        if max_output_tokens is not None:
+            cloned.set_output_cap(max_output_tokens)
         return cloned
+
+    def set_output_cap(self, max_output_tokens: int) -> None:
+        """Set the output-token cap the next request carries.
+
+        Providers whose cap agentica does not set keep this no-op default.
+        """
+        return None
 
     async def close_client(self) -> None:
         """Release the underlying async HTTP client, if any.

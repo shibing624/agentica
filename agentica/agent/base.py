@@ -55,6 +55,7 @@ from agentica.run.config import RunConfig
 from agentica.run.context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
 from agentica.memory.session_log import SessionLog
+from agentica.memory.recall import RecallBreaker
 from agentica.compression import CompressionManager
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, AGENTICA_NUM_HISTORY_TURNS
 from agentica.agent.config import (
@@ -233,6 +234,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # (see _init_execution) or by the first call to get_goal_manager().
     # Declared here so attribute access is never speculative (no getattr).
     _session_log: Optional[Any] = field(default=None, init=False, repr=False)
+    # Per-session circuit breaker for the per-turn memory recall side call.
+    _recall_breaker: RecallBreaker = field(default_factory=RecallBreaker, init=False, repr=False)
     # Persistent standing-goal state machine. Lazily created by
     # ``get_goal_manager()``; bound to ``_session_log`` for persistence.
     goal_manager: Optional[Any] = field(default=None, init=False, repr=False)
@@ -640,6 +643,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._event_callback = None
         self._run_hooks = None
         self._hook_recorder = HookRecorder()
+        self._recall_breaker = RecallBreaker()
         self._default_run_hooks = None
         self._tool_runtime_configs: Dict[str, ToolRuntimeConfig] = {}
         self._skill_runtime_configs: Dict[str, SkillRuntimeConfig] = {}

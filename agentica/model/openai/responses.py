@@ -49,6 +49,9 @@ class OpenAIResponses(OpenAIChat):
     def _has_explicit_output_cap(self) -> bool:
         return self.max_output_tokens is not None or super()._has_explicit_output_cap()
 
+    def set_output_cap(self, max_output_tokens: int) -> None:
+        self.max_output_tokens = max_output_tokens
+
     def describe_thinking_mode(self) -> str:
         if self.reasoning is None:
             return "default"

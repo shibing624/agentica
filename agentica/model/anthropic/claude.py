@@ -432,6 +432,12 @@ class Claude(Model):
             _request_params.update(self.request_params)
         return _request_params
 
+    def set_output_cap(self, max_output_tokens: int) -> None:
+        # A fixed thinking budget must stay below max_tokens, or the request
+        # is rejected; keep the requested room for visible output on top of it.
+        budget = self.thinking.get("budget_tokens") if isinstance(self.thinking, dict) else None
+        self.max_tokens = max_output_tokens + budget if isinstance(budget, int) else max_output_tokens
+
     def describe_thinking_mode(self) -> str:
         """Describe Anthropic extended-thinking configuration.
 

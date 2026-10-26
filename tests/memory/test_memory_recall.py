@@ -11,6 +11,9 @@ os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 from agentica.agent.config import WorkspaceMemoryConfig
 from agentica.memory.recall import (
     MEMORY_RECALL_OPEN,
+    RECALL_MAX_CONSECUTIVE_FAILURES,
+    SELECT_MAX_OUTPUT_TOKENS,
+    RecallBreaker,
     build_memory_recall,
     parse_selection,
     render_recall_block,
@@ -95,12 +98,14 @@ class TestWorkspaceMemoryRedaction(unittest.TestCase):
 
 
 class TestRecallHelpers(unittest.TestCase):
-    def test_parse_selection_fails_closed(self):
+    def test_parse_selection_tells_failure_from_an_empty_choice(self):
         allowed = {"a.md", "b.md"}
         self.assertEqual(parse_selection('{"files": ["b.md", "x.md", "a.md"]}', allowed, 5), ["b.md", "a.md"])
         self.assertEqual(parse_selection('```json\n{"files": ["a.md"]}\n```', allowed, 5), ["a.md"])
-        self.assertEqual(parse_selection("a.md", allowed, 5), [])
-        self.assertEqual(parse_selection('{"files": "a.md"}', allowed, 5), [])
+        self.assertEqual(parse_selection('{"files": []}', allowed, 5), [])
+        self.assertIsNone(parse_selection("a.md", allowed, 5))
+        self.assertIsNone(parse_selection("", allowed, 5))
+        self.assertIsNone(parse_selection('{"files": "a.md"}', allowed, 5))
         self.assertEqual(parse_selection('{"files": ["a.md", "b.md"]}', allowed, 1), ["a.md"])
 
     def test_surfaced_files_read_back_from_the_rendered_block(self):
@@ -119,8 +124,28 @@ class TestBuildMemoryRecall(unittest.TestCase):
     def _run(self, ws, picked_json, context=()):
         model = _model()
         with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content=picked_json))) as m:
-            block = asyncio.run(build_memory_recall(ws, model, "how do I install deps?", list(context), 5, 5.0))
+            block = asyncio.run(build_memory_recall(
+                ws, model, "how do I install deps?", list(context), 5, 5.0, RecallBreaker(), "s1",
+            ))
         return block, m
+
+    def test_selector_request_is_tool_free_and_output_capped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Workspace(tmp)
+            asyncio.run(_seed(ws))
+            model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key", max_tokens=64_000)
+            seen = {}
+
+            async def fake_response(self_model, messages):
+                seen["max_tokens"] = self_model.max_tokens
+                seen["tools"] = self_model.tools
+                return ModelResponse(content='{"files": []}')
+
+            with patch.object(OpenAIChat, "response", new=fake_response):
+                asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, RecallBreaker(), "s1"))
+        self.assertEqual(seen["max_tokens"], SELECT_MAX_OUTPUT_TOKENS)
+        self.assertIsNone(seen["tools"])
+        self.assertNotEqual(model.max_tokens, SELECT_MAX_OUTPUT_TOKENS, "the agent's own model must keep its cap")
 
     def test_selected_body_is_recalled_and_selector_sees_no_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -152,8 +177,45 @@ class TestBuildMemoryRecall(unittest.TestCase):
             asyncio.run(_seed(ws))
             model = _model()
             with patch.object(OpenAIChat, "response", new=AsyncMock(side_effect=ConnectionError("down"))):
-                block = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0))
+                block = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, RecallBreaker(), "s1"))
         self.assertIsNone(block)
+
+    def test_breaker_skips_the_selector_after_three_consecutive_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Workspace(tmp)
+            asyncio.run(_seed(ws))
+            model, breaker = _model(), RecallBreaker()
+            failing = AsyncMock(side_effect=ConnectionError("down"))
+            with patch.object(OpenAIChat, "response", new=failing):
+                for _ in range(5):
+                    asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
+            self.assertEqual(failing.await_count, RECALL_MAX_CONSECUTIVE_FAILURES)
+
+            ok = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
+            with patch.object(OpenAIChat, "response", new=ok):
+                still_open = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
+                new_session = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s2"))
+        self.assertIsNone(still_open)
+        self.assertIn("Use uv", new_session)
+
+    def test_timeouts_and_garbage_count_as_failures_but_an_empty_pick_does_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Workspace(tmp)
+            asyncio.run(_seed(ws))
+            model, breaker = _model(), RecallBreaker()
+
+            async def slow(*args, **kwargs):
+                await asyncio.sleep(1)
+                return ModelResponse(content='{"files": []}')
+
+            with patch.object(OpenAIChat, "response", new=slow):
+                asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 0.05, breaker, "s1"))
+            with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content=""))):
+                asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
+            self.assertEqual(breaker.failures, 2)
+            with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content='{"files": []}'))):
+                asyncio.run(build_memory_recall(ws, model, "17*23?", [], 5, 5.0, breaker, "s1"))
+        self.assertEqual(breaker.failures, 0)
 
     def test_empty_store_makes_no_side_call(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -168,6 +230,25 @@ class TestBuildMemoryRecall(unittest.TestCase):
             asyncio.run(_seed(ws))
             block, _ = self._run(ws, '{"files": ["reference_gateway_port.md"]}')
         self.assertIn("9091", block)
+
+
+class TestSideCallOutputCap(unittest.TestCase):
+    def test_each_wire_shape_takes_the_side_cap(self):
+        from agentica.model.anthropic.claude import Claude
+        from agentica.model.openai.responses import OpenAIResponses
+
+        self.assertEqual(_model().side_call_copy(max_output_tokens=2048).max_tokens, 2048)
+        self.assertEqual(
+            OpenAIResponses(id="gpt-5.6-sol", api_key="fake_openai_key").side_call_copy(max_output_tokens=2048).max_output_tokens,
+            2048,
+        )
+        self.assertEqual(Claude(id="claude-haiku-5-5", api_key="fake").side_call_copy(max_output_tokens=2048).max_tokens, 2048)
+
+    def test_claude_fixed_thinking_budget_stays_below_the_cap(self):
+        from agentica.model.anthropic.claude import Claude
+
+        model = Claude(id="claude-haiku-5-5", api_key="fake", thinking={"type": "enabled", "budget_tokens": 4000})
+        self.assertEqual(model.side_call_copy(max_output_tokens=2048).max_tokens, 6048)
 
 
 class TestAgentRecallInjection(unittest.TestCase):

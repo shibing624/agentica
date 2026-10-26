@@ -161,6 +161,9 @@ class LiteLLMChat(Model):
             return getenv(env_var)
         return None
     
+    def set_output_cap(self, max_output_tokens: int) -> None:
+        self.max_tokens = max_output_tokens
+
     @property
     def request_kwargs(self) -> Dict[str, Any]:
         """Build request parameters for LiteLLM."""

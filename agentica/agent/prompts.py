@@ -707,6 +707,8 @@ class PromptsMixin:
             context,
             limit=cfg.max_memory_entries,
             timeout=cfg.recall_timeout,
+            breaker=self._recall_breaker,
+            session_id=self.session_id,
         )
 
     async def get_messages_for_run(

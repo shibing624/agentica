@@ -128,8 +128,10 @@ class WorkspaceMemoryConfig:
     # Upper bound on entries one turn's recall may inject.
     max_memory_entries: int = 5
     # Wall-clock cap on the selection call; on expiry the turn proceeds
-    # without recall. 0 disables the cap.
-    recall_timeout: float = 10.0
+    # without recall. 0 disables the cap. Measured on the gateway the CLI
+    # uses: normal calls finish under 3.2s (p95 1.7s chat, 2.9s Anthropic);
+    # about 4.5% are stragglers at 7-11s, which 5s cuts off.
+    recall_timeout: float = 5.0
     # Auto-archive conversation to workspace after each run() (zero LLM cost,
     # just appends raw messages to conversations/ directory).
     auto_archive: bool = False

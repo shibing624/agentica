@@ -256,7 +256,7 @@ from agentica.agent.config import WorkspaceMemoryConfig
 | `load_workspace_memory` | `bool` | `True` | 会话开始时把 MEMORY.md 索引（标题 + hook）冻结进 System Prompt |
 | `recall_memories` | `bool` | `False` | 每轮用辅助模型（`memory_recall` 任务）从实时索引挑选相关记忆，正文以 `<memory_recall>` 附在用户消息后；窗口内已召回的不重复。CLI / Web / DeepAgent 默认开启 |
 | `max_memory_entries` | `int` | `5` | 单轮召回的最大条数 |
-| `recall_timeout` | `float` | `10.0` | 召回选择调用的超时秒数，超时或失败时本轮不召回；0 不限 |
+| `recall_timeout` | `float` | `5.0` | 召回选择调用的超时秒数，超时或失败时本轮不召回；同一会话连续失败 3 次后本会话停止召回；0 不限 |
 | `auto_archive` | `bool` | `False` | 每次 run() 后自动归档对话（零 LLM 成本） |
 | `auto_extract_memory` | `bool` | `False` | 每次 run() 后自动提取记忆（有 LLM 成本，仅在 LLM 未主动调用 save_memory 时触发） |
 

@@ -476,6 +476,12 @@ class OpenAIChat(Model):
     def _has_explicit_output_cap(self) -> bool:
         return self.max_tokens is not None or self.max_completion_tokens is not None
 
+    def set_output_cap(self, max_output_tokens: int) -> None:
+        if self.max_completion_tokens is not None:
+            self.max_completion_tokens = max_output_tokens
+        else:
+            self.max_tokens = max_output_tokens
+
     def raise_output_cap(self, used_tokens: int) -> bool:
         """Double the cap after a turn spent ``used_tokens`` and showed nothing.
 
