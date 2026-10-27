@@ -263,7 +263,8 @@ class BuiltinMemoryTool(Tool):
         All three sources are scored against the query in one shared pool. Each
         result carries a `source` field ("memory" | "memory_candidate" |
         "conversation") so the agent can judge provenance, plus `title`,
-        `memory_type`, `memory_source`, and `evidence_refs` from the file
+        `memory_type`, `memory_source`, `evidence_refs`, and `origin_work_dir`
+        (the directory the memory was written in, openable as-is) from the file
         frontmatter (conversation blocks point at `{file}#block=N`). Returns
         JSON of the top matches, capped by `limit` and total `max_chars`. The
         aggregated ``MEMORY.md`` is excluded because the index is already
@@ -360,6 +361,8 @@ class BuiltinMemoryTool(Tool):
             "memory_type": extract_frontmatter_value(raw_content, "type") or "",
             "memory_source": extract_frontmatter_value(raw_content, "source") or "",
             "evidence_refs": extract_frontmatter_list(raw_content, "evidence_refs"),
+            # Directory the writing session worked in; "" for older entries.
+            "origin_work_dir": extract_frontmatter_value(raw_content, "origin_work_dir") or "",
         }
 
     def _get_recent_conversation_files(self, conversation_days: int) -> List[Path]:

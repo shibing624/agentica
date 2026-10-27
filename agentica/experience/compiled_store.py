@@ -193,7 +193,7 @@ class CompiledExperienceStore:
         return str(filepath)
 
     async def correction_rules(self, exclude: str = "") -> List[Dict[str, str]]:
-        """``{filename, title, rule}`` for every stored correction card.
+        """``{filename, title, rule}`` for every stored correction card, newest first.
 
         ``rule`` is the card body's ``Rule:`` line. ``exclude`` is a filename
         to leave out (the card just written).
@@ -201,7 +201,8 @@ class CompiledExperienceStore:
         out: List[Dict[str, str]] = []
         if not self._exp_dir.exists():
             return out
-        for path in sorted(self._exp_dir.glob("correction_*.md")):
+        paths = sorted(self._exp_dir.glob("correction_*.md"), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+        for path in paths:
             if path.name == exclude:
                 continue
             raw = await async_read_text(path)

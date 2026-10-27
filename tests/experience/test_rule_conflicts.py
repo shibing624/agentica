@@ -60,8 +60,7 @@ class TestRuleConflicts(unittest.TestCase):
         self.assertIn("repeat_count: 2", raw)
         self.assertIn("conflict_with:", raw)
 
-    def test_unrelated_rules_cost_no_call(self):
-        self._write("Write commit messages in one line")
+    def test_first_correction_costs_no_call(self):
         new = self._write("Run the linter before opening a pull request")
         with patch.object(OpenAIChat, "response", new=AsyncMock()) as m:
             found = asyncio.run(check_rule_conflicts(
@@ -69,6 +68,15 @@ class TestRuleConflicts(unittest.TestCase):
             ))
         self.assertEqual(found, [])
         m.assert_not_awaited()
+
+    def test_cross_language_pair_is_still_offered(self):
+        old = self._write("回复一律用中文")
+        new = self._write("Always answer in English")
+        reply = ModelResponse(content=f'{{"conflicts": ["{os.path.basename(old)}"]}}')
+        with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=reply)) as m:
+            found = asyncio.run(check_rule_conflicts(self.model, self.store, new, "Always answer in English"))
+        self.assertEqual(found, [os.path.basename(old)])
+        self.assertIn("回复一律用中文", m.await_args.kwargs["messages"][1].content)
 
     def test_failed_call_marks_nothing(self):
         self._write("Use pip to install python packages")
@@ -79,13 +87,54 @@ class TestRuleConflicts(unittest.TestCase):
         with open(new, encoding="utf-8") as f:
             self.assertNotIn("conflict_with", f.read())
 
+    def test_chinese_rules_get_cards_and_their_conflict_is_marked(self):
+        old = self._write("以后都用 pip 装依赖")
+        new = self._write("不要用 pip 装依赖，改用 uv")
+        self.assertNotEqual(old, new, "a rule and its reversal must not share a card")
+        old_name = os.path.basename(old)
+        reply = ModelResponse(content=f'{{"conflicts": ["{old_name}"]}}')
+        with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=reply)) as m:
+            found = asyncio.run(check_rule_conflicts(self.model, self.store, new, "不要用 pip 装依赖，改用 uv"))
+        self.assertEqual(found, [old_name])
+        self.assertIn("以后都用 pip 装依赖", m.await_args.kwargs["messages"][1].content)
+        prompt = asyncio.run(self.store.get_relevant("pip 装依赖", limit=5))
+        self.assertIn("Conflicts with:", prompt)
+
     def test_shortlist_uses_shared_terms_including_cjk(self):
         cards = [
             {"filename": "a.md", "title": "a", "rule": "回复一律用中文"},
             {"filename": "b.md", "title": "b", "rule": "Use pip"},
         ]
-        self.assertEqual([c["filename"] for c in shortlist_rivals("回复请用英文", cards)], ["a.md"])
+        self.assertEqual([c["filename"] for c in shortlist_rivals("Use uv not pip", cards)], ["b.md", "a.md"])
+        self.assertEqual([c["filename"] for c in shortlist_rivals("回复请用英文", cards)], ["a.md", "b.md"])
+        many = [{"filename": f"{i}.md", "title": "", "rule": f"rule {i}"} for i in range(9)]
+        self.assertEqual(len(shortlist_rivals("anything", many)), 5)
         self.assertIn("pip", rule_terms("Never use pip"))
+
+
+class TestChineseCorrectionKey(unittest.TestCase):
+    def test_rewordings_collide_and_reversals_do_not(self):
+        key = ExperienceCompiler.correction_key_from_rule
+        self.assertEqual(key("以后请先跑测试再提交"), key("务必先跑测试再提交"))
+        self.assertEqual(key("不要用pip装依赖"), key("别用 pip 装依赖"))
+        self.assertNotEqual(key("用 pip 装依赖"), key("不要用 pip 装依赖"))
+        self.assertEqual(key("以后都用 uv 装依赖"), "uv_用装依赖")
+        self.assertEqual(key("的了请"), "", "all filler is still refused")
+
+    def test_english_keys_are_unchanged(self):
+        self.assertEqual(
+            ExperienceCompiler.correction_key_from_rule("Always list the directory before reading files"),
+            "list_directory_before_read",
+        )
+
+    def test_prefiltered_chinese_rule_is_persisted(self):
+        from agentica.agent.hooks import ExperienceCaptureHooks
+
+        result = ExperienceCaptureHooks._prefilter_feedback_classification("下次请先跑测试再提交")
+        self.assertIsNotNone(result)
+        card = ExperienceCompiler.compile_correction(result)
+        self.assertIsNotNone(card)
+        self.assertEqual(card.correction_key, "先跑测试再提交")
 
 
 if __name__ == "__main__":

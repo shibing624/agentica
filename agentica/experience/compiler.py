@@ -45,6 +45,16 @@ _RULE_STOPWORDS = frozenset({
 # common verb-object kernel survives noisy paraphrasing.
 _TITLE_TOKEN_CAP = 4
 
+# Chinese part of a correction key. Fillers are removed longest first;
+# negations are folded to 不 before "要" is dropped, so 不要 survives as 不.
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_CJK_NEGATIONS = ("不要", "不许", "不能", "不准", "禁止", "不得", "别", "勿")
+_CJK_FILLERS = (
+    "一定要", "以后", "今后", "下次", "每次", "记住", "务必", "一定", "总是",
+    "永远", "始终", "必须", "应该", "需要", "请", "都", "要", "的", "了",
+)
+_CJK_TITLE_CHARS = 12
+
 # Cap on captured error text. Tool errors carry whole tracebacks and stderr
 # dumps; the card they compile into is re-read into the system prompt on every
 # later request, so an uncapped one is paid for indefinitely. Applied once, by
@@ -124,6 +134,23 @@ def _stem(token: str) -> str:
     return token
 
 
+def _cjk_key(rule: str) -> str:
+    """Normalized Chinese part of a rule key, ``""`` when the rule has none.
+
+    Negation is kept and folded to ``不`` ("不要用 pip" / "别用 pip" / "禁止用
+    pip" all read ``不用``), so a rule and its reversal get different keys and
+    are compared by the conflict check instead of one silently overwriting
+    the other. Fillers that do not change what the rule says (以后, 务必,
+    请, 一定要, 的, ...) are dropped so rewordings still collide.
+    """
+    text = "".join(_CJK_RUN_RE.findall(rule))
+    for neg in _CJK_NEGATIONS:
+        text = text.replace(neg, "不")
+    for filler in _CJK_FILLERS:
+        text = text.replace(filler, "")
+    return text[:_CJK_TITLE_CHARS]
+
+
 def _rule_to_title(rule: str) -> str:
     """Deterministic snake_case title derived from rule text.
 
@@ -132,39 +159,45 @@ def _rule_to_title(rule: str) -> str:
     collapse onto a token set close enough that the resulting filenames will
     bump each other's ``repeat_count``.
 
+    A rule with Chinese text gets the English stems (if any) followed by the
+    normalized Chinese (see ``_cjk_key``); a pure-English rule's title is
+    unchanged by that, so existing cards keep their file names.
+
     Returns empty string when nothing meaningful survives stop-word filtering;
     callers should treat that as "give up on this rule".
     """
+    cjk = _cjk_key(rule)
+    if cjk:
+        # Inside Chinese text an English word is almost always a name (uv,
+        # go, pip, npm), so two-letter ones count here.
+        return "_".join(_english_stems(rule, min_len=2)[:_TITLE_TOKEN_CAP] + [cjk])
+    return "_".join(_english_stems(rule)[:_TITLE_TOKEN_CAP])
+
+
+def _english_stems(rule: str, min_len: int = 3) -> list:
+    """Distinct content stems of the rule's English words, in order."""
     tokens = re.findall(r"[a-z]+", rule.lower())
     seen: set = set()
     keep: list = []
     for raw in tokens:
-        if raw in _RULE_STOPWORDS or len(raw) <= 2:
+        if raw in _RULE_STOPWORDS or len(raw) < min_len:
             continue
         stem = _stem(raw)
-        if stem in _RULE_STOPWORDS or len(stem) <= 2:
+        if stem in _RULE_STOPWORDS or len(stem) < min_len:
             continue
         if stem in seen:
             continue
         seen.add(stem)
         keep.append(stem)
-    if not keep:
-        return ""
-    return "_".join(keep[:_TITLE_TOKEN_CAP])
+    return keep
 
 
 def rule_terms(rule: str) -> set:
     """Content terms of a rule: the stems ``_rule_to_title`` keeps (uncapped)
     plus CJK character bigrams. Two rules sharing none are not compared for
     contradiction."""
-    terms: set = set()
-    for raw in re.findall(r"[a-z]+", rule.lower()):
-        if raw in _RULE_STOPWORDS or len(raw) <= 2:
-            continue
-        stem = _stem(raw)
-        if stem not in _RULE_STOPWORDS and len(stem) > 2:
-            terms.add(stem)
-    for run in re.findall(r"[\u4e00-\u9fff]+", rule):
+    terms: set = set(_english_stems(rule, min_len=2 if _CJK_RUN_RE.search(rule) else 3))
+    for run in _CJK_RUN_RE.findall(rule):
         terms.update(run[i:i + 2] for i in range(len(run) - 1))
     return terms
 

@@ -143,9 +143,13 @@ class TestMemoryOrigin(unittest.TestCase):
         self.assertEqual(legacy_origin, "")
 
     def test_block_shows_origin_tail_and_dedup_still_parses(self):
-        block = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "/Users/x/Codes/agentica")])
-        self.assertIn("(written while working in …/Codes/agentica)", block)
-        self.assertNotIn("/Users/x", block)
+        home = os.path.expanduser("~")
+        block = render_recall_block([
+            ("prefer uv", "user_prefer_uv.md", "Use uv.", os.path.join(home, "Codes", "agentica")),
+        ])
+        self.assertIn("(written while working in ~/Codes/agentica)", block)
+        outside = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "/srv/app")])
+        self.assertIn("(written while working in /srv/app)", outside)
         self.assertEqual(surfaced_memory_files([Message(role="user", content=block)]), {"user_prefer_uv.md"})
         legacy = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "")])
         self.assertNotIn("written while", legacy)

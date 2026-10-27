@@ -23,6 +23,7 @@ the file becomes eligible again — no separate state to reset.
 """
 import asyncio
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -113,9 +114,16 @@ def parse_selection(text: str, allowed: Set[str], limit: int) -> Optional[List[s
 
 
 def _origin_label(origin_work_dir: str) -> str:
-    """Last two path segments: enough to name the project, no full local path."""
-    parts = [p for p in origin_work_dir.replace("\\", "/").split("/") if p]
-    return "/".join(parts[-2:])
+    """The origin directory as a path the model can open, home shortened to ``~``.
+
+    Kept whole so the model can check it (``read_file`` / ``glob`` / shell all
+    take ``~``); the system prompt already carries the current work_dir in
+    full, so this exposes nothing new to the provider.
+    """
+    home = os.path.expanduser("~")
+    if origin_work_dir == home or origin_work_dir.startswith(home + os.sep):
+        return "~" + origin_work_dir[len(home):]
+    return origin_work_dir
 
 
 def render_recall_block(items: Sequence[Tuple[str, ...]]) -> str:
@@ -133,7 +141,7 @@ def render_recall_block(items: Sequence[Tuple[str, ...]]) -> str:
         if len(body) > RECALL_ENTRY_MAX_CHARS:
             body = body[:RECALL_ENTRY_MAX_CHARS].rstrip() + "\n…[truncated; read the file for the rest]"
         label = _origin_label(origin) if origin else ""
-        origin_line = f"(written while working in …/{label})\n" if label else ""
+        origin_line = f"(written while working in {label})\n" if label else ""
         part = f"### {title} (memory/{filename})\n{origin_line}{body}"
         if parts and used + len(part) > RECALL_MAX_CHARS:
             break

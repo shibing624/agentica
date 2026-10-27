@@ -290,6 +290,7 @@ class TestBuiltinMemoryTool:
             memory_type="project",
             source="verified",
             evidence_refs=["conversations/2026-06-16.md#block=0"],
+            origin_work_dir="/srv/budget-app",
         ))
         asyncio.run(self.workspace.write_memory_entry(
             title="candidate_budget",
@@ -312,6 +313,8 @@ class TestBuiltinMemoryTool:
         assert by_source["memory"]["memory_source"] == "verified"
         assert by_source["memory"]["evidence_refs"] == ["conversations/2026-06-16.md#block=0"]
         assert by_source["memory_candidate"]["memory_source"] == "auto_extract"
+        assert by_source["memory"]["origin_work_dir"] == os.path.realpath("/srv/budget-app")
+        assert by_source["memory_candidate"]["origin_work_dir"] == ""
         assert by_source["conversation"]["evidence_refs"]
 
     def test_search_memory_limits_conversations_to_recent_seven_days(self):

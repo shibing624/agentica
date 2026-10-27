@@ -7,9 +7,10 @@ A high-confidence correction is persisted on first sight. When the user later
 says the opposite ("use pip" then "never pip, use uv"), the two cards differ
 in title, so both land in the prompt with nothing saying they disagree.
 
-After a correction card is written, earlier correction cards that share a
-content term with it are shortlisted; only then does one auxiliary call ask
-which of them contradict it. Contradicting pairs are marked on both cards
+After a correction card is written, up to five earlier correction cards
+(those sharing a content term first, then the newest) go to one auxiliary
+call that asks which of them contradict it. Rules may be Chinese, English or
+mixed. Contradicting pairs are marked on both cards
 (``conflict_with``) and the prompt shows them with a note to confirm with
 the user. Neither card is overwritten: which rule is current is the user's
 call, not this module's.
@@ -32,14 +33,19 @@ _JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
 
 
 def shortlist_rivals(rule: str, cards: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Cards sharing at least one content term with ``rule``, most shared first."""
+    """Up to ``CONFLICT_MAX_CANDIDATES`` cards to compare ``rule`` against.
+
+    Cards sharing content terms come first, most shared first; the rest of
+    the slots go to the newest other cards (``cards`` is newest first). Term
+    overlap alone misses a contradiction across languages: "回复一律用中文"
+    and "Always answer in English" share no term, and the classifier writes
+    rules in either language.
+    """
     mine = rule_terms(rule)
-    if not mine:
-        return []
-    scored = [(len(mine & rule_terms(c["rule"])), c) for c in cards]
-    scored = [(n, c) for n, c in scored if n > 0]
-    scored.sort(key=lambda x: -x[0])
-    return [c for _, c in scored[:CONFLICT_MAX_CANDIDATES]]
+    overlap = [(len(mine & rule_terms(c["rule"])), i, c) for i, c in enumerate(cards)]
+    lexical = [c for n, _, c in sorted((o for o in overlap if o[0] > 0), key=lambda o: (-o[0], o[1]))]
+    rest = [c for c in cards if c not in lexical]
+    return (lexical + rest)[:CONFLICT_MAX_CANDIDATES]
 
 
 def parse_conflicts(text: str, allowed: set) -> Optional[List[str]]:
@@ -60,8 +66,8 @@ def parse_conflicts(text: str, allowed: set) -> Optional[List[str]]:
 async def check_rule_conflicts(model, compiled_store, card_path: str, rule: str) -> List[str]:
     """Mark and return the stored cards that contradict the card at ``card_path``.
 
-    No auxiliary call when no stored card shares a term with ``rule``. A
-    failed or unparseable call marks nothing: the new card is already on
+    No auxiliary call when there is no other stored correction. A failed or
+    unparseable call marks nothing: the new card is already on
     disk, and a missed conflict is the state before this check existed.
     """
     filename = Path(card_path).name
