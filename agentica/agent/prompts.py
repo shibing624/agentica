@@ -811,6 +811,15 @@ class PromptsMixin:
                 last = user_messages[-1]
                 user_messages[-1] = last.model_copy(update={"content": f"{recall}\n\n{last.content}"})
 
+        # Files the model read in earlier turns may have been edited between
+        # turns (the user's editor, git). Same placement as recall: before the
+        # question, on a copy.
+        if user_messages and isinstance(user_messages[-1].content, str):
+            note = self.take_external_file_change_note()
+            if note:
+                last = user_messages[-1]
+                user_messages[-1] = last.model_copy(update={"content": f"{note}\n\n{last.content}"})
+
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)
             self.working_memory.drop_pending_window_preamble()

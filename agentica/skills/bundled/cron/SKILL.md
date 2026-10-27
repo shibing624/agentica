@@ -38,6 +38,19 @@ process is gone), report the result and pause this job (its own id) with the
 cronjob tool". Without it the job keeps firing after there is nothing left to
 watch.
 
+## A job that checks for changes says so when there are none
+
+For a job that looks for something new (a feed, a page, a queue, a report),
+write into its prompt: "if nothing new since the last run, reply with exactly
+`[NO_UPDATE]` and nothing else". Each run's result is kept in the job's
+history; a fixed marker lets the user (and any surface that shows results)
+skip empty runs instead of reading "nothing changed" in a dozen phrasings.
+
+Example prompt: "Check https://example.com/releases for a version newer than
+the one in ~/notes/last_release.txt. If there is one, write it to that file
+and reply with the version and its headline changes. Otherwise reply with
+exactly `[NO_UPDATE]`."
+
 A job's agent has the CLI's file, shell, web, memory and `cronjob` tools, and
 no session of its own. It has no `list_agents` / `send_message` /
 `ask_user_question`: do not write a prompt that tells it to message a session

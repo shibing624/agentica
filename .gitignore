@@ -225,3 +225,4 @@ agentica/gateway/ui/
 desktop/node_modules/
 # electron-builder output: installers are release assets, not repo content.
 desktop/dist/
+docs/superpowers/

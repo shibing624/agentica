@@ -5,6 +5,7 @@
 """
 
 import json
+import os
 import re
 from collections import Counter, OrderedDict
 from datetime import date, timedelta
@@ -171,6 +172,7 @@ class BuiltinMemoryTool(Tool):
     def __init__(self):
         super().__init__(name="builtin_memory_tool")
         self._workspace = None
+        self._work_dir: Optional[str] = None
 
         from agentica.prompts.memory import MEMORY_SYSTEM_PROMPT
 
@@ -179,9 +181,14 @@ class BuiltinMemoryTool(Tool):
         self.register(self.save_memory, is_destructive=True)
         self.register(self.search_memory, concurrency_safe=True, is_read_only=True)
 
-    def set_workspace(self, workspace) -> None:
-        """Set the workspace reference for memory persistence."""
+    def set_workspace(self, workspace, work_dir: Optional[str] = None) -> None:
+        """Set the workspace for persistence and the agent's work_dir.
+
+        ``work_dir`` is recorded on each saved memory as provenance; None
+        means the process cwd at save time.
+        """
         self._workspace = workspace
+        self._work_dir = work_dir
 
     def clone(self) -> "BuiltinMemoryTool":
         """Fresh instance so each agent owns its ``_workspace`` slot."""
@@ -238,6 +245,7 @@ class BuiltinMemoryTool(Tool):
             content=content.strip(),
             memory_type=memory_type,
             description=description.strip(),
+            origin_work_dir=self._work_dir or os.getcwd(),
         )
 
         logger.debug(f"Memory saved: {title} -> {filepath}")

@@ -11,7 +11,7 @@ import re
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 from agentica.experience.compiler import CompiledCard
 from agentica.utils.async_file import (
@@ -29,6 +29,8 @@ from agentica.utils.async_file import (
 # experience with different originating tasks; we keep a representative
 # sample (most-recent-wins) so the spawn prompt doesn't blow its budget.
 _MAX_SOURCE_TASKS = 5
+_RULE_LINE_RE = re.compile(r"^Rule:\s*(.+)$", re.MULTILINE)
+_CONFLICT_LINE_RE = re.compile(r"^conflict_with:.*$", re.MULTILINE)
 # Per-task length cap to keep frontmatter compact.
 _SOURCE_TASK_LEN = 200
 
@@ -103,6 +105,7 @@ class CompiledExperienceStore:
         first_seen: str,
         last_seen: str,
         source_tasks: List[str],
+        conflict_with: Sequence[str] = (),
     ) -> str:
         """Build the canonical frontmatter block for a compiled card.
 
@@ -124,6 +127,8 @@ class CompiledExperienceStore:
             lines.append(f"correction_key: {card.correction_key}")
         if source_tasks:
             lines.append(f"source_tasks: {format_frontmatter_list(source_tasks)}")
+        if conflict_with:
+            lines.append(f"conflict_with: {format_frontmatter_list(list(conflict_with))}")
         lines.append("---\n\n")
         return "\n".join(lines)
 
@@ -165,6 +170,7 @@ class CompiledExperienceStore:
                 first_seen=first_seen,
                 last_seen=today,
                 source_tasks=merged_tasks,
+                conflict_with=extract_frontmatter_list(existing, "conflict_with"),
             )
             # Rewrite the body from the incoming card rather than carrying the
             # stored one forward. A bump is a fresh occurrence of the same
@@ -185,6 +191,47 @@ class CompiledExperienceStore:
         hook = card.content[:100].replace("\n", " ").strip()
         await self._update_index(filename, card.title, hook, card.experience_type)
         return str(filepath)
+
+    async def correction_rules(self, exclude: str = "") -> List[Dict[str, str]]:
+        """``{filename, title, rule}`` for every stored correction card.
+
+        ``rule`` is the card body's ``Rule:`` line. ``exclude`` is a filename
+        to leave out (the card just written).
+        """
+        out: List[Dict[str, str]] = []
+        if not self._exp_dir.exists():
+            return out
+        for path in sorted(self._exp_dir.glob("correction_*.md")):
+            if path.name == exclude:
+                continue
+            raw = await async_read_text(path)
+            match = _RULE_LINE_RE.search(strip_frontmatter(raw))
+            if match is None:
+                continue
+            title = extract_frontmatter_value(raw, "title") or path.stem
+            out.append({"filename": path.name, "title": title, "rule": match.group(1).strip()})
+        return out
+
+    async def mark_conflict(self, a: str, b: str) -> None:
+        """Record that cards ``a`` and ``b`` (filenames) contradict each other.
+
+        Both stay in place: neither rule is known to be the current one, so
+        the prompt shows both with a note to ask the user.
+        """
+        for mine, other in ((a, b), (b, a)):
+            path = self._exp_dir / mine
+            if not path.is_file():
+                continue
+            raw = await async_read_text(path)
+            current = extract_frontmatter_list(raw, "conflict_with")
+            if other in current:
+                continue
+            line = f"conflict_with: {format_frontmatter_list(current + [other])}"
+            if current:
+                raw = _CONFLICT_LINE_RE.sub(line, raw, count=1)
+            else:
+                raw = raw.replace("\n---\n", f"\n{line}\n---\n", 1)
+            await async_write_text(path, raw)
 
     async def _update_index(
         self,
@@ -302,6 +349,7 @@ class CompiledExperienceStore:
         if not top:
             return ""
 
+        titles = {e["filename"]: e["title"] for e in entries}
         parts = []
         for entry in top:
             body = strip_frontmatter(entry["_raw"])
@@ -310,6 +358,13 @@ class CompiledExperienceStore:
             tier_badge = f"[{entry['_tier'].upper()}]" if entry["_tier"] != "hot" else ""
             count_badge = f"(seen {entry['_repeat_count']}x)" if entry["_repeat_count"] > 1 else ""
             header = f"### {entry['title']} {tier_badge} {count_badge}".strip()
+            rivals = extract_frontmatter_list(entry["_raw"], "conflict_with")
+            if rivals:
+                names = ", ".join(titles.get(f, Path(f).stem) for f in rivals)
+                body += (
+                    f"\nConflicts with: {names}. These rules disagree; decide from "
+                    "the current conversation and confirm with the user which applies."
+                )
             parts.append(f"{header}\n{body}")
 
         return "\n\n".join(parts)

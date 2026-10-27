@@ -112,14 +112,29 @@ def parse_selection(text: str, allowed: Set[str], limit: int) -> Optional[List[s
     return picked
 
 
-def render_recall_block(items: List[Tuple[str, str, str]]) -> str:
-    """``<memory_recall>`` block from ``(title, filename, body)`` triples."""
+def _origin_label(origin_work_dir: str) -> str:
+    """Last two path segments: enough to name the project, no full local path."""
+    parts = [p for p in origin_work_dir.replace("\\", "/").split("/") if p]
+    return "/".join(parts[-2:])
+
+
+def render_recall_block(items: Sequence[Tuple[str, ...]]) -> str:
+    """``<memory_recall>`` block from ``(title, filename, body[, origin_work_dir])``.
+
+    The origin line is provenance, not a filter: memory is recalled per user
+    across projects, and the model decides whether a memory written while
+    working in another directory applies here.
+    """
     parts: List[str] = []
     used = 0
-    for title, filename, body in items:
+    for item in items:
+        title, filename, body = item[0], item[1], item[2]
+        origin = item[3] if len(item) > 3 else ""
         if len(body) > RECALL_ENTRY_MAX_CHARS:
             body = body[:RECALL_ENTRY_MAX_CHARS].rstrip() + "\n…[truncated; read the file for the rest]"
-        part = f"### {title} (memory/{filename})\n{body}"
+        label = _origin_label(origin) if origin else ""
+        origin_line = f"(written while working in …/{label})\n" if label else ""
+        part = f"### {title} (memory/{filename})\n{origin_line}{body}"
         if parts and used + len(part) > RECALL_MAX_CHARS:
             break
         parts.append(part)
@@ -216,11 +231,11 @@ async def build_memory_recall(
     if not picked:
         return None
     titles = {e["filename"]: e["title"] for e in entries}
-    items: List[Tuple[str, str, str]] = []
+    items: List[Tuple[str, str, str, str]] = []
     for filename in picked:
-        body = await workspace.read_memory_body(filename)
+        body, origin = await workspace.read_memory_entry(filename)
         if body:
-            items.append((titles[filename], filename, body))
+            items.append((titles[filename], filename, body, origin))
     block = render_recall_block(items)
     if block:
         logger.debug(f"Memory recall: {len(items)} entr(ies) -> {[i[1] for i in items]}")

@@ -153,6 +153,22 @@ def _rule_to_title(rule: str) -> str:
     return "_".join(keep[:_TITLE_TOKEN_CAP])
 
 
+def rule_terms(rule: str) -> set:
+    """Content terms of a rule: the stems ``_rule_to_title`` keeps (uncapped)
+    plus CJK character bigrams. Two rules sharing none are not compared for
+    contradiction."""
+    terms: set = set()
+    for raw in re.findall(r"[a-z]+", rule.lower()):
+        if raw in _RULE_STOPWORDS or len(raw) <= 2:
+            continue
+        stem = _stem(raw)
+        if stem not in _RULE_STOPWORDS and len(stem) > 2:
+            terms.add(stem)
+    for run in re.findall(r"[\u4e00-\u9fff]+", rule):
+        terms.update(run[i:i + 2] for i in range(len(run) - 1))
+    return terms
+
+
 @dataclass(frozen=True)
 class CompiledCard:
     """An experience card compiled from raw events.

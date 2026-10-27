@@ -120,6 +120,52 @@ class TestRecallHelpers(unittest.TestCase):
         self.assertNotIn("f9.md", block)
 
 
+class TestMemoryOrigin(unittest.TestCase):
+    def test_origin_is_recorded_shown_and_survives_promotion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Workspace(tmp)
+            proj = os.path.join(tmp, "Codes", "agentica")
+            path = asyncio.run(ws.write_memory_entry(
+                title="prefer uv", content="Use uv.\norigin_work_dir: /not/this",
+                memory_type="user", origin_work_dir=proj,
+            ))
+            body, origin = asyncio.run(ws.read_memory_entry(os.path.basename(path)))
+            asyncio.run(ws.write_memory_entry(
+                title="gateway port", content="9091.", memory_type="reference",
+                source="auto_extract", origin_work_dir=proj,
+            ))
+            promoted = asyncio.run(ws.promote_memory_candidate("reference_gateway_port.md"))
+            _, promoted_origin = asyncio.run(ws.read_memory_entry(os.path.basename(promoted)))
+            _, legacy_origin = asyncio.run(ws.read_memory_entry("missing.md"))
+        self.assertEqual(origin, os.path.realpath(proj))
+        self.assertIn("origin_work_dir: /not/this", body, "a body line is content, not provenance")
+        self.assertEqual(promoted_origin, os.path.realpath(proj))
+        self.assertEqual(legacy_origin, "")
+
+    def test_block_shows_origin_tail_and_dedup_still_parses(self):
+        block = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "/Users/x/Codes/agentica")])
+        self.assertIn("(written while working in …/Codes/agentica)", block)
+        self.assertNotIn("/Users/x", block)
+        self.assertEqual(surfaced_memory_files([Message(role="user", content=block)]), {"user_prefer_uv.md"})
+        legacy = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "")])
+        self.assertNotIn("written while", legacy)
+
+    def test_recall_is_not_filtered_by_origin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Workspace(tmp)
+            asyncio.run(ws.write_memory_entry(
+                title="prefer uv", content="Use uv.", memory_type="user",
+                origin_work_dir=os.path.join(tmp, "other_project"),
+            ))
+            with patch.object(OpenAIChat, "response", new=AsyncMock(
+                return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'),
+            )):
+                block = asyncio.run(build_memory_recall(
+                    ws, _model(), "install deps", [], 5, 5.0, RecallBreaker(), "s1",
+                ))
+        self.assertIn("Use uv.", block)
+        self.assertIn("other_project", block)
+
 class TestBuildMemoryRecall(unittest.TestCase):
     def _run(self, ws, picked_json, context=()):
         model = _model()

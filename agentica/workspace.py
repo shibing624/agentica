@@ -32,6 +32,15 @@ from agentica.utils.async_file import (
 from agentica.utils.log import logger
 
 
+def _frontmatter_value(raw: str, key: str) -> Optional[str]:
+    """``key`` from the leading frontmatter block only, never from the body."""
+    raw = raw.strip()
+    body = strip_frontmatter(raw)
+    if body == raw:
+        return None
+    return extract_frontmatter_value(raw[: len(raw) - len(body)], key)
+
+
 @dataclass
 class WorkspaceConfig:
     """Workspace configuration.
@@ -786,12 +795,22 @@ class Workspace:
         ``filename`` must be a bare name inside the memory folder; anything
         that would resolve outside it reads as empty.
         """
+        body, _ = await self.read_memory_entry(filename)
+        return body
+
+    async def read_memory_entry(self, filename: str) -> Tuple[str, str]:
+        """``(body, origin_work_dir)`` of one memory topic file.
+
+        Same path rules as :meth:`read_memory_body`. ``origin_work_dir`` is ""
+        for entries written before provenance was recorded.
+        """
         memory_dir = self._get_user_memory_dir()
         path = memory_dir / filename
         if Path(filename).name != filename or not path.is_file():
-            return ""
-        body = strip_frontmatter((await async_read_text(path)).strip())
-        return redact_sensitive_text(body, level="memory") or ""
+            return "", ""
+        raw = (await async_read_text(path)).strip()
+        body = redact_sensitive_text(strip_frontmatter(raw), level="memory") or ""
+        return body, _frontmatter_value(raw, "origin_work_dir") or ""
 
     async def get_relevant_memories(
         self,
@@ -894,6 +913,7 @@ class Workspace:
         *,
         source: str = "verified",
         evidence_refs: Optional[List[str]] = None,
+        origin_work_dir: Optional[str] = None,
     ) -> str:
         """Write a typed memory entry as an individual file and update MEMORY.md index.
 
@@ -922,6 +942,10 @@ class Workspace:
             evidence_refs: Optional list of supporting references (file paths,
                 URLs, run_ids). Persisted in the frontmatter so reviewers can
                 trace WHY this memory was written.
+            origin_work_dir: Directory the writing session was working in.
+                Provenance only: recall is per user and never filters on it;
+                the recall block shows it so the model can judge whether a
+                memory about one project applies to the current one.
 
         Returns:
             Absolute path to the written memory file.
@@ -959,12 +983,16 @@ class Workspace:
                 evidence_lines = (
                     f"evidence_refs: {json.dumps(cleaned, ensure_ascii=False)}\n"
                 )
+        origin_line = ""
+        if origin_work_dir:
+            origin_line = f"origin_work_dir: {Path(origin_work_dir).expanduser().resolve()}\n"
         frontmatter = (
             f"---\nname: {title}\n"
             f"description: {hook}\n"
             f"type: {memory_type}\n"
             f"source: {source}\n"
             f"{evidence_lines}"
+            f"{origin_line}"
             f"---\n\n"
         )
         await async_write_text(filepath, frontmatter + content)
@@ -1088,6 +1116,7 @@ class Workspace:
             description=description,
             source="user_confirmed",
             evidence_refs=evidence,
+            origin_work_dir=_frontmatter_value(raw, "origin_work_dir"),
         )
 
     def reject_memory_candidate(self, filename: str) -> bool:

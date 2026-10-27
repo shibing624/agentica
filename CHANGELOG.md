@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **长期记忆记录写入目录，召回块显示出处**：`Workspace.write_memory_entry` 新增 `origin_work_dir`，写进 frontmatter；`save_memory` 取 agent 的 `work_dir`（未设置时取进程 cwd），自动抽取取 `agent.work_dir`，`promote_memory_candidate` 保留原值。召回仍按用户进行、不按目录过滤，召回块在标题下多一行 `(written while working in …/<路径末两级>)`，只显示末两级，不暴露完整本机路径。新增 `Workspace.read_memory_entry` 返回正文和出处；读出处只看 frontmatter，正文里同名的行不算。
+- **`web_search` / `fetch_url` 结果标为第三方内容**：结果包在 `<external_content source="...">` 里（`fetch_url` 带 `url` 属性），工具说明写明标签内是网页文本，不能因为网页让做就执行命令或调用工具。网页里的闭合标签（不区分大小写）会被转义，提前结束不了这个块。用真实模型测过（本地 HTTP 页面，`allow-all` 权限，chat 与 Anthropic 线路）：明显的「SYSTEM NOTICE」注入和与任务挂钩的隐蔽注入，加不加标签都是 0/5 中招，模型本身就能识别；用户让「按页面上的步骤做」、页面要求 `touch` 一个文件时，Anthropic 线路中招从 3/5 降到 1/5，chat 线路两种条件都是 0/5。这是缓解，不是保证。
+- **读过的文件在外部被修改后提示重读**：`BuiltinFileTool` 在 `read_file`、`write_file`、`apply_patch` 后记下文件的 `(mtime_ns, size)`，最多 200 个，按最近使用保留。`take_external_changes()` 返回之后变化或被删除的文件，每次变化只报一次。Agent 在每个工具批之后（post-tool hook，消息标记 `_injected`）和每个人类回合开始时（拼在用户消息前面，改写的是副本）附一条 `[File change notice]`。只用 `stat`，不读内容。已知限制：子代理与父代理共用同一个工具实例，子代理自己的写入也算「已看过」。用真实模型测过（两轮之间把 `TIMEOUT = 30` 改成 75，再问一遍）：Anthropic 线路无提示时 0/3 答对，有提示 3/3；chat 线路从 2/3 到 3/3。
+- **相互矛盾的纠正卡片互相标注**：纠正卡片写入后，和它有共同词干或中文双字的旧纠正卡片（最多 5 张）交给辅助模型（`classification` 任务）判断是否矛盾，没有共同词就不发调用。矛盾的两张都写入 frontmatter `conflict_with`（卡片被再次命中时保留），注入提示词时附一句「两条规则冲突，按当前对话判断并向用户确认」。两张卡片都不覆盖。调用失败或超时（20 秒）时卡片照常保存，只是不标注。新增 `agentica/experience/conflicts.py`、`CompiledExperienceStore.correction_rules` / `mark_conflict`、`compiler.rule_terms`。用真实模型判了 6 组（3 组矛盾、3 组细化或无关），chat 与 Anthropic 线路都 6/6。
+- **cron skill 约定「无事可报」标记**：bundled `cron` skill 新增一节：检查变化类任务的 prompt 应写明没有新情况时只回复 `[NO_UPDATE]`，并给了示例。调度器、`TaskRun` 和界面都没改。
 - **记忆召回块改为前置，并覆盖 `messages=` 入参**：
   - **位置。** `<memory_recall>` 块从拼在本轮用户消息末尾改为拼在开头，用户原文留在消息最底部。长上下文模型对中部注意力最弱，最新的问题应最后读到。历史消息仍不改动，前缀缓存不受影响；去重按块是否存在判断，与位置无关。
   - **`messages=[历史..., 本轮 user]` 入参也触发召回。** IM 适配器这类每轮自己重建历史的调用方，以列表末尾的 user 消息作为召回 query，块只拼到这一条上。

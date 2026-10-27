@@ -11,7 +11,7 @@ import re
 import shutil
 import tempfile
 import threading
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
@@ -39,6 +39,19 @@ _GREP_TIMEOUT = 20
 # Tail / negative-offset reads scan the file from the start (deque of N lines).
 # A multi-GB log must not pin the turn; 20s matches grep/glob. Not exposed.
 _READ_TIMEOUT = 20
+# How many seen files are stat-checked for external changes; the oldest drop.
+EXTERNAL_CHANGE_TRACK_LIMIT = 200
+
+
+def format_external_change_note(paths: List[str]) -> str:
+    """User-role note listing files that changed since the model read them."""
+    listed = "\n".join(f"- {p}" for p in paths)
+    return (
+        "[File change notice] These files changed on disk after you last read "
+        "or wrote them (the user, another process, or a shell command you ran). "
+        "What you saw of them may be out of date; read them again before "
+        "relying on or editing their contents.\n" + listed
+    )
 
 
 def _effective_tail(tail) -> Optional[int]:
@@ -504,6 +517,10 @@ class BuiltinFileTool(Tool):
         # guards for the rest of this session. Not persisted across restarts.
         self._escalated_paths: List[str] = []
         self._permission_mode = permission_mode
+        # Files this tool has shown the model (read, written, patched), with
+        # the (mtime_ns, size) seen then, oldest first. Lets the runner tell
+        # the model when one changed on disk behind its back.
+        self._seen_stamps: "OrderedDict[str, Tuple[int, int]]" = OrderedDict()
 
         # Register all file operation functions.
         # Read-only tools are concurrency_safe (can run in parallel with each other).
@@ -519,6 +536,41 @@ class BuiltinFileTool(Tool):
         # ``$HOME`` or a stuck network mount used to hang for the full 120s.
         self.functions["glob"].manages_own_timeout = True
         self.functions["grep"].manages_own_timeout = True
+
+    def _note_seen(self, path: Path) -> None:
+        """Record ``path`` as matching what the model now knows of it."""
+        key = str(path.resolve())
+        try:
+            st = os.stat(key)
+        except OSError:
+            self._seen_stamps.pop(key, None)
+            return
+        self._seen_stamps[key] = (st.st_mtime_ns, st.st_size)
+        self._seen_stamps.move_to_end(key)
+        while len(self._seen_stamps) > EXTERNAL_CHANGE_TRACK_LIMIT:
+            self._seen_stamps.popitem(last=False)
+
+    def take_external_changes(self) -> List[str]:
+        """Seen files whose mtime or size changed since, each reported once.
+
+        Covers anything this tool did not do itself: the user's editor, a
+        formatter, git, another process, or the agent's own shell commands.
+        Only ``stat`` is used, never the content. A deleted file is reported
+        with a ``(deleted)`` suffix and dropped from tracking.
+        """
+        changed: List[str] = []
+        for key, stamp in list(self._seen_stamps.items()):
+            try:
+                st = os.stat(key)
+            except OSError:
+                changed.append(f"{key} (deleted)")
+                del self._seen_stamps[key]
+                continue
+            now = (st.st_mtime_ns, st.st_size)
+            if now != stamp:
+                changed.append(key)
+                self._seen_stamps[key] = now
+        return changed
 
     def set_work_dir(self, work_dir: str) -> None:
         """Point the session default at another directory.
@@ -908,6 +960,7 @@ class BuiltinFileTool(Tool):
             f"Read file {file_path}: lines {start_shown}-{actual_end}, "
             f"total {total_lines} lines"
         )
+        self._note_seen(path)
         return result
 
     async def _read_from_start(
@@ -1016,6 +1069,7 @@ class BuiltinFileTool(Tool):
                 pass
             raise
 
+        self._note_seen(path)
         # Return absolute path to help LLM use correct path in subsequent operations
         absolute_path = str(path.resolve())
         logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
@@ -1226,6 +1280,7 @@ class BuiltinFileTool(Tool):
                                 pass
                             raise
                     applied.append(result_path)
+                    self._note_seen(path)
             except Exception as exc:
                 applied_text = ", ".join(applied) if applied else "none"
                 raise OSError(

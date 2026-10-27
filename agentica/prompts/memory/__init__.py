@@ -40,6 +40,7 @@ MEMORY_SYSTEM_PROMPT: str = _load(
 )
 FEEDBACK_CLASSIFY_PROMPT: str = _load("feedback_classify.md")
 BATCH_JUDGE_PROMPT: str = _load("batch_judge.md") + "\n"
+RULE_CONFLICT_PROMPT: str = _load("rule_conflict.md")
 
 
 def get_memory_recall_select_prompt(limit: int) -> str:
@@ -54,5 +55,6 @@ __all__ = [
     "MEMORY_SYSTEM_PROMPT",
     "FEEDBACK_CLASSIFY_PROMPT",
     "BATCH_JUDGE_PROMPT",
+    "RULE_CONFLICT_PROMPT",
     "get_memory_recall_select_prompt",
 ]

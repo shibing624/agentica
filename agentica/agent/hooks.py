@@ -18,12 +18,14 @@ mechanism, different config key, different failure modes.
 import asyncio
 import inspect
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Tuple
 
 from agentica.experience import extract_state
 from agentica.experience.compiler import truncate_error_text
+from agentica.experience.conflicts import check_rule_conflicts
 from agentica.experience.skill_upgrade import SkillEvolutionManager
 from agentica.experience.learning_report import (
     LearningReport,
@@ -566,12 +568,17 @@ class MemoryExtractHooks(RunHooks):
         # extraction fails closed with a truncated recent slice instead of a
         # silent context_length_exceeded on the side call.
         text = self._fit_text_to_model(model, text)
+        origin = agent.work_dir or os.getcwd()
         if not detach_model:
-            await self._extract_and_save(model, workspace, text, evidence_refs=evidence_refs)
+            await self._extract_and_save(
+                model, workspace, text, evidence_refs=evidence_refs, origin_work_dir=origin,
+            )
             return
         model = model.detached_copy()
         try:
-            await self._extract_and_save(model, workspace, text, evidence_refs=evidence_refs)
+            await self._extract_and_save(
+                model, workspace, text, evidence_refs=evidence_refs, origin_work_dir=origin,
+            )
         finally:
             await model.close_client()
 
@@ -671,6 +678,7 @@ class MemoryExtractHooks(RunHooks):
         workspace: Any,
         conversation_text: str,
         evidence_refs: Optional[List[str]] = None,
+        origin_work_dir: Optional[str] = None,
     ) -> None:
         """Run the LLM extraction call and persist results.
 
@@ -716,6 +724,7 @@ class MemoryExtractHooks(RunHooks):
                     memory_type=mem_type,
                     source="auto_extract",
                     evidence_refs=evidence_refs or None,
+                    origin_work_dir=origin_work_dir,
                 )
                 logger.debug(f"Auto-extracted memory: {title} (type: {mem_type})")
 
@@ -1070,6 +1079,7 @@ class ExperienceCaptureHooks(RunHooks):
                     result=prefiltered,
                     threshold=self._config.feedback_confidence_threshold,
                     original_task=original_task,
+                    conflict_model=self._get_classification_model(agent),
                 )
                 if was_correction:
                     correction_this_run = True
@@ -1401,6 +1411,7 @@ class ExperienceCaptureHooks(RunHooks):
                 result=finding,
                 threshold=threshold,
                 original_task=original_task or "",
+                conflict_model=model,
             )
 
     async def _dispatch_flush_judge(
@@ -1500,8 +1511,14 @@ class ExperienceCaptureHooks(RunHooks):
         result: Dict[str, Any],
         threshold: float,
         original_task: str = "",
+        conflict_model: Any = None,
     ) -> bool:
-        """Write the classification event and persist a correction card when warranted."""
+        """Write the classification event and persist a correction card when warranted.
+
+        With ``conflict_model``, a written card is checked against stored
+        corrections that share a term with it; contradicting pairs are marked
+        on both cards (see ``agentica.experience.conflicts``).
+        """
         from agentica.experience.compiler import ExperienceCompiler
 
         is_correction = result.get("is_correction", False)
@@ -1534,7 +1551,9 @@ class ExperienceCaptureHooks(RunHooks):
             result["original_task"] = original_task
         card = ExperienceCompiler.compile_correction(result)
         if card:
-            await compiled_store.write(card)
+            path = await compiled_store.write(card)
+            if conflict_model is not None:
+                await check_rule_conflicts(conflict_model, compiled_store, path, rule)
             return True
         return False
 

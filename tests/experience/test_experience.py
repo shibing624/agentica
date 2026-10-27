@@ -127,6 +127,7 @@ class TestExperienceCaptureHooks(unittest.TestCase):
         agent.workspace.get_experience_event_store = MagicMock(return_value=mock_event_store)
         mock_compiled_store = MagicMock()
         mock_compiled_store.write = AsyncMock(return_value="/tmp/exp.md")
+        mock_compiled_store.correction_rules = AsyncMock(return_value=[])
         mock_compiled_store.run_lifecycle = AsyncMock(return_value={"promoted": 0, "demoted": 0, "archived": 0})
         agent.workspace.get_compiled_experience_store = MagicMock(return_value=mock_compiled_store)
         agent.workspace._get_user_generated_skills_dir = MagicMock(return_value=Path("/tmp/gen_skills"))

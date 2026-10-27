@@ -854,7 +854,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             elif isinstance(tool, BuiltinTaskTool):
                 tool.set_parent_agent(self)
             elif isinstance(tool, BuiltinMemoryTool):
-                tool.set_workspace(self.workspace)
+                tool.set_workspace(self.workspace, work_dir=self.work_dir)
             elif isinstance(tool, BuiltinContextTool):
                 tool.set_agent(self)
             elif isinstance(tool, SkillTool):
@@ -1555,7 +1555,49 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             model.session_id = self.session_id
             model.agent_name = self.name
 
+    def _file_tools(self) -> list:
+        from agentica.tools.builtin.file_tool import BuiltinFileTool
+
+        return [t for t in self.tools or [] if isinstance(t, BuiltinFileTool)]
+
+    def take_external_file_change_note(self) -> Optional[str]:
+        """Note naming files changed on disk since the model last saw them.
+
+        Each change is reported once (see ``take_external_changes``). None
+        when nothing changed or the agent has no file tool.
+        """
+        from agentica.tools.builtin.file_tool import format_external_change_note
+
+        changed: List[str] = []
+        for tool in self._file_tools():
+            changed += tool.take_external_changes()
+        return format_external_change_note(changed) if changed else None
+
     def _build_post_tool_hook(self):
+        """Post-tool hook: external file-change note, then the todo reminder.
+
+        Returns an async callable (messages, function_call_results) -> None, or
+        None when the agent has neither a file tool nor an active todo reminder.
+        Both notes are appended as ``_injected`` user messages right after the
+        result batch, so Layer 1 still treats that round as live.
+        """
+        todo_hook = self._build_todo_reminder_hook()
+        if todo_hook is None and not self._file_tools():
+            return None
+
+        async def _post_tool_hook(messages: list, function_call_results: list) -> None:
+            note = self.take_external_file_change_note()
+            if note:
+                notice = Message(role="user", content=note)
+                notice._injected = True
+                messages.append(notice)
+                logger.debug("Injected external file-change note")
+            if todo_hook is not None:
+                await todo_hook(messages, function_call_results)
+
+        return _post_tool_hook
+
+    def _build_todo_reminder_hook(self):
         """Build the post-tool hook function for todo reminder injection.
 
         Returns an async callable (messages, function_call_results) -> None, or None
