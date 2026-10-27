@@ -179,6 +179,7 @@ class BuiltinMemoryTool(Tool):
         self.MEMORY_SYSTEM_PROMPT = MEMORY_SYSTEM_PROMPT
 
         self.register(self.save_memory, is_destructive=True)
+        self.register(self.forget_memory, is_destructive=True)
         self.register(self.search_memory, concurrency_safe=True, is_read_only=True)
 
     def set_workspace(self, workspace, work_dir: Optional[str] = None) -> None:
@@ -219,12 +220,27 @@ class BuiltinMemoryTool(Tool):
         content: str,
         memory_type: str = "project",
         description: str = "",
+        replaces: str = "",
     ) -> str:
-        """Save important information to long-term memory for future sessions.
+        """Save a fact to long-term memory for future sessions.
 
+        Takes no file path: it writes the entry file and its MEMORY.md index
+        row itself. Do not create the file by hand (the index would not show
+        it and search would return a duplicate). Search first; update an
+        existing entry rather than adding a near-duplicate.
+
+        title: short searchable name, e.g. "user_role".
+        content: what to remember and how to apply it; for feedback lead with
+        the rule, then why.
+        memory_type: user (who the user is, preferences), feedback (a
+        correction or a confirmed approach), project (non-derivable work
+        context, measured results), reference (external systems, env, paths
+        outside the repo).
         description: one line saying when this memory is relevant, with the
-        keywords a later search would use. It is the MEMORY.md index hook;
-        omit it and the first line of content is used.
+        keywords a later search would use; it becomes the index hook.
+        replaces: file name of an existing entry (as shown in MEMORY.md, e.g.
+        "user_prefer_uv.md") that this one corrects or supersedes; that entry
+        is removed. Use it when new information contradicts a saved memory.
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured. Memory cannot be saved.")
@@ -239,6 +255,9 @@ class BuiltinMemoryTool(Tool):
             raise ValueError("title cannot be empty.")
         if not content.strip():
             raise ValueError("content cannot be empty.")
+        old = replaces.strip().removeprefix("memory/")
+        if old and not (await self._workspace.read_memory_entry(old))[0]:
+            raise ValueError(f"No memory entry {old!r} to replace; see MEMORY.md for file names.")
 
         filepath = await self._workspace.write_memory_entry(
             title=title.strip(),
@@ -247,9 +266,27 @@ class BuiltinMemoryTool(Tool):
             description=description.strip(),
             origin_work_dir=self._work_dir or os.getcwd(),
         )
+        replaced = ""
+        if old and old != Path(filepath).name:
+            await self._workspace.delete_memory_entry(old)
+            replaced = f"; replaced {old}"
 
-        logger.debug(f"Memory saved: {title} -> {filepath}")
-        return f"Memory saved: '{title}' (type: {memory_type}) -> {filepath}"
+        logger.debug(f"Memory saved: {title} -> {filepath}{replaced}")
+        return f"Memory saved: '{title}' (type: {memory_type}) -> {filepath}{replaced}"
+
+    async def forget_memory(self, filename: str) -> str:
+        """Delete a long-term memory entry the user asked to forget, or one that is wrong.
+
+        filename: the entry's file name as shown in MEMORY.md, e.g.
+        "project_gateway_port.md". To correct an entry instead, call
+        save_memory with replaces=<filename>.
+        """
+        if self._workspace is None:
+            raise RuntimeError("No workspace configured.")
+        name = filename.strip().removeprefix("memory/")
+        if not await self._workspace.delete_memory_entry(name):
+            raise ValueError(f"No memory entry {name!r}; see MEMORY.md for file names.")
+        return f"Memory deleted: {name}"
 
     def search_memory(
         self,

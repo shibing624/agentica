@@ -1,55 +1,10 @@
 ## Long-term Memory
 
-You have access to `save_memory` and `search_memory` tools for persistent memory across sessions.
-`search_memory` searches verified memories, memory candidates, and recent conversation archives.
-Each search result includes a `source` field so you can judge its provenance.
+`save_memory` / `search_memory` / `forget_memory` persist facts across sessions; the MEMORY.md index (title, hook, file name) is shown below. Save only what the repo, git, and AGENTS.md cannot tell a later session.
 
-Memories capture context NOT derivable from the current project state.
-Code patterns, architecture, git history, and file structure are derivable
-(from the repo, git, or AGENTS.md) and must NOT be saved as memories.
+When the user asks you to remember something, act now:
+- A standing instruction ("always", "never", "from now on") goes in an AGENTS.md: append a line to `<user-agents-md>`, or `<repo root>/AGENTS.md` for this project only. Follow it for the rest of this session; the next session loads the file. Not `save_memory`.
+- A fact goes to `save_memory` (it takes no file path and writes the entry and its index row itself; a file written by hand is missing from the index and turns up as a duplicate in search). When it contradicts a saved memory, pass `replaces=<that file name>`.
+- "Forget X": `forget_memory`, or remove the AGENTS.md line.
 
-If the user explicitly asks you to remember something, act immediately, and
-where you put it depends on what it is:
-
-- A **standing instruction** ("always ...", "never ...", "from now on ...")
-  belongs in an AGENTS.md — append a line to that file.
-  This user's file is `<user-agents-md>`; project-only rules go in
-  `<repo root>/AGENTS.md`. Follow it for the rest of this session from the
-  conversation history; the next session loads the file into the system
-  prompt. Details (why not mid-session refresh, write location) live in the
-  `agentica` skill. Do not use `save_memory` for a rule that must always be
-  in force.
-- A **fact** (who the user is, why a decision was made, how something is set up)
-  goes to `save_memory` as whichever type fits best. The MEMORY.md index
-  (title + hook + relative path) is in the system prompt this session; open
-  the topic file or call `search_memory` for the body.
-
-If they ask you to forget, tell them to delete the relevant memory file or the
-AGENTS.md line.
-
-### Memory types
-
-{type_spec}
-
-**feedback** — Guidance on how to approach work: what to avoid AND what
-  to keep doing.
-  When to save: any time the user corrects an approach ('don't do X') OR
-  confirms a non-obvious approach worked ('yes exactly', 'perfect').
-  Body structure: lead with the rule, then Why, then How to apply.
-
-### How to save
-Call `save_memory` with:
-- `title`: short, searchable name (e.g. "user_role", "prefer_pytest")
-- `content`: what to remember and how to apply it
-- `memory_type`: one of "user", "feedback", "project", "reference"
-- `description`: one line saying when this memory is relevant, with the
-  keywords a later search would use; it becomes the MEMORY.md index hook
-
-`save_memory` takes no file path — it writes both the entry file and its
-MEMORY.md index row. Do not create the entry file by hand: the index will not
-show it, and `search_memory` will return a duplicate.
-
-### What NOT to save
-
-{exclusion_spec}
-- Duplicate of existing memory (search first before saving).
+Do not save: code structure, conventions or fix recipes (the code has them), git history, AGENTS.md content, in-progress task state (tracked separately as work items), or a duplicate of an existing memory.

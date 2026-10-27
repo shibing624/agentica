@@ -49,15 +49,42 @@ class TestBuiltinMemoryTool:
         assert "search_memory" in tool.functions
 
     def test_get_system_prompt(self):
-        """Test that system prompt contains memory instructions."""
+        """System prompt routes requests; the type taxonomy lives on save_memory."""
         prompt = self.tool.get_system_prompt()
         assert prompt is not None
         assert "save_memory" in prompt
         assert "search_memory" in prompt
-        assert "user" in prompt
-        assert "feedback" in prompt
-        assert "project" in prompt
-        assert "reference" in prompt
+        assert "forget_memory" in prompt
+        assert "replaces=" in prompt
+        description = self.tool.functions["save_memory"].description
+        for memory_type in ("user", "feedback", "project", "reference"):
+            assert memory_type in description
+
+    def test_replaces_removes_the_superseded_entry(self):
+        old = asyncio.run(self.tool.save_memory(
+            title="prefer pip", content="Use pip.", memory_type="user", description="installer",
+        ))
+        assert "user_prefer_pip.md" in old
+        out = asyncio.run(self.tool.save_memory(
+            title="prefer uv", content="Use uv, not pip.", memory_type="user",
+            description="installer", replaces="user_prefer_pip.md",
+        ))
+        assert "replaced user_prefer_pip.md" in out
+        index = asyncio.run(self.workspace.list_memory_index_entries())
+        names = [e["filename"] for e in index]
+        assert names == ["user_prefer_uv.md"]
+        with pytest.raises(ValueError):
+            asyncio.run(self.tool.save_memory(title="x", content="y", replaces="missing.md"))
+
+    def test_forget_memory_deletes_file_and_index_row(self):
+        asyncio.run(self.tool.save_memory(title="gateway port", content="9091", memory_type="reference"))
+        out = asyncio.run(self.tool.forget_memory("memory/reference_gateway_port.md"))
+        assert "deleted" in out
+        assert asyncio.run(self.workspace.list_memory_index_entries()) == []
+        with pytest.raises(ValueError):
+            asyncio.run(self.tool.forget_memory("reference_gateway_port.md"))
+        with pytest.raises(ValueError):
+            asyncio.run(self.tool.forget_memory("../AGENTS.md"))
 
     def test_system_prompt_names_this_users_own_rules_file(self):
         """Durable rules have no tool, so the prompt must give the real path.
@@ -108,7 +135,7 @@ class TestBuiltinMemoryTool:
         fn = self.tool.functions["save_memory"]
         params = fn._parse_parameters(fn.entrypoint, strict=False)["properties"]
         assert "file_path" not in params
-        assert set(params) == {"title", "content", "memory_type", "description"}
+        assert set(params) == {"title", "content", "memory_type", "description", "replaces"}
 
     def test_save_memory(self):
         """Test saving a memory entry."""

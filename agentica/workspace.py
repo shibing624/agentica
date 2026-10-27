@@ -1132,6 +1132,29 @@ class Workspace:
         cand_path.unlink()
         return True
 
+    async def delete_memory_entry(self, filename: str) -> bool:
+        """Delete one memory topic file and its MEMORY.md index row.
+
+        ``filename`` is the bare name shown in the index (``memory/<filename>``).
+        Returns False when no such entry exists; a path outside the memory
+        folder is refused.
+        """
+        if Path(filename).name != filename:
+            raise ValueError(f"Not a memory file name: {filename!r}")
+        path = self._get_user_memory_dir() / filename
+        index_path = self._get_user_memory_md()
+        removed = False
+        if path.is_file():
+            path.unlink()
+            removed = True
+        if index_path.exists():
+            lines = (await async_read_text(index_path)).splitlines()
+            kept = [l for l in lines if f"(memory/{filename})" not in l]
+            if len(kept) != len(lines):
+                await async_write_text(index_path, "\n".join(kept).strip() + "\n" if kept else "")
+                removed = True
+        return removed
+
     async def _update_memory_index(
         self,
         index_path: Path,

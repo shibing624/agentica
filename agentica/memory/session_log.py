@@ -483,7 +483,7 @@ class SessionLog:
             **meta: Extra fields (tool_name, tool_call_id, is_error, model, usage, etc.)
         """
         entry_uuid = str(uuid4())
-        self._append({
+        entry = {
             "type": role,
             "uuid": entry_uuid,
             "parent_uuid": self._last_uuid,
@@ -494,9 +494,10 @@ class SessionLog:
             "git_branch": self._git_branch,
             "content": content,
             **meta,
-        })
+        }
+        self._append(entry)
         self._last_uuid = entry_uuid
-        self._write_search_index_entry(role, content)
+        self._index_user_row(entry)
         return entry_uuid
 
     def append_compact_boundary(
@@ -535,7 +536,6 @@ class SessionLog:
             "covered_prefix_hash": covered_prefix_hash,
         })
         self._last_uuid = entry_uuid
-        self._write_search_index_entry("compact_boundary", summary)
         return entry_uuid
 
     def lineage_key(self, model: Optional[str] = None) -> str:
@@ -1936,7 +1936,7 @@ class SessionLog:
             entry["session_id"] = new_session_id
             new_log._append(entry)
             new_log._last_uuid = entry.get("uuid")
-            new_log._index_existing_entry(entry)
+            new_log._index_user_row(entry)
 
             # Stop at the fork point
             if at_uuid and entry.get("uuid") == at_uuid:
@@ -2088,6 +2088,16 @@ class SessionLog:
         """Whether dual-write search indexing is still healthy."""
         return self._search_index_healthy
 
+    @property
+    def search_index(self) -> Optional[Any]:
+        """Cross-session :class:`SessionIndex` this log writes to, if any."""
+        return self._search_index if self._search_index_healthy else None
+
+    @property
+    def cwd(self) -> str:
+        """Project directory stamped on this session's rows."""
+        return self._cwd
+
     def entry_count(self) -> int:
         """Count total entries in the log."""
         if not self.path.exists():
@@ -2105,29 +2115,18 @@ class SessionLog:
         except OSError as e:
             logger.warning(f"SessionLog write failed ({self.path}): {e}")
 
-    def _index_existing_entry(self, entry: Dict[str, Any]) -> None:
-        """Index an existing JSONL entry using the same read-model rules."""
-        entry_type = entry.get("type")
-        if entry_type in ("user", "assistant", "system", "tool"):
-            self._write_search_index_entry(entry_type, entry.get("content", ""))
-        elif entry_type == "compact_boundary":
-            self._write_search_index_entry("compact_boundary", entry.get("summary", ""))
+    def _index_user_row(self, entry: Dict[str, Any]) -> None:
+        """Best-effort dual-write of a human ``user`` row to the cross-session index.
 
-    def _write_search_index_entry(self, role: str, content: str) -> None:
-        """Best-effort dual-write to the search index.
-
-        JSONL remains the canonical session store. If the search index fails,
-        we keep the primary write, mark the index unhealthy, and stop dual-write
-        attempts for this SessionLog instance to avoid silent repeated drift.
+        JSONL remains the canonical session store; the index only accelerates
+        cross-session lookup and can be rebuilt by ``SessionIndex.backfill``.
+        On failure the index is marked unhealthy and dual-write stops for this
+        log instance, so a broken index cannot slow every turn.
         """
-        if self._search_index is None or not self._search_index_healthy:
+        if self._search_index is None or not self._search_index_healthy or entry.get("type") != "user":
             return
         try:
-            self._search_index.index_message(self.session_id, role, content)
+            self._search_index.index_user_turn(entry)
         except Exception as e:
             self._search_index_healthy = False
-            logger.warning(
-                "Search index write disabled for session %s after failure: %s",
-                self.session_id,
-                e,
-            )
+            logger.warning(f"Session index write disabled for session {self.session_id} after failure: {e}")

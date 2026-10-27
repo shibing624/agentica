@@ -57,6 +57,10 @@ class PromptConfig:
     # Prompt behavior switches
     add_name_to_instructions: bool = False
     add_datetime_to_instructions: bool = True
+    # Prefix the first user message of a session with a <git_snapshot> of
+    # work_dir (branch, `git status --short`, last 3 commits). Not the system
+    # prompt, so the cached prefix is untouched. DeepAgent turns it on.
+    add_git_snapshot: bool = False
     prevent_hallucinations: bool = False
     prevent_prompt_leakage: bool = False
     limit_tool_access: bool = False
@@ -132,6 +136,18 @@ class WorkspaceMemoryConfig:
     # uses: normal calls finish under 3.2s (p95 1.7s chat, 2.9s Anthropic);
     # about 4.5% are stragglers at 7-11s, which 5s cuts off.
     recall_timeout: float = 5.0
+    # Per-turn recall of earlier sessions (<session_recall>): on a session's
+    # first turn, the project's open items and the last asks of recent
+    # sessions; on every turn, earlier work sharing distinctive terms with the
+    # message. Reads the cross-session index only — no model call, except
+    # that the first turn may finish intent batches an exited session left
+    # queued (capped by recall_timeout). Needs a session log (session_id).
+    recall_sessions: bool = False
+    # Keep a cross-session log of what the user asked for and where it ended
+    # (open / done / dropped). One auxiliary call ("intent_track" task) per
+    # intent_every_n_turns turns, in the background.
+    track_intents: bool = False
+    intent_every_n_turns: int = 3
     # Auto-archive conversation to workspace after each run() (zero LLM cost,
     # just appends raw messages to conversations/ directory).
     auto_archive: bool = False

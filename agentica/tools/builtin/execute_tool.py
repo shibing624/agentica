@@ -27,6 +27,7 @@ from agentica.tools.os_sandbox import (
 from agentica.tools.safety import (
     check_command_safety,
     command_matches_blocked,
+    is_catastrophic,
     redact_sensitive_text,
 )
 from agentica.security.redact import redact_tool_outputs_enabled
@@ -285,32 +286,14 @@ _WAIT_POLL_INTERVAL = 0.2
 # orphan that outlives the agent and nobody can see.
 _BACKGROUND_GUIDANCE = """
 - ``background=True`` decides how long the command lives, not how many run at
-  once. Use it when the output is not needed to continue this turn, or when the
-  command may outlive one tool call: a foreground command killed by ``timeout``
-  or a cancelled turn loses everything it printed, while a background one keeps
-  its log. Something you need right now that fits in one call belongs in the
-  foreground with a raised ``timeout`` — reach for ``parallel_safe`` rather than
-  ``background`` when the goal is speed.
+  once: use it when the output is not needed this turn or the command may
+  outlive one call (a killed foreground command loses its output; a background
+  one keeps its log). For speed, use ``parallel_safe``.
   {delivery}
-  Never improvise a wait inside a turn with ``sleep``, polling, or a blocking
-  ``tail``; a 120s+ leading ``sleep`` is refused. A trailing ``&`` detaches into
-  an untracked orphan that nothing can wait on or stop, so prefer
-  ``background=True``.
-  Example: execute(command="make release", background=True)
-- A background command belongs to this session: it is stopped when the
-  session exits. A job that must outlive the session (hours of training, a
-  server) goes in ``tmux``/``nohup``/``setsid`` instead — and from then on
-  nothing reports its end: ``/ps`` does not list it, and no exit reaches you.
-  So launch it to leave a completion marker and, in the same step, start one
-  background watcher that turns the marker into a completion — do not wait to
-  be asked. Polling is right here, because there is no event to wait on; the
-  watcher only reads, and exits non-zero if the job vanished without a marker:
-  execute(command="tmux new-session -d -s train 'python train.py > train.log 2>&1; echo $? > train.exit'")
-  execute(command="while [ ! -f train.exit ]; do tmux has-session -t train 2>/dev/null || [ -f train.exit ] || {{ echo 'train gone, no exit file'; tail -20 train.log; exit 2; }}; sleep 60; done; tail -20 train.log; exit $(cat train.exit)", background=True)
-  The same watcher fits any job you did not start here (a job queue, a remote
-  run): loop on whatever condition marks it done. Tell the user the watcher
-  dies with this session while the job keeps running; after a restart, read
-  the marker before assuming anything.
+  Never wait inside a turn with ``sleep`` or polling (a 120s+ leading ``sleep``
+  is refused), and never detach with a trailing ``&``.
+- A background command is stopped when the session exits. For a job that must
+  outlive the session, load the ``long-running-jobs`` skill first.
 """
 
 _DELIVERED = (
@@ -345,15 +328,16 @@ class BuiltinExecuteTool(Tool):
 
     def __init__(self, work_dir: Optional[str] = None, timeout: int = 120,
                  max_output_length: int = 20000, sandbox_config=None,
-                 background_process_registry: Optional[BackgroundProcessRegistry] = None):
+                 background_process_registry: Optional[BackgroundProcessRegistry] = None,
+                 max_foreground_timeout: int = 600):
         """
         Initialize BuiltinExecuteTool.
 
         Args:
             work_dir: Work directory for command execution
-            timeout: Default command execution timeout in seconds. Callers may
-                override per-invocation via ``execute(timeout=...)``; overrides
-                are applied as-is with no upper cap — the caller decides.
+            timeout: Default command execution timeout in seconds. With
+                ``SandboxConfig.enabled`` the default is
+                ``sandbox_config.max_execution_time`` instead.
             max_output_length: Maximum length of output to return
             sandbox_config: SandboxConfig instance for command restriction enforcement
                 (``os_sandbox`` puts every command inside the OS sandbox and
@@ -364,6 +348,11 @@ class BuiltinExecuteTool(Tool):
                 and ``wait`` are not offered at all rather than being backed by
                 a private registry nobody can reach: a detached process would
                 outlive the agent with no way to see it or kill it.
+            max_foreground_timeout: Largest per-call ``timeout`` accepted when
+                ``background`` exists. A longer foreground call is refused (not
+                clamped) with a pointer to ``background=True``, which keeps the
+                log when the turn ends. Without a background registry there is
+                no alternative to offer, so no cap applies.
         """
         super().__init__(name="builtin_execute_tool")
         self._work_dir: Optional[Path] = Path(work_dir) if work_dir else None
@@ -382,6 +371,9 @@ class BuiltinExecuteTool(Tool):
         # Override timeout from sandbox config if set
         if sandbox_config and sandbox_config.enabled and sandbox_config.max_execution_time:
             self._timeout = sandbox_config.max_execution_time
+        self._max_foreground_timeout = (
+            max(self._timeout, max_foreground_timeout) if background_process_registry is not None else None
+        )
         self.register(self.execute, is_destructive=True)
 
         # Large bash outputs are persisted to disk (context gets preview only).
@@ -403,6 +395,16 @@ class BuiltinExecuteTool(Tool):
         # parameter and its prose straight back.
         execute_fn = self.functions["execute"]
         execute_fn.process_entrypoint()
+        cap_note = (
+            f" Max {self._max_foreground_timeout}s; longer work goes in background=True."
+            if self._max_foreground_timeout is not None else ""
+        )
+        execute_fn.description = execute_fn.description.replace(
+            "{default_timeout}", str(self._timeout)
+        ).replace("{timeout_cap}", cap_note)
+        execute_fn.parameters["properties"]["timeout"]["description"] = (
+            f"seconds; default {self._timeout}.{cap_note}"
+        )
         if self._background_process_registry is not None:
             execute_fn.description += _BACKGROUND_GUIDANCE.format(
                 delivery=_DELIVERED if self._background_process_registry.delivers_results
@@ -614,99 +616,38 @@ class BuiltinExecuteTool(Tool):
     ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
-        Any shell command goes here: explore, analyze, verify, build, git,
-        and pipelines that shape stdout — filter, sort, unique, count,
-        head, tail.
+        Any shell command goes here: explore, analyze, verify, build, git, and
+        pipelines that shape stdout. Split or combine as needed:
+        do not force every probe into one script. Dependent steps share one command (``&&``,
+        pipes); a miss that must not stop the rest uses ``;`` and
+        ``2>/dev/null``. Search with ``rg -n PAT`` or
+        ``rg -g '*.py' -n TODO src``.
+        Never ``rg -rn``: ``-r`` is ``--replace``.
+        Search from ``.`` or a known directory; do not assemble
+        a long absolute path from package layout. Bound noisy output with
+        ``| head`` / ``| tail``; do not ``cat`` whole source files. Quote paths
+        with spaces. Heredocs (``python3 - <<'EOF'``) work.
 
-        Split or combine as needed — do not force every probe into one
-        script. Independent calls in one message can run together
-        (``parallel_safe=True``). Dependent steps can share one command
-        (pipes and ``&&``). A miss that must not stop the rest: ``;``
-        and ``2>/dev/null``.
-
-        Search with ``rg`` (``rg -g '*.py' -n PAT`` or ``rg -t py``).
-        Never ``rg -rn``: ``-r`` is ``--replace``, so ``-rn`` replaces every
-        match with the letter ``n`` and exits 0. Line numbers are ``-n``
-        alone. Bound noisy output with ``| head`` / ``| tail``. Newlines
-        stay, so a ``python3 - <<'EOF'`` … ``EOF`` heredoc works.
-
-        Do not dump a whole source file through the shell
-        (``cd … && cat f.py``). Bound it with head/tail. A persisted
-        dump still spent a turn filling a pipe.
-
-        Before executing:
-        1. Always quote file paths with spaces: cd "/path with spaces/"
-        2. For a verify/build in one tree, start with ``cd /abs/path &&``
-        3. Search from ``.`` or a known directory; hedge unknown
-           candidates with ``2>/dev/null``. Do not assemble a long
-           absolute path from package layout.
-
-        Usage notes:
-        - The command string is passed unchanged to the system shell after
-          safety validation. Safety policies may block a command, but never
-          rewrite it. Quotes, escapes, newlines, and source code remain exact.
-        - Foreground commands timeout after 120 seconds by default
-        - You may specify a custom ``timeout`` (in seconds) for long-running
-          commands; there is no upper cap — the caller decides.
-        - ``parallel_safe=True`` lets this call run at the same time as the
-          other calls in the same message. Default is False: calls run one at a
-          time, in the order you issued them, and a failing command cancels the
-          ones after it. Set it only when every command in the batch is
-          independent of the others — nothing one writes is read or written by
-          another. Two test suites, two `git log` reads, two builds in separate
-          directories: yes. `git add` then `git commit`, `pip install` then the
-          command that imports it, anything touching one file twice: no, and
-          `&&` in a single call is the right way to say that anyway. When
-          unsure, leave it off; the cost is waiting, and the cost of getting it
-          wrong is a corrupted working tree.
-        - ``work_dir`` runs this command (and any background job / overflow
-          spill) in that directory. Omit to use this session's directory.
-          Use the path ``worktree`` returned for another checkout; this
-          does not move the session.
-        - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
-          Oversized output is persisted to a session file with a head/tail
-          preview and path. When output redaction is enabled, detected secrets
-          are replaced before the result reaches you. Unterminated PEM
-          private-key blocks are always redacted.
-
-        Git safety:
-        - Prefer creating new commits over amending existing ones
-        - Before destructive operations (git reset --hard, git push --force),
-          consider safer alternatives and check with the user first
-        - Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign)
-          unless the user explicitly requests it
-
-        Examples:
-            - One verify-then-next-step call (preferred over N short executes)::
-
-                  cd /abs/project && pytest -q --tb=no | rg '^FAILED' | sort && python -m build 2>&1 | tail -8
-
-            - Independent probes in one call (``;`` so a miss does not abort)::
-
-                  rg -g '*.py' -n Foo src | head -40; echo ===; rg -n Bar docs/note.md 2>/dev/null | head
-
-            - Heredoc (newlines are the command)::
-
-                  python3 - <<'EOF'
-                  from pathlib import Path
-                  print(chr(10).join(Path('pyproject.toml').read_text().splitlines()[:25]))
-                  EOF
-
-            - execute(command="API_ENV=dev python3 scripts/smoke.py && sleep 2 && curl -sI http://127.0.0.1:8000 | head -8")
-            - execute(command="pytest tests/gateway -q --tb=no | rg '^FAILED' | sort")
-            - execute(command="rg -n '^## ' CHANGELOG.md | head -20")
-            - execute(command="rg -g '*.py' -n TODO src")
-            - execute(command="git diff --stat | tail -5")
-            - execute(command="npm install && npm test", timeout=300)
-            - execute(command="pytest tests/unit -q", parallel_safe=True)
-              alongside execute(command="pytest tests/e2e -q", parallel_safe=True)
+        - The command is passed unchanged to the shell; safety checks may
+          refuse it but never rewrite it.
+        - Foreground timeout: {default_timeout}s by default.{timeout_cap}
+        - ``parallel_safe=True`` runs this call together with the adjacent
+          calls in the same message. Default: calls run one at a time in the
+          order issued, and a failing command cancels the ones after it. Only
+          for commands independent of every sibling (two test suites, two
+          reads); never ``git add`` + ``git commit`` or anything touching one
+          file twice.
+        - ``work_dir`` runs this command in that directory (e.g. a path
+          ``worktree`` returned); omit for the session directory.
+        - Output over the limit is saved to a file; you get a head/tail
+          preview and its path.
+        - Git: prefer new commits over amending; ask before ``reset --hard`` /
+          ``push --force``; never ``--no-verify`` unless asked.
 
         Args:
             command: Exact shell command. Not rewritten.
-            timeout: optional timeout in seconds (default 120, no upper cap)
-            parallel_safe: run concurrently with the other calls in this
-                message. Only for commands independent of every sibling call;
-                the default runs the batch serially in order
+            timeout: seconds
+            parallel_safe: run concurrently with adjacent calls in this message
 
         Returns:
             str: The output of the command (stdout + stderr) with exit code
@@ -715,8 +656,17 @@ class BuiltinExecuteTool(Tool):
         # decide the schedule before this ever runs; it means nothing here.
         del parallel_safe
 
-        # Apply timeout: use per-call override if provided, else the tool default.
-        # No upper cap — the caller decides.
+        if (
+            timeout is not None
+            and self._max_foreground_timeout is not None
+            and timeout > self._max_foreground_timeout
+            and not background
+        ):
+            raise ValueError(
+                f"timeout={timeout}s exceeds the {self._max_foreground_timeout}s foreground limit. "
+                "Run it with background=True: it keeps its log when the turn ends, and its exit "
+                "comes back to you."
+            )
         effective_timeout = self._timeout if timeout is None else max(1, timeout)
 
         # Sandbox: check blocked commands (best-effort, not a true security sandbox)
@@ -764,12 +714,18 @@ class BuiltinExecuteTool(Tool):
                         f"in the allowed_commands list: {allowed}"
                     )
 
-        # Safety: check dangerous command patterns (always active unless a
-        # human already allowed this call — otherwise allow-all / the card
-        # would still raise PermissionError).
+        # Safety: dangerous command patterns. A catastrophic one (root delete,
+        # mkfs, fork bomb, writing a disk device) is refused in every mode
+        # unless a human approved this exact call; the other blocks apply only
+        # with the sandbox on, so allow-all keeps running them (logged).
         safety = check_command_safety(command)
         if safety["action"] == "block":
             logger.warning(f"Safety blocked command: {safety['reason']} — {command[:100]}")
+            if is_catastrophic(safety) and not approved_by_user.get():
+                raise PermissionError(
+                    f"{safety['reason']}. Refused in every permission mode; if this is really "
+                    "intended, the user must run it themselves."
+                )
             if not skip_hard_block:
                 raise PermissionError(f"{safety['reason']}. Use a safer alternative.")
         if safety["action"] == "warn":

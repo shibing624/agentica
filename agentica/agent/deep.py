@@ -324,6 +324,7 @@ class DeepAgent(Agent):
                 enable_agentic_prompt=True,
                 add_datetime_to_instructions=True,
                 add_name_to_instructions=True,
+                add_git_snapshot=True,
             )
 
         if tool_config is None:
@@ -350,6 +351,8 @@ class DeepAgent(Agent):
                 load_workspace_context=True,
                 load_workspace_memory=True,
                 recall_memories=True,
+                recall_sessions=True,
+                track_intents=True,
                 max_memory_entries=5,
             )
 

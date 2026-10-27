@@ -33,14 +33,11 @@ MEMORY_EXTRACT_PROMPT: str = _load(
     type_spec=MEMORY_TYPE_SPEC,
     exclusion_spec=MEMORY_EXCLUSION_SPEC,
 ) + "\n"
-MEMORY_SYSTEM_PROMPT: str = _load(
-    "system.md",
-    type_spec=MEMORY_TYPE_SPEC,
-    exclusion_spec=MEMORY_EXCLUSION_SPEC,
-)
+MEMORY_SYSTEM_PROMPT: str = _load("system.md")
 FEEDBACK_CLASSIFY_PROMPT: str = _load("feedback_classify.md")
 BATCH_JUDGE_PROMPT: str = _load("batch_judge.md") + "\n"
 RULE_CONFLICT_PROMPT: str = _load("rule_conflict.md")
+INTENT_UPDATE_PROMPT: str = _load("intent_update.md")
 
 
 def get_memory_recall_select_prompt(limit: int) -> str:
@@ -56,5 +53,6 @@ __all__ = [
     "FEEDBACK_CLASSIFY_PROMPT",
     "BATCH_JUDGE_PROMPT",
     "RULE_CONFLICT_PROMPT",
+    "INTENT_UPDATE_PROMPT",
     "get_memory_recall_select_prompt",
 ]

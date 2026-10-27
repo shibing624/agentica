@@ -167,7 +167,7 @@ class SubagentRegistry:
 
     # Tools blocked for ALL subagent types (prevent recursion + privilege escalation).
     # Pattern borrowed from hermes-agent delegate_tool.py.
-    BLOCKED_TOOLS = {"delegate_task", "spawn_subagent", "save_memory", "shell", "task"}
+    BLOCKED_TOOLS = {"delegate_task", "spawn_subagent", "save_memory", "forget_memory", "shell", "task"}
 
     # Max subagent nesting depth (parent -> child -> grandchild = depth 2)
     MAX_DEPTH = 2

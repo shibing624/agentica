@@ -8,7 +8,7 @@
 
 | 你想让 Agent 记住什么 | 存在哪里 | 怎么写入 | 怎么查回 |
 |---|---|---|---|
-| **1. 当前这次对话的上下文**<br>（刚才问了什么、刚读过哪个文件、刚跑了什么命令） | **会话历史 (`WorkingMemory` / `SessionLog`)**<br>`~/.agentica/projects/<user>/<项目>/<session_id>.jsonl` | 对话时自动记录 | 当前窗口内自动带入；换窗后用 **`search_session`** 检索，或用 `/resume` 恢复整个会话 |
+| **1. 当前这次对话的上下文**<br>（刚才问了什么、刚读过哪个文件、刚跑了什么命令） | **会话历史 (`WorkingMemory` / `SessionLog`)**<br>`~/.agentica/projects/<user>/<项目>/<session_id>.jsonl` | 对话时自动记录 | 当前窗口内自动带入；换窗后用 **`search_session`** 检索，或用 `/resume` 恢复整个会话；之前会话的提问和未完成工作项在新会话中通过 `<session_recall>` 自动带入，也可用 `search_session(scope="project")` 检索 |
 | **2. 跨会话的事实与经验**<br>（比如「我是数据科学家」「发布截止日是月底」「上次修这个报错的方案」） | **Workspace 长期记忆**<br>`~/.agentica/workspace/users/<user_id>/MEMORY.md` 及 `memory/*.md` | 对话中让 Agent 记下（调用 `save_memory`），或开启自动抽取 | 索引自动带入新会话；每轮由辅助模型挑出相关条目，正文附在你的消息后（`<memory_recall>`）；也可用 **`search_memory`** 检索 |
 | **3. 每次都要遵守的常驻规则**<br>（比如「永远用简体中文回答」「不要用 mock 数据库」「提交前先跑测试」） | **`AGENTS.md` 规则文件**<br>项目级：`<仓库根目录>/AGENTS.md`<br>用户级：`~/.agentica/AGENTS.md` | 你直接用编辑器改，或在对话里说「把这条写进 AGENTS.md」 | 每个新会话启动时**全文自动加载**进系统提示词（修改后从**下一个新会话**起生效） |
 
@@ -64,6 +64,20 @@ Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/us
 - CLI：敲 `/workspace` 查看路径与记忆条数，敲 `/memory` 查看当前会话消息。
 - Web / Desktop：点左侧或设置里的「记忆」面板查看和编辑。
 
+### 3. 接上之前的会话（`<session_recall>` 与工作项）
+
+长期记忆只存事实，"做到一半的事"不进去。可新开一个会话时，最需要的恰恰是"上次停在哪"：「继续」「推一下」这种话本身没内容，指的就是上次没收尾的那件事。CLI、Web 和 `DeepAgent` 默认开启这两项：
+
+- **工作项（`track_intents`）**：每 3 轮由辅助模型（`intent_track` 任务）在后台把这几轮整理成工作项，包括你要做什么、做到哪（commit hash、文件、数字）、状态（`open` / `done` / `dropped`）和下一步。同一件事会更新已有条目，不会重复新建；你说"已经推了"，对应条目就改成 `done`。待整理的轮次先落盘，会话来不及整理就退出的，下一个会话在同一项目里的第一轮补上。
+- **会话召回（`recall_sessions`）**：每次发消息前，在你的消息前面拼一个 `<session_recall>` 块。这一步不调用模型，只查本地 SQLite 索引（`~/.agentica/projects/<user>/session_index.db`），真实数据上耗时约 60 ms。
+  - 新会话的第一轮：本项目最近 14 天里 `open` 的工作项（最多 3 条），以及最近两个会话最后问的几句话。
+  - 每一轮：和这条消息有共同关键词的旧工作项和旧提问。其他项目的条目只在消息里提到那个项目目录名时才出现，在 A 仓库说"push"不会带出 B 仓库没推的改动。
+  - 每行都带标记（`[intent:12]`、`[q:996ba8f8]`）和会话 id。已经出现在上下文里的行不会再出现；用 `search_session(session_id=..., uuid=...)` 能取回原话，摘要不确定时回原始记录核对。超过两周没动的 `open` 条目标为 `stale`，不再列为待办。
+
+`search_session` 新增 `scope="project" | "all"` 参数，用来搜之前会话的提问和工作项；`query` 留空时列出本项目最近几个会话最后问的话。新增的 `session_id` 参数用来搜索或读取另一个会话的完整记录。
+
+索引平时随会话日志同步写入。第一次用时，后台会把已有的会话记录补进索引，之后只读新增部分（实测约 6000 条提问，首次 3.6 秒，之后约 0.05 秒）。
+
 ---
 
 ## 在 Python SDK 里怎么用
@@ -112,6 +126,8 @@ agent = Agent(
         load_workspace_context=True,   # 加载 AGENTS.md 常驻规则
         load_workspace_memory=True,    # 加载 MEMORY.md 记忆索引
         recall_memories=True,          # 每轮由辅助模型挑选相关记忆，正文拼在用户消息前（普通 Agent 默认关闭）
+        recall_sessions=True,          # 每轮拼 <session_recall>：未完成工作项 + 之前会话的相关提问（不调用模型）
+        track_intents=True,            # 后台整理跨会话工作项（open/done/dropped），每 intent_every_n_turns 轮一次
         max_memory_entries=5,          # 单轮最多召回条数
         auto_archive=True,             # 每轮结束后将原始对话归档到 conversations/YYYY-MM-DD.md（不调 LLM）
         auto_extract_memory=False,     # 是否在后台自动用副模型抽取记忆条目（会消耗少量 token）

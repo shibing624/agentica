@@ -33,6 +33,8 @@ from agentica.experience.learning_report import (
     write_learning_report,
 )
 from agentica.compression.new_window import notes_path_for
+from agentica.memory.intents import process_pending_intents
+from agentica.memory.session_index import clip_both_ends
 from agentica.model.message import Message
 from agentica.prompts.memory import (
     BATCH_JUDGE_PROMPT,
@@ -732,6 +734,61 @@ class MemoryExtractHooks(RunHooks):
             logger.debug(f"Memory extraction: LLM returned invalid JSON: {e}")
         except Exception as e:
             logger.warning(f"Memory extraction failed: {e}")
+
+
+class IntentTrackHooks(RunHooks):
+    """Queue finished turns for the intent tracker; run it every N turns.
+
+    The queue lives in the cross-session index (SQLite), not in this object:
+    a session that exits before its batch runs leaves the turns there, and
+    the next session in the same project processes them on its first turn
+    (``session_recall.drain_stale_pending``). ``on_pre_compact`` and
+    ``flush_pending`` process this session's queue synchronously.
+    """
+
+    # Reply text kept per queued turn; the outcome is usually at the end.
+    _ASSISTANT_MAX_CHARS = 3_000
+
+    def __init__(self, every_n_turns: int = 3, timeout: float = 60.0):
+        self._every_n_turns = max(1, int(every_n_turns))
+        self._timeout = max(0.0, float(timeout))
+        self._pending_tasks: set = set()
+
+    async def on_agent_end(self, agent: Any, output: Any, **kwargs) -> None:
+        slog = agent._session_log
+        index = slog.search_index if slog is not None else None
+        if index is None or not isinstance(agent.run_input, str) or not agent.run_input.strip():
+            return
+        users = [m for m in agent.run_response.messages or [] if m.role == "user"]
+        if users and users[-1].automated:
+            return
+        reply = output if isinstance(output, str) else ""
+        queued = index.add_pending(
+            slog.session_id, slog.cwd, agent.run_input,
+            clip_both_ends(reply, self._ASSISTANT_MAX_CHARS),
+        )
+        if queued < self._every_n_turns:
+            return
+        future = background_loop.submit(
+            process_pending_intents(
+                index, agent.resolve_auxiliary_model("intent_track"), slog.session_id, self._timeout,
+            )
+        )
+        self._pending_tasks.add(future)
+        future.add_done_callback(self._pending_tasks.discard)
+
+    async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
+        await self.flush_pending(agent)
+
+    async def flush_pending(self, agent: Any, **kwargs) -> None:
+        await background_loop.wait_all(list(self._pending_tasks))
+        slog = agent._session_log
+        index = slog.search_index if slog is not None else None
+        if index is None:
+            return
+        await process_pending_intents(
+            index, agent.resolve_auxiliary_model("intent_track"), slog.session_id, self._timeout,
+        )
 
 
 class ExperienceCaptureHooks(RunHooks):

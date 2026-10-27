@@ -104,15 +104,23 @@ class TestPromptModules:
         assert "Do not invent file paths" in content
         assert "does not invent siblings" in content
         assert "Before calling any path-taking tool" not in content
-        assert "*** Update File" in content
-        assert "python rewriter" in content
         assert "`config.py`" in content
-        assert "parallel `read_file`" in content
-        assert "not read-patch-read-patch" in content
-        assert "one `@@` under the same `*** Update File`" in content
         assert "Read the current file" not in content
         assert "execute" not in content
         assert "`rg`" not in content
+
+    def test_patch_batching_rules_live_on_apply_patch_only(self):
+        """One copy: the system prompt used to repeat the apply_patch docstring."""
+        from agentica.prompts.base.tools import get_tools_prompt
+        from agentica.tools.builtin import BuiltinFileTool
+
+        content = get_tools_prompt()
+        doc = BuiltinFileTool().functions["apply_patch"].description
+        assert "*** Update File" not in content
+        assert "parallel read_file, then one patch" in doc
+        assert "not\n        read-then-patch one file at a time" in BuiltinFileTool.apply_patch.__doc__
+        assert "one ``@@`` under the same" in BuiltinFileTool.apply_patch.__doc__
+        assert "not a shell rewriter" in doc
 
     def test_tools_module_stays_on_file_tools(self):
         from agentica.prompts.base.tools import get_tools_prompt
@@ -120,7 +128,6 @@ class TestPromptModules:
         assert "grep (not grep/rg)" not in content
         assert "(not find" not in content
         assert "not cat" not in content
-        assert "apply_patch" in content
         assert "find . -type f" not in content
         assert "xargs ls" not in content
         assert "execute" not in content
@@ -257,7 +264,7 @@ class TestGetSystemMessage:
 
         assert msg is not None
         assert "# Using Your Tools" in msg.content
-        assert "apply_patch" in msg.content
+        assert "Do not invent file paths" in msg.content
         assert "parallel_safe" not in msg.content
         assert "swift" not in msg.content
 

@@ -90,6 +90,7 @@ BUILTIN_TOOLS = [
     "analyze_image",
     "delegate",
     "save_memory",
+    "forget_memory",
     "search_memory",
     "search_session",
     "get_skill_info",
@@ -821,28 +822,11 @@ def _build_cli_memory_config(agent_config: dict) -> WorkspaceMemoryConfig:
         load_workspace_context=True,
         load_workspace_memory=True,
         recall_memories=True,
+        recall_sessions=True,
+        track_intents=True,
         max_memory_entries=5,
     )
 
-
-def _get_active_skill_names(agent) -> List[str]:
-    """Best-effort enabled skill names from the agent's SkillTool.
-
-    External boundary: SkillTool registry init / disk-backed usage loading can
-    fail in odd environments, and environment_context construction must never
-    break agent creation, so any failure omits the line instead of raising.
-    Returns [] when the agent has no SkillTool.
-    """
-    from agentica.tools.skill_tool import SkillTool
-
-    for tool in agent.tools or []:
-        if isinstance(tool, SkillTool):
-            try:
-                skills = tool._get_enabled_skills()
-            except Exception:
-                return []
-            return [s.name for s in skills]
-    return []
 
 
 def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
@@ -885,10 +869,9 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     tool_names = active_tool_names(agent)
     lines.append(f"- Active tools: {', '.join(tool_names) if tool_names else 'none'}")
 
-    skill_names = _get_active_skill_names(agent)
-    if skill_names:
-        lines.append(f"- Active skills: {', '.join(sorted(skill_names))}")
-
+    # Skills are not listed here: the frozen "Session Guidance" catalog already
+    # names them, and this block is rebuilt on /model switches, so a second,
+    # unfrozen list was both a duplicate and a cache-prefix change.
     from agentica.subagents import get_subagent_configs
 
     subagent_types = sorted(get_subagent_configs())

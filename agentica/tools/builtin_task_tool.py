@@ -45,33 +45,24 @@ class BuiltinTaskTool(Tool):
     Launch a READ-ONLY subagent to investigate an open-ended question in its own
     context window; it returns one summary and you do all edits yourself.
 
-    Use it only when you do not yet know where to look — the search would span
-    directories you cannot enumerate. If you already know the target file,
-    definition, or a handful of files, look there yourself; task size is
-    not the criterion. Do not use `task` for edits or state-changing
-    commands (subagents are refused these), for work that needs this
-    conversation's context, or merely to keep your own context small.
-
-    The `Model` column below shows which model a type runs on. Treat every
-    subagent result as evidence that you still reason over. Do not delegate code
-    review, correctness verdicts, root-cause judgement, or release decisions;
-    those belong to the main agent with the full conversation and diff context.
+    Use it only when you do not yet know where to look. If you already know the
+    target file, definition, or a handful of files, look there yourself; task
+    size is not the criterion. Not for edits or state-changing commands
+    (subagents are refused these), work that needs this conversation's
+    context, or merely to keep your own context small. Subagent results are
+    evidence you still reason over; do not delegate code review, correctness
+    verdicts, root-cause judgement, or release decisions.
 
     {subagent_table}
 
     Briefing: the subagent cannot see this conversation. State what you want to
-    know and why, the files or functions to start from, and ask for findings as
-    path:line. Never ask it to edit or implement.
+    know and why, where to start, and ask for findings as path:line.
 
-    - Launch independent tasks in one message to run them in parallel. Three
-      run at a time; any beyond that wait for a slot, so send the ones that
-      matter.
+    - Independent tasks in one message run in parallel, three at a time.
     - Once delegated, do not duplicate that work yourself.
-    - On `partial=true`, default to synthesizing the partial output. If the
-      result contains only a timeout/limit note and no substantive findings,
-      do not resume merely to force a final answer; finish the work yourself.
-      Resume at most once when real partial findings make continuation useful,
-      using the SAME `description` plus `resume_from_run_id`.""")
+    - On `partial=true`, synthesize the partial output; if it holds no
+      findings, finish the work yourself. Resume at most once, with the SAME
+      `description` plus `resume_from_run_id`.""")
 
     def __init__(self, auxiliary_model: Optional["Model"] = None):
         """

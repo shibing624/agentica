@@ -50,15 +50,8 @@ class RecordingIndex:
     def __init__(self):
         self.calls = []
 
-    def index_message(self, session_id, role, content, timestamp=None):
-        self.calls.append(
-            {
-                "session_id": session_id,
-                "role": role,
-                "content": content,
-                "timestamp": timestamp,
-            }
-        )
+    def index_user_turn(self, entry):
+        self.calls.append(entry)
 
 
 class TestSessionLogBasic:
@@ -867,30 +860,33 @@ class TestToolResultLogging:
 
 
 class TestSessionIndexDualWrite:
-    def test_indexes_regular_messages(self, tmp_dir):
+    def test_indexes_user_rows_only(self, tmp_dir):
         index = RecordingIndex()
         log = SessionLog("dual-write-msg", base_dir=tmp_dir, search_index=index)
 
-        log.append("user", "hello index")
-
-        assert len(index.calls) == 1
-        assert index.calls[0]["session_id"] == "dual-write-msg"
-        assert index.calls[0]["role"] == "user"
-        assert index.calls[0]["content"] == "hello index"
-
-    def test_indexes_compact_boundary_summary(self, tmp_dir):
-        index = RecordingIndex()
-        log = SessionLog("dual-write-boundary", base_dir=tmp_dir, search_index=index)
-
+        uid = log.append("user", "hello index")
+        log.append("assistant", "hi")
         log.append_compact_boundary("summary for search")
 
         assert len(index.calls) == 1
-        assert index.calls[0]["role"] == "compact_boundary"
-        assert index.calls[0]["content"] == "summary for search"
+        assert index.calls[0]["session_id"] == "dual-write-msg"
+        assert index.calls[0]["uuid"] == uid
+        assert index.calls[0]["content"] == "hello index"
+
+    def test_fork_indexes_copied_user_rows_under_new_id(self, tmp_dir):
+        index = RecordingIndex()
+        log = SessionLog("fork-src", base_dir=tmp_dir, search_index=index)
+        log.append("user", "question one")
+        log.append("assistant", "answer one")
+        index.calls.clear()
+
+        log.fork("fork-dst")
+
+        assert [c["session_id"] for c in index.calls] == ["fork-dst"]
 
     def test_marks_index_unhealthy_after_failure(self, tmp_dir):
         class FailingIndex:
-            def index_message(self, *args, **kwargs):
+            def index_user_turn(self, entry):
                 raise RuntimeError("fts unavailable")
 
         log = SessionLog("dual-write-fail", base_dir=tmp_dir, search_index=FailingIndex())
@@ -898,6 +894,7 @@ class TestSessionIndexDualWrite:
         log.append("user", "hello")
 
         assert log.search_index_healthy is False
+        assert log.search_index is None
 
 
 class TestResumeAt:

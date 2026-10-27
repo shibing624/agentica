@@ -17,7 +17,7 @@ from agentica.skills.skill import Skill
 from agentica.skills.skill_loader import SkillLoader
 from agentica.skills.skill_registry import SkillRegistry
 
-BUNDLED = ("agentica", "cron", "multi-agent", "worktree")
+BUNDLED = ("agentica", "cron", "long-running-jobs", "multi-agent", "worktree")
 
 
 class TestBundledSkillsShip(unittest.TestCase):

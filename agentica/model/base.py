@@ -1041,20 +1041,19 @@ class Model(ABC):
         """Execute tool calls with concurrency-split execution.
 
         Strategy (mirrors CC's StreamingToolExecutor):
-        - concurrency-safe calls run in parallel with each other.
-        - the rest run sequentially, one at a time, in the order the model
-          issued them.
-        - A *bash/execute* error aborts any remaining serial tools
-          (sibling_error pattern from CC), whichever phase the failure
-          happened in.
+        - the batch runs in the order the model issued it;
+        - consecutive concurrency-safe calls form a segment that runs in
+          parallel (``asyncio.gather``); every other call runs alone, after
+          everything before it has finished and before anything after it starts.
+        - A *bash/execute* error aborts the remaining unsafe calls after it,
+          whichever segment the failure happened in.
 
         Safety is asked of the *call* (``FunctionCall.is_concurrency_safe``),
         not the function: ``execute`` issues both independent and dependent
         work, so it declares safety per call instead of once at registration.
 
         Phase 1: Emit tool_call_started events (in order)
-        Phase 2a: Execute safe tools in parallel (asyncio.gather)
-        Phase 2b: Execute unsafe tools sequentially
+        Phase 2: Execute segments in order
         Phase 3: Process results in original order
         """
         function_call_stack = self._get_function_call_stack()
@@ -1273,9 +1272,20 @@ class Model(ABC):
                 if idx in started_indices:
                     _notify_tool_event("completed", idx)
 
-        if safe_indices:
+        # Phase 2 runs the batch in the order the model issued it, as
+        # segments: each maximal run of consecutive safe calls is gathered,
+        # each unsafe call runs alone. Running every safe call before every
+        # unsafe one (the previous split) let ``[apply_patch A, read_file A]``
+        # read A before the patch.
+        #
+        # A failed shell call cancels the unsafe calls after it in the batch,
+        # whichever segment the failure happened in.
+        bash_errored = False
+
+        async def _run_safe_segment(seg: List[int]) -> None:
+            nonlocal bash_errored
             gather_results = await asyncio.gather(
-                *[_execute_safe(i, function_calls[i]) for i in safe_indices],
+                *[_execute_safe(i, function_calls[i]) for i in seg],
                 return_exceptions=True,
             )
             # Re-raise CancelledError / AgentCancelledError immediately so
@@ -1284,20 +1294,18 @@ class Model(ABC):
             for r in gather_results:
                 if isinstance(r, (asyncio.CancelledError, AgentCancelledError)):
                     raise r
-            for gi, idx in enumerate(safe_indices):
+            for gi, idx in enumerate(seg):
                 if isinstance(gather_results[gi], BaseException) and exceptions[idx] is None:
                     exceptions[idx] = gather_results[gi]
                     results[idx] = False
+            if any(
+                function_calls[i].function.name in _SHELL_TOOL_NAMES and exceptions[i] is not None
+                for i in seg
+            ):
+                bash_errored = True
 
-        # Phase 2b: run unsafe tools serially; bash error → cancel rest.
-        # A shell call that ran in the parallel phase counts as well: "a failed
-        # command cancels the rest of the batch" is a statement about the batch,
-        # not about which branch happened to run the failure.
-        bash_errored = any(
-            function_calls[i].function.name in _SHELL_TOOL_NAMES and exceptions[i] is not None
-            for i in safe_indices
-        )
-        for idx in unsafe_indices:
+        async def _run_unsafe(idx: int) -> None:
+            nonlocal bash_errored
             fc = function_calls[idx]
             if bash_errored:
                 # Sibling-error cancellation (mirrors CC's siblingAbortController)
@@ -1307,13 +1315,13 @@ class Model(ABC):
                 results[idx] = False
                 timers[idx].start()
                 timers[idx].stop()
-                continue
+                return
             # Cancellation check before each unsafe tool.
             if _cancelled_before_start(fc):
                 _mark_cancelled(idx)
-                continue
+                return
             if await _denied_by_user(idx, fc):
-                continue
+                return
             # Input guardrail check (before execution)
             if _has_guardrails:
                 _fc_args = json.dumps(fc.arguments) if fc.arguments else None
@@ -1326,7 +1334,7 @@ class Model(ABC):
                     results[idx] = False
                     timers[idx].start()
                     timers[idx].stop()
-                    continue
+                    return
             timers[idx].start()
             try:
                 results[idx] = await _call_execute(idx, fc)
@@ -1364,6 +1372,19 @@ class Model(ABC):
                 timers[idx].stop()
                 if idx in started_indices:
                     _notify_tool_event("completed", idx)
+
+        safe_set = set(safe_indices)
+        segment: List[int] = []
+        for idx in range(len(function_calls)):
+            if idx in safe_set:
+                segment.append(idx)
+                continue
+            if segment:
+                await _run_safe_segment(segment)
+                segment = []
+            await _run_unsafe(idx)
+        if segment:
+            await _run_safe_segment(segment)
 
         # Phase 3: Process results in original order
         for i, function_call in enumerate(function_calls):

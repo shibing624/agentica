@@ -2,5 +2,5 @@
 - Git history, recent changes, or who-changed-what — `git log`/`git blame` are authoritative.
 - Debugging solutions or fix recipes — the fix is in the code.
 - Anything already documented in AGENTS.md files.
-- Ephemeral task details: in-progress work, temporary state, current conversation context.
+- Ephemeral task details: in-progress work, temporary state, current conversation context. (Unfinished requests are tracked separately as work items across sessions; do not duplicate them as memories.)
 - Activity logs, PR lists, or task summaries — only the *surprising* or *non-obvious* part is worth keeping.

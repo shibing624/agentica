@@ -568,6 +568,8 @@ class AgentService:
                 load_workspace_context=True,
                 load_workspace_memory=True,
                 recall_memories=True,
+                recall_sessions=True,
+                track_intents=True,
                 max_memory_entries=5,
             ),
         )

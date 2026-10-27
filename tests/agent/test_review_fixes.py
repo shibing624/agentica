@@ -236,8 +236,23 @@ class TestSandboxCommandBlocking:
             approved_by_user.reset(token)
         assert "gone" in result
 
-    def test_allow_all_sandbox_off_root_rm_warns_and_runs(self):
-        """allow-all disables sandbox: hard-unsafe is a warning, not PermissionError."""
+    def test_allow_all_sandbox_off_root_rm_is_still_refused(self):
+        """Catastrophic commands are refused in every mode unless a human approved the call."""
+        from agentica.tools.builtin import BuiltinExecuteTool
+
+        tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=SandboxConfig(enabled=False))
+        spawn = AsyncMock(return_value=self._mock_process())
+        with patch(
+            "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_shell", new=spawn,
+        ), patch(
+            "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_exec", new=spawn,
+        ):
+            with pytest.raises(PermissionError, match="every permission mode"):
+                asyncio.run(tool.execute("rm -rf /"))
+        spawn.assert_not_called()
+
+    def test_allow_all_sandbox_off_non_catastrophic_block_warns_and_runs(self):
+        """allow-all disables sandbox: other hard-unsafe patterns are a warning, not PermissionError."""
         from agentica.tools.builtin import BuiltinExecuteTool
 
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=SandboxConfig(enabled=False))
@@ -249,7 +264,7 @@ class TestSandboxCommandBlocking:
             "agentica.tools.builtin.execute_tool.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=proc),
         ):
-            result = asyncio.run(tool.execute("rm -rf /"))
+            result = asyncio.run(tool.execute("dd if=/tmp/a of=/tmp/b"))
         assert "gone" in result
 
 

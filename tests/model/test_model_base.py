@@ -288,6 +288,82 @@ class TestRunFunctionCalls:
         assert len(results) == n
 
     @pytest.mark.asyncio
+    async def test_batch_runs_in_issued_order_with_parallel_safe_segments(self):
+        """``[write A, read A]`` reads the written A; safe runs between writes stay parallel.
+
+        The earlier split ran every safe call before every unsafe one, so a
+        read issued after a write in the same batch saw the old content.
+        """
+        model = self._make_model_instance()
+        state = {"A": "old"}
+        log = []
+
+        async def write_a(value: str) -> str:
+            """Write A."""
+            log.append(("write", value))
+            state["A"] = value
+            return "ok"
+
+        async def read_a(tag: str) -> str:
+            """Read A."""
+            log.append(("read-start", tag))
+            await asyncio.sleep(0.05)
+            log.append(("read-end", tag))
+            return state["A"]
+
+        read_fn = Function.from_callable(read_a)
+        read_fn.concurrency_safe = True
+        write_fn = Function.from_callable(write_a)
+
+        def call(fn, args, cid):
+            return FunctionCall(function=fn, arguments=args, call_id=cid)
+
+        fcs = [
+            call(read_fn, {"tag": "r0"}, "r0"),
+            call(write_fn, {"value": "v1"}, "w1"),
+            call(read_fn, {"tag": "r1"}, "r1"),
+            call(read_fn, {"tag": "r2"}, "r2"),
+            call(write_fn, {"value": "v2"}, "w2"),
+        ]
+        results = []
+        async for _ in model.run_function_calls(fcs, results):
+            pass
+
+        assert [r.content for r in results] == ["old", "ok", "v1", "v1", "ok"]
+        assert [r.tool_call_id for r in results] == ["r0", "w1", "r1", "r2", "w2"]
+        # r1 and r2 form one parallel segment: both start before either ends.
+        assert log.index(("read-start", "r2")) < log.index(("read-end", "r1"))
+        # The write after them waits for both.
+        assert log.index(("write", "v2")) > log.index(("read-end", "r2"))
+
+    @pytest.mark.asyncio
+    async def test_failed_parallel_shell_call_cancels_later_unsafe_calls_only(self):
+        model = self._make_model_instance()
+        ran = []
+
+        async def execute(command: str, parallel_safe: bool = False) -> str:
+            """Shell."""
+            ran.append(command)
+            if command == "fail":
+                raise ToolCallException("exit 1")
+            return command
+
+        exec_fn = Function.from_callable(execute)
+        exec_fn.parallel_arg = "parallel_safe"
+        fcs = [
+            FunctionCall(function=exec_fn, arguments={"command": "before"}, call_id="b"),
+            FunctionCall(function=exec_fn, arguments={"command": "fail", "parallel_safe": True}, call_id="f"),
+            FunctionCall(function=exec_fn, arguments={"command": "ok", "parallel_safe": True}, call_id="o"),
+            FunctionCall(function=exec_fn, arguments={"command": "after"}, call_id="a"),
+        ]
+        results = []
+        async for _ in model.run_function_calls(fcs, results):
+            pass
+        assert ran[0] == "before"
+        assert sorted(ran[1:]) == ["fail", "ok"]
+        assert "sibling" in str(results[3].content)
+
+    @pytest.mark.asyncio
     async def test_parallel_execution_preserves_order(self):
         """Results should be in the same order as the input function calls."""
         model = self._make_model_instance()

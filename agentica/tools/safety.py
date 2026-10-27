@@ -44,6 +44,7 @@ DANGEROUS_PATTERNS: List[Tuple[str, str]] = [
     (r"\bchown\s+(-[^\s]*)?R\s+root", "recursive chown to root"),
     # Filesystem
     (r"\bmkfs\b", "format filesystem"),
+    (r"\bdd\s+[^\n]*\bof=/dev/(?!null\b|stdout\b|stderr\b|zero\b)", "write disk image to a device"),
     (r"\bdd\s+.*if=", "disk copy"),
     (r">\s*/dev/sd", "write to block device"),
     # SQL
@@ -86,7 +87,25 @@ _BLOCK_DESCRIPTIONS = frozenset({
     "delete root filesystem", "delete all files in root",
     "format filesystem", "fork bomb",
     "kill all processes", "disk copy", "write to block device",
+    "write disk image to a device",
 })
+
+# The subset that ``execute`` refuses in every permission mode, sandbox or
+# not, unless a human approved this exact call. These destroy the machine or
+# the disk, not just the project, and no task needs them unattended. ``dd`` in
+# general (``disk copy``) stays a sandbox-mode block: ``dd if=a of=b`` between
+# files is ordinary.
+CATASTROPHIC_DESCRIPTIONS = frozenset({
+    "delete root filesystem", "delete all files in root",
+    "format filesystem", "fork bomb",
+    "kill all processes", "write to block device",
+    "write disk image to a device",
+})
+
+
+def is_catastrophic(safety: dict) -> bool:
+    """Whether a ``check_command_safety`` result is in ``CATASTROPHIC_DESCRIPTIONS``."""
+    return safety["action"] == "block" and safety["pattern"] in CATASTROPHIC_DESCRIPTIONS
 
 # Top-level shell separators that chain independent commands.
 # Order matters: longer tokens (&&, ||) must be tried before single chars (&, |).

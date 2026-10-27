@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import agentica
+
 from agentica.tools.background_processes import (
     BackgroundProcess,
     BackgroundProcessRegistry,
@@ -58,6 +60,52 @@ class TestBuiltinExecuteTool:
     def test_execute_simple_command(self, execute_tool):
         result = asyncio.run(execute_tool.execute("echo hello"))
         assert "hello" in result
+
+    @pytest.mark.parametrize("command", [
+        "rm -rf /", "echo ok && rm -rf /*", "mkfs.ext4 /dev/sda1", ":(){ :|:& };:",
+        "dd if=/dev/zero of=/dev/disk2", "kill -9 -1",
+    ])
+    def test_catastrophic_commands_refused_without_sandbox(self, execute_tool, command):
+        """allow-all with no sandbox (the CLI default) used to log these and run them."""
+        with pytest.raises(PermissionError, match="every permission mode"):
+            asyncio.run(execute_tool.execute(command))
+
+    def test_catastrophic_command_runs_when_a_human_approved_it(self, execute_tool):
+        from agentica.agent.approvals import approved_by_user
+
+        async def go():
+            token = approved_by_user.set(True)
+            try:
+                # Approved, so the safety layer lets it through; `echo` keeps it harmless.
+                return await execute_tool.execute("echo 'rm -rf /' > /dev/null; echo approved-ran")
+            finally:
+                approved_by_user.reset(token)
+
+        assert "approved-ran" in asyncio.run(go())
+
+    def test_ordinary_dd_and_scoped_rm_still_run_without_sandbox(self, execute_tool, tmp_dir):
+        src = os.path.join(tmp_dir, "a.bin")
+        with open(src, "wb") as fh:
+            fh.write(b"x" * 10)
+        out = asyncio.run(execute_tool.execute(f"dd if={src} of={src}.copy 2>/dev/null; rm -rf {tmp_dir}/sub; echo fine"))
+        assert "fine" in out
+
+    def test_foreground_timeout_over_the_cap_points_to_background(self, bg_execute_tool):
+        with pytest.raises(ValueError, match="background=True"):
+            asyncio.run(bg_execute_tool.execute("echo hi", timeout=3600))
+        assert "default 120" in bg_execute_tool.functions["execute"].parameters["properties"]["timeout"]["description"]
+        assert "Max 600s" in bg_execute_tool.functions["execute"].description
+
+    def test_no_cap_without_a_background_registry(self, execute_tool):
+        assert "hi" in asyncio.run(execute_tool.execute("echo hi", timeout=3600))
+        assert "Max " not in execute_tool.functions["execute"].description
+
+    def test_sandbox_default_timeout_is_what_the_description_says(self, tmp_dir):
+        from agentica.agent.config import SandboxConfig
+
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, sandbox_config=SandboxConfig(enabled=True, writable_dirs=[tmp_dir]))
+        assert "Foreground timeout: 300s by default" in tool.functions["execute"].description
+        assert "{default_timeout}" not in tool.functions["execute"].description
 
     def test_execute_docstring_allows_pipeline_rg(self):
         doc = BuiltinExecuteTool.execute.__doc__ or ""
@@ -328,15 +376,17 @@ class TestBuiltinExecuteTool:
         assert "reported to the user, not to you" in undelivered
         assert "come back to you as a new" not in undelivered
 
-    def test_background_prose_watcher_example_reports_the_job(self, bg_execute_tool, tmp_dir):
-        """A tmux/nohup job has no completion event, so the prose teaches a
-        watcher. The example is what models copy: it must exit with the job's
-        own code once the marker exists, and fail loudly when the session is
-        gone without one (no tmux server here, so `has-session` fails)."""
-        description = bg_execute_tool.functions["execute"].description
+    def test_long_running_jobs_skill_watcher_example_reports_the_job(self, bg_execute_tool, tmp_dir):
+        """A tmux/nohup job has no completion event, so the bundled
+        ``long-running-jobs`` skill teaches a watcher, and the background
+        prose points there. The example is what models copy: it must exit with
+        the job's own code once the marker exists, and fail loudly when the
+        session is gone without one (no tmux server here, so `has-session` fails)."""
+        assert "long-running-jobs" in bg_execute_tool.functions["execute"].description
+        skill_md = Path(agentica.__file__).parent / "skills" / "bundled" / "long-running-jobs" / "SKILL.md"
         watcher = next(
             line.strip()[len('execute(command="'):-len('", background=True)')]
-            for line in description.splitlines()
+            for line in skill_md.read_text(encoding="utf-8").splitlines()
             if line.strip().startswith('execute(command="while [ ! -f train.exit ]')
         ).replace("-t train ", f"-t agentica-test-{os.getpid()} ")
         assert f"agentica-test-{os.getpid()}" in watcher

@@ -55,6 +55,10 @@ from agentica.skills.catalog import render_skills_catalog
 from agentica.skills.skill_loader import SkillLoader
 from agentica.utils.log import logger
 
+# get_skill_info returns at most this much of a SKILL.md body; the rest is
+# pointed to by path and line offset.
+SKILL_INFO_MAX_CHARS = 20_000
+
 
 # Per-call score components for ranking skills in the system prompt.
 # Recency wins over raw frequency to keep the visible set adaptive.
@@ -533,8 +537,26 @@ class SkillTool(Tool):
         if skill_obj.license:
             result += f"License: {skill_obj.license}\n"
 
-        # Include full instructions from SKILL.md
-        result += f"\n--- Instructions ---\n{skill_obj.content}\n"
+        # Include the instructions from SKILL.md. A very long one (50K chars
+        # exist in the wild) would land whole in context on every load; give
+        # the head and the path, so the rest is read in pages only if needed.
+        content = skill_obj.content or ""
+        if len(content) > SKILL_INFO_MAX_CHARS:
+            cut = content.rfind("\n", 0, SKILL_INFO_MAX_CHARS)
+            cut = cut if cut > SKILL_INFO_MAX_CHARS // 2 else SKILL_INFO_MAX_CHARS
+            skill_md = skill_obj.path / "SKILL.md"
+            # ``content`` is the body after the frontmatter; the offset must
+            # count from the top of the file read_file will page.
+            raw = skill_md.read_text(encoding="utf-8")
+            body_start = raw.find(content[:200])
+            offset = raw[: max(body_start, 0) + cut].count("\n") + 1
+            content = (
+                content[:cut]
+                + f"\n\n[SKILL.md continues: {len(content) - cut} more characters. "
+                f"read_file(file_path=\"{skill_md}\", offset={offset}) for the rest, "
+                "only if this task needs it.]"
+            )
+        result += f"\n--- Instructions ---\n{content}\n"
 
         return result
 

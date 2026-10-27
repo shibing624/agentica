@@ -18,6 +18,8 @@ from agentica.compression.token_budget import (
 )
 from agentica.knowledge.document import Document
 from agentica.memory.recall import build_memory_recall
+from agentica.memory.session_recall import session_recall_safe
+from agentica.utils.git_snapshot import build_git_snapshot
 from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
 from agentica.prompts.base.soul import get_soul_prompt
@@ -326,9 +328,7 @@ class PromptsMixin:
         # agent actually has tools available.
         if self.tools:
             system_message_lines.append(
-                "IMPORTANT: When you need to perform an action, you MUST call the "
-                "appropriate tool function. Do NOT describe what you would do or "
-                "write out commands in plain text — use the tool directly."
+                "To take an action, call the tool for it; do not describe the call in text instead."
             )
             system_message_lines.append("")
 
@@ -380,39 +380,7 @@ class PromptsMixin:
         # model layer keep the cache breakpoint on the stable prefix above, so
         # memory churn never invalidates the cached tools+system prefix.
         system_message_lines.append(VOLATILE_SYSTEM_MARKER)
-        _query = self._get_anchor_query()
-        workspace_memory = await self.get_workspace_memory_prompt(query=_query)
-        if workspace_memory:
-            system_message_lines.append("## Workspace Memory")
-            system_message_lines.append(self._render_xml_cdata_block("workspace_memory", workspace_memory))
-            system_message_lines.append("")
-
-        # Experience injection (self-evolution)
-        experience_prompt = await self.get_experience_prompt(query=_query)
-        if experience_prompt:
-            system_message_lines.append("## Learned Experiences")
-            system_message_lines.append(
-                self._render_xml_cdata_block("experiences", experience_prompt)
-            )
-            system_message_lines.append("")
-
-        if self.working_memory.create_session_summary:
-            if self.working_memory.summary is not None:
-                system_message_lines.append("Here is a brief summary of your previous interactions if it helps:")
-                system_message_lines.append("### Summary of previous interactions\n")
-                system_message_lines.append(self.working_memory.summary.model_dump_json(indent=2))
-                system_message_lines.append(
-                    "\nNote: this information is from previous interactions and may be outdated. "
-                    "You should ALWAYS prefer information from this conversation over the past summary.\n"
-                )
-
-        # Datetime: placed at the very end so it doesn't break the static prefix cache.
-        # Day-level precision — all requests within the same day share the cache prefix.
-        if pc.add_datetime_to_instructions:
-            system_message_lines.append(f"Today's date is {datetime.now().strftime('%Y-%m-%d')}.")
-
-        if self.response_model is not None and not self.use_structured_outputs:
-            system_message_lines.append(self.get_json_output_prompt() + "\n")
+        system_message_lines.extend(await self._volatile_system_tail())
 
         if len(system_message_lines) > 0:
             return Message(role=pc.system_message_role, content=("\n".join(system_message_lines)).strip())
@@ -493,8 +461,14 @@ class PromptsMixin:
                 self._render_xml_cdata_block("workspace_context", workspace_context)
             )
 
-        # Config directives
-        directives = self._get_config_directives()
+        # Config directives. Soul already asks for markdown, and the identity
+        # line already carries the name when there is no description; skip
+        # those two directives here instead of saying them twice.
+        directives = [
+            d for d in self._get_config_directives()
+            if d != "Use markdown to format your answers."
+            and not (self.name and not self.description and d == f"Your name is: {self.name}.")
+        ]
         if directives:
             system_message_lines.append("\n## Directives")
             for d in directives:
@@ -522,36 +496,44 @@ class PromptsMixin:
         # model layer keep the cache breakpoint on the stable prefix above, so
         # memory churn never invalidates the cached tools+system prefix.
         system_message_lines.append(VOLATILE_SYSTEM_MARKER)
+        system_message_lines.extend(await self._volatile_system_tail())
+
+        final_prompt = "\n".join(system_message_lines)
+        return Message(role=pc.system_message_role, content=final_prompt.strip())
+
+    async def _volatile_system_tail(self) -> List[str]:
+        """Sections below ``VOLATILE_SYSTEM_MARKER``, shared by both system-prompt paths.
+
+        Order: workspace memory, learned experiences, session summary, JSON
+        output instructions, date (last, day precision, for the prefix cache).
+        """
+        pc = self.prompt_config
+        lines: List[str] = []
         _query = self._get_anchor_query()
         workspace_memory = await self.get_workspace_memory_prompt(query=_query)
         if workspace_memory:
-            system_message_lines.append("\n## Workspace Memory")
-            system_message_lines.append(
-                self._render_xml_cdata_block("workspace_memory", workspace_memory)
-            )
+            lines.append("\n## Workspace Memory")
+            lines.append(self._render_xml_cdata_block("workspace_memory", workspace_memory))
 
         # Experience injection (self-evolution)
         experience_prompt = await self.get_experience_prompt(query=_query)
         if experience_prompt:
-            system_message_lines.append("\n## Learned Experiences")
-            system_message_lines.append(
-                self._render_xml_cdata_block("experiences", experience_prompt)
-            )
+            lines.append("\n## Learned Experiences")
+            lines.append(self._render_xml_cdata_block("experiences", experience_prompt))
 
         if self.working_memory.create_session_summary and self.working_memory.summary is not None:
-            system_message_lines.append("\n## Summary of Previous Interactions")
-            system_message_lines.append(self.working_memory.summary.model_dump_json(indent=2))
+            lines.append("\n## Summary of Previous Interactions")
+            lines.append(self.working_memory.summary.model_dump_json(indent=2))
+            lines.append("This summary may be outdated; prefer this conversation where they differ.")
 
         if self.response_model is not None and not self.use_structured_outputs:
-            system_message_lines.append("\n" + self.get_json_output_prompt())
+            lines.append("\n" + self.get_json_output_prompt())
 
         # Datetime at the very end — day precision for prefix-cache friendliness
         # Mirrors CC's getLocalISODate(): only YYYY-MM-DD, no time component.
         if pc.add_datetime_to_instructions:
-            system_message_lines.append(f"\nToday's date is {datetime.now().strftime('%Y-%m-%d')}.")
-
-        final_prompt = "\n".join(system_message_lines)
-        return Message(role=pc.system_message_role, content=final_prompt.strip())
+            lines.append(f"\nToday's date is {datetime.now().strftime('%Y-%m-%d')}.")
+        return lines
 
     async def get_relevant_docs_from_knowledge(
             self, query: str, num_documents: Optional[int] = None, **kwargs
@@ -711,6 +693,34 @@ class PromptsMixin:
             session_id=self.session_id,
         )
 
+    def _get_git_snapshot_block(self) -> Optional[str]:
+        """``<git_snapshot>`` of ``work_dir`` for a session's first turn, if enabled."""
+        if not self.prompt_config.add_git_snapshot or not self.work_dir:
+            return None
+        return build_git_snapshot(os.path.abspath(self.work_dir))
+
+    async def _get_session_recall_block(self, query: str, context: List[Message]) -> Optional[str]:
+        """Per-turn ``<session_recall>`` block (earlier sessions), if enabled.
+
+        The first turn of a session (no user message in ``context``) gets the
+        project's open items and the last asks of recent sessions; every turn
+        gets earlier work that shares distinctive terms with ``query``.
+        """
+        cfg = self.long_term_memory_config
+        slog = self._session_log
+        if not cfg.recall_sessions or slog is None or slog.search_index is None:
+            return None
+        return await session_recall_safe(
+            slog.search_index,
+            self.resolve_auxiliary_model("intent_track"),
+            query=query,
+            work_dir=slog.cwd,
+            session_id=slog.session_id,
+            first_turn=not any(m.role == "user" for m in context),
+            context=context,
+            timeout=cfg.recall_timeout,
+        )
+
     async def get_messages_for_run(
             self,
             *,
@@ -801,15 +811,22 @@ class PromptsMixin:
             if last_msg.role == "user" and isinstance(last_msg.content, str):
                 recall_query = last_msg.content
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
-            recall = await self._get_memory_recall_block(
-                recall_query, messages_for_model + user_messages[:-1],
-            )
-            if recall:
+            prior = messages_for_model + user_messages[:-1]
+            first_turn = not any(m.role == "user" for m in prior)
+            blocks = [
+                b for b in (
+                    self._get_git_snapshot_block() if first_turn else None,
+                    await self._get_session_recall_block(recall_query, prior),
+                    await self._get_memory_recall_block(recall_query, prior),
+                ) if b
+            ]
+            if blocks:
                 # A ``messages=`` item may be the caller's own Message object,
                 # kept in its history and passed again next turn; rewrite a
                 # copy so the block never leaks into the caller's state.
                 last = user_messages[-1]
-                user_messages[-1] = last.model_copy(update={"content": f"{recall}\n\n{last.content}"})
+                prefix = "\n\n".join(blocks)
+                user_messages[-1] = last.model_copy(update={"content": f"{prefix}\n\n{last.content}"})
 
         # Files the model read in earlier turns may have been edited between
         # turns (the user's editor, git). Same placement as recall: before the

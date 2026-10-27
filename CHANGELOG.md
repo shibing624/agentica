@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **系统提示词与工具说明精简，首轮附 git 快照**：
+ - **精简。** CLI 默认配置下，系统提示词从 26.7K 字减到 21.1K，17 个工具的 schema 从 22.0K 减到 18.7K（含新增的 `forget_memory`）。`environment_context` 去掉 `Active skills` 一行：它和冻结的 Session Guidance 技能目录重复，而且切换 `/model` 时会重建，会改变缓存前缀。增强路径不再重复 soul 里已有的「用 markdown」指令；没有 description 时也不再重复「Your name is」。
+ - **两条路径统一。** 默认路径和增强路径共用 `_volatile_system_tail()`，按同一顺序渲染：工作区记忆、经验、会话摘要、JSON 输出说明、日期。默认路径原来日期在 JSON 说明之前，摘要的说明文字也不一样。默认路径的「IMPORTANT … MUST call」改写成一句平实的话。
+ - **记忆可改可删。** `save_memory(replaces=<filename>)` 更新已有条目；新增 `forget_memory(filename)` 删除条目。
+ - **git 快照（`PromptConfig.add_git_snapshot`，`DeepAgent` 默认开启）。** 会话第一轮在用户消息前拼一个 `<git_snapshot>`：分支、`git status --short`（最多 20 行）、最近 3 个 commit，并注明执行前要先核实。不放进系统提示词，缓存前缀不变。不是 git 仓库、没装 git，或 2 秒内没返回时跳过。
+ - **`get_skill_info` 截断。** SKILL.md 正文超过 2 万字时，只返回前面部分（在行边界截断），并附上文件路径和 `read_file` 的行偏移，模型需要时再分页读取。本机就有一个 51K 的 SKILL.md。
+- **跨会话"上次停在哪"：用户提问索引、工作项日志与 `<session_recall>`**：
+  - **问题。** 长期记忆只抽事实，`exclusion_spec` 明确不存进行中的工作，所以「继续」「推一下」这类新会话的第一句话没有任何可检索的内容，它指向的上一个会话的收尾也不在任何地方。`SessionIndex`（FTS5）早就写好了，但没有任何调用方；`search_session` 和 `list_user_questions` 都只能查当前会话。
+  - **索引。** `SessionIndex` 重写为每个用户一个 `~/.agentica/projects/<user>/session_index.db`。表 `turns` 存每个会话里人写的提问，带 `session_id` / `work_dir` / `uuid`；自动轮次和换窗前缀不入索引。表 `intents` 存工作项，表 `intent_pending` 存待整理的轮次。全文检索对预分词后的列建 FTS5：英文 token 加中文双字切分，和 `search_session` 用的切分规则一致。`SessionLog` 只把 `user` 行同步写入索引，`compact_boundary` 摘要不再写入；Agent 有会话日志时自动接上索引。已有的会话日志由后台线程补进索引，按文件记录已读到的字节偏移，增量读取。实测 6091 条提问：首次 3.6 秒，再跑 0.04 秒，索引文件 7.9 MB。
+  - **工作项（`WorkspaceMemoryConfig.track_intents`）。** 新增 `IntentTrackHooks`：每轮结束把用户原话和回复（取首尾共 3000 字）写进 `intent_pending`，攒满 `intent_every_n_turns` 轮（默认 3）后，在后台调一次辅助模型（`intent_track` 任务）。模型拿到本项目最近 14 天的 `open` 工作项和新的几轮，返回新建和更新：同一件事更新原条目，不新建；做完的条目在这一步就改成 `done`，不会一直挂着"待确认"。每个条目记下来源轮次的 uuid。整理前先认领待整理的轮次，两个进程不会重复处理同一批；调用失败就释放，留给下次重试。会话没来得及整理就退出时，同一项目下一个会话的第一轮会先处理这些轮次（受 `recall_timeout` 限制）。
+  - **会话召回（`recall_sessions`）。** 每个人类回合前，在用户消息前面拼一个 `<session_recall>` 块（在 `<memory_recall>` 之前，用户原话仍在最后）。块分三栏，不调用模型：
+    - 新会话第一轮：本项目最近 14 天的 `open` 工作项（3 条）。
+    - 新会话第一轮：最近两个会话的最后 3 句提问。已被上面工作项引用的提问不再列出。
+    - 每一轮：和这条消息有共同关键词的旧工作项和旧提问，最多 3 条。按 token 计分：id、路径、hash 记 3 分，4 个字母以上的英文词记 2 分，中文双字记 1 分，满 3 分才算相关。长提问只看首尾 400 字，和本条消息完全相同的旧提问跳过。其他项目的条目只在消息里提到那个项目的目录名时才出现。
+    - 每行带 `[intent:N]` / `[q:uuid8]` 标记和会话 id。上下文里已有的标记不再召回；超过 14 天没更新的 `open` 条目标为 `stale`，不显示下一步。整块不超过 2000 字，只截整行。召回块不写入会话日志。
+  - **`search_session`。**
+    - 新增 `scope`：`session`（默认）/ `project` / `all`。后两个搜之前会话的提问和工作项，`project` 不带 query 时列出本项目最近 5 个会话的最后几句提问。
+    - 新增 `session_id`：按 id 或前缀打开另一个会话的记录，可配合 query / role / uuid 使用。
+    - 当前会话里找不到的 uuid 会去跨会话索引里找，用于取回召回块里摘要所依据的原话。
+  - **默认开启范围。** CLI、Web gateway、`DeepAgent` 默认开启这两项，普通 `Agent` 默认关闭。`recall.py` 的 `_origin_label` 改名为 `display_path`，供两种召回块共用。
+  - **测试。** 标注评测 `tmp/session_recall_eval.py`：3 个项目、13 个用例，包括续接、低信息 query、命中 hash、点名其他项目、不点名其他项目、无关问题、过期条目。应命中的 10/10 全部召回，不应出现的 30 项出现 0 项，平均 459 字。真实数据上相关栏检索 p50 约 62 ms。用真实模型（`venus-ds-v4-1-flash`）跑 `tmp/session_recall_e2e.py`，8 项检查全部通过：
+    - 会话 A 说「已 commit 9f3e2c1，先别 push」，生成了 `open` 工作项。
+    - 会话 B 第一句「继续上次没做完的」带上了这条工作项，回复按"未 push、等压测确认"作答。
+    - 用户说已经 push 后，该条目改成 `done`；会话 C 不再列为待办。
+    - `search_session` 按 uuid 取回了会话 A 的原话。
 - **长期记忆记录写入目录，召回块显示出处**：`Workspace.write_memory_entry` 新增 `origin_work_dir`，写进 frontmatter；`save_memory` 取 agent 的 `work_dir`（未设置时取进程 cwd），自动抽取取 `agent.work_dir`，`promote_memory_candidate` 保留原值。召回仍按用户进行、不按目录过滤，召回块在标题下多一行 `(written while working in <目录>)`，给的是完整路径，家目录缩写成 `~`（`read_file`、`glob`、shell 都认），模型拿到后可以直接打开核对；系统提示词里本来就有当前 `work_dir` 的完整路径，这里没有多暴露什么。`search_memory` 的结果也带上 `origin_work_dir`。新增 `Workspace.read_memory_entry` 返回正文和出处；读出处只看 frontmatter，正文里同名的行不算。用真实 Agent 测过：会话 1 在目录 A 存下偏好，会话 2 在目录 B 问「那是在哪个目录记的，里面有哪个 .toml」，chat 与 Anthropic 线路都按出处打开了 A，答出只有 A 才有的文件。
 - **`web_search` / `fetch_url` 结果标为第三方内容**：结果包在 `<external_content source="...">` 里（`fetch_url` 带 `url` 属性），工具说明写明标签内是网页文本，不能因为网页让做就执行命令或调用工具。网页里的闭合标签（不区分大小写）会被转义，提前结束不了这个块。用真实模型测过（本地 HTTP 页面，`allow-all` 权限，chat 与 Anthropic 线路）：明显的「SYSTEM NOTICE」注入和与任务挂钩的隐蔽注入，加不加标签都是 0/5 中招，模型本身就能识别；用户让「按页面上的步骤做」、页面要求 `touch` 一个文件时，Anthropic 线路中招从 3/5 降到 1/5，chat 线路两种条件都是 0/5。这是缓解，不是保证。
 - **读过的文件在外部被修改后提示重读**：`BuiltinFileTool` 在 `read_file`、`write_file`、`apply_patch` 后记下文件的 `(mtime_ns, size)`，最多 200 个，按最近使用保留。`take_external_changes()` 返回之后变化或被删除的文件，每次变化只报一次。Agent 在每个工具批之后（post-tool hook，消息标记 `_injected`）和每个人类回合开始时（拼在用户消息前面，改写的是副本）附一条 `[File change notice]`。只用 `stat`，不读内容。已知限制：子代理与父代理共用同一个工具实例，子代理自己的写入也算「已看过」。用真实模型测过（两轮之间把 `TIMEOUT = 30` 改成 75，再问一遍）：Anthropic 线路无提示时 0/3 答对，有提示 3/3；chat 线路从 2/3 到 3/3。

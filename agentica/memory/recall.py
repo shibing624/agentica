@@ -113,7 +113,7 @@ def parse_selection(text: str, allowed: Set[str], limit: int) -> Optional[List[s
     return picked
 
 
-def _origin_label(origin_work_dir: str) -> str:
+def display_path(origin_work_dir: str) -> str:
     """The origin directory as a path the model can open, home shortened to ``~``.
 
     Kept whole so the model can check it (``read_file`` / ``glob`` / shell all
@@ -140,7 +140,7 @@ def render_recall_block(items: Sequence[Tuple[str, ...]]) -> str:
         origin = item[3] if len(item) > 3 else ""
         if len(body) > RECALL_ENTRY_MAX_CHARS:
             body = body[:RECALL_ENTRY_MAX_CHARS].rstrip() + "\n…[truncated; read the file for the rest]"
-        label = _origin_label(origin) if origin else ""
+        label = display_path(origin) if origin else ""
         origin_line = f"(written while working in {label})\n" if label else ""
         part = f"### {title} (memory/{filename})\n{origin_line}{body}"
         if parts and used + len(part) > RECALL_MAX_CHARS:

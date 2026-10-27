@@ -55,6 +55,7 @@ from agentica.run.config import RunConfig
 from agentica.run.context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
 from agentica.memory.session_log import SessionLog
+from agentica.memory.session_index import SessionIndex
 from agentica.memory.recall import RecallBreaker
 from agentica.compression import CompressionManager
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, AGENTICA_NUM_HISTORY_TURNS
@@ -78,6 +79,7 @@ from agentica.agent.hooks import (
     RunHooks,
     ConversationArchiveHooks,
     MemoryExtractHooks,
+    IntentTrackHooks,
     ExperienceCaptureHooks,
     _CompositeRunHooks,
     _CompositeAgentHooks,
@@ -563,6 +565,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 base_dir=session_base_dir,
                 work_dir=self.work_dir,
                 user_id=self.user_id,
+                search_index=SessionIndex.for_user(self.user_id),
             )
 
     @property
@@ -793,6 +796,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                         every_n_turns=self.long_term_memory_config.extract_every_n_turns,
                         min_seconds_between=self.long_term_memory_config.extract_min_seconds_between,
                         background=self.long_term_memory_config.extract_background,
+                        timeout=self.long_term_memory_config.extract_timeout,
+                    )
+                )
+            if self.long_term_memory_config.track_intents and self._session_log is not None:
+                auto_hooks.append(
+                    IntentTrackHooks(
+                        every_n_turns=self.long_term_memory_config.intent_every_n_turns,
                         timeout=self.long_term_memory_config.extract_timeout,
                     )
                 )
