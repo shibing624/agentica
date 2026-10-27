@@ -47,7 +47,10 @@ SELECT_QUERY_MAX_CHARS = 4_000
 SELECT_MAX_OUTPUT_TOKENS = 2_048
 RECALL_MAX_CONSECUTIVE_FAILURES = 3
 
-_RECALLED_FILE_RE = re.compile(r"^### .*\(memory/([^)\s]+)\)$", re.MULTILINE)
+# Heading ends in the entry's path; the file name is its last segment. Matches
+# both the full path written now and the bare ``memory/<file>`` of older
+# blocks still in resumed history.
+_RECALLED_FILE_RE = re.compile(r"^### .*\((?:[^()\n]*/)?([^/()\n]+)\)$", re.MULTILINE)
 _JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
 
 
@@ -126,8 +129,12 @@ def display_path(origin_work_dir: str) -> str:
     return origin_work_dir
 
 
-def render_recall_block(items: Sequence[Tuple[str, ...]]) -> str:
+def render_recall_block(items: Sequence[Tuple[str, ...]], memory_dir: str) -> str:
     """``<memory_recall>`` block from ``(title, filename, body[, origin_work_dir])``.
+
+    Each heading carries the entry's full path under ``memory_dir`` so the
+    model can open the file as-is; a bare ``memory/<file>`` is relative to
+    the user's workspace, not the work_dir, and does not resolve.
 
     The origin line is provenance, not a filter: memory is recalled per user
     across projects, and the model decides whether a memory written while
@@ -142,7 +149,7 @@ def render_recall_block(items: Sequence[Tuple[str, ...]]) -> str:
             body = body[:RECALL_ENTRY_MAX_CHARS].rstrip() + "\n…[truncated; read the file for the rest]"
         label = display_path(origin) if origin else ""
         origin_line = f"(written while working in {label})\n" if label else ""
-        part = f"### {title} (memory/{filename})\n{origin_line}{body}"
+        part = f"### {title} ({display_path(os.path.join(memory_dir, filename))})\n{origin_line}{body}"
         if parts and used + len(part) > RECALL_MAX_CHARS:
             break
         parts.append(part)
@@ -244,7 +251,7 @@ async def build_memory_recall(
         body, origin = await workspace.read_memory_entry(filename)
         if body:
             items.append((titles[filename], filename, body, origin))
-    block = render_recall_block(items)
+    block = render_recall_block(items, str(workspace.get_user_memory_dir()))
     if block:
         logger.debug(f"Memory recall: {len(items)} entr(ies) -> {[i[1] for i in items]}")
     return block or None

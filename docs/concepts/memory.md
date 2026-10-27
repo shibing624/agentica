@@ -48,6 +48,7 @@ Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/us
 - 当前窗口里已经召回过的条目不会重复召回；换窗后旧召回块被移出，相关时会再次召回。
 - 大多数消息不会召回任何条目；选择调用失败、超时（默认 5 秒）或返回无法解析的内容时，本轮照常进行，只是没有召回。同一会话内连续失败 3 次后，本会话不再发起召回（新会话自动恢复），避免辅助模型挂掉时每轮都白等。
 - 召回块不写入会话日志，`search_session` 搜不到它。
+- 召回块每条的标题里是记忆文件的完整路径（如 `### prefer uv (~/.agentica/workspace/users/default/memory/user_prefer_uv.md)`），模型可以直接打开看全文。
 - 召回按用户进行，不按项目过滤：在 A 项目存下的偏好，在 B 项目里同样会被召回。每条记忆会记下写入时所在的目录（frontmatter `origin_work_dir`），召回块里显示这个目录（如 `(written while working in ~/Documents/Codes/agentica)`，家目录缩写成 `~`），`search_memory` 结果里也有 `origin_work_dir`。模型可以据此判断这条记忆是否适用于当前项目，需要时直接打开那个目录核对。之前写入的旧记忆没有这一行，照常召回。
 
 **密钥过滤**：写入记忆前（以及读取旧记忆时）会屏蔽密钥形态的内容：厂商前缀 key、JWT、私钥块、`XXX_API_KEY=...` 这类凭据赋值（数字取值如 `max_tokens=50` 保留），以及无前缀的高熵 token。端口、路径、commit hash 不受影响。

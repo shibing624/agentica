@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **记忆召回块标题给出记忆文件的完整路径**：标题从 `### <title> (memory/<file>)` 改为 `### <title> (~/.agentica/workspace/users/<user>/memory/<file>)`（家目录缩写成 `~`）。原来的 `memory/<file>` 是相对用户 workspace 的路径，不是相对当前工作目录，模型直接 `read_file` 打不开。新增 `Workspace.get_user_memory_dir()`；`render_recall_block` 多一个 `memory_dir` 参数。去重仍按文件名，恢复的旧会话历史里 `memory/<file>` 形式的标题照样识别。
 - **系统提示词与工具说明精简，首轮附 git 快照**：
  - **精简。** CLI 默认配置下，系统提示词从 26.7K 字减到 21.1K，17 个工具的 schema 从 22.0K 减到 18.7K（含新增的 `forget_memory`）。`environment_context` 去掉 `Active skills` 一行：它和冻结的 Session Guidance 技能目录重复，而且切换 `/model` 时会重建，会改变缓存前缀。增强路径不再重复 soul 里已有的「用 markdown」指令；没有 description 时也不再重复「Your name is」。
  - **两条路径统一。** 默认路径和增强路径共用 `_volatile_system_tail()`，按同一顺序渲染：工作区记忆、经验、会话摘要、JSON 输出说明、日期。默认路径原来日期在 JSON 说明之前，摘要的说明文字也不一样。默认路径的「IMPORTANT … MUST call」改写成一句平实的话。

@@ -224,6 +224,10 @@ class Workspace:
         """Get current user's daily memory directory."""
         return self._get_user_path() / self.config.memory_dir
 
+    def get_user_memory_dir(self) -> Path:
+        """Absolute folder holding the current user's memory topic files."""
+        return self._get_user_memory_dir().resolve()
+
     def _get_user_memory_md(self) -> Path:
         """Get current user's long-term memory file path."""
         return self._get_user_path() / self.config.memory_md

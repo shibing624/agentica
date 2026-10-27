@@ -26,6 +26,8 @@ from agentica.run.response import RunResponse
 from agentica.security.redact import redact_sensitive_text
 from agentica.workspace import Workspace
 
+MEM_DIR = "/srv/ws/users/default/memory"
+
 
 def _model() -> OpenAIChat:
     return OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
@@ -109,13 +111,21 @@ class TestRecallHelpers(unittest.TestCase):
         self.assertEqual(parse_selection('{"files": ["a.md", "b.md"]}', allowed, 1), ["a.md"])
 
     def test_surfaced_files_read_back_from_the_rendered_block(self):
-        block = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")])
+        block = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")], MEM_DIR)
+        self.assertIn("### prefer uv (/srv/ws/users/default/memory/user_prefer_uv.md)\n", block)
         msgs = [Message(role="user", content=f"hi\n\n{block}"), Message(role="assistant", content="ok")]
         self.assertEqual(surfaced_memory_files(msgs), {"user_prefer_uv.md"})
 
+    def test_heading_path_is_home_shortened_and_legacy_headings_still_dedup(self):
+        home_dir = os.path.join(os.path.expanduser("~"), ".agentica", "workspace", "users", "default", "memory")
+        block = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")], home_dir)
+        self.assertIn("(~/.agentica/workspace/users/default/memory/user_prefer_uv.md)", block)
+        legacy = "<memory_recall>\n### prefer uv (memory/user_prefer_uv.md)\nUse uv.\n</memory_recall>"
+        self.assertEqual(surfaced_memory_files([Message(role="user", content=legacy)]), {"user_prefer_uv.md"})
+
     def test_render_respects_the_total_budget(self):
         items = [(f"t{i}", f"f{i}.md", "x" * 1900) for i in range(10)]
-        block = render_recall_block(items)
+        block = render_recall_block(items, MEM_DIR)
         self.assertLess(len(block), 6_000 + 2_500)
         self.assertNotIn("f9.md", block)
 
@@ -146,12 +156,12 @@ class TestMemoryOrigin(unittest.TestCase):
         home = os.path.expanduser("~")
         block = render_recall_block([
             ("prefer uv", "user_prefer_uv.md", "Use uv.", os.path.join(home, "Codes", "agentica")),
-        ])
+        ], MEM_DIR)
         self.assertIn("(written while working in ~/Codes/agentica)", block)
-        outside = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "/srv/app")])
+        outside = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "/srv/app")], MEM_DIR)
         self.assertIn("(written while working in /srv/app)", outside)
         self.assertEqual(surfaced_memory_files([Message(role="user", content=block)]), {"user_prefer_uv.md"})
-        legacy = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "")])
+        legacy = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.", "")], MEM_DIR)
         self.assertNotIn("written while", legacy)
 
     def test_recall_is_not_filtered_by_origin(self):
@@ -202,6 +212,8 @@ class TestBuildMemoryRecall(unittest.TestCase):
             ws = Workspace(tmp)
             asyncio.run(_seed(ws))
             block, mock = self._run(ws, '{"files": ["user_prefer_uv.md"]}')
+            heading_path = block.split("### prefer uv (", 1)[1].split(")\n", 1)[0]
+            self.assertTrue(os.path.isfile(os.path.expanduser(heading_path)), heading_path)
         self.assertIn(MEMORY_RECALL_OPEN, block)
         self.assertIn("Use uv, never pip", block)
         self.assertNotIn("9091", block)
@@ -213,7 +225,7 @@ class TestBuildMemoryRecall(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ws = Workspace(tmp)
             asyncio.run(_seed(ws))
-            prior = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")])
+            prior = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")], MEM_DIR)
             block, mock = self._run(
                 ws, '{"files": ["user_prefer_uv.md"]}',
                 context=[Message(role="user", content=f"earlier\n\n{prior}")],
@@ -389,7 +401,7 @@ class TestAgentRecallInjection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
             asyncio.run(_seed(agent.workspace))
-            prior = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")])
+            prior = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")], MEM_DIR)
             pick = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
             with patch.object(OpenAIChat, "response", new=pick):
                 _, users, _ = asyncio.run(agent.get_messages_for_run(messages=[
