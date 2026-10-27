@@ -126,12 +126,7 @@ def render_recall_block(items: List[Tuple[str, str, str]]) -> str:
         used += len(part)
     if not parts:
         return ""
-    header = (
-        "Long-term memories selected for this message. They were written in "
-        "earlier sessions and may be outdated: verify file paths, flags and "
-        "versions before relying on them. The current conversation wins on conflict."
-    )
-    return f"{MEMORY_RECALL_OPEN}\n{header}\n\n" + "\n\n".join(parts) + f"\n{MEMORY_RECALL_CLOSE}"
+    return f"{MEMORY_RECALL_OPEN}\n" + "\n\n".join(parts) + f"\n{MEMORY_RECALL_CLOSE}"
 
 
 async def select_memories(
