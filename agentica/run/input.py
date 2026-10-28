@@ -23,6 +23,10 @@ _KNOWN_RUN_KWARGS = {
     "timeout",
     "hooks",
     "config",
+    # Overrides the recall search key when the caller wraps the user's ask in
+    # bulky instructions (an IM gateway prepending a SOP to every message):
+    # memory/session recall then match on the bare ask, not the wrapper.
+    "recall_query",
 }
 _REMOVED_RUN_KWARGS = {"add_messages"}
 

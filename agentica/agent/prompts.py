@@ -732,6 +732,9 @@ class PromptsMixin:
             **kwargs: Any,
     ) -> Tuple[Optional[Message], List[Message], List[Message]]:
         """Build and return (system_message, user_messages, messages_for_model)."""
+        # Popped before anything else: kwargs flows on to get_user_message and
+        # must not carry recall-only keys there.
+        explicit_recall_query = str(kwargs.pop("recall_query", "") or "").strip()
         pc = self.prompt_config
         messages_for_model: List[Message] = []
 
@@ -803,13 +806,18 @@ class PromptsMixin:
         # The block goes *before* the user's question: long-context models pay
         # least attention to the middle, so the fresh question sits at the
         # very bottom where it is read last and weighs most.
-        recall_query: Optional[str] = None
-        if isinstance(message, str):
-            recall_query = message
-        elif message is None and messages is not None and user_messages:
-            last_msg = user_messages[-1]
-            if last_msg.role == "user" and isinstance(last_msg.content, str):
-                recall_query = last_msg.content
+        # ``recall_query`` (via run(**kwargs)) lets a caller that wraps the
+        # user's ask in bulky instructions — e.g. an IM gateway prepending a
+        # SOP to every message — name the bare ask, so recall matches on what
+        # the user actually said instead of the wrapper's high-frequency terms.
+        recall_query: Optional[str] = explicit_recall_query or None
+        if recall_query is None:
+            if isinstance(message, str):
+                recall_query = message
+            elif message is None and messages is not None and user_messages:
+                last_msg = user_messages[-1]
+                if last_msg.role == "user" and isinstance(last_msg.content, str):
+                    recall_query = last_msg.content
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
             prior = messages_for_model + user_messages[:-1]
             first_turn = not any(m.role == "user" for m in prior)

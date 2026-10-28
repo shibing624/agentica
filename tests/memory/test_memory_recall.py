@@ -326,6 +326,49 @@ class TestAgentRecallInjection(unittest.TestCase):
         agent.run_response = RunResponse()
         return agent
 
+    def test_explicit_recall_query_overrides_the_wrapped_message(self):
+        # IM 网关把用户请求包进大段 SOP，recall 检索应按显式传入的裸请求匹配，
+        # 而不是整条带噪声的 message（message 原文仍然完整进 prompt）。
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            with patch.object(
+                OpenAIChat, "response",
+                new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
+            ) as mocked:
+                system, users, _ = asyncio.run(agent.get_messages_for_run(
+                    message="【话术SOP】……大量指令……【当前用户问题】install deps please",
+                    recall_query="install deps please",
+                ))
+        self.assertTrue(users[0].content.startswith(MEMORY_RECALL_OPEN))
+        self.assertTrue(users[0].content.endswith("install deps please"))
+        # 选择调用拿到的 query 是裸请求，不含 SOP 噪声
+        sent = mocked.call_args.kwargs.get("messages") or mocked.call_args.args
+        sent_text = str(sent)
+        self.assertIn("install deps please", sent_text)
+        self.assertNotIn("当前用户问题", sent_text.split("install deps please")[0])
+
+    def test_explicit_recall_query_via_run_kwarg_passes_the_whitelist(self):
+        # run(**kwargs) 路径：recall_query 穿过 runner 的未知 kwargs 白名单，
+        # 不抛 TypeError（agentica/run/input.py reject_unknown_run_kwargs）。
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            with patch.object(
+                OpenAIChat, "response",
+                new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
+            ):
+                asyncio.run(agent.run(
+                    message="【SOP 噪声包装】install deps please",
+                    recall_query="install deps please",
+                ))
+            recalled = [
+                m for m in (agent.run_response.messages or [])
+                if m.role == "user" and isinstance(m.content, str)
+                and m.content.startswith(MEMORY_RECALL_OPEN)
+            ]
+            self.assertTrue(recalled, "run(recall_query=...) 未触发召回注入")
+
     def test_recall_is_prepended_to_the_user_message_not_the_system_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
