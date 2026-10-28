@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **定时任务记录每次运行的 token 用量；`deliver` 不再接受不存在的投递目标**：
+  - **用量。** `AgentRunner.run()` 可以返回 `CronRunOutput(content, usage)`；老的只返回 `str` 的 runner 照常工作，只是不记用量。`TaskRun` 新增 `usage` 字段，包括 `input_tokens`（含缓存命中）、`output_tokens`、`cache_read_tokens`、`cache_write_tokens`、`api_calls`、`cost_usd`；旧记录读出来是 `None`。CLI runner 从这次运行的 `cost_tracker` 取数；gateway 的 `run_cron` 返回 `turn_usage`，口径和聊天页脚一致。显示的地方：`/cron runs` 每行末尾，例如 `43.0K in (31.2K cached) / 340 out · 3 calls · $0.0128`；`cronjob(action='runs')` 和 `/api/scheduler/runs` 也返回 `usage`，后者还带 `duration_ms`。只统计主模型的请求；辅助模型调用（记忆召回挑选、记忆抽取）不在这次运行的 cost tracker 里，不计入。用真实模型测过（`tmp/cron_usage_e2e.py`）：记录下来的输入和输出 token 与这次运行中 3 个主模型请求的上报之和完全一致，另有 1 个辅助请求按设计不计入。
+  - **`deliver`。** 原来可以填 `telegram`、`origin` 等值，存下来以后什么也不会发送。现在只接受 `local`：`create_job` 和 `cronjob` 的 create/update 遇到其他值会报错，写明暂不支持投递到渠道；gateway 返回 400。工具说明去掉了 `deliver` 这个可选参数，并写明结果只保存在本地。
 - **记忆召回块标题给出记忆文件的完整路径**：标题从 `### <title> (memory/<file>)` 改为 `### <title> (~/.agentica/workspace/users/<user>/memory/<file>)`（家目录缩写成 `~`）。原来的 `memory/<file>` 是相对用户 workspace 的路径，不是相对当前工作目录，模型直接 `read_file` 打不开。新增 `Workspace.get_user_memory_dir()`；`render_recall_block` 多一个 `memory_dir` 参数。去重仍按文件名，恢复的旧会话历史里 `memory/<file>` 形式的标题照样识别。
 - **系统提示词与工具说明精简，首轮附 git 快照**：
  - **精简。** CLI 默认配置下，系统提示词从 26.7K 字减到 21.1K，17 个工具的 schema 从 22.0K 减到 18.7K（含新增的 `forget_memory`）。`environment_context` 去掉 `Active skills` 一行：它和冻结的 Session Guidance 技能目录重复，而且切换 `/model` 时会重建，会改变缓存前缀。增强路径不再重复 soul 里已有的「用 markdown」指令；没有 description 时也不再重复「Your name is」。

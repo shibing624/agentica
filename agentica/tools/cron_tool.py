@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 from agentica.tools.base import Tool
 from agentica.tools.decorators import tool
 from agentica.tools.helpers import tool_result
+from agentica.cron.types import validate_deliver
 from agentica.cron.jobs import (
     CronJob,
     create_job,
@@ -94,7 +95,7 @@ def _format_job(job: CronJob) -> dict:
 _CRONJOB_DESCRIPTION = """Manage the user's scheduled (cron) jobs with a single tool. Prefer this over editing cron files by hand.
 
 Actions:
-- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/deliver/timeout_seconds/max_retries.
+- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/timeout_seconds/max_retries.
 - action='list'    -> list all jobs with their id, schedule, status and next run time.
 - action='runs'    -> show recent execution history (optionally for one job_id) to see the effect of past runs.
 - action='update'  -> change an existing job's prompt/schedule/name/etc. Requires job_id.
@@ -103,6 +104,8 @@ Actions:
 - action='run'     -> execute a job ONCE right now and return its result (a trial run to verify it works). Requires job_id.
 
 Jobs run in a fresh session with no current-chat context, so the prompt must be fully self-contained.
+Results are kept locally only (see action='runs'); nothing is sent to chat channels, so deliver is
+always 'local'.
 Scheduled jobs run autonomously with no user present; write prompts that need no clarification.
 
 Not for waiting on a job this session started (training, eval, build, tmux/nohup): a background
@@ -288,6 +291,7 @@ def _action_runs(job_id: Optional[str]) -> str:
                 "ended_at_ms": r.ended_at_ms,
                 "result_preview": (r.result[:200] if r.result else None),
                 "error": r.error,
+                "usage": r.usage,
             }
             for r in runs
         ],
@@ -350,7 +354,7 @@ def _action_update(
     if name is not None:
         updates["name"] = name
     if deliver is not None:
-        updates["deliver"] = deliver
+        updates["deliver"] = validate_deliver(deliver)
     if timeout_seconds is not None:
         updates["timeout_seconds"] = timeout_seconds
     if max_retries is not None:

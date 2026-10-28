@@ -268,6 +268,70 @@ class TestCronCommand(unittest.TestCase):
         cron_cmd._cmd_cron(self.ctx, "runs")
         cron_cmd._cmd_cron(self.ctx, f"runs {jid}")
 
+    def test_runner_usage_is_recorded_and_shown(self):
+        """A runner returning CronRunOutput gets its token usage into the run
+        record, /cron runs and the cronjob tool; a plain-str runner records none."""
+        import asyncio
+        import io
+        import json
+        from rich.console import Console
+        from agentica.cli.commands import cron_cmd
+        from agentica.cron.scheduler import _execute_job
+        from agentica.cron.types import CronRunOutput
+        from agentica.tools.cron_tool import cronjob
+
+        usage = {"input_tokens": 12345, "output_tokens": 456, "cache_read_tokens": 9800,
+                 "cache_write_tokens": 0, "api_calls": 5, "cost_usd": 0.0123}
+
+        class UsageRunner:
+            async def run(self, prompt, context=None):
+                return CronRunOutput(content="checked, nothing new", usage=usage)
+
+        class TextRunner:
+            async def run(self, prompt, context=None):
+                return "plain"
+
+        jid = self.cronjobs.create_job(prompt="check the feed", schedule="0 9 * * *").id
+        out = asyncio.run(_execute_job(self.cronjobs.get_job(jid), agent_runner=UsageRunner(), verbose=False))
+        self.assertEqual(out["result"], "checked, nothing new")
+        asyncio.run(_execute_job(self.cronjobs.get_job(jid), agent_runner=TextRunner(), verbose=False))
+
+        runs = self.cronjobs.list_task_runs(job_id=jid)
+        self.assertEqual([r.usage for r in runs], [None, usage])  # newest first
+        self.assertEqual(runs[1].result, "checked, nothing new")
+
+        buf = io.StringIO()
+        with patch.object(cron_cmd, "get_console", return_value=Console(file=buf, width=200)):
+            cron_cmd._cmd_cron(self.ctx, f"runs {jid}")
+        shown = buf.getvalue()
+        self.assertIn("12.3K in (9.8K cached) / 456 out · 5 calls · $0.0123", shown)
+
+        tool_runs = json.loads(cronjob(action="runs", job_id=jid))["runs"]
+        self.assertEqual(tool_runs[1]["usage"]["api_calls"], 5)
+
+    def test_unsupported_deliver_is_refused_not_stored(self):
+        """deliver used to accept 'telegram' and then deliver nothing."""
+        import json
+        from agentica.tools.cron_tool import cronjob
+
+        with self.assertRaises(ValueError):
+            self.cronjobs.create_job(prompt="x", schedule="0 9 * * *", deliver="telegram")
+        res = json.loads(cronjob(action="create", prompt="x", schedule="0 9 * * *", deliver="feishu"))
+        self.assertFalse(res["success"])
+        self.assertIn("not supported", res["error"])
+        self.assertEqual(self.cronjobs.list_jobs(), [])
+
+        jid = json.loads(cronjob(action="create", prompt="x", schedule="0 9 * * *"))["job"]["job_id"]
+        res = json.loads(cronjob(action="update", job_id=jid, deliver="origin"))
+        self.assertFalse(res["success"])
+        self.assertEqual(self.cronjobs.get_job(jid).deliver, "local")
+        self.assertTrue(json.loads(cronjob(action="update", job_id=jid, deliver="local"))["success"])
+
+    def test_old_run_records_without_usage_still_load(self):
+        from agentica.cron.types import TaskRun
+        old = {"run_id": "r", "task_id": "t", "status": "ok", "started_at_ms": 1, "ended_at_ms": 2}
+        self.assertIsNone(TaskRun.from_dict(old).usage)
+
 
 class TestCronInCliTools(unittest.TestCase):
     def test_cli_agent_has_cron_tool(self):

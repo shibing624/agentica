@@ -672,7 +672,8 @@ class TestSchedulerEndpoints:
     def _fake_run(self, **over):
         from types import SimpleNamespace
         base = dict(task_id="j1", status=SimpleNamespace(value="ok"),
-                    started_at_ms=1, ended_at_ms=2, result="done", error=None)
+                    started_at_ms=1, ended_at_ms=2, result="done", error=None,
+                    duration_ms=1, usage={"input_tokens": 100, "output_tokens": 7, "api_calls": 1})
         base.update(over)
         return SimpleNamespace(**base)
 
@@ -817,6 +818,8 @@ class TestSchedulerEndpoints:
         assert data["runs"][0]["job_id"] == "j1"
         assert data["runs"][0]["result_preview"] == "done"
         assert data["runs"][0]["result_full"] == "done"
+        assert data["runs"][0]["usage"]["input_tokens"] == 100
+        assert data["runs"][0]["duration_ms"] == 1
 
     def test_list_runs_result_full_uses_error_when_no_result(self, mock_app):
         client, _ = mock_app

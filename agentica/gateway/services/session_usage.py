@@ -97,4 +97,5 @@ def turn_usage_payload(agent: Any) -> Optional[Dict[str, Any]]:
         "cache_hit_percent": summary.cache_hit_percent,
         "cost_usd": round(summary.cost_usd, 6),
         "net_new_tokens": summary.net_new_tokens,
+        "api_calls": summary.api_calls,
     }

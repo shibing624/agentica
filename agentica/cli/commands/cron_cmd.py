@@ -31,6 +31,35 @@ def _fmt_ms(ms) -> str:
 
 
 
+def _fmt_duration(ms: int) -> str:
+    if not ms:
+        return "-"
+    return f"{ms / 1000:.1f}s" if ms < 60_000 else f"{ms / 60_000:.1f}m"
+
+
+def _fmt_tokens(n: int) -> str:
+    return f"{n / 1000:.1f}K" if n >= 1000 else str(n)
+
+
+def _fmt_run_usage(usage) -> str:
+    """'12.3K in (9.8K cached) / 456 out · 5 calls · $0.0123', or '' when unknown."""
+    if not usage:
+        return ""
+    inp = int(usage.get("input_tokens") or 0)
+    cached = int(usage.get("cache_read_tokens") or 0)
+    text = f"{_fmt_tokens(inp)} in"
+    if cached:
+        text += f" ({_fmt_tokens(cached)} cached)"
+    text += f" / {_fmt_tokens(int(usage.get('output_tokens') or 0))} out"
+    calls = usage.get("api_calls")
+    if calls:
+        text += f" · {calls} calls"
+    cost = usage.get("cost_usd")
+    if cost:
+        text += f" · ${cost:.4f}"
+    return text
+
+
 def _fmt_next_run(job) -> str:
     """Human-friendly 'next run' time for a job, or '-' when not scheduled."""
     return _fmt_ms(getattr(job, "next_run_at_ms", None))
@@ -292,7 +321,8 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
             st = r.status.value if hasattr(r.status, "value") else str(r.status)
             when = _fmt_ms(r.started_at_ms)
             color = "green" if st == "ok" else ("yellow" if st == "timeout" else "red")
-            con.print(f"  [cyan]{r.task_id}[/cyan]  [{color}]{st}[/]  {when}")
+            con.print(f"  [cyan]{r.task_id}[/cyan]  [{color}]{st}[/]  {when}  "
+                      f"[dim]{_fmt_duration(r.duration_ms)}  {_fmt_run_usage(r.usage)}[/dim]")
         return
 
     if sub == "run":

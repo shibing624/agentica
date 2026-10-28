@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from agentica.config import AGENTICA_LOG_LEVEL
+from agentica.cron.types import CronRunOutput
 from agentica.utils.log import enable_process_file_logging, logger
 from . import accounts, auth, deps, runtime
 from agentica.version import __version__
@@ -742,6 +743,12 @@ async def _process_channel_message(message, session_id: str) -> None:
 
 # ============== Scheduler agent runner ==============
 
+# TaskRun.usage keys, picked out of ChatResult.turn_usage.
+_CRON_USAGE_KEYS = (
+    "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "api_calls", "cost_usd",
+)
+
+
 class _GatewayAgentRunner:
     """Adapts AgentService to the AgentRunner protocol expected by JobExecutor.
 
@@ -754,13 +761,16 @@ class _GatewayAgentRunner:
     def __init__(self, agent_svc: AgentService):
         self._svc = agent_svc
 
-    async def run(self, prompt: str, context: Optional[dict] = None) -> str:
+    async def run(self, prompt: str, context: Optional[dict] = None) -> CronRunOutput:
         ctx = context or {}
         job_id = ctx.get("job_id", str(uuid4()))
         user_id = ctx.get("user_id", settings.default_user_id)
 
         result = await self._svc.run_cron(message=prompt, job_id=job_id, user_id=user_id)
-        return result.content
+        usage = None
+        if result.turn_usage:
+            usage = {k: result.turn_usage.get(k) for k in _CRON_USAGE_KEYS}
+        return CronRunOutput(content=result.content, usage=usage)
 
 
 # ============== Entry point ==============

@@ -30,7 +30,7 @@ from agentica.cron.jobs import (
     mark_job_run,
     now_ms,
 )
-from agentica.cron.types import RunStatus
+from agentica.cron.types import CronRunOutput, RunStatus
 from agentica.run.context import RunSource
 
 logger = logging.getLogger(__name__)
@@ -43,9 +43,32 @@ LOCK_FILE = CRON_DIR / ".tick.lock"
 class AgentRunner(Protocol):
     """Protocol for executing agent tasks from cron jobs."""
 
-    async def run(self, prompt: str, context: dict[str, Any] | None = None) -> str:
-        """Run agent with a prompt and return the result text."""
+    async def run(self, prompt: str, context: dict[str, Any] | None = None) -> str | CronRunOutput:
+        """Run agent with a prompt; return the result text, or text plus token usage."""
         ...
+
+
+def run_usage(response: Any) -> dict[str, Any] | None:
+    """``TaskRun.usage`` from a ``RunResponse``'s cost tracker, or None.
+
+    Counts every main-model request of the run, tool rounds included — the
+    same numbers as the CLI footer and the gateway's per-turn usage.
+    Auxiliary-model calls (memory recall selection, memory extraction) are
+    not in the run's cost tracker and are not counted.
+    """
+    from agentica.model.cost import CostTracker
+
+    tracker = getattr(response, "cost_tracker", None)
+    if not isinstance(tracker, CostTracker) or tracker.turns == 0:
+        return None
+    return {
+        "input_tokens": tracker.total_prompt_tokens,
+        "output_tokens": tracker.total_output_tokens,
+        "cache_read_tokens": tracker.total_cache_read_tokens,
+        "cache_write_tokens": tracker.total_cache_write_tokens,
+        "api_calls": tracker.turns,
+        "cost_usd": round(tracker.total_cost_usd, 6),
+    }
 
 
 # ============== File Lock ==============
@@ -171,9 +194,13 @@ async def _execute_job(
         }
         run_coro = agent_runner.run(prompt=job.prompt, context=context)
         if job.timeout_seconds > 0:
-            result_text = await asyncio.wait_for(run_coro, timeout=job.timeout_seconds)
+            output = await asyncio.wait_for(run_coro, timeout=job.timeout_seconds)
         else:
-            result_text = await run_coro
+            output = await run_coro
+        if isinstance(output, CronRunOutput):
+            result_text, usage = output.content, output.usage
+        else:
+            result_text, usage = output, None
         mark_job_run(
             job.id,
             RunStatus.OK,
@@ -181,13 +208,14 @@ async def _execute_job(
             started_at_ms=started_at_ms,
             ended_at_ms=now_ms(),
             attempt=attempt,
+            usage=usage,
         )
 
         if verbose:
             preview = result_text[:100] + "..." if len(result_text) > 100 else result_text
             print(f"  OK: {preview}")
 
-        return {"job_id": job.id, "status": "ok", "result": result_text}
+        return {"job_id": job.id, "status": "ok", "result": result_text, "usage": usage}
 
     except asyncio.TimeoutError:
         ended_at_ms = now_ms()

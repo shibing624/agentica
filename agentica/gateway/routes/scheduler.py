@@ -86,6 +86,8 @@ def _run_dict(r) -> dict:
         "result_preview": (r.result[:200] if r.result else None),
         "result_full": full[:20000],
         "error": r.error,
+        "duration_ms": r.duration_ms,
+        "usage": r.usage,
     }
 
 

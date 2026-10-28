@@ -492,6 +492,33 @@ class TestAgentServiceRunCron:
         asyncio.run(svc.run_cron("do it again", job_id="job1", user_id="u1"))
         assert svc._build_agent.call_count == 2
 
+    def test_cron_runner_passes_the_runs_token_usage_through(self, tmp_path):
+        from agentica.cron.types import CronRunOutput
+        from agentica.gateway.main import _GatewayAgentRunner
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.model.cost import CostTracker
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        tracker = CostTracker()
+        tracker.record("gpt-4o", 200, 30, cache_read_tokens=800)
+        tracker.record("gpt-4o", 100, 20, cache_read_tokens=900)
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=MagicMock(content="done", tools=[]))
+        agent.run_response = MagicMock(cost_tracker=tracker, metrics=None)
+        svc._build_agent = MagicMock(return_value=agent)
+
+        out = asyncio.run(_GatewayAgentRunner(svc).run("x", {"job_id": "job1", "user_id": "u1"}))
+        assert isinstance(out, CronRunOutput)
+        assert out.content == "done"
+        assert out.usage["input_tokens"] == 2000
+        assert out.usage["cache_read_tokens"] == 1700
+        assert out.usage["output_tokens"] == 50
+        assert out.usage["api_calls"] == 2
+        assert set(out.usage) == {"input_tokens", "output_tokens", "cache_read_tokens",
+                                  "cache_write_tokens", "api_calls", "cost_usd"}
+
     def test_run_cron_rejects_concurrent_runs_of_the_same_job(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
 

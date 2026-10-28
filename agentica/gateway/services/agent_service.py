@@ -966,6 +966,7 @@ class AgentService:
                     session_id=session_id,
                     user_id=user_id,
                     metrics=extract_metrics(agent),
+                    turn_usage=turn_usage_payload(agent),
                 )
             except Exception as e:
                 logger.error(f"AgentService.run_cron error (job={job_id}): {e}")

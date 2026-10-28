@@ -28,6 +28,7 @@ from agentica.cron.types import (
     RunStatus,
     TaskRun,
     schedule_from_dict,
+    validate_deliver,
 )
 
 logger = logging.getLogger(__name__)
@@ -464,7 +465,9 @@ def create_job(
         schedule: Parseable schedule string (cron, interval, or ISO datetime).
         name: Human-friendly name (auto-generated if omitted).
         user_id: Owner user ID.
-        deliver: Delivery target (local, origin, telegram, etc.).
+        deliver: Delivery target. Only "local" (run history + output files) is
+            supported; anything else raises ValueError instead of being stored
+            and silently never delivered.
         timezone: Timezone for cron expressions.
         workspace: Optional workspace path for product surfaces.
         permissions: Product-layer permission profile for the run.
@@ -475,6 +478,7 @@ def create_job(
     Returns:
         The created CronJob.
     """
+    validate_deliver(deliver)
     parsed = parse_schedule(schedule)
 
     if isinstance(parsed, CronSchedule) and timezone != "Asia/Shanghai":
@@ -647,8 +651,12 @@ def mark_job_run(
     started_at_ms: int | None = None,
     ended_at_ms: int | None = None,
     attempt: int | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> CronJob | None:
-    """Mark a job as having been run, update next_run_at."""
+    """Mark a job as having been run, update next_run_at.
+
+    ``usage`` is the run's token usage (``TaskRun.usage`` keys), when known.
+    """
     current = ended_at_ms or now_ms()
     job = get_job(job_id)
     if not job:
@@ -687,6 +695,7 @@ def mark_job_run(
             result=result,
             error=error,
             error_type=error_type,
+            usage=usage,
         )
     )
 

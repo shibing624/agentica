@@ -21,7 +21,8 @@ from typing import Any, Callable, Dict, Optional
 
 from agentica.utils.log import logger
 
-from agentica.cron.scheduler import tick
+from agentica.cron.scheduler import run_usage, tick
+from agentica.cron.types import CronRunOutput
 
 # Keys in a CLI agent_config that name the interactive session's transcript.
 # A cron job built from that config must not inherit them.
@@ -42,7 +43,7 @@ class CliAgentRunner:
     def __init__(self, agent_factory: Callable[..., Any]):
         self._factory = agent_factory
 
-    async def run(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def run(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> CronRunOutput:
         context = context or {}
         # Honor a per-job workspace from the cron run context instead of
         # silently dropping it. The scheduler passes a path string (or None);
@@ -54,7 +55,7 @@ class CliAgentRunner:
         agent = self._factory(workspace=ws)
         response = await agent.run(message=prompt)
         # RunResponse.content is the final text; fall back to "" for safety.
-        return getattr(response, "content", None) or ""
+        return CronRunOutput(content=getattr(response, "content", None) or "", usage=run_usage(response))
 
 
 def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,

@@ -197,6 +197,12 @@ class TaskRun:
     result: str = ""
     error: str = ""
     error_type: str = ""
+    # Token usage of this run when the runner reported it (see
+    # ``CronRunOutput``): input_tokens (all prompt tokens, cached included),
+    # output_tokens, cache_read_tokens, cache_write_tokens, api_calls,
+    # cost_usd. None for runs from runners that return plain text, and for
+    # records written before this field existed.
+    usage: dict[str, Any] | None = None
 
     @property
     def duration_ms(self) -> int:
@@ -216,6 +222,7 @@ class TaskRun:
             "result": self.result,
             "error": self.error,
             "error_type": self.error_type,
+            "usage": self.usage,
         }
 
     @classmethod
@@ -230,4 +237,34 @@ class TaskRun:
             result=data.get("result", ""),
             error=data.get("error", ""),
             error_type=data.get("error_type", ""),
+            usage=data.get("usage"),
         )
+
+
+@dataclass
+class CronRunOutput:
+    """What an ``AgentRunner`` may return instead of plain text.
+
+    ``usage`` uses the ``TaskRun.usage`` keys. Runners that return a bare
+    ``str`` still work; their runs record no usage.
+    """
+
+    content: str
+    usage: dict[str, Any] | None = None
+
+
+# Delivery targets a job may name. Only "local" exists: the result is written
+# to the run history and output files and sent nowhere else. Accepting other
+# names ("telegram", "origin") used to store them and then deliver nothing.
+SUPPORTED_DELIVER_TARGETS = frozenset({"local"})
+
+
+def validate_deliver(deliver: str) -> str:
+    """Return ``deliver`` if it is a supported target, else raise ValueError."""
+    if deliver not in SUPPORTED_DELIVER_TARGETS:
+        raise ValueError(
+            f"deliver={deliver!r} is not supported: results are only kept locally "
+            "(run history and output files); delivery to channels is not implemented. "
+            "Use deliver='local' or omit it."
+        )
+    return deliver
