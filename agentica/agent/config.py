@@ -147,7 +147,7 @@ class WorkspaceMemoryConfig:
     # (open / done / dropped). One auxiliary call ("intent_track" task) per
     # intent_every_n_turns turns, in the background.
     track_intents: bool = False
-    intent_every_n_turns: int = 3
+    intent_every_n_turns: int = 8
     # Auto-archive conversation to workspace after each run() (zero LLM cost,
     # just appends raw messages to conversations/ directory).
     auto_archive: bool = False
