@@ -19,6 +19,7 @@ import asyncio
 import unittest
 
 from agentica.model.anthropic.claude import Claude
+from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.runner.persist import PersistMixin
@@ -893,6 +894,113 @@ class TestRefusedCallIsPersistedAsAnError(unittest.TestCase):
         self.assertTrue(tool_entry["is_error"])
         self.assertEqual(tool_entry["tool_name"], "no_such_tool")
         self.assertEqual(tool_entry["tool_call_id"], "toolu_x")
+
+
+def _parallel_calls():
+    return [
+        {"id": "a", "type": "function", "function": {"name": "analyze_image", "arguments": "{}"}},
+        {"id": "b", "type": "function", "function": {"name": "execute", "arguments": "{}"}},
+    ]
+
+
+def _picture():
+    media = Message(role="user", content="look")
+    media._tool_media = True
+    return media
+
+
+def _split_round():
+    """The order a parallel round used to land in: the picture between the results."""
+    return [
+        Message(role="user", content="q"),
+        Message(role="assistant", content="", tool_calls=_parallel_calls()),
+        Message(role="tool", tool_call_id="a", content="img"),
+        _picture(),
+        Message(role="tool", tool_call_id="b", content="ok"),
+        Message(role="user", content="next"),
+    ]
+
+
+class TestSplitToolRound(unittest.TestCase):
+    """A picture between two results of one round is moved behind them, not stripped."""
+
+    def test_format_tool_results_appends_the_picture_after_both_results(self):
+        from agentica.model.openai.chat import OpenAIChat
+
+        model = OpenAIChat(id="gpt-4o", api_key="fake")
+        messages = [Message(role="assistant", content="", tool_calls=_parallel_calls())]
+        model.format_tool_results(
+            [Message(role="tool", tool_call_id="a", content="img"), _picture(),
+             Message(role="tool", tool_call_id="b", content="ok")],
+            messages,
+            {"tool_ids": ["a", "b"], "tool_role": "tool"},
+        )
+        self.assertEqual([m.role for m in messages], ["assistant", "tool", "tool", "user"])
+        self.assertEqual([m.tool_call_id for m in messages[1:3]], ["a", "b"])
+        self.assertTrue(messages[3]._tool_media)
+
+    def test_format_tool_results_pads_ahead_of_the_picture(self):
+        from agentica.model.openai.chat import OpenAIChat
+
+        model = OpenAIChat(id="gpt-4o", api_key="fake")
+        messages = [Message(role="assistant", content="", tool_calls=_parallel_calls())]
+        model.format_tool_results(
+            [Message(role="tool", tool_call_id="a", content="img"), _picture()],
+            messages,
+            {"tool_ids": ["a", "b"], "tool_role": "tool"},
+        )
+        self.assertEqual([m.role for m in messages], ["assistant", "tool", "tool", "user"])
+        self.assertEqual(messages[2].tool_call_id, "b")
+        self.assertTrue(messages[2].tool_call_error)
+
+    def test_sanitize_moves_results_ahead_of_the_picture_and_the_next_question(self):
+        messages = _split_round()
+        Model.sanitize_messages(messages)
+        self.assertEqual([m.role for m in messages], ["user", "assistant", "tool", "tool", "user", "user"])
+        self.assertEqual([m.tool_call_id for m in messages[2:4]], ["a", "b"])
+        self.assertEqual([m.content for m in messages[2:4]], ["img", "ok"])
+        self.assertTrue(messages[4]._tool_media)
+        self.assertEqual(messages[5].content, "next")
+
+    def test_sanitize_pads_a_missing_result_ahead_of_the_picture(self):
+        messages = [
+            Message(role="assistant", content="", tool_calls=_parallel_calls()),
+            Message(role="tool", tool_call_id="a", content="img"),
+            _picture(),
+        ]
+        Model.sanitize_messages(messages)
+        self.assertEqual([m.role for m in messages], ["assistant", "tool", "tool", "user"])
+        self.assertEqual([m.tool_call_id for m in messages[1:3]], ["a", "b"])
+        self.assertIn("did not return a response", messages[2].content)
+
+    def test_sanitize_leaves_a_contiguous_round_and_the_next_round_alone(self):
+        messages = [
+            Message(role="assistant", content="", tool_calls=_parallel_calls()),
+            Message(role="tool", tool_call_id="a", content="img"),
+            Message(role="tool", tool_call_id="b", content="ok"),
+            _picture(),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "c", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="tool", tool_call_id="c", content="file"),
+        ]
+        before = list(messages)
+        Model.sanitize_messages(messages)
+        self.assertEqual(len(messages), len(before))
+        self.assertTrue(all(m is b for m, b in zip(messages, before)))
+
+    def test_claude_request_puts_both_results_before_the_picture(self):
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        messages = Model.sanitize_messages(_split_round())
+        chat, _system = asyncio.run(model.format_messages(messages))
+        blocks = chat[2]["content"]
+        self.assertEqual(chat[1]["role"], "assistant")
+        self.assertEqual(
+            [b["tool_use_id"] for b in blocks[:2] if b.get("type") == "tool_result"],
+            ["a", "b"],
+        )
 
 
 if __name__ == "__main__":

@@ -713,94 +713,84 @@ class Model(ABC):
 
     @staticmethod
     def sanitize_messages(messages: List[Message]) -> List[Message]:
-        """Validate and fix tool call message sequences.
+        """Make every tool-call round well-formed before a request. In place.
 
-        OpenAI API requires that every assistant message with 'tool_calls' must be
-        followed by tool messages responding to each 'tool_call_id'. If any tool
-        response is missing (e.g. due to an interrupted execution or corrupted
-        history), this method adds a placeholder tool response so the API call
-        does not fail.
+        Each assistant message with ``tool_calls`` must be followed, with
+        nothing in between, by the results that answer every id it issued.
+        Two transcripts break that:
 
-        The messages list is modified **in-place** and also returned.
+        - a result is missing (interrupted run, corrupted history): a
+          placeholder result is inserted;
+        - a non-result message sits between two results. ``analyze_image``
+          sends its picture as a user message right after its own result, so
+          in a parallel round the picture lands in front of the next result.
+          The results are all there, only on the wrong side of the picture;
+          Anthropic then rejects the request ("`tool_use` ids were found
+          without `tool_result` blocks immediately after"). The results move
+          up, ahead of everything else in the round.
 
-        Args:
-            messages: The list of messages to sanitize.
-
-        Returns:
-            The same list of messages after sanitization.
+        A result is a ``role="tool"`` message for one of the round's ids, or
+        a ``role="user"`` message holding ``tool_result`` blocks (the
+        Anthropic shape). Counting only the OpenAI shape made every Claude
+        result look missing and put "interrupted" ahead of the real output.
+        Results, then placeholders, then the rest of the round, each in
+        their original order. The next assistant message ends the round.
         """
         i = 0
         while i < len(messages):
             msg = messages[i]
-            # Only process assistant messages that have tool_calls
-            if msg.role == "assistant" and msg.tool_calls:
-                expected_ids = {}
-                for tc in msg.tool_calls:
-                    tc_id = tc.get("id") if isinstance(tc, dict) else tc.id
-                    if tc_id:
-                        expected_ids[tc_id] = tc
+            if msg.role != "assistant" or not msg.tool_calls:
+                i += 1
+                continue
+            calls = {}
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else tc.id
+                if tc_id:
+                    calls[tc_id] = tc
 
-                # Scan the following messages for matching tool responses.
-                # We scan all messages until the next assistant message (or end),
-                # because additional non-tool messages (e.g. from ToolCallException)
-                # may be interleaved between tool responses.
-                j = i + 1
-                first_non_tool_pos = None
-                while j < len(messages):
-                    next_msg = messages[j]
-                    if next_msg.role == "tool" and next_msg.tool_call_id in expected_ids:
-                        del expected_ids[next_msg.tool_call_id]
-                        j += 1
-                    elif next_msg.role == "user" and isinstance(next_msg.content, list):
-                        # Anthropic answers a tool call with role="user" carrying
-                        # tool_result blocks, not a role="tool" message. Counting
-                        # only the OpenAI shape made every Claude tool result look
-                        # unanswered, so a placeholder claiming "execution may have
-                        # been interrupted" was injected *ahead of the real
-                        # output* -- telling the model its successful tool had
-                        # failed. Consume these ids before deciding anything is
-                        # missing; the block-shaped message stays where it is.
-                        for block in next_msg.content:
-                            if (
-                                isinstance(block, dict)
-                                and block.get("type") == "tool_result"
-                                and block.get("tool_use_id") in expected_ids
-                            ):
-                                del expected_ids[block["tool_use_id"]]
-                        if not expected_ids:
-                            break
-                        j += 1
-                    elif next_msg.role == "assistant":
-                        # Reached the next assistant turn — stop scanning
-                        break
-                    else:
-                        # Track first non-tool position for placeholder insertion
-                        if first_non_tool_pos is None:
-                            first_non_tool_pos = j
-                        j += 1
+            end = i + 1
+            while end < len(messages) and messages[end].role != "assistant":
+                end += 1
 
-                # Insert placeholder responses for any missing tool_call_ids.
-                # Insert right after the assistant message + existing tool responses,
-                # before any non-tool messages.
-                if expected_ids:
-                    insert_pos = first_non_tool_pos if first_non_tool_pos is not None else j
-                    for tc_id, tc in expected_ids.items():
-                        func_info = tc.get("function", {}) if isinstance(tc, dict) else {}
-                        func_name = func_info.get("name", "unknown") if isinstance(func_info, dict) else "unknown"
-                        logger.debug(
-                            f"Missing tool response for tool_call_id={tc_id} "
-                            f"(function={func_name}), inserting placeholder."
-                        )
-                        placeholder = Message(
-                            role="tool",
-                            tool_call_id=tc_id,
-                            content=f"Error: tool call '{func_name}' did not return a response (execution may have been interrupted).",
-                        )
-                        messages.insert(insert_pos, placeholder)
-                        insert_pos += 1
-                    # Re-scan from current position since we inserted messages
+            results: List[Message] = []
+            rest: List[Message] = []
+            answered: set = set()
+            for m in messages[i + 1:end]:
+                if m.role == "tool" and m.tool_call_id in calls:
+                    ids = {m.tool_call_id}
+                elif m.role == "user" and isinstance(m.content, list):
+                    ids = {
+                        block.get("tool_use_id")
+                        for block in m.content
+                        if isinstance(block, dict)
+                        and block.get("type") == "tool_result"
+                        and block.get("tool_use_id") in calls
+                    }
+                else:
+                    ids = set()
+                (results if ids else rest).append(m)
+                answered |= ids
+
+            placeholders: List[Message] = []
+            for tc_id, tc in calls.items():
+                if tc_id in answered:
                     continue
-            i += 1
+                func_info = tc.get("function", {}) if isinstance(tc, dict) else {}
+                func_name = func_info.get("name", "unknown") if isinstance(func_info, dict) else "unknown"
+                logger.debug(
+                    f"Missing tool response for tool_call_id={tc_id} "
+                    f"(function={func_name}), inserting placeholder."
+                )
+                placeholders.append(
+                    Message(
+                        role="tool",
+                        tool_call_id=tc_id,
+                        content=f"Error: tool call '{func_name}' did not return a response (execution may have been interrupted).",
+                    )
+                )
+
+            messages[i + 1:end] = results + placeholders + rest
+            i = end + len(placeholders)
         return messages
 
     def _log_messages(self, messages: List[Message]) -> None:
@@ -944,11 +934,18 @@ class Model(ABC):
                 continue
             function_calls_to_run.append(_function_call)
 
-        # ``tool_ids`` is every id this round issued, so format_tool_results can
-        # tell "this call produced no result" from "this call was never made".
-        # Without it the default path cannot pad, and an interrupted round
-        # leaves an orphan for the provider to reject.
-        return function_calls_to_run, {
+        return function_calls_to_run, self._tool_round_metadata(assistant_message, tool_role)
+
+    @staticmethod
+    def _tool_round_metadata(assistant_message: Message, tool_role: str) -> dict:
+        """``provider_metadata`` for ``format_tool_results`` of this round.
+
+        ``tool_ids`` is every id the round issued, so format_tool_results can
+        tell "this call produced no result" from "this call was never made".
+        Without it the default path cannot pad, and an interrupted round
+        leaves an orphan for the provider to reject.
+        """
+        return {
             "tool_role": tool_role,
             "tool_ids": [
                 tc.get("id")
@@ -971,33 +968,28 @@ class Model(ABC):
         array" and "its results are in the array" one atomic unit. Leaving the
         padding to the per-request ``sanitize_messages`` instead would make that
         guarantee depend on a later, separate pass.
-        """
-        if function_call_results:
-            messages.extend(function_call_results)
 
-        tool_ids = provider_metadata.get("tool_ids") or []
-        if not tool_ids:
-            return
-        answered = {
-            m.tool_call_id
-            for m in messages
-            if m.role == "tool" and m.tool_call_id
-        }
+        Order: results, pads, then the messages a tool asked to follow its
+        result (``analyze_image``'s picture, ``ToolCallException`` messages).
+        ``function_call_results`` interleaves those after each result; kept
+        that way, a parallel round puts a picture between two results.
+        """
+        messages.extend(m for m in function_call_results if m.role == "tool")
+
+        answered = {m.tool_call_id for m in messages if m.role == "tool" and m.tool_call_id}
         tool_role = provider_metadata.get("tool_role", "tool")
-        for tc_id in tool_ids:
-            if tc_id in answered:
-                continue
-            messages.append(
-                Message(
-                    role=tool_role,
-                    tool_call_id=tc_id,
-                    content=(
-                        "Error: tool call did not return a response "
-                        "(execution may have been interrupted)."
-                    ),
-                    tool_call_error=True,
-                )
+        messages.extend(
+            Message(
+                role=tool_role,
+                tool_call_id=tc_id,
+                content="Error: tool call did not return a response (execution may have been interrupted).",
+                tool_call_error=True,
             )
+            for tc_id in provider_metadata.get("tool_ids") or []
+            if tc_id not in answered
+        )
+
+        messages.extend(m for m in function_call_results if m.role != "tool")
 
     async def run_function_calls(
             self,
@@ -1714,7 +1706,11 @@ class Model(ABC):
                 pass
 
             if len(function_call_results) > 0:
-                messages.extend(function_call_results)
+                self.format_tool_results(
+                    function_call_results,
+                    messages,
+                    self._tool_round_metadata(assistant_message, tool_role),
+                )
 
             return model_response
         return None
@@ -1755,7 +1751,11 @@ class Model(ABC):
                 yield function_call_response
 
             if len(function_call_results) > 0:
-                messages.extend(function_call_results)
+                self.format_tool_results(
+                    function_call_results,
+                    messages,
+                    self._tool_round_metadata(assistant_message, tool_role),
+                )
 
     # ── Default usage metrics update (shared across providers) ───────────────
 
