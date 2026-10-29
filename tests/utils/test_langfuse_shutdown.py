@@ -5,6 +5,7 @@ force_flush + consumer-thread polls); the bounded path overlaps teardown and
 caps the wait. Tests pin the behavioral contract: no client spawned just to
 be shut down, daemon thread semantics, and the join timeout being honored.
 """
+import base64
 import threading
 import time
 import unittest
@@ -53,6 +54,58 @@ class TestLangfuseMediaGuard(unittest.TestCase):
         uri = "data:audio/wav;base64," + base64.b64encode(raw).decode()
         media = LangfuseMedia(base64_data_uri=uri)
         self.assertEqual(media._content_bytes, raw)
+
+    def test_guard_does_not_log_incorrect_padding(self):
+        """A data URI chopped at 4000 chars used to log Incorrect padding.
+
+        That is what ``analyze_image`` hit: the tool result carries the whole
+        screenshot, ``bound_langfuse_value`` used to slice it, and Langfuse
+        still tried to decode the slice.
+        """
+        _require_langfuse()
+        from langfuse.media import LangfuseMedia
+
+        li._install_langfuse_media_guard()
+        raw = b"\xff\xd8\xff" + b"\x00" * 5000
+        uri = "data:image/jpeg;base64," + base64.b64encode(raw).decode()
+        chopped = uri[:4000] + "...[truncated]"
+        self.assertGreater(len(uri), 4000)
+        with self.assertNoLogs("langfuse", level="ERROR"):
+            media = LangfuseMedia(base64_data_uri=chopped)
+        self.assertIsNone(media._content_bytes)
+
+
+class TestBoundLangfuseMedia(unittest.TestCase):
+    def _screenshot_uri(self) -> str:
+        raw = b"\xff\xd8\xff" + b"\x00" * 5000
+        return "data:image/jpeg;base64," + base64.b64encode(raw).decode()
+
+    def test_decodable_data_uri_is_not_truncated(self):
+        uri = self._screenshot_uri()
+        self.assertGreater(len(uri), 4000)
+        self.assertEqual(li.bound_langfuse_value(uri), uri)
+        envelope = {
+            "_multimodal": True,
+            "text": "look",
+            "images": [{"url": uri}],
+        }
+        bounded = li.bound_langfuse_value(envelope)
+        self.assertEqual(bounded["images"][0]["url"], uri)
+        self.assertEqual(bounded["text"], "look")
+
+    def test_chopped_data_uri_is_not_sent_as_media(self):
+        uri = self._screenshot_uri()
+        chopped = uri[:4000] + "...[truncated]"
+        omitted = li.bound_langfuse_value(chopped)
+        self.assertFalse(omitted.startswith("data:"))
+        self.assertIn("image/jpeg", omitted)
+
+    def test_ordinary_long_text_is_still_capped(self):
+        text = "hello " * 2000
+        bounded = li.bound_langfuse_value(text)
+        self.assertTrue(bounded.endswith("...[truncated]"))
+        self.assertLessEqual(len(bounded), 4000 + len("...[truncated]"))
+
 
 class TestStartShutdownThread(unittest.TestCase):
     def test_returns_none_when_not_configured(self):

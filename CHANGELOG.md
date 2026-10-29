@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **换窗后从 `<session>.notes.md` 抽取跨会话记忆**：`MemoryExtractHooks.on_post_compact` 把 notes 交给 aux 模型抽取，结果写入 `memory_candidates/`，`evidence_refs` 指向这个 notes 文件。notes 内容和上次抽取时相同就跳过（reactive compact、notes 重写失败的情况）。
 
 #### fixes
+- **Langfuse 上传 `analyze_image` 的图片不再报 `Incorrect padding`**：工具结果里的 `data:image/...;base64,...` 被 `bound_langfuse_value` 截到 4000 字再拼上 `...[truncated]`。截断后的 payload 长度不是 4 的倍数，Langfuse 仍把它当媒体去 `b64decode`，终端打出 `Error parsing base64 data URI`。现在能解码的 data URI 原样上传（Langfuse 会换成短的 media reference）；解不开的换成不含 `data:` 的占位，解析器不再打这条错误。
 - **`apply_patch` 的 context not found 能说出是哪种不匹配，hunk 顺序反了也能应用**：长程会话日志里 apply_patch 错误率 6.5%（29/446），其中 17 次是 context not found，返回给模型的只有它自己发的那一行，分不出缩进错、行不存在、还是块写在了上一个 hunk 之前，三种修法不同。现在报错附带分类和行号，但不引用模型没读过的文件内容：同样文字但缩进/空格不同时给出行号，整块逐字存在但都在上一个 hunk 之前时提示按文件顺序排，否则提示重读文件。块在文件里逐字只出现一次时，即使 hunk 顺序反了也直接应用（精确匹配，不做空白/引号 fuzz）；出现多次仍报错，两个 hunk 改动重叠时由 `applyDiff` 拒绝。17 次里有 6 次属于这一类。同时修正「块不连续」提示里的行号，此前指向块的起始行而不是断开的那一行。
 - **`execute` 及几个文件工具在长任务和慢盘上的明显错误**：
   - POSIX 上命令改为经环境变量交给 `/bin/sh`（`eval "$AGENTICA_COMMAND"`，执行前 unset），不再作为 `sh -c` 的 argv。Linux 的 `pkill -f <pat>` 会匹配到执行它的那个 `sh -c '<cmd>'`，把自己的 shell 杀掉，pkill 之后的命令都不执行，返回 exit -15；日志里 18 次 -15 全是这种情况。OS 沙箱与后台命令同样处理，Windows 不变。

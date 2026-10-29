@@ -43,11 +43,12 @@ Usage:
         shutdown_langfuse_bounded()  # overlaps nothing, caps the wait
 """
 
+import base64
 import logging
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Optional, List, Dict, Any, Generator
+from typing import Optional, List, Dict, Any, Generator, Tuple
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_BASE_URL
 from agentica.security.redact import redact_sensitive_text
 from agentica.utils.log import logger
@@ -64,10 +65,22 @@ _langfuse_root_active: ContextVar[bool] = ContextVar(
 
 
 def bound_langfuse_value(value: Any, depth: int = 0) -> Any:
-    """Bound and redact a value before sending it to Langfuse."""
+    """Bound and redact a value before sending it to Langfuse.
+
+    A ``data:...;base64,...`` URI is left whole when it decodes. Chopping it
+    at 4000 chars (or redacting a ``sk-`` run inside the payload) leaves a
+    string Langfuse still treats as media, and ``b64decode`` then logs
+    ``Error parsing base64 data URI`` / ``Incorrect padding``. Langfuse
+    replaces a valid URI with a short media reference before the span
+    attribute is stored, so the cap is not what keeps the field small.
+    """
     if value is None or isinstance(value, (int, float, bool)):
         return value
     if isinstance(value, str):
+        if _decode_base64_data_uri(value) is not None:
+            return value
+        if _looks_like_base64_data_uri(value):
+            return _omit_broken_data_uri(value)
         text = redact_sensitive_text(value, level="strict") or ""
         return text if len(text) <= 4000 else text[:4000] + "...[truncated]"
     if depth >= 6:
@@ -101,12 +114,14 @@ _langfuse_timeout_warned: bool = False
 
 
 def _looks_like_base64_data_uri(data: Any) -> bool:
-    """True only for real media data URIs Langfuse can upload.
+    """True only for strings shaped like ``data:...;base64,...``.
 
     Langfuse's MediaManager treats every string starting with ``data:`` as a
     base64 media URI. SSE frames (``data: {"choices":...}``), Swift type
     annotations, and other ``data:`` prefixes then explode as
     ``Error parsing base64 data URI`` / ``Data is not base64 encoded``.
+    Shape is not enough: a URI chopped mid-payload still matches and then
+    fails with ``Incorrect padding``. Decode with ``_decode_base64_data_uri``.
     """
     if not isinstance(data, str) or not data.startswith("data:"):
         return False
@@ -116,8 +131,38 @@ def _looks_like_base64_data_uri(data: Any) -> bool:
     return "base64" in header.split(";")
 
 
+def _decode_base64_data_uri(data: str) -> Optional[Tuple[bytes, str]]:
+    """Decode a media data URI, or None when it is not valid base64.
+
+    Does not log. Langfuse's own parser logs ``Error parsing base64 data URI``
+    on the same failure, which is how a truncated screenshot reached the CLI.
+    """
+    if not _looks_like_base64_data_uri(data):
+        return None
+    header, _, payload = data[5:].partition(",")
+    mime = header.split(";", 1)[0]
+    if not mime or not payload:
+        return None
+    translated = "".join(payload.split()).translate(str.maketrans("-_", "+/"))
+    try:
+        return base64.b64decode(translated, validate=True), mime
+    except Exception:
+        return None
+
+
+def _omit_broken_data_uri(data: str) -> str:
+    """Replace an undecodable data URI with text Langfuse will not parse."""
+    header, _, payload = data[5:].partition(",")
+    mime = header.split(";", 1)[0] or "application/octet-stream"
+    return f"[media omitted mime={mime} chars={len(payload)}]"
+
+
 def _install_langfuse_media_guard() -> None:
-    """Skip Langfuse media parsing unless the string is actually ``data:...;base64,...``."""
+    """Parse media data URIs ourselves so a bad payload does not get logged.
+
+    Langfuse catches the decode error and logs it with a traceback. Returning
+    ``None, None`` is the same outcome, without the log line.
+    """
     try:
         from langfuse.media import LangfuseMedia
     except ImportError:
@@ -127,9 +172,10 @@ def _install_langfuse_media_guard() -> None:
         return
 
     def _parse_base64_data_uri(self, data: str):
-        if not _looks_like_base64_data_uri(data):
+        parsed = _decode_base64_data_uri(data)
+        if parsed is None:
             return None, None
-        return original(self, data)
+        return parsed
 
     _parse_base64_data_uri._agentica_guarded = True  # type: ignore[attr-defined]
     LangfuseMedia._parse_base64_data_uri = _parse_base64_data_uri  # type: ignore[method-assign]
