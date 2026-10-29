@@ -2024,7 +2024,10 @@ class Model(ABC):
                 - bytes: raw image data
 
         Returns:
-            Message content with images added in the format expected by the model
+            A copy of the message whose content carries the images in the format
+            expected by the model. The input message is not modified: it lives in
+            the conversation history, and writing the pixels into its content
+            would resend them on every later request.
         """
         # If no images are provided, return the message as is
         if images is None or len(images) == 0:
@@ -2046,9 +2049,7 @@ class Model(ABC):
             if image_data:
                 message_content_with_image.append(image_data)
 
-        # Update the message content with the images
-        message.content = message_content_with_image
-        return message
+        return message.model_copy(update={"content": message_content_with_image})
 
     def add_audio_to_message(self, message: Message, audio: Optional[Any] = None) -> Message:
         """
@@ -2062,7 +2063,8 @@ class Model(ABC):
                     }
 
         Returns:
-            Message content with audio added in the format expected by the model
+            A copy of the message with the audio in the format expected by the
+            model; the input message is not modified (see add_images_to_message).
         """
         if audio is None:
             return message
@@ -2070,16 +2072,18 @@ class Model(ABC):
         # If `id` is in the audio, this means the audio is already processed
         # This is used in multi-turn conversations
         if "id" in audio:
-            message.content = ""
-            message.audio = {"id": audio["id"]}
+            return message.model_copy(update={"content": "", "audio": {"id": audio["id"]}})
         # If `data` is in the audio, this means the audio is raw data
         # And an input audio
-        elif "data" in audio:
-            # Create a message with audio
-            message.content = [
-                {"type": "text", "text": message.content},
-                {"type": "input_audio", "input_audio": audio},
-            ]
+        if "data" in audio:
+            return message.model_copy(
+                update={
+                    "content": [
+                        {"type": "text", "text": message.content},
+                        {"type": "input_audio", "input_audio": audio},
+                    ]
+                }
+            )
         return message
 
     def get_system_message_for_model(self) -> Optional[str]:

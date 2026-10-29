@@ -8,7 +8,7 @@ from agentica.model.anthropic import Claude
 from agentica.model.litellm import LiteLLMChat
 from agentica.model.message import Message
 from agentica.model.ollama import Ollama
-from agentica.model.openai import OpenAIChat
+from agentica.model.openai import OpenAIChat, OpenAIResponses
 
 
 def test_model_infers_image_support_from_catalog():
@@ -91,6 +91,57 @@ def test_litellm_forwards_allowed_images_as_multimodal_content():
 
     assert formatted["content"][0] == {"type": "text", "text": "describe this image"}
     assert formatted["content"][1]["type"] == "image_url"
+
+
+def _vision_litellm():
+    model = object.__new__(LiteLLMChat)
+    model.id = "private-vision-model"
+    model.supports_images = True
+    return model
+
+
+@pytest.mark.parametrize(
+    "format_one",
+    [
+        lambda m: OpenAIChat(id="gpt-4o", api_key="fake_openai_key").format_message(m),
+        lambda m: _vision_litellm().format_message(m),
+        lambda m: OpenAIResponses(
+            id="gpt-5.6-sol", api_key="fake_openai_key", supports_images=True
+        ).format_messages([m])[-1],
+    ],
+    ids=["openai_chat", "litellm", "openai_responses"],
+)
+def test_formatting_images_leaves_the_history_message_text_only(format_one):
+    """Pixels belong to the request, not to the conversation history.
+
+    ``add_images_to_message`` used to assign the multimodal list to
+    ``message.content`` on the history object itself. After that the base64
+    was the message's body: clearing ``message.images`` at turn end no longer
+    removed it, every later request resent it, and the session JSONL stored
+    it as plain content.
+    """
+    message = Message(role="user", content="如图", images=[b"image-bytes"])
+
+    first = format_one(message)
+    message.images = None
+    second = format_one(message)
+
+    assert message.content == "如图"
+    assert "image-bytes" not in str(message.content)
+    assert any("image" in str(block.get("type")) for block in first["content"] if isinstance(block, dict))
+    assert second["content"] in ("如图", [{"type": "input_text", "text": "如图"}])
+
+
+def test_formatting_audio_leaves_the_history_message_unchanged():
+    model = OpenAIChat(id="gpt-4o-audio-preview", api_key="fake_openai_key")
+    audio = {"data": "QUJD", "format": "wav"}
+    message = Message(role="user", content="听一下", audio=audio)
+
+    wire = model.format_message(message)
+
+    assert message.content == "听一下"
+    assert message.audio == audio
+    assert wire["content"][1] == {"type": "input_audio", "input_audio": audio}
 
 
 def test_anthropic_rejects_images_for_text_only_model():

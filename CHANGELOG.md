@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **图片 / 音频的 base64 不再写进会话历史**：`add_images_to_message` / `add_audio_to_message` 原来把多模态列表直接赋给历史里那条消息的 `content`，于是 OpenAI Chat、OpenAI Responses、LiteLLM 三条线上，第一次发请求后像素就成了这条消息的正文：回合结束清掉 `message.images` 也没用，之后每轮请求都重发，会话 JSONL 里也存成普通正文，`/compact`、`/resume` 读回来照样带着。现在两个函数返回副本，只有当次请求带图，历史消息保持原来的文字说明。
 - **`run(recall_query=...)` 指定召回检索词**：调用方把用户请求包在大段指令里时（如 IM 网关在每条消息前拼话术 SOP），记忆召回与跨会话召回默认拿整条消息检索，包装里的高频词会带出无关条目。显式传 `recall_query` 后两条召回都按它匹配，消息原文照常进 prompt；不传时行为不变。实测（真实 SOP + 一句提问，每组 6 次）：无关记忆误召回 3/6 → 1/6。
 - **定时任务记录每次运行的 token 用量；`deliver` 不再接受不存在的投递目标**：
   - **用量。** `AgentRunner.run()` 可以返回 `CronRunOutput(content, usage)`；老的只返回 `str` 的 runner 照常工作，只是不记用量。`TaskRun` 新增 `usage` 字段，包括 `input_tokens`（含缓存命中）、`output_tokens`、`cache_read_tokens`、`cache_write_tokens`、`api_calls`、`cost_usd`；旧记录读出来是 `None`。CLI runner 从这次运行的 `cost_tracker` 取数；gateway 的 `run_cron` 返回 `turn_usage`，口径和聊天页脚一致。显示的地方：`/cron runs` 每行末尾，例如 `43.0K in (31.2K cached) / 340 out · 3 calls · $0.0128`；`cronjob(action='runs')` 和 `/api/scheduler/runs` 也返回 `usage`，后者还带 `duration_ms`。只统计主模型的请求；辅助模型调用（记忆召回挑选、记忆抽取）不在这次运行的 cost tracker 里，不计入。用真实模型测过（`tmp/cron_usage_e2e.py`）：记录下来的输入和输出 token 与这次运行中 3 个主模型请求的上报之和完全一致，另有 1 个辅助请求按设计不计入。
