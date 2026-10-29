@@ -1,3 +1,4 @@
+"""Test token counting utilities."""
 import base64
 import struct
 from types import SimpleNamespace

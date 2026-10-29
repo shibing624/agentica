@@ -1,3 +1,4 @@
+"""Test vision capability of models."""
 import asyncio
 import base64
 
