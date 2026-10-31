@@ -26,6 +26,7 @@ from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
 from agentica.agent.config import ToolConfig, WorkspaceMemoryConfig
+from agentica.cron.scheduler import scheduled_job_guidance
 from agentica.run.display import RunDisplayEventKind, classify_run_response
 from agentica.run.response import AgentCancelledError
 from agentica.run.config import RunConfig
@@ -928,7 +929,14 @@ class AgentService:
                     media_notes=media_notes,
                 )
 
-    async def run_cron(self, message: str, job_id: str, user_id: str = "default") -> ChatResult:
+    async def run_cron(
+        self,
+        message: str,
+        job_id: str,
+        user_id: str = "default",
+        permission_mode: Optional[str] = None,
+        work_dir: Optional[str] = None,
+    ) -> ChatResult:
         """Run a scheduled job's prompt on a brand-new, independent Agent.
 
         Unlike chat()/chat_stream(), this never reads from or writes to the
@@ -939,9 +947,16 @@ class AgentService:
         bookkeeping scoped to the job (one entry per job, not one per run),
         but is CRON_SESSION_PREFIX-tagged so it's excluded from
         list_sessions() (the chat sidebar).
+
+        ``permission_mode`` / ``work_dir`` are the job's mandate (see
+        ``CronJob``); None runs on the gateway defaults.
         """
         await self._ensure_initialized()
         session_id = f"{CRON_SESSION_PREFIX}{job_id}"
+        if permission_mode is not None:
+            self.set_session_approval_mode(session_id, permission_mode, user_id)
+        if work_dir is not None:
+            self.set_session_work_dir(session_id, work_dir, user_id)
 
         lock = self._get_session_lock(session_id, user_id)
         if lock.locked():
@@ -952,6 +967,7 @@ class AgentService:
                 asyncio.to_thread(self._build_agent, session_id, user_id),
                 timeout=_AGENT_BUILD_TIMEOUT_S,
             )
+            agent.add_session_guidance(scheduled_job_guidance(job_id))
             try:
                 if self._workspace:
                     await asyncio.to_thread(self._workspace.set_user, user_id)

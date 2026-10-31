@@ -11,12 +11,13 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from agentica.agent.permissions import validate_permission_mode
 from agentica.config import AGENTICA_CRON_DIR
 from agentica.cron.types import (
     Schedule,
@@ -51,7 +52,19 @@ def _ensure_dirs():
 
 @dataclass
 class CronJob:
-    """A scheduled cron job."""
+    """A scheduled cron job.
+
+    ``permission_mode`` and ``work_dir`` are the job's mandate: the tier and
+    directory of the session that created it, captured at creation and used
+    on every tick. A job does not follow the tier the host process happens to
+    be in when it fires. Empty means the job predates the mandate (or was
+    created without a session, e.g. over HTTP) and runs on the runner's
+    default.
+
+    ``paused_reason`` says why the job stopped without a person pausing it:
+    the scheduler found its mandate unusable (work_dir gone), or the job
+    paused itself because it could not proceed unattended. Resuming clears it.
+    """
     id: str
     name: str
     prompt: str
@@ -67,7 +80,9 @@ class CronJob:
     run_count: int = 0
     enabled: bool = True
     workspace: str | None = None
-    permissions: dict[str, Any] = field(default_factory=dict)
+    permission_mode: str = ""
+    work_dir: str | None = None
+    paused_reason: str = ""
     timeout_seconds: float = 0.0
     max_retries: int = 0
     retry_count: int = 0
@@ -90,7 +105,9 @@ class CronJob:
             "run_count": self.run_count,
             "enabled": self.enabled,
             "workspace": self.workspace,
-            "permissions": self.permissions,
+            "permission_mode": self.permission_mode,
+            "work_dir": self.work_dir,
+            "paused_reason": self.paused_reason,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "retry_count": self.retry_count,
@@ -117,7 +134,9 @@ class CronJob:
             run_count=data.get("run_count", 0),
             enabled=data.get("enabled", True),
             workspace=data.get("workspace"),
-            permissions=data.get("permissions") or {},
+            permission_mode=data.get("permission_mode", ""),
+            work_dir=data.get("work_dir"),
+            paused_reason=data.get("paused_reason", ""),
             timeout_seconds=data.get("timeout_seconds", 0.0),
             max_retries=data.get("max_retries", 0),
             retry_count=data.get("retry_count", 0),
@@ -453,7 +472,8 @@ def create_job(
     deliver: str = "local",
     timezone: str = "Asia/Shanghai",
     workspace: str | None = None,
-    permissions: dict[str, Any] | None = None,
+    permission_mode: str = "",
+    work_dir: str | None = None,
     timeout_seconds: float = 0.0,
     max_retries: int = 0,
     retry_delay_ms: int = 60000,
@@ -470,7 +490,10 @@ def create_job(
             and silently never delivered.
         timezone: Timezone for cron expressions.
         workspace: Optional workspace path for product surfaces.
-        permissions: Product-layer permission profile for the run.
+        permission_mode: Tier every run of this job uses ("ask" / "auto" /
+            "allow-all"). Empty: the runner's default.
+        work_dir: Directory every run of this job works in. Empty: the
+            runner's default.
         timeout_seconds: Per-run timeout. 0 disables timeout.
         max_retries: Number of immediate retries before waiting for the next schedule.
         retry_delay_ms: Delay before a retry run.
@@ -479,6 +502,8 @@ def create_job(
         The created CronJob.
     """
     validate_deliver(deliver)
+    if permission_mode:
+        validate_permission_mode(permission_mode)
     parsed = parse_schedule(schedule)
 
     if isinstance(parsed, CronSchedule) and timezone != "Asia/Shanghai":
@@ -503,7 +528,8 @@ def create_job(
         created_at_ms=current,
         next_run_at_ms=next_run or 0,
         workspace=workspace,
-        permissions=permissions or {},
+        permission_mode=permission_mode,
+        work_dir=work_dir,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
         retry_delay_ms=retry_delay_ms,
@@ -540,7 +566,8 @@ def create_daily_task(spec: DailyTaskSpec) -> CronJob:
         deliver=spec.deliver,
         timezone=timezone,
         workspace=spec.workspace,
-        permissions=spec.permissions,
+        permission_mode=spec.permission_mode,
+        work_dir=spec.work_dir,
         timeout_seconds=spec.timeout_seconds,
         max_retries=spec.max_retries,
         retry_delay_ms=spec.retry_delay_ms,
@@ -602,11 +629,17 @@ def remove_job(job_id: str) -> bool:
     return False
 
 
-def pause_job(job_id: str) -> CronJob | None:
-    """Pause a job."""
+def pause_job(job_id: str, reason: str = "") -> CronJob | None:
+    """Pause a job.
+
+    ``reason`` is set when nobody asked for the pause (the scheduler blocked
+    the job, or the job paused itself); it is what the CLI shows as needing
+    attention. A person pausing a job passes none.
+    """
     return update_job(job_id, {
         "status": JobStatus.PAUSED.value,
         "enabled": False,
+        "paused_reason": reason,
     })
 
 
@@ -620,6 +653,7 @@ def resume_job(job_id: str) -> CronJob | None:
         "status": JobStatus.ACTIVE.value,
         "enabled": True,
         "next_run_at_ms": next_run or 0,
+        "paused_reason": "",
     })
 
 
@@ -664,7 +698,13 @@ def mark_job_run(
 
     # Compute next run
     next_run = compute_next_run_at_ms(job.schedule, current, current)
-    should_retry = status != RunStatus.OK and job.retry_count < job.max_retries
+    # A paused job (by the scheduler or by its own run) waits for a person,
+    # not for the retry delay.
+    should_retry = (
+        status != RunStatus.OK
+        and job.status != JobStatus.PAUSED
+        and job.retry_count < job.max_retries
+    )
     retry_count = job.retry_count + 1 if should_retry else 0
     if should_retry:
         next_run = current + max(0, job.retry_delay_ms)
@@ -677,8 +717,13 @@ def mark_job_run(
         "retry_count": retry_count,
     }
 
-    # One-shot jobs: mark completed
-    if not should_retry and (isinstance(job.schedule, AtSchedule) or next_run is None):
+    # One-shot jobs: mark completed — unless the run paused its own job, which
+    # must stay paused (with its reason) rather than look finished.
+    if (
+        not should_retry
+        and job.status != JobStatus.PAUSED
+        and (isinstance(job.schedule, AtSchedule) or next_run is None)
+    ):
         updates["status"] = JobStatus.COMPLETED.value
         updates["enabled"] = False
 

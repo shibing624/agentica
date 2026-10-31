@@ -38,6 +38,21 @@ process is gone), report the result and pause this job (its own id) with the
 cronjob tool". Without it the job keeps firing after there is nothing left to
 watch.
 
+## Which tier a job runs under
+
+A job always runs under the permission tier and working directory of the
+session that created it, recorded at `create`. Switching this session's tier
+later does not change the job. `permission_mode` on create/update can only
+make it stricter. Use `ask` for a trial job ("check and tell me what you
+would change"): it can read and report, but every write, mutating command and
+network call is denied, because nobody is around to approve. Once its runs
+look right, the user can raise it.
+
+A job that cannot go on without a person (permission denied, missing
+credential, out of scope) should pause its own job with the cronjob tool,
+giving a one-line reason. The job's agent is told its own id. The user sees the reason at CLI startup and in
+`/cron list`. Do not write a prompt that just retries.
+
 ## A job that checks for changes says so when there are none
 
 For a job that looks for something new (a feed, a page, a queue, a report),

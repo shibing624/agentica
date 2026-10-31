@@ -10,6 +10,7 @@ Uses a file-based lock so only one tick runs at a time.
 """
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -29,6 +30,7 @@ from agentica.cron.jobs import (
     get_due_jobs,
     mark_job_run,
     now_ms,
+    pause_job,
 )
 from agentica.cron.types import CronRunOutput, RunStatus
 from agentica.run.context import RunSource
@@ -69,6 +71,33 @@ def run_usage(response: Any) -> dict[str, Any] | None:
         "api_calls": tracker.turns,
         "cost_usd": round(tracker.total_cost_usd, 6),
     }
+
+
+def scheduled_job_guidance(job_id: str) -> str:
+    """What a job's agent is told about itself.
+
+    Its prompt was written before the job had an id, so "pause yourself when
+    done" needs the id from here.
+    """
+    return (
+        f"# Scheduled job\n\nYou are running unattended as scheduled job `{job_id}`; nobody is "
+        "here to answer or approve. If the task cannot go on without a person (a needed "
+        "permission is denied, a credential or path is missing, the work is outside what "
+        f"the prompt covers), call `cronjob(action='pause', job_id='{job_id}', reason=<one "
+        "line>)` and stop: the user is shown the reason, and the job does not fire again "
+        "until they resume it."
+    )
+
+
+def mandate_problem(job: CronJob) -> str:
+    """Why the job's recorded mandate cannot be honored now, or "".
+
+    Checked before every run, so a job whose directory is gone stops instead
+    of running somewhere it was never meant to.
+    """
+    if job.work_dir and not os.path.isdir(job.work_dir):
+        return f"work_dir {job.work_dir} no longer exists"
+    return ""
 
 
 # ============== File Lock ==============
@@ -168,6 +197,21 @@ async def _execute_job(
     if verbose:
         print(f"  Running: {job.name} ({job.id})")
 
+    problem = mandate_problem(job)
+    if problem:
+        pause_job(job.id, reason=problem)
+        mark_job_run(
+            job.id,
+            RunStatus.FAILED,
+            error=f"Not run, job paused: {problem}",
+            error_type="MandateError",
+            started_at_ms=started_at_ms,
+            ended_at_ms=now_ms(),
+            attempt=attempt,
+        )
+        logger.warning(f"Job {job.id} paused: {problem}")
+        return {"job_id": job.id, "status": "paused", "error": problem}
+
     if not agent_runner:
         ended_at_ms = now_ms()
         mark_job_run(
@@ -189,7 +233,8 @@ async def _execute_job(
             "scheduled": True,
             "attempt": attempt,
             "workspace": job.workspace,
-            "permissions": job.permissions,
+            "permission_mode": job.permission_mode,
+            "work_dir": job.work_dir,
             "run_source": RunSource.cron.value,
         }
         run_coro = agent_runner.run(prompt=job.prompt, context=context)

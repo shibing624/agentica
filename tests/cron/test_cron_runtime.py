@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import sys
@@ -196,6 +197,9 @@ class TestCronCommand(unittest.TestCase):
                 return _FakeResp()
 
         class _FakeAgent:
+            tool_config = SimpleNamespace(permission_mode="auto")
+            work_dir = "/tmp"
+
             def resolve_auxiliary_model(self, task="default"):
                 return _FakeModel()
 
@@ -221,6 +225,9 @@ class TestCronCommand(unittest.TestCase):
                 return _FakeResp()
 
         class _FakeAgent:
+            tool_config = SimpleNamespace(permission_mode="auto")
+            work_dir = "/tmp"
+
             def resolve_auxiliary_model(self, task="default"):
                 return _FakeModel()
 

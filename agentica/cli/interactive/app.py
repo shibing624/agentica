@@ -544,6 +544,17 @@ def run_interactive(
     if workspace and workspace.exists():
         con.print(f"  Workspace: [green]{workspace.path}[/green]")
 
+    # A job the scheduler or its own run paused is waiting on a person; say so
+    # once at startup instead of leaving it to be found in /cron.
+    from rich.markup import escape
+    from agentica.cron.jobs import list_jobs
+    for job in list_jobs(include_disabled=True):
+        if job.paused_reason:
+            con.print(
+                f"  [yellow]Scheduled job '{escape(job.name)}' ({job.id}) paused: "
+                f"{escape(job.paused_reason)}[/yellow]  [dim]/cron resume {job.id}[/dim]"
+            )
+
     if agent_config.get("_resume_requested"):
         if current_agent._session_log is None or not current_agent._session_log.exists():
             con.print(f"[bold red]No session found: {current_agent.session_id}[/bold red]")

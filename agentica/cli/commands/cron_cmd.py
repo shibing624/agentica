@@ -159,6 +159,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
     /cron daemon on|off|status     control the in-CLI scheduler thread
     """
     con = get_console()
+    from rich.markup import escape
     from agentica.cron import jobs as cronjobs
 
     args = cmd_args.strip()
@@ -166,7 +167,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
     rest = args[len(sub) :].strip() if args else ""
 
     if sub in ("list", "ls", ""):
-        all_jobs = cronjobs.list_jobs()
+        all_jobs = cronjobs.list_jobs(include_disabled=True)
         if not all_jobs:
             con.print('[dim]No cron jobs. Add one with: /cron add "<prompt>" <schedule>[/dim]')
             return
@@ -179,6 +180,8 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                 f"[{'green' if status == 'active' else 'dim'}]{status}[/]  "
                 f"next: {_fmt_next_run(j)}  [dim]({human})[/dim]"
             )
+            if j.paused_reason:
+                con.print(f"      [yellow]paused: {escape(j.paused_reason)}[/yellow]  [dim]/cron resume {j.id}[/dim]")
         return
 
     if sub == "add":
@@ -252,7 +255,16 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         try:
             # Keep the user's own words as the display name; run the (possibly
             # refined) prompt under the hood.
-            job = cronjobs.create_job(prompt=final_prompt, schedule=schedule, name=prompt[:50])
+            # The job runs under this session's tier and directory from now
+            # on, not whatever the session is switched to when it fires.
+            mandate = {}
+            if ctx.current_agent is not None:
+                mandate = {
+                    "permission_mode": ctx.current_agent.tool_config.permission_mode,
+                    "work_dir": ctx.current_agent.work_dir,
+                }
+            job = cronjobs.create_job(
+                prompt=final_prompt, schedule=schedule, name=prompt[:50], **mandate)
         except Exception as e:
             con.print(f"[red]Failed to create job: {e}[/red]")
             return

@@ -664,7 +664,8 @@ class TestSchedulerEndpoints:
             schedule="ignored", status=SimpleNamespace(value="active"),
             enabled=True, deliver="local", next_run_at_ms=0, last_run_at_ms=0,
             last_status=None, run_count=0, timeout_seconds=0, max_retries=0,
-            retry_count=0, retry_delay_ms=60000, permissions={},
+            retry_count=0, retry_delay_ms=60000,
+            permission_mode="", work_dir=None, paused_reason="",
         )
         base.update(over)
         return SimpleNamespace(**base)

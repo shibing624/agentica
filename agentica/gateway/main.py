@@ -766,7 +766,11 @@ class _GatewayAgentRunner:
         job_id = ctx.get("job_id", str(uuid4()))
         user_id = ctx.get("user_id", settings.default_user_id)
 
-        result = await self._svc.run_cron(message=prompt, job_id=job_id, user_id=user_id)
+        result = await self._svc.run_cron(
+            message=prompt, job_id=job_id, user_id=user_id,
+            permission_mode=ctx.get("permission_mode") or None,
+            work_dir=ctx.get("work_dir") or None,
+        )
         usage = None
         if result.turn_usage:
             usage = {k: result.turn_usage.get(k) for k in _CRON_USAGE_KEYS}

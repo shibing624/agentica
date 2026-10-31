@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, Optional
 
 from agentica.utils.log import logger
 
-from agentica.cron.scheduler import run_usage, tick
+from agentica.cron.scheduler import run_usage, scheduled_job_guidance, tick
 from agentica.cron.types import CronRunOutput
 
 # Keys in a CLI agent_config that name the interactive session's transcript.
@@ -52,7 +52,14 @@ class CliAgentRunner:
         if isinstance(ws, str) and ws:
             from agentica.workspace import Workspace
             ws = Workspace(path=ws)
-        agent = self._factory(workspace=ws)
+        agent = self._factory(
+            workspace=ws,
+            permission_mode=context.get("permission_mode") or None,
+            work_dir=context.get("work_dir") or None,
+        )
+        job_id = context.get("job_id")
+        if job_id:
+            agent.add_session_guidance(scheduled_job_guidance(job_id))
         response = await agent.run(message=prompt)
         # RunResponse.content is the final text; fall back to "" for safety.
         return CronRunOutput(content=getattr(response, "content", None) or "", usage=run_usage(response))
@@ -62,9 +69,12 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
                             workspace=None, skills_registry=None) -> Callable[..., Any]:
     """Return a factory that builds a fresh CLI agent from the given config.
 
-    The returned factory accepts an optional ``workspace`` override (used by
-    cron jobs that target a specific workspace); when not provided it falls back
-    to the default captured here. Imported lazily to avoid a circular import
+    The returned factory accepts optional ``workspace`` / ``permission_mode`` /
+    ``work_dir`` overrides: a job's mandate, so it runs under the tier and
+    directory it was created with rather than whatever the host session is in
+    when the tick fires (``/permissions`` mutates ``agent_config`` in place,
+    and this closure holds that same dict). Without overrides it falls back to
+    the defaults captured here. Imported lazily to avoid a circular import
     (cli.config imports tools which may import cron).
 
     The job gets the interactive session's model and tools, not its session.
@@ -77,12 +87,14 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
     """
     workspace_default = workspace
 
-    def _factory(workspace=None):
+    def _factory(workspace=None, permission_mode=None, work_dir=None):
         from agentica.cli.runtime import create_agent
         job_config = {
             key: value for key, value in agent_config.items()
             if key not in _SESSION_IDENTITY_KEYS
         }
+        if work_dir is not None:
+            job_config["work_dir"] = work_dir
         return create_agent(
             job_config,
             extra_tools=extra_tools or [],
@@ -95,6 +107,7 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
             # A scheduled job must not recursively kick off further immediate runs.
             enable_cron_immediate_run=False,
             enable_session_log=False,
+            permission_mode=permission_mode,
         )
 
     return _factory

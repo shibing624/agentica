@@ -5,7 +5,7 @@
 
 Schedule types (at/every/cron), job status, and run status enums.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
@@ -121,7 +121,10 @@ class DailyTaskSpec:
     """Product-layer task spec for scheduled agent work.
 
     Cron remains the execution backend; this spec gives CLI/Gateway/product
-    surfaces a stable shape for user intent, permissions, and runtime limits.
+    surfaces a stable shape for user intent, permission tier, and runtime limits.
+
+    ``permission_mode`` / ``work_dir`` are what the job runs under on every
+    tick (see ``CronJob``); empty means the runner's default.
     """
 
     name: str
@@ -129,7 +132,8 @@ class DailyTaskSpec:
     schedule: Schedule
     user_id: str = "default"
     workspace: str | None = None
-    permissions: dict[str, Any] = field(default_factory=dict)
+    permission_mode: str = ""
+    work_dir: str | None = None
     deliver: str = "local"
     timezone: str = "Asia/Shanghai"
     timeout_seconds: float = 0.0
@@ -143,7 +147,8 @@ class DailyTaskSpec:
             "schedule": self.schedule.to_dict(),
             "user_id": self.user_id,
             "workspace": self.workspace,
-            "permissions": self.permissions,
+            "permission_mode": self.permission_mode,
+            "work_dir": self.work_dir,
             "deliver": self.deliver,
             "timezone": self.timezone,
             "timeout_seconds": self.timeout_seconds,
@@ -159,7 +164,8 @@ class DailyTaskSpec:
             schedule=schedule_from_dict(data.get("schedule", {"kind": "at"})),
             user_id=data.get("user_id", "default"),
             workspace=data.get("workspace"),
-            permissions=data.get("permissions") or {},
+            permission_mode=data.get("permission_mode", ""),
+            work_dir=data.get("work_dir"),
             deliver=data.get("deliver", "local"),
             timezone=data.get("timezone", "Asia/Shanghai"),
             timeout_seconds=data.get("timeout_seconds", 0.0),

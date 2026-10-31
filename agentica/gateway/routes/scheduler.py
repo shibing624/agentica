@@ -65,7 +65,9 @@ def _job_dict(j) -> dict:
         "max_retries": j.max_retries,
         "retry_count": j.retry_count,
         "retry_delay_ms": j.retry_delay_ms,
-        "permissions": j.permissions,
+        "permission_mode": j.permission_mode,
+        "work_dir": j.work_dir,
+        "paused_reason": j.paused_reason,
     }
 
 
