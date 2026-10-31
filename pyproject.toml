@@ -296,6 +296,7 @@ agentica = [
     "**/*.css",
     "**/*.yaml",
     "**/*.json",
+    "utils/o200k_base.tiktoken.gz",
     "gateway/ui/*",
     "gateway/ui/**/*",
 ]

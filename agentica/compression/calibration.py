@@ -16,8 +16,8 @@ The provider reports the real prompt size of every request it answers
 with the estimate made for that same request gives a ratio, and every later
 estimate is multiplied by it. That is protocol data, not a guess.
 
-The ratio only ever scales *up*. An estimate that runs high (CJK char fallback
-when tiktoken is offline) compacts a little early, which is today's behaviour;
+The ratio only ever scales *up*. An estimate that runs high compacts a little
+early, which is today's behaviour;
 one that runs low is the failure above. A provider whose figure is lower than
 the estimate therefore leaves the estimate alone.
 """

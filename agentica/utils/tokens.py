@@ -4,15 +4,18 @@
 @description: Token counting utilities for messages, tools, and multi-modal content.
 
 Supports:
-- Text token counting with tiktoken (OpenAI), with CJK-aware character fallback
+- Text token counting with tiktoken's o200k_base, loaded from the vocabulary
+  shipped in this package
 - Image token counting based on OpenAI's vision model formula
 - Audio/Video token estimation
 - Tool/Function definition token counting
 """
+import base64
+import gzip
 import json
 import math
-import unicodedata
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 
 import tiktoken
@@ -20,53 +23,51 @@ from pydantic import BaseModel
 from agentica.model.media import Audio, Image, Video, get_image_type
 from agentica.model.message import Message
 from agentica.tools.base import Function, ModelTool
-from agentica.utils.log import logger
 
 # Default image dimensions used as fallback when actual dimensions cannot be determined
 DEFAULT_IMAGE_WIDTH = 1024
 DEFAULT_IMAGE_HEIGHT = 1024
 
+# tiktoken's own o200k_base vocabulary (sha256 of the uncompressed file is the
+# ``expected_hash`` tiktoken checks: 446a9538...1a2d). Shipped so counting never
+# touches the network: ``tiktoken.get_encoding`` downloads the blob with no
+# timeout and caches it under the system temp dir, which macOS clears, so a
+# fresh launch could block the CLI before its prompt appears for minutes.
+_O200K_BASE_PATH = Path(__file__).with_name("o200k_base.tiktoken.gz")
+_O200K_BASE_PAT_STR = "|".join(
+    [
+        r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
+        r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
+        r"""\p{N}{1,3}""",
+        r""" ?[^\s\p{L}\p{N}]+[\r\n/]*""",
+        r"""\s*[\r\n]+""",
+        r"""\s+(?!\S)""",
+        r"""\s+""",
+    ]
+)
+_O200K_BASE_SPECIAL_TOKENS = {"<|endoftext|>": 199999, "<|endofprompt|>": 200018}
 
-@lru_cache(maxsize=16)
-def _get_tiktoken_encoding(model_id: str):
-    """Get tiktoken encoding for a model, with caching.
 
-    OpenAI model ids map directly. Unknown ids (e.g. ``deepseek-v4-flash``)
-    fall back to a general encoding. When tiktoken cannot load an encoding
-    (an offline host with no network to fetch the ``.tiktoken`` blob), return
-    ``None`` so callers fall back to the char-based estimator instead of
-    hanging on a slow fetch or crashing the run.
+@lru_cache(maxsize=1)
+def _get_tiktoken_encoding() -> tiktoken.Encoding:
+    """The o200k_base encoding, built from the bundled vocabulary.
+
+    Every model is estimated with it: the figure is a local estimate that
+    ``ContextCalibration`` scales by what the provider actually counted, so a
+    per-model tokenizer buys nothing and would bring the download back
+    (``encoding_for_model("gpt-4")`` resolves to cl100k_base).
     """
-    try:
-        return tiktoken.encoding_for_model(model_id.lower())
-    except KeyError:
-        pass
-    try:
-        return tiktoken.get_encoding("o200k_base")
-    except Exception:
-        logger.warning(
-            "tiktoken encoding unavailable (offline host?); "
-            "falling back to char-based token estimate for %r",
-            model_id,
-        )
-        return None
-
-
-def _estimate_tokens_by_chars(text: str) -> int:
-    """Estimate token count using character-based heuristics.
-
-    - CJK characters (Chinese/Japanese/Korean): ~1 token per character
-    - Other characters (English, numbers, punctuation, etc.): ~1 token per 4 characters
-    """
-    cjk_chars = 0
-    other_chars = 0
-    for ch in text:
-        if unicodedata.category(ch).startswith('L') and ord(ch) > 0x2E7F:
-            # CJK Unified Ideographs and extensions, Hangul, Kana, etc.
-            cjk_chars += 1
-        else:
-            other_chars += 1
-    return cjk_chars + (other_chars + 3) // 4
+    with gzip.open(_O200K_BASE_PATH, "rb") as f:
+        mergeable_ranks = {
+            base64.b64decode(token): int(rank)
+            for token, rank in (line.split() for line in f.read().splitlines() if line)
+        }
+    return tiktoken.Encoding(
+        name="o200k_base",
+        pat_str=_O200K_BASE_PAT_STR,
+        mergeable_ranks=mergeable_ranks,
+        special_tokens=_O200K_BASE_SPECIAL_TOKENS,
+    )
 
 
 # =============================================================================
@@ -354,13 +355,10 @@ def _to_tool_dict(tool: Union[Function, ModelTool, Dict[str, Any]]) -> Optional[
 
 
 def count_text_tokens(text: str, model_id: str = "gpt-4o") -> int:
-    """Count tokens in a text string using tiktoken (char-based fallback)."""
+    """Count tokens in a text string with the bundled o200k_base encoding."""
     if not text:
         return 0
-    encoding = _get_tiktoken_encoding(model_id)
-    if encoding is None:
-        return _estimate_tokens_by_chars(text)
-    return len(encoding.encode(text, disallowed_special=()))
+    return len(_get_tiktoken_encoding().encode(text, disallowed_special=()))
 
 
 def count_image_tokens(image: Union[Image, str, bytes, Dict[str, Any]]) -> int:

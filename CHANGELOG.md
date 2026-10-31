@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **启动不再因下载 tiktoken 词表卡住**：CLI 画输入框之前要先估算上下文 token，`tiktoken.get_encoding("o200k_base")` 缓存未命中时会从 `openaipublic.blob.core.windows.net` 下载词表。这个请求没有超时，缓存又放在系统临时目录（macOS 重启或定期清理会清掉），所以网络慢时启动会卡好几分钟；原来「取不到就按字符估算」的兜底只在抛异常时生效，请求挂住时永远走不到。现在 o200k_base 词表（sha256 与 tiktoken 官方 `expected_hash` 一致，gzip 后约 1.6MB）随包附带在 `agentica/utils/o200k_base.tiktoken.gz`，本地直接构造 `tiktoken.Encoding`，运行时不联网。所有模型统一用 o200k 估算（原来 gpt-4 一类会映射到 cl100k，同样要下载），偏差由 `ContextCalibration` 按上游计费修正。按字符估算的兜底已删除。
 - **图片 / 音频的 base64 不再写进会话历史**：`add_images_to_message` / `add_audio_to_message` 原来把多模态列表直接赋给历史里那条消息的 `content`，于是 OpenAI Chat、OpenAI Responses、LiteLLM 三条线上，第一次发请求后像素就成了这条消息的正文：回合结束清掉 `message.images` 也没用，之后每轮请求都重发，会话 JSONL 里也存成普通正文，`/compact`、`/resume` 读回来照样带着。现在两个函数返回副本，只有当次请求带图，历史消息保持原来的文字说明。
 - **`run(recall_query=...)` 指定召回检索词**：调用方把用户请求包在大段指令里时（如 IM 网关在每条消息前拼话术 SOP），记忆召回与跨会话召回默认拿整条消息检索，包装里的高频词会带出无关条目。显式传 `recall_query` 后两条召回都按它匹配，消息原文照常进 prompt；不传时行为不变。实测（真实 SOP + 一句提问，每组 6 次）：无关记忆误召回 3/6 → 1/6。
 - **定时任务记录每次运行的 token 用量；`deliver` 不再接受不存在的投递目标**：
