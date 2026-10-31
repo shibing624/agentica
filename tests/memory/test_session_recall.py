@@ -17,11 +17,12 @@ from agentica.agent.hooks import IntentTrackHooks
 from agentica.memory.intents import parse_update, process_pending_intents
 from agentica.memory.session_index import SessionIndex, index_terms
 from agentica.memory.session_log import SessionLog
+from agentica.memory.recall import RecallBreaker, build_recall
 from agentica.memory.session_recall import (
     RECALL_MAX_CHARS,
+    RELATED_LIMIT,
     SESSION_RECALL_OPEN,
-    build_session_recall,
-    match_strength,
+    draft_session_recall,
     surfaced_markers,
 )
 from agentica.model.message import Message
@@ -146,22 +147,32 @@ class TestSessionRecall(_Base):
     def _seed(self):
         prev = self.log("prev-session")
         prev.append("user", "把 session_index.py 的改动 commit 一下")
-        self.index.add_intent(work_dir=PROJ, session_id="prev-session", ask="session_index 改动推送",
-                              outcome="commit 1a2b3c4，未 push", next_step="git push")
-        self.index.add_intent(work_dir=OTHER, session_id="vpet", ask="VPetMac TalkConfig 改动推送",
-                              outcome="未 commit", next_step="commit + push")
-        self.index.add_intent(work_dir=PROJ, session_id="prev-session", ask="旧任务", status="open",
-                              now=time.time() - 30 * 86400)
+        self.mine = self.index.add_intent(work_dir=PROJ, session_id="prev-session", ask="session_index 改动推送",
+                                          outcome="commit 1a2b3c4，未 push", next_step="git push")
+        self.vpet = self.index.add_intent(work_dir=OTHER, session_id="vpet", ask="VPetMac TalkConfig 改动推送",
+                                          outcome="未 commit", next_step="commit + push")
+        self.old = self.index.add_intent(work_dir=PROJ, session_id="prev-session", ask="旧任务", status="open",
+                                         now=time.time() - 30 * 86400)
 
-    def recall(self, query, first_turn=True, context=(), session_id="new-session"):
-        return asyncio.run(build_session_recall(
-            self.index, None, query=query, work_dir=PROJ, session_id=session_id,
+    def recall(self, query, picked_work=(), first_turn=True, context=(), session_id="new-session"):
+        """(block, selector request messages or None when no call was made)."""
+        draft = asyncio.run(draft_session_recall(
+            self.index, None, work_dir=PROJ, session_id=session_id,
             first_turn=first_turn, context=list(context), timeout=1,
         ))
+        reply = json.dumps({"files": [], "work": list(picked_work)})
+        mock = AsyncMock(return_value=ModelResponse(content=reply))
+        with patch.object(OpenAIChat, "response", new=mock):
+            _, picked = asyncio.run(build_recall(
+                None, _model(), query, list(context), 5, 5.0, RecallBreaker(), session_id,
+                work=draft.selector_items(), work_limit=RELATED_LIMIT, work_dir=PROJ,
+            ))
+        request = mock.await_args.kwargs["messages"] if mock.await_count else None
+        return draft.render(picked), request
 
     def test_first_turn_shows_open_items_and_last_asks_of_this_project_only(self):
         self._seed()
-        block = self.recall("git push")
+        block, _ = self.recall("git push")
         self.assertTrue(block.startswith(SESSION_RECALL_OPEN))
         self.assertIn("session_index 改动推送", block)
         self.assertIn("Next: git push", block)
@@ -169,40 +180,57 @@ class TestSessionRecall(_Base):
         self.assertNotIn("VPetMac", block)
         self.assertNotIn("旧任务", block)
 
-    def test_other_project_only_when_named(self):
+    def test_selector_sees_every_project_labeled_and_its_pick_is_rendered(self):
         self._seed()
-        block = self.recall("VPetMac 的 TalkConfig 推了吗", first_turn=False)
-        self.assertIn("VPetMac TalkConfig", block)
-        self.assertIn("/work/VPetMac · ", block)
+        block, request = self.recall("TalkConfig 那个改了吗", picked_work=[self.vpet], first_turn=False)
+        offered = request[1].content
+        self.assertIn(f"{self.vpet}: [/work/VPetMac] [open]", offered)
+        self.assertIn(f"{self.mine}: [this project] [open]", offered)
+        self.assertIn("Earlier work (current project: /work/agentica)", offered)
+        self.assertIn('"work"', request[0].content)
+        self.assertIn(f"[intent:{self.vpet}]", block)
+        self.assertIn("/work/VPetMac · VPetMac TalkConfig", block)
+        self.assertNotIn("session_index 改动推送", block)
 
-    def test_later_turn_without_overlap_recalls_nothing(self):
+    def test_later_turn_recalls_only_what_the_selector_picked(self):
         self._seed()
-        self.assertIsNone(self.recall("17 乘以 23 等于多少", first_turn=False))
+        block, request = self.recall("17 乘以 23 等于多少", first_turn=False)
+        self.assertIsNotNone(request)
+        self.assertIsNone(block)
 
-    def test_lines_already_in_context_are_not_repeated(self):
+    def test_lines_already_in_context_are_not_offered_again(self):
         self._seed()
-        first = self.recall("git push")
+        first, _ = self.recall("git push")
         ctx = [Message(role="user", content=f"{first}\n\ngit push")]
-        self.assertTrue(surfaced_markers(ctx))
-        again = self.recall("session_index 推送", first_turn=False, context=ctx)
+        self.assertIn(f"intent:{self.mine}", surfaced_markers(ctx))
+        again, request = self.recall("session_index 推送", picked_work=[self.mine], first_turn=False, context=ctx)
+        self.assertNotIn(f"{self.mine}: ", request[1].content)
         self.assertIsNone(again)
 
     def test_stale_open_item_is_labeled_and_has_no_next_step(self):
         self._seed()
-        block = self.recall("旧任务", first_turn=False)
+        block, _ = self.recall("旧任务", picked_work=[self.old], first_turn=False)
         self.assertIn("[stale", block)
         self.assertNotIn("Open items", block)
 
-    def test_match_strength_weights(self):
-        self.assertGreaterEqual(match_strength("VPetMac TalkConfig 改动", "VPetMac TalkConfig"), 3)
-        self.assertGreaterEqual(match_strength("commit 3f9366a4", "3f9366a4"), 3)
-        self.assertLess(match_strength("代码改动推送完成", "改动 推送"), 3)
+    def test_selector_failure_keeps_first_turn_sections(self):
+        self._seed()
+        draft = asyncio.run(draft_session_recall(
+            self.index, None, work_dir=PROJ, session_id="new", first_turn=True, context=[], timeout=1,
+        ))
+        with patch.object(OpenAIChat, "response", new=AsyncMock(side_effect=ConnectionError("down"))):
+            _, picked = asyncio.run(build_recall(
+                None, _model(), "git push", [], 5, 5.0, RecallBreaker(), "new",
+                work=draft.selector_items(), work_limit=RELATED_LIMIT, work_dir=PROJ,
+            ))
+        block = draft.render(picked)
+        self.assertEqual(picked, [])
+        self.assertIn("session_index 改动推送", block)
 
     def test_budget_is_respected_with_whole_lines(self):
-        for i in range(40):
-            self.index.add_intent(work_dir=PROJ, session_id="p", ask=f"gateway 任务 {i} " + "x" * 200,
-                                  next_step="push")
-        block = self.recall("gateway push")
+        ids = [self.index.add_intent(work_dir=PROJ, session_id="p", ask=f"gateway 任务 {i} " + "x" * 200,
+                                     next_step="push") for i in range(40)]
+        block, _ = self.recall("gateway push", picked_work=ids[-RELATED_LIMIT:])
         self.assertLessEqual(len(block), RECALL_MAX_CHARS + 200)
         self.assertTrue(block.endswith("</session_recall>"))
 
@@ -211,11 +239,11 @@ class TestSessionRecall(_Base):
         reply = json.dumps({"new": [{"ask": "release v1.5.1", "outcome": "tag 已打", "status": "open",
                                      "next_step": "twine upload", "turns": [1]}], "update": []})
         with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content=reply))):
-            block = asyncio.run(build_session_recall(
-                self.index, _model(), query="继续", work_dir=PROJ, session_id="new",
+            draft = asyncio.run(draft_session_recall(
+                self.index, _model(), work_dir=PROJ, session_id="new",
                 first_turn=True, context=[], timeout=5,
             ))
-        self.assertIn("twine upload", block)
+        self.assertIn("twine upload", draft.render([]))
         self.assertEqual(self.index.stale_pending_sessions(PROJ, "new"), [])
 
 
@@ -264,6 +292,35 @@ class TestAgentWiring(unittest.TestCase):
             self.assertIn("给 v9.9 打 tag", other)
             found = asyncio.run(tool.search_session(scope="project", query="v9.9 发布"))
             self.assertIn("[intent:", found)
+
+    def test_one_selector_call_picks_memory_and_cross_project_work(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as proj:
+            cfg = WorkspaceMemoryConfig(recall_sessions=True, recall_memories=True)
+            a = Agent(model=_model(), session_id="sess-cccc", work_dir=proj, user_id="u1",
+                      long_term_memory_config=cfg, enable_long_term_memory=True, workspace=home)
+            asyncio.run(a.workspace.write_memory_entry(
+                title="prefer uv", content="Use uv, never pip.", memory_type="user"))
+            index = a._session_log.search_index
+            other = index.add_intent(work_dir="/work/VPetMac", session_id="vpet",
+                                     ask="VPetMac 打包签名失败排查", outcome="证书过期，已续签")
+            calls, captured = [], {}
+
+            async def answer(model_self, messages, **kw):
+                calls.append(messages)
+                if len(calls) == 1:
+                    return ModelResponse(content=json.dumps(
+                        {"files": ["user_prefer_uv.md"], "work": [other]}))
+                captured["user"] = [m.content for m in messages if m.role == "user"][-1]
+                return ModelResponse(content="ok")
+
+            with patch.object(OpenAIChat, "response", new=answer):
+                a.run_sync("这边打包也报签名错误")
+            self.assertEqual(len(calls), 2, "one selector call, then the main call")
+            self.assertIn(f"{other}: [/work/VPetMac]", calls[0][1].content)
+            self.assertIn(f"[intent:{other}]", captured["user"])
+            self.assertIn("证书过期", captured["user"])
+            self.assertIn("Use uv, never pip.", captured["user"])
+            self.assertTrue(captured["user"].rstrip().endswith("这边打包也报签名错误"))
 
 
 if __name__ == "__main__":

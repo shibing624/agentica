@@ -499,6 +499,15 @@ class SessionIndex:
             ).fetchall()
         return [self._intent_row(r) for r in rows]
 
+    def recent_intents(self, exclude_session: Optional[str], limit: int) -> List[Dict[str, Any]]:
+        """Intents of every project, newest first, except ``exclude_session``'s own."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {self._INTENT_COLS} FROM intents WHERE session_id != ? ORDER BY updated DESC LIMIT ?",
+                (exclude_session or "", limit),
+            ).fetchall()
+        return [self._intent_row(r) for r in rows]
+
     def search_intents(
         self,
         query: str,

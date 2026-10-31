@@ -17,8 +17,8 @@ from agentica.compression.token_budget import (
     is_pending_window_preamble,
 )
 from agentica.knowledge.document import Document
-from agentica.memory.recall import build_memory_recall
-from agentica.memory.session_recall import session_recall_safe
+from agentica.memory.recall import build_recall
+from agentica.memory.session_recall import RELATED_LIMIT, draft_session_recall_safe
 from agentica.utils.git_snapshot import build_git_snapshot
 from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
@@ -673,17 +673,41 @@ class PromptsMixin:
             audio=audio, images=images, videos=videos, **kwargs,
         )
 
-    async def _get_memory_recall_block(self, query: str, context: List[Message]) -> Optional[str]:
-        """Per-turn ``<memory_recall>`` block for a human message, if enabled.
+    def _get_git_snapshot_block(self) -> Optional[str]:
+        """``<git_snapshot>`` of ``work_dir`` for a session's first turn, if enabled."""
+        if not self.prompt_config.add_git_snapshot or not self.work_dir:
+            return None
+        return build_git_snapshot(os.path.abspath(self.work_dir))
 
+    async def _get_recall_blocks(self, query: str, context: List[Message]) -> Tuple[Optional[str], Optional[str]]:
+        """``(<session_recall>, <memory_recall>)`` for a human message, each if enabled.
+
+        One auxiliary call ("memory_recall" task) picks both the MEMORY.md
+        entries and the earlier work of any project this message needs.
         ``context`` is what is about to be sent before this turn's message;
-        entries already recalled there are skipped.
+        entries and lines already recalled there are skipped. On a session's
+        first turn (no user message in ``context``) the session block also
+        carries this project's open items and the last asks of recent sessions.
         """
         cfg = self.long_term_memory_config
-        if not (self.enable_long_term_memory and self.workspace is not None and cfg.recall_memories):
-            return None
-        return await build_memory_recall(
-            self.workspace,
+        slog = self._session_log
+        draft = None
+        if cfg.recall_sessions and slog is not None and slog.search_index is not None:
+            draft = await draft_session_recall_safe(
+                slog.search_index,
+                self.resolve_auxiliary_model("intent_track"),
+                work_dir=slog.cwd,
+                session_id=slog.session_id,
+                first_turn=not any(m.role == "user" for m in context),
+                context=context,
+                timeout=cfg.recall_timeout,
+            )
+        recall_memories = self.enable_long_term_memory and self.workspace is not None and cfg.recall_memories
+        work = draft.selector_items() if draft else ()
+        if not recall_memories and not work:
+            return (draft.render([]) if draft else None), None
+        memory_block, picked_work = await build_recall(
+            self.workspace if recall_memories else None,
             self.resolve_auxiliary_model("memory_recall"),
             query,
             context,
@@ -691,35 +715,11 @@ class PromptsMixin:
             timeout=cfg.recall_timeout,
             breaker=self._recall_breaker,
             session_id=self.session_id,
+            work=work,
+            work_limit=RELATED_LIMIT if work else 0,
+            work_dir=draft.work_dir if draft else "",
         )
-
-    def _get_git_snapshot_block(self) -> Optional[str]:
-        """``<git_snapshot>`` of ``work_dir`` for a session's first turn, if enabled."""
-        if not self.prompt_config.add_git_snapshot or not self.work_dir:
-            return None
-        return build_git_snapshot(os.path.abspath(self.work_dir))
-
-    async def _get_session_recall_block(self, query: str, context: List[Message]) -> Optional[str]:
-        """Per-turn ``<session_recall>`` block (earlier sessions), if enabled.
-
-        The first turn of a session (no user message in ``context``) gets the
-        project's open items and the last asks of recent sessions; every turn
-        gets earlier work that shares distinctive terms with ``query``.
-        """
-        cfg = self.long_term_memory_config
-        slog = self._session_log
-        if not cfg.recall_sessions or slog is None or slog.search_index is None:
-            return None
-        return await session_recall_safe(
-            slog.search_index,
-            self.resolve_auxiliary_model("intent_track"),
-            query=query,
-            work_dir=slog.cwd,
-            session_id=slog.session_id,
-            first_turn=not any(m.role == "user" for m in context),
-            context=context,
-            timeout=cfg.recall_timeout,
-        )
+        return (draft.render(picked_work) if draft else None), memory_block
 
     async def get_messages_for_run(
             self,
@@ -821,11 +821,12 @@ class PromptsMixin:
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
             prior = messages_for_model + user_messages[:-1]
             first_turn = not any(m.role == "user" for m in prior)
+            session_block, memory_block = await self._get_recall_blocks(recall_query, prior)
             blocks = [
                 b for b in (
                     self._get_git_snapshot_block() if first_turn else None,
-                    await self._get_session_recall_block(recall_query, prior),
-                    await self._get_memory_recall_block(recall_query, prior),
+                    session_block,
+                    memory_block,
                 ) if b
             ]
             if blocks:

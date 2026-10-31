@@ -597,12 +597,6 @@ class Workspace:
     _MEMORY_INJECT_MAX_LINES: int = 60
     _MEMORY_INJECT_MAX_BYTES: int = 4_000
 
-    # Injected after memory content to guard against stale references.
-    _MEMORY_DRIFT_DEFENSE: str = (
-        "Note: memories reflect the state at write time. "
-        "If a memory references a specific file path, function, or flag, "
-        "verify it still exists before recommending it."
-    )
     MAX_MEMORY_CHARACTER_COUNT: int = AGENTICA_MAX_MEMORY_CHARACTER_COUNT
     def user_agent_md_path(self) -> Path:
         """Return this user's own AGENTS.md — ``users/{user_id}/AGENTS.md``.
@@ -815,93 +809,6 @@ class Workspace:
         raw = (await async_read_text(path)).strip()
         body = redact_sensitive_text(strip_frontmatter(raw), level="memory") or ""
         return body, _frontmatter_value(raw, "origin_work_dir") or ""
-
-    async def get_relevant_memories(
-        self,
-        query: str = "",
-        limit: int = 5,
-        already_surfaced: Optional[set] = None,
-    ) -> str:
-        """Load MEMORY.md index, score entries against query, return top-k content.
-
-        Implements CC-style relevance-based recall instead of dumping all memory:
-        - Parses MEMORY.md as an index of entry links
-        - Scores each entry against the query with keyword overlap
-        - Loads only the top-k most relevant entry files
-        - Appends a drift-defense note to guard against stale references
-
-        Falls back to loading all entries when query is empty (same as before).
-
-        Args:
-            query: Current user query (used for relevance scoring)
-            limit: Maximum number of memory entries to return
-            already_surfaced: Set of filenames already shown this session (dedup)
-
-        Returns:
-            Formatted memory string ready for system prompt injection, or empty string.
-        """
-        self._initialize_user_dir()
-        index_path = self._get_user_memory_md()
-        memory_dir = self._get_user_memory_dir()
-
-        if not index_path.exists() and not memory_dir.exists():
-            return ""
-
-        # --- Parse MEMORY.md index ---
-        index_entries: List[Dict] = []
-        if index_path.exists():
-            index_content = (await async_read_text(index_path)).strip()
-            if index_content:
-                index_entries = self._parse_memory_index(index_content)
-
-        # --- If no structured index exists, fall back to listing memory dir files ---
-        if not index_entries and memory_dir.exists():
-            for f in sorted(memory_dir.glob("*.md"), reverse=True):
-                index_entries.append({
-                    "title": f.stem,
-                    "filename": f.name,
-                    "hook": f.stem.replace("_", " "),
-                })
-
-        if not index_entries:
-            return ""
-
-        # --- Filter already-surfaced entries (avoid repeating in same session) ---
-        if already_surfaced:
-            index_entries = [e for e in index_entries if e["filename"] not in already_surfaced]
-
-        if not index_entries:
-            return ""
-
-        # --- Score entries against query ---
-        if query.strip():
-            scored = self._score_memory_entries(query, index_entries)
-        else:
-            # No query: take the most recent entries (already sorted by recency from glob)
-            scored = index_entries[:limit]
-
-        top_entries = scored[:limit]
-
-        # --- Load file content for selected entries ---
-        parts = []
-        for entry in top_entries:
-            content_path = memory_dir / entry["filename"]
-            if content_path.exists():
-                raw = (await async_read_text(content_path)).strip()
-                # Strip frontmatter (---...---) before injecting
-                body = strip_frontmatter(raw)
-                if body:
-                    parts.append(f"### {entry['title']}\n\n{body}")
-                    # Write back to already_surfaced for session-level dedup
-                    if already_surfaced is not None:
-                        already_surfaced.add(entry["filename"])
-
-        if not parts:
-            return ""
-
-        result = "\n\n".join(parts)
-        result += f"\n\n*{self._MEMORY_DRIFT_DEFENSE}*"
-        return result
 
     # ── arch_v5.md §"Evidence Gate" ───────────────────────────────────
     # Sources allowed to write directly into the canonical memory folder.
@@ -1243,22 +1150,6 @@ class Workspace:
             ngram_hits = sum(1.0 for ng in char_bigrams if ng in text_lower)
             score += 0.5 * ngram_hits / len(char_bigrams)
         return score
-
-    def _score_memory_entries(self, query: str, entries: List[Dict]) -> List[Dict]:
-        """Score memory entries by token overlap with query.
-
-        Returns entries sorted by score descending. Entries with score=0 are
-        included at the end (ensures fallback when no token matches).
-        """
-        query_lower = query.lower()
-        scored = []
-        for entry in entries:
-            text = f"{entry['title']} {entry['hook']}".lower()
-            score = self.compute_relevance_score(query_lower, text)
-            scored.append({**entry, "_score": score})
-
-        scored.sort(key=lambda x: -x["_score"])
-        return scored
 
     async def write_memory(self, content: str, to_daily: bool = True):
         """Write memory content. Delegates to write_memory_entry() for indexed storage.

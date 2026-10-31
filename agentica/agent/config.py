@@ -138,10 +138,11 @@ class WorkspaceMemoryConfig:
     recall_timeout: float = 5.0
     # Per-turn recall of earlier sessions (<session_recall>): on a session's
     # first turn, the project's open items and the last asks of recent
-    # sessions; on every turn, earlier work sharing distinctive terms with the
-    # message. Reads the cross-session index only — no model call, except
-    # that the first turn may finish intent batches an exited session left
-    # queued (capped by recall_timeout). Needs a session log (session_id).
+    # sessions; on every turn, earlier work of any project that the
+    # "memory_recall" selector picks for the message (the same call that
+    # picks memories, so one side call per turn either way). The first turn
+    # may also finish intent batches an exited session left queued (capped by
+    # recall_timeout). Needs a session log (session_id).
     recall_sessions: bool = False
     # Keep a cross-session log of what the user asked for and where it ended
     # (open / done / dropped). One auxiliary call ("intent_track" task) per

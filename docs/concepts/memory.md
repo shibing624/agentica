@@ -70,9 +70,9 @@ Agent 会自动调用 `save_memory` 把它分类存进 `~/.agentica/workspace/us
 长期记忆只存事实，"做到一半的事"不进去。可新开一个会话时，最需要的恰恰是"上次停在哪"：「继续」「推一下」这种话本身没内容，指的就是上次没收尾的那件事。CLI、Web 和 `DeepAgent` 默认开启这两项：
 
 - **工作项（`track_intents`）**：每 3 轮由辅助模型（`intent_track` 任务）在后台把这几轮整理成工作项，包括你要做什么、做到哪（commit hash、文件、数字）、状态（`open` / `done` / `dropped`）和下一步。同一件事会更新已有条目，不会重复新建；你说"已经推了"，对应条目就改成 `done`。待整理的轮次先落盘，会话来不及整理就退出的，下一个会话在同一项目里的第一轮补上。
-- **会话召回（`recall_sessions`）**：每次发消息前，在你的消息前面拼一个 `<session_recall>` 块。这一步不调用模型，只查本地 SQLite 索引（`~/.agentica/projects/<user>/session_index.db`），真实数据上耗时约 60 ms。
+- **会话召回（`recall_sessions`）**：每次发消息前，在你的消息前面拼一个 `<session_recall>` 块。数据来自本地 SQLite 索引（`~/.agentica/projects/<user>/session_index.db`）。
   - 新会话的第一轮：本项目最近 14 天里 `open` 的工作项（最多 3 条），以及最近两个会话最后问的几句话。
-  - 每一轮：和这条消息有共同关键词的旧工作项和旧提问。其他项目的条目只在消息里提到那个项目目录名时才出现，在 A 仓库说"push"不会带出 B 仓库没推的改动。
+  - 每一轮：所有项目最近的工作项（最多 60 条，每条标明所属项目和状态）交给挑记忆的同一次辅助模型调用（`memory_recall` 任务），由模型判断哪些和这条消息有关，最多 3 条。不按关键词匹配：别的项目的工作只要和这条消息真的相关（接着做、依赖它的结果、遇到过同一个问题）就会带出来；在 A 仓库说"push"，不会因为同一个词带出 B 仓库没推的改动。选择调用失败或超时时这一栏为空，第一轮的两栏照常显示。
   - 每行都带标记（`[intent:12]`、`[q:996ba8f8]`）和会话 id。已经出现在上下文里的行不会再出现；用 `search_session(session_id=..., uuid=...)` 能取回原话，摘要不确定时回原始记录核对。超过两周没动的 `open` 条目标为 `stale`，不再列为待办。
 
 `search_session` 新增 `scope="project" | "all"` 参数，用来搜之前会话的提问和工作项；`query` 留空时列出本项目最近几个会话最后问的话。新增的 `session_id` 参数用来搜索或读取另一个会话的完整记录。
@@ -127,7 +127,7 @@ agent = Agent(
         load_workspace_context=True,   # 加载 AGENTS.md 常驻规则
         load_workspace_memory=True,    # 加载 MEMORY.md 记忆索引
         recall_memories=True,          # 每轮由辅助模型挑选相关记忆，正文拼在用户消息前（普通 Agent 默认关闭）
-        recall_sessions=True,          # 每轮拼 <session_recall>：未完成工作项 + 之前会话的相关提问（不调用模型）
+        recall_sessions=True,          # 每轮拼 <session_recall>：未完成工作项 + 模型挑出的相关工作项（与记忆挑选共用一次调用）
         track_intents=True,            # 后台整理跨会话工作项（open/done/dropped），每 intent_every_n_turns 轮一次
         max_memory_entries=5,          # 单轮最多召回条数
         auto_archive=True,             # 每轮结束后将原始对话归档到 conversations/YYYY-MM-DD.md（不调 LLM）

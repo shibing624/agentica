@@ -40,9 +40,18 @@ RULE_CONFLICT_PROMPT: str = _load("rule_conflict.md")
 INTENT_UPDATE_PROMPT: str = _load("intent_update.md")
 
 
-def get_memory_recall_select_prompt(limit: int) -> str:
-    """System prompt for the per-turn recall selection call."""
-    return _load("recall_select.md", limit=limit)
+def get_memory_recall_select_prompt(limit: int, work_limit: int = 0) -> str:
+    """System prompt for the per-turn recall selection call.
+
+    ``work_limit`` > 0 adds the earlier-work section and the ``work`` key.
+    """
+    if work_limit:
+        return _load(
+            "recall_select.md", limit=limit,
+            work_spec=_load("recall_select_work.md", work_limit=work_limit) + "\n\n",
+            output_spec='{"files": ["<filename>", ...], "work": [<id>, ...]}',
+        )
+    return _load("recall_select.md", limit=limit, work_spec="", output_spec='{"files": ["<filename>", ...]}')
 
 
 __all__ = [

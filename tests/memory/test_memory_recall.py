@@ -14,7 +14,7 @@ from agentica.memory.recall import (
     RECALL_MAX_CONSECUTIVE_FAILURES,
     SELECT_MAX_OUTPUT_TOKENS,
     RecallBreaker,
-    build_memory_recall,
+    build_recall,
     parse_selection,
     render_recall_block,
     surfaced_memory_files,
@@ -25,6 +25,12 @@ from agentica.model.response import ModelResponse
 from agentica.run.response import RunResponse
 from agentica.security.redact import redact_sensitive_text
 from agentica.workspace import Workspace
+
+
+async def build_fact_recall(*args, **kwargs):
+    """Fact recall alone: the memory block of :func:`build_recall`."""
+    block, _ = await build_recall(*args, **kwargs)
+    return block
 
 MEM_DIR = "/srv/ws/users/default/memory"
 
@@ -102,13 +108,20 @@ class TestWorkspaceMemoryRedaction(unittest.TestCase):
 class TestRecallHelpers(unittest.TestCase):
     def test_parse_selection_tells_failure_from_an_empty_choice(self):
         allowed = {"a.md", "b.md"}
-        self.assertEqual(parse_selection('{"files": ["b.md", "x.md", "a.md"]}', allowed, 5), ["b.md", "a.md"])
-        self.assertEqual(parse_selection('```json\n{"files": ["a.md"]}\n```', allowed, 5), ["a.md"])
-        self.assertEqual(parse_selection('{"files": []}', allowed, 5), [])
+        self.assertEqual(parse_selection('{"files": ["b.md", "x.md", "a.md"]}', allowed, 5).files, ["b.md", "a.md"])
+        self.assertEqual(parse_selection('```json\n{"files": ["a.md"]}\n```', allowed, 5).files, ["a.md"])
+        self.assertEqual(parse_selection('{"files": []}', allowed, 5).files, [])
         self.assertIsNone(parse_selection("a.md", allowed, 5))
         self.assertIsNone(parse_selection("", allowed, 5))
         self.assertIsNone(parse_selection('{"files": "a.md"}', allowed, 5))
-        self.assertEqual(parse_selection('{"files": ["a.md", "b.md"]}', allowed, 1), ["a.md"])
+        self.assertEqual(parse_selection('{"files": ["a.md", "b.md"]}', allowed, 1).files, ["a.md"])
+
+    def test_parse_selection_work_ids_only_from_what_was_offered(self):
+        picked = parse_selection('{"files": [], "work": [7, 99, 3, 7]}', set(), 5, {3, 7}, 3)
+        self.assertEqual(picked.work, [7, 3])
+        self.assertIsNone(parse_selection('{"files": []}', set(), 5, {3, 7}, 3),
+                          "work offered but no work list is not a selection")
+        self.assertEqual(parse_selection('{"files": []}', set(), 5).work, [])
 
     def test_surfaced_files_read_back_from_the_rendered_block(self):
         block = render_recall_block([("prefer uv", "user_prefer_uv.md", "Use uv.")], MEM_DIR)
@@ -174,7 +187,7 @@ class TestMemoryOrigin(unittest.TestCase):
             with patch.object(OpenAIChat, "response", new=AsyncMock(
                 return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'),
             )):
-                block = asyncio.run(build_memory_recall(
+                block = asyncio.run(build_fact_recall(
                     ws, _model(), "install deps", [], 5, 5.0, RecallBreaker(), "s1",
                 ))
         self.assertIn("Use uv.", block)
@@ -184,7 +197,7 @@ class TestBuildMemoryRecall(unittest.TestCase):
     def _run(self, ws, picked_json, context=()):
         model = _model()
         with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content=picked_json))) as m:
-            block = asyncio.run(build_memory_recall(
+            block = asyncio.run(build_fact_recall(
                 ws, model, "how do I install deps?", list(context), 5, 5.0, RecallBreaker(), "s1",
             ))
         return block, m
@@ -202,7 +215,7 @@ class TestBuildMemoryRecall(unittest.TestCase):
                 return ModelResponse(content='{"files": []}')
 
             with patch.object(OpenAIChat, "response", new=fake_response):
-                asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, RecallBreaker(), "s1"))
+                asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 5.0, RecallBreaker(), "s1"))
         self.assertEqual(seen["max_tokens"], SELECT_MAX_OUTPUT_TOKENS)
         self.assertIsNone(seen["tools"])
         self.assertNotEqual(model.max_tokens, SELECT_MAX_OUTPUT_TOKENS, "the agent's own model must keep its cap")
@@ -239,7 +252,7 @@ class TestBuildMemoryRecall(unittest.TestCase):
             asyncio.run(_seed(ws))
             model = _model()
             with patch.object(OpenAIChat, "response", new=AsyncMock(side_effect=ConnectionError("down"))):
-                block = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, RecallBreaker(), "s1"))
+                block = asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 5.0, RecallBreaker(), "s1"))
         self.assertIsNone(block)
 
     def test_breaker_skips_the_selector_after_three_consecutive_failures(self):
@@ -250,13 +263,13 @@ class TestBuildMemoryRecall(unittest.TestCase):
             failing = AsyncMock(side_effect=ConnectionError("down"))
             with patch.object(OpenAIChat, "response", new=failing):
                 for _ in range(5):
-                    asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
+                    asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
             self.assertEqual(failing.await_count, RECALL_MAX_CONSECUTIVE_FAILURES)
 
             ok = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
             with patch.object(OpenAIChat, "response", new=ok):
-                still_open = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
-                new_session = asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s2"))
+                still_open = asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
+                new_session = asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 5.0, breaker, "s2"))
         self.assertIsNone(still_open)
         self.assertIn("Use uv", new_session)
 
@@ -271,12 +284,12 @@ class TestBuildMemoryRecall(unittest.TestCase):
                 return ModelResponse(content='{"files": []}')
 
             with patch.object(OpenAIChat, "response", new=slow):
-                asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 0.05, breaker, "s1"))
+                asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 0.05, breaker, "s1"))
             with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content=""))):
-                asyncio.run(build_memory_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
+                asyncio.run(build_fact_recall(ws, model, "install?", [], 5, 5.0, breaker, "s1"))
             self.assertEqual(breaker.failures, 2)
             with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=ModelResponse(content='{"files": []}'))):
-                asyncio.run(build_memory_recall(ws, model, "17*23?", [], 5, 5.0, breaker, "s1"))
+                asyncio.run(build_fact_recall(ws, model, "17*23?", [], 5, 5.0, breaker, "s1"))
         self.assertEqual(breaker.failures, 0)
 
     def test_empty_store_makes_no_side_call(self):

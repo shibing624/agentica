@@ -204,33 +204,6 @@ class TestWorkspace:
                 break
         assert found
 
-    def test_get_memory_prompt(self, temp_workspace_path):
-        """Test getting relevant memories (replaces old get_memory_prompt)."""
-        workspace = Workspace(temp_workspace_path)
-        workspace.initialize()
-
-        # Write memories via write_memory_entry (structured, indexed)
-        asyncio.run(workspace.write_memory_entry(
-            title="Python preference",
-            content="User prefers concise Python code.",
-            memory_type="feedback",
-            description="python concise coding style",
-        ))
-        asyncio.run(workspace.write_memory_entry(
-            title="Daily note",
-            content="Worked on memory system refactor.",
-            memory_type="project",
-            description="memory system refactor project",
-        ))
-
-        # get_relevant_memories without query returns top entries
-        memory_prompt = asyncio.run(workspace.get_relevant_memories())
-        assert len(memory_prompt) > 0
-
-        # get_relevant_memories with a matching query returns relevant entry
-        memory_prompt_python = asyncio.run(workspace.get_relevant_memories(query="python coding"))
-        assert "Python preference" in memory_prompt_python or len(memory_prompt_python) > 0
-
     def test_freeze_snapshots_injects_memory_index_not_bodies(self, temp_workspace_path):
         """Session prompt gets MEMORY.md hooks, not topic-file bodies."""
         workspace = Workspace(temp_workspace_path)
