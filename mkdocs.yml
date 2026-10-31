@@ -69,6 +69,7 @@ nav:
       - 外部进程协议：Notify Sink: getting-started/notify-sink.md
       - 外部进程协议：Attach Socket: getting-started/attach.md
       - 依赖分层 RFC: rfcs/dependency-layering.md
+      - Personal Agent 路线 RFC: rfcs/personal-agent-roadmap.md
   - Changelog 存档: changelog-archive.md
 
 markdown_extensions:
