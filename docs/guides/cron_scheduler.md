@@ -167,7 +167,7 @@ curl -X POST http://localhost:8881/api/scheduler/jobs \
 
 请求体字段（`CronJobCreateRequest`）：`prompt`（必填）、`schedule`（必填，三种语法见第三节）、
 `name`、`timezone`（默认 `Asia/Shanghai`）、`deliver`（默认 `local`，预留字段）、
-`timeout_seconds`、`max_retries`、`retry_delay_ms`、`permissions`、`validate_run`。
+`timeout_seconds`、`max_retries`、`retry_delay_ms`、`permission_mode`、`validate_run`。
 
 > ⚠️ 关于 `deliver`：当前版本 `deliver` 仅作为任务元数据被持久化，调度器**不会**自动把
 > 运行结果推送到 IM 渠道。查看结果请走 Web UI / API 的运行历史，或让 Agent 在 `prompt`
@@ -178,4 +178,6 @@ curl -X POST http://localhost:8881/api/scheduler/jobs \
 ## 七、安全须知
 
 - 定时任务会**自动、无人值守地**让 agent 执行你写的 prompt，并消耗 token。请确认 prompt 的副作用可控。
+- 任务每次运行都使用**创建时会话的权限档位和工作目录**，不跟随宿主进程当下的 `/permissions`。通过 `cronjob` 工具创建时，模型只能把档位调得更严，不能比当前会话更宽。`permission_mode="ask"` 可以用来试跑：读和汇报照常进行，写文件、会改东西的命令和联网调用都会被拒绝（因为没人审批）。
+- 到点时如果工作目录已经不在了，任务会被暂停，不会运行，`paused_reason` 里写明原因。任务自己发现无法在无人值守的情况下继续时，也会带原因暂停自己。暂停的任务不重试；CLI 启动时和 `/cron list` 会显示暂停原因，`/cron resume <id>` 恢复后原因清空。
 - 删除任务需二次确认；开关状态会持久化到 `config.yaml`，重启后保持。

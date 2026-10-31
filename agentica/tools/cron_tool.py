@@ -11,6 +11,7 @@ Security: cron prompts are scanned for injection patterns before storage.
 import re
 from typing import Any, Callable, Optional
 
+from agentica.agent.permissions import PERMISSION_MODES, validate_permission_mode
 from agentica.tools.base import Tool
 from agentica.tools.decorators import tool
 from agentica.tools.helpers import tool_result
@@ -88,20 +89,27 @@ def _format_job(job: CronJob) -> dict:
         "max_retries": job.max_retries,
         "retry_count": job.retry_count,
         "retry_delay_ms": job.retry_delay_ms,
-        "permissions": job.permissions,
+        "permission_mode": job.permission_mode,
+        "work_dir": job.work_dir,
+        "paused_reason": job.paused_reason,
     }
 
 
 _CRONJOB_DESCRIPTION = """Manage the user's scheduled (cron) jobs with a single tool. Prefer this over editing cron files by hand.
 
 Actions:
-- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/timeout_seconds/max_retries.
+- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/timeout_seconds/max_retries/permission_mode.
 - action='list'    -> list all jobs with their id, schedule, status and next run time.
 - action='runs'    -> show recent execution history (optionally for one job_id) to see the effect of past runs.
 - action='update'  -> change an existing job's prompt/schedule/name/etc. Requires job_id.
-- action='pause' / 'resume' -> disable/enable an existing job. Requires job_id.
+- action='pause' / 'resume' -> disable/enable an existing job. Requires job_id. Pass reason when pausing
+                     a job because it cannot proceed unattended; the user is shown it.
 - action='remove'  -> delete a job. Requires job_id.
 - action='run'     -> execute a job ONCE right now and return its result (a trial run to verify it works). Requires job_id.
+
+A job runs every time under this session's permission tier and working directory, captured at create.
+permission_mode may only make it stricter: 'ask' gives a trial job that reads and reports but has every
+write, mutating command and network call denied (nobody is there to approve).
 
 Jobs run in a fresh session with no current-chat context, so the prompt must be fully self-contained.
 Results are kept locally only (see action='runs'); nothing is sent to chat channels, so deliver is
@@ -132,7 +140,9 @@ def _do_cronjob(
     timeout_seconds: Optional[float] = None,
     max_retries: Optional[int] = None,
     retry_delay_ms: Optional[int] = None,
-    permissions: Optional[dict[str, Any]] = None,
+    permission_mode: Optional[str] = None,
+    reason: Optional[str] = None,
+    mandate: Optional[tuple[str, Optional[str]]] = None,
 ) -> str:
     """Pure business implementation of the cronjob tool (no immediate-run path).
 
@@ -140,6 +150,10 @@ def _do_cronjob(
     module-level ``@tool``-decorated ``cronjob`` and ``CronTool.cronjob``
     delegate here, so neither depends on the decorator's ``__call__``
     transparency (which was a fragile implicit contract).
+
+    ``mandate`` is ``(permission_mode, work_dir)`` of the agent making the
+    call, or None when there is none (HTTP route, SDK call without an agent).
+    It is never a model-supplied value.
     """
     try:
         normalized = (action or "").strip().lower()
@@ -155,7 +169,8 @@ def _do_cronjob(
                 timeout_seconds,
                 max_retries,
                 retry_delay_ms,
-                permissions,
+                permission_mode,
+                mandate,
             )
         if normalized == "list":
             return _action_list(user_id)
@@ -171,7 +186,7 @@ def _do_cronjob(
         if normalized == "remove":
             return _action_remove(job_id, job)
         if normalized == "pause":
-            return _action_pause(job_id)
+            return _action_pause(job_id, reason)
         if normalized == "resume":
             return _action_resume(job_id)
         if normalized in {"run", "run_now", "trigger"}:
@@ -186,7 +201,8 @@ def _do_cronjob(
                 timeout_seconds,
                 max_retries,
                 retry_delay_ms,
-                permissions,
+                permission_mode,
+                mandate,
             )
 
         return _to_json({"success": False, "error": f"Unknown action '{action}'"})
@@ -208,7 +224,8 @@ def cronjob(
     timeout_seconds: Optional[float] = None,
     max_retries: Optional[int] = None,
     retry_delay_ms: Optional[int] = None,
-    permissions: Optional[dict[str, Any]] = None,
+    permission_mode: Optional[str] = None,
+    reason: Optional[str] = None,
 ) -> str:
     """Unified cron job management tool. See decorator description for actions."""
     return _do_cronjob(
@@ -223,8 +240,32 @@ def cronjob(
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
         retry_delay_ms=retry_delay_ms,
-        permissions=permissions,
+        permission_mode=permission_mode,
+        reason=reason,
     )
+
+
+def _resolve_job_mandate(
+    requested: Optional[str],
+    mandate: Optional[tuple[str, Optional[str]]],
+) -> tuple[str, Optional[str]]:
+    """The (permission_mode, work_dir) a job will run under.
+
+    The caller's tier is the ceiling: a job is a way to run later what this
+    session could run now, not a way to get more. ``requested`` may only lower
+    it. Without a calling agent there is no ceiling to hold the request to, so
+    the request (validated) stands on its own and work_dir stays unset.
+    """
+    caller_mode, work_dir = mandate if mandate is not None else ("", None)
+    if not requested:
+        return caller_mode, work_dir
+    validate_permission_mode(requested)
+    if caller_mode and PERMISSION_MODES.index(requested) > PERMISSION_MODES.index(caller_mode):
+        raise ValueError(
+            f"permission_mode={requested!r} is broader than this session's tier {caller_mode!r}; "
+            "a job may only run under the same tier or a stricter one."
+        )
+    return requested, work_dir
 
 
 def _action_create(
@@ -237,7 +278,8 @@ def _action_create(
     timeout_seconds: Optional[float],
     max_retries: Optional[int],
     retry_delay_ms: Optional[int],
-    permissions: Optional[dict[str, Any]],
+    permission_mode: Optional[str],
+    mandate: Optional[tuple[str, Optional[str]]],
 ) -> str:
     if not prompt:
         return _to_json({"success": False, "error": "prompt is required for create"})
@@ -249,6 +291,7 @@ def _action_create(
     if scan_error:
         return _to_json({"success": False, "error": scan_error})
 
+    job_mode, job_work_dir = _resolve_job_mandate(permission_mode, mandate)
     job = create_job(
         prompt=prompt,
         schedule=schedule,
@@ -259,7 +302,8 @@ def _action_create(
         timeout_seconds=timeout_seconds or 0.0,
         max_retries=max_retries or 0,
         retry_delay_ms=retry_delay_ms or 60000,
-        permissions=permissions,
+        permission_mode=job_mode,
+        work_dir=job_work_dir,
     )
     return _to_json({
         "success": True,
@@ -308,8 +352,8 @@ def _action_remove(job_id: str, job: CronJob) -> str:
     })
 
 
-def _action_pause(job_id: str) -> str:
-    updated = pause_job(job_id)
+def _action_pause(job_id: str, reason: Optional[str]) -> str:
+    updated = pause_job(job_id, reason=(reason or "").strip())
     if not updated:
         return _to_json({"success": False, "error": "Pause failed"})
     return _to_json({"success": True, "job": _format_job(updated)})
@@ -343,7 +387,8 @@ def _action_update(
     timeout_seconds: Optional[float],
     max_retries: Optional[int],
     retry_delay_ms: Optional[int],
-    permissions: Optional[dict[str, Any]],
+    permission_mode: Optional[str],
+    mandate: Optional[tuple[str, Optional[str]]],
 ) -> str:
     updates: dict = {}
     if prompt is not None:
@@ -361,8 +406,11 @@ def _action_update(
         updates["max_retries"] = max_retries
     if retry_delay_ms is not None:
         updates["retry_delay_ms"] = retry_delay_ms
-    if permissions is not None:
-        updates["permissions"] = permissions
+    if permission_mode is not None:
+        # Re-tiering is held to the editing session's ceiling, same as create.
+        # work_dir is not moved: an edit of the schedule or prompt from another
+        # directory must not silently relocate the job.
+        updates["permission_mode"], _ = _resolve_job_mandate(permission_mode, mandate)
     if schedule is not None:
         parsed = parse_schedule(schedule)
         updates["schedule"] = parsed.to_dict()
@@ -431,7 +479,9 @@ class CronTool(Tool):
         timeout_seconds: Optional[float] = None,
         max_retries: Optional[int] = None,
         retry_delay_ms: Optional[int] = None,
-        permissions: Optional[dict[str, Any]] = None,
+        permission_mode: Optional[str] = None,
+        reason: Optional[str] = None,
+        agent: Any = None,
     ) -> str:
         normalized = (action or "").strip().lower()
         if self._owner:
@@ -461,7 +511,12 @@ class CronTool(Tool):
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             retry_delay_ms=retry_delay_ms,
-            permissions=permissions,
+            permission_mode=permission_mode,
+            reason=reason,
+            # ``agent`` is injected by the runtime (FunctionCall._build_args),
+            # never part of the schema: the job's mandate is the calling
+            # session's tier and directory, not something the model names.
+            mandate=(agent.tool_config.permission_mode, agent.work_dir) if agent is not None else None,
         )
 
     def _run_now(self, job_id: str, job: CronJob) -> str:

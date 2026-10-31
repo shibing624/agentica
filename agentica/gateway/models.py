@@ -102,7 +102,7 @@ class CronJobCreateRequest(BaseModel):
     timeout_seconds: float = 0.0
     max_retries: int = 0
     retry_delay_ms: int = 60000
-    permissions: Optional[dict] = None
+    permission_mode: Optional[str] = None
     # When True, the job is triggered once immediately after creation so the
     # user can verify the prompt/schedule actually work before waiting for
     # the first scheduled tick.
@@ -157,7 +157,7 @@ class CronJobUpdateRequest(BaseModel):
     timeout_seconds: Optional[float] = None
     max_retries: Optional[int] = None
     retry_delay_ms: Optional[int] = None
-    permissions: Optional[dict] = None
+    permission_mode: Optional[str] = None
 
 
 class ModelSwitchRequest(BaseModel):
