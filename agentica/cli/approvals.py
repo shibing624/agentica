@@ -369,6 +369,27 @@ def _offer_approval_to_hook(
         logger.debug(f"shell hooks: approval offer failed: {exc}")
 
 
+def _check_approval_idle(state: Any, req: Any, loop: Any, ui_holder: dict) -> None:
+    """Once a second on the agent loop: expire the card after keyboard silence.
+
+    Idle, not wall-clock: a keypress restarts the clock, so a user reading the
+    card is not cut off. Near the end the repaint keeps the countdown live.
+    """
+    from agentica.cli.interactive.tui import IDLE_COUNTDOWN_SECONDS
+
+    if req.resolved:
+        return
+    remaining = req.idle_remaining()
+    if remaining <= 0:
+        _expire_approval(state, req, req.idle_timeout, ui_holder)
+        return
+    if remaining <= IDLE_COUNTDOWN_SECONDS:
+        app = ui_holder.get("app")
+        if app is not None:
+            app.invalidate()
+    loop.call_later(1.0, _check_approval_idle, state, req, loop, ui_holder)
+
+
 def _expire_approval(state: Any, req: Any, timeout_s: float, ui_holder: dict) -> None:
     """Close an approval card nobody answered. Runs on the agent loop.
 
@@ -487,7 +508,9 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         _offer_approval_to_hook(pending, state, loop, req, ui_holder)
         timeout_s = human_wait_timeout()
         if timeout_s > 0:
-            loop.call_later(timeout_s, _expire_approval, state, req, timeout_s, ui_holder)
+            req.idle_timeout = timeout_s
+            req.touch()
+            loop.call_later(1.0, _check_approval_idle, state, req, loop, ui_holder)
 
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",

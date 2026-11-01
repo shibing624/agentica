@@ -121,7 +121,7 @@ from .stream_loop import (
     _seed_context_tokens,
     _status_thinking_mode,
 )
-from .tui import _setup_tui
+from .tui import IDLE_COUNTDOWN_SECONDS, _setup_tui
 
 # ==================== Main entry ====================
 
@@ -298,14 +298,13 @@ def run_interactive(
             armed_during_run = state_ref.agent_running
         app_ref.invalidate()
 
-        # An agent's question gives up after the configured wait. A slash
-        # command's prompt is the user's own action in progress, so it never
-        # expires.
+        # An agent's question gives up after the configured stretch of keyboard
+        # silence (any key restarts it). A slash command's prompt is the user's
+        # own action in progress, so it never expires.
         timeout_s = human_wait_timeout()
-        deadline = (
-            time.monotonic() + timeout_s
-            if armed_during_run and timeout_s > 0 else None
-        )
+        if armed_during_run and timeout_s > 0:
+            req.idle_timeout = timeout_s
+            req.touch()
 
         # Offer the same question to the user's hook command, if one is
         # configured. Armed *after* the slot above, deliberately: the widget only
@@ -342,7 +341,8 @@ def run_interactive(
                         logger.info("[ask] watchdog: run ended, aborting prompt")
                         answer = _InputRequest.CANCELLED
                         break
-                    if deadline is not None and time.monotonic() >= deadline:
+                    remaining = req.idle_remaining()
+                    if remaining is not None and remaining <= 0:
                         # Resolve the slot first: a line typed this very moment
                         # either wins (and is used) or is dropped, never both.
                         if req.cancel():
@@ -350,6 +350,8 @@ def run_interactive(
                             break
                         answer = req.result.get_nowait()
                         break
+                    if remaining is not None and remaining <= IDLE_COUNTDOWN_SECONDS:
+                        app_ref.invalidate()  # repaint the countdown
                     if state_ref.input_request is not req:
                         logger.info("[ask] watchdog: re-arming after overwrite")
                         state_ref.input_request = req

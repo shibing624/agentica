@@ -235,6 +235,18 @@ class _CleanResizeApplication(Application):
 # an answer is pending. So this prompt is the one place the hint is true.
 _ASK_KEY_HINT = "    Enter to answer · Ctrl+C to cancel · Ctrl+\\ if frozen"
 
+# The idle countdown is shown only for its last stretch: a clock ticking for
+# five minutes is noise, the last 20 seconds are a warning.
+IDLE_COUNTDOWN_SECONDS = 20
+
+
+def _idle_countdown_line(req) -> str:
+    remaining = req.idle_remaining()
+    if remaining is None or remaining > IDLE_COUNTDOWN_SECONDS:
+        return ""
+    action = "skipping this call" if req.kind == "approval" else "continuing without an answer"
+    return f"    {action} in {max(0, int(remaining + 0.999))}s · any key to stay"
+
 # Claude Code confirms Ctrl+D inside this window (its double-press helper
 # defaults to 800ms). One press is the terminal's EOF and fires by accident;
 # the second press inside the window is the exit. The hint lives in
@@ -301,12 +313,20 @@ def _input_prompt_fragments(req) -> list[tuple[str, str]]:
     """
     text = _ask_prompt_text(req)
     if req.kind == "approval":
-        return [("class:input-prompt", text)]
+        frags = [("class:input-prompt", text)]
+        countdown = _idle_countdown_line(req)
+        if countdown:
+            frags.append(("class:hint", f"\n{countdown}"))
+        return frags
     body, _, hint = text.rpartition("\n")
-    return [
+    frags = [
         ("class:input-prompt", body),
         ("class:hint", f"\n{hint}"),
     ]
+    countdown = _idle_countdown_line(req)
+    if countdown:
+        frags.append(("class:hint", f"\n{countdown}"))
+    return frags
 
 
 def _count_input_visual_rows(
@@ -1110,6 +1130,15 @@ def _setup_tui(
     # Attached so _on_resize can flip the collapse flag and schedule the
     # debounce timer without needing to override __init__.
     app.tui_state = tui_state
+
+    # Any key while a question or approval card is up means someone is there:
+    # restart its idle clock.
+    def _note_activity(_event) -> None:
+        req = state.input_request
+        if req is not None:
+            req.touch()
+
+    app.key_processor.before_key_press += _note_activity
 
     return app
 

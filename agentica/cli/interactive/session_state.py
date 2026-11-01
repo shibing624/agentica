@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional
 
@@ -45,6 +46,20 @@ class _InputRequest:
     approval_pending: Any = None
     hook_request_id: Optional[str] = None
     resolved_by: Optional[str] = None
+    # Seconds of keyboard silence after which nobody is taken to be there.
+    # None waits forever. Any keypress restarts the clock (``touch``), so a
+    # user who is reading or typing an answer is never cut off.
+    idle_timeout: Optional[float] = None
+    last_activity: float = field(default_factory=time.monotonic)
+
+    def touch(self) -> None:
+        self.last_activity = time.monotonic()
+
+    def idle_remaining(self) -> Optional[float]:
+        """Seconds until the idle timeout fires; None when there is none."""
+        if self.idle_timeout is None:
+            return None
+        return self.idle_timeout - (time.monotonic() - self.last_activity)
 
     def submit(self, answer: str, *, source: str = "terminal") -> bool:
         """Deliver the user's answer exactly once.

@@ -391,7 +391,7 @@ class TestApprovalTimeout:
         task = asyncio.create_task(approve(fc))
         req = await self._wait_for_prompt(state)
 
-        assert await asyncio.wait_for(task, 2.0) == "deny"
+        assert await asyncio.wait_for(task, 5.0) == "deny"
         assert fc.denied_result is not None
         assert fc.denied_result != DENIED_TOOL_RESULT
         assert "nobody answered the approval prompt within 0s" in fc.denied_result
@@ -407,7 +407,7 @@ class TestApprovalTimeout:
         import agentica.cli.approvals as cli_approvals
         from agentica.cli.approvals import complete_approval
 
-        monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0.2)
+        monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0.5)
         state = SessionState()
         state.current_agent = _agent()
         approve = build_interactive_approve(state, {})
@@ -416,7 +416,7 @@ class TestApprovalTimeout:
         req = await self._wait_for_prompt(state)
         assert complete_approval(state, "allow")
         assert await asyncio.wait_for(task, 2.0) == "allow"
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(1.2)
         assert state.approval_registry.pop_expired("t2") is None
         assert fc.denied_result is None
 
@@ -453,3 +453,50 @@ class TestApprovalTimeout:
         state.approval_registry.decide("t4", "allow")
         assert await asyncio.wait_for(task, 2.0) == "allow"
         assert fc.denied_result is None
+
+
+class TestIdleCountdown:
+    def test_keypress_restarts_the_idle_clock(self):
+        req = _InputRequest(prompt="q", idle_timeout=300)
+        req.last_activity -= 290
+        assert req.idle_remaining() < 11
+        req.touch()
+        assert req.idle_remaining() > 299
+
+    def test_no_timeout_means_no_clock(self):
+        assert _InputRequest(prompt="q").idle_remaining() is None
+
+    def test_countdown_appears_only_in_the_last_stretch(self):
+        from agentica.cli.interactive.tui import IDLE_COUNTDOWN_SECONDS
+
+        req = _InputRequest(prompt="Pick one", options=["A", "B"], idle_timeout=300)
+        blob = "".join(t for _, t in _input_prompt_fragments(req))
+        assert "any key to stay" not in blob
+        req.last_activity -= 300 - IDLE_COUNTDOWN_SECONDS + 5
+        blob = "".join(t for _, t in _input_prompt_fragments(req))
+        assert blob.endswith("continuing without an answer in 15s · any key to stay")
+
+    def test_approval_card_countdown_says_the_call_is_skipped(self):
+        req = _InputRequest(prompt="Run it?", kind="approval", idle_timeout=300)
+        req.last_activity -= 295
+        blob = "".join(t for _, t in _input_prompt_fragments(req))
+        assert blob.startswith("Run it?")
+        assert blob.endswith("skipping this call in 5s · any key to stay")
+
+
+def test_a_keypress_in_the_tui_restarts_the_pending_requests_clock(tmp_path):
+    from unittest.mock import patch
+
+    from agentica.cli.commands.context import PendingQueue
+    from agentica.cli.interactive.tui import _setup_tui
+
+    state = SessionState()
+    with patch("agentica.cli.interactive.tui.history_file",
+               return_value=str(tmp_path / "history")):
+        app = _setup_tui(state, skills_registry=None, tui_state={},
+                         pending_queue=PendingQueue(), image_counter_ref=[0])
+    req = _InputRequest(prompt="q", idle_timeout=300)
+    req.last_activity -= 290
+    state.input_request = req
+    app.key_processor.before_key_press.fire()
+    assert req.idle_remaining() > 299

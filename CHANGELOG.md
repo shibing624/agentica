@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### changes
 - **CLI 等人默认最多 5 分钟：提问没人答时，可逆的选择按推荐继续；审批卡没人答时，那一步不执行**：
   - **为什么。** 曾有一次 `ask_user_question` 挂了 6522 秒（约 1.8 小时），整个 turn 什么都没做。权限审批卡（`ApprovalRegistry.wait`）也一样没有截止时间，长程任务半夜弹一张卡，就会卡到天亮。
-  - **一个配置管两处。** `settings.human_wait_timeout`，默认 300 秒，`0` 表示一直等。斜杠命令（`/resume`、`/cron` 等）里的提问是用户自己在操作，不会超时。
+  - **一个配置管两处，按键盘空闲计时。** `settings.human_wait_timeout`，默认 300 秒，`0` 表示一直等。计时从最后一次按键算起（prompt_toolkit 的 `before_key_press`），用户正在看或正在打字时不会被截断。剩最后 20 秒时，提示框下方出现 `continuing without an answer in Ns · any key to stay`（审批卡上是 `skipping this call in Ns`），按任意键重新计时。斜杠命令（`/resume`、`/cron` 等）里的提问是用户自己在操作，不会超时。做法参考了 Claude Code 的 `askUserQuestionTimeout`（空闲计时加 20 秒倒计时）和 `dialogExpiry`（审批超时走不执行的安全默认）；Claude Code 在 auto 模式下另有一个分类器，拦截模型本可以自己决定的提问，这里没有照搬，而是靠工具说明和 AGENTS.md 让模型少问。
   - **提问超时：沉默不等于同意。** 工具返回 `{"timed_out": true, "response": "", "note": ...}`，不替用户编答案。`note` 交给模型自己判断：如果是本地、可逆的选择，按自己标了推荐的选项继续，并在回复里写明选了哪个；如果涉及难以撤销或机器外可见的动作（push、部署、发消息、删除），这一步不做，其余工作做完，在回复里列为待用户处理。工具说明同时要求：能给出推荐的歧义直接按推荐做；不要用这个工具去问「能不能跑这个命令 / 改这个文件」，那是权限系统的事。
   - **审批超时：不执行，也不算用户拒绝。** 这次调用不执行，不写入 deny-similar 规则。模型收到的不是 `Tool call denied by user.`，而是「没人回答审批，这既不是拒绝也不是同意；不要重试，也不要换个办法达到同样效果；把其余工作做完，并把这一步列为待用户处理」。transcript 里显示 `✗ not run (no answer within 300s)`，session log 的 `approval_decision` 带 `reason="timeout"`，hook 的 `needs.resolved` 带 `decided_by="timeout"`。超时与按键或 hook 应答同时发生时，以 `_InputRequest.submit` 先成功的一方为准。
   - **`/goal` 不再因为歧义暂停。** `update_goal` 的说明、`goal_continuation.md` 和 `goal_judge.md` 都去掉了「需求有歧义就暂停 / 判为完成」：选最合理的方案继续，把假设写进最终答复。只有剩下的每一步都需要只有用户能给的东西（凭据、权限、对不可逆操作的批准）时，才 `paused`。

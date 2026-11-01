@@ -49,7 +49,8 @@ TIMED_OUT_NOTE = (
     "that stays local and reversible, go on with your recommended option and "
     "say what you chose. If it was about something hard to undo or visible "
     "outside this machine (push, deploy, send, delete), do not do that step: "
-    "finish the rest and list it in your reply as waiting for the user."
+    "finish the rest and list it in your reply as waiting for the user. You "
+    "may ask again later if the question still matters."
 )
 
 
