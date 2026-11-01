@@ -498,8 +498,11 @@ def test_waiting_line_shows_how_long_the_prompt_has_waited():
     from agentica.cli.interactive.session_state import _InputRequest
     from agentica.cli.interactive.stream_loop import _waiting_for_input_text
 
-    req = _InputRequest(prompt="q")
-    req.created_at -= 65
-    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (1m5s)"
+    req = _InputRequest(prompt="q", idle_timeout=300)
+    req.created_at -= 11
+    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (11s/5m)"
+    req.created_at -= 50  # 61s total: 1m1s, no zero-padding
+    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (1m1s/5m)"
     req.touch()  # a keypress resets the idle clock, not the waited time
-    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (1m5s)"
+    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (1m1s/5m)"
+    assert _waiting_for_input_text(_InputRequest(prompt="q")) == "⏸  waiting for your answer… (0s)"

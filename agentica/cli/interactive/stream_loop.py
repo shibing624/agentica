@@ -109,8 +109,11 @@ def _fmt_phase_elapsed(elapsed: float) -> str:
 
 
 def _waiting_for_input_text(req) -> str:
-    """``⏸  waiting for your answer… (1m05s)`` — how long this prompt has waited."""
-    return f"{_WAITING_FOR_INPUT_TEXT} ({_fmt_phase_elapsed(time.monotonic() - req.created_at)})"
+    """``⏸  waiting for your answer… (11s/5m)`` — how long this prompt has waited."""
+    waited = _fmt_phase_elapsed(time.monotonic() - req.created_at)
+    if req.idle_timeout is not None and req.idle_timeout > 0:
+        return f"{_WAITING_FOR_INPUT_TEXT} ({waited}/{_fmt_phase_elapsed(req.idle_timeout)})"
+    return f"{_WAITING_FOR_INPUT_TEXT} ({waited})"
 
 
 def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) -> str:
