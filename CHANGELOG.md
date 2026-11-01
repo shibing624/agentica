@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **`ask_user_question` 默认等 5 分钟，没人回答就按推荐项继续**：交互式 CLI 里，agent 发起的问题超过 `settings.ask_user_question_timeout`（默认 300 秒，设为 `0` 表示一直等）没人回答，问题就会从屏幕上撤掉，工具返回 `{"timed_out": true, "response": "", "waited_seconds": N}`。工具层不会替用户填答案。system prompt 告诉模型，遇到 `timed_out` 就按自己标了推荐的那个选项继续，并在回复里写明选了哪个；同时要求只在没有合理默认、或者操作不可逆时才发问，其余情况先做，做完再告诉用户。transcript 里这一条显示为 `(no answer within 300s — agent proceeds with its recommendation)`。超时的瞬间如果用户正好提交了回答，以已提交的回答为准，不会两边各算一次。slash command（`/resume`、`/cron` 等）的提问是用户自己在操作，不会超时。hook 收到的 `needs.resolved` 事件里，超时对应 `decided_by="timeout"`。这样改的原因：曾有一次提问挂了 6522 秒（约 1.8 小时），这段时间整个 turn 什么也没做。
 - **新增 `UserPromptSubmit` hook：外部记忆库可以给每轮消息补充上下文，协议与 Claude Code 完全一致**：
   - **为什么是这份协议。** Claude Code、Codex、CodeBuddy 用的是同一套 `UserPromptSubmit`：stdin 是 `{hook_event_name, session_id, cwd, transcript_path, prompt}`，stdout 是 `hookSpecificOutput.additionalContext`（或纯文本），退出码 `2` 表示拒绝并可用 stderr 给出原因。照这个形状实现，为其中任何一家写的 hook 脚本在 agentica 上不用改就能跑；自己发明一套（比如按 agentica 内部事件名命名的 `prompt.submit`）会让每个外部记忆库为每个宿主各写一份。
   - **与内置记忆并存。** `get_messages_for_run` 里内置的 `<memory_recall>` / `<session_recall>` 与 hook 并发执行（`asyncio.gather`），hook 的上下文排在内置块之后、用户问题之前。hook 失败、超时或没有订阅者时只是这一段为空，内置召回不受影响；反过来也一样。
