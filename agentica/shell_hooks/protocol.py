@@ -84,7 +84,7 @@ def parse_reply(
     """
     if not isinstance(stdout, str) or not stdout.strip():
         return None
-    body = _first_json_document(stdout)
+    body = first_json_document(stdout)
     if not isinstance(body, dict):
         # Includes malformed output and JSON that is not an object.
         return None
@@ -103,19 +103,15 @@ def parse_reply(
             return {"answer": answer}
         return None
 
-    if event == "prompt.submit":
-        context = body.get("additional_context")
-        if isinstance(context, str) and context.strip():
-            return {"additional_context": context.strip()}
-        return None
-
     # A reply to a notice is meaningless; treat it as no reply.
     return None
 
 
-def _first_json_document(text: str) -> Any:
+def first_json_document(text: Optional[str]) -> Any:
     """Parse the leading JSON document, ignoring anything after it."""
-    stripped = text.strip()
+    stripped = (text or "").strip()
+    if not stripped:
+        return None
     try:
         return json.loads(stripped)
     except ValueError:

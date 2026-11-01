@@ -68,12 +68,15 @@ class HookProcess:
         payload: Dict[str, object],
         *,
         env: Optional[Dict[str, str]] = None,
+        capture_stderr: bool = False,
     ):
         self._command: List[str] = list(command)
         self._payload = payload
         self._env = env
+        self._capture_stderr = capture_stderr
         self._proc: Optional[subprocess.Popen] = None
         self._stdout = ""
+        self._stderr = ""
         self._done = threading.Event()
         self._killed = False
         self._completed_at: Optional[float] = None
@@ -90,6 +93,11 @@ class HookProcess:
     def stdout(self) -> Optional[str]:
         """Whatever the consumer printed, once the reader has finished."""
         return self._stdout or None
+
+    @property
+    def stderr(self) -> str:
+        """stderr, when captured: the refusal reason of a prompt hook."""
+        return self._stderr
 
     @property
     def finished(self) -> bool:
@@ -111,6 +119,23 @@ class HookProcess:
         """
         return self._proc.poll() if self._proc is not None else None
 
+    def exit_code(self, timeout: Optional[float] = None) -> Optional[int]:
+        """Wait up to ``timeout`` for the child to exit; None if it has not."""
+        if self._proc is None:
+            return None
+        try:
+            code = self._proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+        if self._capture_stderr and self._proc.stderr is not None and not self._stderr:
+            try:
+                self._stderr = self._proc.stderr.read(MAX_OUTPUT_BYTES).decode(
+                    "utf-8", errors="replace"
+                )
+            except (OSError, ValueError):
+                pass
+        return code
+
     def start(self) -> bool:
         """Spawn and feed stdin. False means the hook could not be run at all.
 
@@ -129,7 +154,7 @@ class HookProcess:
                 self._command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE if self._capture_stderr else subprocess.DEVNULL,
                 start_new_session=True,
                 env=env,
             )
@@ -202,6 +227,8 @@ class HookProcess:
         try:
             if self._proc is not None and self._proc.stdout is not None:
                 self._proc.stdout.close()
+            if self._proc is not None and self._proc.stderr is not None:
+                self._proc.stderr.close()
         except Exception:  # closing an already-closed pipe
             pass
 

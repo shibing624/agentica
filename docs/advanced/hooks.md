@@ -86,22 +86,25 @@ result = await agent.run("Hello", config=RunConfig(hooks=hooks))
 | `on_tool_start` | 工具执行前 | `agent, tool_name, tool_call_id, tool_args` |
 | `on_tool_end` | 工具执行后 | `agent, tool_name, tool_call_id, tool_args, result, is_error, elapsed` |
 | `on_agent_transfer` | Agent 委派转移 | `from_agent, to_agent` |
-| `on_user_prompt` | 用户输入处理前 | `agent, message` -> 返回修改后的 message 或 None |
+| `on_user_prompt` | 每轮用户消息拼装前 | `agent, message` -> 返回要追加的上下文，或 None |
 | `on_pre_compact` | 上下文压缩前 | `agent, messages` |
 | `on_post_compact` | 上下文压缩后 | `agent, messages` |
 
 ### on_user_prompt
 
-在用户输入被处理之前拦截和修改：
+在用户消息拼装前返回一段上下文（外部记忆、RAG、策略说明），它被放在用户问题之前，
+与内置的记忆召回并发、互不替代。用户原话不会被改写；要拒绝一条消息，用输入 guardrail。
+多个 hook 的返回按顺序拼接，每个看到的都是原始 message。
 
 ```python
-class InputPreprocessor(RunHooks):
+class ExternalMemory(RunHooks):
     async def on_user_prompt(self, agent, message, **kwargs):
-        # 返回修改后的消息，或 None 保持不变
-        if "秘密" in message:
-            return message.replace("秘密", "[REDACTED]")
-        return None
+        hits = await my_store.search(message)
+        return "\n".join(hits) or None
 ```
+
+它是 shell hook `UserPromptSubmit`（与 Claude Code 同一份协议，见
+[Shell Hooks](../getting-started/shell-hooks.md)）的进程内形式。
 
 ### on_pre_compact / on_post_compact
 

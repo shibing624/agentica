@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **新增 `UserPromptSubmit` hook：外部记忆库可以给每轮消息补充上下文，协议与 Claude Code 完全一致**：
+  - **为什么是这份协议。** Claude Code、Codex、CodeBuddy 用的是同一套 `UserPromptSubmit`：stdin 是 `{hook_event_name, session_id, cwd, transcript_path, prompt}`，stdout 是 `hookSpecificOutput.additionalContext`（或纯文本），退出码 `2` 表示拒绝并可用 stderr 给出原因。照这个形状实现，为其中任何一家写的 hook 脚本在 agentica 上不用改就能跑；自己发明一套（比如按 agentica 内部事件名命名的 `prompt.submit`）会让每个外部记忆库为每个宿主各写一份。
+  - **与内置记忆并存。** `get_messages_for_run` 里内置的 `<memory_recall>` / `<session_recall>` 与 hook 并发执行（`asyncio.gather`），hook 的上下文排在内置块之后、用户问题之前。hook 失败、超时或没有订阅者时只是这一段为空，内置召回不受影响；反过来也一样。
+  - **进程内形态。** `RunHooks.on_user_prompt` 从「返回改写后的 message」改为「返回要追加的上下文」，多个 hook 的返回按顺序拼接，每个看到的都是原始 message。改写消息这条语义随之删除：要拒绝一条消息，用输入 guardrail（`PromptBlocked` 就是 `InputGuardrailTripwireTriggered`，被拒的一轮不调用模型，CLI 显示为 `Prompt blocked by UserPromptSubmit`，不按运行失败处理）。
+  - **必须显式订阅。** `events: {UserPromptSubmit: true}`。这一轮要等它（上限 `recall_timeout`，默认 5 秒，超时的消费者被杀掉），已有的桌面通知类消费者不该因为升级被拉进每轮的等待里。
 - **修掉 5b2981fd..HEAD review 里指出的几处边角问题**：历史回放统一丢弃 `Message.images` / `audio` / `videos` 附件字段，只保留文字内容，避免 `analyze_image`、浏览器截图、SDK/Gateway 上传图在后续轮次被重复编码发送；CLI 那个只处理显式上传图片的局部清理已删除。`examples/memory/04_long_term_memory.py` / `05_auto_memory.py` 不再调用已经删除的 `Workspace.get_relevant_memories()`。Gateway cron 任务把 `permission_mode` / `work_dir` 清空时，现在会清掉该 job session 之前的覆盖值，避免继续沿用旧档位或旧目录。`session_recall.selector_line` 把 open intent 的 `next_step` 也交给 selector。cron 运行用量展示测试关闭 rich 颜色和高亮，避免 ANSI 拆字导致断言误判。
 - **记忆召回 selector 的 prompt 模板改为 import 时加载**：`recall_select.md` / `recall_select_work.md` 和其它 memory prompt 一样在 `agentica.prompts.memory` import 时读入常量，`get_memory_recall_select_prompt()` 每轮只做 `.format()`，不再重新读磁盘。这样长驻 CLI 进程不会在开发期把旧 Python 代码和新磁盘模板混用，也少了每轮两次无意义的模板 I/O。
 - **定时任务按创建时的权限档位和工作目录运行；目录失效或任务自己卡住时带原因暂停，不再重试**：

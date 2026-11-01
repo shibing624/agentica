@@ -26,7 +26,7 @@ from agentica.prompts.base.soul import get_soul_prompt
 from agentica.prompts.builder import PromptBuilder
 from agentica.run.input import build_user_message_from_sequence
 from agentica.run.response import RunResponseExtraData
-from agentica.shell_hooks.requests import request_prompt_context
+from agentica.shell_hooks.prompt import collect_prompt_context
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
@@ -722,6 +722,42 @@ class PromptsMixin:
         )
         return (draft.render(picked_work) if draft else None), memory_block
 
+    async def _get_prompt_hook_block(self, query: str) -> Optional[str]:
+        """Context ``UserPromptSubmit`` adds: in-process hooks, then shell hooks.
+
+        Both are the same contract on two transports (Python ``RunHooks`` and
+        Claude Code's command wire), and both add beside built-in recall.
+        ``PromptBlocked`` from a shell hook propagates: refusing the prompt is
+        the one thing a consumer here may decide.
+        """
+        timeout = self.long_term_memory_config.recall_timeout or None
+        slog = self._session_log
+        shell = asyncio.to_thread(
+            collect_prompt_context,
+            query,
+            session_id=self.session_id,
+            work_dir=self.work_dir,
+            transcript_path=str(slog.path) if slog is not None else None,
+            timeout=timeout,
+        )
+        parts: List[str] = []
+        run_hooks = self._run_hooks
+        if run_hooks is not None:
+            try:
+                local = await asyncio.wait_for(
+                    self._runner._dispatch_user_prompt_hook(query), timeout
+                )
+            except Exception as exc:
+                # A broken in-process provider costs this turn its context only.
+                logger.warning(f"on_user_prompt hook error: {exc}")
+                local = None
+            if local:
+                parts.append(local)
+        external = await shell
+        if external:
+            parts.append(external)
+        return "\n\n".join(parts) or None
+
     async def get_messages_for_run(
             self,
             *,
@@ -822,17 +858,11 @@ class PromptsMixin:
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
             prior = messages_for_model + user_messages[:-1]
             first_turn = not any(m.role == "user" for m in prior)
-            # Built-in recall and any ``prompt.submit`` hook (an external memory
-            # store) run side by side; each contributes its own block.
+            # Built-in recall and the UserPromptSubmit hooks run side by side;
+            # each adds its own block, neither replaces the other.
             (session_block, memory_block), hook_block = await asyncio.gather(
                 self._get_recall_blocks(recall_query, prior),
-                asyncio.to_thread(
-                    request_prompt_context,
-                    recall_query,
-                    session_id=self.session_id,
-                    work_dir=self.work_dir,
-                    timeout=self.long_term_memory_config.recall_timeout,
-                ),
+                self._get_prompt_hook_block(recall_query),
             )
             blocks = [
                 b for b in (

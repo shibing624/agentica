@@ -70,7 +70,7 @@ class TestCommandIsArgv:
 
 
 class TestEvents:
-    def test_all_events_but_opt_in_ones_default_on(self):
+    def test_every_event_but_the_opt_in_ones_defaults_on(self):
         consumer = HookConsumer(name="desktop", command=["/hook"])
         assert set(consumer.events) == set(SHELL_HOOK_EVENTS)
         for event in SHELL_HOOK_EVENTS:

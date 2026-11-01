@@ -183,10 +183,12 @@ class RunHooks:
         message: str,
         **kwargs,
     ) -> Optional[str]:
-        """Called before a user prompt is processed.
+        """Context to add to this turn's user message, or None.
 
-        Return a modified message string to replace the original, or None to
-        keep it unchanged.  Mirrors CC's UserPromptSubmit hook.
+        The in-process form of the ``UserPromptSubmit`` hook: an external memory
+        store, a RAG index or a policy note returns text, and it is placed before
+        the user's question next to agentica's own recall. The message itself is
+        never rewritten; to refuse a prompt, use an input guardrail.
         """
         return None
 
@@ -1797,16 +1799,15 @@ class _CompositeRunHooks(RunHooks):
             )
 
     async def on_user_prompt(self, agent: Any, message: str, **kwargs) -> Optional[str]:
-        result = None
+        parts: List[str] = []
         for h in self._hooks_list:
             r = await self._dispatch(
                 h, "on_user_prompt",
                 h.on_user_prompt(agent=agent, message=message, **kwargs),
             )
-            if r is not None:
-                result = r
-                message = r  # chain: next hook sees the modified message
-        return result
+            if isinstance(r, str) and r.strip():
+                parts.append(r.strip())
+        return "\n\n".join(parts) or None
 
     async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
         for h in self._hooks_list:

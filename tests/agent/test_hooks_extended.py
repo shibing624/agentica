@@ -14,21 +14,13 @@ from agentica.agent.hooks import (
 
 
 class TestRunHooksOnUserPrompt(unittest.TestCase):
-    """on_user_prompt: returns modified message or None."""
+    """on_user_prompt: context to add to the turn, or None."""
 
     def test_default_returns_none(self):
         hooks = RunHooks()
         result = asyncio.run(hooks.on_user_prompt(agent=MagicMock(), message="hello"))
         self.assertIsNone(result)
 
-    def test_subclass_modifies_message(self):
-        class UpperHooks(RunHooks):
-            async def on_user_prompt(self, agent, message, **kwargs):
-                return message.upper()
-
-        hooks = UpperHooks()
-        result = asyncio.run(hooks.on_user_prompt(agent=MagicMock(), message="hello"))
-        self.assertEqual(result, "HELLO")
 
 
 class TestRunHooksCompactCallbacks(unittest.TestCase):
@@ -67,44 +59,38 @@ class TestRunHooksCompactCallbacks(unittest.TestCase):
 
 
 class TestCompositeRunHooksOnUserPrompt(unittest.TestCase):
-    """_CompositeRunHooks chains on_user_prompt: each hook sees the modified message."""
+    """Every hook adds its own context; none rewrites the message for the next."""
 
-    def test_single_hook_returns_modified(self):
-        class AddPrefix(RunHooks):
+    def test_contexts_are_joined_in_order_and_each_sees_the_original(self):
+        seen = []
+
+        class A(RunHooks):
             async def on_user_prompt(self, agent, message, **kwargs):
-                return "[prefix] " + message
+                seen.append(message)
+                return "context A"
 
-        composite = _CompositeRunHooks([AddPrefix()])
-        result = asyncio.run(composite.on_user_prompt(agent=MagicMock(), message="hello"))
-        self.assertEqual(result, "[prefix] hello")
-
-    def test_chained_hooks(self):
-        """Second hook sees the modified message from the first."""
-
-        class AddA(RunHooks):
+        class B(RunHooks):
             async def on_user_prompt(self, agent, message, **kwargs):
-                return message + " [A]"
+                seen.append(message)
+                return "context B"
 
-        class AddB(RunHooks):
+        composite = _CompositeRunHooks([A(), B()])
+        result = asyncio.run(composite.on_user_prompt(agent=MagicMock(), message="ask"))
+        self.assertEqual(result, "context A\n\ncontext B")
+        self.assertEqual(seen, ["ask", "ask"])
+
+    def test_blank_and_none_add_nothing(self):
+        class Blank(RunHooks):
             async def on_user_prompt(self, agent, message, **kwargs):
-                return message + " [B]"
+                return "   "
 
-        composite = _CompositeRunHooks([AddA(), AddB()])
-        result = asyncio.run(composite.on_user_prompt(agent=MagicMock(), message="start"))
-        self.assertEqual(result, "start [A] [B]")
-
-    def test_hook_returning_none_preserves_message(self):
-        class NoOp(RunHooks):
+        class Tag(RunHooks):
             async def on_user_prompt(self, agent, message, **kwargs):
-                return None  # no modification
+                return "tag"
 
-        class AddTag(RunHooks):
-            async def on_user_prompt(self, agent, message, **kwargs):
-                return message + " [tagged]"
-
-        composite = _CompositeRunHooks([NoOp(), AddTag()])
+        composite = _CompositeRunHooks([RunHooks(), Blank(), Tag()])
         result = asyncio.run(composite.on_user_prompt(agent=MagicMock(), message="msg"))
-        self.assertEqual(result, "msg [tagged]")
+        self.assertEqual(result, "tag")
 
     def test_all_noop_returns_none(self):
         composite = _CompositeRunHooks([RunHooks(), RunHooks()])

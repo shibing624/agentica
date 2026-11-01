@@ -632,7 +632,6 @@ class LoopMixin:
             _parent_run_id_var.set(_short(agent._parent_run_id))
 
         async def _run_core() -> AsyncIterator[RunResponse]:  # pyright: ignore[reportGeneralTypeIssues] - main agent loop is intentionally centralized.
-            nonlocal message  # on_user_prompt hook may reassign message
             # Guard: warn if this agent instance is already running concurrently.
             # Agent is not thread-safe — concurrent runs share mutable state
             # (run_id, run_response, _run_hooks, _enabled_tools, model.functions).
@@ -949,18 +948,6 @@ class LoopMixin:
                     "on_agent_start",
                     lambda hook: hook.on_agent_start(agent=agent),
                 )
-
-                # --- Lifecycle: on_user_prompt hook ---
-                # Allows hooks to inspect/modify user input before message assembly.
-                if isinstance(message, str) and agent._run_hooks is not None:
-                    try:
-                        modified = await self._dispatch_user_prompt_hook(message)
-                        if modified is not None:
-                            message = modified
-                    except Exception as e:
-                        # Fail-open by design: hook errors never block the user's
-                        # request. Early-stage product -- minimize user disruption.
-                        logger.warning(f"on_user_prompt hook error: {e}")
 
                 # --- Agent-level input guardrails ---
                 # Run BEFORE message assembly / LLM. A blocked guardrail raises

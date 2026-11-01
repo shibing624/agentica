@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from rich.text import Text
 
+from agentica.guardrails.agent import InputGuardrailTripwireTriggered
 from agentica.utils.log import logger
 
 # Rich console color scheme (unified - no separate ANSI codes)
@@ -180,6 +181,15 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
     actually sent is in ``.doc``, and nothing else keeps a copy of it.
     """
     raw = str(error)
+    if isinstance(error, InputGuardrailTripwireTriggered):
+        # A policy decision, not a fault: say who refused and why, nothing else.
+        return {
+            "summary": f"Prompt blocked by {error.guardrail_name}",
+            "detail": str(error.output.output_info or raw),
+            "diagnostics": "",
+            "hint": None,
+            "raw": raw,
+        }
     details = _parse_provider_error_payload(raw)
     low = raw.lower()
     status = details.get("status")

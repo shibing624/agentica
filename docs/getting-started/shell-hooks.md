@@ -41,9 +41,8 @@ settings:
         command: ["/绝对/路径/vpet-hook"]
 ```
 
-`name` 必填且必须唯一；`events` 缺省全部开启（`prompt.submit` 除外，它必须显式
-写 `prompt.submit: true` 才订阅），每个消费者独立配置。顶层 `enabled` 是总开关，
-消费者自己的 `enabled` 是局部开关。
+`name` 必填且必须唯一；`events` 缺省全部开启，每个消费者独立配置。顶层
+`enabled` 是总开关，消费者自己的 `enabled` 是局部开关。
 
 环境变量覆盖同名项，前缀 `AGENTICA_HOOKS_`：
 
@@ -85,22 +84,43 @@ consumers:
 | `needs.approval` | 工具调用被 park，等用户批准 | **是**（回话） |
 | `needs.input` | `ask_user_question` 被 park | **是**（回话） |
 | `needs.resolved` | 待答请求已由终端、hook 或取消解决 | 否 |
-| `prompt.submit` | 每轮用户消息拼装前（**仅显式订阅**） | **是**，最多 `recall_timeout` 秒 |
+| `UserPromptSubmit` | 每轮用户消息拼装前（**仅显式订阅**） | **是**，最多 `recall_timeout` 秒 |
 
 `tool.*` 跟真实执行边界走：串行工具轮到自己时才 started，并行工具谁先结束谁先
 completed；运行中取消也会补一条 `ok: false` 的 completed。
 
-`prompt.submit` 是给外部记忆库用的：它与内置的 `<memory_recall>` /
-`<session_recall>` **并发**执行，返回的上下文排在内置块之后、用户问题之前，两者
-互不替代。这一轮的等待上限是 `WorkspaceMemoryConfig.recall_timeout`（默认 5 秒），
-到点还没回的消费者被杀掉，什么都不加。它的 stdin 额外带完整的用户消息 `query`
-（`prompt` 仍是截断后的锚文本）——这是订阅它的唯一用途。回话：
+### `UserPromptSubmit`：与 Claude Code 同一份协议
 
-```json
-{"request_id": "…", "additional_context": "<relevant-memories>…</relevant-memories>"}
+给外部记忆库、RAG、策略检查用。**协议逐字段照搬 Claude Code**（Codex、CodeBuddy
+也是这一份），为它们写的 hook 脚本在 agentica 上不用改就能跑：
+
+- stdin：`hook_event_name: "UserPromptSubmit"`、`session_id`、`cwd`、
+  `transcript_path`、**完整的** `prompt`（不截断——检索要用用户原话）。
+- stdout：`{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "…"}}`，
+  或直接打印纯文本。`additionalContext` 写在顶层会被忽略，与 Claude Code 一致。
+- 退出码 `2`：拒绝这条消息，stderr 是原因；JSON 的 `decision: "block"` /
+  `continue: false` 同样生效。被拒的一轮不调用模型，按输入 guardrail 处理。
+- 其它非 0 退出码：非阻塞错误，这一轮照常进行，它的输出不当作上下文。
+
+和其它事件不同，它**必须显式订阅**（`events: {UserPromptSubmit: true}`）：
+这一轮要等它，已有的桌面通知类消费者不该因为升级被拉进每轮的等待里。
+
+它与内置的 `<memory_recall>` / `<session_recall>` **并发**执行，返回的上下文排在
+内置块之后、用户问题之前，两者互不替代。多个订阅者并行，各自的上下文按配置顺序
+拼接。等待上限是 `WorkspaceMemoryConfig.recall_timeout`（默认 5 秒），到点还没
+回的消费者被杀掉，什么都不加。
+
+```yaml
+settings:
+  hooks:
+    enabled: true
+    consumers:
+      - name: my-memory
+        command: ["/abs/path/memory-hook"]
+        events: {UserPromptSubmit: true}
 ```
 
-多个订阅者各自的 `additional_context` 按配置顺序拼接；没有竞速。
+进程内同一件事是 `RunHooks.on_user_prompt`：返回一段文本，放到同一位置。
 
 `goal.*` **不上这条线**：一次请求变成 N 个 run 是 agentica 的实现细节。但
 **不上线 ≠ 不影响协议** —— goal 活跃时 `run.completed` 会被扣住，否则一个 5 轮

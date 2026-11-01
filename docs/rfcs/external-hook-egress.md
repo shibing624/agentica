@@ -88,7 +88,7 @@ settings:
 | `needs.approval` | a tool call is parked, waiting for the user | the `publish` hook of `make_approve` (`cli/approvals.py:270`) |
 | `needs.input` | `ask_user_question` is parked | the armed TUI input slot |
 | `needs.resolved` | a pending request is no longer actionable | the approval/question winner |
-| `prompt.submit` | before each human turn's message is assembled (opt-in only) | `get_messages_for_run`, beside built-in recall |
+| `UserPromptSubmit` | before each human turn's message is assembled (opt-in) | `get_messages_for_run`, beside built-in recall; Claude Code's wire (`shell_hooks/prompt.py`) |
 
 The schema gate refuses anything else. Runner-owned run/tool names also exist in
 `RunEventType`; CLI-owned session/request names have explicit emit sites.
