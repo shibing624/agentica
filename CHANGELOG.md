@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **记忆召回 selector 的 prompt 模板改为 import 时加载**：`recall_select.md` / `recall_select_work.md` 和其它 memory prompt 一样在 `agentica.prompts.memory` import 时读入常量，`get_memory_recall_select_prompt()` 每轮只做 `.format()`，不再重新读磁盘。这样长驻 CLI 进程不会在开发期把旧 Python 代码和新磁盘模板混用，也少了每轮两次无意义的模板 I/O。
 - **定时任务按创建时的权限档位和工作目录运行；目录失效或任务自己卡住时带原因暂停，不再重试**：
   - **原来的问题。** `CronJob.permissions` 会存下来，也会被传进运行上下文，但 `CliAgentRunner` 和 gateway 的 runner 都不读它，所以这个字段一直没有作用。CLI 的 job factory 持有的是宿主会话的 `agent_config`，而 `/permissions` 是原地改这个 dict。结果后台 daemon 线程到点时，按的是宿主当下的档位：创建时在 `ask`，后来切到 `allow-all`，任务就以 `allow-all` 无人值守地跑。工作目录也一样，跟着宿主走。
   - **授权快照。** `permissions: dict` 删除（没有任何读取方），换成 `CronJob.permission_mode` 和 `CronJob.work_dir`，`DailyTaskSpec` 同步修改；gateway 的请求体和返回体也把 `permissions` 换成了 `permission_mode`。通过 `cronjob` 工具创建时，记录的是调用它的 agent 的档位和目录。这两个值由运行时注入，不在 LLM schema 里。模型传 `permission_mode` 只能比当前会话更严，更宽会被拒绝；`update` 改档位同样以编辑方会话为上限，而且不会挪动 `work_dir`。`/cron add` 也记录当前会话的值。档位非法时，`create_job` 直接报错。CLI 和 gateway 的 runner 都按记录的值构建 agent。旧任务没有这两个值，行为不变（跟随 runner 默认）。

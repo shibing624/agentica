@@ -38,6 +38,8 @@ FEEDBACK_CLASSIFY_PROMPT: str = _load("feedback_classify.md")
 BATCH_JUDGE_PROMPT: str = _load("batch_judge.md") + "\n"
 RULE_CONFLICT_PROMPT: str = _load("rule_conflict.md")
 INTENT_UPDATE_PROMPT: str = _load("intent_update.md")
+RECALL_SELECT_TEMPLATE: str = _load("recall_select.md")
+RECALL_SELECT_WORK_TEMPLATE: str = _load("recall_select_work.md")
 
 
 def get_memory_recall_select_prompt(limit: int, work_limit: int = 0) -> str:
@@ -46,12 +48,16 @@ def get_memory_recall_select_prompt(limit: int, work_limit: int = 0) -> str:
     ``work_limit`` > 0 adds the earlier-work section and the ``work`` key.
     """
     if work_limit:
-        return _load(
-            "recall_select.md", limit=limit,
-            work_spec=_load("recall_select_work.md", work_limit=work_limit) + "\n\n",
+        return RECALL_SELECT_TEMPLATE.format(
+            limit=limit,
+            work_spec=RECALL_SELECT_WORK_TEMPLATE.format(work_limit=work_limit) + "\n\n",
             output_spec='{"files": ["<filename>", ...], "work": [<id>, ...]}',
         )
-    return _load("recall_select.md", limit=limit, work_spec="", output_spec='{"files": ["<filename>", ...]}')
+    return RECALL_SELECT_TEMPLATE.format(
+        limit=limit,
+        work_spec="",
+        output_spec='{"files": ["<filename>", ...]}',
+    )
 
 
 __all__ = [
@@ -63,5 +69,7 @@ __all__ = [
     "BATCH_JUDGE_PROMPT",
     "RULE_CONFLICT_PROMPT",
     "INTENT_UPDATE_PROMPT",
+    "RECALL_SELECT_TEMPLATE",
+    "RECALL_SELECT_WORK_TEMPLATE",
     "get_memory_recall_select_prompt",
 ]
