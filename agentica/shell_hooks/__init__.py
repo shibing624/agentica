@@ -10,6 +10,7 @@ as they are. See ``docs/rfcs/external-hook-egress.md``.
 """
 
 from agentica.shell_hooks.config import (
+    OPT_IN_EVENTS,
     HookConsumer,
     ShellHooksConfig,
     load_shell_hooks_config,
@@ -30,12 +31,14 @@ from agentica.shell_hooks.requests import (
     HookRequest,
     approval_payload,
     question_payload,
+    request_prompt_context,
     start_hook_request,
 )
 
 __all__ = [
     "HookRequest",
     "HookConsumer",
+    "OPT_IN_EVENTS",
     "ShellHooksConfig",
     "approval_payload",
     "get_hook_egress",
@@ -47,6 +50,7 @@ __all__ = [
     "install_hook_egress",
     "load_shell_hooks_config",
     "question_payload",
+    "request_prompt_context",
     "reset_hook_egress_for_tests",
     "start_hook_request",
 ]

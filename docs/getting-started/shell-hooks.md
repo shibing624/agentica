@@ -41,8 +41,9 @@ settings:
         command: ["/绝对/路径/vpet-hook"]
 ```
 
-`name` 必填且必须唯一；`events` 缺省全部开启，每个消费者独立配置。顶层
-`enabled` 是总开关，消费者自己的 `enabled` 是局部开关。
+`name` 必填且必须唯一；`events` 缺省全部开启（`prompt.submit` 除外，它必须显式
+写 `prompt.submit: true` 才订阅），每个消费者独立配置。顶层 `enabled` 是总开关，
+消费者自己的 `enabled` 是局部开关。
 
 环境变量覆盖同名项，前缀 `AGENTICA_HOOKS_`：
 
@@ -84,9 +85,22 @@ consumers:
 | `needs.approval` | 工具调用被 park，等用户批准 | **是**（回话） |
 | `needs.input` | `ask_user_question` 被 park | **是**（回话） |
 | `needs.resolved` | 待答请求已由终端、hook 或取消解决 | 否 |
+| `prompt.submit` | 每轮用户消息拼装前（**仅显式订阅**） | **是**，最多 `recall_timeout` 秒 |
 
 `tool.*` 跟真实执行边界走：串行工具轮到自己时才 started，并行工具谁先结束谁先
 completed；运行中取消也会补一条 `ok: false` 的 completed。
+
+`prompt.submit` 是给外部记忆库用的：它与内置的 `<memory_recall>` /
+`<session_recall>` **并发**执行，返回的上下文排在内置块之后、用户问题之前，两者
+互不替代。这一轮的等待上限是 `WorkspaceMemoryConfig.recall_timeout`（默认 5 秒），
+到点还没回的消费者被杀掉，什么都不加。它的 stdin 额外带完整的用户消息 `query`
+（`prompt` 仍是截断后的锚文本）——这是订阅它的唯一用途。回话：
+
+```json
+{"request_id": "…", "additional_context": "<relevant-memories>…</relevant-memories>"}
+```
+
+多个订阅者各自的 `additional_context` 按配置顺序拼接；没有竞速。
 
 `goal.*` **不上这条线**：一次请求变成 N 个 run 是 agentica 的实现细节。但
 **不上线 ≠ 不影响协议** —— goal 活跃时 `run.completed` 会被扣住，否则一个 5 轮

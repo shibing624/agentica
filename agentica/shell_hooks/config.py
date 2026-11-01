@@ -18,7 +18,7 @@ from agentica.config.profiles import get_setting
 from agentica.utils.log import logger
 
 #: Events on this wire. ``needs.approval`` and ``needs.input`` take the reply
-#: path; every other value is a fire-and-forget notice.
+#: path, as does ``prompt.submit``; every other value is a fire-and-forget notice.
 SHELL_HOOK_EVENTS = (
     "run.started",
     "run.completed",
@@ -31,7 +31,13 @@ SHELL_HOOK_EVENTS = (
     "needs.approval",
     "needs.input",
     "needs.resolved",
+    "prompt.submit",
 )
+
+#: Events a consumer receives only when it subscribes to them by name. A
+#: ``prompt.submit`` subscriber is waited on before every turn, so a consumer
+#: written before the event existed must not start being waited on.
+OPT_IN_EVENTS = ("prompt.submit",)
 
 
 def _env(name: str) -> Optional[str]:
@@ -79,7 +85,7 @@ class HookConsumer:
     command: List[str] = field(default_factory=list)
     enabled: bool = True
     events: Dict[str, bool] = field(
-        default_factory=lambda: {e: True for e in SHELL_HOOK_EVENTS}
+        default_factory=lambda: {e: e not in OPT_IN_EVENTS for e in SHELL_HOOK_EVENTS}
     )
 
     def __post_init__(self) -> None:
@@ -90,7 +96,7 @@ class HookConsumer:
         that rule would silently switch off the other five as well, so the
         mapping is completed against the defaults here, once.
         """
-        merged = {e: True for e in SHELL_HOOK_EVENTS}
+        merged = {e: e not in OPT_IN_EVENTS for e in SHELL_HOOK_EVENTS}
         merged.update(
             {k: bool(v) for k, v in (self.events or {}).items() if k in merged}
         )

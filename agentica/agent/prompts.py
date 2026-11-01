@@ -26,6 +26,7 @@ from agentica.prompts.base.soul import get_soul_prompt
 from agentica.prompts.builder import PromptBuilder
 from agentica.run.input import build_user_message_from_sequence
 from agentica.run.response import RunResponseExtraData
+from agentica.shell_hooks.requests import request_prompt_context
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
@@ -821,12 +822,24 @@ class PromptsMixin:
         if recall_query and user_messages and isinstance(user_messages[-1].content, str):
             prior = messages_for_model + user_messages[:-1]
             first_turn = not any(m.role == "user" for m in prior)
-            session_block, memory_block = await self._get_recall_blocks(recall_query, prior)
+            # Built-in recall and any ``prompt.submit`` hook (an external memory
+            # store) run side by side; each contributes its own block.
+            (session_block, memory_block), hook_block = await asyncio.gather(
+                self._get_recall_blocks(recall_query, prior),
+                asyncio.to_thread(
+                    request_prompt_context,
+                    recall_query,
+                    session_id=self.session_id,
+                    work_dir=self.work_dir,
+                    timeout=self.long_term_memory_config.recall_timeout,
+                ),
+            )
             blocks = [
                 b for b in (
                     self._get_git_snapshot_block() if first_turn else None,
                     session_block,
                     memory_block,
+                    hook_block,
                 ) if b
             ]
             if blocks:

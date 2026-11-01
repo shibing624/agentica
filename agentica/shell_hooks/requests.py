@@ -197,3 +197,47 @@ def start_hook_request(event: str, payload: Dict[str, Any]) -> Optional[HookRequ
     except Exception as exc:
         logger.debug(f"shell hooks: could not start {event}: {exc}")
         return None
+
+
+def request_prompt_context(
+    query: str,
+    *,
+    session_id: Optional[str] = None,
+    work_dir: Optional[str] = None,
+    timeout: Optional[float] = None,
+) -> Optional[str]:
+    """Context every ``prompt.submit`` subscriber returns for this turn's message.
+
+    Unlike ``needs.*`` this is not a race: each subscriber (an external memory
+    store, say) adds its own context, joined in config order. ``timeout`` is the
+    caller's recall budget; a subscriber still running at the deadline is
+    killed and contributes nothing, so the turn never waits longer than that.
+    """
+    cfg = ensure_hook_egress_installed()
+    if cfg is None or not query.strip():
+        return None
+    consumers = cfg.consumers_for("prompt.submit")
+    if not consumers:
+        return None
+    request_id = str(uuid4())
+    # The consumer subscribed to this event by name to receive the message, so
+    # the full text travels as ``query``; ``prompt`` stays the clipped anchor.
+    payload = build_payload(
+        "prompt.submit",
+        session_id=session_id,
+        work_dir=work_dir,
+        request_id=request_id,
+        prompt=query,
+        extra={"query": query},
+    )
+    processes = [p for p in (HookProcess(c.command, payload) for c in consumers) if p.start()]
+    deadline = None if not timeout else time.monotonic() + timeout
+    parts: List[str] = []
+    for process in processes:
+        remaining = None if deadline is None else max(deadline - time.monotonic(), 0)
+        if process.wait(remaining):
+            reply = parse_reply(process.stdout, "prompt.submit", request_id=request_id)
+            if reply is not None:
+                parts.append(reply["additional_context"])
+        process.kill()
+    return "\n\n".join(parts) or None

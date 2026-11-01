@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from agentica.shell_hooks.config import (
+    OPT_IN_EVENTS,
     SHELL_HOOK_EVENTS,
     HookConsumer,
     load_shell_hooks_config,
@@ -69,10 +70,11 @@ class TestCommandIsArgv:
 
 
 class TestEvents:
-    def test_all_events_default_on(self):
+    def test_all_events_but_opt_in_ones_default_on(self):
         consumer = HookConsumer(name="desktop", command=["/hook"])
         assert set(consumer.events) == set(SHELL_HOOK_EVENTS)
-        assert all(consumer.event_enabled(e) for e in SHELL_HOOK_EVENTS)
+        for event in SHELL_HOOK_EVENTS:
+            assert consumer.event_enabled(event) is (event not in OPT_IN_EVENTS)
 
     def test_an_event_can_be_switched_off(self):
         cfg = _cfg(

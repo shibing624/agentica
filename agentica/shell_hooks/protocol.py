@@ -103,6 +103,12 @@ def parse_reply(
             return {"answer": answer}
         return None
 
+    if event == "prompt.submit":
+        context = body.get("additional_context")
+        if isinstance(context, str) and context.strip():
+            return {"additional_context": context.strip()}
+        return None
+
     # A reply to a notice is meaningless; treat it as no reply.
     return None
 
