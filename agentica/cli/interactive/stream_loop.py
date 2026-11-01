@@ -713,14 +713,6 @@ def _process_stream_response(
         current_agent._event_callback = None
         tui_state.pop("live_display", None)
         tui_state["live_tool_lines"] = []
-        # Strip image payloads from history: the turn already consumed them
-        # multimodally; re-encoding and re-sending every local image on each
-        # later turn would bloat context and cost. Paths and OCR text remain
-        # in the message content, so the model still knows an image exists.
-        if images:
-            for m in current_agent.working_memory.messages:
-                if m.role == "user" and m.images:
-                    m.images = None
         # The completed/cancelled answer is now persisted. Re-measure what the
         # next request will carry so the idle bar includes that newest turn.
         _seed_context_tokens(current_agent, tui_state)

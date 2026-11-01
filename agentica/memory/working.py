@@ -98,17 +98,14 @@ def _clean_message_for_history(msg: Message) -> Message:
             if BASE64_PLACEHOLDER in cleaned_msg.content:
                 cleaned_msg.content = ""
 
-    if cleaned_msg.images is not None:
-        cleaned_msg.images = _clean_media_list(cleaned_msg.images)
-
-    if cleaned_msg.audio is not None:
-        if isinstance(cleaned_msg.audio, str) and BASE64_PLACEHOLDER in cleaned_msg.audio:
-            cleaned_msg.audio = None
-        elif isinstance(cleaned_msg.audio, dict):
-            cleaned_msg.audio = clean_media_placeholders(cleaned_msg.audio)
-
-    if cleaned_msg.videos is not None:
-        cleaned_msg.videos = _clean_media_list(cleaned_msg.videos)
+    # ``images`` / ``audio`` / ``videos`` are per-turn attachments, not durable
+    # conversation facts. Replaying them from history resends screenshots,
+    # analyze_image payloads and uploaded files on every later turn (or from the
+    # compacted ``runs`` copy). Keep text content only; if a durable fact is
+    # needed, the tool/user text already names it.
+    cleaned_msg.images = None
+    cleaned_msg.audio = None
+    cleaned_msg.videos = None
 
     # A tool result must be sent to pair with its assistant tool_call, but
     # Anthropic and compatible proxies reject empty tool_result content

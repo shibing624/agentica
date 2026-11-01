@@ -768,8 +768,8 @@ class _GatewayAgentRunner:
 
         result = await self._svc.run_cron(
             message=prompt, job_id=job_id, user_id=user_id,
-            permission_mode=ctx.get("permission_mode") or None,
-            work_dir=ctx.get("work_dir") or None,
+            permission_mode=ctx.get("permission_mode"),
+            work_dir=ctx.get("work_dir"),
         )
         usage = None
         if result.turn_usage:

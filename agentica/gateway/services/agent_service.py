@@ -949,14 +949,19 @@ class AgentService:
         list_sessions() (the chat sidebar).
 
         ``permission_mode`` / ``work_dir`` are the job's mandate (see
-        ``CronJob``); None runs on the gateway defaults.
+        ``CronJob``). Empty / None clears any earlier per-job override so the
+        job runs on the gateway defaults.
         """
         await self._ensure_initialized()
         session_id = f"{CRON_SESSION_PREFIX}{job_id}"
-        if permission_mode is not None:
+        if permission_mode:
             self.set_session_approval_mode(session_id, permission_mode, user_id)
-        if work_dir is not None:
+        else:
+            self._session_approval_modes.pop(self._sk(session_id, user_id), None)
+        if work_dir:
             self.set_session_work_dir(session_id, work_dir, user_id)
+        else:
+            self._session_work_dirs.pop(self._sk(session_id, user_id), None)
 
         lock = self._get_session_lock(session_id, user_id)
         if lock.locked():

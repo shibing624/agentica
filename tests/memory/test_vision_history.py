@@ -149,6 +149,46 @@ class TestVisionHistoryCleanup(unittest.TestCase):
             for img in history_msgs[0].images:
                 self.assertNotIn(BASE64_PLACEHOLDER, str(img))
 
+    def test_history_never_replays_attachment_fields(self):
+        """Message.images/audio/videos are one-turn attachments.
+
+        A tool-produced media message (for example analyze_image) can store a
+        data URL in ``Message.images`` while its text content is only a short
+        description. The next turn must keep the text and drop the attachment,
+        otherwise the same payload is re-encoded into every later model call.
+        """
+        memory = WorkingMemory()
+        msg = Message(
+            role='user',
+            content='Screenshot captured by tool',
+            images=[{'url': 'data:image/png;base64,abc'}],
+            audio={'data': 'data:audio/wav;base64,abc', 'format': 'wav'},
+            videos=[{'url': 'data:video/mp4;base64,abc'}],
+        )
+        memory.add_run(AgentRun(response=RunResponse(messages=[msg])))
+
+        history_msgs = memory.get_messages_from_last_n_runs(last_n=1)
+
+        self.assertEqual(history_msgs[0].content, 'Screenshot captured by tool')
+        self.assertIsNone(history_msgs[0].images)
+        self.assertIsNone(history_msgs[0].audio)
+        self.assertIsNone(history_msgs[0].videos)
+        # The archive keeps the original payload; cleaning happens only at the
+        # history replay boundary.
+        self.assertEqual(memory.runs[0].response.messages[0].images, [{'url': 'data:image/png;base64,abc'}])
+
+    def test_compacted_runs_do_not_replay_attachment_fields(self):
+        """collapse_runs() deep-copies messages, but history replay still strips media."""
+        memory = WorkingMemory()
+        msg = Message(role='user', content='Uploaded image', images=['/tmp/clip.png'])
+        memory.collapse_runs([msg])
+
+        history_msgs = memory.get_messages_from_last_n_runs(last_n=1)
+
+        self.assertEqual(history_msgs[0].content, 'Uploaded image')
+        self.assertIsNone(history_msgs[0].images)
+        self.assertEqual(memory.runs[0].response.messages[0].images, ['/tmp/clip.png'])
+
 
 class TestFilterBase64Media(unittest.TestCase):
     """Test cases for filter_base64_media function."""

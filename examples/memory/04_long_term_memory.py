@@ -41,6 +41,16 @@ def create_long_term_memory(user_id: str) -> Workspace:
     return memory_store
 
 
+def format_memory_results(results: list[dict]) -> str:
+    """Render Workspace.search_memory() results for the demo output."""
+    if not results:
+        return ""
+    return "\n\n".join(
+        f"### {item['file_path']} (score={item['score']:.2f})\n{item['content']}"
+        for item in results
+    )
+
+
 async def seed_user_memory(memory_store: Workspace) -> None:
     """Write durable facts that should survive across conversations."""
     await memory_store.write_memory_entry(
@@ -72,10 +82,9 @@ async def demo_persistent_recall() -> None:
     memory_store = create_long_term_memory("alice")
     await seed_user_memory(memory_store)
 
-    recalled = await memory_store.get_relevant_memories(
-        query="How should I write tests for this Python RAG project?",
-        limit=3,
-    )
+    recalled = format_memory_results(memory_store.search_memory(
+        "How should I write tests for this Python RAG project?", limit=3
+    ))
     print("\n--- Recalled memories for the next agent run ---")
     print(recalled or "(empty)")
 
@@ -134,7 +143,9 @@ async def demo_agent_configuration() -> None:
         instructions="Use the user's long-term memory when it is relevant.",
     )
 
-    memory_prompt = await memory_store.get_relevant_memories(query="What testing style should I use?", limit=3)
+    memory_prompt = format_memory_results(
+        memory_store.search_memory("What testing style should I use?", limit=3)
+    )
     print("\n--- Long-term memory the Agent can inject ---")
     print(memory_prompt or "(empty)")
     print("\nAgent is configured with:")

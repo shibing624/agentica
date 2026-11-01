@@ -519,6 +519,39 @@ class TestAgentServiceRunCron:
         assert set(out.usage) == {"input_tokens", "output_tokens", "cache_read_tokens",
                                   "cache_write_tokens", "api_calls", "cost_usd"}
 
+    def test_run_cron_empty_mandate_clears_prior_per_job_overrides(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=MagicMock(content="done", tools=[]))
+        seen = []
+
+        def build(session_id, owner=None):
+            seen.append((
+                svc.get_session_approval_mode(session_id, owner),
+                svc.get_session_work_dir(session_id, owner),
+            ))
+            return agent
+
+        svc._build_agent = build
+        asyncio.run(svc.run_cron(
+            "x", job_id="job1", user_id="u1",
+            permission_mode="ask", work_dir=str(tmp_path / "job"),
+        ))
+        asyncio.run(svc.run_cron(
+            "x", job_id="job1", user_id="u1",
+            permission_mode="", work_dir=None,
+        ))
+
+        assert seen[0] == ("ask", str(tmp_path / "job"))
+        assert seen[1][0] == svc._DEFAULT_APPROVAL_MODE
+        assert seen[1][1] != str(tmp_path / "job")
+        assert svc._sk("scheduled_job1", "u1") not in svc._session_approval_modes
+        assert svc._sk("scheduled_job1", "u1") not in svc._session_work_dirs
+
     def test_run_cron_rejects_concurrent_runs_of_the_same_job(self, tmp_path):
         from agentica.gateway.services.agent_service import AgentService
 

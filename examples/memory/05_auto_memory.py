@@ -86,7 +86,7 @@ async def demo_auto_memory():
 
     # Show what the LLM saved (without manual intervention)
     print("\n--- What LLM auto-saved to workspace ---")
-    memory_content = await ws1.get_relevant_memories()
+    memory_content = await ws1.get_memory_index_prompt()
     if memory_content:
         print(memory_content)
     else:
@@ -252,7 +252,7 @@ async def demo_combined():
     # firing on_pre_compact manually before reading memories.
 
     print("\n--- Long-term memory ---")
-    memory = await workspace.get_relevant_memories()
+    memory = await workspace.get_memory_index_prompt()
     print(memory or "(empty)")
 
     print(f"\n--- Session stats ---")

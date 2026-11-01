@@ -127,7 +127,7 @@ class TestCronCommand(unittest.TestCase):
         self._running = False  # no live thread in this session
 
         buf = io.StringIO()
-        with patch.object(cron_cmd, "get_console", return_value=Console(file=buf, width=200)):
+        with patch.object(cron_cmd, "get_console", return_value=Console(file=buf, width=200, no_color=True, highlight=False)):
             cron_cmd._cmd_cron(self.ctx, "daemon status")
         out = buf.getvalue()
         self.assertIn("config", out)
@@ -308,7 +308,7 @@ class TestCronCommand(unittest.TestCase):
         self.assertEqual(runs[1].result, "checked, nothing new")
 
         buf = io.StringIO()
-        with patch.object(cron_cmd, "get_console", return_value=Console(file=buf, width=200)):
+        with patch.object(cron_cmd, "get_console", return_value=Console(file=buf, width=200, no_color=True, highlight=False)):
             cron_cmd._cmd_cron(self.ctx, f"runs {jid}")
         shown = buf.getvalue()
         self.assertIn("12.3K in (9.8K cached) / 456 out · 5 calls · $0.0123", shown)

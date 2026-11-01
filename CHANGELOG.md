@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **修掉 5b2981fd..HEAD review 里指出的几处边角问题**：历史回放统一丢弃 `Message.images` / `audio` / `videos` 附件字段，只保留文字内容，避免 `analyze_image`、浏览器截图、SDK/Gateway 上传图在后续轮次被重复编码发送；CLI 那个只处理显式上传图片的局部清理已删除。`examples/memory/04_long_term_memory.py` / `05_auto_memory.py` 不再调用已经删除的 `Workspace.get_relevant_memories()`。Gateway cron 任务把 `permission_mode` / `work_dir` 清空时，现在会清掉该 job session 之前的覆盖值，避免继续沿用旧档位或旧目录。`session_recall.selector_line` 把 open intent 的 `next_step` 也交给 selector。cron 运行用量展示测试关闭 rich 颜色和高亮，避免 ANSI 拆字导致断言误判。
 - **记忆召回 selector 的 prompt 模板改为 import 时加载**：`recall_select.md` / `recall_select_work.md` 和其它 memory prompt 一样在 `agentica.prompts.memory` import 时读入常量，`get_memory_recall_select_prompt()` 每轮只做 `.format()`，不再重新读磁盘。这样长驻 CLI 进程不会在开发期把旧 Python 代码和新磁盘模板混用，也少了每轮两次无意义的模板 I/O。
 - **定时任务按创建时的权限档位和工作目录运行；目录失效或任务自己卡住时带原因暂停，不再重试**：
   - **原来的问题。** `CronJob.permissions` 会存下来，也会被传进运行上下文，但 `CliAgentRunner` 和 gateway 的 runner 都不读它，所以这个字段一直没有作用。CLI 的 job factory 持有的是宿主会话的 `agent_config`，而 `/permissions` 是原地改这个 dict。结果后台 daemon 线程到点时，按的是宿主当下的档位：创建时在 `ask`，后来切到 `allow-all`，任务就以 `allow-all` 无人值守地跑。工作目录也一样，跟着宿主走。

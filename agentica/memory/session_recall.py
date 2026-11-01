@@ -97,6 +97,8 @@ def selector_line(item: Dict[str, Any], current_work_dir: str) -> str:
     """One earlier-work line as the recall selector sees it."""
     project = "this project" if item["work_dir"] == current_work_dir else display_path(item["work_dir"])
     body = item["ask"] + (f" → {item['outcome']}" if item["outcome"] else "")
+    if item["status"] == "open" and item["next_step"]:
+        body += f". Next: {item['next_step']}"
     return snippet_head(f"{item['id']}: [{project}] [{item['status']}] {_day(item['updated'])} {body}", LINE_MAX_CHARS)
 
 

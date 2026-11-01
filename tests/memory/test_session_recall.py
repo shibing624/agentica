@@ -24,6 +24,7 @@ from agentica.memory.session_recall import (
     SESSION_RECALL_OPEN,
     draft_session_recall,
     surfaced_markers,
+    selector_line,
 )
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
@@ -95,6 +96,24 @@ class TestSessionIndexTurns(_Base):
         terms = index_terms("fix the gateway port").split()
         self.assertIn("gateway", terms)
         self.assertNotIn("fix the gateway port", " ".join(terms).split("  "))
+
+
+class TestSessionRecallFormatting(_Base):
+    def test_selector_line_includes_open_item_next_step(self):
+        intent_id = self.index.add_intent(
+            work_dir=PROJ,
+            session_id="sess-next",
+            ask="发布包",
+            outcome="tag 已打",
+            status="open",
+            next_step="twine upload",
+        )
+        item = self.index.open_intents(PROJ, 0, 5)[0]
+
+        line = selector_line(item, PROJ)
+
+        self.assertIn(f"{intent_id}:", line)
+        self.assertIn("Next: twine upload", line)
 
 
 class TestIntents(_Base):
