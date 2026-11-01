@@ -113,7 +113,7 @@ from .session_state import (
 )
 from .stream_loop import (
     _BRAILLE_SPINNER,
-    _WAITING_FOR_INPUT_TEXT,
+    _waiting_for_input_text,
     _process_stream_response,
     _read_git_branch,
     _refresh_live_status,
@@ -1115,14 +1115,27 @@ def run_interactive(
                 if not (state.agent_running and app.is_running):
                     time.sleep(0.3)
                     continue
-                # Agent parked on a ask_user_question/confirm tool: stop churning
-                # invalidate() (it fights the input renderer and desyncs the
-                # cursor) and replace the stale "🔧 tool (Ns)" phase with a
-                # steady "waiting" line so the user knows it's their turn.
-                if state.input_request is not None:
+                # Agent parked on a question or approval card: replace the stale
+                # "🔧 tool (Ns)" phase with a "waiting (Ns)" line so the user knows
+                # it's their turn and for how long. The prompt is rendered inside
+                # the layout, so repainting is safe; it happens only when a
+                # displayed second changes, not at spinner speed. The turn clock
+                # in the status bar keeps running too.
+                req = state.input_request
+                if req is not None:
+                    _req_start = tui_state.get("_turn_request_start")
+                    if _req_start is not None:
+                        _refresh_live_status(
+                            tui_state, state.current_agent, _req_start,
+                            tui_state.get("_turn_cost_baseline", 0.0),
+                            tui_state.get("_turn_active_baseline", 0.0),
+                            tui_state.get("_turn_calls_baseline", 0),
+                            tui_state.get("_turn_goal_tokens_baseline", 0),
+                        )
                     changed = False
-                    if tui_state.get("spinner_text") != _WAITING_FOR_INPUT_TEXT:
-                        tui_state["spinner_text"] = _WAITING_FOR_INPUT_TEXT
+                    waiting = _waiting_for_input_text(req)
+                    if tui_state.get("spinner_text") != waiting:
+                        tui_state["spinner_text"] = waiting
                         changed = True
                     live = tui_state.get("live_display")
                     if live is not None:

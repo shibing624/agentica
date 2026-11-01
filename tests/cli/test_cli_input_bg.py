@@ -492,3 +492,14 @@ class TestInputVisualRows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_waiting_line_shows_how_long_the_prompt_has_waited():
+    from agentica.cli.interactive.session_state import _InputRequest
+    from agentica.cli.interactive.stream_loop import _waiting_for_input_text
+
+    req = _InputRequest(prompt="q")
+    req.created_at -= 65
+    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (1m5s)"
+    req.touch()  # a keypress resets the idle clock, not the waited time
+    assert _waiting_for_input_text(req) == "⏸  waiting for your answer… (1m5s)"

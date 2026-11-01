@@ -500,3 +500,36 @@ def test_a_keypress_in_the_tui_restarts_the_pending_requests_clock(tmp_path):
     state.input_request = req
     app.key_processor.before_key_press.fire()
     assert req.idle_remaining() > 299
+
+
+@pytest.mark.asyncio
+async def test_idle_check_stops_when_the_wait_is_cancelled_without_resolving_the_card(monkeypatch):
+    """A cancelled turn cancels the registry future but never calls submit/cancel
+    on the request. The 1s idle check must notice and stop, not poll until expiry."""
+    import agentica.cli.approvals as cli_approvals
+
+    calls = []
+    real_check = cli_approvals._check_approval_idle
+
+    def counting(*args):
+        calls.append(1)
+        real_check(*args)
+
+    monkeypatch.setattr(cli_approvals, "_check_approval_idle", counting)
+    monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 300)
+    state = SessionState()
+    state.current_agent = _agent()
+    approve = build_interactive_approve(state, {})
+    task = asyncio.create_task(approve(_fc("execute", {"command": "rm x"}, call_id="c9")))
+    deadline = asyncio.get_running_loop().time() + 1.0
+    while not is_approval_request(state.input_request):
+        assert asyncio.get_running_loop().time() < deadline
+        await asyncio.sleep(0)
+    req = state.input_request
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert req.resolved is False  # the case under test: nobody resolved the card
+    await asyncio.sleep(2.3)
+    # First tick runs, sees the future is no longer parked, and does not reschedule.
+    assert len(calls) == 1

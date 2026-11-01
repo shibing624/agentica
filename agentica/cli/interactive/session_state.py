@@ -51,6 +51,8 @@ class _InputRequest:
     # user who is reading or typing an answer is never cut off.
     idle_timeout: Optional[float] = None
     last_activity: float = field(default_factory=time.monotonic)
+    # When the prompt appeared; the status line shows how long it has waited.
+    created_at: float = field(default_factory=time.monotonic)
 
     def touch(self) -> None:
         self.last_activity = time.monotonic()

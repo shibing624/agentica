@@ -377,7 +377,9 @@ def _check_approval_idle(state: Any, req: Any, loop: Any, ui_holder: dict) -> No
     """
     from agentica.cli.interactive.tui import IDLE_COUNTDOWN_SECONDS
 
-    if req.resolved:
+    # The registry is the authority on whether this card still waits: a turn
+    # cancelled mid-wait cancels the future without touching ``req``.
+    if req.resolved or not state.approval_registry.is_parked(req.approval_id or ""):
         return
     remaining = req.idle_remaining()
     if remaining <= 0:

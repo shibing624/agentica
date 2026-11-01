@@ -88,8 +88,7 @@ def _show_completed_tool(display: StreamDisplayManager, info: dict) -> None:
 _BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 # Shown in the spinner line while the agent is parked on a ask_user_question/confirm
-# tool. Steady (no animation) so the spinner thread can stop invalidate() churn
-# that would otherwise fight the input renderer.
+# tool or an approval card. No spinner animation; the clock ticks once a second.
 _WAITING_FOR_INPUT_TEXT = "⏸  waiting for your answer…"
 
 
@@ -107,6 +106,11 @@ def _fmt_phase_elapsed(elapsed: float) -> str:
     if minutes:
         return f"{minutes}m{seconds}s" if seconds else f"{minutes}m"
     return f"{seconds}s"
+
+
+def _waiting_for_input_text(req) -> str:
+    """``⏸  waiting for your answer… (1m05s)`` — how long this prompt has waited."""
+    return f"{_WAITING_FOR_INPUT_TEXT} ({_fmt_phase_elapsed(time.monotonic() - req.created_at)})"
 
 
 def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) -> str:
@@ -719,4 +723,4 @@ def _process_stream_response(
         tui_state["git_branch"] = _read_git_branch(tui_state["work_dir"])
 
 
-__all__ = ['_BRAILLE_SPINNER', '_WAITING_FOR_INPUT_TEXT', '_render_spinner_text', '_refresh_live_status', '_make_compact_phase_handler', '_record_main_auto_compaction', '_record_main_context_usage', '_read_git_branch', '_status_thinking_mode', '_seed_context_tokens', '_process_stream_response']
+__all__ = ['_BRAILLE_SPINNER', '_WAITING_FOR_INPUT_TEXT', '_waiting_for_input_text', '_render_spinner_text', '_refresh_live_status', '_make_compact_phase_handler', '_record_main_auto_compaction', '_record_main_context_usage', '_read_git_branch', '_status_thinking_mode', '_seed_context_tokens', '_process_stream_response']
