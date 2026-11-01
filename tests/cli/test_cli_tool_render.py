@@ -1779,5 +1779,5 @@ def test_timed_out_ask_renders_as_no_answer_not_blank():
     })
     prompt, response, options = _parse_ask_user_exchange(payload)
     assert prompt == "Q?"
-    assert response.startswith("(no answer within 300s")
+    assert response == "(no answer within 300s)"
     assert options == ["A", "B"]

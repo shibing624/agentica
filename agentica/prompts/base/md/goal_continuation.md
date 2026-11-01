@@ -8,4 +8,4 @@ When you believe the goal is complete, DO NOT just say so — call the `verify_c
 - For non-code deliverables: `verify_completion(mode="criteria", acceptance_criteria="<checklist>", summary="<what you produced>", final_answer="<the result>")`.
 Only a passing verification ends the loop. If it fails, fix the reported gap and verify again.
 
-If you are blocked and need user input, call `update_goal(status="paused", reason="...")` and stop.
+The user is likely away. Do not pause for ambiguity: pick the most reasonable option, keep going, and record the assumption in the final answer. Call `update_goal(status="paused", reason="...")` only when every remaining step needs something only the user can provide (credentials, access, approval for an irreversible step).

@@ -11,7 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
-- **`ask_user_question` 默认等 5 分钟，没人回答就按推荐项继续**：交互式 CLI 里，agent 发起的问题超过 `settings.ask_user_question_timeout`（默认 300 秒，设为 `0` 表示一直等）没人回答，问题就会从屏幕上撤掉，工具返回 `{"timed_out": true, "response": "", "waited_seconds": N}`。工具层不会替用户填答案。system prompt 告诉模型，遇到 `timed_out` 就按自己标了推荐的那个选项继续，并在回复里写明选了哪个；同时要求只在没有合理默认、或者操作不可逆时才发问，其余情况先做，做完再告诉用户。transcript 里这一条显示为 `(no answer within 300s — agent proceeds with its recommendation)`。超时的瞬间如果用户正好提交了回答，以已提交的回答为准，不会两边各算一次。slash command（`/resume`、`/cron` 等）的提问是用户自己在操作，不会超时。hook 收到的 `needs.resolved` 事件里，超时对应 `decided_by="timeout"`。这样改的原因：曾有一次提问挂了 6522 秒（约 1.8 小时），这段时间整个 turn 什么也没做。
+- **CLI 等人默认最多 5 分钟：提问没人答时，可逆的选择按推荐继续；审批卡没人答时，那一步不执行**：
+  - **为什么。** 曾有一次 `ask_user_question` 挂了 6522 秒（约 1.8 小时），整个 turn 什么都没做。权限审批卡（`ApprovalRegistry.wait`）也一样没有截止时间，长程任务半夜弹一张卡，就会卡到天亮。
+  - **一个配置管两处。** `settings.human_wait_timeout`，默认 300 秒，`0` 表示一直等。斜杠命令（`/resume`、`/cron` 等）里的提问是用户自己在操作，不会超时。
+  - **提问超时：沉默不等于同意。** 工具返回 `{"timed_out": true, "response": "", "note": ...}`，不替用户编答案。`note` 交给模型自己判断：如果是本地、可逆的选择，按自己标了推荐的选项继续，并在回复里写明选了哪个；如果涉及难以撤销或机器外可见的动作（push、部署、发消息、删除），这一步不做，其余工作做完，在回复里列为待用户处理。工具说明同时要求：能给出推荐的歧义直接按推荐做；不要用这个工具去问「能不能跑这个命令 / 改这个文件」，那是权限系统的事。
+  - **审批超时：不执行，也不算用户拒绝。** 这次调用不执行，不写入 deny-similar 规则。模型收到的不是 `Tool call denied by user.`，而是「没人回答审批，这既不是拒绝也不是同意；不要重试，也不要换个办法达到同样效果；把其余工作做完，并把这一步列为待用户处理」。transcript 里显示 `✗ not run (no answer within 300s)`，session log 的 `approval_decision` 带 `reason="timeout"`，hook 的 `needs.resolved` 带 `decided_by="timeout"`。超时与按键或 hook 应答同时发生时，以 `_InputRequest.submit` 先成功的一方为准。
+  - **`/goal` 不再因为歧义暂停。** `update_goal` 的说明、`goal_continuation.md` 和 `goal_judge.md` 都去掉了「需求有歧义就暂停 / 判为完成」：选最合理的方案继续，把假设写进最终答复。只有剩下的每一步都需要只有用户能给的东西（凭据、权限、对不可逆操作的批准）时，才 `paused`。
 - **新增 `UserPromptSubmit` hook：外部记忆库可以给每轮消息补充上下文，协议与 Claude Code 完全一致**：
   - **为什么是这份协议。** Claude Code、Codex、CodeBuddy 用的是同一套 `UserPromptSubmit`：stdin 是 `{hook_event_name, session_id, cwd, transcript_path, prompt}`，stdout 是 `hookSpecificOutput.additionalContext`（或纯文本），退出码 `2` 表示拒绝并可用 stderr 给出原因。照这个形状实现，为其中任何一家写的 hook 脚本在 agentica 上不用改就能跑；自己发明一套（比如按 agentica 内部事件名命名的 `prompt.submit`）会让每个外部记忆库为每个宿主各写一份。
   - **与内置记忆并存。** `get_messages_for_run` 里内置的 `<memory_recall>` / `<session_recall>` 与 hook 并发执行（`asyncio.gather`），hook 的上下文排在内置块之后、用户问题之前。hook 失败、超时或没有订阅者时只是这一段为空，内置召回不受影响；反过来也一样。

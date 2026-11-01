@@ -472,6 +472,9 @@ class FunctionCall(BaseModel):
     # duration, and any similar-grant that was recorded. Logged onto the
     # ``approval_decision`` session event.
     approval_trace: Optional[Dict[str, Any]] = None
+    # What the model reads instead of the generic denial when nobody actually
+    # refused the call (the approval card expired). Set by ``make_approve``.
+    denied_result: Optional[str] = None
     # Runner sets this after allow / allow_prefix so execute-time hard
     # blocks (``rm -rf /``, sandbox ``blocked_commands``) do not contradict
     # the card. Direct ``tool.execute`` keeps the default False.

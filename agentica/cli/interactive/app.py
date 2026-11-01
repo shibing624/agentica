@@ -20,7 +20,11 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from agentica.peers import git_state
 from agentica import config
-from agentica.cli.approvals import build_interactive_approve, interrupt_approvals
+from agentica.cli.approvals import (
+    build_interactive_approve,
+    human_wait_timeout,
+    interrupt_approvals,
+)
 from agentica.cli.commands.context import (
     IMAGE_EXTENSIONS,
     CommandContext,
@@ -68,7 +72,6 @@ from agentica.shell_hooks import (
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.subagents.loader import load_all_agents
 from agentica.tools.ask_user_question_tool import (
-    DEFAULT_ASK_USER_QUESTION_TIMEOUT,
     AskUserQuestionTimeout,
     set_default_ask_user_question_callback,
 )
@@ -295,12 +298,10 @@ def run_interactive(
             armed_during_run = state_ref.agent_running
         app_ref.invalidate()
 
-        # An agent's question gives up after the configured wait; the agent then
-        # goes on with the option it recommended and says so. A slash command's
-        # prompt is the user's own action in progress, so it never expires.
-        timeout_s = float(
-            get_setting("ask_user_question_timeout", DEFAULT_ASK_USER_QUESTION_TIMEOUT) or 0
-        )
+        # An agent's question gives up after the configured wait. A slash
+        # command's prompt is the user's own action in progress, so it never
+        # expires.
+        timeout_s = human_wait_timeout()
         deadline = (
             time.monotonic() + timeout_s
             if armed_during_run and timeout_s > 0 else None

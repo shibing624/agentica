@@ -590,9 +590,10 @@ settings:
 #                            # profile when only one model needs a smaller cap.
 #  resume_cwd: ask           # ask|session|current — directory to use when /resume
 #                            # picks a session started in another directory
-#  ask_user_question_timeout: 300  # seconds the CLI waits on the agent's question;
-#                            # then it proceeds with its recommended option and
-#                            # tells you what it chose. 0 = wait forever.
+#  human_wait_timeout: 300   # seconds the CLI waits on the agent's question or
+#                            # approval card. A question then lets the agent go
+#                            # on without an answer; an approval is not granted.
+#                            # 0 = wait forever.
 #  media_model:              # gateway: Gemini used to describe/transcribe
 #                            # inbound image/voice/video the base model cannot
 #                            # take natively. model_name defaults to

@@ -41,6 +41,14 @@ approved_by_user: contextvars.ContextVar[bool] = contextvars.ContextVar(
 )
 
 DENIED_TOOL_RESULT = "Tool call denied by user."
+# Not "denied by user": nobody refused, so the model must not read it as a
+# verdict on the call, and must not treat it as an obstacle to route around.
+APPROVAL_TIMED_OUT_RESULT = (
+    "Tool call not run: nobody answered the approval prompt within {seconds}s. "
+    "This is neither a refusal nor consent. Do not retry it, and do not get the "
+    "same effect another way. Finish the work that does not need it and list "
+    "this step in your reply as waiting for the user."
+)
 
 FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep"})
 WRITE_FILE_TOOLS = frozenset({"write_file", "apply_patch"})
@@ -109,6 +117,8 @@ class ApprovalRegistry:
 
     def __init__(self) -> None:
         self._pending: Dict[str, _PendingEntry] = {}
+        # tool_call_id -> seconds waited, for waits that expired unanswered.
+        self._expired: Dict[str, float] = {}
 
     @property
     def size(self) -> int:
@@ -149,6 +159,17 @@ class ApprovalRegistry:
         """Resolve every pending wait as deny (interrupt / cancel)."""
         for tool_call_id in list(self._pending):
             self.decide(tool_call_id, "deny")
+
+    def expire(self, tool_call_id: str, waited_seconds: float) -> bool:
+        """Resolve a wait nobody answered: the call does not run, but no one refused it."""
+        if not self.decide(tool_call_id, "deny"):
+            return False
+        self._expired[tool_call_id] = waited_seconds
+        return True
+
+    def pop_expired(self, tool_call_id: str) -> Optional[float]:
+        """Seconds waited if this id's wait expired, else None."""
+        return self._expired.pop(tool_call_id, None)
 
 
 @dataclass
@@ -724,6 +745,11 @@ def make_approve(
         publish(pending)
         decision = await waiter
         wait_s = round(time.monotonic() - started, 2)
+        expired_after = registry.pop_expired(pending.tool_call_id)
+        if expired_after is not None:
+            fc.denied_result = APPROVAL_TIMED_OUT_RESULT.format(
+                seconds=round(expired_after)
+            )
         if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
             decision = "deny"
         grant: Optional[Dict[str, Any]] = None
@@ -748,6 +774,7 @@ def make_approve(
             "similar_label": similar_label or None,
             "mode": mode,
             "decision": decision,
+            "reason": "timeout" if expired_after is not None else None,
             "wait_s": wait_s,
             "grant": grant,
         }

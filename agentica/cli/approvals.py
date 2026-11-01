@@ -25,9 +25,19 @@ from agentica.agent.approvals import (
     make_approve,
 )
 from agentica.shell_hooks import emit_request_resolved
+from agentica.config.profiles import get_setting
 from agentica.tools.acp_agent_tool import ACP_PERMISSION_TOOL
 from agentica.shell_hooks.requests import approval_payload, start_hook_request
 from agentica.utils.log import logger
+
+# Seconds the CLI waits on a person before moving on. Long enough to read and
+# answer, short enough that stepping away does not leave a turn idle for hours.
+DEFAULT_HUMAN_WAIT_TIMEOUT = 300
+
+
+def human_wait_timeout() -> float:
+    """``settings.human_wait_timeout``; 0 means wait forever."""
+    return float(get_setting("human_wait_timeout", DEFAULT_HUMAN_WAIT_TIMEOUT) or 0)
 
 _DECISION_ORDER: Tuple[ApprovalDecision, ...] = (
     "allow",
@@ -128,7 +138,12 @@ def format_approval_prompt(pending: PendingApproval) -> str:
     return "\n".join(lines)
 
 
-def format_approval_record(pending: PendingApproval, decision: ApprovalDecision) -> str:
+def format_approval_record(
+    pending: PendingApproval,
+    decision: ApprovalDecision,
+    *,
+    expired_after: Optional[float] = None,
+) -> str:
     """Transcript remnant after the TUI card is dismissed.
 
     The card lives in the prompt_toolkit layout, not scrollback. Hiding it
@@ -147,17 +162,24 @@ def format_approval_record(pending: PendingApproval, decision: ApprovalDecision)
         verdict = "✓ allowed similar"
     elif decision == "deny_prefix":
         verdict = "✗ denied similar"
+    elif expired_after is not None:
+        verdict = f"✗ not run (no answer within {round(expired_after)}s)"
     else:
         verdict = "✗ denied"
     return f"{body}\n{verdict}"
 
 
-def _print_approval_record(pending: Optional[PendingApproval], decision: ApprovalDecision) -> None:
+def _print_approval_record(
+    pending: Optional[PendingApproval],
+    decision: ApprovalDecision,
+    *,
+    expired_after: Optional[float] = None,
+) -> None:
     if pending is None:
         return
     from agentica.cli.interactive.console_io import _cprint
 
-    _cprint(format_approval_record(pending, decision))
+    _cprint(format_approval_record(pending, decision, expired_after=expired_after))
 
 
 def submit_approval_decision(req: Any, decision: ApprovalDecision) -> bool:
@@ -283,9 +305,8 @@ def _offer_approval_to_hook(
     terminal first, ``is_parked`` goes False and the process is killed — the
     hook's answer would be second, which is a race rather than an error.
 
-    No timeout is passed anywhere: the terminal prompt this races waits as long
-    as the user takes (``registry.wait`` has no deadline), so the hook gets the
-    same patience rather than a shorter clock of our own invention.
+    The hook has no clock of its own: it gets as long as the terminal prompt it
+    races. When that prompt expires ``is_parked`` goes False the same way.
     """
     try:
         agent = state.current_agent
@@ -346,6 +367,38 @@ def _offer_approval_to_hook(
         ).start()
     except Exception as exc:
         logger.debug(f"shell hooks: approval offer failed: {exc}")
+
+
+def _expire_approval(state: Any, req: Any, timeout_s: float, ui_holder: dict) -> None:
+    """Close an approval card nobody answered. Runs on the agent loop.
+
+    The call is not run (silence is not consent), but it is not recorded as the
+    user's refusal either: no deny-similar grant, and the model is told nobody
+    answered. ``req.submit`` is the race point with a keypress or hook answer.
+    """
+    from agentica.cli.interactive.console_io import _ask_active, _ask_state_lock
+
+    pending = req.approval_pending
+    if not req.submit("deny", source="timeout"):
+        return
+    if not state.approval_registry.expire(req.approval_id or "", timeout_s):
+        return
+    if state.input_request is req:
+        state.input_request = None
+    with _ask_state_lock:
+        _ask_active[0] = False
+    _print_approval_record(pending, "deny", expired_after=timeout_s)
+    if req.hook_request_id:
+        emit_request_resolved(
+            state.current_agent,
+            request_id=req.hook_request_id,
+            event="needs.approval",
+            decided_by="timeout",
+            decision="deny",
+        )
+    app = ui_holder.get("app")
+    if app is not None:
+        app.invalidate()
 
 
 def _apply_hook_decision(
@@ -432,6 +485,9 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
         # answer, applied the same way. The app has no authority of its own, and
         # with no hook configured this is a no-op.
         _offer_approval_to_hook(pending, state, loop, req, ui_holder)
+        timeout_s = human_wait_timeout()
+        if timeout_s > 0:
+            loop.call_later(timeout_s, _expire_approval, state, req, timeout_s, ui_holder)
 
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",

@@ -273,9 +273,12 @@ class GoalTool(Tool):
         Prefer ``verify_completion`` to finish a goal — it backs completion
         with real evidence. Use ``update_goal`` for:
 
-        - ``status="paused"``: you are blocked and need new input from the
-          user (ambiguous requirements, missing credentials). Stops the
-          auto-continuation loop without losing progress.
+        - ``status="paused"``: every remaining step needs something only the
+          user can provide (missing credentials or access, or approval for
+          an irreversible step). Stops the auto-continuation loop without
+          losing progress. Ambiguity is not a reason to pause: choose the
+          most reasonable option, keep going, and record the assumption in
+          ``final_answer``.
         - ``status="complete"``: escape hatch for goals with no runnable
           check (exit 0) and no judgeable criteria. Pass the full
           deliverable in ``final_answer``.

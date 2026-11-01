@@ -208,17 +208,23 @@ class TestAskUserQuestionTimeout:
         result = json.loads(asyncio.run(tool.ask_user_question(
             prompt="Which?", options=["A（推荐）", "B"],
         )))
+        from agentica.tools.ask_user_question_tool import TIMED_OUT_NOTE
+
         assert result == {
             "prompt": "Which?",
             "response": "",
             "timed_out": True,
             "waited_seconds": 300,
+            "note": TIMED_OUT_NOTE,
             "options": ["A（推荐）", "B"],
         }
+        # Silence licenses a reversible choice, never an irreversible step.
+        assert "Silence is not consent" in TIMED_OUT_NOTE
+        assert "do not do that step" in TIMED_OUT_NOTE
 
-    def test_system_prompt_tells_the_model_to_proceed_with_its_recommendation(self):
+    def test_system_prompt_keeps_permission_questions_out_of_the_tool(self):
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         text = AskUserQuestionTool().get_system_prompt()
         assert '"timed_out": true' in text
-        assert "recommended option" in text
+        assert "permission system" in text

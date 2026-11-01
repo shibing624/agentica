@@ -43,11 +43,14 @@ from agentica.utils.log import logger
 # one the CLI wired explicitly.
 _default_callback_holder: List[Optional[Callable]] = [None]
 
-# Seconds the interactive CLI waits on an agent's question before the agent
-# goes on with its recommendation (``settings.ask_user_question_timeout``;
-# 0 waits forever). Long enough to read and answer, short enough that a user
-# who stepped away does not come back to a turn that sat idle for hours.
-DEFAULT_ASK_USER_QUESTION_TIMEOUT = 300
+# Handed to the model at the moment it decides what to do without an answer.
+TIMED_OUT_NOTE = (
+    "Nobody answered. Silence is not consent. If the question was a choice "
+    "that stays local and reversible, go on with your recommended option and "
+    "say what you chose. If it was about something hard to undo or visible "
+    "outside this machine (push, deploy, send, delete), do not do that step: "
+    "finish the rest and list it in your reply as waiting for the user."
+)
 
 
 class AskUserQuestionTimeout(Exception):
@@ -83,10 +86,10 @@ class AskUserQuestionTool(Tool):
     provided, it defaults to console input (useful for CLI applications).
 
     The tool itself has no deadline. A callback may give up on a question
-    (the interactive CLI does after ``settings.ask_user_question_timeout``) by
-    raising :class:`AskUserQuestionTimeout`; the result then says
-    ``timed_out`` with no response, and the model carries on with the option
-    it recommended and reports that choice. Nothing here invents an answer.
+    (the interactive CLI does after ``settings.human_wait_timeout``) by
+    raising :class:`AskUserQuestionTimeout`; the result then says ``timed_out``
+    with no response and tells the model what silence does and does not
+    license. Nothing here invents an answer.
     Agents with nobody to answer at all must not be given this tool: see
     ``include_ask_user_question`` in ``agentica/tools/builtin`` and
     ``agentica/cli/runtime.create_agent``.
@@ -118,8 +121,9 @@ and it blocks until someone answers it.
 
 Ask only when no reasonable default exists or the step is hard to undo. For an
 ambiguity you can resolve with a recommendation, take it and tell the user
-afterwards. A question nobody answers in time returns `"timed_out": true`:
-proceed with your recommended option and say in your reply what you chose."""
+afterwards. Do not ask whether you may run a command or edit a file: call the
+tool, and the permission system prompts when it needs to. A question nobody
+answers in time returns `"timed_out": true` with a note on how to proceed."""
 
     _ASK_PARAMETERS = {
         "type": "object",
@@ -234,6 +238,7 @@ proceed with your recommended option and say in your reply what you chose."""
                 "response": "",
                 "timed_out": True,
                 "waited_seconds": round(e.waited_seconds),
+                "note": TIMED_OUT_NOTE,
             }
             if options:
                 result["options"] = list(options)

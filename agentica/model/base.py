@@ -1201,8 +1201,8 @@ class Model(ABC):
             if decision in ("allow", "allow_prefix"):
                 fc.skip_hard_safety = True
                 return False
-            fc.result = DENIED_TOOL_RESULT
-            fc.error = DENIED_TOOL_RESULT
+            fc.result = fc.denied_result or DENIED_TOOL_RESULT
+            fc.error = fc.result
             results[idx] = False
             exceptions[idx] = None
             return True

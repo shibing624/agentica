@@ -362,3 +362,94 @@ class TestInteractiveApprove:
         fc = _fc("execute", {"command": "rm -f /tmp/x"}, call_id="a4")
         assert await approve(fc) == "deny"
         assert state.input_request is None
+
+
+class TestApprovalTimeout:
+    async def _wait_for_prompt(self, state, timeout=1.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if is_approval_request(state.input_request):
+                return state.input_request
+            await asyncio.sleep(0)
+        raise AssertionError("approval prompt did not appear")
+
+    @pytest.mark.asyncio
+    async def test_unanswered_card_is_not_run_and_not_recorded_as_refusal(self, monkeypatch):
+        import agentica.cli.approvals as cli_approvals
+        from agentica.agent.approvals import DENIED_TOOL_RESULT
+
+        monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0.05)
+        printed = []
+        monkeypatch.setattr(cli_approvals, "_print_approval_record",
+                            lambda pending, decision, expired_after=None: printed.append(
+                                format_approval_record(pending, decision,
+                                                       expired_after=expired_after)))
+        state = SessionState()
+        state.current_agent = _agent()
+        approve = build_interactive_approve(state, {})
+        fc = _fc("execute", {"command": "git push"}, call_id="t1")
+        task = asyncio.create_task(approve(fc))
+        req = await self._wait_for_prompt(state)
+
+        assert await asyncio.wait_for(task, 2.0) == "deny"
+        assert fc.denied_result is not None
+        assert fc.denied_result != DENIED_TOOL_RESULT
+        assert "nobody answered the approval prompt within 0s" in fc.denied_result
+        assert fc.approval_trace["reason"] == "timeout"
+        assert state.approval_grants.deny_command_prefixes == []
+        assert state.input_request is None
+        assert printed == ["$ git push\n✗ not run (no answer within 0s)"]
+        # A keypress arriving after expiry has nothing left to decide.
+        assert cli_approvals.submit_approval_decision(req, "allow") is False
+
+    @pytest.mark.asyncio
+    async def test_answer_before_deadline_wins_and_expiry_is_a_no_op(self, monkeypatch):
+        import agentica.cli.approvals as cli_approvals
+        from agentica.cli.approvals import complete_approval
+
+        monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0.2)
+        state = SessionState()
+        state.current_agent = _agent()
+        approve = build_interactive_approve(state, {})
+        fc = _fc("execute", {"command": "rm -f /tmp/x"}, call_id="t2")
+        task = asyncio.create_task(approve(fc))
+        req = await self._wait_for_prompt(state)
+        assert complete_approval(state, "allow")
+        assert await asyncio.wait_for(task, 2.0) == "allow"
+        await asyncio.sleep(0.3)
+        assert state.approval_registry.pop_expired("t2") is None
+        assert fc.denied_result is None
+
+    @pytest.mark.asyncio
+    async def test_zero_waits_forever(self, monkeypatch):
+        import agentica.cli.approvals as cli_approvals
+
+        monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0)
+        state = SessionState()
+        state.current_agent = _agent()
+        approve = build_interactive_approve(state, {})
+        task = asyncio.create_task(approve(_fc("execute", {"command": "rm x"}, call_id="t3")))
+        await self._wait_for_prompt(state)
+        await asyncio.sleep(0.2)
+        assert not task.done()
+        interrupt_approvals(state)
+        assert await asyncio.wait_for(task, 2.0) == "deny"
+
+    @pytest.mark.asyncio
+    async def test_expiry_loses_to_a_keypress_whose_decide_is_still_queued(self, monkeypatch):
+        """The TUI thread submits, then posts ``decide`` to the loop. A timer
+        firing in between must not override the user's answer."""
+        import agentica.cli.approvals as cli_approvals
+
+        monkeypatch.setattr(cli_approvals, "human_wait_timeout", lambda: 0)
+        state = SessionState()
+        state.current_agent = _agent()
+        approve = build_interactive_approve(state, {})
+        fc = _fc("execute", {"command": "rm -f /tmp/x"}, call_id="t4")
+        task = asyncio.create_task(approve(fc))
+        req = await self._wait_for_prompt(state)
+        assert req.submit("allow")  # keypress landed; its decide not yet run
+        cli_approvals._expire_approval(state, req, 300, {})
+        state.approval_registry.decide("t4", "allow")
+        assert await asyncio.wait_for(task, 2.0) == "allow"
+        assert fc.denied_result is None

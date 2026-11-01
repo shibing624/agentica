@@ -714,6 +714,24 @@ class TestRunnerApprovalHook:
         assert "Cancelled: sibling" not in (fc2.error or "")
 
     @pytest.mark.asyncio
+    async def test_expired_approval_tells_the_model_nobody_answered(self):
+        model = _model()
+        agent = _HarnessAgent()
+
+        async def approve(fc):
+            fc.denied_result = "Tool call not run: nobody answered"
+            return "deny"
+
+        agent.approve = approve
+        model._agent_ref = weakref.ref(agent)
+        fc, ex = _exec_fc("c1", "git push")
+        async for _ in model.run_function_calls([fc], []):
+            pass
+        assert fc.result == "Tool call not run: nobody answered"
+        assert fc.error == fc.result
+        assert ex.calls == []
+
+    @pytest.mark.asyncio
     async def test_approve_exception_becomes_deny_result(self):
         model = _model()
         agent = _HarnessAgent()
