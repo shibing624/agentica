@@ -1766,3 +1766,18 @@ class TestCLIToolRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_timed_out_ask_renders_as_no_answer_not_blank():
+    import json as _json
+
+    from agentica.cli.display.stream import _parse_ask_user_exchange
+
+    payload = _json.dumps({
+        "prompt": "Q?", "response": "", "timed_out": True,
+        "waited_seconds": 300, "options": ["A", "B"],
+    })
+    prompt, response, options = _parse_ask_user_exchange(payload)
+    assert prompt == "Q?"
+    assert response.startswith("(no answer within 300s")
+    assert options == ["A", "B"]

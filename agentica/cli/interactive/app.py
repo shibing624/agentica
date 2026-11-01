@@ -68,6 +68,8 @@ from agentica.shell_hooks import (
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.subagents.loader import load_all_agents
 from agentica.tools.ask_user_question_tool import (
+    DEFAULT_ASK_USER_QUESTION_TIMEOUT,
+    AskUserQuestionTimeout,
     set_default_ask_user_question_callback,
 )
 from agentica.tools.background_processes import BackgroundProcessCompleted
@@ -293,6 +295,17 @@ def run_interactive(
             armed_during_run = state_ref.agent_running
         app_ref.invalidate()
 
+        # An agent's question gives up after the configured wait; the agent then
+        # goes on with the option it recommended and says so. A slash command's
+        # prompt is the user's own action in progress, so it never expires.
+        timeout_s = float(
+            get_setting("ask_user_question_timeout", DEFAULT_ASK_USER_QUESTION_TIMEOUT) or 0
+        )
+        deadline = (
+            time.monotonic() + timeout_s
+            if armed_during_run and timeout_s > 0 else None
+        )
+
         # Offer the same question to the user's hook command, if one is
         # configured. Armed *after* the slot above, deliberately: the widget only
         # polls `state_ref.input_request`, so a hook offered the question first
@@ -317,6 +330,7 @@ def run_interactive(
         # the turn permanently with no recovery. On each empty poll we
         # re-validate: re-arm if overwritten, abort if the run ended.
         answer = None
+        timed_out = False
         try:
             while True:
                 try:
@@ -326,6 +340,14 @@ def run_interactive(
                     if state_ref.should_exit or (armed_during_run and not state_ref.agent_running):
                         logger.info("[ask] watchdog: run ended, aborting prompt")
                         answer = _InputRequest.CANCELLED
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        # Resolve the slot first: a line typed this very moment
+                        # either wins (and is used) or is dropped, never both.
+                        if req.cancel():
+                            timed_out = True
+                            break
+                        answer = req.result.get_nowait()
                         break
                     if state_ref.input_request is not req:
                         logger.info("[ask] watchdog: re-arming after overwrite")
@@ -350,6 +372,16 @@ def run_interactive(
                 if state_ref.input_request is req:
                     state_ref.input_request = None
 
+        if timed_out:
+            logger.info(f"[ask] resolved: TIMEOUT after {timeout_s:.0f}s")
+            emit_request_resolved(
+                state_ref.current_agent,
+                request_id=request_id,
+                event="needs.input",
+                decided_by="timeout",
+            )
+            app_ref.invalidate()
+            raise AskUserQuestionTimeout(timeout_s)
         if answer is _InputRequest.CANCELLED:
             # Propagate as AgentCancelledError so the agent runtime unwinds
             # cleanly. Any layer between us and the agent that catches Exception

@@ -192,3 +192,33 @@ class TestAskUserQuestionTool:
         assert call.arguments["options"] == options
         assert asyncio.run(call.execute()) is True
         assert captured["options"] == options
+
+
+class TestAskUserQuestionTimeout:
+    def test_callback_timeout_becomes_timed_out_result_without_an_answer(self):
+        from agentica.tools.ask_user_question_tool import (
+            AskUserQuestionTimeout,
+            AskUserQuestionTool,
+        )
+
+        def cb(prompt, options=None):
+            raise AskUserQuestionTimeout(300)
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            prompt="Which?", options=["A（推荐）", "B"],
+        )))
+        assert result == {
+            "prompt": "Which?",
+            "response": "",
+            "timed_out": True,
+            "waited_seconds": 300,
+            "options": ["A（推荐）", "B"],
+        }
+
+    def test_system_prompt_tells_the_model_to_proceed_with_its_recommendation(self):
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        text = AskUserQuestionTool().get_system_prompt()
+        assert '"timed_out": true' in text
+        assert "recommended option" in text

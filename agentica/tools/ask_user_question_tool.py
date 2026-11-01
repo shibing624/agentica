@@ -43,6 +43,26 @@ from agentica.utils.log import logger
 # one the CLI wired explicitly.
 _default_callback_holder: List[Optional[Callable]] = [None]
 
+# Seconds the interactive CLI waits on an agent's question before the agent
+# goes on with its recommendation (``settings.ask_user_question_timeout``;
+# 0 waits forever). Long enough to read and answer, short enough that a user
+# who stepped away does not come back to a turn that sat idle for hours.
+DEFAULT_ASK_USER_QUESTION_TIMEOUT = 300
+
+
+class AskUserQuestionTimeout(Exception):
+    """Raised by an input callback when nobody answered within its deadline.
+
+    The callback owns the deadline because it owns the prompt: it is the one
+    that can take the question off the screen and drop a late answer. The tool
+    turns this into a ``timed_out`` result instead of an answer, so the model —
+    not this layer — decides what to do without one.
+    """
+
+    def __init__(self, waited_seconds: float):
+        super().__init__(f"no answer within {waited_seconds:.0f}s")
+        self.waited_seconds = waited_seconds
+
 
 def set_default_ask_user_question_callback(callback: Optional[Callable]) -> None:
     """Register/clear the process-wide default ask_user_question callback.
@@ -62,13 +82,14 @@ class AskUserQuestionTool(Tool):
     The tool uses a callback mechanism to get user input. If no callback is
     provided, it defaults to console input (useful for CLI applications).
 
-    It waits for the user without a deadline. That is the point of the tool
-    rather than a timeout setting: a question is a *user action*, and the
-    answer arriving is what ends it. There is deliberately no timeout to tune —
-    a number here would mean the question expired, and there is no correct
-    value for "how long a person may take". Agents with nobody to answer must
-    therefore not be given this tool at all: see ``include_ask_user_question``
-    in ``agentica/tools/builtin`` and ``agentica/cli/runtime.create_agent``.
+    The tool itself has no deadline. A callback may give up on a question
+    (the interactive CLI does after ``settings.ask_user_question_timeout``) by
+    raising :class:`AskUserQuestionTimeout`; the result then says
+    ``timed_out`` with no response, and the model carries on with the option
+    it recommended and reports that choice. Nothing here invents an answer.
+    Agents with nobody to answer at all must not be given this tool: see
+    ``include_ask_user_question`` in ``agentica/tools/builtin`` and
+    ``agentica/cli/runtime.create_agent``.
 
     Attributes:
         input_callback: Custom callback for getting user input.
@@ -93,7 +114,12 @@ class AskUserQuestionTool(Tool):
 
 This prompt renders in YOUR terminal. Work handed to you by another agent
 session must go back with `send_message` — this box never reaches that person,
-and it blocks until someone answers it."""
+and it blocks until someone answers it.
+
+Ask only when no reasonable default exists or the step is hard to undo. For an
+ambiguity you can resolve with a recommendation, take it and tell the user
+afterwards. A question nobody answers in time returns `"timed_out": true`:
+proceed with your recommended option and say in your reply what you chose."""
 
     _ASK_PARAMETERS = {
         "type": "object",
@@ -152,6 +178,8 @@ and it blocks until someone answers it."""
         if callback is not None:
             try:
                 return callback(prompt, options)
+            except AskUserQuestionTimeout:
+                raise
             except Exception as e:
                 logger.error(f"Error in input callback: {e}")
                 raise
@@ -195,9 +223,21 @@ and it blocks until someone answers it."""
         # prompt_toolkit callback parks on a queue until the user types). Run
         # it in a thread so the event loop stays live to service the UI.
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, lambda: self._get_input(prompt, options)
-        )
+        try:
+            response = await loop.run_in_executor(
+                None, lambda: self._get_input(prompt, options)
+            )
+        except AskUserQuestionTimeout as e:
+            logger.info(f"User input timed out after {e.waited_seconds:.0f}s")
+            result = {
+                "prompt": prompt,
+                "response": "",
+                "timed_out": True,
+                "waited_seconds": round(e.waited_seconds),
+            }
+            if options:
+                result["options"] = list(options)
+            return json.dumps(result, ensure_ascii=False)
 
         logger.info(f"User input received: {response[:100]}...")
 

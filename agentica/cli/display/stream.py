@@ -149,9 +149,12 @@ def _parse_ask_user_exchange(
     options = _coerce_ask_options(payload.get("options"))
     if options is None and tool_args:
         options = _coerce_ask_options(tool_args.get("options"))
+    response = str(payload.get("response", ""))
+    if payload.get("timed_out") is True:
+        response = f"(no answer within {payload.get('waited_seconds', '?')}s — agent proceeds with its recommendation)"
     return (
         str(payload.get("prompt", "")),
-        str(payload.get("response", "")),
+        response,
         options,
     )
 
