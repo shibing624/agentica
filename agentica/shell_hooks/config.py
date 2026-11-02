@@ -115,6 +115,9 @@ class ShellHooksConfig:
 
     enabled: bool = False
     consumers: List[HookConsumer] = field(default_factory=list)
+    #: The gateway (web UI, IM channels, desktop app) wires these hooks too.
+    #: Off by default: IM channels carry messages from people other than you.
+    gateway: bool = False
 
     @property
     def effective(self) -> bool:
@@ -176,6 +179,7 @@ def load_shell_hooks_config(config: Optional[Dict[str, Any]] = None) -> ShellHoo
         consumers=_parse_consumers(
             block.get("consumers"), location="settings.hooks.consumers"
         ),
+        gateway=bool(block.get("gateway", False)),
     )
 
     env_enabled = _env_bool("ENABLED")

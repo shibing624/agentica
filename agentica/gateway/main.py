@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from agentica.config import AGENTICA_LOG_LEVEL
 from agentica.cron.types import CronRunOutput
+from agentica.shell_hooks import install_hook_egress, load_shell_hooks_config
 from agentica.utils.log import enable_process_file_logging, logger
 from . import accounts, auth, deps, runtime
 from agentica.version import __version__
@@ -59,6 +60,23 @@ def _display_home_path(path: str) -> str:
     if path.startswith(home):
         return "~" + path[len(home):]
     return path
+
+
+def _install_gateway_hooks() -> None:
+    """Wire ``settings.hooks`` here only when ``settings.hooks.gateway`` is on.
+
+    The gateway is the same personal agent as the CLI behind another surface
+    (web UI, desktop app, IM). But IM channels carry other people's messages:
+    with hooks on, a recall consumer answers *them* from your memory and a
+    capture consumer files *their* chats as yours. So it is opt-in.
+    """
+    cfg = load_shell_hooks_config()
+    if not cfg.gateway:
+        logger.info("Shell hooks: off for the gateway (set `settings.hooks.gateway: true` to enable)")
+        return
+    installed = install_hook_egress(cfg)
+    names = [c.name for c in installed.consumers if c.enabled] if installed else []
+    logger.info(f"Shell hooks: {', '.join(names) or 'none active'}")
 
 
 def _sign_in_notice(user_id: str, password: str) -> str:
@@ -122,6 +140,8 @@ async def lifespan(app: FastAPI):
     if log_file:
         logger.info(f"  Log File ({AGENTICA_LOG_LEVEL}): {_display_home_path(log_file)}")
     logger.info("=" * 50)
+
+    _install_gateway_hooks()
 
     # Agent service
     agent_svc = AgentService(workspace_path=str(settings.workspace_path))

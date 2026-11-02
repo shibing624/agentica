@@ -222,10 +222,27 @@ goal 会报 5 次「跑完了」。这条规则与 notify sink 共用（同一�
 无人值守路径（`--print` / cron / `/bg`）不发起 `needs.*`，但照常发送 `run.*`
 与 `tool.*`。
 
-**只有 `agentica` CLI 进程读 `settings.hooks`。** 在同一台机器上用 SDK
-（`from agentica import Agent, DeepAgent`）写的服务不会自动加载这里的 hooks：
-它的用户不是你，不该被注入你的 `UserPromptSubmit` 召回，也不该被你的消费者采集。
-SDK 进程需要 hooks 时显式调用一次：
+**哪些进程会加载 `settings.hooks`：**
+
+| 入口 | 默认 | 开启方式 |
+|---|---|---|
+| `agentica` CLI（交互、`--query`/`--print`、cron daemon、ACP） | 开（只看 `enabled`） | — |
+| `agentica-gateway`（Web UI、IM 渠道、Desktop App 共用这一个进程） | 关 | `settings.hooks.gateway: true` |
+| SDK（`Agent` / `DeepAgent`） | 关 | 代码里调用 `install_hook_egress()` |
+
+Gateway 默认关闭，是因为 IM 渠道里的消息可能来自别人：开启后，记忆类消费者会用你的
+记忆去回答他们，采集类消费者会把他们的对话当成你的存下来。只有你自己用（Desktop App、
+本机 Web UI、只放行你自己的 IM 账号）时再打开：
+
+```yaml
+settings:
+  hooks:
+    enabled: true
+    gateway: true
+    consumers: [...]
+```
+
+SDK 是给开发者写服务用的，服务的用户不是你，所以不会自动读这份配置。需要时显式调用一次：
 
 ```python
 from agentica.shell_hooks import install_hook_egress

@@ -201,7 +201,9 @@ the hook config once at process start, so every CLI mode (interactive,
 `--query`/`--print`, cron daemon, ACP) emits events. An SDK process never reads
 `~/.agentica/config.yaml` hooks on its own: a service embedding `Agent` on the
 same machine must not get the CLI user's recall or be captured by their
-consumers. It opts in by calling `install_hook_egress()` explicitly.
+consumers. It opts in by calling `install_hook_egress()` explicitly. The gateway
+(web UI, IM channels, desktop app) installs it at startup only when
+`settings.hooks.gateway: true`, because IM channels carry other people's messages.
 The Runner passes a callback into `Model.run_function_calls`: it emits started
 immediately before each actual execution and completed from that execution's
 finally block, so serial, parallel and cancelled calls reflect real boundaries

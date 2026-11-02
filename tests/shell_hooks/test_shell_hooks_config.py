@@ -34,6 +34,10 @@ class TestDisabledByDefault:
         cfg = _cfg({"enabled": True})
         assert cfg.consumers == []
 
+    def test_gateway_is_off_unless_asked_for(self):
+        assert _cfg({"enabled": True}).gateway is False
+        assert _cfg({"enabled": True, "gateway": True}).gateway is True
+
 
 class TestCommandIsArgv:
     def test_a_list_is_taken_verbatim(self):
