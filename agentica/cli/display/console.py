@@ -301,7 +301,8 @@ def display_agent_execution_error(console_instance, error: BaseException) -> Dic
     stamp = _error_display_stamp()
     view["stamp"] = stamp
     headline_text = f"{view['summary']} - {stamp}"
-    if view["raw"]:
+    blocked = isinstance(error, InputGuardrailTripwireTriggered)
+    if view["raw"] and not blocked:
         remember_truncated("Agent error · raw", view["raw"])
         # One log record per error, so the raw text is greppable as a unit.
         logger.error("%s: %s", headline_text, " ".join(view["raw"].split()))
@@ -316,7 +317,9 @@ def display_agent_execution_error(console_instance, error: BaseException) -> Dic
         console_instance.print(Text(f"  {view['diagnostics']}", style="dim"))
     if view["hint"]:
         console_instance.print(Text(f"  {view['hint']}", style="dim"))
-    console_instance.print(Text("  Ctrl+O shows raw provider error.", style="dim"))
+    if not blocked:
+        # A refusal has no provider error behind it; the reason above is all.
+        console_instance.print(Text("  Ctrl+O shows raw provider error.", style="dim"))
     return view
 
 

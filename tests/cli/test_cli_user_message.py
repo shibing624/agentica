@@ -77,6 +77,25 @@ class TestCLIUserMessage(unittest.TestCase):
         }])
 
 
+    def test_a_blocked_prompt_names_the_refusal_and_offers_no_raw_error(self):
+        """A hook's refusal is a policy decision: no 'raw provider error' to open."""
+        from rich.console import Console
+
+        from agentica.cli.display import console as disp
+        from agentica.shell_hooks.prompt import PromptBlocked
+
+        output = StringIO()
+        console = Console(file=output, width=100, force_terminal=False, no_color=True)
+        disp.clear_truncated_blocks()
+
+        view = disp.display_agent_execution_error(console, PromptBlocked("contains a key"))
+
+        rendered = output.getvalue()
+        self.assertEqual(view["summary"], "Prompt blocked by UserPromptSubmit")
+        self.assertIn("contains a key", rendered)
+        self.assertNotIn("Ctrl+O", rendered)
+        self.assertEqual(disp.get_truncated_blocks(), [])
+
     def test_display_agent_execution_error_keeps_retry_hint_for_429_without_payload(self):
         """A bare 429 still gets the same actionable retry treatment."""
         from agentica.cli.display import console as disp

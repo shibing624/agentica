@@ -76,7 +76,8 @@ class HookProcess:
         self._capture_stderr = capture_stderr
         self._proc: Optional[subprocess.Popen] = None
         self._stdout = ""
-        self._stderr = ""
+        self._stderr_buf = bytearray()
+        self._stderr_done: Optional[threading.Event] = None
         self._done = threading.Event()
         self._killed = False
         self._completed_at: Optional[float] = None
@@ -96,8 +97,8 @@ class HookProcess:
 
     @property
     def stderr(self) -> str:
-        """stderr, when captured: the refusal reason of a prompt hook."""
-        return self._stderr
+        """stderr captured so far (non-blocking): the refusal reason of a prompt hook."""
+        return self._stderr_text()
 
     @property
     def finished(self) -> bool:
@@ -120,21 +121,32 @@ class HookProcess:
         return self._proc.poll() if self._proc is not None else None
 
     def exit_code(self, timeout: Optional[float] = None) -> Optional[int]:
-        """Wait up to ``timeout`` for the child to exit; None if it has not."""
+        """Wait up to ``timeout`` for the child to exit; None if it has not.
+
+        Never touches stderr: a grandchild that inherited it keeps the pipe
+        open after the hook itself has exited, and a blocking read there would
+        hang the turn. Use :meth:`read_stderr` when the text is actually needed.
+        """
         if self._proc is None:
             return None
         try:
-            code = self._proc.wait(timeout=timeout)
+            return self._proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             return None
-        if self._capture_stderr and self._proc.stderr is not None and not self._stderr:
-            try:
-                self._stderr = self._proc.stderr.read(MAX_OUTPUT_BYTES).decode(
-                    "utf-8", errors="replace"
-                )
-            except (OSError, ValueError):
-                pass
-        return code
+
+    def read_stderr(self, timeout: Optional[float] = None) -> str:
+        """stderr so far, waiting up to ``timeout`` for it to close.
+
+        The drain thread has been reading since ``start()``, so whatever the
+        exited hook wrote is already here; the wait only covers the last chunk
+        in flight. A pipe still held open by a grandchild returns what arrived.
+        """
+        if self._stderr_done is not None:
+            self._stderr_done.wait(timeout)
+        return self._stderr_text()
+
+    def _stderr_text(self) -> str:
+        return bytes(self._stderr_buf).decode("utf-8", errors="replace")
 
     def start(self) -> bool:
         """Spawn and feed stdin. False means the hook could not be run at all.
@@ -180,7 +192,36 @@ class HookProcess:
         threading.Thread(
             target=self._read_stdout, name="agentica-hook-reader", daemon=True
         ).start()
+        if self._proc.stderr is not None:
+            # Drained concurrently for the same reason as stdout: a hook that
+            # logs more than a pipe buffer to stderr would otherwise block in
+            # write(2) until the deadline kills it.
+            self._stderr_done = threading.Event()
+            threading.Thread(
+                target=self._drain_stderr, name="agentica-hook-stderr", daemon=True
+            ).start()
         return True
+
+    def _drain_stderr(self) -> None:
+        """Read stderr to EOF; keep the first ``MAX_OUTPUT_BYTES``, discard the rest."""
+        proc = self._proc
+        assert self._stderr_done is not None
+        try:
+            if proc is None or proc.stderr is None:
+                return
+            while True:
+                # fileno() each time, as ``_read_stdout`` does: after kill()
+                # closes the pipe it raises instead of reading a reused fd.
+                chunk = os.read(proc.stderr.fileno(), _READ_CHUNK)
+                if not chunk:
+                    break
+                room = MAX_OUTPUT_BYTES - len(self._stderr_buf)
+                if room > 0:
+                    self._stderr_buf.extend(chunk[:room])
+        except (OSError, ValueError):
+            pass  # closed by kill()
+        finally:
+            self._stderr_done.set()
 
     def _read_stdout(self) -> None:
         """Read until one JSON document has arrived, the pipe closes, or the cap."""
@@ -247,12 +288,16 @@ def _is_json_document(buf: bytes) -> bool:
     A consumer may print its document and then keep the pipe open (a wrapper that
     waits for its own children, say). Waiting for EOF there would hold a thread
     until someone killed the process, so the document itself ends the read.
+
+    Only an object counts. Every structured reply on these wires is one, while
+    a plain-text ``UserPromptSubmit`` reply may well begin with a line that is
+    a JSON scalar (``42``, ``true``, ``"note"``); stopping there would cut off
+    the rest of the text.
     """
     text = buf.decode("utf-8", errors="replace").strip()
-    if not text:
+    if not text.startswith("{"):
         return False
     try:
-        json.loads(text)
-        return True
+        return isinstance(json.loads(text), dict)
     except ValueError:
         return False

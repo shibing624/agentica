@@ -171,6 +171,48 @@ class TestCollect:
         assert not marker.exists()
 
 
+# A hook that leaves a background job behind (``dual-mem`` spawns a sync after
+# answering) and the job inherits stderr: the pipe stays open after the hook
+# itself exits.
+_GRANDCHILD = (
+    "import subprocess\n"
+    "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+)
+
+
+class TestStderrNeverHangsTheTurn:
+    def test_a_grandchild_holding_stderr_does_not_stall_the_reply(self, tmp_path):
+        cmd = _script(tmp_path, _GRANDCHILD + CLAUDE_STYLE)
+        started = time.monotonic()
+        assert collect_prompt_context("hi", timeout=20, config=_config(cmd)) == "<ext>hi</ext>"
+        assert time.monotonic() - started < 5
+
+    def test_a_refusal_with_a_grandchild_still_reports_its_reason(self, tmp_path):
+        cmd = _script(
+            tmp_path,
+            _GRANDCHILD + "sys.stderr.write('contains a key'); sys.stderr.flush(); sys.exit(2)\n",
+        )
+        started = time.monotonic()
+        with pytest.raises(PromptBlocked) as caught:
+            collect_prompt_context("hi", timeout=20, config=_config(cmd))
+        assert caught.value.reason == "contains a key"
+        assert time.monotonic() - started < 5
+
+    def test_more_stderr_than_a_pipe_buffer_does_not_block_the_hook(self, tmp_path):
+        cmd = _script(tmp_path, "sys.stderr.write('x' * 512 * 1024); sys.stderr.flush()\n" + CLAUDE_STYLE)
+        started = time.monotonic()
+        assert collect_prompt_context("hi", timeout=10, config=_config(cmd)) == "<ext>hi</ext>"
+        assert time.monotonic() - started < 5
+
+
+def test_plain_text_opening_with_a_json_scalar_is_not_cut_short(tmp_path):
+    cmd = _script(
+        tmp_path,
+        "import time\nprint('42', flush=True)\ntime.sleep(0.3)\nprint('open items: 3')\n",
+    )
+    assert collect_prompt_context("hi", timeout=10, config=_config(cmd)) == "42\nopen items: 3"
+
+
 async def _seed(ws: Workspace) -> None:
     await ws.write_memory_entry(
         title="prefer uv", content="Use uv, never pip, for installs.",
@@ -241,3 +283,42 @@ class TestAgentCoexistence:
                     asyncio.run(agent.run("install deps"))
         main_calls = [c for c in mock.await_args_list if "files" not in str(c)]
         assert main_calls == []
+
+
+class TestOnlyHumanTurns:
+    """Recall and UserPromptSubmit are for what a person asked."""
+
+    def _users(self, tmp_path, agent, message):
+        with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=SELECT_UV)) as mock:
+            _, users, _ = asyncio.run(agent.get_messages_for_run(message=message))
+        return users[0].content, mock
+
+    @pytest.mark.parametrize("mark", ["subagent", "automated", "goal"])
+    def test_machine_written_turns_skip_both(self, tmp_path, mark):
+        from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
+
+        seen = tmp_path / "seen"
+        install_hook_egress(_config(_script(
+            tmp_path, f"open({str(seen)!r}, 'w').close()\n" + CLAUDE_STYLE)))
+        message = "install deps please"
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = _agent(tmp)
+            asyncio.run(_seed(agent.workspace))
+            if mark == "subagent":
+                agent._parent_run_id = "parent-run"
+            elif mark == "automated":
+                agent._run_automated_input = True
+            else:
+                message = f"{CONTINUATION_PROMPT_PREFIX}\n{message}"
+            content, mock = self._users(tmp_path, agent, message)
+        assert content == message
+        assert not seen.exists()
+        mock.assert_not_awaited()
+
+    def test_a_human_turn_still_gets_both(self, tmp_path):
+        install_hook_egress(_config(_script(tmp_path, CLAUDE_STYLE)))
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = _agent(tmp)
+            asyncio.run(_seed(agent.workspace))
+            content, _ = self._users(tmp_path, agent, "install deps please")
+        assert "Use uv, never pip" in content and "<ext>" in content

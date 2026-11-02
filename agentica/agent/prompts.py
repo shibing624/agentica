@@ -11,6 +11,7 @@ from datetime import datetime
 from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+from agentica.agent.goals import is_goal_generated_prompt
 from agentica.agent.history_filter import apply_history_pipeline
 from agentica.compression.token_budget import (
     fold_window_preamble,
@@ -722,6 +723,20 @@ class PromptsMixin:
         )
         return (draft.render(picked_work) if draft else None), memory_block
 
+    def _is_human_turn(self, query: str) -> bool:
+        """Is this turn's message something a person asked?
+
+        Recall and ``UserPromptSubmit`` both exist for a person's question.
+        Not one: a subagent's task (the parent model wrote it, and the shell
+        hooks are process-wide, so the parent's consumers would see it with a
+        fallback session id), a run marked ``automated_input`` (peer message,
+        job report, background-command completion), and the prompts the
+        standing-goal loop feeds itself.
+        """
+        if self._parent_run_id is not None or self._run_automated_input:
+            return False
+        return not is_goal_generated_prompt(query)
+
     async def _get_prompt_hook_block(self, query: str) -> Optional[str]:
         """Context ``UserPromptSubmit`` adds: in-process hooks, then shell hooks.
 
@@ -855,7 +870,12 @@ class PromptsMixin:
                 last_msg = user_messages[-1]
                 if last_msg.role == "user" and isinstance(last_msg.content, str):
                     recall_query = last_msg.content
-        if recall_query and user_messages and isinstance(user_messages[-1].content, str):
+        if (
+            recall_query
+            and user_messages
+            and isinstance(user_messages[-1].content, str)
+            and self._is_human_turn(recall_query)
+        ):
             prior = messages_for_model + user_messages[:-1]
             first_turn = not any(m.role == "user" for m in prior)
             # Built-in recall and the UserPromptSubmit hooks run side by side;

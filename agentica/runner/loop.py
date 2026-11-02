@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from agentica.agent.goals import is_goal_generated_prompt
 from agentica.agent.history_filter import _text_from_content_blocks, ensure_history_portable
 from agentica.model.cost import CostTracker
 from agentica.guardrails.agent import (
@@ -985,7 +986,13 @@ class LoopMixin:
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
                     message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
                 )
-                if agent._run_automated_input:
+                # The goal loop's own prompts are machine traffic too, whichever
+                # driver queued them (CLI /goal, SDK run_goal): keep them out of
+                # the human-turn index, intent tracking and transcripts.
+                _automated = agent._run_automated_input or (
+                    isinstance(message, str) and is_goal_generated_prompt(message)
+                )
+                if _automated:
                     for _user_message in user_messages:
                         _user_message.automated = True
                 num_input_messages = len(messages_for_model)

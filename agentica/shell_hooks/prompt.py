@@ -115,6 +115,39 @@ def _remaining(deadline: Optional[float]) -> Optional[float]:
     return None if deadline is None else max(deadline - time.monotonic(), 0)
 
 
+#: Longest a refusal waits for stderr to reach EOF once the hook has exited.
+_STDERR_GRACE = 0.5
+
+
+def _stderr_wait(deadline: Optional[float]) -> float:
+    remaining = _remaining(deadline)
+    return _STDERR_GRACE if remaining is None else min(remaining, _STDERR_GRACE)
+
+
+_POLL = 0.05
+
+
+def _wait_reply(process: HookProcess, deadline: Optional[float]) -> bool:
+    """Wait until the reply is in: stdout read, or the hook has exited.
+
+    A hook that exits leaving a background job behind (one that inherited
+    stdout) never closes the pipe, and a plain-text or exit-2 reply has no JSON
+    document to end the read early. Once the hook itself is gone, stdout gets
+    a short grace and is then closed, keeping whatever already arrived.
+    """
+    while True:
+        remaining = _remaining(deadline)
+        if process.wait(_POLL if remaining is None else min(_POLL, remaining)):
+            return True
+        if process.returncode is not None:
+            if process.wait(_stderr_wait(deadline)):
+                return True
+            process.kill()  # closes stdout; the reader returns what it has
+            return process.wait(_STDERR_GRACE)
+        if remaining is not None and remaining <= 0:
+            return False
+
+
 def collect_prompt_context(
     query: str,
     *,
@@ -154,13 +187,17 @@ def collect_prompt_context(
         for process in processes:
             # The reply is complete once stdout has one document or closes; the
             # exit code still has to be collected, because 2 is a refusal.
-            if not process.wait(_remaining(deadline)):
+            if not _wait_reply(process, deadline):
                 continue
             code = process.exit_code(_remaining(deadline))
             if code is None:
                 continue
+            # stderr matters only for a refusal, and is drained on its own
+            # thread; the wait here is bounded because a grandchild that
+            # inherited the pipe can hold it open long after the hook exited.
+            stderr = process.read_stderr(_stderr_wait(deadline)) if code == 2 else ""
             context, refusal = parse_prompt_reply(
-                process.stdout, returncode=code, stderr=process.stderr
+                process.stdout, returncode=code, stderr=stderr
             )
             if refusal is not None:
                 raise PromptBlocked(refusal)

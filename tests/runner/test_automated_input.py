@@ -86,6 +86,20 @@ def test_a_human_turn_after_resume_is_not_marked():
         assert [e.get("automated", False) for e in _user_entries(agent)] == [True, False]
 
 
+def test_the_goal_loops_own_prompts_are_automated():
+    """Neither /goal nor run_goal passes automated_input; the prefix says it."""
+    from agentica.agent.goals import BUDGET_WRAPUP_PROMPT_PREFIX, CONTINUATION_PROMPT_PREFIX
+
+    requests = []
+    with tempfile.TemporaryDirectory() as tmp:
+        agent = _agent(tmp, requests)
+        agent.run_sync("ship the release")
+        agent.run_sync(f"{CONTINUATION_PROMPT_PREFIX}\nGoal: ship the release")
+        agent.run_sync(f"{BUDGET_WRAPUP_PROMPT_PREFIX}\nWrap up.")
+
+        assert [e.get("automated", False) for e in _user_entries(agent)] == [False, True, True]
+
+
 def test_automated_steer_is_not_presented_as_user_guidance():
     agent = Agent()
     agent._begin_steer_window()
