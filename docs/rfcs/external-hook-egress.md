@@ -196,8 +196,12 @@ terminal until one path answers or the request is cancelled.
 
 **Wiring point.** `Runner._emit_event` dispatches run/tool records through
 `notify_sink_dispatch`; its `_fan_out_event` is the single shared deferral and
-fan-out point for notify and shell hooks. Hook config installs lazily on first
-dispatch, so SDK and one-shot runs work without an interactive bootstrap.
+fan-out point for notify and shell hooks. `agentica.cli.main.main()` installs
+the hook config once at process start, so every CLI mode (interactive,
+`--query`/`--print`, cron daemon, ACP) emits events. An SDK process never reads
+`~/.agentica/config.yaml` hooks on its own: a service embedding `Agent` on the
+same machine must not get the CLI user's recall or be captured by their
+consumers. It opts in by calling `install_hook_egress()` explicitly.
 The Runner passes a callback into `Model.run_function_calls`: it emits started
 immediately before each actual execution and completed from that execution's
 finally block, so serial, parallel and cancelled calls reflect real boundaries

@@ -219,8 +219,18 @@ goal 会报 5 次「跑完了」。这条规则与 notify sink 共用（同一�
 `needs.*` 的发起**只在交互 CLI 里**：那里确实有人在终端前，而 hook 的回答是
 **用户本人的回答** —— 与在终端敲的是同一个效果、同一个授权。
 
-无人值守路径（`--print` / SDK / cron / `/bg`）不发起 `needs.*`，但会自动安装
-egress，并照常发送 `run.*` 与 `tool.*`；无需先启动一次交互 CLI。
+无人值守路径（`--print` / cron / `/bg`）不发起 `needs.*`，但照常发送 `run.*`
+与 `tool.*`。
+
+**只有 `agentica` CLI 进程读 `settings.hooks`。** 在同一台机器上用 SDK
+（`from agentica import Agent, DeepAgent`）写的服务不会自动加载这里的 hooks：
+它的用户不是你，不该被注入你的 `UserPromptSubmit` 召回，也不该被你的消费者采集。
+SDK 进程需要 hooks 时显式调用一次：
+
+```python
+from agentica.shell_hooks import install_hook_egress
+install_hook_egress()  # 读 ~/.agentica/config.yaml；也可传 ShellHooksConfig(...)
+```
 
 ## 用起来
 

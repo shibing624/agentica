@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **外部 shell hooks 只在 `agentica` CLI 进程里生效，SDK 进程不再读 `~/.agentica/config.yaml` 的 `settings.hooks`**：原来 `hook_egress_dispatch` / `collect_prompt_context` / `start_hook_request` 在首次调用时懒加载全局配置，于是同一台机器上任何 `Agent` / `DeepAgent` SDK 服务都会每轮跑 CLI 用户订阅的 `UserPromptSubmit`（把个人记忆注入别人的 prompt），`run.completed` 也会把服务里的对话交给用户的采集消费者。现在删除懒加载（`ensure_hook_egress_installed` 一并删除），只由 `agentica.cli.main.main()` 在进程启动时 `install_hook_egress()`，覆盖交互、`--query`/`--print`（含 `delegate` worker）、cron daemon、ACP；gateway 是独立入口，不加载。SDK 需要时显式调用 `install_hook_egress()`。
 - **CLI 等人默认最多 5 分钟：提问没人答时，可逆的选择按推荐继续；审批卡没人答时，那一步不执行**：
   - **为什么。** 曾有一次 `ask_user_question` 挂了 6522 秒（约 1.8 小时），整个 turn 什么都没做。权限审批卡（`ApprovalRegistry.wait`）也一样没有截止时间，长程任务半夜弹一张卡，就会卡到天亮。
   - **一个配置管两处，按键盘空闲计时。** `settings.human_wait_timeout`，默认 300 秒，`0` 表示一直等。计时从最后一次按键算起（prompt_toolkit 的 `before_key_press`），用户正在看或正在打字时不会被截断。剩最后 20 秒时，提示框下方出现 `continuing without an answer in Ns · any key to stay`（审批卡上是 `skipping this call in Ns`），按任意键重新计时。斜杠命令（`/resume`、`/cron` 等）里的提问是用户自己在操作，不会超时。做法参考了 Claude Code 的 `askUserQuestionTimeout`（空闲计时加 20 秒倒计时）和 `dialogExpiry`（审批超时走不执行的安全默认）；Claude Code 在 auto 模式下另有一个分类器，拦截模型本可以自己决定的提问，这里没有照搬，而是靠工具说明和 AGENTS.md 让模型少问。

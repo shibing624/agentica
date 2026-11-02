@@ -14,6 +14,7 @@ from agentica.cli.prefs import apply_cli_prefs, read_project_prefs
 from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.model.cost import refresh_model_catalog_in_background
 from agentica.run.response import AgentCancelledError
+from agentica.shell_hooks import install_hook_egress
 from agentica.utils.log import suppress_console_logging, enable_process_file_logging
 from agentica.utils.string import replace_invalid_utf8
 from agentica.workspace import Workspace
@@ -30,6 +31,14 @@ def main():
 
     # Enable a default file log for the CLI (SDK stays silent by default).
     _enable_cli_file_logging()
+
+    # External hook egress (settings.hooks in ~/.agentica/config.yaml). Only
+    # the CLI wires it — interactive, --query/--print (delegate workers), the
+    # cron daemon and ACP are all this user's own runs. An SDK process never
+    # reads that file on its own, so a service embedding Agent/DeepAgent on
+    # this machine gets no recall injected and is not captured by the user's
+    # consumers.
+    install_hook_egress()
 
     if getattr(args, "chat_only", False):
         from agentica.utils.log import logger, CHAT_LEVEL

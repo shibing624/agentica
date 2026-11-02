@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from agentica.notify.wire import clip_text
-from agentica.shell_hooks.egress import ensure_hook_egress_installed
+from agentica.shell_hooks.egress import get_hook_egress
 from agentica.shell_hooks.process import HookProcess
 from agentica.shell_hooks.protocol import build_payload, parse_reply
 from agentica.utils.log import logger
@@ -179,7 +179,7 @@ def start_hook_request(event: str, payload: Dict[str, Any]) -> Optional[HookRequ
 
     Returns immediately. Nothing here blocks the run.
     """
-    cfg = ensure_hook_egress_installed()
+    cfg = get_hook_egress()
     if cfg is None:
         return None
     try:

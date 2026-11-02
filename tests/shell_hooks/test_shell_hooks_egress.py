@@ -269,44 +269,31 @@ class TestDispatch:
         assert _wait_for(first_out, 1)[0]["hook_event_name"] == "run.started"
         assert _wait_for(second_out, 1)[0]["hook_event_name"] == "run.started"
 
-    def test_dispatch_lazily_installs_for_noninteractive_runs(self, tmp_path, monkeypatch):
+    def test_sdk_process_never_reads_the_user_config(self, tmp_path, monkeypatch):
+        """An SDK process that did not install the egress must not pick up
+        the CLI user's ``settings.hooks`` — not on dispatch, not on prompt
+        context, not on ``needs.*``."""
         import agentica.shell_hooks.egress as egress_mod
+        from agentica.shell_hooks.prompt import collect_prompt_context
+        from agentica.shell_hooks.requests import start_hook_request
 
-        command, out = _recorder(tmp_path, "lazy")
-        monkeypatch.setattr(
-            egress_mod,
-            "load_shell_hooks_config",
-            lambda: _config(command),
-        )
-        hook_egress_dispatch("run.started", {}, session_id="s")
-        assert _wait_for(out, 1)[0]["hook_event_name"] == "run.started"
-
-    def test_concurrent_lazy_install_reads_config_once(self, monkeypatch):
-        import agentica.shell_hooks.egress as egress_mod
-
-        calls = []
+        command, out = _recorder(tmp_path, "sdk")
+        loads = []
 
         def load():
-            calls.append(True)
-            time.sleep(0.05)
-            return _config(["/bin/true"])
+            loads.append(True)
+            return _config(
+                command,
+                events={"run.started": True, "UserPromptSubmit": True, "needs.approval": True},
+            )
 
         monkeypatch.setattr(egress_mod, "load_shell_hooks_config", load)
-        barrier = threading.Barrier(8)
-        threads = [
-            threading.Thread(
-                target=lambda: (
-                    barrier.wait(),
-                    egress_mod.ensure_hook_egress_installed(),
-                )
-            )
-            for _ in range(8)
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=5)
-        assert calls == [True]
+        hook_egress_dispatch("run.started", {}, session_id="s")
+        assert collect_prompt_context("hello", session_id="s") is None
+        assert start_hook_request("needs.approval", {"request_id": "r"}) is None
+        time.sleep(0.3)
+        assert loads == []
+        assert not out.exists()
 
 
 class TestTheSinkStillWorks:

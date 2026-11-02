@@ -7,9 +7,14 @@ Notices are fire-and-forget: spawn every subscriber, write the document, and
 return. The blocking ``needs.*`` path is ``requests.py`` because it needs a
 first-valid-reply race.
 
-Installed once per process, like the sink, so a mid-run config flip cannot leave
-a half-wired channel behind. ``enabled: false`` — or an enabled block with no
-command — wires nothing at all: no thread, no process.
+Installed once per process, like the sink, and only by the process that owns
+``~/.agentica/config.yaml``: the ``agentica`` CLI calls ``install_hook_egress``
+at startup. An SDK process (``Agent`` / ``DeepAgent`` embedded in a service)
+never reads that file on its own — its runs are not the CLI user's, so they
+must not get that user's recall injected or be captured by that user's
+consumers. Such a process opts in by calling ``install_hook_egress`` itself.
+``enabled: false`` — or an enabled block with no command — wires nothing at
+all: no thread, no process.
 """
 
 from __future__ import annotations
@@ -25,7 +30,6 @@ from agentica.utils.log import logger
 
 #: Install-time decision: None means "this process runs no hook consumers".
 _shell_hooks: Optional[ShellHooksConfig] = None
-_installed = False
 _install_lock = threading.Lock()
 NOTICE_PROCESS_TIMEOUT_SECONDS = 30.0
 _live_notices: Set[HookProcess] = set()
@@ -37,24 +41,10 @@ def install_hook_egress(
     config: Optional[ShellHooksConfig] = None,
 ) -> Optional[ShellHooksConfig]:
     """Wire the egress, or return None when there is nothing to run."""
-    global _installed, _shell_hooks
+    global _shell_hooks
     cfg = config if config is not None else load_shell_hooks_config()
     with _install_lock:
         _shell_hooks = cfg if cfg.effective else None
-        _installed = True
-        return _shell_hooks
-
-
-def ensure_hook_egress_installed() -> Optional[ShellHooksConfig]:
-    """Load process configuration once, including outside the interactive CLI."""
-    global _installed, _shell_hooks
-    if _installed:
-        return _shell_hooks
-    with _install_lock:
-        if not _installed:
-            cfg = load_shell_hooks_config()
-            _shell_hooks = cfg if cfg.effective else None
-            _installed = True
         return _shell_hooks
 
 
@@ -65,11 +55,10 @@ def get_hook_egress() -> Optional[ShellHooksConfig]:
 
 def reset_hook_egress_for_tests() -> None:
     """Drop the installed egress so a test starts from a clean process state."""
-    global _installed, _shell_hooks
+    global _shell_hooks
     _shutdown_notice_processes()
     with _install_lock:
         _shell_hooks = None
-        _installed = False
 
 
 def hook_egress_dispatch(
@@ -86,7 +75,7 @@ def hook_egress_dispatch(
     and a broken sink must not be able to take each other down, and observation
     must never break a run.
     """
-    cfg = ensure_hook_egress_installed()
+    cfg = _shell_hooks
     if cfg is None:
         return
     try:

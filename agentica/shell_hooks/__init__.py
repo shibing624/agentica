@@ -15,7 +15,6 @@ from agentica.shell_hooks.config import (
     load_shell_hooks_config,
 )
 from agentica.shell_hooks.egress import (
-    ensure_hook_egress_installed,
     get_hook_egress,
     hook_egress_dispatch,
     install_hook_egress,
@@ -39,7 +38,6 @@ __all__ = [
     "ShellHooksConfig",
     "approval_payload",
     "get_hook_egress",
-    "ensure_hook_egress_installed",
     "emit_request_resolved",
     "emit_session_ended",
     "emit_session_started",

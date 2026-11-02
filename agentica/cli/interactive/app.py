@@ -67,7 +67,6 @@ from agentica.shell_hooks import (
     emit_request_resolved,
     emit_session_ended,
     emit_session_started,
-    install_hook_egress,
 )
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.subagents.loader import load_all_agents
@@ -869,11 +868,6 @@ def run_interactive(
     # meaningful. Installed once here; the decision is made once, not per turn.
     # It is off unless the user turned it on (`settings.notify.enabled`).
     install_notify_sink()
-
-    # External hook egress: run every subscribed consumer at lifecycle points.
-    # Off unless settings.hooks is enabled with at least one active consumer;
-    # notify and hook egresses remain independent.
-    install_hook_egress()
 
     # "Done" on the notify wire means "you can come back now", which is only
     # true when nothing else is queued. Several messages typed in a row each run

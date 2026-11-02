@@ -27,7 +27,7 @@ from agentica.notify.transport import build_transport
 from agentica.guardrails.agent import InputGuardrailTripwireTriggered
 from agentica.guardrails.core import GuardrailOutput
 from agentica.shell_hooks.config import ShellHooksConfig
-from agentica.shell_hooks.egress import ensure_hook_egress_installed
+from agentica.shell_hooks.egress import get_hook_egress
 from agentica.shell_hooks.process import HookProcess
 from agentica.shell_hooks.protocol import PROCESS_SESSION_ID, first_json_document
 
@@ -131,7 +131,7 @@ def collect_prompt_context(
     contributes nothing, so a broken hook costs the turn a fixed few seconds
     instead of hanging it.
     """
-    cfg = config if config is not None else ensure_hook_egress_installed()
+    cfg = config if config is not None else get_hook_egress()
     if cfg is None or not query.strip():
         return None
     consumers = cfg.consumers_for(PROMPT_EVENT)
