@@ -253,18 +253,29 @@ def render_markdown_response(console_instance, text: str) -> None:
         console_instance.print(text, style=COLORS["agent"], markup=False, highlight=False)
 
 
-def display_diff(console_instance, file_path: str, old_content: str, new_content: str) -> None:
-    """Display unified diff between old and new file content."""
-    diff_lines = list(difflib.unified_diff(
+def build_file_diff(old_content: Optional[str], new_content: Optional[str],
+                    filename: str) -> str:
+    """``diff -- <file>`` plus hunks: the edit-tool diff, no ``---``/``+++`` lines."""
+    if old_content is None or new_content is None:
+        return ""
+    unified_lines = list(difflib.unified_diff(
         old_content.splitlines(),
         new_content.splitlines(),
-        fromfile=f"a/{file_path}",
-        tofile=f"b/{file_path}",
-        n=3,
+        fromfile=filename,
+        tofile=filename,
+        n=2,
         lineterm="",
     ))
-    if diff_lines:
-        diff_text = "\n".join(diff_lines)
+    if not unified_lines:
+        return ""
+    hunks = "\n".join(unified_lines[2:]).rstrip("\n")
+    return f"diff -- {filename}\n{hunks}"
+
+
+def display_diff(console_instance, file_path: str, old_content: str, new_content: str) -> None:
+    """Display the diff between old and new file content, as the edit tools do."""
+    diff_text = build_file_diff(old_content, new_content, file_path)
+    if diff_text:
         # word_wrap so long single-line entries are not cropped at the edge.
-        console_instance.print(Syntax(diff_text, "diff", theme="monokai",
+        console_instance.print(Syntax(diff_text + "\n", "diff", theme="monokai",
                                       line_numbers=False, word_wrap=True))

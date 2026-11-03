@@ -4,7 +4,6 @@
 @description: StreamDisplayManager: live tool/response rendering during a run
 """
 
-import difflib
 import json
 import os
 import re
@@ -36,7 +35,7 @@ from .console import (
     _strip_internal_tool_notices,
     remember_truncated,
 )
-from .messages import _has_markdown
+from .messages import _has_markdown, build_file_diff
 from .tool_format import (
     HANDOFF_TOOLS,
     LIVE_EXECUTE_WRAP_ROWS,
@@ -816,7 +815,7 @@ class StreamDisplayManager:
                 old_content = ""
             if action == "delete" and new_content is None:
                 new_content = ""
-            diff_text = self._build_file_diff(
+            diff_text = build_file_diff(
                 old_content,
                 new_content,
                 self._display_path(raw_path),
@@ -843,25 +842,6 @@ class StreamDisplayManager:
             self._assistant_console.print(
                 "\n".join(detail_lines), style="dim", highlight=False, markup=False
             )
-
-    @staticmethod
-    def _build_file_diff(old_content: Optional[str], new_content: Optional[str],
-                         filename: str) -> str:
-        """Build one git-style unified diff from real pre/post file contents."""
-        if old_content is None or new_content is None:
-            return ""
-        unified_lines = list(difflib.unified_diff(
-            old_content.splitlines(),
-            new_content.splitlines(),
-            fromfile=filename,
-            tofile=filename,
-            n=2,
-            lineterm="",
-        ))
-        if not unified_lines:
-            return ""
-        hunks = "\n".join(unified_lines[2:]).rstrip("\n")
-        return f"diff -- {filename}\n{hunks}"
 
     def _display_write_merged(self, tool_name: str, tool_args: dict,
                               result_content: str, is_error: bool,
@@ -900,7 +880,7 @@ class StreamDisplayManager:
             display_path = self._display_path(str(change.get("path") or raw_path))
         if old_content is None and changes and changes[0].get("action") == "add":
             old_content = ""
-        diff_text = self._build_file_diff(old_content, new_content, display_path)
+        diff_text = build_file_diff(old_content, new_content, display_path)
         n_lines = len(new_content.splitlines())
         verb = "created" if "Created" in result_str else "updated"
         unit = "line" if n_lines == 1 else "lines"

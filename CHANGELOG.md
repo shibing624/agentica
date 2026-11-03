@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **CLI `/compact` 显示 session notes 的路径和改动 diff**：原来结束只打印 `New context window 1: 59 messages -> 2. Prior turns stay in the session log. Session notes rewritten.`，看不出 notes 写在哪、写了什么。现在打印 `Compacted 59 messages.`；模型改写了 notes 时接着打印 `Session notes updated (+N -M):`，再用和 `apply_patch` 一样的 `diff -- <路径>` 格式显示改动，没有改写则提示 `Session notes unchanged: <路径>`。`display_diff` 与编辑工具改用同一个 `build_file_diff`（`cli/display/messages.py`），不再输出 `--- a/` / `+++ b/` 两行。同时去掉了窗口编号、`59 -> 2` 的消息数，以及末尾的 `Workspace memory preserved.`。
 - **`UserPromptSubmit` 只对人发的消息生效，hook 的 stderr 不再可能卡住一轮**：
   - **子 agent、自动轮次和 `/goal` 续跑不再触发召回和 hook。** `task` 派生的子 agent 拿到的是父模型写的任务描述，shell hooks 又是进程级的，于是外部记忆库会收到它（`session_id` 还是兜底值）；后台命令回执、peer 消息、`/goal` 自己塞进队列的 `[Continuing toward your standing goal]` 也都会每轮跑一次外部 hook 和内置 `memory_recall` 辅助模型调用。现在 `_parent_run_id` 非空、`automated_input`、或以 goal 循环前缀开头的消息，跳过 `<memory_recall>` / `<session_recall>` 和 `UserPromptSubmit`。goal 循环的两种提示（续跑、预算收尾）同时在 runner 里标 `automated`，不再写进 `session_index.db` 的 `turns`、不进意图追踪和会话预览；CLI `/goal` 和 SDK `run_goal` 都走这一处。
   - **stderr 改为后台线程持续读取。** 原来 hook 退出后才同步 `stderr.read()`，没有超时：hook 留下的后台进程（例如检索完再拉起一次同步）继承了 stderr，管道一直不关，这一轮就卡死；hook 运行中往 stderr 写超过管道缓冲区的日志，也会阻塞到超时被杀。现在 stderr 与 stdout 一样由 daemon 线程读，只在退出码为 `2` 时才取（最多再等 0.5 秒）。hook 自己退出但后台进程仍占着 stdout 时（纯文本回复、退出码 2 没有 JSON 文档可以提前结束读取），stdout 最多再等 0.5 秒就关闭，保留已经收到的内容。

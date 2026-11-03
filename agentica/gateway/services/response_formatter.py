@@ -120,7 +120,7 @@ def _format_task_result(raw: str) -> str:
 def files_unified_diff(files: List[Dict[str, Any]]) -> str:
     """CLI-style unified diffs from write_file / apply_patch display_meta.
 
-    Same shape as ``cli/display/stream.py`` ``_build_file_diff``: one
+    Same shape as ``cli/display/messages.py`` ``build_file_diff``: one
     ``diff -- path`` block per file, context of 2. Missing before on an
     add (or after on a delete) is treated as empty so a new file still
     renders as a full ``+`` dump.

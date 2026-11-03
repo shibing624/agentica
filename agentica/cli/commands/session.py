@@ -26,11 +26,13 @@ from agentica.cli.commands.helpers import (
 )
 from agentica.cli.context_usage import measure_context
 from agentica.cli.display import (
+    display_diff,
     format_session_summary,
     print_header,
     render_markdown_response,
     resumable_session_id,
 )
+from agentica.cli.display.messages import build_file_diff
 from agentica.cli.prefs import apply_session_cli_prefs, sync_view_prefs_to_tui
 from agentica.cli.runtime import (
     configure_tools,
@@ -44,6 +46,7 @@ from agentica.cli.session_resume import (
 )
 from agentica.cli.setup import apply_named_profile_to_agent_config
 from agentica.compression.manager import apply_idle_compact
+from agentica.compression.new_window import notes_path_for
 from agentica.config.profiles import set_project_profile
 from agentica.agent.goals import GoalManager
 from agentica.memory.models import AgentRun
@@ -785,7 +788,6 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         return
 
     extra = cmd_args.strip() if cmd_args else ""
-    wm = agent.working_memory
     if extra:
         con.print(
             "[dim]/compact takes no instructions — "
@@ -803,21 +805,26 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         con.print("[red]No compression manager on this agent; nothing to compact with.[/red]")
         return
     con.print(
-        f"[dim]Writing session notes and starting a new context window "
-        f"({msg_count} messages)...[/dim]"
+        f"[dim]Compacting {msg_count} messages: writing session notes...[/dim]"
     )
+    notes_path = notes_path_for(agent._session_log)
+    notes_before = _read_notes(notes_path)
     compacted = _run_async_safe(apply_idle_compact(agent))
     if not compacted:
-        con.print("[red]New context window failed; conversation left unchanged.[/red]")
+        con.print("[red]Compact failed; conversation left unchanged.[/red]")
         return
-    notes_note = (
-        "Session notes rewritten." if cm.last_notes_authored else "Notes unchanged."
-    )
-    con.print(
-        f"[green]New context window {cm.window_id}: "
-        f"{msg_count} messages -> {len(wm.messages)}. "
-        f"Prior turns stay in the session log. {notes_note}[/green]"
-    )
+    con.print(f"[green]Compacted {msg_count} messages.[/green]")
+    if notes_path is not None:
+        shown_path = format_path_for_display(notes_path)
+        notes_after = _read_notes(notes_path)
+        if cm.last_notes_authored and notes_after != notes_before:
+            hunk_lines = build_file_diff(notes_before, notes_after, shown_path).splitlines()[1:]
+            added = sum(1 for line in hunk_lines if line.startswith("+"))
+            removed = sum(1 for line in hunk_lines if line.startswith("-"))
+            con.print(f"[dim]Session notes updated (+{added} -{removed}):[/dim]")
+            display_diff(con, shown_path, notes_before, notes_after)
+        else:
+            con.print(f"[dim]Session notes unchanged:[/dim] [cyan]{shown_path}[/cyan]")
 
     if hooks is not None:
         _run_async_safe(hooks.on_post_compact(agent=agent, messages=messages))
@@ -826,7 +833,13 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         breakdown = _run_async_safe(measure_context(agent))
         ctx.tui_state["context_tokens"] = breakdown.total
         ctx.tui_state["context_window"] = breakdown.window
-    con.print("[dim]Workspace memory preserved.[/dim]")
+
+
+def _read_notes(notes_path: Optional[str]) -> str:
+    """Notes file text, ``""`` before the first cut wrote it."""
+    if notes_path is None or not os.path.exists(notes_path):
+        return ""
+    return Path(notes_path).read_text(encoding="utf-8")
 
 
 

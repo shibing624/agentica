@@ -32,6 +32,29 @@ def _run(turn: int) -> AgentRun:
     )
 
 
+def _agent_with_log_in(base: str, n_runs: int = 3):
+    from agentica import Agent
+
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"),
+        add_history_to_context=True,
+    )
+    wm = WorkingMemory()
+    for i in range(n_runs):
+        run = _run(i)
+        wm.add_run(run)
+        wm.add_messages(run.response.messages)
+    agent.working_memory = wm
+    slog = SessionLog("compact-persist-test", base_dir=base)
+    for msg in wm.messages:
+        if msg.role == "system":
+            continue
+        slog.append(msg.role, msg.content or "")
+    agent._session_log = slog
+    agent.model._agent_ref = lambda: agent
+    return agent, slog
+
+
 class TestCompactPersistsForForkResume(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -41,26 +64,7 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def _agent_with_log(self, n_runs: int = 3):
-        from agentica import Agent
-
-        agent = Agent(
-            model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"),
-            add_history_to_context=True,
-        )
-        wm = WorkingMemory()
-        for i in range(n_runs):
-            run = _run(i)
-            wm.add_run(run)
-            wm.add_messages(run.response.messages)
-        agent.working_memory = wm
-        slog = SessionLog("compact-persist-test", base_dir=self.base)
-        for msg in wm.messages:
-            if msg.role == "system":
-                continue
-            slog.append(msg.role, msg.content or "")
-        agent._session_log = slog
-        agent.model._agent_ref = lambda: agent
-        return agent, slog
+        return _agent_with_log_in(self.base, n_runs)
 
     def test_compact_writes_boundary_and_post_compact_messages(self):
         agent, slog = self._agent_with_log()
@@ -120,6 +124,59 @@ class TestCompactPersistsForForkResume(unittest.TestCase):
         self.assertIn("<context_window>", contents)
         self.assertIn("New context window started", contents)
         self.assertEqual([m.get("role") for m in resumed], ["user"])
+
+
+class TestCompactShowsNotes(unittest.TestCase):
+    """/compact prints the notes path and the notes diff, not message counts."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.base = self._tmpdir.name
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _compact(self, author):
+        from rich.console import Console
+        from unittest.mock import patch
+
+        agent, slog = _agent_with_log_in(self.base)
+        notes_path = Path(slog.path).with_name(f"{Path(slog.path).stem}.notes.md")
+        notes_path.write_text("# Notes\n- old fact\n", encoding="utf-8")
+        ctx = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+            current_agent=agent,
+        )
+        con = Console(record=True, width=200)
+        with patch("agentica.cli.commands.session.get_console", return_value=con), \
+                patch("agentica.compression.manager.author_session_notes", author):
+            _cmd_compact(ctx)
+        return con.export_text(), notes_path
+
+    def test_rewritten_notes_are_shown_as_diff_with_path(self):
+        async def author(messages, model, path):
+            Path(path).write_text("# Notes\n- new fact\n", encoding="utf-8")
+            return "written"
+
+        out, notes_path = self._compact(author)
+        self.assertIn("Compacted 6 messages.", out)
+        self.assertIn("Session notes updated (+1 -1):", out)
+        self.assertIn(f"diff -- {notes_path}", out)
+        self.assertNotIn("--- a/", out)
+        self.assertNotIn("+++ b/", out)
+        self.assertIn("-- old fact", out)
+        self.assertIn("+- new fact", out)
+        self.assertNotIn("->", out)
+        self.assertNotIn("New context window", out)
+
+    def test_unwritten_notes_show_path_without_diff(self):
+        async def author(messages, model, path):
+            return None
+
+        out, notes_path = self._compact(author)
+        self.assertIn("Session notes unchanged:", out)
+        self.assertIn(notes_path.name, out)
+        self.assertNotIn("old fact", out)
 
 
 class TestMemoryExtractFitsAuxWindow(unittest.TestCase):
