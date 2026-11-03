@@ -15,6 +15,8 @@ Key design decisions:
 """
 import asyncio
 import os
+import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -282,6 +284,8 @@ class AgentService:
         self._session_work_dirs: Dict[str, str] = {}
         self._session_approval_modes: Dict[str, str] = {}
         self._session_grants: Dict[str, SessionGrants] = {}
+        self._session_preview_cache: OrderedDict[str, tuple[tuple[int, int], Dict[str, Any]]] = OrderedDict()
+        self._session_preview_lock = threading.Lock()
         # Per-session run locks: prevents concurrent runs (chat or stream) on the same session.
         # The underlying Agent instance is NOT thread-safe for concurrent reuse.
         self._session_locks: Dict[str, asyncio.Lock] = {}
@@ -1255,26 +1259,41 @@ class AgentService:
 
     # ============== Session management ==============
 
-    def list_sessions(self, owner: Optional[str] = None) -> List[Dict[str, Any]]:
-        """List sessions from the persistent SessionLog (single source of truth).
+    def _session_preview(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        path = str(entry["path"])
+        version = (
+            int(entry.get("size_bytes") or 0),
+            int(entry.get("mtime_ns") or 0),
+        )
+        with self._session_preview_lock:
+            cached = self._session_preview_cache.get(path)
+            if cached is not None and cached[0] == version:
+                self._session_preview_cache.move_to_end(path)
+                return cached[1]
+        preview = SessionLog.session_preview(path)
+        with self._session_preview_lock:
+            self._session_preview_cache[path] = (version, preview)
+            self._session_preview_cache.move_to_end(path)
+            while len(self._session_preview_cache) > 10000:
+                self._session_preview_cache.popitem(last=False)
+        return preview
 
-        Returns rich metadata (name/preview/timestamps/work_dir) so the UI can
-        show sessions across restarts, not just the in-memory LRU cache.
+    def list_sessions(
+        self,
+        owner: Optional[str] = None,
+        scope: str = "recent",
+        recent_days: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """List lightweight session summaries across the owner's projects.
 
-        The web sidebar is grouped by project, so this lists **every** project
-        under the owner's ``users/<id>/`` tree — not only ``settings.base_dir``.
-        Listing just the default work dir made a finished chat vanish after
-        opening its trace: navigating remounted the shell, refetched this
-        list, and overwrote the sidebar with a set that did not include it.
-
-        Scheduled (cron) job runs are excluded — they're not interactive chat
-        sessions and shouldn't clutter the sidebar; their execution history
-        is tracked separately via the cron TaskRun store.
-
-        Ordered by creation time (the first request's timestamp, newest
-        first) so the sidebar never reshuffles when a session gets new
-        messages. CLI /resume keeps its own mtime ordering.
+        ``recent`` keeps every gateway session, archived session and active run,
+        but only CLI/legacy sessions modified within ``recent_days``. Filtering
+        happens before preview generation so old logs are never parsed.
         """
+        if scope not in ("all", "recent"):
+            raise ValueError(f"Unknown session scope: {scope}")
+        if recent_days < 1:
+            raise ValueError("recent_days must be positive")
         uid = self._owner(owner)
         projects = SessionLog.list_projects(user_id=uid)
         if not projects:
@@ -1282,58 +1301,69 @@ class AgentService:
                 "base_dir": self._session_base_dir(str(settings.base_dir), owner),
                 "work_dir": str(settings.base_dir),
             }]
-        out: List[Dict[str, Any]] = []
+        candidates: Dict[str, tuple[Dict[str, Any], str]] = {}
         for project in projects:
             base_dir = project["base_dir"]
             work_dir = project.get("work_dir") or ""
-            for s in SessionLog.list_sessions(base_dir=base_dir):
-                sid = s["session_id"]
+            for entry in SessionLog.list_sessions(base_dir=base_dir, work_dir=work_dir or None):
+                sid = entry["session_id"]
                 if sid.startswith(CRON_SESSION_PREFIX):
                     continue
-                preview = SessionLog.session_preview(s["path"])
-                first_user = (preview or {}).get("first_user", "")
-                name = s.get("name") or (first_user[:40] if first_user else "Chat")
-                first_ts = s.get("first_timestamp")
-                if not first_ts and s.get("mtime"):
-                    first_ts = iso_timestamp(s["mtime"])
-                running = (
-                    self.is_session_active(sid, owner=uid)
-                    or live_turn.active(sid, owner=uid) is not None
-                )
-                last_ts = s.get("last_timestamp")
-                last_read_at = s.get("last_read_at")
-                out.append({
-                    "session_id": sid,
-                    "name": name,
-                    "preview": first_user,
-                    "user_count": (preview or {}).get("user_count", 0),
-                    "first_timestamp": first_ts,
-                    "last_timestamp": last_ts,
-                    "last_read_at": last_read_at,
-                    "unread": (not running) and is_session_unread(last_ts, last_read_at),
-                    "size_bytes": s.get("size_bytes", 0),
-                    "archived": bool(s.get("archived")),
-                    "work_dir": s.get("work_dir") or work_dir,
-                    "running": running,
-                })
-        # Same session_id can exist in two project dirs: a 0-byte touch stub
-        # under settings.base_dir plus the real transcript under the session's
-        # work_dir. Keep the one with content so the sidebar title and trace
-        # survive a restart.
-        collapsed: Dict[str, Dict[str, Any]] = {}
-        for row in out:
-            sid = row["session_id"]
-            prev = collapsed.get(sid)
-            if prev is None or int(row.get("size_bytes") or 0) > int(prev.get("size_bytes") or 0):
-                collapsed[sid] = row
-        out = list(collapsed.values())
+                previous = candidates.get(sid)
+                if previous is None or int(entry.get("size_bytes") or 0) > int(previous[0].get("size_bytes") or 0):
+                    candidates[sid] = (entry, work_dir)
+
+        cutoff = time.time() - recent_days * 86400
+        out: List[Dict[str, Any]] = []
+        for entry, project_work_dir in candidates.values():
+            sid = entry["session_id"]
+            running = (
+                self.is_session_active(sid, owner=uid)
+                or live_turn.active(sid, owner=uid) is not None
+            )
+            source = entry.get("source")
+            if not source:
+                if entry.get("cli"):
+                    source = "cli"
+                elif entry.get("last_read_at"):
+                    source = "gateway"
+                else:
+                    source = "legacy"
+            archived = bool(entry.get("archived"))
+            if (
+                scope == "recent"
+                and source != "gateway"
+                and not running
+                and not archived
+                and float(entry.get("mtime") or 0) < cutoff
+            ):
+                continue
+            preview = self._session_preview(entry)
+            first_user = preview.get("first_user", "")
+            first_ts = entry.get("first_timestamp")
+            if not first_ts and entry.get("mtime"):
+                first_ts = iso_timestamp(entry["mtime"])
+            last_ts = entry.get("last_timestamp")
+            last_read_at = entry.get("last_read_at")
+            out.append({
+                "session_id": sid,
+                "name": entry.get("name") or (first_user[:40] if first_user else "Chat"),
+                "preview": first_user,
+                "user_count": preview.get("user_count", 0),
+                "first_timestamp": first_ts,
+                "last_timestamp": last_ts,
+                "last_read_at": last_read_at,
+                "unread": (not running) and is_session_unread(last_ts, last_read_at),
+                "size_bytes": entry.get("size_bytes", 0),
+                "archived": archived,
+                "work_dir": entry.get("work_dir") or project_work_dir,
+                "running": running,
+                "source": source,
+            })
         seen = {row["session_id"] for row in out}
         for turn in live_turn.iter_owner(uid):
-            if turn.session_id.startswith(CRON_SESSION_PREFIX):
+            if turn.session_id.startswith(CRON_SESSION_PREFIX) or turn.session_id in seen:
                 continue
-            if turn.session_id in seen:
-                continue
-            work = self.get_session_work_dir(turn.session_id, owner=uid)
             out.append({
                 "session_id": turn.session_id,
                 "name": "Chat",
@@ -1345,8 +1375,9 @@ class AgentService:
                 "unread": False,
                 "size_bytes": 0,
                 "archived": False,
-                "work_dir": work,
+                "work_dir": self.get_session_work_dir(turn.session_id, owner=uid),
                 "running": not turn.done,
+                "source": "gateway",
             })
         out.sort(key=lambda row: str(row.get("first_timestamp") or ""), reverse=True)
         return out
@@ -1438,6 +1469,8 @@ class AgentService:
         log_existed = False
         try:
             log = SessionLog(session_id=session_id, base_dir=base_dir)
+            with self._session_preview_lock:
+                self._session_preview_cache.pop(str(log.path), None)
             if log.path.exists():
                 log.path.unlink()
                 log_existed = True

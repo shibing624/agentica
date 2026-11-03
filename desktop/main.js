@@ -24,9 +24,10 @@
  */
 
 const path = require("node:path");
-const { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
 const { bootstrapBlockedPage, resolveExistingCommand } = require("./runtime");
+const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const {
   HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, iconPath, isAppUrl, restartDelayMs,
 } = require("./util");
@@ -67,13 +68,15 @@ function fatal(context, err) {
 }
 
 function createWindow() {
+  const stateFile = path.join(app.getPath("userData"), "window-state.json");
+  const state = keepVisiblePosition(readWindowState(stateFile), screen.getAllDisplays());
+  const { maximized, ...bounds } = state;
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    ...bounds,
     minWidth: 720,
     minHeight: 480,
     title: "Agentica",
-    backgroundColor: "#ffffff",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
     show: false,
     ...(icon ? { icon } : {}),
     webPreferences: {
@@ -82,8 +85,16 @@ function createWindow() {
       sandbox: true,
     },
   });
+  if (maximized) win.maximize();
 
   win.once("ready-to-show", () => win.show());
+  win.on("close", () => {
+    try {
+      writeWindowState(stateFile, { ...win.getNormalBounds(), maximized: win.isMaximized() });
+    } catch (err) {
+      log(`could not save window state: ${err.message}`);
+    }
+  });
   win.on("closed", () => {
     win = null;
   });

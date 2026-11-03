@@ -255,7 +255,7 @@ class TestSessionEndpoints:
     """Test /api/sessions endpoints."""
 
     def test_list_sessions(self, mock_app):
-        client, _ = mock_app
+        client, mock_svc = mock_app
         resp = client.get("/api/sessions")
         assert resp.status_code == 200
         data = resp.json()
@@ -265,6 +265,15 @@ class TestSessionEndpoints:
         assert sessions[0]["name"] == "Chat 1"
         assert sessions[1]["session_id"] == "s2"
         assert sessions[1]["archived"] is True
+        assert data["scope"] == "recent"
+        mock_svc.list_sessions.assert_called_with(owner="default", scope="recent", recent_days=30)
+
+    def test_list_all_sessions(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.get("/api/sessions?scope=all&recent_days=90")
+        assert resp.status_code == 200
+        assert resp.json()["scope"] == "all"
+        mock_svc.list_sessions.assert_called_with(owner="default", scope="all", recent_days=90)
 
     def test_delete_session(self, mock_app):
         client, mock_svc = mock_app

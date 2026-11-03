@@ -55,7 +55,8 @@ export const startWechatQrApi = () => postJson<{
 export const pollWechatQrApi = (id: string) =>
   request<{ status: string }>(`/api/channels/wechat/qr?id=${encodeURIComponent(id)}`);
 export const fetchFsBrowse = (path: string) => request(`/api/fs/browse${path ? "?path=" + encodeURIComponent(path) : ""}`);
-export const fetchSessions = () => request("/api/sessions");
+export const fetchSessions = (scope: "recent" | "all" = "recent", signal?: AbortSignal) =>
+  request(`/api/sessions?scope=${scope}&recent_days=30`, { signal });
 export const deleteSessionApi = (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" });
 export const archiveSessionApi = (id: string) => request(`/api/sessions/${id}/archive`, { method: "POST" });
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });

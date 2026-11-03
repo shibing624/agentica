@@ -1,9 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import * as api from "../api";
 import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
-import { ChatMarkdown } from "../components/ChatMarkdown";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { promptRename } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
@@ -29,6 +28,8 @@ import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 
+const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
+
 function permIcon(mode: string) {
   if (mode === "ask") return <IconAsk />;
   if (mode === "allow-all") return <IconAllowAll />;
@@ -43,6 +44,8 @@ export function ChatPage() {
   const hadGoalCompose = useRef(false);
   const goalBudgetSnapshot = useRef("");
   const msgsRef = useRef<HTMLDivElement>(null);
+  const chatWrapRef = useRef<HTMLDivElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(createStreamFollow());
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
@@ -207,6 +210,17 @@ export function ChatPage() {
 
   useEffect(() => { setSlashActive(0); }, [s.inputText]);
 
+  useEffect(() => {
+    const area = inputAreaRef.current;
+    const wrap = chatWrapRef.current;
+    if (!area || !wrap) return;
+    const measure = () => wrap.style.setProperty("--composer-height", `${area.offsetHeight}px`);
+    const observer = new ResizeObserver(measure);
+    observer.observe(area);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
   const windowSize = s.serverContextWindow || 128000;
   const occupancy = cur?.contextTokens || cur?.lastInputTokens || 0;
   const ctxPct = Math.min(100, Math.round((occupancy / windowSize) * 100));
@@ -217,7 +231,7 @@ export function ChatPage() {
 
   return (
     <>
-      <div className="main">
+      <div className={"main" + (!cur || !cur.msgs.length ? " chat-empty" : "")}>
         <div className="topbar">
           <div className="tb-l">
             <button className="ib sidebar-expand-btn" onClick={() => setState({ sidebarCollapsed: false })} title={S.nav.expand}><IconSidebar /></button>
@@ -236,7 +250,7 @@ export function ChatPage() {
             </button>
           </div>
         </div>
-        <div className="chat-wrap">
+        <div className="chat-wrap" ref={chatWrapRef}>
           <div className="chat" id="chatArea" ref={msgsRef}
             onWheel={(e) => { followRef.current.wheel(e.deltaY); syncJump(); }}
             onTouchStart={(e) => followRef.current.touchStart(e.touches[0]?.clientY ?? 0)}
@@ -282,8 +296,7 @@ export function ChatPage() {
               <IconArrowDown />
             </button>
           )}
-        </div>
-        <div className="input-area">
+          <div className="input-area" ref={inputAreaRef}>
           {pendingReq && (
             <ApprovalCard
               req={pendingReq}
@@ -570,6 +583,7 @@ export function ChatPage() {
             </div>
           </div>
         </div>
+        </div>
       </div>
       <FilesPanel root={workspace} panel={files} />
     </>
@@ -604,7 +618,9 @@ function MessageView({ idx, m, workspace, onOpenFile, live, pendingToolCallId }:
           if (!text && !isLast) return null;
           return (
             <div className={"bub" + (live && isLast ? " streaming-bub" : "")} key={i}>
-              <ChatMarkdown text={text} streaming={!!live && isLast} />
+              <Suspense fallback={<span className="markdown-fallback">{text}</span>}>
+                <ChatMarkdown text={text} streaming={!!live && isLast} />
+              </Suspense>
               {live && isLast ? <span className="stream-caret" /> : null}
             </div>
           );

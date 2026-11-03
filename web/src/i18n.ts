@@ -78,6 +78,15 @@ const en = {
 
   chat: {
     projects: "Projects",
+    recentSessions: "Web + recent CLI",
+    allSessions: "All sessions",
+    showAllSessions: "Show all",
+    showRecentSessions: "Show recent",
+    showMore: (n: number) => `Show ${n} more`,
+    showLessSessions: "Show less",
+    loadSessionsFailed: "Could not load sessions",
+    expandProject: "Expand project",
+    collapseProject: "Collapse project",
     welcome: "What shall we do today?",
     newConversation: "New chat",
     newInProject: "New chat in this project",
@@ -635,6 +644,15 @@ const zh: Strings = {
 
   chat: {
     projects: "项目",
+    recentSessions: "网页 + 近期 CLI",
+    allSessions: "全部会话",
+    showAllSessions: "显示全部",
+    showRecentSessions: "只看近期",
+    showMore: (n: number) => `再显示 ${n} 条`,
+    showLessSessions: "收起",
+    loadSessionsFailed: "会话加载失败",
+    expandProject: "展开项目",
+    collapseProject: "收起项目",
     welcome: "今天想做点什么？",
     newConversation: "新对话",
     newInProject: "在此项目新建对话",

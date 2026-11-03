@@ -169,6 +169,8 @@ class PersistMixin:
         meta = PersistMixin._provider_replay_meta(user_messages[-1]) if user_messages else {}
         if user_messages and user_messages[-1].automated:
             meta["automated"] = True
+        if agent.run_context is not None:
+            session_log.set_source(agent.run_context.source.value)
         session_log._turn_user_uuid = session_log.append("user", text, **meta)
 
     @staticmethod

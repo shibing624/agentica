@@ -32,6 +32,7 @@
       "runtime.js",
       "port-memory.js",
       "util.js",
+      "window-state.js",
       "package.json",
       "build/icon.png"
     ],

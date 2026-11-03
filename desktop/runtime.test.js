@@ -17,6 +17,9 @@ const {
   managedBinDir,
   resolveExistingCommand,
 } = require("./runtime");
+const {
+  keepVisiblePosition, normalizeWindowState, readWindowState, writeWindowState,
+} = require("./window-state");
 
 const KEYS = [
   "AGENTICA_DESKTOP_RUNTIME",
@@ -117,4 +120,32 @@ test("offline first-launch page does not look like an error dialog", () => {
   assert.doesNotMatch(text, SCREENSHOT_SOFT);
   const words = text.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 3);
   assert.ok(words.length >= 5, `expected a readable page, got ${words.length} words`);
+});
+
+test("window state validates bounds and maximized flag", () => {
+  assert.deepEqual(normalizeWindowState(null), { width: 1360, height: 880, maximized: false });
+  assert.deepEqual(normalizeWindowState({ width: 10, height: 9000, maximized: "yes" }), {
+    width: 1360, height: 880, maximized: false,
+  });
+  assert.deepEqual(normalizeWindowState({ x: -40, y: 80, width: 1200, height: 800, maximized: true }), {
+    x: -40, y: 80, width: 1200, height: 800, maximized: true,
+  });
+});
+
+test("window state survives an atomic round trip", () => {
+  const file = path.join(tmp, "state", "window.json");
+  const state = { x: 120, y: 90, width: 1440, height: 920, maximized: false };
+  writeWindowState(file, state);
+  assert.deepEqual(readWindowState(file), state);
+  assert.equal(fs.existsSync(`${file}.tmp`), false);
+});
+
+test("window state recenters a window left on a disconnected display", () => {
+  const displays = [{ workArea: { x: 0, y: 0, width: 1440, height: 900 } }];
+  const offscreen = { x: -5000, y: 80, width: 1200, height: 800, maximized: false };
+  assert.deepEqual(keepVisiblePosition(offscreen, displays), {
+    width: 1200, height: 800, maximized: false,
+  });
+  const visible = { ...offscreen, x: -40 };
+  assert.deepEqual(keepVisiblePosition(visible, displays), visible);
 });

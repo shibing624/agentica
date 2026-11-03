@@ -723,11 +723,15 @@ class TestUserRoutes:
         from agentica.gateway import deps
 
         client.get("/api/sessions", headers=_auth())
-        assert deps.agent_service.list_sessions.call_args.kwargs == {"owner": ADMIN_ID}
+        assert deps.agent_service.list_sessions.call_args.kwargs == {
+            "owner": ADMIN_ID, "scope": "recent", "recent_days": 30,
+        }
 
         self._sign_in_as(client, "kk")
         client.get("/api/sessions")
-        assert deps.agent_service.list_sessions.call_args.kwargs == {"owner": "kk"}
+        assert deps.agent_service.list_sessions.call_args.kwargs == {
+            "owner": "kk", "scope": "recent", "recent_days": 30,
+        }
 
     def test_cron_jobs_are_listed_and_edited_per_account(self, client, tmp_path, monkeypatch):
         """The scheduler used to treat the gateway as one user, so `kk`

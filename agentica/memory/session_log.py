@@ -1433,6 +1433,7 @@ class SessionLog:
             "work_dir": work_dir,
             "size_bytes": stat.st_size,
             "mtime": stat.st_mtime,
+            "mtime_ns": stat.st_mtime_ns,
             "first_timestamp": first_timestamp,
             "last_timestamp": last_timestamp,
             "name": cls._meta_name(meta),
@@ -1441,6 +1442,7 @@ class SessionLog:
             "profile_source": cls._meta_profile_source(meta),
             "last_read_at": cls._meta_last_read_at(meta),
             "cli": cls._meta_cli(meta),
+            "source": cls._meta_source(meta),
         }
 
     @classmethod
@@ -1703,6 +1705,20 @@ class SessionLog:
         value = data.get("cli")
         return dict(value) if isinstance(value, dict) else {}
 
+    @staticmethod
+    def _meta_source(data: Dict[str, Any]) -> Optional[str]:
+        value = data.get("source")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def set_source(self, source: str) -> None:
+        """Persist the entry point that created this session."""
+        normalized = source.strip()
+        if not normalized:
+            raise ValueError("session source must be a non-empty string")
+        if self._meta_source(self._read_meta(self.meta_path)) == normalized:
+            return
+        self._write_meta({"source": normalized})
+
     def _write_meta(self, updates: Dict[str, Any]) -> None:
         """Merge sidecar metadata updates and persist atomically."""
         from datetime import datetime, timezone
@@ -1947,7 +1963,7 @@ class SessionLog:
         source_meta = self._read_meta(self.meta_path)
         fork_meta = {
             key: source_meta[key]
-            for key in ("profile_name", "profile_source")
+            for key in ("profile_name", "profile_source", "source")
             if isinstance(source_meta.get(key), str) and source_meta[key].strip()
         }
         # A branch is the same conversation seen from a second window; the view

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from agentica.memory.trace import last_completed_round
@@ -499,9 +499,22 @@ async def cancel_chat(
 @router.get("/api/sessions")
 async def list_sessions(
     request: Request,
+    scope: str = Query("recent", pattern="^(recent|all)$"),
+    recent_days: int = Query(30, ge=1, le=365),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    return {"sessions": svc.list_sessions(owner=_account(request))}
+    rows = await asyncio.to_thread(
+        svc.list_sessions,
+        owner=_account(request),
+        scope=scope,
+        recent_days=recent_days,
+    )
+    return {
+        "sessions": rows,
+        "scope": scope,
+        "recent_days": recent_days,
+        "count": len(rows),
+    }
 
 
 @router.delete("/api/sessions/{session_id}")
@@ -720,6 +733,7 @@ async def _apply_session_work_dir(
 def _touch_session_log(svc: AgentService, session_id: str, owner: str) -> None:
     """Create an empty jsonl so the sidebar can list a run before the first append."""
     log = svc.session_log_for(session_id, owner=owner)
+    log.set_source("gateway")
     path = log.path
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)

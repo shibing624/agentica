@@ -67,6 +67,11 @@ export type Session = {
   unread?: boolean;
   /** Server says a run is in flight (refresh can reattach). */
   running?: boolean;
+  source?: string;
+  preview?: string;
+  userCount?: number;
+  sizeBytes?: number;
+  hydratedSize?: number;
 };
 
 export type QueuedMessage = { id: string; sessionId: string; text: string; files: File[]; ts: number };
@@ -192,6 +197,9 @@ export type AppState = {
   cronRunsOpen: string[];
   cronBusy: string;
   sidebarSearch: string;
+  sessionScope: "recent" | "all";
+  sessionsLoading: boolean;
+  sessionsError: string;
   /** Whether a web password exists. Decides what the access-control block
    *  offers ("set" vs "change") and whether logging out is a thing. */
   passwordSet: boolean;
@@ -297,6 +305,9 @@ const state: AppState = {
   cronRunsOpen: [],
   cronBusy: "",
   sidebarSearch: "",
+  sessionScope: "recent",
+  sessionsLoading: false,
+  sessionsError: "",
   passwordSet: false,
   passwordIsInitial: false,
   accountId: "default",

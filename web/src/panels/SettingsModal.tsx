@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import * as api from "../api";
 import {
   loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders,
   loadStatus,
 } from "../data";
 import { openPasswordDialog } from "../components/ChangePasswordDialog";
-import { ChatMarkdown } from "../components/ChatMarkdown";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import { IconClose, IconExpand } from "../icons";
@@ -17,6 +16,8 @@ import {
 } from "../store";
 import { CronPanel } from "./CronPanel";
 import { AssistantPanel } from "../pages/AssistantPage";
+
+const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 
 /** Tab ids are stable (they are stored in `settingsTab`); only the label moves.
  *
@@ -346,7 +347,9 @@ function MemoryTab() {
           {emptyTemplate || !content.trim() ? (
             <span className="mem-preview-empty">{M.empty}</span>
           ) : (
-            <div className="mem-preview-md"><ChatMarkdown text={content} /></div>
+            <div className="mem-preview-md">
+              <Suspense fallback={<pre>{content}</pre>}><ChatMarkdown text={content} /></Suspense>
+            </div>
           )}
           <span className="mem-preview-expand" title={M.previewLabel}><IconExpand /></span>
         </div>

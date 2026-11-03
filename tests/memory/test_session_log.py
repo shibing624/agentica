@@ -36,6 +36,7 @@ class _FakeAgent:
     def __init__(self, log, messages, tools):
         self._session_log = log
         self.model = _FakeModel()
+        self.run_context = None
         self.run_response = _FakeRunResponse(messages, tools)
 
 
@@ -71,6 +72,14 @@ class TestSessionLogBasic:
         assert messages[1]["content"] == "hi there"
         assert messages[2]["role"] == "user"
         assert messages[2]["content"] == "how are you?"
+
+    def test_session_source_is_listed_from_sidecar(self, tmp_dir):
+        log = SessionLog("s-source", base_dir=tmp_dir)
+        log.append("user", "hello")
+        log.set_source("cli")
+        assert SessionLog._session_entry(log.path, None)["source"] == "cli"
+        log.set_source("gateway")
+        assert SessionLog._session_entry(log.path, None)["source"] == "gateway"
 
     def test_load_empty_log(self, tmp_dir):
         log = SessionLog("empty", base_dir=tmp_dir)

@@ -11,41 +11,72 @@ import {
 /** Session list state, shared by the sidebar and the settings modal's archive
  *  tab so restoring a session there updates the tree without a reload. */
 
-export async function loadSessions() {
-  // Overlay only: token counts and the local dir live in the browser, but the
-  // list itself is the server's. Merging local-only ids is how logging in as
-  // `kk` used to resurrect `default`'s conversations from the same origin.
-  const local = readSessionCache();
-  const { ok, data } = await api.fetchSessions();
-  const serverList = (ok && data?.sessions) ? data.sessions : [];
-  const merged: Record<string, Session> = {};
-  const st = getState();
-  for (const sv of serverList) {
-    const id = sv.session_id;
-    const lc = local[id] || {};
-    const mem = st.sessions[id];
-    const dir = sv.work_dir || st.serverDir || "";
-    const firstTs = Date.parse(sv.first_timestamp) || Date.now();
-    const serverLast = Date.parse(sv.last_timestamp) || 0;
-    merged[id] = {
-      title: sv.name || "Chat",
-      msgs: mem?.msgs || [],
-      ts: firstTs,
-      lastTs: Math.max(serverLast, mem ? lastQueryTs(mem) : 0, firstTs),
-      tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
-      requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
-      contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,
-      dir,
-      projectId: projectIdForDir(dir),
-      archived: !!sv.archived,
-      running: !!sv.running,
-      unread: !!sv.unread,
-    };
-  }
-  setState({ sessions: merged });
-  saveSessions();
-  const last = readLastSessionId();
-  if (last && merged[last]) switchTo(last);
+let catalogGeneration = 0;
+let catalogFlight: { scope: "recent" | "all"; promise: Promise<void> } | null = null;
+let catalogAbort: AbortController | null = null;
+const hydrateGenerations: Record<string, number> = {};
+
+export function loadSessions(scope: "recent" | "all" = getState().sessionScope): Promise<void> {
+  if (catalogFlight?.scope === scope) return catalogFlight.promise;
+  catalogAbort?.abort();
+  const controller = new AbortController();
+  catalogAbort = controller;
+  const generation = ++catalogGeneration;
+  const promise = (async () => {
+    if (getState().sessionScope === scope) setState({ sessionsLoading: true, sessionsError: "" });
+    const { ok, data, error } = await api.fetchSessions(scope, controller.signal);
+    if (generation !== catalogGeneration) return;
+    if (!ok || !Array.isArray(data?.sessions)) {
+      setState({
+        sessionsLoading: false,
+        sessionsError: error instanceof Error ? error.message : "Could not load sessions",
+      });
+      return;
+    }
+    const local = readSessionCache();
+    const merged: Record<string, Session> = {};
+    const st = getState();
+    for (const sv of data.sessions) {
+      const id = sv.session_id;
+      const lc = local[id] || {};
+      const mem = st.sessions[id];
+      const dir = sv.work_dir || st.serverDir || "";
+      const firstTs = Date.parse(sv.first_timestamp) || Date.now();
+      const serverLast = Date.parse(sv.last_timestamp) || 0;
+      const next: Session = {
+        title: sv.name || "Chat",
+        msgs: mem?.msgs || [],
+        ts: firstTs,
+        lastTs: Math.max(serverLast, mem ? lastQueryTs(mem) : 0, firstTs),
+        tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
+        requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
+        contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,
+        dir,
+        projectId: projectIdForDir(dir),
+        archived: !!sv.archived,
+        running: sessionIsLive(id) || !!sv.running,
+        unread: !!sv.unread,
+        source: sv.source || "legacy",
+        preview: sv.preview || "",
+        userCount: sv.user_count || 0,
+        sizeBytes: Number(sv.size_bytes) || 0,
+        hydratedSize: mem?.hydratedSize,
+      };
+      merged[id] = mem ? Object.assign(mem, next) : next;
+    }
+    if (st.curSess && !merged[st.curSess] && st.sessions[st.curSess]) {
+      merged[st.curSess] = st.sessions[st.curSess];
+    }
+    setState({ sessions: merged, sessionScope: scope, sessionsLoading: false, sessionsError: "" });
+    saveSessions();
+    const last = readLastSessionId();
+    if (last && merged[last] && getState().curSess !== last) switchTo(last);
+  })().finally(() => {
+    if (catalogFlight?.promise === promise) catalogFlight = null;
+    if (catalogAbort === controller) catalogAbort = null;
+  });
+  catalogFlight = { scope, promise };
+  return promise;
 }
 
 export function switchTo(id: string) {
@@ -59,6 +90,7 @@ export function switchTo(id: string) {
   writeLastSessionId(id);
   bump();
   if (!sess || sessionIsLive(id)) return;
+  if (sess.msgs.length && sess.hydratedSize === sess.sizeBytes) return;
   void (async () => {
     await hydrateSession(id, true);
     if (getState().curSess !== id) return;
@@ -74,29 +106,31 @@ export function markSessionRead(id: string) {
   void api.markSessionReadApi(id);
 }
 
-/** Patch running/unread from the server without replacing transcripts. */
+/** Poll only active runs; refresh the catalog once when a remote run finishes. */
 export async function syncSessionStatus() {
-  const { ok, data } = await api.fetchSessions();
-  if (!ok || !data?.sessions) return;
   const st = getState();
+  const ids = Object.entries(st.sessions)
+    .filter(([id, sess]) => sess.running && !sessionIsLive(id))
+    .map(([id]) => id);
+  if (!ids.length) return;
+  const results = await Promise.all(ids.map((id) => api.fetchActiveRun(id)));
   let changed = false;
-  const byId: Record<string, { running?: boolean; unread?: boolean }> = {};
-  for (const sv of data.sessions) byId[sv.session_id] = sv;
-  for (const [id, sess] of Object.entries(st.sessions)) {
-    const sv = byId[id];
-    if (!sv) continue;
-    const live = !!(st.streams[id] || st.goalRuns[id] || st.commandRuns[id]);
-    const running = live || !!sv.running;
-    const unread = id === st.curSess ? false : !!sv.unread;
-    if (sess.running !== running || sess.unread !== unread) {
+  let finished = false;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const { ok, data } = results[i];
+    if (!ok) continue;
+    const sess = getState().sessions[id];
+    if (!sess) continue;
+    const running = sessionIsLive(id) || !!data?.run;
+    if (sess.running !== running) {
       sess.running = running;
-      sess.unread = unread;
       changed = true;
     }
+    if (!running) finished = true;
   }
-  if (!changed) return;
-  saveSessions();
-  bump();
+  if (changed) bump();
+  if (finished) await loadSessions();
 }
 
 function sessionIsLive(id: string): boolean {
@@ -109,17 +143,20 @@ function sessionIsLive(id: string): boolean {
  *  calls, matching the live web turn. */
 export async function hydrateSession(id: string, force = false) {
   if (sessionIsLive(id)) return;
+  const existing = getState().sessions[id];
+  if (!force && existing?.msgs.length && existing.hydratedSize === existing.sizeBytes) return;
+  const generation = (hydrateGenerations[id] || 0) + 1;
+  hydrateGenerations[id] = generation;
   const events = await fetchAllTraceEvents(id);
-  if (!events) return;
+  if (!events || hydrateGenerations[id] !== generation) return;
   const sess = getState().sessions[id];
-  if (!sess || sessionIsLive(id) || (sess.msgs.length && !force)) return;
-  const msgs = eventsToChatMsgs(events);
-  if (!msgs.length) return;
-  sess.msgs = msgs;
+  if (!sess || sessionIsLive(id)) return;
+  sess.msgs = eventsToChatMsgs(events);
+  sess.hydratedSize = sess.sizeBytes;
   sess.lastTs = lastQueryTs(sess);
   saveSessions();
   bump();
-  void syncSessionRoundStats(id);
+  if (sess.msgs.length) void syncSessionRoundStats(id);
 }
 
 async function fetchAllTraceEvents(id: string): Promise<any[] | null> {
