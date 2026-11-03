@@ -23,14 +23,15 @@ export async function loadSessions() {
   for (const sv of serverList) {
     const id = sv.session_id;
     const lc = local[id] || {};
-    const dir = sv.work_dir || lc.dir || st.serverDir || "";
-    const firstTs = Date.parse(sv.first_timestamp) || lc.ts || Date.now();
+    const mem = st.sessions[id];
+    const dir = sv.work_dir || st.serverDir || "";
+    const firstTs = Date.parse(sv.first_timestamp) || Date.now();
     const serverLast = Date.parse(sv.last_timestamp) || 0;
     merged[id] = {
-      title: sv.name || lc.title || "Chat",
-      msgs: lc.msgs || [],
+      title: sv.name || "Chat",
+      msgs: mem?.msgs || [],
       ts: firstTs,
-      lastTs: Math.max(serverLast, lastQueryTs({ ts: firstTs, lastTs: lc.lastTs, msgs: lc.msgs }), firstTs),
+      lastTs: Math.max(serverLast, mem ? lastQueryTs(mem) : 0, firstTs),
       tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
       requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
       contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,

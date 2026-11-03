@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import * as api from "./api";
+import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
 
 /** Ordered stream of one assistant turn (text interleaves with tool groups). */
 export type MsgPart =
@@ -358,10 +359,18 @@ function accountCachePrefix() {
 }
 
 export function saveSessions() {
-  localStorage.setItem("ag_s:" + accountCachePrefix(), JSON.stringify(state.sessions));
+  const key = "ag_s:" + accountCachePrefix();
+  try {
+    localStorage.setItem(key, JSON.stringify(sessionStatsCache(state.sessions)));
+  } catch (e) {
+    // The cache is optional (the server log is the record); a full or
+    // disabled storage must not abort the send that triggered this save.
+    console.warn("session cache not saved:", e);
+    localStorage.removeItem(key);
+  }
 }
 
-export function readSessionCache(): Record<string, Session> {
+export function readSessionCache(): Record<string, Partial<SessionStats>> {
   const namespaced = localStorage.getItem("ag_s:" + accountCachePrefix());
   const raw = namespaced || localStorage.getItem("ag_s") || "{}";
   return JSON.parse(raw);

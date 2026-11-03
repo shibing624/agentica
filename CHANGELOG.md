@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **修复 Web 端发不出消息：浏览器本地缓存写满后，发送流程中途抛错**：侧栏的会话缓存 `ag_s:<账号>` 原来会把整份会话列表连同打开过的每个会话的完整对话一起写进 localStorage。本机有 5000 多个 CLI 会话，光列表就占了 1.9MB，再打开几个长会话就会超出浏览器约 5MB 的配额。之后每次 `saveSessions()` 都会抛 `QuotaExceededError`，而发送路径上就有这一步，所以点了发送没反应，消息留在输入框里。现在缓存里只存服务端不返回的 token/耗时计数，并且只存在本浏览器跑过对话的会话；标题、时间和对话内容每次都从服务端日志重新取。写缓存失败时只打一条警告，不再打断发送。
 - **修复网页端设置页报 `'coroutine' object is not iterable`**：`Workspace` 里有两个同名的 `list_memory_index_entries`，原来的同步版本被后加的 async 版本覆盖了。gateway 的 `read_memory_index` 仍用 `asyncio.to_thread` 去调它，拿到的是一个没被 await 的 coroutine，FastAPI 序列化响应时抛错。现在删掉被覆盖的同步版本，调用方直接 `await`。
 - **修复退出时 hook 清理报 `can't create new thread at interpreter shutdown`**：记忆这类 fire-and-forget 的 hook consumer 在进程退出时还没结束，`atexit` 里调用 `HookProcess.kill()`，它会起一个 reaper 线程回收僵尸进程，而较新的 Python 3.12 在这个阶段已经不允许创建线程。现在退出时只 kill 进程组、关闭管道，不再起线程：父进程退出后，子进程会被 init 回收。
 - **Gateway IM 渠道的权限档位跟随 Web 端的选择**：原来 IM 会话从不设置审批档位，固定是默认的 `auto`；IM 又没有审批卡，所以凡是需要审批的操作（改 `work_dir` 以外的文件等）都会直接被拒绝，也没有任何配置能改。现在每轮 IM 消息开始前，会读取该账号在 Web 输入框旁审批选择器里选的档位（`~/.agentica/gateway/prefs/<账号>.json` 的 `approval_mode`），在 Web 上选 `allow-all`，IM 也就是 `allow-all`。没选过时仍用 `auto`。偏好文件读不出来（写一半被中断、手工改坏）时按「没选过」处理并记 warning，不会让这台机器上每条 IM 消息都变成 `error processing message`。
