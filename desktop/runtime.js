@@ -13,10 +13,14 @@
  * Resolution order:
  *
  *   1. AGENTICA_GATEWAY_BIN
- *   2. login-shell `agentica-gateway` (unless AGENTICA_DESKTOP_IGNORE_EXISTING)
- *   3. managed venv (`<support>/venv/bin/agentica-gateway`)
- *   4. login-shell python that can `import agentica.gateway`
- *   5. first-launch bootstrap (uv → CPython 3.12 → pip install agentica[gateway])
+ *   2. the interpreter bundled in the installer (`<resources>/runtime/python`),
+ *      same version as the shell, no network and no system Python needed
+ *   3. login-shell `agentica-gateway` (unless AGENTICA_DESKTOP_IGNORE_EXISTING)
+ *   4. managed venv (`<support>/venv/bin/agentica-gateway`)
+ *   5. login-shell python that can `import agentica.gateway`
+ *   6. first-launch bootstrap (uv → CPython 3.12 → pip install agentica[gateway])
+ *
+ * Only 3-6 exist for `npm start` and for installers built without a runtime.
  *
  * Pure Node, no Electron — tests run under `node --test`.
  */
@@ -114,6 +118,43 @@ function ignoreExisting() {
   return process.env.AGENTICA_DESKTOP_IGNORE_EXISTING === "1";
 }
 
+const GATEWAY_ENTRY = "from agentica.gateway.main import main; main()";
+const CLI_ENTRY = "import sys; sys.argv[0] = 'agentica'; from agentica.cli.main import main; sys.exit(main())";
+
+/** Directory the installer unpacked next to the app: `<resources>/runtime`. */
+function bundledRoot() {
+  if (process.env.AGENTICA_DESKTOP_BUNDLED_RUNTIME) {
+    return process.env.AGENTICA_DESKTOP_BUNDLED_RUNTIME;
+  }
+  return process.resourcesPath ? path.join(process.resourcesPath, "runtime") : null;
+}
+
+function bundledPython(root = bundledRoot()) {
+  if (!root) return null;
+  const python = process.platform === "win32"
+    ? path.join(root, "python", "python.exe")
+    : path.join(root, "python", "bin", "python3");
+  return isExecutable(python) ? python : null;
+}
+
+/**
+ * The interpreter that shipped inside the installer, with agentica already
+ * installed into it. It is the shell's own version of the gateway, so the two
+ * never drift; `PYTHONNOUSERSITE` keeps a user's `pip install --user` packages
+ * from shadowing what was shipped.
+ */
+function resolveBundledCommand() {
+  const python = bundledPython();
+  if (!python) return null;
+  return {
+    command: python,
+    args: ["-c", GATEWAY_ENTRY],
+    source: "bundled",
+    pathPrefix: path.dirname(python),
+    env: { PYTHONNOUSERSITE: "1" },
+  };
+}
+
 function pythonWithGateway() {
   const py = loginShellWhich("python3") || loginShellWhich("python");
   if (!py) return null;
@@ -142,6 +183,8 @@ function resolveExistingCommand() {
       pathPrefix: null,
     };
   }
+  const bundled = resolveBundledCommand();
+  if (bundled) return bundled;
   if (!ignoreExisting()) {
     const bin = loginShellWhich("agentica-gateway");
     if (bin) {
@@ -162,7 +205,7 @@ function resolveExistingCommand() {
     if (py) {
       return {
         command: py,
-        args: ["-m", "agentica.gateway.main"],
+        args: ["-c", GATEWAY_ENTRY],
         source: "python",
         pathPrefix: null,
       };
@@ -391,6 +434,10 @@ function bootstrapBlockedPage() {
 module.exports = {
   PYTHON_VERSION,
   UV_UNIX_INSTALL,
+  CLI_ENTRY,
+  bundledRoot,
+  bundledPython,
+  resolveBundledCommand,
   supportRoot,
   uvBin,
   uvInstallPlan,

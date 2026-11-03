@@ -12,7 +12,12 @@
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux"
+    "dist:linux": "electron-builder --linux",
+    "prepare-runtime": "node scripts/prepare-runtime.js",
+    "test": "node --test runtime.test.js"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "electron": "^43.4.1",
@@ -33,8 +38,23 @@
       "port-memory.js",
       "util.js",
       "window-state.js",
+      "cli-shim.js",
+      "updater.js",
       "package.json",
       "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime/${os}-${arch}",
+        "to": "runtime"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "shibing624",
+        "repo": "agentica"
+      }
     ],
     "npmRebuild": false,
     "artifactName": "agentica-desktop-${platform}-${arch}.${ext}",
@@ -53,10 +73,21 @@
             "arm64",
             "x64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "category": "public.app-category.developer-tools",
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
       "title": "Agentica ${version}"

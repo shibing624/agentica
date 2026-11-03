@@ -86,9 +86,14 @@ answering on that port.
 | `AGENTICA_DESKTOP_SMOKE=1` | Print one `DESKTOP-SMOKE-RESULT {json}` line describing what the window loaded, then quit through the normal quit path. |
 | `AGENTICA_DESKTOP_SMOKE_SHOT` | With the above: also write a PNG of the window there. |
 
-An app launched from the Dock does not inherit your shell's `PATH`, so a conda
-or venv `agentica-gateway` is invisible to it. Resolution asks the login shell
-first (`$SHELL -ilc 'command -v agentica-gateway'`), then a managed venv under
+`AGENTICA_DESKTOP_BUNDLED_RUNTIME` points at a runtime directory other than
+`<resources>/runtime` (tests, `npm start` against a locally prepared runtime).
+`AGENTICA_DESKTOP_NO_UPDATE=1` skips the update check.
+
+Without a bundled runtime (`npm start`), an app launched from the Dock does not
+inherit your shell's `PATH`, so a conda or venv `agentica-gateway` is invisible
+to it. Resolution asks the login shell first
+(`$SHELL -ilc 'command -v agentica-gateway'`), then a managed venv under
 Application Support. If neither exists, the first launch downloads uv, installs
 CPython 3.12, and `pip install`s `agentica[gateway]` into that venv — once.
 `~/.agentica` stays data-only. Set `AGENTICA_GATEWAY_BIN` to skip the search.
@@ -114,9 +119,53 @@ the deb/AppImage need Linux — so the full matrix runs in CI
 whatever `v*` tag was pushed. Builds are unsigned; the root README documents the
 one-time unlock each OS asks for.
 
-`npm start` and the installers agree: the app is a **shell** and does not
-carry a Python interpreter inside the `.app`. A machine that already has
-`agentica-gateway` (`uv tool install "agentica[gateway]"`) keeps using it. A
-machine that does not gets a managed runtime on first launch, outside the
-bundle, so a later `uv tool upgrade agentica` still updates the gateway
-without a new dmg.
+## Bundled runtime (no system dependencies)
+
+Every installer carries its own CPython 3.12 (python-build-standalone) with
+`agentica[gateway]` already installed, under `<resources>/runtime/python`. The
+app needs no system Python, Node, uv or network on first launch, and the shell
+and the gateway are always the same version: they are built from one commit and
+shipped, signed and updated as one unit.
+
+```bash
+cd web && npm ci && npm run build          # the wheel carries the SPA
+cd ../desktop && npm ci
+node scripts/prepare-runtime.js            # host platform; or --target mac-arm64 --target mac-x64 ...
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
+```
+
+`prepare-runtime.js` builds a wheel of this checkout and installs it with
+`pip --platform ... --target`, so one runner can assemble a runtime for another
+architecture. The CPython build is pinned (`AGENTICA_PBS_TAG` /
+`AGENTICA_PBS_PYTHON` override it). `extraResources` selects
+`runtime/${os}-${arch}` per target. The unpacked runtime is roughly 380 MB
+(`lark_oapi` alone is ~100 MB) and compresses to about a third in the installer.
+
+Gateway resolution is: `AGENTICA_GATEWAY_BIN`, then the **bundled** interpreter,
+then (only for `npm start` and runtime-less builds) a login-shell
+`agentica-gateway`, the managed venv, a system Python, and finally the uv
+bootstrap. The bundled interpreter runs with `PYTHONNOUSERSITE=1`, so a
+`pip install --user` never shadows what shipped. The desktop and the CLI share
+the data under `~/.agentica` but never an executable.
+
+`Help > Install 'agentica' Command in Terminal…` writes an `agentica` wrapper
+that runs the bundled Python (`/usr/local/bin` on macOS when writable, else
+`~/.local/bin`; on Windows `%LOCALAPPDATA%\Agentica\bin` plus the user PATH).
+It will not overwrite an `agentica` it did not create.
+
+## Updates and signing
+
+`electron-updater` checks GitHub Releases at startup and installs a new version
+that replaces shell, Python and agentica together. CI uploads the
+`latest*.yml` and blockmap files next to the installers. macOS only accepts an
+update for a signed app, so an unsigned build skips the check
+(`AGENTICA_DESKTOP_NO_UPDATE=1` disables it everywhere).
+
+Signing is driven by repository secrets in `.github/workflows/desktop.yml`:
+
+| Platform | Secrets |
+|---|---|
+| macOS (sign + notarize) | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` |
+| Windows | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` |
+
+Without them the build is unsigned, exactly as before.

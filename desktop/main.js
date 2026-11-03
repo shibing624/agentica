@@ -27,6 +27,8 @@ const path = require("node:path");
 const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, session, shell } = require("electron");
 const { GatewayProcess } = require("./gateway");
 const { bootstrapBlockedPage, resolveExistingCommand } = require("./runtime");
+const { installCommand } = require("./cli-shim");
+const { startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const {
   HEALTHY_AFTER_MS, MAX_GATEWAY_RESTARTS, iconPath, isAppUrl, restartDelayMs,
@@ -269,6 +271,7 @@ async function boot() {
     return;
   }
   if (splash && !splash.isDestroyed()) splash.close();
+  startUpdates(app, log);
 }
 
 /**
@@ -306,7 +309,39 @@ function installMenu() {
       ],
     },
     { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Install 'agentica' Command in Terminal…",
+          click: () => registerTerminalCommand(),
+        },
+      ],
+    },
   ]));
+}
+
+/** Menu action: put an `agentica` command on the terminal PATH. */
+function registerTerminalCommand() {
+  try {
+    const { target, onPath, restart } = installCommand();
+    const hint = restart
+      ? "Open a new terminal window to use it."
+      : onPath
+        ? "It is ready to use in any terminal."
+        : `Add ${path.dirname(target)} to your PATH to use it.`;
+    void dialog.showMessageBox({
+      type: "info",
+      message: "The 'agentica' command is installed.",
+      detail: `${target}\n\n${hint}`,
+    });
+  } catch (err) {
+    void dialog.showMessageBox({
+      type: "warning",
+      message: "Could not install the 'agentica' command.",
+      detail: err.message,
+    });
+  }
 }
 
 /**

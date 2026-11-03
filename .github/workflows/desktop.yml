@@ -5,14 +5,22 @@
 # needs Linux (or docker), so a macOS dev box can only ever produce the two
 # dmgs. Three runners is the whole reason this file exists.
 #
-# Pushing a v* tag builds and attaches the installers to that tag's Release.
+# Each installer carries its own CPython and the agentica wheel built from the
+# tagged commit (desktop/scripts/prepare-runtime.js), so the app needs no
+# system Python or network on first launch, and shell and gateway are always the
+# same version.
+#
+# Pushing a v* tag builds and attaches the installers to that tag's Release,
+# together with the latest*.yml / blockmap files electron-updater reads.
 # workflow_dispatch builds the same artifacts without touching any Release, so
 # the packaging can be exercised on a branch before a release depends on it.
 #
-# Nothing here is code-signed. macOS will quarantine an unsigned download and
-# SmartScreen will warn on the exe; the README documents the one-time unlock for
-# each. Signing needs a paid Apple/EV certificate, which is an account decision
-# rather than a build one.
+# Signing is opt-in. With the secrets below set, macOS builds are signed and
+# notarized and the Windows exe is signed; without them the build is unsigned
+# (macOS quarantines it, SmartScreen warns, and macOS skips auto-update).
+#   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+#            APPLE_TEAM_ID
+#   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD
 name: Desktop installers
 
 on:
@@ -28,10 +36,13 @@ jobs:
         include:
           - os: macos-latest
             args: --mac
+            runtimes: --target mac-arm64 --target mac-x64
           - os: windows-latest
             args: --win
+            runtimes: --target win-x64
           - os: ubuntu-latest
             args: --linux
+            runtimes: --target linux-x64
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -43,6 +54,20 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The gateway serves the SPA out of agentica/gateway/ui, and the wheel
+      # that goes into the installer must carry it.
+      - name: Build the web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - run: python -m pip install --upgrade pip wheel setuptools
 
       # The installers carry their own version metadata, so a tag build must
       # stamp it — otherwise every release ships an installer claiming whatever
@@ -58,14 +83,28 @@ jobs:
       - run: npm ci
         working-directory: desktop
 
+      - name: Assemble the bundled runtime
+        working-directory: desktop
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/prepare-runtime.js ${{ matrix.runtimes }}
+
       - name: Build installers
         working-directory: desktop
         shell: bash
         env:
-          # Without this, electron-builder hunts for a signing identity in the
-          # runner's empty keychain and fails the build instead of producing an
-          # unsigned app.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Without a certificate, electron-builder would hunt for a signing
+          # identity in the runner's empty keychain and fail the build instead
+          # of producing an unsigned app.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK == '' && 'false' || 'true' }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npx electron-builder ${{ matrix.args }} --publish never
 
       - uses: actions/upload-artifact@v4
@@ -74,9 +113,12 @@ jobs:
           if-no-files-found: error
           path: |
             desktop/dist/*.dmg
+            desktop/dist/*.zip
             desktop/dist/*.exe
             desktop/dist/*.AppImage
             desktop/dist/*.deb
+            desktop/dist/*.blockmap
+            desktop/dist/latest*.yml
 
   attach:
     needs: build

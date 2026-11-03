@@ -160,7 +160,7 @@ class GatewayProcess {
     ];
     this.log(`starting ${resolved.command} ${args.join(" ")} (${resolved.source})`);
 
-    const env = { ...process.env, PYTHONUNBUFFERED: "1" };
+    const env = { ...process.env, PYTHONUNBUFFERED: "1", ...resolved.env };
     if (resolved.pathPrefix) {
       env.PATH = `${resolved.pathPrefix}${path.delimiter}${env.PATH || ""}`;
     }

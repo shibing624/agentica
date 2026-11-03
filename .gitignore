@@ -223,6 +223,8 @@ sdk-ts/dist/
 # and the sdist/wheel ships it. Hashed filenames change every build.
 agentica/gateway/ui/
 desktop/node_modules/
+# Bundled Python + agentica, assembled by desktop/scripts/prepare-runtime.js.
+desktop/runtime/
 # electron-builder output: installers are release assets, not repo content.
 desktop/dist/
 docs/superpowers/

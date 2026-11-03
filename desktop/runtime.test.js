@@ -21,7 +21,11 @@ const {
   keepVisiblePosition, normalizeWindowState, readWindowState, writeWindowState,
 } = require("./window-state");
 
+const { shimText, withPathEntry } = require("./cli-shim");
+const { TARGETS, parseTargets, sitePackages } = require("./scripts/prepare-runtime");
+
 const KEYS = [
+  "AGENTICA_DESKTOP_BUNDLED_RUNTIME",
   "AGENTICA_DESKTOP_RUNTIME",
   "AGENTICA_GATEWAY_BIN",
   "AGENTICA_DESKTOP_IGNORE_EXISTING",
@@ -62,6 +66,63 @@ test("AGENTICA_GATEWAY_BIN wins over everything", () => {
   assert.equal(got.source, "env");
   assert.equal(got.command, "/opt/custom/agentica-gateway");
   assert.deepEqual(got.args, []);
+});
+
+function fakeBundledPython() {
+  const bundled = path.join(tmp, "resources", "runtime");
+  const python = process.platform === "win32"
+    ? path.join(bundled, "python", "python.exe")
+    : path.join(bundled, "python", "bin", "python3");
+  fs.mkdirSync(path.dirname(python), { recursive: true });
+  fs.writeFileSync(python, "#!/bin/sh\n");
+  fs.chmodSync(python, 0o755);
+  process.env.AGENTICA_DESKTOP_BUNDLED_RUNTIME = bundled;
+  return python;
+}
+
+test("bundled interpreter beats every system gateway", () => {
+  const python = fakeBundledPython();
+  const got = resolveExistingCommand();
+  assert.equal(got.source, "bundled");
+  assert.equal(got.command, python);
+  assert.deepEqual(got.args.slice(0, 1), ["-c"]);
+  assert.match(got.args[1], /agentica\.gateway\.main import main/);
+  assert.equal(got.env.PYTHONNOUSERSITE, "1");
+});
+
+test("AGENTICA_GATEWAY_BIN still overrides the bundled interpreter", () => {
+  fakeBundledPython();
+  process.env.AGENTICA_GATEWAY_BIN = "/opt/custom/agentica-gateway";
+  assert.equal(resolveExistingCommand().source, "env");
+});
+
+test("a bundled runtime directory without python is ignored", () => {
+  process.env.AGENTICA_DESKTOP_BUNDLED_RUNTIME = path.join(tmp, "empty");
+  process.env.AGENTICA_DESKTOP_IGNORE_EXISTING = "1";
+  assert.equal(resolveExistingCommand(), null);
+});
+
+test("terminal shim runs the bundled python and tags itself", () => {
+  const unix = shimText("/Applications/Agentica.app/Contents/Resources/runtime/python/bin/python3", "darwin");
+  assert.match(unix, /^#!\/bin\/sh\n# agentica-desktop-shim\n/);
+  assert.match(unix, /exec "\/Applications\/.*python3" -c '.*agentica\.cli\.main import main.*' "\$@"/);
+  const win = shimText("C:\\Agentica\\python.exe", "win32");
+  assert.match(win, /agentica-desktop-shim/);
+  assert.match(win, /%\*/);
+});
+
+test("PATH entries are appended once", () => {
+  assert.equal(withPathEntry("/a:/b", "/c", ":"), "/a:/b:/c");
+  assert.equal(withPathEntry("/a:/b", "/b", ":"), "/a:/b");
+  assert.equal(withPathEntry("", "/c", ":"), "/c");
+});
+
+test("runtime recipes cover every installer target", () => {
+  assert.deepEqual(Object.keys(TARGETS).sort(), ["linux-x64", "mac-arm64", "mac-x64", "win-x64"]);
+  assert.deepEqual(parseTargets(["--target", "mac-x64", "--target", "win-x64"]), ["mac-x64", "win-x64"]);
+  assert.throws(() => parseTargets(["--target", "plan9-mips"]));
+  assert.match(sitePackages("/r/win-x64/python", "win-x64"), /Lib[\\/]site-packages$/);
+  assert.match(sitePackages("/r/mac-arm64/python", "mac-arm64"), /lib[\\/]python3\.12[\\/]site-packages$/);
 });
 
 test("managed venv is used when PATH lookup is skipped", () => {
