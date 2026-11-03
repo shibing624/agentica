@@ -74,6 +74,24 @@ class TestAgentServiceSteer:
         assert svc.steer_session("s1", "don't rewrite tests") is True
         agent.steer.assert_called_once_with("don't rewrite tests")
 
+    def test_steer_session_expands_skill_invocation(self, tmp_path):
+        """A ``/skill`` steered mid-run reaches the model as the skill prompt,
+        the same as when it starts a turn."""
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        svc._cache.put(svc._sk("s1"), agent)
+        registry = MagicMock()
+        registry.expand_invocation.side_effect = (
+            lambda text: "SKILL PROMPT for x" if text == "/review x" else None
+        )
+        with patch(
+            "agentica.gateway.services.agent_service.get_skill_registry",
+            return_value=registry,
+        ):
+            svc.steer_session("s1", "/review x")
+        agent.steer.assert_called_once_with("SKILL PROMPT for x")
+
     def test_steer_session_missing_agent_is_false(self, tmp_path):
         svc = self._svc(tmp_path)
         assert svc.steer_session("missing", "hello") is False

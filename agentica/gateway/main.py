@@ -18,6 +18,7 @@ import sys
 import unicodedata
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
@@ -577,12 +578,16 @@ async def _setup_channels() -> None:
     await deps.channel_manager.connect_all()
 
 
-# Per-session FIFO queues for inbound channel messages. IM users (WeChat,
-# etc.) routinely fire several messages in quick succession before the agent
-# has replied; the session run-lock would reject the second message
-# ("already has an active run") and it would be lost. Each session gets its
-# own queue drained by a single worker task, so messages are answered in
-# order, one at a time, instead of colliding on the lock.
+# Inbound IM is full duplex. While this session's worker has a run in flight,
+# a follow-up text line is steered into that run (``agent.steer``: delivered at
+# the next tool-batch boundary, same as typing mid-run in the CLI) instead of
+# waiting for the whole turn to finish. What cannot be steered — media, lines
+# that arrive before the run opens its steer window, lines behind already
+# queued ones — goes on a per-session FIFO drained by a single worker task.
+# The worker takes everything pending as one batch, so N lines sent while the
+# agent was busy become one turn and one reply, not N turns answering stale
+# context. Without the queue the session run-lock would reject the second
+# message ("already has an active run") and it would be lost.
 _channel_queues: dict[str, asyncio.Queue] = {}
 _channel_workers: dict[str, asyncio.Task] = {}
 _channel_queue_lock = asyncio.Lock()
@@ -632,11 +637,11 @@ def _home_account() -> str:
 
 
 async def _handle_channel_message(message) -> None:
-    """Enqueue an inbound channel message for serialized, in-order handling.
+    """Steer an inbound line into the session's running turn, or queue it.
 
-    Returns immediately after queuing. A per-session worker task drains the
-    queue and processes one message at a time via ``_process_channel_message``,
-    so rapid-fire messages from the same user never hit the session run-lock.
+    Returns immediately. A per-session worker task drains the queue in
+    batches via ``_process_channel_batch``, so rapid-fire messages from the
+    same user never hit the session run-lock.
     """
     logger.info(f"[{message.channel.value}] {message.sender_id}: {message.content[:500]}")
 
@@ -659,23 +664,68 @@ async def _handle_channel_message(message) -> None:
     if deps.agent_peers is not None:
         deps.agent_peers.note_route(session_id, message.channel, message.channel_id)
 
+    if await _steer_running_turn(session_id, message):
+        return
     await _enqueue_session_message(session_id, message)
 
 
+async def _steer_running_turn(session_id: str, message) -> bool:
+    """Hand a follow-up line to this session's in-flight run. True if taken.
+
+    Only a run this channel worker started is steered: its reply goes back to
+    this conversation, and the worker pops whatever is accepted too late for
+    the run (``take_undelivered_steer``) and runs it as the next turn. Lines
+    already waiting in the queue go first, so a line never overtakes them.
+    Media needs the per-turn media routing in ``chat()``, so it is queued.
+    False also covers the run ending between this check and ``steer()``.
+    """
+    if message.metadata.get("media"):
+        return False
+    text = (message.content or "").strip()
+    if not text:
+        return False
+    async with _channel_queue_lock:
+        worker = _channel_workers.get(session_id)
+        if worker is None or worker.done():
+            return False
+        queue = _channel_queues.get(session_id)
+        if queue is not None and not queue.empty():
+            return False
+        accepted = deps.agent_service.steer_session(session_id, text, owner=_home_account())
+    if accepted:
+        logger.info(f"[{message.channel.value}] steered into running turn of {session_id}")
+    return accepted
+
+
 async def _channel_queue_worker(session_id: str, queue: asyncio.Queue) -> None:
-    """Drain one session's message queue, processing messages sequentially.
+    """Drain one session's message queue, one batch per turn.
+
+    Each turn takes every message pending at that moment. After the turn,
+    lines that were steered too late for it (accepted during the final
+    inference) run next, ahead of anything queued since: they were sent
+    first.
 
     Exits (and removes itself from the registries) once the queue is empty.
     The empty-check and teardown happen under ``_channel_queue_lock`` so they
     are atomic with respect to ``_handle_channel_message`` enqueuing — a
     message added just as the worker is about to exit is never stranded.
     """
+    carried: list = []
     while True:
-        message = await queue.get()
+        taken = [] if carried else [await queue.get()]
+        while not queue.empty():
+            taken.append(queue.get_nowait())
+        batch, carried = carried + taken, []
         try:
-            await _process_channel_message(message, session_id)
+            await _process_channel_batch(batch, session_id)
         finally:
-            queue.task_done()
+            for _ in taken:
+                queue.task_done()
+
+        late = deps.agent_service.take_undelivered_steer(session_id, owner=_home_account())
+        if late:
+            carried = [replace(batch[-1], content="\n\n".join(late), metadata={}, attachments=[])]
+            continue
 
         async with _channel_queue_lock:
             if queue.empty():
@@ -684,33 +734,48 @@ async def _channel_queue_worker(session_id: str, queue: asyncio.Queue) -> None:
                 return
 
 
-async def _process_channel_message(message, session_id: str) -> None:
-    """Route a single channel message through the agent and reply."""
+async def _process_channel_batch(messages: list, session_id: str) -> None:
+    """Run one turn for these messages (same conversation, in order) and reply.
+
+    Texts are joined, media from every message is attached. The reply goes to
+    the last message's conversation.
+    """
     user_id = _home_account()
+    last = messages[-1]
 
     try:
-        # Materialise media references (image/voice/video) the channel put
-        # into metadata — only channels with media support return anything.
+        parts: list[str] = []
         media = []
-        wanted = message.metadata.get("media") or []
-        if wanted:
-            channel = deps.channel_manager.get_channel(message.channel)
-            if channel is not None:
-                media = await channel.fetch_media(message)
-
-        text = (message.content or "").strip()
-        if not text and not media:
-            # A media-only inbound whose download/decrypt failed must not
-            # become agent.chat(""): Claude and compatible proxies reject empty user content
-            # (``messages.N: user messages must have non-empty content``)
-            # and the empty turn poisons the session history.
+        for message in messages:
+            # Materialise media references (image/voice/video) the channel put
+            # into metadata — only channels with media support return anything.
+            fetched = []
+            wanted = message.metadata.get("media") or []
             if wanted:
-                await deps.channel_manager.send(
-                    message.channel,
-                    message.channel_id,
-                    "没能下载这条图片/语音，请再发一次，或配一句文字。",
-                )
+                channel = deps.channel_manager.get_channel(message.channel)
+                if channel is not None:
+                    fetched = await channel.fetch_media(message)
+            line = (message.content or "").strip()
+            if not line and not fetched:
+                # A media-only inbound whose download/decrypt failed must not
+                # become agent.chat(""): Claude and compatible proxies reject empty user content
+                # (``messages.N: user messages must have non-empty content``)
+                # and the empty turn poisons the session history.
+                if wanted:
+                    await deps.channel_manager.send(
+                        message.channel,
+                        message.channel_id,
+                        "没能下载这条图片/语音，请再发一次，或配一句文字。",
+                    )
+                continue
+            if line:
+                # Per line: a ``/skill`` sent second in a batch is still a skill call.
+                parts.append(AgentService.expand_skill_invocation(line))
+            media.extend(fetched)
+
+        if not parts and not media:
             return
+        text = "\n\n".join(parts)
         if not text:
             kind = media[0].kind
             text = {
@@ -736,16 +801,17 @@ async def _process_channel_message(message, session_id: str) -> None:
 
         if reply:
             await deps.channel_manager.send(
-                message.channel,
-                message.channel_id,
+                last.channel,
+                last.channel_id,
                 reply,
             )
 
         await ws.ws_manager.broadcast("channel.message", {
-            "channel": message.channel.value,
-            "sender": message.sender_id,
+            "channel": last.channel.value,
+            "sender": last.sender_id,
             "userId": user_id,
-            "content": message.content[:100],
+            # The lines as sent: ``text`` may hold a whole expanded skill prompt.
+            "content": "\n\n".join(m.content or "" for m in messages).strip()[:100],
             "response": result.content[:100] if result.content else "",
         })
 
@@ -753,8 +819,8 @@ async def _process_channel_message(message, session_id: str) -> None:
         logger.error(f"Handle channel message error: {e}")
         try:
             await deps.channel_manager.send(
-                message.channel,
-                message.channel_id,
+                last.channel,
+                last.channel_id,
                 "error processing message",
             )
         except Exception:

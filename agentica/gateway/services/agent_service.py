@@ -804,7 +804,7 @@ class AgentService:
         return 128000
 
     @staticmethod
-    def _expand_skill_invocation(message: str) -> str:
+    def expand_skill_invocation(message: str) -> str:
         """Turn a ``/skill-trigger [arguments]`` message into the skill prompt.
 
         The web input box inserts skill references as plain ``/trigger`` text,
@@ -889,7 +889,7 @@ class AgentService:
                     )
 
                 response = await agent.run(
-                    self._expand_skill_invocation(message),
+                    self.expand_skill_invocation(message),
                     config=self._run_config_for_session(session_id, source),
                     images=run_images,
                     audio=run_audio,
@@ -1199,7 +1199,7 @@ class AgentService:
             tool_calls = 0
 
             async for chunk in agent.run_stream(
-                self._expand_skill_invocation(message),
+                self.expand_skill_invocation(message),
                 config=self._run_config_for_session(
                     session_id,
                     source,
@@ -1511,7 +1511,7 @@ class AgentService:
         agent = self._cached_agent_for_owner(session_id, owner)
         if agent is None:
             return False
-        return bool(agent.steer(guidance))
+        return bool(agent.steer(self.expand_skill_invocation(guidance)))
 
     def take_undelivered_steer(self, session_id: str, owner: Optional[str] = None) -> List[str]:
         """Pop steering accepted too late for this run, so the web UI can queue it.

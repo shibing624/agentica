@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Gateway IM 渠道改为全双工：agent 正在干活时发的话直接插进这一轮**：原来微信等 IM 渠道收到的消息进入每个会话的 FIFO，agent 跑一个几分钟的任务时，用户补一句「不对，改成方案 B」要等整轮结束才作为新一轮执行，期间模型还在按旧指令干。现在：
+  - **运行中的纯文字消息走 `steer()`**，在下一个 tool batch 边界交给模型，和 CLI 运行中打字、Web 端 `/api/chat/steer` 一致。只 steer 进本渠道 worker 自己发起的那一轮（回复回到同一个会话）；队列里已有消息时不插队；带图片/语音的消息照旧排队，因为媒体要先经过 `chat()` 的媒体路由。`steer()` 返回 False（run 还没开始或刚好结束）时照旧排队，不丢消息。
+  - **在最后一次推理期间发的话不再丢失**。这类 steer 被 agent 停放（`pop_undelivered_steer`），每轮结束后取出作为下一轮，排在之后排队的消息前面。
+  - **排队的消息合成一轮**。worker 每次取出此刻队列里的全部消息，文字按顺序拼接、媒体全部附上，跑一轮、回一条，而不是逐条各跑一轮、各回一条。`/skill` 逐条展开，批里第二条是技能调用也照样生效；`AgentService.steer_session()` 同样展开 `/skill`（Web 端 steer 原来把 `/skill` 原样交给模型）。
 - **CLI `/compact` 显示 session notes 的路径和改动 diff**：原来结束只打印 `New context window 1: 59 messages -> 2. Prior turns stay in the session log. Session notes rewritten.`，看不出 notes 写在哪、写了什么。现在打印 `Compacted 59 messages.`；模型改写了 notes 时接着打印 `Session notes updated (+N -M):`，再用和 `apply_patch` 一样的 `diff -- <路径>` 格式显示改动，没有改写则提示 `Session notes unchanged: <路径>`。`display_diff` 与编辑工具改用同一个 `build_file_diff`（`cli/display/messages.py`），不再输出 `--- a/` / `+++ b/` 两行。同时去掉了窗口编号、`59 -> 2` 的消息数，以及末尾的 `Workspace memory preserved.`。
 - **`UserPromptSubmit` 只对人发的消息生效，hook 的 stderr 不再可能卡住一轮**：
   - **子 agent、自动轮次和 `/goal` 续跑不再触发召回和 hook。** `task` 派生的子 agent 拿到的是父模型写的任务描述，shell hooks 又是进程级的，于是外部记忆库会收到它（`session_id` 还是兜底值）；后台命令回执、peer 消息、`/goal` 自己塞进队列的 `[Continuing toward your standing goal]` 也都会每轮跑一次外部 hook 和内置 `memory_recall` 辅助模型调用。现在 `_parent_run_id` 非空、`automated_input`、或以 goal 循环前缀开头的消息，跳过 `<memory_recall>` / `<session_recall>` 和 `UserPromptSubmit`。goal 循环的两种提示（续跑、预算收尾）同时在 runner 里标 `automated`，不再写进 `session_index.db` 的 `turns`、不进意图追踪和会话预览；CLI `/goal` 和 SDK `run_goal` 都走这一处。
