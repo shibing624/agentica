@@ -239,6 +239,7 @@ class TestWebSearchBackendSignatureUniformity:
         from agentica.tools.baidu_search_tool import BaiduSearchTool
         from agentica.tools.duckduckgo_tool import DuckDuckGoTool
         from agentica.tools.search_bocha_tool import SearchBochaTool
+        from agentica.tools.search_keenable_tool import SearchKeenableTool
         from agentica.tools.search_mcp_tool import McpSearchTool
         from agentica.tools.search_serper_tool import SearchSerperTool
         from agentica.tools.zhipu_web_search_tool import ZhipuWebSearchTool
@@ -247,6 +248,7 @@ class TestWebSearchBackendSignatureUniformity:
             (BaiduSearchTool, "baidu_search"),
             (DuckDuckGoTool, "duckduckgo_search"),
             (SearchBochaTool, "search_bocha"),
+            (SearchKeenableTool, "search_keenable"),
             (SearchSerperTool, "search_google"),
             (ZhipuWebSearchTool, "zhipu_web_search"),
             (McpSearchTool, "mcp_search"),

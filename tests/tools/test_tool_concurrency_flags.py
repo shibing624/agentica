@@ -24,6 +24,7 @@ READ_ONLY_TOOLS = [
     ("agentica.tools.search_serper_tool", "SearchSerperTool", {"api_key": "fake"}, ["search_google"]),
     ("agentica.tools.search_exa_tool", "SearchExaTool", {"api_key": "fake"}, ["search_exa"]),
     ("agentica.tools.search_bocha_tool", "SearchBochaTool", {"api_key": "fake"}, ["search_bocha"]),
+    ("agentica.tools.search_keenable_tool", "SearchKeenableTool", {}, ["search_keenable"]),
     ("agentica.tools.baidu_search_tool", "BaiduSearchTool", {}, ["baidu_search"]),
     ("agentica.tools.duckduckgo_tool", "DuckDuckGoTool", {}, ["duckduckgo_search"]),
     ("agentica.tools.zhipu_web_search_tool", "ZhipuWebSearchTool", {"api_key": "fake"}, ["zhipu_web_search"]),

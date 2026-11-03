@@ -558,6 +558,7 @@ env: {}
 #   SERPER_API_KEY:             # Google search via serper.dev
 #   EXA_API_KEY:                # Exa search
 #   BOCHA_API_KEY:              # Bocha search
+#   KEENABLE_API_KEY:           # Keenable search (optional; works keyless)
 #   # --- shell tool safety (execute/run_shell_command) ---
 #   SHELL_COMMAND_CONTROL: denylist   # allowlist|denylist (default: denylist)
 #   SHELL_DENYLIST: "sudo,su"         # used when SHELL_COMMAND_CONTROL=denylist

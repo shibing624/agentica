@@ -145,6 +145,7 @@ TOOL_REGISTRY = {
     "duckduckgo": ("duckduckgo", "DuckDuckGoTool", "Search", "Web search via DuckDuckGo"),
     "search_bocha": ("search_bocha", "SearchBochaTool", "Search", "Web search via Bocha"),
     "search_exa": ("search_exa", "SearchExaTool", "Search", "Web search via Exa"),
+    "search_keenable": ("search_keenable", "SearchKeenableTool", "Search", "Web search via Keenable (no key required)"),
     "search_serper": ("search_serper", "SearchSerperTool", "Search", "Web search via Serper (Google)"),
     "wikipedia": ("wikipedia", "WikipediaTool", "Search", "Search and read Wikipedia articles"),
     "zhipu_web_search": ("zhipu_web_search", "ZhipuWebSearchTool", "Search", "Web search via ZhipuAI"),

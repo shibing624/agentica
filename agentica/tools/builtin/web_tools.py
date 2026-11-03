@@ -88,6 +88,11 @@ def _bocha_backend(api_key: Optional[str]) -> Any:
     return SearchBochaTool(api_key=api_key)
 
 
+def _keenable_backend(api_key: Optional[str]) -> Any:
+    from agentica.tools.search_keenable_tool import SearchKeenableTool
+    return SearchKeenableTool(api_key=api_key)
+
+
 def _serper_backend(api_key: Optional[str]) -> Any:
     from agentica.tools.search_serper_tool import SearchSerperTool
     return SearchSerperTool(api_key=api_key)
@@ -133,6 +138,9 @@ _BACKENDS: Dict[str, WebSearchBackend] = {
     # pool; EXA_API_KEY moves the call onto your own quota.
     "exa": WebSearchBackend(_exa_backend, "mcp_search", "EXA_API_KEY", key_required=False),
     "bocha": WebSearchBackend(_bocha_backend, "search_bocha", "BOCHA_API_KEY", key_required=True),
+    # Keenable answers anonymously via its free public endpoint; KEENABLE_API_KEY
+    # switches to the keyed endpoint.
+    "keenable": WebSearchBackend(_keenable_backend, "search_keenable", "KEENABLE_API_KEY", key_required=False),
     "serper": WebSearchBackend(_serper_backend, "search_google", "SERPER_API_KEY", key_required=True),
     "zhipu": WebSearchBackend(_zhipu_backend, "zhipu_web_search", "ZAI_API_KEY", key_required=True),
     "mcp": WebSearchBackend(_custom_mcp_backend, "mcp_search", "AGENTICA_WEB_SEARCH_API_KEY"),
