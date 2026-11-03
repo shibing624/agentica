@@ -1733,3 +1733,24 @@ class TestWebRunGoalBudgets:
         assert kwargs["isolate"] is False
         assert "seed_messages" not in kwargs
 
+
+
+class TestAgentServiceMemoryIndex:
+    """Settings page: ``GET /api/memory_index`` returns the parsed entries."""
+
+    @pytest.mark.asyncio
+    async def test_read_memory_index_returns_entries_not_a_coroutine(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        await svc._ensure_initialized()
+        index = svc._switch_workspace_user("default").memory_index_path()
+        index.write_text(
+            "- [user_city](memory/user_city.md) — 用户住在北京\n", encoding="utf-8",
+        )
+
+        result = await svc.read_memory_index("default")
+
+        assert result["entries"] == [
+            {"title": "user_city", "filename": "user_city.md", "hook": "用户住在北京"},
+        ]

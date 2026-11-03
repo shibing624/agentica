@@ -239,9 +239,14 @@ class TestDispatch:
             [sys.executable, str(child)],
             cwd=str(tmp_path),
             env={**os.environ, "AGENTICA_HOOKS_ENABLED": "1"},
+            capture_output=True,
+            text=True,
             timeout=15,
         )
-        assert completed.returncode == 0
+        assert completed.returncode == 0, completed.stderr
+        # An atexit callback that raises still exits 0; the failure only shows
+        # here (a reaper thread cannot start at interpreter shutdown).
+        assert "Exception ignored" not in completed.stderr, completed.stderr
         pid = int(pid_file.read_text(encoding="utf-8"))
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -252,6 +257,30 @@ class TestDispatch:
             time.sleep(0.01)
         else:
             raise AssertionError("notice consumer outlived the parent process")
+
+    def test_exit_cleanup_kills_without_starting_a_thread(self, monkeypatch):
+        """At interpreter exit no thread can start (Python raises ``can't create
+        new thread at interpreter shutdown``), so the atexit path must kill the
+        consumer without spawning the zombie reaper."""
+        import agentica.shell_hooks.egress as egress_mod
+        from agentica.shell_hooks.process import HookProcess
+
+        process = HookProcess(
+            [sys.executable, "-c", "import json,sys,time; json.load(sys.stdin); time.sleep(30)"],
+            {"hook_event_name": "run.started"},
+        )
+        assert process.start()
+        egress_mod._live_notices.add(process)
+
+        def refuse(self):
+            raise RuntimeError("can't create new thread at interpreter shutdown")
+
+        with monkeypatch.context() as m:
+            m.setattr(threading.Thread, "start", refuse)
+            egress_mod._shutdown_notice_processes(at_exit=True)
+
+        # Killed (SIGKILL), not merely abandoned: the exit status is -9.
+        assert process._proc.wait(timeout=5) == -9
 
     def test_each_subscribed_consumer_receives_the_event(self, tmp_path):
         first_command, first_out = _recorder(tmp_path, "first")

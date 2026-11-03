@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **修复网页端设置页报 `'coroutine' object is not iterable`**：`Workspace` 里有两个同名的 `list_memory_index_entries`，原来的同步版本被后加的 async 版本覆盖了。gateway 的 `read_memory_index` 仍用 `asyncio.to_thread` 去调它，拿到的是一个没被 await 的 coroutine，FastAPI 序列化响应时抛错。现在删掉被覆盖的同步版本，调用方直接 `await`。
+- **修复退出时 hook 清理报 `can't create new thread at interpreter shutdown`**：记忆这类 fire-and-forget 的 hook consumer 在进程退出时还没结束，`atexit` 里调用 `HookProcess.kill()`，它会起一个 reaper 线程回收僵尸进程，而较新的 Python 3.12 在这个阶段已经不允许创建线程。现在退出时只 kill 进程组、关闭管道，不再起线程：父进程退出后，子进程会被 init 回收。
+- **Gateway IM 渠道的权限档位跟随 Web 端的选择**：原来 IM 会话从不设置审批档位，固定是默认的 `auto`；IM 又没有审批卡，所以凡是需要审批的操作（改 `work_dir` 以外的文件等）都会直接被拒绝，也没有任何配置能改。现在每轮 IM 消息开始前，会读取该账号在 Web 输入框旁审批选择器里选的档位（`~/.agentica/gateway/prefs/<账号>.json` 的 `approval_mode`），在 Web 上选 `allow-all`，IM 也就是 `allow-all`。没选过时仍用 `auto`。偏好文件读不出来（写一半被中断、手工改坏）时按「没选过」处理并记 warning，不会让这台机器上每条 IM 消息都变成 `error processing message`。
 - **`apply_patch` 能认出「只抄了长行开头」的 hunk**：模型改 CHANGELOG、文档这类一行几百字的文件时，常只把某一行的开头当上下文发过来，而 hunk 按整行匹配，于是报 `No line in the file matches it; read the file again before patching.`。这句话是错的：那一行在文件里，只是 hunk 里没写完，重新读文件也修不好。现在文件里恰好有一行以这段文字开头（忽略行首缩进，手抄长行时截断和缩进错常一起出现）、并且更长时，改报 `Line N starts with this text and continues past it; a hunk line must be the whole line. Send the full line exactly as the file has it, or anchor on a shorter line.`。多行都以它开头时（例如 `}` 对多个 `});`）说不出是哪一行，仍报 absent。和其他诊断一样，只给行号，不把文件里那行原文发回去。
 - **Gateway IM 渠道改为全双工：agent 正在干活时发的话直接插进这一轮**：原来微信等 IM 渠道收到的消息进入每个会话的 FIFO，agent 跑一个几分钟的任务时，用户补一句「不对，改成方案 B」要等整轮结束才作为新一轮执行，期间模型还在按旧指令干。现在：
   - **运行中的纯文字消息走 `steer()`**，在下一个 tool batch 边界交给模型，和 CLI 运行中打字、Web 端 `/api/chat/steer` 一致。只 steer 进本渠道 worker 自己发起的那一轮（回复回到同一个会话）；队列里已有消息时不插队；带图片/语音的消息照旧排队，因为媒体要先经过 `chat()` 的媒体路由。`steer()` 返回 False（run 还没开始或刚好结束）时照旧排队，不丢消息。

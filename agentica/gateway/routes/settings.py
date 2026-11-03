@@ -32,6 +32,7 @@ from agentica.config.profiles import (
 )
 from agentica.cli import self_manage
 from agentica.config import AGENTICA_HOME
+from agentica.utils.log import logger
 from agentica.model.cost import get_model_supports_images
 from agentica.compression.manager import parse_compact_token_limit
 from ..models import (
@@ -152,10 +153,20 @@ def _prefs_path(user_id: str) -> Path:
 
 
 def _read_prefs(user_id: str) -> dict:
+    """Prefs for one account; an unreadable file reads as "nothing chosen yet".
+
+    This is on the IM turn path (``approval_mode_pref``), so a half-written or
+    hand-edited file must not fail every message. The write is not atomic, and
+    the reader is not allowed to turn that into an outage.
+    """
     path = _prefs_path(user_id)
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except (OSError, ValueError) as exc:
+        logger.warning(f"gateway prefs unreadable, using defaults: {path}: {exc}")
+        return {}
     return data if isinstance(data, dict) else {}
 
 
@@ -186,6 +197,11 @@ def _clean_prefs(raw: dict) -> dict:
     if isinstance(raw.get("auto_extract_memory"), bool):
         out["auto_extract_memory"] = raw["auto_extract_memory"]
     return out
+
+
+def approval_mode_pref(user_id: str) -> Optional[str]:
+    """The approval tier this account last picked in the web selector, if any."""
+    return _clean_prefs(_read_prefs(user_id)).get("approval_mode")
 
 
 @router.get("/api/prefs")

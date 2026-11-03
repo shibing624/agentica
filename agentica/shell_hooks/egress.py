@@ -115,17 +115,17 @@ def _register_shutdown() -> None:
     global _atexit_registered
     if _atexit_registered:
         return
-    atexit.register(_shutdown_notice_processes)
+    atexit.register(_shutdown_notice_processes, at_exit=True)
     _atexit_registered = True
 
 
-def _shutdown_notice_processes() -> None:
+def _shutdown_notice_processes(*, at_exit: bool = False) -> None:
     """Kill outstanding notice groups. Daemon cleanup does not survive exit."""
     with _live_lock:
         processes = list(_live_notices)
         _live_notices.clear()
     for process in processes:
-        process.kill()
+        process.kill(reap=not at_exit)
 
 
 def _finish_notice_process(process: HookProcess) -> None:

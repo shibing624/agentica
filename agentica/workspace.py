@@ -621,16 +621,6 @@ class Workspace:
         self._initialize_user_dir()
         return self._get_user_memory_md()
 
-    def list_memory_index_entries(self) -> List[Dict]:
-        """Parse MEMORY.md into ``{title, filename, hook}`` dicts (settings page)."""
-        path = self.memory_index_path()
-        if not path.is_file():
-            return []
-        content = path.read_text(encoding="utf-8").strip()
-        if not content:
-            return []
-        return self._parse_memory_index(content)
-
     def read_user_agents_md(self) -> str:
         """Return this user's AGENTS.md body (empty string if the file is missing)."""
         path = self.user_agent_md_path()

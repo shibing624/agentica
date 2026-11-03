@@ -1641,7 +1641,7 @@ class AgentService:
         """Return this account's MEMORY.md index entries for the settings page."""
         await self._ensure_initialized()
         ws = await asyncio.to_thread(self._switch_workspace_user, owner)
-        entries = await asyncio.to_thread(ws.list_memory_index_entries)
+        entries = await ws.list_memory_index_entries()
         return {
             "auto_extract": self._auto_extract_for(owner),
             "index_path": str(ws.memory_index_path()),

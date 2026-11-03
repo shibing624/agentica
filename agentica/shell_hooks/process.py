@@ -250,13 +250,18 @@ class HookProcess:
         """Wait for the reader. True when it finished within ``timeout``."""
         return self._done.wait(timeout)
 
-    def kill(self) -> None:
+    def kill(self, *, reap: bool = True) -> None:
+        """Kill the process group and close its pipes.
+
+        ``reap=False`` is for interpreter exit: no thread can start then, and
+        none is needed — the children are re-parented and collected by init.
+        """
         if self._killed:
             return
         self._killed = True
         kill_process_group(self._proc)
         proc = self._proc
-        if proc is not None and proc.poll() is None:
+        if reap and proc is not None and proc.poll() is None:
             # SIGKILL is immediate, but the exit status still has to be
             # collected or the child stays a ``<defunct>`` zombie in the
             # process table — and "no zombie left behind" is part of this

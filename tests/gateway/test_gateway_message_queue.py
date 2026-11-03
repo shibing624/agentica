@@ -286,6 +286,59 @@ async def _drain(timeout: float = 2.0) -> None:
     raise AssertionError("channel worker did not drain")
 
 
+@pytest.mark.asyncio
+async def test_im_turn_follows_web_approval_pref(patched_deps, tmp_path, monkeypatch):
+    """IM has no approval card: the tier picked in the web selector applies."""
+    import json
+    from agentica.gateway.routes import settings as settings_routes
+
+    agent_service, _ = patched_deps
+    agent_service.chat = AsyncMock(return_value=ChatResult(content="ok", session_id="sess:wx"))
+    monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+    user_id = gw_main._home_account()
+    prefs = tmp_path / "gateway" / "prefs" / f"{user_id}.json"
+    prefs.parent.mkdir(parents=True)
+    prefs.write_text(json.dumps({"approval_mode": "allow-all"}), encoding="utf-8")
+
+    await gw_main._process_channel_batch([_make_message("你好")], "sess:wx")
+
+    agent_service.set_session_approval_mode.assert_called_once_with(
+        "sess:wx", "allow-all", owner=user_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_im_turn_without_web_pref_keeps_default_mode(patched_deps, tmp_path, monkeypatch):
+    from agentica.gateway.routes import settings as settings_routes
+
+    agent_service, _ = patched_deps
+    agent_service.chat = AsyncMock(return_value=ChatResult(content="ok", session_id="sess:wx"))
+    monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+
+    await gw_main._process_channel_batch([_make_message("你好")], "sess:wx")
+
+    agent_service.set_session_approval_mode.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_im_turn_survives_a_corrupt_prefs_file(patched_deps, tmp_path, monkeypatch):
+    """A half-written prefs file must not fail every IM message."""
+    from agentica.gateway.routes import settings as settings_routes
+
+    agent_service, _ = patched_deps
+    agent_service.chat = AsyncMock(return_value=ChatResult(content="ok", session_id="sess:wx"))
+    monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+    user_id = gw_main._home_account()
+    prefs = tmp_path / "gateway" / "prefs" / f"{user_id}.json"
+    prefs.parent.mkdir(parents=True)
+    prefs.write_text('{"approval_mode": "allo', encoding="utf-8")
+
+    await gw_main._process_channel_batch([_make_message("你好")], "sess:wx")
+
+    agent_service.chat.assert_awaited_once()
+    agent_service.set_session_approval_mode.assert_not_called()
+
+
 def _blocking_first_chat(processed: list):
     """chat() that blocks the first turn until released."""
     release = asyncio.Event()
