@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **`apply_patch` 能认出「只抄了长行开头」的 hunk**：模型改 CHANGELOG、文档这类一行几百字的文件时，常只把某一行的开头当上下文发过来，而 hunk 按整行匹配，于是报 `No line in the file matches it; read the file again before patching.`。这句话是错的：那一行在文件里，只是 hunk 里没写完，重新读文件也修不好。现在文件里有一行以这段文字开头、并且更长时，改报 `Line N starts with this text and continues past it; a hunk line must be the whole line. Send the full line, or anchor on a shorter line.`。和其他诊断一样，只给行号，不把文件里那行原文发回去。
 - **Gateway IM 渠道改为全双工：agent 正在干活时发的话直接插进这一轮**：原来微信等 IM 渠道收到的消息进入每个会话的 FIFO，agent 跑一个几分钟的任务时，用户补一句「不对，改成方案 B」要等整轮结束才作为新一轮执行，期间模型还在按旧指令干。现在：
   - **运行中的纯文字消息走 `steer()`**，在下一个 tool batch 边界交给模型，和 CLI 运行中打字、Web 端 `/api/chat/steer` 一致。只 steer 进本渠道 worker 自己发起的那一轮（回复回到同一个会话）；队列里已有消息时不插队；带图片/语音的消息照旧排队，因为媒体要先经过 `chat()` 的媒体路由。`steer()` 返回 False（run 还没开始或刚好结束）时照旧排队，不丢消息。
   - **在最后一次推理期间发的话不再丢失**。这类 steer 被 agent 停放（`pop_undelivered_steer`），每轮结束后取出作为下一轮，排在之后排队的消息前面。

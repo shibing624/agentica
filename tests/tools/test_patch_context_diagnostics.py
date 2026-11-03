@@ -70,6 +70,22 @@ class TestContextMissIsDiagnosable(unittest.TestCase):
         self.assertIn("No line in the file matches", out)
         self.assertNotIn("different indentation or spacing", out)
 
+    def test_head_of_long_line_is_named_truncated(self):
+        """Production case: the model copied only the start of a CHANGELOG line."""
+        long_line = "- **CLI `/compact` 显示路径**：原来结束只打印 `New context window 1`，看不出写在哪。"
+        src = "# Changelog\n\n" + long_line + "\n- next entry\n"
+        out = _apply(
+            "*** Begin Patch\n*** Update File: m.py\n@@\n"
+            "+- new entry\n"
+            " - **CLI `/compact` 显示路径**：原来结束只打印\n"
+            "*** End Patch",
+            src=src,
+        )
+        self.assertIn("Line 3 starts with this text and continues past it", out)
+        self.assertNotIn("No line in the file matches", out)
+        # The rest of the file's line is not quoted back.
+        self.assertNotIn("看不出写在哪", out)
+
     def test_dropped_internal_spaces_is_named_as_spacing(self):
         """The real production case: the model squeezed the spaces out."""
         src = "- New combined dev should be written under campaign/inputs/\n"

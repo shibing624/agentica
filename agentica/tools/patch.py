@@ -78,6 +78,8 @@ class ContextFailure:
     #                squeezing prose is the production case)
     #   "above"    — the block is in the file as written, more than once, but
     #                only above where the previous hunk matched
+    #   "truncated" — a file line starts with this text and goes on: the hunk
+    #                carries only the head of a long line (prose, CHANGELOG)
     #   "absent"   — no line in the file resembles it
     reason: str = ""
     line_number: int = 0
@@ -113,6 +115,12 @@ class ContextFailure:
                 f" It matches at line {self.line_number} and elsewhere, all above "
                 f"where the previous hunk matched; order the hunks as they "
                 f"appear in the file."
+            )
+        if self.reason == "truncated":
+            return (
+                f" Line {self.line_number} starts with this text and continues "
+                f"past it; a hunk line must be the whole line. Send the full "
+                f"line, or anchor on a shorter line."
             )
         return " No line in the file matches it; read the file again before patching."
 
@@ -435,9 +443,15 @@ def _context_failure(
     missing = next((line for line in context if line not in present), None)
     if missing is not None:
         line_number = _near_line_number(missing, input_lines, start)
+        if line_number:
+            return ContextFailure(
+                hunk_number=hunk_number, eof=eof, unmatched=missing,
+                reason="near", line_number=line_number,
+            )
+        line_number = _prefix_line_number(missing, input_lines, start)
         return ContextFailure(
             hunk_number=hunk_number, eof=eof, unmatched=missing,
-            reason="near" if line_number else "absent", line_number=line_number,
+            reason="truncated" if line_number else "absent", line_number=line_number,
         )
     note = _contiguous_break_note(context, input_lines, start)
     if note:
@@ -463,6 +477,23 @@ def _near_line_number(wanted: str, input_lines: List[str], start: int) -> int:
     first = 0
     for index, line in enumerate(input_lines):
         if "".join(line.split()) == squeezed:
+            if index >= start:
+                return index + 1
+            first = first or index + 1
+    return first
+
+
+def _prefix_line_number(wanted: str, input_lines: List[str], start: int) -> int:
+    """1-based line that begins with ``wanted`` and is longer, else 0.
+
+    Same preference and same no-quoting rule as ``_near_line_number``.
+    """
+    head = wanted.rstrip()
+    if not head.strip():
+        return 0
+    first = 0
+    for index, line in enumerate(input_lines):
+        if len(line) > len(head) and line.startswith(head):
             if index >= start:
                 return index + 1
             first = first or index + 1
