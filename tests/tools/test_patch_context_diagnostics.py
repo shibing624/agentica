@@ -86,6 +86,30 @@ class TestContextMissIsDiagnosable(unittest.TestCase):
         # The rest of the file's line is not quoted back.
         self.assertNotIn("看不出写在哪", out)
 
+    def test_head_of_long_line_with_wrong_indent_is_truncated(self):
+        src = "def f():\n    return compute_total(items, discount=0.1, tax=0.2)\n"
+        out = _apply(
+            "*** Begin Patch\n*** Update File: m.py\n@@\n"
+            "+# note\n"
+            " return compute_total(items,\n"
+            "*** End Patch",
+            src=src,
+        )
+        self.assertIn("Line 2 starts with this text and continues past it", out)
+
+    def test_short_head_starting_many_lines_is_not_truncated(self):
+        """`}` begins several `});` lines; naming one of them would be a guess."""
+        src = "a({\n});\nb({\n});\n"
+        out = _apply(
+            "*** Begin Patch\n*** Update File: m.py\n@@\n"
+            "-}\n"
+            "+};\n"
+            "*** End Patch",
+            src=src,
+        )
+        self.assertNotIn("starts with this text", out)
+        self.assertIn("No line in the file matches", out)
+
     def test_dropped_internal_spaces_is_named_as_spacing(self):
         """The real production case: the model squeezed the spaces out."""
         src = "- New combined dev should be written under campaign/inputs/\n"

@@ -78,8 +78,9 @@ class ContextFailure:
     #                squeezing prose is the production case)
     #   "above"    — the block is in the file as written, more than once, but
     #                only above where the previous hunk matched
-    #   "truncated" — a file line starts with this text and goes on: the hunk
-    #                carries only the head of a long line (prose, CHANGELOG)
+    #   "truncated" — exactly one file line starts with this text (leading
+    #                whitespace aside) and goes on: the hunk carries only the
+    #                head of a long line (prose, CHANGELOG)
     #   "absent"   — no line in the file resembles it
     reason: str = ""
     line_number: int = 0
@@ -120,7 +121,7 @@ class ContextFailure:
             return (
                 f" Line {self.line_number} starts with this text and continues "
                 f"past it; a hunk line must be the whole line. Send the full "
-                f"line, or anchor on a shorter line."
+                f"line exactly as the file has it, or anchor on a shorter line."
             )
         return " No line in the file matches it; read the file again before patching."
 
@@ -486,18 +487,19 @@ def _near_line_number(wanted: str, input_lines: List[str], start: int) -> int:
 def _prefix_line_number(wanted: str, input_lines: List[str], start: int) -> int:
     """1-based line that begins with ``wanted`` and is longer, else 0.
 
-    Same preference and same no-quoting rule as ``_near_line_number``.
+    Leading whitespace is ignored on both sides: a hand-copied long line is
+    often cut short and re-indented at once. Only a unique match is reported —
+    a short head (``}`` against ``});``) that begins many lines does not say
+    which line was meant. Never quotes the line, as ``_near_line_number``.
     """
-    head = wanted.rstrip()
-    if not head.strip():
+    head = wanted.strip()
+    if not head:
         return 0
-    first = 0
-    for index, line in enumerate(input_lines):
-        if len(line) > len(head) and line.startswith(head):
-            if index >= start:
-                return index + 1
-            first = first or index + 1
-    return first
+    hits = [
+        index + 1 for index, line in enumerate(input_lines)
+        if (body := line.lstrip()).startswith(head) and len(body.rstrip()) > len(head)
+    ]
+    return hits[0] if len(hits) == 1 else 0
 
 
 def _recover_unprefixed_keep_lines(
