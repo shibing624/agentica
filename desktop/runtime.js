@@ -205,7 +205,7 @@ function resolveExistingCommand() {
     if (py) {
       return {
         command: py,
-        args: ["-c", GATEWAY_ENTRY],
+        args: ["-m", "agentica.gateway.main"],
         source: "python",
         pathPrefix: null,
       };

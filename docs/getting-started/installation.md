@@ -48,7 +48,7 @@ IM 等 extras 写进同一个 spec（zsh 下括号要加引号）：
 uv tool install --force "agentica[gateway,wechat,telegram]"
 ```
 
-Desktop 安装包第一次打开时，如果本机还没有 `agentica-gateway`，会自己用 uv 装一份托管 runtime。已经 `uv tool install` 过的继续用你原来的。
+Desktop 安装包自带 Python 和同版本的 `agentica`，打开即用，不需要另装 Python、Node、uv，也不用联网。它和 `uv tool install` 装的 CLI 共用 `~/.agentica` 数据，但各用各的可执行包。
 
 ## 当库用（自己的项目）
 

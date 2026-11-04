@@ -84,7 +84,9 @@ uv tool install "agentica[gateway]"
 窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
 
 > [!IMPORTANT]
-> 安装包当前**未签名**，首次启动若被系统拦截，按下方对应系统操作一次即可。如果机器上还没装过 `agentica-gateway`，桌面版首次打开会自动安装运行环境；已经用 `uv tool install` 装过的会直接共用。
+> 安装包自带 Python 运行环境和与之同版本的 `agentica`，**不需要**另装 Python、Node 或 uv，首次打开也不用联网。安装包当前**未签名**，首次启动若被系统拦截，按下方对应系统操作一次即可（个人使用不需要证书）；未签名的 macOS 版本不会自动更新，升级请重新下载安装包。
+>
+> 安装后可在菜单 `Help › Install 'agentica' Command in Terminal…` 把 `agentica` 命令装进终端，它用的就是安装包里的那份 Python。
 
 <details>
 <summary><b>🍎 macOS 提示「Agentica 已损坏，无法打开」</b></summary>
@@ -118,7 +120,7 @@ chmod +x Agentica-x86_64.AppImage
 
 </details>
 
-也可以直接从源码跑：`cd desktop && npm install && npm start`，详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
+也可以直接从源码跑：`cd desktop && npm install && npm start`（Node 22 及以上），详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
 
 ## 配置
 

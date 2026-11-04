@@ -49,7 +49,19 @@ agentica-gateway --port 8890         # 指定监听端口
 
 如果你喜欢独立窗口应用，可以直接下载安装包（macOS `.dmg` / Windows `.exe` / Linux `.AppImage` & `.deb`），详见 [README 桌面版说明](https://github.com/shibing624/agentica#桌面版)。
 
-桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录；如果本机还没安装 `agentica-gateway`，首次打开桌面版时会自动安装运行环境。
+桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录，但**不共用可执行包**：安装包里自带 Python 3.12 和与桌面壳同一次构建的 `agentica[gateway]`，不依赖本机 Python、Node、uv，也不需要联网；壳和网关版本始终一致，一起更新。
+
+- **优先级**：`AGENTICA_GATEWAY_BIN` → 安装包内置运行环境 → 本机 `agentica-gateway`（仅 `npm start` 或不带运行环境的构建）。
+- **终端命令**：菜单 `Help › Install 'agentica' Command in Terminal…` 生成调用内置 Python 的 `agentica` 命令（macOS 优先 `/usr/local/bin`，否则 `~/.local/bin`；Windows 写用户 PATH），不会覆盖不是它创建的同名文件。
+- **自动更新**：基于 `electron-updater` 读取 GitHub Release。macOS 只接受已签名应用的更新，未签名构建会跳过检查，需要重新下载安装包；`AGENTICA_DESKTOP_NO_UPDATE=1` 可全局关闭。
+- **签名**：在仓库 secrets 配置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`（macOS 签名 + 公证）和 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`（Windows）即可，不配则产出未签名安装包。
+
+#### 会话侧栏
+
+- 侧栏默认只列**全部网页会话 + 最近 30 天的 CLI 会话 + 正在运行的会话 + 已归档会话**，点「显示全部」才加载几千条历史 CLI 会话。对应接口 `GET /api/sessions?scope=recent|all&recent_days=30`，默认 `recent`。
+- 会话来源写在 `<session_id>.meta.json` 的 `source` 字段（`gateway` / `cli` 等）；没有该字段的老会话，有 `last_read_at` 的按网页会话处理。
+- 每个项目分组默认显示 5 条，当前会话和运行中的会话不会被折叠；搜索同时匹配标题、项目名和首条消息。
+- 实测 5000 个会话：默认请求约 0.4 秒、12KB（原来约 5.5 秒、1.9MB）。
 
 ### 4. Docker 部署（可选）
 
