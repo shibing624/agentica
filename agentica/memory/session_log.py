@@ -36,8 +36,8 @@ from agentica.compression.token_budget import (
     CONTEXT_WINDOW_OPEN,
     WINDOW_CONTINUATION_MARK,
 )
-from agentica.skills.skill import Skill
 from agentica.utils.log import logger
+from agentica.utils.skill_invocation import invocation_label
 from agentica.utils.tokens import count_text_tokens
 
 if TYPE_CHECKING:
@@ -1621,7 +1621,7 @@ class SessionLog:
                         continue
                     user_count += 1
                     # A /skill turn is stored expanded; show what was typed.
-                    clipped = (Skill.invocation_label(content) or content)[:max_chars]
+                    clipped = (invocation_label(content) or content)[:max_chars]
                     if not first_user:
                         first_user = clipped
                     recent.append(clipped)

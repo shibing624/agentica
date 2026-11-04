@@ -10,7 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-04
+
 #### changes
+- **会话标题不再为了识别技能轮次去加载整个技能包。** `SessionLog.session_preview` 原来 `from agentica.skills.skill import Skill`，这会先执行 `agentica.skills` 的包初始化（loader、installer、curator）。识别逻辑挪到 `agentica.utils.skill_invocation.invocation_label`，`Skill.invocation_label` 改为调用它。
 - **Gateway 拆成独立发行包 `agentica-gateway`，Web 产物改到 `web/dist`，一个 tag 统一发布全部产物**（参照 deepseek-harness 的「按包拆源码、按家族统一版本」）：
   - **两个 PyPI 包，同一个版本。** `agentica` 只剩 SDK + CLI，`pip install agentica` 不再装 fastapi、uvicorn、lark-oapi。服务端、Web UI、IM 渠道、cron 移到 `gateway/`，发布为 `agentica-gateway`（导入名 `agentica_gateway`），精确锁定同版本的 `agentica`，因为它用到核心包内部模块。`agentica[gateway]` 改为「同版本的 `agentica-gateway[feishu]`」，`agentica[wechat]` 等渠道 extra 照旧，**README 里的 `uv tool install "agentica[gateway]"` 不用改**。`agentica-gateway` 自己的 extra 是 `[feishu]`、`[wechat]`、`[telegram]`…和 `[all]`；单装它不带飞书 SDK，飞书渠道缺 SDK 时日志会给出安装命令。
   - **`agentica-gateway` 命令保住了。** uv 的 `tool install` 只暴露命令行上那个包的可执行文件，实测拆分后 `uv tool install "agentica[gateway]"` 只剩 `agentica`，老用户 `uv tool upgrade agentica` 也会丢掉这个命令。所以 `agentica` 包里保留同名命令 `agentica.cli.gateway_command`：装了网关就直接转过去，没装就提示装哪个包。四种安装方式（uv tool + extra、只装核心、只装网关、pip 同一 venv 装两个）都实测过。
@@ -26,11 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`POST /api/open` 的 `app` 改为枚举校验**：未知值返回 422，不再静默退化成默认打开；Linux `reveal` 对相对路径不会执行 `xdg-open ""`。补了 reveal 与相对路径测试。
   - **新增接口的鉴权回归测试**：fork / feedback / 单条记忆 / reveal 四个入口补了未带凭证 401 与「owner 取自凭证、忽略请求体」的用例。
 - **Web / 桌面端会话列表与 CLI 分开，清掉测试残留；回复下方的文件卡片和 footer 重做**：
-  - **CLI 会话默认不显示。** 设置 › 常规新增开关「显示 CLI 会话」，默认关闭，按账号保存在 gateway prefs（`show_cli_sessions`）。`GET /api/sessions` 按这个开关过滤：关闭时只列出 gateway 发起的会话（Web、桌面端、IM），CLI、SDK 以及没有记录来源的旧会话都不出现；正在运行的会话始终列出。CLI 会话一旦在 Web 里继续聊，就算 gateway 会话。
+  - **CLI 会话默认不显示。** 设置 › 常规新增开关「显示 CLI 会话」，默认关闭，按账号保存在 gateway prefs（`show_cli_sessions`）。`GET /api/sessions` 按这个开关过滤：关闭时只列出 gateway 发起的会话（Web、桌面端、IM）。打开后也只额外加入 `source=cli` 的会话，SDK 脚本和没有 `source` 的旧日志仍然不出现；正在运行的会话始终列出。`scope=recent` 时 CLI 会话仍只保留最近 `recent_days` 天。CLI 会话一旦在 Web 里继续聊，就算 gateway 会话。
   - **系统临时目录里的无内容残留不再列出。** 工作目录在 `/tmp`、`/private/tmp`、`/var/folders` 或 `$TMPDIR` 下、且没有任何真实用户轮次的会话（VPet 等程序的测试和演示留下的 0 字节 stub、只有系统行的日志）会被隐藏；有过真实对话的会话照常列出，因为 Web 没有恢复入口。`$AGENTICA_HOME` 和 gateway 默认目录（含子目录）不受影响；运行中的会话始终列出。
   - **测试残留会话已移走。** `Touch tmp/<ISO-timestamp>.txt in one run.`、`a much better thing` 等只有一句话的会话，是 9 月至 10 月 5 日 cron 测试任务漏进真实 `~/.agentica/cron`、被 CLI cron daemon 每分钟执行一次留下的。那条路径已经不再产生新会话：CLI runner 不写会话日志，gateway 的定时任务写入单独的 `scheduled_` 会话且不列出。本机 361 个这类会话已移到 `~/.agentica/trash/junk-sessions-20261104/`，跨会话提问索引里对应的 4,625 行也一并删除，避免 `<session_recall>` 再把它们召回。全部会话从 615 个降到 225 个，默认只显示 Web 会话时是 15 个。
   - **查看轨迹显示完整 work_dir。** 不再缩写成 `…/最后两级`，可以直接选中，旁边加了复制按钮。
-  - **技能轮次显示成技能名。** CLI 和 gateway 写进会话日志的是展开后的完整 SKILL.md 提示，回看历史时整份技能文本都塞在用户气泡里。现在识别 `render_invocation()` 的格式，气泡里只显示带下划线的技能名和参数，点击弹窗预览 SKILL.md（Markdown 渲染，带路径和复制按钮）。刚发出、还没从日志读回的 `/trigger 参数` 也按同样方式显示。格式标记由 `tests/skills/test_skill_invocation_markers.py` 固定，改格式时 Web 不会悄悄退回长气泡。
+  - **技能轮次显示成技能名。** CLI 和 gateway 写进会话日志的是展开后的完整 SKILL.md 提示，回看历史时整份技能文本都塞在用户气泡里。现在识别 `render_invocation()` 的格式，气泡里只显示带下划线的技能名和参数，点击在右侧文件面板打开 SKILL.md（Markdown / 源码 / 纯文本，可刷新、用编辑器打开）。输入框里已安装技能的开头 `/trigger` 同样可点。刚发出、还没从日志读回的 `/trigger 参数` 也按同样方式显示。格式标记由 `tests/skills/test_skill_invocation_markers.py` 固定，改格式时 Web 不会悄悄退回长气泡。
   - **回复下方的文件卡片。** 卡片铺满宽度；先列「已编辑 N 个文件」，按 `apply_patch` 的补丁统计每个文件的 `+增 -删` 行数（`write_file` 只计新写入的行数；失败的调用不计；原来 `apply_patch` 改过的文件根本不进卡片），再列回复里提到的其他文件。点击文件仍在侧边栏预览，行尾新增「用默认应用打开」和「打开所在文件夹」。后者对应 `POST /api/open` 新增的 `app: "reveal"`：macOS 用 `open -R`，Windows 用 `explorer /select,`，Linux 打开所在目录。
   - **回复 footer。** 改为：复制、点赞、点踩（弹出可选的问题说明）、从这里分叉，以及「用量 N tok」（悬停显示输入、缓存、输出、tok/s、费用）、耗时和时间。新增接口：
     - `GET/POST /api/sessions/{id}/feedback`：评价存在 sidecar 的 `feedback` 字段，以日志条目 uuid 为键，不写入 JSONL；再点一次已选中的赞或踩即撤销。

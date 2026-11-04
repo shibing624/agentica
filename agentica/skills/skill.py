@@ -15,18 +15,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from agentica.utils import skill_invocation
 from agentica.utils.log import logger
 
 try:
     import yaml
 except ImportError:
     yaml = None
-
-# Markers of Skill.render_invocation(); keep in step with it and with
-# web/src/lib/skillInvocation.ts.
-_INVOCATION_HEADER_RE = re.compile(r"Loading: ([^\n]+)\nBase directory: ([^\n]*)\n")
-_INVOCATION_TYPED_RE = re.compile(r"\n## Skill invocation\n\nThe user invoked this skill as: `([^`\n]+)`")
-
 
 @dataclass
 class Skill:
@@ -366,17 +361,7 @@ Base directory: {self.path}
         the skill's own folder, so a pasted document with the same two header
         lines is not relabelled.
         """
-        head = _INVOCATION_HEADER_RE.match(prompt)
-        if head is None:
-            return None
-        name = head.group(1).strip()
-        typed = _INVOCATION_TYPED_RE.search(prompt)
-        if typed is not None:
-            label = typed.group(1).strip()
-            return label if label.startswith("/") else f"/{label}"
-        if Path(head.group(2).strip()).name.lower() == name.lower():
-            return f"/{name}"
-        return None
+        return skill_invocation.invocation_label(prompt)
 
     def to_xml(self) -> str:
         """

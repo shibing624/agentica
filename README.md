@@ -84,7 +84,7 @@ uv tool install "agentica[gateway]"
 窗口里就是同一套 Web UI，同一 `~/.agentica`，和 CLI / 浏览器混用没有区别。
 
 > [!IMPORTANT]
-> 安装包自带 Python 运行环境和与之同版本的 `agentica`，**不需要**另装 Python、Node 或 uv，首次打开也不用联网。安装包当前**未签名**，首次启动若被系统拦截，按下方对应系统操作一次即可（个人使用不需要证书）；未签名的 macOS 版本不会自动更新，升级请重新下载安装包。
+> 安装包自带 Python 3.12，以及同一次构建的 `agentica` 和 `agentica-gateway`（含 Web UI），**不需要**另装 Python、Node 或 uv，首次打开也不用联网。安装包当前**未签名**，首次启动若被系统拦截，按下方对应系统操作一次即可（个人使用不需要证书）；未签名的 macOS 版本不会自动更新，升级请重新下载安装包。
 >
 > 安装后可在菜单 `Help › Install 'agentica' Command in Terminal…` 把 `agentica` 命令装进终端，它用的就是安装包里的那份 Python。
 
@@ -277,6 +277,7 @@ agent = DeepAgent()
 
 ## 🔥 News
 
+- [2026/11/04] **v1.5.1**：Web 后端拆成独立包 `agentica-gateway`（与 `agentica` 同版本发布，`uv tool install "agentica[gateway]"` 不用改）。Web 构建产物改为 `web/dist`，打进 gateway wheel。一个 `v*` tag 同时发 PyPI（两个包）、npm（`@agentica-ai/sdk`）、Desktop 安装包和 GitHub Release。详见 [Release-v1.5.1](https://github.com/shibing624/agentica/releases/tag/v1.5.1)
 - [2026/10/22] **v1.5.0**：Langfuse 5 每次用户请求一条 Trace，模型调用与工具执行是子 Observation，Hook 不上报。历史默认重放整个窗口（`num_history_turns` 默认 `None`，不再截断旧 tool 结果）。换模型保留工具历史，一轮内跨 provider fallback 能带着本轮工具结果完成。长会话按 provider 实测 token 校准压缩。详见 [Release-v1.5.0](https://github.com/shibing624/agentica/releases/tag/v1.5.0)
 - [2026/10/15] **v1.4.17**：输出上限按用户配置 > 模型目录 > 网关默认；网关空回复会重发，写不完的回答标成未完成；内置 `analyze_image`。公开 `from agentica import …` 不变，子模块按领域收进子包；`worktree` 不再搬家上锁。详见 [Release-v1.4.17](https://github.com/shibing624/agentica/releases/tag/v1.4.17)
 - [2026/09/15] **v1.4.16**：Layer 2 compact 改为空窗换窗（不再 LLM 摘要），旧对话用 `search_session` 查；交互 CLI 可选 attach / 外部 hooks（默认关）；MCP 只支持 2.x。详见 [Release-v1.4.16](https://github.com/shibing624/agentica/releases/tag/v1.4.16)

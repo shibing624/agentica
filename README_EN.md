@@ -84,8 +84,7 @@ Embed Agentica in your own Python project with `uv add agentica`. Only checkout 
 The window is the same web UI, on the same `~/.agentica` — mixing it with the CLI or a browser makes no difference.
 
 > [!IMPORTANT]
-> These builds are **unsigned**, so the OS may block the first launch — one step, once.
-> If this machine does not have `agentica-gateway` yet, the first launch automatically installs a managed runtime; if you already installed it with `uv tool install`, the desktop app uses your existing installation.
+> The installer bundles CPython 3.12 plus `agentica` and `agentica-gateway` (with the Web UI) from the same build. No system Python, Node, uv, or network is required on first launch. Builds are **unsigned**, so the OS may block the first launch — one step, once. Unsigned macOS builds do not auto-update; download the new installer.
 
 | OS | Installer |
 |---|---|
@@ -282,6 +281,7 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 
 ## 🔥 News
 
+- [2026/11/04] **v1.5.1**: The web backend is its own package, `agentica-gateway`, released at the same version as `agentica` (`uv tool install "agentica[gateway]"` is unchanged). The Web UI builds to `web/dist` and is packed into the gateway wheel. One `v*` tag publishes both PyPI packages, the npm SDK, the Desktop installers, and the GitHub Release. See [Release-v1.5.1](https://github.com/shibing624/agentica/releases/tag/v1.5.1)
 - [2026/10/22] **v1.5.0**: Langfuse 5 records one trace per user request; model calls and tool executions are child observations, and hooks are not exported. History replays the whole window by default (`num_history_turns` defaults to `None`, and old tool results are no longer truncated). Switching models keeps tool history, and an in-turn cross-provider fallback can finish with that turn's tool results. Long sessions calibrate compression from the provider-reported prompt size. See [Release-v1.5.0](https://github.com/shibing624/agentica/releases/tag/v1.5.0)
 - [2026/10/15] **v1.4.17**: Output cap follows user config, then the model catalog, then the gateway default. Empty gateway replies are retried; answers that never finish under `max_tokens` are marked incomplete. Built-in `analyze_image`. Public `from agentica import …` stays the same; submodules move into domain packages. `worktree` no longer relocates or locks a checkout. See [Release-v1.4.17](https://github.com/shibing624/agentica/releases/tag/v1.4.17)
 - [2026/09/15] **v1.4.16**: Layer 2 compact opens an empty window (no LLM summary); prior turns stay in the session JSONL via `search_session`. Optional CLI attach and external hooks (off by default). MCP is 2.x only. See [Release-v1.4.16](https://github.com/shibing624/agentica/releases/tag/v1.4.16)

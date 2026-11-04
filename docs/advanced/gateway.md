@@ -67,8 +67,9 @@ agentica-gateway --port 8890         # 指定监听端口
 
 #### 会话侧栏
 
-- 侧栏默认只列**全部网页会话 + 最近 30 天的 CLI 会话 + 正在运行的会话 + 已归档会话**，点「显示全部」才加载几千条历史 CLI 会话。对应接口 `GET /api/sessions?scope=recent|all&recent_days=30`，默认 `recent`。
-- 会话来源写在 `<session_id>.meta.json` 的 `source` 字段（`gateway` / `cli` 等）；没有该字段的老会话，有 `last_read_at` 的按网页会话处理。
+- 侧栏默认只列 **gateway 会话**（Web、桌面端、IM）。设置 › 常规「显示 CLI 会话」打开后才加入 CLI 会话；SDK 脚本和没有记录来源的旧日志不进这个列表。正在运行的会话始终列出。接口是 `GET /api/sessions?scope=recent|all&recent_days=30`，默认 `recent`。
+- `recent` 里 CLI 会话只保留最近 `recent_days` 天（默认 30）；gateway 会话和已归档会话不受这个天窗口限制。`all` 去掉天窗口，仍然不含 SDK 和无来源的旧日志。
+- 来源写在 `<session_id>.meta.json` 的 `source`（`gateway` / `cli`）。没有该字段时：sidecar 里有 CLI 偏好的算 CLI，有 `last_read_at` 的算网页会话，其余不列出。
 - 每个项目分组默认显示 5 条，当前会话和运行中的会话不会被折叠；搜索同时匹配标题、项目名和首条消息。
 - 实测 5000 个会话：默认请求约 0.4 秒、12KB（原来约 5.5 秒、1.9MB）。
 
