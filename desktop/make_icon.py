@@ -1,12 +1,13 @@
-"""Regenerate the round logo used by the desktop app and the web UI.
+"""Regenerate the app icon used by the desktop app and the web UI.
 
-The mark is the project cat on a soft circular badge, so it reads as a round
-logo in the dock, the taskbar and the sidebar instead of a loose cat on a
-transparent square. One source drives every output:
+The mark is the project cat on a rounded-square (squircle) badge — the shape
+macOS / iOS app icons use: a square with continuously curved corners, not a
+circle and not a hard-cornered square. One source drives every output:
 
   desktop/build/icon.png        1024  electron-builder master (it refuses < 512)
-  web/src/assets/logo-round.png  256  sidebar / login / assistant brand mark
+  web/src/assets/app-icon.png    256  sidebar / welcome / login brand mark
   web/public/favicon.png          64  browser tab
+  web/public/favicon.ico           multi-resolution ICO, same artwork
 
 The masters are committed because CI packages without a Python step; this
 script is how they get rebuilt when the logo changes, so the icon has a source
@@ -20,6 +21,7 @@ taken: at 32px in a taskbar the ring is illegible noise.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -34,12 +36,18 @@ SIZE = 1024
 # of non-transparent pixels is the whole logo.
 CROP = (245, 243, 676, 752)
 # Transparent margin around the badge, as a share of the canvas. macOS and
-# Windows both assume some; without it the circle touches the icon's edge.
-MARGIN = 0.05
-# The cat's longest side as a share of the badge diameter: big enough to read at
-# 16px, small enough that the ears do not graze the circle.
-CAT_FILL = 0.74
-BADGE = (234, 243, 255, 255)  # the logo's own pale blue, so the cat's white belly still reads
+# Windows both assume some; without it the shape touches the icon's edge.
+MARGIN = 0.055
+# Superellipse exponent. n=2 is an ellipse, n->infinity a square; iOS uses
+# roughly 4-5, which keeps the straight edges but rounds the corners smoothly.
+SQUIRCLE_N = 4.6
+# The cat's longest side as a share of the badge side. Reference app icons keep
+# roughly 20-30% air around the glyph; 0.66 leaves that without shrinking the
+# cat illegible at 16px.
+CAT_FILL = 0.66
+BADGE = (234, 243, 255, 255)  # the logo's own pale blue
+BORDER = (196, 219, 250, 255)  # a hairline so the pale badge reads on a light sidebar
+BORDER_W = 0.006  # share of the canvas
 
 
 def cut_out(cat: Image.Image) -> Image.Image:
@@ -76,34 +84,61 @@ def cut_out(cat: Image.Image) -> Image.Image:
     return out
 
 
+def squircle(cx: float, cy: float, half: float, n: float, steps: int = 720):
+    """Points on |x/half|^n + |y/half|^n = 1, sampled for a polygon fill."""
+    pts = []
+    for i in range(steps):
+        t = 2 * math.pi * i / steps
+        c, s = math.cos(t), math.sin(t)
+        x = math.copysign(abs(c) ** (2 / n), c)
+        y = math.copysign(abs(s) ** (2 / n), s)
+        pts.append((cx + half * x, cy + half * y))
+    return pts
+
+
 def build(size: int = SIZE) -> Image.Image:
-    # Draw at 4x and downsample: PIL's ellipse has no antialiasing.
-    work = size * 4
-    diameter = round(work * (1 - 2 * MARGIN))
-    left = (work - diameter) // 2
+    # Draw at 4x and downsample: PIL's polygons and ellipse have no antialiasing.
+    scale = 4
+    work = size * scale
+    side = round(work * (1 - 2 * MARGIN))
+    half = side / 2
+    cx = cy = work / 2
 
     canvas = Image.new("RGBA", (work, work), (0, 0, 0, 0))
-    ImageDraw.Draw(canvas).ellipse((left, left, left + diameter - 1, left + diameter - 1), fill=BADGE)
+    draw = ImageDraw.Draw(canvas)
+    # Two filled squircles make a hairline border without a stroke width that
+    # would have to be scaled by 4 differently on every output size.
+    draw.polygon(squircle(cx, cy, half, SQUIRCLE_N), fill=BORDER)
+    draw.polygon(squircle(cx, cy, half - work * BORDER_W, SQUIRCLE_N), fill=BADGE)
 
     cat = cut_out(Image.open(SOURCE).convert("RGBA").crop(CROP))
-    scale = diameter * CAT_FILL / max(cat.size)
-    cat = cat.resize((round(cat.width * scale), round(cat.height * scale)), Image.LANCZOS)
+    factor = side * CAT_FILL / max(cat.size)
+    cat = cat.resize((round(cat.width * factor), round(cat.height * factor)), Image.LANCZOS)
     canvas.paste(cat, ((work - cat.width) // 2, (work - cat.height) // 2 + round(work * 0.012)), cat)
     return canvas.resize((size, size), Image.LANCZOS)
 
 
 def main() -> None:
     master = build(SIZE)
-    targets = {
-        HERE / "build" / "icon.png": SIZE,
-        ROOT / "web" / "src" / "assets" / "logo-round.png": 256,
-        ROOT / "web" / "public" / "favicon.png": 64,
-    }
-    for out, size in targets.items():
+    outputs = [
+        (HERE / "build" / "icon.png", SIZE),
+        (ROOT / "web" / "src" / "assets" / "app-icon.png", 256),
+        (ROOT / "web" / "public" / "favicon.png", 64),
+    ]
+    for out, size in outputs:
         out.parent.mkdir(parents=True, exist_ok=True)
         img = master if size == SIZE else master.resize((size, size), Image.LANCZOS)
         img.save(out)
         print(f"wrote {out.relative_to(ROOT)} ({size}x{size})")
+
+    # The tab asks for /favicon.ico too. Keep it the same artwork (the previous
+    # one was a bare transparent cat). BMP inside ICO compresses poorly, so
+    # stick to the sizes browsers actually pick — 16/32/48 lands ~7KB.
+    ico = ROOT / "web" / "public" / "favicon.ico"
+    master.resize((256, 256), Image.LANCZOS).save(
+        ico, format="ICO", sizes=[(16, 16), (32, 32), (48, 48)],
+    )
+    print(f"wrote {ico.relative_to(ROOT)} (ICO, 16/32/48)")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import type { ReactNode, SVGProps } from "react";
-import roundLogo from "./assets/logo-round.png";
+import appIcon from "./assets/app-icon.png";
 
-export const LOGO_SRC = roundLogo;
+export const LOGO_SRC = appIcon;
 
 export function Logo({ className = "brand-logo" }: { className?: string }) {
   return <img className={className} src={LOGO_SRC} alt="Agentica" />;
