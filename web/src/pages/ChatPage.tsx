@@ -4,14 +4,14 @@ import * as api from "../api";
 import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
-import { promptRename } from "../components/SessionTree";
+import { RenameInput } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, invocableSkills, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
 import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
-import { parseSkillTurn } from "../lib/skillInvocation";
+import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtN, fmtTps, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
-import { createSession, forkAt, hydrateSession, markSessionRead, rateMessage, syncSessionRoundStats } from "../sessions";
+import { createSession, forkAt, hydrateSession, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
@@ -52,10 +52,15 @@ export function ChatPage() {
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
   const [goalBudgetOpen, setGoalBudgetOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const approvalWrapRef = useRef<HTMLDivElement>(null);
   const skillsWrapRef = useRef<HTMLDivElement>(null);
+  const ctxWrapRef = useRef<HTMLDivElement>(null);
+  const skillHlRef = useRef<HTMLDivElement>(null);
+  const skillMarkRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (s.goalCompose && !hadGoalCompose.current) {
@@ -120,7 +125,7 @@ export function ChatPage() {
     }
   }, [slashOpen, pendingReq?.toolCallId]);
   useEffect(() => {
-    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen) return;
+    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen && !ctxOpen) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       const patch: { modelDDOpen?: false; approvalMenuOpen?: false } = {};
@@ -128,12 +133,14 @@ export function ChatPage() {
       if (!approvalWrapRef.current?.contains(t)) patch.approvalMenuOpen = false;
       if (patch.modelDDOpen !== undefined || patch.approvalMenuOpen !== undefined) setState(patch);
       if (!skillsWrapRef.current?.contains(t)) setSkillsOpen(false);
+      if (!ctxWrapRef.current?.contains(t)) setCtxOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
       setSkillsOpen(false);
+      setCtxOpen(false);
       setState({ modelDDOpen: false, approvalMenuOpen: false });
     };
     document.addEventListener("mousedown", onDown);
@@ -142,7 +149,7 @@ export function ChatPage() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen]);
+  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen, ctxOpen]);
   useEffect(() => {
     if (!pendingReq) return;
     const onKey = (e: KeyboardEvent) => {
@@ -208,6 +215,7 @@ export function ChatPage() {
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
+    if (skillHlRef.current) skillHlRef.current.scrollTop = ta.scrollTop;
   }, [s.inputText]);
 
   useEffect(() => { setSlashActive(0); }, [s.inputText]);
@@ -228,8 +236,15 @@ export function ChatPage() {
   const ctxPct = Math.min(100, Math.round((occupancy / windowSize) * 100));
   const files = useFilesPanel(s.curSess);
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
-  const [ctxReady, setCtxReady] = useState(false);
-  useEffect(() => { setCtxReady(false); }, [s.curSess]);
+  useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
+  const skillToken = leadingSkillToken(s.inputText, invocableSkills(s.pluginsData.skills || []));
+  // The token is drawn in an overlay under the textarea; hit-test its boxes so
+  // a click on the name opens the skill while a click elsewhere just edits.
+  const overSkillToken = (x: number, y: number) => {
+    const mark = skillMarkRef.current;
+    if (!skillToken || !mark) return false;
+    return Array.from(mark.getClientRects()).some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+  };
 
   return (
     <>
@@ -239,9 +254,18 @@ export function ChatPage() {
             <button className="ib sidebar-expand-btn" onClick={() => setState({ sidebarCollapsed: false })} title={S.nav.expand}><IconSidebar /></button>
             <div className="tb-chat-info">
               {cur && <span className="tb-chat-icon"><IconChat /></span>}
-              <span className="tb-chat-title" title={S.chat.dblclickRename} onDoubleClick={() => s.curSess && promptRename(s.curSess)}>
-                {cur?.title || S.chat.newConversation}
-              </span>
+              {titleEditing && s.curSess && cur ? (
+                <RenameInput className="tb-chat-rename-input" initial={cur.title}
+                             onDone={(name) => {
+                               setTitleEditing(false);
+                               if (name !== null && s.curSess) void renameSession(s.curSess, name);
+                             }} />
+              ) : (
+                <span className="tb-chat-title" title={cur ? S.chat.dblclickRename : undefined}
+                      onDoubleClick={() => { if (cur) setTitleEditing(true); }}>
+                  {cur?.title || S.chat.newConversation}
+                </span>
+              )}
               {s.curSess && <Link className="trace-link" to={`/traces?sessionId=${s.curSess}`}>{S.chat.viewTrace}</Link>}
             </div>
           </div>
@@ -276,7 +300,8 @@ export function ChatPage() {
                   <p>{S.chat.welcome}</p>
                 </div>
               ) : cur.msgs.map((m, i) => (
-                <MessageView key={i} idx={i} m={m} sessionId={s.curSess} workspace={workspace} onOpenFile={files.browsePath}
+                <MessageView key={i} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
+                  onOpenFile={files.browsePath} onOpenSkill={files.openSkill}
                   live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
                   pendingToolCallId={pendingToolCallId} />
               ))}
@@ -429,6 +454,14 @@ export function ChatPage() {
             {pendingImages.length > 0 && !s.serverSupportsImages && (
               <div className="vision-note">{S.chat.visionFallback(s.serverMediaModel, s.serverConfigPath)}</div>
             )}
+            <div className="input-ta-wrap">
+            {skillToken && (
+              <div className="input-ta-hl" ref={skillHlRef} aria-hidden>
+                {s.inputText.slice(0, skillToken.start)}
+                <mark ref={skillMarkRef} className="skill-ref-hl">{s.inputText.slice(skillToken.start, skillToken.end)}</mark>
+                {s.inputText.slice(skillToken.end)}{"\n"}
+              </div>
+            )}
             <textarea
               ref={taRef}
               className="input-ta"
@@ -437,6 +470,17 @@ export function ChatPage() {
               placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : pendingReq ? S.chat.placeholderApproval : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
               value={s.inputText}
               onChange={(e) => setState({ inputText: e.target.value })}
+              onScroll={(e) => { if (skillHlRef.current) skillHlRef.current.scrollTop = e.currentTarget.scrollTop; }}
+              onMouseMove={(e) => {
+                const over = overSkillToken(e.clientX, e.clientY);
+                e.currentTarget.style.cursor = over ? "pointer" : "";
+                e.currentTarget.title = over ? S.chat.skillChipTip : "";
+              }}
+              onClick={(e) => {
+                const ta = e.currentTarget;
+                if (!skillToken || e.detail !== 1 || ta.selectionStart !== ta.selectionEnd) return;
+                if (overSkillToken(e.clientX, e.clientY)) files.openSkill(skillToken.name);
+              }}
               onKeyDown={(e) => {
                 if (slashOpen && slashItems.length && !compacting) {
                   if (e.key === "ArrowDown") {
@@ -475,6 +519,7 @@ export function ChatPage() {
                 }
               }}
             />
+            </div>
             <div className="input-foot">
               <div className="input-foot-l" inert={pendingReq ? true : undefined}>
                 <input type="file" multiple accept="image/*,*/*" style={{ display: "none" }} id="fileInput" onChange={(e) => {
@@ -537,12 +582,14 @@ export function ChatPage() {
                 </div>
               </div>
               <div className="input-foot-r">
-                <div className="ctx-wrap" onMouseEnter={() => setCtxReady(true)}>
-                  <span className="foot-btn input-ctx" title={S.chat.ctxUsage}>
+                <div className="ctx-wrap" ref={ctxWrapRef}>
+                  <button type="button" className={"foot-btn input-ctx" + (ctxOpen ? " on" : "")}
+                          title={ctxOpen ? undefined : S.chat.ctxUsage} aria-haspopup="dialog" aria-expanded={ctxOpen}
+                          onClick={() => setCtxOpen((v) => !v)}>
                     <span className="ctx-ring" style={{ ["--pct" as any]: ctxPct + "%" }} />
                     {ctxPct}%
-                  </span>
-                  {ctxReady && (
+                  </button>
+                  {ctxOpen && (
                     <ContextUsageTip sessionId={s.curSess} fallback={cur} />
                   )}
                 </div>
@@ -592,9 +639,9 @@ export function ChatPage() {
   );
 }
 
-function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingToolCallId }: {
+function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenSkill, live, pendingToolCallId }: {
   idx: number; m: ChatMsg; sessionId: string | null; workspace: string; onOpenFile: (path: string) => void;
-  live?: boolean; pendingToolCallId?: string;
+  onOpenSkill: (name: string) => void; live?: boolean; pendingToolCallId?: string;
 }) {
   const S = useStrings();
   const skill = m.role === "user"
@@ -603,7 +650,7 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingTo
   if (m.role === "user" && m.steer) {
     return (
       <div id={"msg-" + idx} className="m m-steer-wrap">
-        <SteerChip text={m.content} ts={m.ts} />
+        <SteerChip text={m.content} ts={m.ts} onOpenSkill={onOpenSkill} />
       </div>
     );
   }
@@ -618,7 +665,7 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingTo
             return <WorkGroup key={i} items={seg.items} isLast={isLast} live={!!live} pendingToolCallId={pendingToolCallId} />;
           }
           if (seg.part.kind === "steer") {
-            return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} />;
+            return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} onOpenSkill={onOpenSkill} />;
           }
           const text = seg.part.kind === "text" ? seg.part.text : "";
           if (!text && !isLast) return null;
@@ -639,7 +686,7 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingTo
                 </div>
               )}
               {skill
-                ? <SkillTurn name={skill.name} args={skill.args} source={m.content} />
+                ? <SkillTurn name={skill.name} args={skill.args} source={m.content} onOpen={onOpenSkill} />
                 : m.content}
             </div>
           )
@@ -1307,7 +1354,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
   sess.msgs.push(userMsg);
   sess.msgs.push(aiMsg);
   st.streams[sessId] = { abortCtrl, aiMsg, preparing: files.length > 0 };
-  if (sess.msgs.filter((m) => m.role === "user").length === 1) sess.title = (text || "Chat").slice(0, 50);
+  if (!sess.named && sess.msgs.filter((m) => m.role === "user").length === 1) sess.title = (text || "Chat").slice(0, 50);
   saveSessions();
   bump();
 
@@ -1362,6 +1409,7 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
     }
     if (live) live.runId = created.data.run_id;
     markSessionRead(sessId);
+    pushPendingName(sessId);
     if (getState().streams[sessId]?.userStopped || abortCtrl.signal.aborted) {
       await api.cancelRunApi(created.data.run_id);
       aiMsg.aborted = true;

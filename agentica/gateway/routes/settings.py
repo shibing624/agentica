@@ -241,7 +241,7 @@ def _clean_workspaces(raw: Any) -> list:
 
 
 def show_cli_sessions_pref(user_id: str) -> bool:
-    """Whether this account's web session list includes CLI/SDK sessions (default: no)."""
+    """Whether this account's web session list includes CLI sessions (default: no)."""
     return bool(_clean_prefs(_read_prefs(user_id)).get("show_cli_sessions", False))
 
 
@@ -724,12 +724,15 @@ async def open_path(request: OpenRequest):
 
 def _open_os(target: str, app: str) -> None:
     """``finder``: open with the default app (a folder opens in the file manager).
+    ``editor``: open in the default text editor, whatever the file type.
     ``reveal``: show the item selected in its folder. ``terminal``: a shell there."""
     if sys.platform == "darwin":
         if app == "terminal":
             subprocess.Popen(["open", "-a", "Terminal", target])
         elif app == "reveal":
             subprocess.Popen(["open", "-R", target])
+        elif app == "editor":
+            subprocess.Popen(["open", "-t", target])
         else:
             subprocess.Popen(["open", target])
     elif sys.platform == "linux":
@@ -747,5 +750,7 @@ def _open_os(target: str, app: str) -> None:
             subprocess.Popen(["xdg-open", target])
     elif app == "reveal":
         subprocess.Popen(["explorer", f"/select,{target}"])
+    elif app == "editor":
+        subprocess.Popen(["notepad", target])
     else:
         subprocess.Popen(["explorer", target])

@@ -511,7 +511,6 @@ function GeneralTab() {
         <div className="settings-row">
           <div className="settings-row-text">
             <div className="settings-row-title">{S.settings.showCliSessions}</div>
-            <div className="settings-row-hint">{S.settings.showCliSessionsMeta}</div>
           </div>
           <button type="button" className={"mem-switch" + (s.showCliSessions ? " on" : "")}
                   role="switch" aria-checked={s.showCliSessions} aria-label={S.settings.showCliSessions}

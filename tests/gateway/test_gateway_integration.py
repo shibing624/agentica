@@ -694,6 +694,21 @@ class TestOpenUrlAndWechatQr:
         assert client.post("/api/open", json={"path": "notes.md", "app": "reveal"}).status_code == 200
         assert called and called[0][1], "xdg-open got an empty folder"
 
+    def test_open_in_editor_uses_the_default_text_editor_on_macos(self, mock_app, monkeypatch, tmp_path):
+        client, _ = mock_app
+        import agentica.gateway.routes.settings as settings_routes
+
+        target = tmp_path / "config.yaml"
+        target.write_text("a: 1\n")
+        called = []
+        monkeypatch.setattr(settings_routes, "sys", type("S", (), {"platform": "darwin"})())
+        monkeypatch.setattr(
+            settings_routes.subprocess, "Popen",
+            lambda args, **kw: called.append(args) or MagicMock(),
+        )
+        assert client.post("/api/open", json={"path": str(target), "app": "editor"}).status_code == 200
+        assert called == [["open", "-t", str(target)]]
+
     def test_open_rejects_an_unknown_app(self, mock_app):
         client, _ = mock_app
         assert client.post("/api/open", json={"url": "http://example.com", "app": "shell"}).status_code == 422

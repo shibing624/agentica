@@ -22,6 +22,11 @@ try:
 except ImportError:
     yaml = None
 
+# Markers of Skill.render_invocation(); keep in step with it and with
+# web/src/lib/skillInvocation.ts.
+_INVOCATION_HEADER_RE = re.compile(r"Loading: ([^\n]+)\nBase directory: ([^\n]*)\n")
+_INVOCATION_TYPED_RE = re.compile(r"\n## Skill invocation\n\nThe user invoked this skill as: `([^`\n]+)`")
+
 
 @dataclass
 class Skill:
@@ -349,6 +354,29 @@ Base directory: {self.path}
             "implies, and ask before doing anything outside the workflow.",
         ])
         return "\n".join(lines)
+
+    @staticmethod
+    def invocation_label(prompt: str) -> Optional[str]:
+        """The ``/trigger args`` a user typed, recovered from ``render_invocation`` output.
+
+        Logs store the expanded prompt, so titles and pickers built from the
+        first user message would otherwise show ``Loading: <name> Base
+        directory: ...``. Returns None for anything else. A bare header (no
+        arguments, so no trailer) is accepted only when the base directory is
+        the skill's own folder, so a pasted document with the same two header
+        lines is not relabelled.
+        """
+        head = _INVOCATION_HEADER_RE.match(prompt)
+        if head is None:
+            return None
+        name = head.group(1).strip()
+        typed = _INVOCATION_TYPED_RE.search(prompt)
+        if typed is not None:
+            label = typed.group(1).strip()
+            return label if label.startswith("/") else f"/{label}"
+        if Path(head.group(2).strip()).name.lower() == name.lower():
+            return f"/{name}"
+        return None
 
     def to_xml(self) -> str:
         """

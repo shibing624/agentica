@@ -1308,18 +1308,19 @@ class AgentService:
         owner: Optional[str] = None,
         scope: str = "recent",
         recent_days: int = 30,
-        include_cli: bool = True,
+        include_cli: bool = False,
         hide_temp_dirs: bool = False,
     ) -> List[Dict[str, Any]]:
         """List lightweight session summaries across the owner's projects.
 
         ``recent`` keeps every gateway session, archived session and active run,
-        but only CLI/legacy sessions modified within ``recent_days``. Filtering
+        but only CLI sessions modified within ``recent_days``. Filtering
         happens before preview generation so old logs are never parsed.
 
-        ``include_cli=False`` keeps only sessions started from the gateway (web,
-        desktop, IM): the CLI and SDK write to the same project tree, and the
-        web lists them only when the user asks for it. ``hide_temp_dirs`` drops
+        Only the three product surfaces share history: gateway sessions (web,
+        desktop, IM) are always listed and CLI sessions are added when
+        ``include_cli`` is set. SDK scripts and unlabelled legacy logs write to
+        the same project tree but are never listed. ``hide_temp_dirs`` drops
         *empty* residue under the system temp dir (``/tmp``, ``/var/folders``):
         zero-byte stubs and logs with no real user turn, left behind by test
         runs and demos. A conversation someone actually had in a temp working
@@ -1381,7 +1382,7 @@ class AgentService:
                 else:
                     source = "legacy"
             archived = bool(entry.get("archived"))
-            if not running and not include_cli and source != "gateway":
+            if not running and not (source == "gateway" or (include_cli and source == "cli")):
                 continue
             if (
                 not running

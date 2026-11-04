@@ -30,6 +30,7 @@ export function SessionTree() {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
+  const [editingSession, setEditingSession] = useState<string | null>(null);
   const labels = useMemo(() => {
     const m: Record<string, string> = {};
     for (const w of s.workspaces) if (w.name) m[projectIdForDir(w.dir)] = w.name;
@@ -206,21 +207,33 @@ export function SessionTree() {
                        }
                      }}>
                   <div className="s-main">
-                    <span className="ti">{session.title}</span>
+                    {editingSession === id ? (
+                      <RenameInput className="s-rename-input" initial={session.title}
+                                   onDone={(name) => {
+                                     setEditingSession(null);
+                                     if (name !== null) void renameSession(id, name);
+                                   }} />
+                    ) : (
+                      <span className="ti" onDoubleClick={(e) => { e.stopPropagation(); setEditingSession(id); }}>
+                        {session.title}
+                      </span>
+                    )}
                   </div>
-                  {session.source === "cli" && <span className="s-source">CLI</span>}
-                  {side === "busy" ? (
+                  {editingSession !== id && session.source === "cli" && <span className="s-source">CLI</span>}
+                  {editingSession === id ? null : side === "busy" ? (
                     <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>
                   ) : side === "unread" ? (
                     <span className="mt unread" title={S.chat.sessionUnread} />
                   ) : (
                     <span className="mt">{agoStr(lastQueryTs(session), S.chat)}</span>
                   )}
-                  <div className="s-actions">
-                    <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); promptRename(id); }}><IconPencil /></button>
-                    <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
-                    <button className="db danger" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
-                  </div>
+                  {editingSession !== id && (
+                    <div className="s-actions">
+                      <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); setEditingSession(id); }}><IconPencil /></button>
+                      <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
+                      <button className="db danger" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -237,9 +250,34 @@ export function SessionTree() {
   );
 }
 
-export function promptRename(id: string) {
-  const sess = getState().sessions[id];
-  if (!sess) return;
-  const name = window.prompt(getStrings().chat.renamePrompt, sess.title);
-  if (name) renameSession(id, name);
+/** Inline title editor. Enter or blur saves, Esc cancels (`onDone(null)`).
+ *  Clicks and keys stay inside so the row underneath does not open or toggle. */
+export function RenameInput({ initial, className, onDone }: {
+  initial: string;
+  className: string;
+  onDone: (name: string | null) => void;
+}) {
+  const S = getStrings();
+  const [text, setText] = useState(initial);
+  const done = useRef(false);
+  const finish = (name: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(name === null || !name.trim() ? null : name.trim());
+  };
+  return (
+    <input className={className} autoFocus value={text} placeholder={S.chat.renamePrompt}
+           aria-label={S.chat.rename}
+           onFocus={(e) => e.currentTarget.select()}
+           onChange={(e) => setText(e.target.value)}
+           onClick={(e) => e.stopPropagation()}
+           onDoubleClick={(e) => e.stopPropagation()}
+           onBlur={() => finish(text)}
+           onKeyDown={(e) => {
+             e.stopPropagation();
+             if (e.nativeEvent.isComposing) return;
+             if (e.key === "Enter") { e.preventDefault(); finish(text); }
+             if (e.key === "Escape") { e.preventDefault(); finish(null); }
+           }} />
+  );
 }

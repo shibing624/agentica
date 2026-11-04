@@ -44,16 +44,16 @@ def dirs(tmp_path):
 
 
 class TestListFilters:
-    def test_cli_and_sdk_sessions_hidden_unless_asked(self, svc, dirs):
+    def test_cli_listed_only_when_asked_and_sdk_never(self, svc, dirs):
         _session("web-1", dirs["proj"], source="gateway")
         _session("cli-1", dirs["proj"], source="cli")
-        _session("old-1", dirs["proj"])  # no source: legacy, written by an old CLI
+        _session("old-1", dirs["proj"])  # no source: legacy
         _session("sdk-1", dirs["proj"], source="sdk")
 
         shown = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", include_cli=False)}
         assert shown == {"web-1"}
-        everything = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all")}
-        assert everything == {"web-1", "cli-1", "old-1", "sdk-1"}
+        with_cli = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", include_cli=True)}
+        assert with_cli == {"web-1", "cli-1"}
 
     def test_only_empty_temp_residue_is_hidden(self, svc, dirs):
         _session("real", dirs["proj"], source="gateway")
@@ -66,7 +66,8 @@ class TestListFilters:
     def test_zero_content_temp_stubs_are_still_hidden(self, svc, dirs):
         _session("real", dirs["proj"], source="gateway")
         _session("stub", dirs["scratch"], source="cli", users=())
-        shown = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", hide_temp_dirs=True)}
+        shown = {r["session_id"] for r in svc.list_sessions(
+            owner="default", scope="all", include_cli=True, hide_temp_dirs=True)}
         assert shown == {"real"}
 
     def test_cli_flag_wins_over_last_read_at(self, svc, dirs):

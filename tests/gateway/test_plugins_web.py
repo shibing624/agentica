@@ -48,6 +48,21 @@ def _names(resp):
     return [s["name"] for s in resp.json()["skills"]]
 
 
+def test_listing_keeps_bundled_skills_in_the_global_registry(client, monkeypatch):
+    """The routes reload the registry the gateway expands /skill turns from;
+    dropping bundled skills there made /worktree stop expanding in the web."""
+    c, _, _ = client
+    from agentica.gateway.routes import plugins
+
+    seen = []
+    monkeypatch.setattr(
+        plugins.SkillLoader, "get_search_paths",
+        lambda self, include_system=False: seen.append(include_system) or [],
+    )
+    assert c.get("/api/skills").status_code == 200
+    assert seen == [True]
+
+
 class TestSkillsCrud:
     """The registry is process-global and keeps the first entry per name, so a
     route that only calls load_all() serves a stale listing forever: an edit
