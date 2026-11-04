@@ -3,9 +3,12 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 
-from agentica.gateway.routes import settings as settings_routes
+pytest.importorskip("fastapi")
+
+from fastapi import HTTPException  # noqa: E402
+
+from agentica.gateway.routes import settings as settings_routes  # noqa: E402
 
 
 def _request(body, user_id="u1"):
