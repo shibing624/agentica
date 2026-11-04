@@ -9,6 +9,7 @@ long bubble back; this test pins them.
 import re
 from pathlib import Path
 
+from agentica.memory.session_log import SessionLog
 from agentica.skills.skill import Skill
 
 
@@ -36,3 +37,20 @@ def test_no_argument_is_just_the_header_and_body(tmp_path):
     out = _skill(tmp_path).render_invocation("")
     assert out.startswith("Loading: code-review\nBase directory: ")
     assert "## Skill invocation" not in out
+
+
+def test_invocation_label_recovers_what_was_typed(tmp_path):
+    skill = _skill(tmp_path)
+    assert Skill.invocation_label(skill.render_invocation("src/app.py 的改动")) == "/code-review src/app.py 的改动"
+    assert Skill.invocation_label(skill.render_invocation("")) == "/code-review"
+    pasted = "Loading: code-review\nBase directory: /somewhere/else\n\n# Review\n"
+    assert Skill.invocation_label(pasted) is None
+    assert Skill.invocation_label("just a question") is None
+
+
+def test_session_preview_titles_a_skill_turn_by_its_trigger(tmp_path):
+    log = SessionLog("s1", work_dir=str(tmp_path), user_id="default")
+    log.append("user", _skill(tmp_path).render_invocation("git status 的 diff"))
+    preview = SessionLog.session_preview(str(log.path))
+    assert preview["first_user"] == "/code-review git status 的 diff"
+    assert preview["recent_users"] == ["/code-review git status 的 diff"]

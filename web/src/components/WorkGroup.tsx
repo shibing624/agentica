@@ -7,6 +7,9 @@ import { getState, type ApprovalDecision, type ApprovalRequest } from "../store"
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
 import { HIGHLIGHT_LIMIT } from "../lib/highlight";
+import { parseSkillTurn } from "../lib/skillInvocation";
+import { SkillTurn } from "./MessageExtras";
+import { invocableSkills } from "./SlashMenu";
 
 function thinkLabel(
   streaming: boolean,
@@ -339,8 +342,9 @@ export function ApprovalCard({
   );
 }
 
-export function SteerChip({ text, ts }: { text: string; ts?: number }) {
+export function SteerChip({ text, ts, onOpenSkill }: { text: string; ts?: number; onOpenSkill: (name: string) => void }) {
   const S = useStrings();
+  const skill = parseSkillTurn(text, invocableSkills(getState().pluginsData.skills || []));
   return (
     <div className="steer-chip">
       <div className="steer-chip-box">
@@ -348,7 +352,7 @@ export function SteerChip({ text, ts }: { text: string; ts?: number }) {
           <IconUser />
           <p className="steer-chip-text">
             <span className="steer-chip-label">{S.chat.userSteering}</span>
-            {text}
+            {skill ? <SkillTurn name={skill.name} args={skill.args} source={text} onOpen={onOpenSkill} /> : text}
           </p>
         </div>
       </div>

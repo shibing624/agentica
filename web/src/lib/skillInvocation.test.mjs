@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { parseSkillTurn } = await vite.ssrLoadModule("/src/lib/skillInvocation.ts");
+const { parseSkillTurn, leadingSkillToken } = await vite.ssrLoadModule("/src/lib/skillInvocation.ts");
 const { fileEditsOf, patchEdits } = await vite.ssrLoadModule("/src/lib/fileEdits.ts");
 after(() => vite.close());
 
@@ -114,5 +114,14 @@ test("steps: write_file counts new lines, failed calls are skipped, one row per 
     { type: "tool", name: "read_file", argsStr: JSON.stringify({ file_path: "z.py" }), result: "..." },
   ];
   assert.deepEqual(fileEditsOf(steps), [{ path: "README.md", added: 3, removed: 1 }]);
+});
+
+test("composer: only a leading installed trigger is a skill token", () => {
+  const skills = [{ cmd: "/review", name: "code-review" }];
+  assert.deepEqual(leadingSkillToken("/review src/app.py", skills), { start: 0, end: 7, name: "code-review" });
+  assert.deepEqual(leadingSkillToken("  /REVIEW", skills), { start: 2, end: 9, name: "code-review" });
+  assert.equal(leadingSkillToken("/reviewer x", skills), null);
+  assert.equal(leadingSkillToken("please /review x", skills), null);
+  assert.equal(leadingSkillToken("/unknown x", skills), null);
 });
 

@@ -90,6 +90,37 @@ def _isolate_gateway_accounts():
 
 
 @pytest.fixture(autouse=True)
+def opened_externally(monkeypatch):
+    """Nothing a test does may open a window on the developer's desktop.
+
+    The gateway's ``POST /api/open`` ends in ``settings._open_os`` (``open``,
+    ``open -R``, ``xdg-open``, ``explorer``), and the WeChat login falls back to
+    ``webbrowser.open`` for its QR code. One test once let a real authorised
+    ``/api/open`` through and every test run popped Finder on /tmp. Both are
+    replaced for every test; a test that cares asks for this fixture and
+    asserts on what was recorded, as ``(target, app)`` or ``(url, "browser")``.
+    The argv each platform would run is ``settings._open_command``, a pure
+    function, tested on its own.
+    """
+    opened: list = []
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url, *a, **k: opened.append((url, "browser")) or True)
+    try:
+        from agentica_gateway.routes import settings as settings_routes
+    except ImportError:  # bare CI: no gateway, nothing to open
+        yield opened
+        return
+    def _record(target, app):
+        opened.append((target, app))
+
+    # The real one, for the single test that checks it with Popen stubbed.
+    _record.real = settings_routes._open_os
+    monkeypatch.setattr(settings_routes, "_open_os", _record)
+    yield opened
+
+
+@pytest.fixture(autouse=True)
 def _isolate_skill_dir(monkeypatch):
     """Keep skill loading and skill CRUD off the user's real
     ``~/.agentica/skills``."""

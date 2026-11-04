@@ -18,6 +18,27 @@ function S({ children, ...rest }: SVGProps<SVGSVGElement> & { children: ReactNod
 export const IconPlus = () => (
   <S strokeWidth="1.6" strokeLinecap="round"><path d="M8 2.75v10.5M2.75 8h10.5" /></S>
 );
+export const IconRefresh = () => (
+  <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M13.25 8a5.25 5.25 0 11-1.54-3.71" /><path d="M13.25 2.75v2.5h-2.5" />
+  </S>
+);
+export const IconDownload = () => (
+  <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 2.5v7.5M4.75 7l3.25 3.25L11.25 7M3 13.25h10" />
+  </S>
+);
+export const IconTick = () => (
+  <S strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 8.5l3 3 6-6.5" /></S>
+);
+/** Text editor app: a page with a pen across it. */
+export const IconEditorApp = () => (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+    <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="3" fill="var(--editor-app-bg,#4f6bed)" />
+    <path d="M4.75 5.5h4M4.75 8h2.5" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" />
+    <path d="M7.6 11.6l.35-1.7 3.6-3.6a.9.9 0 011.3 1.3l-3.6 3.6z" fill="#fff" />
+  </svg>
+);
 export const IconSearch = () => (
   <S strokeWidth="1.4"><circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2l3.05 3.05" strokeLinecap="round" /></S>
 );

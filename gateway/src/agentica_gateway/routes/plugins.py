@@ -162,8 +162,12 @@ def _load_registry():
     no-op: an edit made through this router returned 200 while the listing kept
     serving the old body, and a deleted skill kept appearing. ``reload()``
     clears first, which is the only way a CRUD route sees its own write.
+
+    The registry is the global one the gateway expands ``/skill`` turns from,
+    so it must keep the bundled skills: reloading without them made bundled
+    triggers vanish from the slash menu and stop expanding.
     """
-    return SkillLoader().reload()
+    return SkillLoader().reload(include_system=True)
 
 
 def _write_skill_md(path: Path, name: str, description: str, content: str, trigger: str = "") -> None:

@@ -70,6 +70,8 @@ export type Session = {
   contextTokens: number;
   costUsd: number;
   dir: string;
+  /** The user picked this title; the first message must not replace it. */
+  named?: boolean;
   projectId?: string;
   archived?: boolean;
   unread?: boolean;

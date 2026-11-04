@@ -16,6 +16,9 @@ let catalogGeneration = 0;
 let catalogFlight: { scope: "recent" | "all"; promise: Promise<void> } | null = null;
 let catalogAbort: AbortController | null = null;
 const hydrateGenerations: Record<string, number> = {};
+/** Names the user typed that the server has not confirmed yet: a catalog
+ *  response already in flight would otherwise put the old title back. */
+const pendingNames: Record<string, string> = {};
 
 export function loadSessions(scope: "recent" | "all" = getState().sessionScope): Promise<void> {
   if (catalogFlight?.scope === scope) return catalogFlight.promise;
@@ -45,7 +48,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
       const firstTs = Date.parse(sv.first_timestamp) || Date.now();
       const serverLast = Date.parse(sv.last_timestamp) || 0;
       const next: Session = {
-        title: sv.name || "Chat",
+        title: pendingNames[id] || sv.name || "Chat",
         msgs: mem?.msgs || [],
         ts: firstTs,
         lastTs: Math.max(serverLast, mem ? lastQueryTs(mem) : 0, firstTs),
@@ -341,13 +344,41 @@ export function newChatInDir(dir: string) {
   createSession(dir);
 }
 
-export function renameSession(id: string, name: string) {
+/** Rename a chat. A chat with no turn yet has no log on the server, so the
+ *  name is kept on the session (`named`) and pushed once its first run exists
+ *  (see `pushPendingName`); the first message then no longer overwrites it. */
+export async function renameSession(id: string, name: string): Promise<void> {
   const sess = getState().sessions[id];
-  if (!sess || !name.trim()) return;
-  sess.title = name.trim();
+  const title = name.trim();
+  if (!sess || !title || title === sess.title) return;
+  const previous = sess.title;
+  sess.title = title;
+  sess.named = true;
   saveSessions();
   bump();
-  void api.renameSessionApi(id, sess.title);
+  if (!sess.msgs.length && !sess.sizeBytes) return;
+  pendingNames[id] = title;
+  const { ok } = await api.renameSessionApi(id, title);
+  if (pendingNames[id] === title) delete pendingNames[id];
+  if (ok) return;
+  if (sess.title === title) {
+    sess.title = previous;
+    saveSessions();
+    bump();
+  }
+  showToast(getStrings().chat.renameFailed, 2500);
+}
+
+/** After a renamed-before-first-message chat gets its first run. */
+export function pushPendingName(id: string) {
+  const sess = getState().sessions[id];
+  if (!sess?.named) return;
+  const title = sess.title;
+  pendingNames[id] = title;
+  void api.renameSessionApi(id, title).then(({ ok }) => {
+    if (pendingNames[id] === title) delete pendingNames[id];
+    if (!ok) showToast(getStrings().chat.renameFailed, 2500);
+  });
 }
 
 export function archiveSession(id: string) {

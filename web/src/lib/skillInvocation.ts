@@ -74,3 +74,23 @@ export function parseSkillTurn(
   const hit = skills.find((s) => s.cmd === cmd);
   return hit ? { name: hit.name, args: (typed[2] || "").trim() } : null;
 }
+
+export type SkillToken = { start: number; end: number; name: string };
+
+/**
+ * The leading `/trigger` of a composer draft when it names an installed skill.
+ * Only the first token counts: the gateway expands a skill only when the
+ * message starts with its trigger, so a `/word` later in the text is plain text.
+ */
+export function leadingSkillToken(
+  text: string,
+  skills: Array<{ cmd: string; name: string }>,
+): SkillToken | null {
+  const m = /^(\s*)(\/[^\s]+)(?=\s|$)/.exec(text);
+  if (!m) return null;
+  const cmd = m[2]!.toLowerCase();
+  const hit = skills.find((s) => s.cmd === cmd);
+  if (!hit) return null;
+  const start = m[1]!.length;
+  return { start, end: start + m[2]!.length, name: hit.name };
+}

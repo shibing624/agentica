@@ -590,8 +590,8 @@ class TestAgentServiceRunCron:
 
         live_turn.reset()
         with patch.object(SessionLog, "list_sessions", return_value=[
-            {"session_id": "scheduled_job1", "path": "x", "last_timestamp": 1},
-            {"session_id": "chat123", "path": "y", "last_timestamp": 2},
+            {"session_id": "scheduled_job1", "path": "x", "source": "gateway", "last_timestamp": 1},
+            {"session_id": "chat123", "path": "y", "source": "gateway", "last_timestamp": 2},
         ]), patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
             svc = AgentService(workspace_path=str(tmp_path))
             sessions = svc.list_sessions(scope="all")
@@ -611,6 +611,8 @@ class TestAgentServiceRunCron:
         dir_b.mkdir()
         SessionLog("sess-a", work_dir=str(dir_a), user_id="default").append("user", "hello a")
         SessionLog("sess-b", work_dir=str(dir_b), user_id="default").append("user", "hello b")
+        SessionLog("sess-a", work_dir=str(dir_a), user_id="default").set_source("gateway")
+        SessionLog("sess-b", work_dir=str(dir_b), user_id="default").set_source("gateway")
 
         svc = AgentService(workspace_path=str(tmp_path))
         sessions = svc.list_sessions(owner="default")
@@ -636,8 +638,9 @@ class TestAgentServiceRunCron:
              patch.object(SessionLog, "list_sessions", return_value=entries), \
              patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}) as preview:
             svc = AgentService(workspace_path=str(tmp_path))
-            rows = svc.list_sessions(scope="recent", recent_days=30)
+            rows = svc.list_sessions(scope="recent", recent_days=30, include_cli=True)
 
+        # Unlabelled legacy logs are never listed; old CLI logs drop out of "recent".
         assert {row["session_id"] for row in rows} == {"web-old", "cli-new", "legacy-web", "archived"}
         assert preview.call_count == 4
 
@@ -677,9 +680,9 @@ class TestAgentServiceRunCron:
 
         live_turn.reset()
         with patch.object(SessionLog, "list_sessions", return_value=[
-            {"session_id": "old", "path": "a",
+            {"session_id": "old", "path": "a", "source": "gateway",
              "first_timestamp": "2026-01-01T00:00:00.000Z", "last_timestamp": "2026-03-01T00:00:00.000Z"},
-            {"session_id": "new", "path": "b",
+            {"session_id": "new", "path": "b", "source": "gateway",
              "first_timestamp": "2026-01-03T00:00:00.000Z", "last_timestamp": "2026-01-02T00:00:00.000Z"},
         ]), patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
             svc = AgentService(workspace_path=str(tmp_path))
@@ -703,6 +706,8 @@ class TestAgentServiceRunCron:
         SessionLog("older", work_dir=str(d), user_id="default").append(
             "user", "later on older", timestamp="2026-01-03T00:00:00.000Z",
         )
+        SessionLog("older", work_dir=str(d), user_id="default").set_source("gateway")
+        SessionLog("newer", work_dir=str(d), user_id="default").set_source("gateway")
 
         svc = AgentService(workspace_path=str(tmp_path))
         sessions = [
@@ -804,6 +809,7 @@ class TestAgentServiceRunCron:
         SessionLog("s_dup", work_dir=str(other), user_id="default").append(
             "user", "写个v1版本的纠错代码，用pycorrector",
         )
+        SessionLog("s_dup", work_dir=str(other), user_id="default").set_source("gateway")
         stub = SessionLog("s_dup", work_dir=str(default_dir), user_id="default")
         stub.path.parent.mkdir(parents=True, exist_ok=True)
         stub.path.touch()
@@ -871,17 +877,17 @@ class TestAgentServiceOwnerPartition:
         by_id = {s["session_id"]: s for s in svc.list_sessions(owner="default")}
         assert by_id["s-unread"]["unread"] is False
 
-    def test_list_sessions_legacy_without_last_read_is_not_unread(self, tmp_path):
+    def test_list_sessions_cli_without_last_read_is_not_unread(self, tmp_path):
         from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         work = tmp_path / "repo"
         work.mkdir()
-        SessionLog("s-old", work_dir=str(work), user_id="default").append(
-            "user", "hello", timestamp="2026-01-01T00:00:00.000Z",
-        )
+        log = SessionLog("s-old", work_dir=str(work), user_id="default")
+        log.append("user", "hello", timestamp="2026-01-01T00:00:00.000Z")
+        log.set_source("cli")
         svc = AgentService(workspace_path=str(tmp_path))
-        by_id = {s["session_id"]: s for s in svc.list_sessions(owner="default")}
+        by_id = {s["session_id"]: s for s in svc.list_sessions(owner="default", scope="all", include_cli=True)}
         assert by_id["s-old"]["unread"] is False
 
     def test_same_session_id_locks_do_not_collide_across_owners(self, tmp_path):

@@ -7,6 +7,10 @@ export type FilesPanelState = {
   startResize: (e: React.MouseEvent) => void;
   browsePath: (path: string) => void;
   openRequest: { path: string } | null;
+  /** Skill whose SKILL.md the panel shows on top of the file browser. */
+  skill: string | null;
+  openSkill: (name: string) => void;
+  closeSkill: () => void;
 };
 
 const WIDTH_KEY = "ag_files_w";
@@ -23,8 +27,12 @@ export function useFilesPanel(sessionId: string | null): FilesPanelState {
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(readWidth);
   const [openRequest, setOpenRequest] = useState<{ path: string } | null>(null);
+  const [skill, setSkill] = useState<string | null>(null);
 
-  useEffect(() => { setOpenRequest(null); }, [sessionId]);
+  useEffect(() => {
+    setOpenRequest(null);
+    setSkill(null);
+  }, [sessionId]);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -46,8 +54,16 @@ export function useFilesPanel(sessionId: string | null): FilesPanelState {
 
   const browsePath = useCallback((path: string) => {
     setOpen(true);
+    setSkill(null);
     setOpenRequest({ path });
   }, []);
 
-  return { open, setOpen, width, startResize, browsePath, openRequest };
+  const openSkill = useCallback((name: string) => {
+    setOpen(true);
+    setSkill(name);
+  }, []);
+
+  const closeSkill = useCallback(() => setSkill(null), []);
+
+  return { open, setOpen, width, startResize, browsePath, openRequest, skill, openSkill, closeSkill };
 }

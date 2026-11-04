@@ -187,8 +187,9 @@ function TraceDetail({ a }: { a: Analysis }) {
         </div>
         <div className="trace-head-r">
           <span className="trace-badge">{a.session_id}</span>
-          <button className="dp-btn" onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast(S.traces.copiedPath); }}>
-            <IconCopy /> {S.traces.copyPath}
+          <button className="trace-cwd-copy" title={S.traces.copyPath} aria-label={S.traces.copyPath}
+                  onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast(S.traces.copiedPath); }}>
+            <IconCopy />
           </button>
         </div>
       </div>

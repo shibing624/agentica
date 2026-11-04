@@ -644,55 +644,68 @@ class TestMemoryEndpoints:
 
 
 class TestOpenUrlAndWechatQr:
-    def test_open_url(self, mock_app, monkeypatch):
+    # conftest's `opened_externally` replaces settings._open_os for every test,
+    # so these never spawn anything. The route tests assert what was handed to
+    # the desktop; the per-OS argv is the pure _open_command, tested below.
+
+    def test_open_url(self, mock_app, opened_externally):
         client, _ = mock_app
-        import agentica_gateway.routes.settings as settings_routes
-        called = []
-        monkeypatch.setattr(
-            settings_routes.subprocess,
-            "Popen",
-            lambda args, **kw: called.append(args) or MagicMock(),
-        )
         resp = client.post("/api/open", json={"url": "http://127.0.0.1:8881/chat"})
         assert resp.status_code == 200
-        assert called
-        assert "http://127.0.0.1:8881/chat" in called[0]
+        assert opened_externally == [("http://127.0.0.1:8881/chat", "finder")]
 
-    def test_open_url_rejects_javascript(self, mock_app):
+    def test_open_url_rejects_javascript(self, mock_app, opened_externally):
         client, _ = mock_app
         resp = client.post("/api/open", json={"url": "javascript:alert(1)"})
         assert resp.status_code == 400
+        assert opened_externally == []
 
-    def test_reveal_selects_the_file_in_its_folder(self, mock_app, monkeypatch, tmp_path):
+    def test_open_path_passes_the_app_through(self, mock_app, opened_externally, tmp_path):
         client, _ = mock_app
-        import agentica_gateway.routes.settings as settings_routes
+        target = tmp_path / "notes.md"
+        target.write_text("x", encoding="utf-8")
+        assert client.post("/api/open", json={"path": str(target), "app": "reveal"}).status_code == 200
+        assert opened_externally == [(str(target), "reveal")]
+
+    def test_open_missing_path_opens_nothing(self, mock_app, opened_externally, tmp_path):
+        client, _ = mock_app
+        assert client.post("/api/open", json={"path": str(tmp_path / "nope")}).status_code == 404
+        assert opened_externally == []
+
+    def test_reveal_selects_the_file_in_its_folder_on_linux(self, tmp_path):
+        from agentica_gateway.routes.settings import _open_command
 
         target = tmp_path / "notes.md"
         target.write_text("x", encoding="utf-8")
-        called = []
-        monkeypatch.setattr(settings_routes, "sys", type("S", (), {"platform": "linux"})())
-        monkeypatch.setattr(
-            settings_routes.subprocess, "Popen",
-            lambda args, **kw: called.append(args) or MagicMock(),
-        )
-        resp = client.post("/api/open", json={"path": str(target), "app": "reveal"})
-        assert resp.status_code == 200
-        assert called == [["xdg-open", str(tmp_path)]]
+        assert _open_command(str(target), "reveal", platform="linux") == ["xdg-open", str(tmp_path)]
 
-    def test_reveal_with_a_relative_path_never_opens_an_empty_string(self, mock_app, monkeypatch, tmp_path):
-        client, _ = mock_app
-        import agentica_gateway.routes.settings as settings_routes
+    def test_reveal_with_a_relative_path_never_opens_an_empty_string(self, monkeypatch, tmp_path):
+        from agentica_gateway.routes.settings import _open_command
 
         (tmp_path / "notes.md").write_text("x", encoding="utf-8")
-        called = []
-        monkeypatch.setattr(settings_routes, "sys", type("S", (), {"platform": "linux"})())
-        monkeypatch.setattr(
-            settings_routes.subprocess, "Popen",
-            lambda args, **kw: called.append(args) or MagicMock(),
-        )
         monkeypatch.chdir(tmp_path)
-        assert client.post("/api/open", json={"path": "notes.md", "app": "reveal"}).status_code == 200
-        assert called and called[0][1], "xdg-open got an empty folder"
+        cmd = _open_command("notes.md", "reveal", platform="linux")
+        assert cmd[0] == "xdg-open" and cmd[1], "xdg-open got an empty folder"
+
+    def test_open_commands_on_macos(self):
+        from agentica_gateway.routes.settings import _open_command
+
+        assert _open_command("/x/a.yaml", "editor", platform="darwin") == ["open", "-t", "/x/a.yaml"]
+        assert _open_command("/x/a.yaml", "reveal", platform="darwin") == ["open", "-R", "/x/a.yaml"]
+        assert _open_command("/x", "terminal", platform="darwin") == ["open", "-a", "Terminal", "/x"]
+        assert _open_command("/x", "finder", platform="darwin") == ["open", "/x"]
+
+    def test_open_commands_on_windows(self):
+        from agentica_gateway.routes.settings import _open_command
+
+        assert _open_command(r"C:\a.txt", "reveal", platform="win32") == ["explorer", r"/select,C:\a.txt"]
+        assert _open_command(r"C:\a.txt", "editor", platform="win32") == ["notepad", r"C:\a.txt"]
+
+    def test_linux_terminal_without_any_terminal_opens_nothing(self, monkeypatch):
+        import agentica_gateway.routes.settings as settings_routes
+
+        monkeypatch.setattr(settings_routes.shutil, "which", lambda name: None)
+        assert settings_routes._open_command("/x", "terminal", platform="linux") is None
 
     def test_open_rejects_an_unknown_app(self, mock_app):
         client, _ = mock_app
