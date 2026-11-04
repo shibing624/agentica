@@ -535,6 +535,9 @@ async def fork_session(
 ):
     """Branch a conversation at one of its entries into a new session."""
     try:
+        # No session lock on purpose: a chat turn holds it for its whole run and
+        # a send during a fork would be refused with "already has an active run".
+        # SessionLog.fork copes with a concurrent append by itself.
         new_id = await asyncio.to_thread(
             svc.fork_session, session_id, body.at_uuid, owner=_account(request),
         )

@@ -8,10 +8,15 @@ import { Dialog } from "./Dialog";
 const ChatMarkdown = lazy(() => import("./ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 
 /** `/skill args` in a user bubble: the skill name underlined, then the argument.
- *  Click the name to read its SKILL.md, instead of the whole prompt in the bubble. */
-export function SkillTurn({ name, args }: { name: string; args: string }) {
+ *  Click the name to read its SKILL.md, instead of the whole prompt in the bubble.
+ *
+ *  `source` is the original user text. Recognition is deliberately strict, but
+ *  a pasted document can still look like a skill header — keep the text one
+ *  click away so a false positive never hides or loses what the user typed. */
+export function SkillTurn({ name, args, source }: { name: string; args: string; source?: string }) {
   const S = useStrings();
   const [open, setOpen] = useState(false);
+  const [showSource, setShowSource] = useState(false);
   return (
     <>
       <button type="button" className="skill-chip" title={S.chat.skillChipTip} onClick={() => setOpen(true)}>
@@ -19,6 +24,14 @@ export function SkillTurn({ name, args }: { name: string; args: string }) {
         <span>{name}</span>
       </button>
       {args && <span className="skill-args">{args}</span>}
+      {source && (
+        <>
+          <button type="button" className="skill-source-toggle" onClick={() => setShowSource((v) => !v)}>
+            {showSource ? S.chat.skillSourceHide : S.chat.skillSourceShow}
+          </button>
+          {showSource && <pre className="skill-source">{source}</pre>}
+        </>
+      )}
       {open && <SkillPreview name={name} onClose={() => setOpen(false)} />}
     </>
   );

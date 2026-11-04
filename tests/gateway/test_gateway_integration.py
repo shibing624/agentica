@@ -663,6 +663,41 @@ class TestOpenUrlAndWechatQr:
         resp = client.post("/api/open", json={"url": "javascript:alert(1)"})
         assert resp.status_code == 400
 
+    def test_reveal_selects_the_file_in_its_folder(self, mock_app, monkeypatch, tmp_path):
+        client, _ = mock_app
+        import agentica.gateway.routes.settings as settings_routes
+
+        target = tmp_path / "notes.md"
+        target.write_text("x", encoding="utf-8")
+        called = []
+        monkeypatch.setattr(settings_routes, "sys", type("S", (), {"platform": "linux"})())
+        monkeypatch.setattr(
+            settings_routes.subprocess, "Popen",
+            lambda args, **kw: called.append(args) or MagicMock(),
+        )
+        resp = client.post("/api/open", json={"path": str(target), "app": "reveal"})
+        assert resp.status_code == 200
+        assert called == [["xdg-open", str(tmp_path)]]
+
+    def test_reveal_with_a_relative_path_never_opens_an_empty_string(self, mock_app, monkeypatch, tmp_path):
+        client, _ = mock_app
+        import agentica.gateway.routes.settings as settings_routes
+
+        (tmp_path / "notes.md").write_text("x", encoding="utf-8")
+        called = []
+        monkeypatch.setattr(settings_routes, "sys", type("S", (), {"platform": "linux"})())
+        monkeypatch.setattr(
+            settings_routes.subprocess, "Popen",
+            lambda args, **kw: called.append(args) or MagicMock(),
+        )
+        monkeypatch.chdir(tmp_path)
+        assert client.post("/api/open", json={"path": "notes.md", "app": "reveal"}).status_code == 200
+        assert called and called[0][1], "xdg-open got an empty folder"
+
+    def test_open_rejects_an_unknown_app(self, mock_app):
+        client, _ = mock_app
+        assert client.post("/api/open", json={"url": "http://example.com", "app": "shell"}).status_code == 422
+
     def test_wechat_qr_start_and_poll(self, mock_app):
         client, _ = mock_app
         from agentica.gateway import deps

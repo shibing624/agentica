@@ -292,6 +292,8 @@ const en = {
     forkNotSaved: "This reply is not saved yet; try again in a moment",
     skillChipTip: "Skill. Click to view its SKILL.md",
     skillPreviewTitle: (name: string) => `Skill · ${name}`,
+    skillSourceShow: "View original text",
+    skillSourceHide: "Hide original text",
     skillLoadFailed: "Could not load this skill",
   },
 
@@ -913,6 +915,8 @@ const zh: Strings = {
     forkNotSaved: "这条回复还没写入会话记录，稍后再试",
     skillChipTip: "技能，点击查看 SKILL.md",
     skillPreviewTitle: (name: string) => `技能 · ${name}`,
+    skillSourceShow: "查看原文",
+    skillSourceHide: "收起原文",
     skillLoadFailed: "无法加载该技能",
     showLess: "收起",
   },

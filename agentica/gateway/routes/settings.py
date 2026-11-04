@@ -734,8 +734,10 @@ def _open_os(target: str, app: str) -> None:
             subprocess.Popen(["open", target])
     elif sys.platform == "linux":
         if app == "reveal":
-            # No portable "select this file" on Linux file managers.
-            subprocess.Popen(["xdg-open", target if os.path.isdir(target) else os.path.dirname(target)])
+            # No portable "select this file" on Linux file managers. Resolve so
+            # a relative path never turns into `xdg-open ""`.
+            folder = target if os.path.isdir(target) else os.path.dirname(os.path.abspath(target))
+            subprocess.Popen(["xdg-open", folder])
         elif app == "terminal":
             for term in ["gnome-terminal", "xterm", "konsole"]:
                 if shutil.which(term):

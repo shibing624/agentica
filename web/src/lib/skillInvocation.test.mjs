@@ -30,11 +30,44 @@ test("the expanded prompt in the log becomes a chip with its argument", () => {
 });
 
 test("no argument, and a body line that looks like one, is not taken as the argument", () => {
+  // No trailer, but the header names the skill's own directory: replay (which
+  // has no skills list) still recognises it.
   assert.deepEqual(parseSkillTurn(expanded("")), { name: "code-review", args: "" });
+  assert.deepEqual(
+    parseSkillTurn(expanded(""), [{ cmd: "/review", name: "code-review" }]),
+    { name: "code-review", args: "" },
+  );
 });
 
 test("a multi-line argument is kept whole", () => {
   assert.equal(parseSkillTurn(expanded("line one\nline two")).args, "line one\nline two");
+});
+
+test("a pasted document with a skill-like header is not hidden behind a chip", () => {
+  const pasted = [
+    "Loading: whatever",
+    "Base directory: /tmp/skills/notes",
+    "",
+    "这是一段我粘贴的普通内容，讨论技能格式。",
+    "后面还有很长的正文，不能被吞掉。",
+  ].join("\n");
+  assert.equal(parseSkillTurn(pasted, [{ cmd: "/review", name: "code-review" }]), null);
+});
+
+test("an unterminated invocation does not swallow the remaining body", () => {
+  const text = [
+    "Loading: code-review",
+    "Base directory: /Users/me/.agentica/skills/code-review",
+    "",
+    "---",
+    "",
+    "## Skill invocation",
+    "",
+    "Argument: src/app.py",
+    "",
+    "这里是很长的一段后续正文，原本没有终止标记",
+  ].join("\n");
+  assert.deepEqual(parseSkillTurn(text), { name: "code-review", args: "" });
 });
 
 test("the typed /trigger form maps through the known skills only", () => {
@@ -82,3 +115,4 @@ test("steps: write_file counts new lines, failed calls are skipped, one row per 
   ];
   assert.deepEqual(fileEditsOf(steps), [{ path: "README.md", added: 3, removed: 1 }]);
 });
+

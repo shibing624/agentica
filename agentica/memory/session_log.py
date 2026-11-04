@@ -1963,6 +1963,37 @@ class SessionLog:
     # Fork: create a new session branching from a specific message
     # ------------------------------------------------------------------
 
+    def _read_complete_entries(self, stop_at_uuid: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Parse the log for a copy, without silently losing a row being written.
+
+        A bad line in the *middle* of the file is old damage (a crash, a manual
+        edit); skipping it is what forks always did, so logs that have one stay
+        forkable. A bad *last* line is what a concurrent append looks like, so
+        read again once after a short wait. If it is still incomplete, that only
+        matters when the copy needs it — i.e. no ``stop_at_uuid`` was given or
+        the fork point was not found before it — and then we fail loudly instead
+        of handing back a branch that is missing the newest turn.
+        """
+        for attempt in range(2):
+            lines = [ln for ln in self.path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            parsed: List[Dict[str, Any]] = []
+            tail_incomplete = False
+            for i, line in enumerate(lines):
+                try:
+                    parsed.append(json.loads(line))
+                except json.JSONDecodeError:
+                    tail_incomplete = i == len(lines) - 1
+            if not tail_incomplete:
+                return parsed
+            if attempt == 0:
+                time.sleep(0.02)
+        if stop_at_uuid and any(e.get("uuid") == stop_at_uuid for e in parsed):
+            return parsed
+        raise ValueError(
+            f"Session log {self.path.name} ends with an incomplete row; it is being "
+            "written or was cut off. Retry the fork, or fork at an earlier message."
+        )
+
     def fork(self, new_session_id: str, at_uuid: Optional[str] = None) -> "SessionLog":
         """Fork this session into a new one, optionally truncated at at_uuid.
 
@@ -1980,22 +2011,19 @@ class SessionLog:
         if not self.path.exists():
             raise FileNotFoundError(f"Session log not found: {self.path}")
 
+        entries = self._read_complete_entries(stop_at_uuid=at_uuid)
+        # Validate before writing anything: a branch that has to be deleted again
+        # would also leave rows behind in the cross-session search index.
+        if at_uuid and not any(e.get("uuid") == at_uuid for e in entries):
+            raise ValueError(f"No entry {at_uuid} in session {self.session_id}")
+
         new_log = SessionLog(
             new_session_id,
             base_dir=str(self.base_dir),
             work_dir=self._cwd,
             search_index=self._search_index if self._search_index_healthy else None,
         )
-
-        lines = self.path.read_text(encoding="utf-8").splitlines()
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
+        for entry in entries:
             # Re-stamp session_id (CC convention on fork)
             entry["session_id"] = new_session_id
             new_log._append(entry)

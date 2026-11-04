@@ -1320,9 +1320,11 @@ class AgentService:
         ``include_cli=False`` keeps only sessions started from the gateway (web,
         desktop, IM): the CLI and SDK write to the same project tree, and the
         web lists them only when the user asks for it. ``hide_temp_dirs`` drops
-        sessions whose working directory is under the system temp dir
-        (``/tmp``, ``/var/folders``); those are left behind by test runs and
-        demos of programs that drive agentica, not conversations to go back to.
+        *empty* residue under the system temp dir (``/tmp``, ``/var/folders``):
+        zero-byte stubs and logs with no real user turn, left behind by test
+        runs and demos. A conversation someone actually had in a temp working
+        directory is a real session and stays reachable — hiding it would make
+        it disappear from the web with no way to bring it back.
         Running sessions are always listed.
         """
         if scope not in ("all", "recent"):
@@ -1368,6 +1370,10 @@ class AgentService:
             )
             source = entry.get("source")
             if not source:
+                # A CLI flag is authoritative. Otherwise an old Web session
+                # (written before `source` existed) only has `last_read_at` to
+                # say the gateway showed it; dropping that hint would hide the
+                # user's own web history after an upgrade with no way back.
                 if entry.get("cli"):
                     source = "cli"
                 elif entry.get("last_read_at"):
@@ -1377,7 +1383,16 @@ class AgentService:
             archived = bool(entry.get("archived"))
             if not running and not include_cli and source != "gateway":
                 continue
-            if not running and hide_temp_dirs and _hidden_temp(entry.get("work_dir") or project_work_dir):
+            if (
+                not running
+                and hide_temp_dirs
+                and _hidden_temp(entry.get("work_dir") or project_work_dir)
+                # Only residue. Parsing the log for user turns is cheap here
+                # because it is one line at a time and preview is cached; the
+                # alternative is losing a real conversation with no UI to
+                # restore it.
+                and not self._session_preview(entry).get("user_count")
+            ):
                 continue
             if (
                 scope == "recent"

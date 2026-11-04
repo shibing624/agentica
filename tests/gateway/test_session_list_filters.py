@@ -55,17 +55,40 @@ class TestListFilters:
         everything = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all")}
         assert everything == {"web-1", "cli-1", "old-1", "sdk-1"}
 
-    def test_temp_dir_sessions_hidden(self, svc, dirs):
+    def test_only_empty_temp_residue_is_hidden(self, svc, dirs):
         _session("real", dirs["proj"], source="gateway")
         _session("demo", dirs["scratch"], source="gateway")
         shown = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", hide_temp_dirs=True)}
+        # A real conversation in a temp work dir must stay reachable: there is
+        # no UI switch to bring it back once hidden.
+        assert shown == {"real", "demo"}
+
+    def test_zero_content_temp_stubs_are_still_hidden(self, svc, dirs):
+        _session("real", dirs["proj"], source="gateway")
+        _session("stub", dirs["scratch"], source="cli", users=())
+        shown = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", hide_temp_dirs=True)}
         assert shown == {"real"}
+
+    def test_cli_flag_wins_over_last_read_at(self, svc, dirs):
+        """Opening a CLI chat in the web must not reclassify it as a web chat."""
+        log = _session("old-cli", dirs["proj"], source="cli")
+        log.set_last_read_at("2026-01-01T00:00:00Z")
+        shown = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", include_cli=False)}
+        assert shown == set()
+        with_cli = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", include_cli=True)}
+        assert "old-cli" in with_cli
 
     def test_a_running_session_is_always_listed(self, svc, dirs):
         _session("cli-run", dirs["scratch"], source="cli")
         with patch.object(svc, "is_session_active", side_effect=lambda sid, owner=None: sid == "cli-run"):
             rows = svc.list_sessions(owner="default", scope="all", include_cli=False, hide_temp_dirs=True)
         assert [r["session_id"] for r in rows] == ["cli-run"]
+
+    def test_running_session_listed_via_live_turn_even_when_old_and_temp(self, svc, dirs):
+        _session("live-run", dirs["scratch"], source="cli")
+        with patch.object(svc_mod.live_turn, "active", side_effect=lambda sid, owner=None: {"run": 1} if sid == "live-run" else None):
+            rows = svc.list_sessions(owner="default", scope="recent", include_cli=False, hide_temp_dirs=True)
+        assert "live-run" in {r["session_id"] for r in rows}
 
 
 class TestSystemTempPath:
@@ -107,6 +130,49 @@ class TestForkAndFeedback:
             svc.fork_session("nope", owner="default")
         with pytest.raises(ValueError):
             svc.fork_session("orig", at_uuid="not-a-uuid", owner="default")
+
+    def test_fork_refuses_a_half_written_last_row_instead_of_dropping_it(self, svc, dirs):
+        log = _session("orig", dirs["proj"], source="gateway")
+        # A concurrent append that was only half flushed. The old code silently
+        # skipped the line and reported success with the newest turn missing.
+        with open(log.path, "a", encoding="utf-8") as fh:
+            fh.write('{"type": "user", "content": "half')
+        before = {p.name for p in log.base_dir.glob("*.jsonl")}
+        with pytest.raises(ValueError, match="incomplete row"):
+            svc.fork_session("orig", owner="default")
+        assert {p.name for p in log.base_dir.glob("*.jsonl")} == before, "partial branch left on disk"
+
+    def test_fork_before_a_half_written_tail_still_works(self, svc, dirs):
+        log = _session("orig", dirs["proj"], source="gateway", users=("one", "two"))
+        first_answer = next(e["uuid"] for e in log._iter_entries() if e.get("type") == "assistant")
+        with open(log.path, "a", encoding="utf-8") as fh:
+            fh.write('{"type": "user", "content": "half')
+        branch = svc.fork_session("orig", at_uuid=first_answer, owner="default")
+        texts = [e.get("content") for e in svc.session_log_for(branch)._iter_entries()
+                 if e.get("type") in ("user", "assistant")]
+        assert texts == ["one", "re: one"]
+
+    def test_old_damage_in_the_middle_of_a_log_does_not_block_fork(self, svc, dirs):
+        log = _session("orig", dirs["proj"], source="gateway", users=("one", "two"))
+        lines = log.path.read_text(encoding="utf-8").splitlines()
+        lines.insert(1, "{not json")  # a crash-damaged row long before the tail
+        log.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        branch = svc.fork_session("orig", owner="default")
+        texts = [e.get("content") for e in svc.session_log_for(branch)._iter_entries()
+                 if e.get("type") in ("user", "assistant")]
+        assert texts == ["one", "re: one", "two", "re: two"]
+
+    def test_fork_with_an_unknown_entry_writes_nothing(self, svc, dirs):
+        log = _session("orig", dirs["proj"], source="gateway")
+        before = {p.name for p in log.base_dir.iterdir()}
+        with pytest.raises(ValueError, match="No entry"):
+            svc.fork_session("orig", at_uuid="missing", owner="default")
+        assert {p.name for p in log.base_dir.iterdir()} == before
+
+    def test_fork_is_account_scoped(self, svc, dirs):
+        _session("alice-chat", dirs["proj"], source="gateway")
+        with pytest.raises(FileNotFoundError):
+            svc.fork_session("alice-chat", owner="bob")
 
     def test_feedback_round_trip_and_clear(self, svc, dirs):
         log = _session("s1", dirs["proj"], source="gateway")

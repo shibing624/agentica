@@ -717,6 +717,41 @@ class TestUserRoutes:
         client.post("/api/auth/login", json={"username": ADMIN_ID, "password": "correct horse battery"})
         assert client.request("DELETE", f"/api/auth/users/{ADMIN_ID}").status_code == 400
 
+    def test_new_session_routes_stay_behind_the_gate(self, client):
+        """Fork / feedback / one memory entry all read account-owned data; none
+        may quietly become reachable without a credential."""
+        endpoints = [
+            ("POST", "/api/sessions/s1/fork", {"at_uuid": "u-1"}),
+            ("GET", "/api/sessions/s1/feedback", None),
+            ("POST", "/api/sessions/s1/feedback", {"uuid": "u-1", "rating": "up"}),
+            ("GET", "/api/memory/entry?filename=x.md", None),
+            ("POST", "/api/open", {"path": "/tmp", "app": "reveal"}),
+        ]
+        for method, url, body in endpoints:
+            kwargs = {"json": body} if body is not None else {}
+            assert client.request(method, url, **kwargs).status_code == 401, f"{method} {url} was not gated"
+            assert client.request(method, url, headers=_auth(), **kwargs).status_code != 401
+
+    def test_new_session_routes_pass_the_credential_account(self, client, monkeypatch):
+        """The owner comes from the token, never from the request body."""
+        from agentica.gateway import deps
+        import agentica.gateway.routes.chat as chat_routes
+
+        deps.agent_service.fork_session = MagicMock(return_value="branch")
+        deps.agent_service.set_session_feedback = MagicMock(return_value={})
+        deps.agent_service.session_feedback = MagicMock(return_value={})
+        deps.agent_service.read_memory_entry = AsyncMock(return_value={"filename": "x.md"})
+        monkeypatch.setattr(chat_routes, "show_cli_sessions_pref", lambda uid: False)
+
+        client.post("/api/sessions/s1/fork", json={"at_uuid": "u-1", "owner": "someone-else"}, headers=_auth())
+        assert deps.agent_service.fork_session.call_args.kwargs["owner"] == ADMIN_ID
+        client.post("/api/sessions/s1/feedback", json={"uuid": "u-1", "owner": "someone-else"}, headers=_auth())
+        assert deps.agent_service.set_session_feedback.call_args.kwargs["owner"] == ADMIN_ID
+        client.get("/api/sessions/s1/feedback", headers=_auth())
+        assert deps.agent_service.session_feedback.call_args.kwargs["owner"] == ADMIN_ID
+        client.get("/api/memory/entry?filename=x.md", headers=_auth())
+        assert deps.agent_service.read_memory_entry.await_args.args[0] == ADMIN_ID
+
     def test_sessions_are_listed_per_account(self, client, monkeypatch):
         """The route reads the owner off the credential, so two accounts asking
         the same question get two different partitions."""

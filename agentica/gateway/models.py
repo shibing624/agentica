@@ -198,4 +198,6 @@ class BaseDirRequest(BaseModel):
 class OpenRequest(BaseModel):
     path: str = ""
     url: str = ""
-    app: str = "finder"  # "finder" (default app), "reveal" (select in folder) or "terminal"
+    # "finder" = default app, "reveal" = select in folder, "terminal" = shell there.
+    # Reject unknown values instead of silently opening with the wrong handler.
+    app: Literal["finder", "reveal", "terminal"] = "finder"

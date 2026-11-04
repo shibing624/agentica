@@ -638,7 +638,9 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingTo
                   {m.previews.map((src, i) => <img key={i} src={src} alt="" />)}
                 </div>
               )}
-              {skill ? <SkillTurn name={skill.name} args={skill.args} /> : m.content}
+              {skill
+                ? <SkillTurn name={skill.name} args={skill.args} source={m.content} />
+                : m.content}
             </div>
           )
         )}
@@ -657,21 +659,22 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingTo
             {` - ${formatErrorStamp(m.errorTs ?? m.ts)}`}
           </div>
         )}
-        <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx}
-                       copyText={skill ? [skill.name, skill.args].filter(Boolean).join(" ") : undefined} />
+        <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx} />
       </div>
     </div>
   );
 }
 
-function MessageFooter({ m, live, sessionId, idx, copyText }: {
-  m: ChatMsg; live?: boolean; sessionId: string | null; idx: number; copyText?: string;
+function MessageFooter({ m, live, sessionId, idx }: {
+  m: ChatMsg; live?: boolean; sessionId: string | null; idx: number;
 }) {
   const S = useStrings();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   if (live) return null;
   const copy = () => {
-    const text = copyText ?? m.content;
+    // Always the original message. A rendered skill chip is a view, not the text
+    // the user sent — copying it would silently lose the SKILL.md expansion.
+    const text = m.content;
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));
   };

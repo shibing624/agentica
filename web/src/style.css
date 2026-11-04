@@ -422,6 +422,9 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .skill-chip svg{width:13px;height:13px;opacity:.75}
 .skill-chip:hover{opacity:.8}
 .skill-args{white-space:pre-wrap}
+.skill-source-toggle{margin-left:8px;border:none;background:transparent;padding:0;color:var(--fg3);font:inherit;font-size:11px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.skill-source-toggle:hover{color:var(--fg)}
+.skill-source{display:block;margin:8px 0 0;max-height:240px;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);font:11.5px/1.55 var(--mono);color:var(--fg2);white-space:pre-wrap;word-break:break-word}
 .skill-preview-path{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg3);margin-bottom:6px}
 .skill-preview-path code{font-family:var(--mono);word-break:break-all;user-select:all}
 .skill-preview-path button{border:none;background:none;color:var(--fg3);cursor:pointer;padding:2px;border-radius:4px;display:inline-flex}
