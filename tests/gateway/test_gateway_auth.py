@@ -717,15 +717,13 @@ class TestUserRoutes:
         client.post("/api/auth/login", json={"username": ADMIN_ID, "password": "correct horse battery"})
         assert client.request("DELETE", f"/api/auth/users/{ADMIN_ID}").status_code == 400
 
-    def test_new_session_routes_stay_behind_the_gate(self, client, monkeypatch):
+    def test_new_session_routes_stay_behind_the_gate(self, client, opened_externally):
         """Fork / feedback / one memory entry all read account-owned data; none
-        may quietly become reachable without a credential."""
-        import agentica.gateway.routes.settings as settings_routes
+        may quietly become reachable without a credential.
 
-        # The authorised /api/open call really runs: without this every test
-        # run popped a Finder window on /tmp.
-        opened = []
-        monkeypatch.setattr(settings_routes, "_open_os", lambda target, app: opened.append((target, app)))
+        The authorised /api/open call goes through: conftest's
+        ``opened_externally`` keeps it off the desktop (it once popped Finder
+        on /tmp every run) and records it."""
         endpoints = [
             ("POST", "/api/sessions/s1/fork", {"at_uuid": "u-1"}),
             ("GET", "/api/sessions/s1/feedback", None),
@@ -737,7 +735,8 @@ class TestUserRoutes:
             kwargs = {"json": body} if body is not None else {}
             assert client.request(method, url, **kwargs).status_code == 401, f"{method} {url} was not gated"
             assert client.request(method, url, headers=_auth(), **kwargs).status_code != 401
-        assert opened == [("/tmp", "reveal")]
+        assert opened_externally == [("/tmp", "reveal")]
+
     def test_new_session_routes_pass_the_credential_account(self, client, monkeypatch):
         """The owner comes from the token, never from the request body."""
         from agentica.gateway import deps

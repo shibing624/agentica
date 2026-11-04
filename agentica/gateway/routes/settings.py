@@ -722,35 +722,46 @@ async def open_path(request: OpenRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _open_os(target: str, app: str) -> None:
-    """``finder``: open with the default app (a folder opens in the file manager).
+def _open_command(target: str, app: str, platform: Optional[str] = None) -> Optional[list]:
+    """The argv that opens ``target`` the way ``app`` asks, on this OS.
+
+    ``finder``: open with the default app (a folder opens in the file manager).
     ``editor``: open in the default text editor, whatever the file type.
-    ``reveal``: show the item selected in its folder. ``terminal``: a shell there."""
-    if sys.platform == "darwin":
+    ``reveal``: show the item selected in its folder. ``terminal``: a shell there.
+    None when nothing can do it (Linux with no known terminal). Pure, so tests
+    check it directly and never have to spawn anything.
+    """
+    platform = platform or sys.platform
+    if platform == "darwin":
         if app == "terminal":
-            subprocess.Popen(["open", "-a", "Terminal", target])
-        elif app == "reveal":
-            subprocess.Popen(["open", "-R", target])
-        elif app == "editor":
-            subprocess.Popen(["open", "-t", target])
-        else:
-            subprocess.Popen(["open", target])
-    elif sys.platform == "linux":
+            return ["open", "-a", "Terminal", target]
+        if app == "reveal":
+            return ["open", "-R", target]
+        if app == "editor":
+            return ["open", "-t", target]
+        return ["open", target]
+    if platform.startswith("linux"):
         if app == "reveal":
             # No portable "select this file" on Linux file managers. Resolve so
             # a relative path never turns into `xdg-open ""`.
             folder = target if os.path.isdir(target) else os.path.dirname(os.path.abspath(target))
-            subprocess.Popen(["xdg-open", folder])
-        elif app == "terminal":
+            return ["xdg-open", folder]
+        if app == "terminal":
             for term in ["gnome-terminal", "xterm", "konsole"]:
                 if shutil.which(term):
-                    subprocess.Popen([term, f"--working-directory={target}"])
-                    break
-        else:
-            subprocess.Popen(["xdg-open", target])
-    elif app == "reveal":
-        subprocess.Popen(["explorer", f"/select,{target}"])
-    elif app == "editor":
-        subprocess.Popen(["notepad", target])
-    else:
-        subprocess.Popen(["explorer", target])
+                    return [term, f"--working-directory={target}"]
+            return None
+        return ["xdg-open", target]
+    if app == "reveal":
+        return ["explorer", f"/select,{target}"]
+    if app == "editor":
+        return ["notepad", target]
+    return ["explorer", target]
+
+
+def _open_os(target: str, app: str) -> None:
+    """Hand ``target`` to the desktop. The only place the gateway pops a window,
+    which is why tests/conftest.py replaces exactly this function."""
+    cmd = _open_command(target, app)
+    if cmd:
+        subprocess.Popen(cmd)
