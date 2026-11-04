@@ -141,7 +141,12 @@ async function prepare(key, w, tmp) {
   console.log(`[runtime] ${key}: ${asset.name}`);
   const archive = path.join(tmp, asset.name);
   await download(asset.url, archive);
-  execFileSync("tar", ["-xzf", archive, "-C", outDir], { stdio: "inherit" });
+  // Git for Windows ships GNU tar, and GNU tar reads `C:` in `C:\...` as a
+  // remote host (`Cannot connect to C:`). `--force-local` is the GNU switch
+  // that keeps the drive letter. macOS and Linux tar ignore the extra flag
+  // only if we don't pass it, so it stays Windows-only.
+  const tarArgs = process.platform === "win32" ? ["--force-local"] : [];
+  execFileSync("tar", [...tarArgs, "-xzf", archive, "-C", outDir], { stdio: "inherit" });
 
   const site = sitePackages(path.join(outDir, "python"), key);
   fs.mkdirSync(site, { recursive: true });

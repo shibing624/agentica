@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### fixes
+- **1.5.1 的 Desktop 安装包补打。** Windows 上 Git 自带的 GNU tar 把 `C:\...` 读成远程主机，运行时解包失败；macOS 上空的 `CSC_LINK` 被 electron-builder 当成证书路径，未签名构建直接失败。两条都只影响安装包，不影响已发布的 PyPI / npm 包。
+
 ## [1.5.1] - 2026-11-04
 
 #### changes

@@ -134,7 +134,17 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npx electron-builder ${{ matrix.args }} --publish never
+        # An unset secret arrives as an empty string. electron-builder then
+        # treats CSC_LINK="" as a certificate path and fails with
+        # "<checkout> not a file" instead of building unsigned.
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          fi
+          if [ -z "$WIN_CSC_LINK" ]; then
+            unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
+          fi
+          npx electron-builder ${{ matrix.args }} --publish never
 
       - uses: actions/upload-artifact@v4
         with:
