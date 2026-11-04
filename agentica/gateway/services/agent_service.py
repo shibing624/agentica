@@ -1682,6 +1682,30 @@ class AgentService:
             "user_id": self._owner(owner),
         }
 
+    async def read_memory_entry(self, owner: str, filename: str) -> dict | None:
+        """One MEMORY.md topic file for the settings page.
+
+        ``filename`` comes straight from the browser, so it must be a bare name
+        that is actually listed in this account's MEMORY.md index. That keeps
+        the endpoint from reading AGENTS.md or anything outside the index.
+        """
+        await self._ensure_initialized()
+        ws = await asyncio.to_thread(self._switch_workspace_user, owner)
+        entries = await ws.list_memory_index_entries()
+        meta = next((e for e in entries if e.get("filename") == filename), None)
+        if not meta:
+            return None
+        body, origin = await ws.read_memory_entry(filename)
+        return {
+            "filename": filename,
+            "title": meta.get("title", ""),
+            "hook": meta.get("hook", ""),
+            "content": body,
+            "origin_work_dir": origin,
+            "path": str(ws.get_user_memory_dir() / filename),
+            "user_id": self._owner(owner),
+        }
+
     async def get_workspace_context(self, user_id: str = "default") -> str:
         """Retrieve workspace context prompt for a user."""
         await self._ensure_initialized()

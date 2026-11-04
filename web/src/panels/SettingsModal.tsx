@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import * as api from "../api";
 import {
@@ -9,7 +9,8 @@ import { openPasswordDialog } from "../components/ChangePasswordDialog";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import {
-  IconArchive, IconChat, IconClock, IconClose, IconDatabase, IconExpand, IconGear, IconProfiles,
+  IconArchive, IconChat, IconChevronRight, IconClock, IconClose, IconCopy, IconDatabase,
+  IconExpand, IconGear, IconProfiles,
 } from "../icons";
 import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession } from "../sessions";
@@ -19,8 +20,6 @@ import {
 } from "../store";
 import { CronPanel } from "./CronPanel";
 import { AssistantPanel } from "../pages/AssistantPage";
-
-const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 
 /** Tab ids are stable (they are stored in `settingsTab`); only the label moves.
  *
@@ -279,6 +278,8 @@ function MemoryTab() {
   const [indexPath, setIndexPath] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [openEntry, setOpenEntry] = useState<string | null>(null);
+  const [entryDocs, setEntryDocs] = useState<Record<string, api.MemoryEntryDoc | "loading" | "error">>({});
 
   const applyAgents = (data: api.AgentsMdDoc) => {
     setContent(data.content || "");
@@ -331,6 +332,27 @@ function MemoryTab() {
     }
   };
 
+  /** Entries are MEMORY.md links to real .md files. Load the body lazily so
+   *  the settings page stays cheap even with a long index. */
+  const toggleEntry = async (filename: string) => {
+    if (openEntry === filename) { setOpenEntry(null); return; }
+    setOpenEntry(filename);
+    const cached = entryDocs[filename];
+    if (cached && cached !== "error") return;
+    setEntryDocs((d) => ({ ...d, [filename]: "loading" }));
+    const { ok, data } = await api.fetchMemoryEntry(filename);
+    setEntryDocs((d) => ({ ...d, [filename]: ok && data ? data : "error" }));
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(S.common.copied);
+    } catch {
+      showToast(S.settings.setFailed, 2500);
+    }
+  };
+
   if (editing) {
     return (
       <div className="mem-page">
@@ -353,19 +375,28 @@ function MemoryTab() {
       <div className="mem-section">
         <div className="settings-block-title">{M.rulesTitle}</div>
         <p className="mem-hint">{M.rulesHint}</p>
+        <div className="mem-source-head">
+          <span>{M.sourceLabel}</span>
+          <div className="mem-source-actions">
+            {!!content.trim() && (
+              <button type="button" className="mem-src-btn" title={M.copySource}
+                      onClick={() => void copyText(content)}><IconCopy /></button>
+            )}
+            <button type="button" className="mem-src-btn" title={M.openFile}
+                    disabled={!path} onClick={() => void api.openPathApi(path, "finder")}><IconExpand /></button>
+          </div>
+        </div>
         <div className="mem-preview" role="button" tabIndex={0}
              onClick={openEdit}
              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEdit(); } }}>
           {emptyTemplate || !content.trim() ? (
             <span className="mem-preview-empty">{M.empty}</span>
           ) : (
-            <div className="mem-preview-md">
-              <Suspense fallback={<pre>{content}</pre>}><ChatMarkdown text={content} /></Suspense>
-            </div>
+            <pre className="mem-source">{content}</pre>
           )}
           <span className="mem-preview-expand" title={M.previewLabel}><IconExpand /></span>
         </div>
-        <div className="mem-preview-label">{M.previewLabel}</div>
+        <div className="mem-preview-label">{M.sourceHint}</div>
       </div>
 
       <div className="mem-section">
@@ -377,16 +408,49 @@ function MemoryTab() {
           </button>
         </div>
         <p className="mem-hint">{M.extractHint}</p>
+        <p className="mem-hint">{M.entriesHint}</p>
         {entries.length === 0 ? (
           <div className="mem-preview-empty">{M.extractEmpty}</div>
         ) : (
           <div className="mem-list">
-            {entries.map((entry) => (
-              <div className="mem-entry" key={entry.filename}>
-                <div className="mem-entry-title">{entry.title}</div>
-                {entry.hook ? <div className="mem-entry-hook">{entry.hook}</div> : null}
-              </div>
-            ))}
+            {entries.map((entry) => {
+              const expanded = openEntry === entry.filename;
+              const doc = entryDocs[entry.filename];
+              return (
+                <div className={"mem-entry" + (expanded ? " open" : "")} key={entry.filename}>
+                  <button type="button" className="mem-entry-head" aria-expanded={expanded}
+                          onClick={() => void toggleEntry(entry.filename)}>
+                    <span className={"mem-entry-caret" + (expanded ? " open" : "")}><IconChevronRight /></span>
+                    <span className="mem-entry-text">
+                      <span className="mem-entry-title">{entry.title}</span>
+                      {entry.hook ? <span className="mem-entry-hook">{entry.hook}</span> : null}
+                    </span>
+                    <span className="mem-entry-file">{entry.filename}</span>
+                  </button>
+                  {expanded && (
+                    <div className="mem-entry-body">
+                      {doc === "loading" ? <div className="mem-preview-empty">{S.common.loading}</div>
+                        : doc === "error" || !doc ? <div className="mem-preview-empty">{M.entryFailed}</div>
+                          : <>
+                              <div className="mem-entry-toolbar">
+                                <span className="mem-entry-path" title={doc.path}>{doc.path}</span>
+                                <button type="button" className="mem-src-btn" title={M.copySource}
+                                        onClick={() => void copyText(doc.content)}><IconCopy /></button>
+                                <button type="button" className="mem-src-btn" title={M.openFile}
+                                        onClick={() => void api.openPathApi(doc.path, "finder")}><IconExpand /></button>
+                              </div>
+                              {doc.content.trim()
+                                ? <pre className="mem-source">{doc.content}</pre>
+                                : <div className="mem-preview-empty">{M.entryEmpty}</div>}
+                              {doc.origin_work_dir && (
+                                <div className="mem-preview-label">{M.originDir}: {doc.origin_work_dir}</div>
+                              )}
+                            </>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         {indexPath ? <div className="mem-preview-label">{indexPath}</div> : null}

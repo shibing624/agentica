@@ -11,6 +11,7 @@ Supports:
 - Tool/Function definition token counting
 """
 import base64
+import binascii
 import gzip
 import json
 import math
@@ -58,8 +59,10 @@ def _get_tiktoken_encoding() -> tiktoken.Encoding:
     (``encoding_for_model("gpt-4")`` resolves to cl100k_base).
     """
     with gzip.open(_O200K_BASE_PATH, "rb") as f:
+        # a2b_base64 skips b64decode's argument normalisation: ~30% faster
+        # over the 200k lines, on the CLI's startup path (status-bar seed).
         mergeable_ranks = {
-            base64.b64decode(token): int(rank)
+            binascii.a2b_base64(token): int(rank)
             for token, rank in (line.split() for line in f.read().splitlines() if line)
         }
     return tiktoken.Encoding(

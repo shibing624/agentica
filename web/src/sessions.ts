@@ -2,6 +2,7 @@ import * as api from "./api";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
 import { eventsToChatMsgs } from "./lib/hydrateMessages";
+import { emptyChatIds } from "./lib/sessionDrafts";
 import {
   askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
   saveSessions, setState, showToast, writeLastSessionId,
@@ -223,9 +224,26 @@ export async function syncSessionRoundStats(id: string) {
   bump();
 }
 
+/**
+ * Create (or reuse) the workspace's single unsent "New Chat".
+ *
+ * Sidebar + buttons, the top New chat button and `ensureSession()` all land
+ * here. Without reuse, clicking + N times left N identical empty rows in the
+ * sidebar — none of them has a server-side log, so they disappear on refresh
+ * and the user loses what looked like N conversations.
+ */
 export function createSession(dir: string) {
+  const st = getState();
+  const drafts = emptyChatIds(st.sessions, dir);
+  if (drafts.length) {
+    const [keep, ...stale] = drafts;
+    for (const id of stale) delete st.sessions[id];
+    saveSessions();
+    switchTo(keep);
+    return keep;
+  }
   const id = uid();
-  getState().sessions[id] = {
+  st.sessions[id] = {
     title: "New Chat", msgs: [], ts: Date.now(), lastTs: Date.now(), tokIn: 0, tokOut: 0, tokTotal: 0,
     requests: 0, totalTime: 0, lastInputTokens: 0, contextTokens: 0, costUsd: 0,
     dir, projectId: projectIdForDir(dir),
@@ -240,6 +258,16 @@ export function newChat() {
   const cur = st.curSess ? st.sessions[st.curSess] : null;
   const dir = (cur && cur.dir) || st.pendingNewChatDir || st.serverDir;
   if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: st.serverDir } }); return; }
+  // The top button and a workspace's + must land on the same unsent draft.
+  // Otherwise the sidebar can show a "New Chat" row while the main pane shows
+  // a second, unrelated empty welcome screen.
+  const drafts = emptyChatIds(st.sessions, dir);
+  if (drafts.length) {
+    for (const id of drafts.slice(1)) delete st.sessions[id];
+    setState({ pendingNewChatDir: dir, inputText: "" });
+    switchTo(drafts[0]);
+    return;
+  }
   setState({ curSess: null, pendingNewChatDir: dir, inputText: "" });
   writeLastSessionId(null);
 }

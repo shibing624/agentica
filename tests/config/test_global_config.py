@@ -187,3 +187,56 @@ class TestGlobalConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoadGlobalConfigCache(unittest.TestCase):
+    """load_global_config re-parses only when the file changed (startup reads it ~16x)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self._tmp.name, "config.yaml")
+        self._patch = patch.object(gc, "global_config_path", return_value=self.path)
+        self._patch.start()
+        gc._plain_cache = None
+
+    def tearDown(self):
+        self._patch.stop()
+        self._tmp.cleanup()
+        gc._plain_cache = None
+
+    def _write(self, text):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_unchanged_file_is_parsed_once(self):
+        self._write("settings:\n  a: 1\n")
+        with patch.object(gc, "_load_commented", wraps=gc._load_commented) as load:
+            for _ in range(5):
+                self.assertEqual(gc.load_global_config(), {"settings": {"a": 1}})
+        self.assertEqual(load.call_count, 1)
+
+    def test_callers_get_copies(self):
+        self._write("settings:\n  a: 1\n")
+        gc.load_global_config()["settings"]["a"] = 99
+        self.assertEqual(gc.load_global_config()["settings"]["a"], 1)
+
+    def test_an_edit_by_another_program_is_seen(self):
+        self._write("settings:\n  a: 1\n")
+        gc.load_global_config()
+        self._write("settings:\n  a: 2\n  b: 3\n")
+        st = os.stat(self.path)
+        os.utime(self.path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+        self.assertEqual(gc.load_global_config(), {"settings": {"a": 2, "b": 3}})
+
+    def test_our_own_writes_are_seen(self):
+        self._write("settings:\n  a: 1\n")
+        gc.load_global_config()
+        gc.set_setting("a", 5)
+        self.assertEqual(gc.get_setting("a"), 5)
+        gc.upsert_profile("p1", {"model_provider": "openai", "model_name": "gpt-4o"})
+        self.assertIn("p1", gc.load_global_config()["profiles"])
+
+    def test_missing_file(self):
+        self.assertEqual(gc.load_global_config(), {})
+        self._write("x: 1\n")
+        self.assertEqual(gc.load_global_config(), {"x": 1})

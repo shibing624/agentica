@@ -581,6 +581,29 @@ class TestMemoryEndpoints:
         resp = client.put("/api/memory", json={"content": "be brief\n"})
         assert resp.status_code == 405
 
+    def test_get_memory_entry_returns_the_topic_file_body(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.read_memory_entry = AsyncMock(return_value={
+            "filename": "user_tea.md", "title": "Tea shop", "hook": "wechat tea",
+            "content": "Prefers oolong.\n", "origin_work_dir": "/tmp/shop",
+            "path": "/tmp/memory/user_tea.md", "user_id": "default",
+        })
+        resp = client.get("/api/memory/entry", params={"filename": "user_tea.md"})
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "Prefers oolong.\n"
+        assert resp.json()["path"] == "/tmp/memory/user_tea.md"
+        mock_svc.read_memory_entry.assert_awaited_once()
+
+    def test_get_memory_entry_404_on_unknown_file(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.read_memory_entry = AsyncMock(return_value=None)
+        resp = client.get("/api/memory/entry", params={"filename": "../AGENTS.md"})
+        assert resp.status_code == 404
+
+    def test_get_memory_entry_requires_filename(self, mock_app):
+        client, _ = mock_app
+        assert client.get("/api/memory/entry").status_code == 422
+
 
 class TestOpenUrlAndWechatQr:
     def test_open_url(self, mock_app, monkeypatch):

@@ -230,7 +230,19 @@ export type MemoryIndexDoc = {
   user_id: string;
 };
 
+export type MemoryEntryDoc = {
+  filename: string;
+  title: string;
+  hook: string;
+  content: string;
+  origin_work_dir: string;
+  path: string;
+  user_id: string;
+};
+
 export const fetchUserAgentsMd = () => request<AgentsMdDoc>("/api/user_agents_md");
 export const saveUserAgentsMd = (content: string) =>
   putJson<AgentsMdDoc>("/api/user_agents_md", { content });
 export const fetchMemoryIndex = () => request<MemoryIndexDoc>("/api/memory");
+export const fetchMemoryEntry = (filename: string) =>
+  request<MemoryEntryDoc>(`/api/memory/entry?filename=${encodeURIComponent(filename)}`);

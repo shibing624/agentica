@@ -107,6 +107,7 @@ Schema (``~/.agentica/config.yaml``)::
 The file is written with ``chmod 0o600`` because profiles hold secrets.
 """
 
+import copy
 import logging
 import os
 from typing import Dict, Optional, Any, List, Tuple
@@ -203,15 +204,38 @@ def _to_commented(obj: Any) -> Any:
     return obj
 
 
+# Parsed config.yaml keyed by (path, mtime_ns, size). A round-trip ruamel parse
+# costs ~20 ms and startup reads the file a dozen-plus times (profile, every
+# get_setting), so the CLI spent ~0.3 s re-parsing an unchanged file. Any write
+# -- ours via _save_commented, or an editor's -- changes the key.
+_plain_cache: Optional[Tuple[Tuple[str, int, int], Dict[str, Any]]] = None
+
+
 def load_global_config() -> Dict[str, Any]:
-    """Load ``config.yaml`` as a plain dict, or an empty dict if missing/invalid."""
-    return _to_plain(_load_commented())
+    """Load ``config.yaml`` as a plain dict, or an empty dict if missing/invalid.
+
+    Returns a fresh copy each call; callers may mutate it.
+    """
+    global _plain_cache
+    path = global_config_path()
+    try:
+        st = os.stat(path)
+        key = (path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
+    if key is not None and _plain_cache is not None and _plain_cache[0] == key:
+        return copy.deepcopy(_plain_cache[1])
+    data = _to_plain(_load_commented())
+    _plain_cache = (key, copy.deepcopy(data)) if key is not None else None
+    return data
 
 
 def _save_commented(data: CommentedMap) -> None:
     """Persist a CommentedMap to config.yaml with ``0o600`` perms (holds secrets)."""
+    global _plain_cache
     path = global_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    _plain_cache = None
     with open(path, "w", encoding="utf-8") as f:
         _yaml.dump(data, f)
     try:

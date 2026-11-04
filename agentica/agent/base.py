@@ -958,33 +958,24 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     def _load_mcp_tools(self):
         """Auto-load MCP tools from mcp_config.json/yaml if available."""
         try:
-            import asyncio
             from agentica.mcp.config import MCPConfig
-            from agentica.tools.mcp_tool import McpTool
+            from agentica.tools.mcp_tool import CompositeMultiMcpTool, McpTool, prepare_mcp_servers
 
             config = MCPConfig()
             if not config.servers:
                 return
 
             mcp_tool = McpTool.from_config(config_path=config.config_path)
-
-            async def init_mcp():
-                await mcp_tool.__aenter__()
-                await mcp_tool.__aexit__(None, None, None)
-
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is not None:
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, init_mcp())
-                    future.result(timeout=30)
-            else:
-                asyncio.run(init_mcp())
+            # Tool lists come from the per-server cache when present (no
+            # connection on the startup path) and are listed concurrently
+            # otherwise; see agentica.tools.mcp_tool.prepare_mcp_servers.
+            servers = mcp_tool.tools if isinstance(mcp_tool, CompositeMultiMcpTool) else [mcp_tool]
+            ready = prepare_mcp_servers(servers)
+            if not ready:
+                logger.warning("Failed to auto-load MCP tools: no MCP server could be reached")
+                return
+            if isinstance(mcp_tool, CompositeMultiMcpTool):
+                mcp_tool._adopt(ready)
 
             if self.tools is None:
                 self.tools = [mcp_tool]

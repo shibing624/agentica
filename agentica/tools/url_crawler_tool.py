@@ -15,7 +15,6 @@ from typing import Any, Dict, Optional
 from urllib.parse import ParseResult, urlparse, urljoin
 
 import httpx
-from bs4 import BeautifulSoup
 
 from agentica.tools.base import Tool
 from agentica.config import AGENTICA_CACHE_DIR
@@ -83,6 +82,7 @@ class UrlCrawlerTool(Tool):
     def parse_html_to_markdown(html: str) -> str:
         """Parse HTML to markdown."""
         import markdownify
+        from bs4 import BeautifulSoup
 
         soup = BeautifulSoup(html, "html.parser")
         title = soup.title.string if soup.title else "No Title"
@@ -195,6 +195,10 @@ class UrlCrawlerTool(Tool):
             # Improved encoding detection for Chinese websites
             encoding = self._detect_encoding(response)
             text = response.content.decode(encoding, errors="replace")
+
+            # bs4 (~60 ms with its builders) is loaded on first crawl, not when
+            # the builtin tools are imported by every agent.
+            from bs4 import BeautifulSoup
 
             soup = BeautifulSoup(text, "html.parser")
             for script in soup(["script", "style", "noscript", "iframe", "svg"]):

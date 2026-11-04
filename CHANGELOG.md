@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **工作区只保留一个「New Chat」，记忆页能看正文**：
+  - 工作区行的 `+`、顶部 `New chat`、`ensureSession()`（发送时）以及「添加工作区」都会落到同一个空草稿；连点 N 次不再堆 N 个一模一样的 `New Chat` 行。复用按工作区目录判断，且只认本地未发送、无服务端日志的草稿（已发过消息、已重命名、归档、运行中和来自服务端的空会话都不会被合并）；发现历史遗留的多个草稿时会保留最新一个并清掉其余。判定逻辑抽到 `web/src/lib/sessionDrafts.ts`，带单测。
+  - 设置 › 记忆：**常驻规则改回源码显示**（之前用 Markdown 渲染，看不到 `#`、列表标记这些实际写进 system prompt 的内容），新增复制源码和打开文件按钮。
+  - **生成对话记忆的条目可以点开**：新增 `GET /api/memory/entry?filename=…`，只接受本账号 `MEMORY.md` 索引里列出的文件名（路径穿越和索引外文件一律 404），返回去掉 frontmatter 且脱敏后的正文、原始文件路径和来源工作目录。条目展开后显示源码、路径、复制和打开文件按钮，正文按需懒加载；未列出的文件读不到，避免把 `AGENTS.md` 之类的文件暴露给页面。
+- **CLI 启动从约 3.5–4.6 秒降到约 1 秒，`import agentica` 从 0.44 秒降到 0.31 秒**（M3 Pro，2 个 MCP server：一个远程 HTTP，一个本地 stdio。测量方法：在 pty 里启动 CLI，计时到出现输入提示）：
+  - **MCP 工具列表按 server 配置缓存。** 原来每次建 agent（CLI 每次启动、gateway 每个会话）都要逐个连接全部 MCP server，只为拿工具列表，每个约 1 秒。而工具调用本来就是每次单独建连接，启动时这一步纯粹是取列表。现在 `prepare_mcp_servers` 先读 `~/.agentica/cache/mcp_tools/<hash>.json`：键由 server 名、url/headers、command/args/env 计算，不包含进程环境变量；命中缓存就直接注册工具，不连接 server。启动 5 秒后，后台线程用新建的实例重新拉一次列表、写回缓存，当前会话的工具列表不变（工具 schema 在缓存的提示词前缀里），新列表从下一个会话开始生效。没有缓存的 server 改为并行连接，启动只等最慢的那个，不再是所有 server 耗时之和；连不上的 server 会跳过并打印 warning，不写缓存，下次启动重试。设 `AGENTICA_MCP_TOOLS_CACHE=0` 关闭缓存。实测：首次启动（无缓存）2.8 秒，之后约 1.0 秒；从缓存建 agent 用时 8 ms，通过缓存注册的工具做真实调用正常。
+  - **mcp SDK 改为用到时再导入。** `agentica.mcp` 的导出改为首次访问时加载（PEP 562）；`McpTool` 只在真正连接时才导入 mcp，`StdioServerParameters` 也在首次连接时才构造。命中缓存时整个进程都不导入 mcp，省约 0.2 秒。未安装 `[mcp]` extra 时，导入 `agentica.mcp` 仍报原来的错误。
+  - **`load_global_config` 加缓存。** 启动时会读 `config.yaml` 约 16 次，每次用 ruamel 解析约 20 ms。现在按 `(路径, mtime_ns, 大小)` 缓存解析结果，每次返回一份副本，调用方修改不影响缓存。自己写入（`_save_commented`）或其他程序改了文件，缓存都会失效。
+  - **`import agentica` 不再加载 bs4 / requests / markdownify。** `UrlCrawlerTool` 改为第一次抓取网页时才导入 bs4，`knowledge` 改为第一次读文件或 URL 时才导入 `MarkdownConverter`。`from agentica import Agent, DeepAgent, OpenAIChat` 从 0.68 秒降到 0.53 秒。
+  - **o200k 词表解析快约 30%。** 改用 `binascii.a2b_base64`。这一步在 CLI 启动路径上，用来给状态栏算初始上下文。
 - **Web/Desktop 侧栏改为「工作区」，并重做设置页**（对照 deepseek-harness）：
   - **工作区**：侧栏分组改称工作区，标题行有搜索和「添加工作区」。添加时选一个本机已存在的文件夹（不会替你创建），加入后立刻新建一个对话；空工作区也会列出。每个工作区的 `⋯` 菜单可重命名（双击名称也行）和删除。重命名只是显示名，不动磁盘文件夹；删除会移除该工作区下的对话，工作区里有运行中的对话时拒绝，磁盘上的文件夹不受影响。工作区列表存在账号偏好 `prefs.workspaces`（`PUT /api/prefs`），新增项服务端校验目录存在，已有项重命名和移除不再复查，所以文件夹被删后条目仍能清理。
   - **侧栏**：「新建对话」改为顶部按钮，插件、定时任务在下方；可拖拽右边缘调宽（220–480px，记在浏览器里，双击恢复默认）；侧栏换成 dsh 的浅灰底与 hover 色。

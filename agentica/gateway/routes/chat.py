@@ -653,6 +653,21 @@ async def get_memory(
     return await svc.read_memory_index(_account(request))
 
 
+@router.get("/api/memory/entry")
+async def get_memory_entry(
+    request: Request,
+    filename: str = Query(..., min_length=1),
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Body of one MEMORY.md topic file, so the settings page can show what the
+    agent actually saved instead of just the index's title and hook.
+    """
+    doc = await svc.read_memory_entry(_account(request), filename)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Memory entry not found")
+    return doc
+
+
 # ============== File upload ==============
 
 @router.post("/api/upload")
