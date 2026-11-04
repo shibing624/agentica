@@ -7,11 +7,11 @@ import asyncio
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 from agentica.agent import Agent
 from agentica.model.cost import CostTracker
-from agentica.gateway.services.session_usage import turn_usage_payload, usage_payload
+from agentica_gateway.services.session_usage import turn_usage_payload, usage_payload
 from agentica.model.openai import OpenAIChat
 from agentica.model.usage import RequestUsage, TokenDetails
 

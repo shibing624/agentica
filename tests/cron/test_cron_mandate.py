@@ -105,11 +105,11 @@ class TestMandateCapture:
 class TestRunUnderMandate:
     def test_scheduler_passes_the_mandate_to_the_runner(self, tmp_cron_dir, tmp_path):
         from agentica.cron.jobs import create_job, get_job
-        from agentica.cron.scheduler import _execute_job
+        from agentica.cron.scheduler import execute_job
 
         job = create_job(prompt="p", schedule="1h", permission_mode="ask", work_dir=str(tmp_path))
         runner = _RecordingRunner()
-        asyncio.run(_execute_job(get_job(job.id), runner, verbose=False))
+        asyncio.run(execute_job(get_job(job.id), runner, verbose=False))
         ctx = runner.contexts[0]
         assert (ctx["permission_mode"], ctx["work_dir"]) == ("ask", str(tmp_path))
 
@@ -163,9 +163,9 @@ class TestRunUnderMandate:
         assert any("j42" in g and "cronjob(action='pause'" in g for g in agent.guidance)
 
     def test_gateway_run_cron_applies_the_mandate(self, tmp_path):
-        pytest.importorskip("fastapi", reason="requires agentica[gateway]")
+        pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
         from unittest.mock import AsyncMock, MagicMock
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -190,13 +190,13 @@ class TestRunUnderMandate:
 class TestPausedWithReason:
     def test_missing_work_dir_pauses_without_running(self, tmp_cron_dir, tmp_path):
         from agentica.cron.jobs import create_job, get_job, list_task_runs
-        from agentica.cron.scheduler import _execute_job
+        from agentica.cron.scheduler import execute_job
         from agentica.cron.types import JobStatus
 
         gone = tmp_path / "gone"
         job = create_job(prompt="p", schedule="1h", work_dir=str(gone), max_retries=3)
         runner = _RecordingRunner()
-        result = asyncio.run(_execute_job(get_job(job.id), runner, verbose=False))
+        result = asyncio.run(execute_job(get_job(job.id), runner, verbose=False))
 
         assert result["status"] == "paused"
         assert runner.contexts == []
@@ -211,7 +211,7 @@ class TestPausedWithReason:
         a failing one must not be retried past its own pause."""
         from datetime import datetime, timedelta
         from agentica.cron.jobs import create_job, get_job
-        from agentica.cron.scheduler import _execute_job
+        from agentica.cron.scheduler import execute_job
         from agentica.cron.types import JobStatus
         from agentica.tools.cron_tool import CronTool
 
@@ -224,7 +224,7 @@ class TestPausedWithReason:
                                    reason="needs GITHUB_TOKEN")
                 raise RuntimeError("gave up")
 
-        asyncio.run(_execute_job(get_job(job.id), _SelfPausing(), verbose=False))
+        asyncio.run(execute_job(get_job(job.id), _SelfPausing(), verbose=False))
         after = get_job(job.id)
         assert after.status == JobStatus.PAUSED
         assert after.paused_reason == "needs GITHUB_TOKEN"

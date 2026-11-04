@@ -77,7 +77,7 @@ uv tool install "agentica[gateway]"
 
 已经装过 CLI、再补 Web：`uv tool install --force "agentica[gateway]"`。升级：`uv tool upgrade agentica`。命令找不到时跑一次 `uv tool update-shell`。
 
-开发本仓库用 `pip install -e .`。详见 [安装文档](https://shibing624.github.io/agentica/getting-started/installation)。
+开发本仓库用 `pip install -e . -e ./gateway`（Web 后端已是独立发行包 `agentica-gateway`，`agentica[gateway]` 会把它一起装上）。详见 [安装文档](https://shibing624.github.io/agentica/getting-started/installation)。
 
 ### 桌面版
 

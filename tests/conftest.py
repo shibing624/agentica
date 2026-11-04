@@ -77,7 +77,7 @@ def _isolate_gateway_accounts():
     the seam here; the store is. Skipped entirely without ``[gateway]``.
     """
     try:
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
     except ImportError:
         yield
         return

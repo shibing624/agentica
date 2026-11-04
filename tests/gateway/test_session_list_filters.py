@@ -7,11 +7,11 @@ import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
-pytest.importorskip("fastapi")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
-from agentica.gateway.services import agent_service as svc_mod  # noqa: E402
-from agentica.gateway.services import live_turn  # noqa: E402
-from agentica.gateway.services.agent_service import AgentService, is_system_temp_path  # noqa: E402
+from agentica_gateway.services import agent_service as svc_mod  # noqa: E402
+from agentica_gateway.services import live_turn  # noqa: E402
+from agentica_gateway.services.agent_service import AgentService, is_system_temp_path  # noqa: E402
 from agentica.memory.session_log import SessionLog  # noqa: E402
 
 

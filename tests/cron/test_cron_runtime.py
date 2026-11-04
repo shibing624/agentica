@@ -241,10 +241,10 @@ class TestCronCommand(unittest.TestCase):
         self.assertEqual(jobs[0].prompt, "raw words")
 
     def test_execute_job_signature(self):
-        """Regression: _execute_job requires positional `verbose`; ensure calling
+        """Regression: execute_job requires positional `verbose`; ensure calling
         it the way /cron run does works end-to-end with a stub runner (offline)."""
         import asyncio
-        from agentica.cron.scheduler import _execute_job
+        from agentica.cron.scheduler import execute_job
 
         commands_jid = self.cronjobs.create_job(prompt="say hi", schedule="0 9 * * *").id
 
@@ -254,7 +254,7 @@ class TestCronCommand(unittest.TestCase):
 
         job = self.cronjobs.get_job(commands_jid)
         # Must not raise (TypeError on missing verbose would mean a real bug).
-        result = asyncio.run(_execute_job(job, agent_runner=StubRunner(), verbose=False))
+        result = asyncio.run(execute_job(job, agent_runner=StubRunner(), verbose=False))
         self.assertIsInstance(result, dict)
 
     def test_runs_reads_real_fields(self):
@@ -283,7 +283,7 @@ class TestCronCommand(unittest.TestCase):
         import json
         from rich.console import Console
         from agentica.cli.commands import cron_cmd
-        from agentica.cron.scheduler import _execute_job
+        from agentica.cron.scheduler import execute_job
         from agentica.cron.types import CronRunOutput
         from agentica.tools.cron_tool import cronjob
 
@@ -299,9 +299,9 @@ class TestCronCommand(unittest.TestCase):
                 return "plain"
 
         jid = self.cronjobs.create_job(prompt="check the feed", schedule="0 9 * * *").id
-        out = asyncio.run(_execute_job(self.cronjobs.get_job(jid), agent_runner=UsageRunner(), verbose=False))
+        out = asyncio.run(execute_job(self.cronjobs.get_job(jid), agent_runner=UsageRunner(), verbose=False))
         self.assertEqual(out["result"], "checked, nothing new")
-        asyncio.run(_execute_job(self.cronjobs.get_job(jid), agent_runner=TextRunner(), verbose=False))
+        asyncio.run(execute_job(self.cronjobs.get_job(jid), agent_runner=TextRunner(), verbose=False))
 
         runs = self.cronjobs.list_task_runs(job_id=jid)
         self.assertEqual([r.usage for r in runs], [None, usage])  # newest first

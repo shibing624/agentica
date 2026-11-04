@@ -25,7 +25,7 @@ Optional extras (need ``pip install agentica[xxx]``)::
     from agentica.vectordb import InMemoryVectorDb # pip install agentica[rag]
     from agentica.mcp import MCPClient             # pip install agentica[mcp]
     from agentica.acp import ACPServer             # pip install agentica[acp]
-    from agentica.gateway.main import app          # pip install agentica[gateway]
+    from agentica_gateway.main import app          # pip install agentica-gateway
     from agentica.db import SqliteDb               # pip install agentica[sql]
 
 ═══════════════════════════════════════════════════════════════

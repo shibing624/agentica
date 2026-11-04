@@ -364,11 +364,13 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 
 
 # ============== Static files + SPA ==============
-# Production: Vite writes into gateway/ui/ (gitignored). Release/CI run
-# `cd web && npm run build` before `python -m build`, so pip users get the
-# dist and do not need Node. Dev: `cd web && npm run dev` proxies /api here.
+# `web/` builds into web/dist; the wheel carries a copy at agentica_gateway/ui
+# (gateway/hatch_build.py), so pip users never need Node. See ui_dist for the
+# lookup order. Dev: `cd web && npm run dev` proxies /api here.
 
-_UI_DIR = Path(__file__).parent / "ui"
+from agentica_gateway.ui_dist import ENV_VAR as _UI_ENV, resolve_ui_dir  # noqa: E402
+
+_UI_DIR = resolve_ui_dir() or Path(__file__).parent / "ui"
 _UI_ASSETS = _UI_DIR / "assets"
 
 
@@ -377,7 +379,8 @@ def _spa_index() -> HTMLResponse:
     if not index.is_file():
         return HTMLResponse(
             "<!doctype html><title>Agentica</title><p>Web UI is not built. "
-            "From the repo: <code>cd web && npm install && npm run build</code>.</p>",
+            "From the repo: <code>cd web && npm install && npm run build</code> "
+            f"(writes <code>web/dist</code>), or point <code>{_UI_ENV}</code> at a built dist.</p>",
             status_code=503,
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
@@ -974,7 +977,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     # settings.port to publish the runtime record, so it must be set first.
     settings.port = sock.getsockname()[1]
 
-    # The app *object*, not "agentica.gateway.main:app". Under `python -m` the
+    # The app *object*, not "agentica_gateway.main:app". Under `python -m` the
     # import string makes uvicorn load this file a second time, under its real
     # name — so `main()` would set `_server` on the `__main__` copy while the
     # shutdown route ran in the other one and answered "not under uvicorn".

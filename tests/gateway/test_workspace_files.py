@@ -2,12 +2,12 @@
 """Workspace file browser: containment, list, preview cap, upload."""
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from agentica.gateway.workspace_files import (
+from agentica_gateway.workspace_files import (
     TEXT_PREVIEW_BYTES,
     WorkspacePathError,
     list_entries,
@@ -62,7 +62,7 @@ def test_preview_reads_only_the_first_256kib(tmp_path):
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("GATEWAY_AUTH", "false")
-    from agentica.gateway.main import app
+    from agentica_gateway.main import app
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c, tmp_path
 

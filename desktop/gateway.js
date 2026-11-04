@@ -143,7 +143,7 @@ class GatewayProcess {
       throw new Error(
         "Cannot find agentica-gateway. The app installs a managed runtime on "
         + "first launch when the network is available; to install yourself run "
-        + "`pip install \"agentica[gateway]\"`, or set AGENTICA_GATEWAY_BIN."
+        + "`pip install agentica-gateway` (or `uv tool install agentica-gateway`), or set AGENTICA_GATEWAY_BIN."
       );
     }
 

@@ -115,26 +115,29 @@ still does not start, so the AppImage target passes `--no-sandbox` itself.
 The deb does not.
 A given OS can only build its own installers — the NSIS exe needs Windows and
 the deb/AppImage need Linux — so the full matrix runs in CI
-(`.github/workflows/desktop.yml`) and attaches the installers to the release for
-whatever `v*` tag was pushed. Builds are unsigned; the root README documents the
+(`.github/workflows/desktop.yml`, called by `release.yml` on a `v*` tag, which
+attaches the installers to that release). Builds are unsigned; the root README documents the
 one-time unlock each OS asks for.
 
 ## Bundled runtime (no system dependencies)
 
 Every installer carries its own CPython 3.12 (python-build-standalone) with
-`agentica[gateway]` already installed, under `<resources>/runtime/python`. The
+`agentica` and `agentica-gateway[feishu]` already installed, under
+`<resources>/runtime/python`. The
 app needs no system Python, Node, uv or network on first launch, and the shell
 and the gateway are always the same version: they are built from one commit and
 shipped, signed and updated as one unit.
 
 ```bash
-cd web && npm ci && npm run build          # the wheel carries the SPA
+cd web && npm ci && npm run build          # web/dist; the gateway wheel carries it
 cd ../desktop && npm ci
 node scripts/prepare-runtime.js            # host platform; or --target mac-arm64 --target mac-x64 ...
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
 ```
 
-`prepare-runtime.js` builds a wheel of this checkout and installs it with
+`prepare-runtime.js` builds both wheels of this checkout (or takes
+`AGENTICA_WHEEL` / `AGENTICA_GATEWAY_WHEEL`, which a release passes so the
+installer carries the exact wheels PyPI gets) and installs them with
 `pip --platform ... --target`, so one runner can assemble a runtime for another
 architecture. The CPython build is pinned (`AGENTICA_PBS_TAG` /
 `AGENTICA_PBS_PYTHON` override it). `extraResources` selects

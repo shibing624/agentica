@@ -17,7 +17,8 @@
  *      same version as the shell, no network and no system Python needed
  *   3. login-shell `agentica-gateway` (unless AGENTICA_DESKTOP_IGNORE_EXISTING)
  *   4. managed venv (`<support>/venv/bin/agentica-gateway`)
- *   5. login-shell python that can `import agentica.gateway`
+ *   5. login-shell python that can `import agentica_gateway` (or, for an
+ *      install older than the split, `agentica.gateway`)
  *   6. first-launch bootstrap (uv → CPython 3.12 → pip install agentica[gateway])
  *
  * Only 3-6 exist for `npm start` and for installers built without a runtime.
@@ -118,7 +119,7 @@ function ignoreExisting() {
   return process.env.AGENTICA_DESKTOP_IGNORE_EXISTING === "1";
 }
 
-const GATEWAY_ENTRY = "from agentica.gateway.main import main; main()";
+const GATEWAY_ENTRY = "from agentica_gateway.main import main; main()";
 const CLI_ENTRY = "import sys; sys.argv[0] = 'agentica'; from agentica.cli.main import main; sys.exit(main())";
 
 /** Directory the installer unpacked next to the app: `<resources>/runtime`. */
@@ -155,16 +156,31 @@ function resolveBundledCommand() {
   };
 }
 
+/**
+ * Gateway module a Python can run: the `agentica_gateway` distribution, or the
+ * `agentica.gateway` subpackage of an agentica older than the split (1.5.0 and
+ * earlier). Probed in that order, in one interpreter start.
+ */
+const GATEWAY_MODULES = ["agentica_gateway.main", "agentica.gateway.main"];
+
 function pythonWithGateway() {
   const py = loginShellWhich("python3") || loginShellWhich("python");
   if (!py) return null;
+  // find_spec on the `.main` submodule imports its package, so a package that
+  // cannot run (agentica's deprecated alias with no agentica-gateway behind
+  // it, or either one without fastapi) raises and is skipped.
+  const probe = "import importlib.util, sys\n"
+    + `for m in ${JSON.stringify(GATEWAY_MODULES)}:\n`
+    + "    try:\n"
+    + "        if importlib.util.find_spec(m):\n"
+    + "            print(m); sys.exit(0)\n"
+    + "    except Exception:\n"
+    + "        pass\n"
+    + "sys.exit(1)";
   try {
-    execFileSync(
-      py,
-      ["-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('agentica.gateway') else 1)"],
-      { timeout: 8_000, stdio: "ignore" },
-    );
-    return py;
+    const out = execFileSync(py, ["-W", "ignore", "-c", probe], { timeout: 8_000, encoding: "utf8" }).trim();
+    const module = out.split("\n").pop();
+    return GATEWAY_MODULES.includes(module) ? { python: py, module } : null;
   } catch {
     return null;
   }
@@ -201,11 +217,11 @@ function resolveExistingCommand() {
     };
   }
   if (!ignoreExisting()) {
-    const py = pythonWithGateway();
-    if (py) {
+    const found = pythonWithGateway();
+    if (found) {
       return {
-        command: py,
-        args: ["-m", "agentica.gateway.main"],
+        command: found.python,
+        args: ["-m", found.module],
         source: "python",
         pathPrefix: null,
       };
@@ -309,6 +325,9 @@ async function ensureUv(root, log) {
   return plan.dest;
 }
 
+// `agentica[gateway]` rather than `agentica-gateway`: it resolves correctly on
+// both sides of the 1.5.1 split (before it, the gateway was that extra; after,
+// the extra pins the matching agentica-gateway with Feishu, as it always had).
 function packageSpec() {
   return process.env.AGENTICA_DESKTOP_PACKAGE || "agentica[gateway]";
 }

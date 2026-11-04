@@ -13,7 +13,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, "../agentica/gateway/ui"),
+    outDir: path.resolve(__dirname, "dist"),
     emptyOutDir: true,
     sourcemap: false,
     rollupOptions: {

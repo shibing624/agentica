@@ -1080,12 +1080,12 @@ def create_agent(
 
         def _cron_job_runner(job):
             import asyncio
-            from agentica.cron.scheduler import _execute_job
+            from agentica.cron.scheduler import execute_job
             from agentica.cron.cli_runner import CliAgentRunner, build_cli_agent_factory
 
             factory = build_cli_agent_factory(agent_config, extra_tools, workspace, skills_registry)
             runner = CliAgentRunner(factory)
-            return asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
+            return asyncio.run(execute_job(job, agent_runner=runner, verbose=False))
 
         cron_job_runner = _cron_job_runner
 

@@ -86,7 +86,7 @@ test("bundled interpreter beats every system gateway", () => {
   assert.equal(got.source, "bundled");
   assert.equal(got.command, python);
   assert.deepEqual(got.args.slice(0, 1), ["-c"]);
-  assert.match(got.args[1], /agentica\.gateway\.main import main/);
+  assert.match(got.args[1], /agentica_gateway\.main import main/);
   assert.equal(got.env.PYTHONNOUSERSITE, "1");
 });
 
@@ -209,4 +209,13 @@ test("window state recenters a window left on a disconnected display", () => {
   });
   const visible = { ...offscreen, x: -40 };
   assert.deepEqual(keepVisiblePosition(visible, displays), visible);
+});
+
+test("bundled runtime requirements pin both wheels of one build", () => {
+  const { requirements } = require("./scripts/prepare-runtime.js");
+  const reqs = requirements({ core: "/w/agentica-1.5.1-py3-none-any.whl", gateway: "/w/agentica_gateway-1.5.1-py3-none-any.whl" });
+  assert.equal(reqs.length, 2);
+  assert.match(reqs[0], /^agentica @ file:\/\/.*agentica-1\.5\.1-/);
+  // Feishu ships in the app, as it did in agentica[gateway] before the split.
+  assert.match(reqs[1], /^agentica-gateway\[feishu\] @ file:\/\/.*agentica_gateway-1\.5\.1-/);
 });

@@ -1,19 +1,19 @@
 # syntax=docker/dockerfile:1
 
-# Web UI is compiled here, then copied into the Python image and into the
-# wheel path (agentica/gateway/ui). Runtime still does not need Node.
+# Two stages: Node builds the Web UI into web/dist, then the Python stage builds
+# the agentica and agentica-gateway wheels (the gateway wheel carries the UI,
+# gateway/hatch_build.py) and installs them. The runtime image has no Node.
 FROM node:22-bookworm-slim AS web
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-# vite.config.ts writes ../agentica/gateway/ui
-RUN mkdir -p /src/agentica/gateway && npm run build
+RUN npm run build
 
 FROM python:3.12-slim-bookworm AS runtime
 
-WORKDIR /app
+WORKDIR /src
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,12 +26,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data /workspace
 
-COPY pyproject.toml README.md LICENSE /app/
-COPY agentica /app/agentica
-COPY --from=web /src/agentica/gateway/ui /app/agentica/gateway/ui
+COPY pyproject.toml README.md LICENSE MANIFEST.in ./
+COPY agentica ./agentica
+COPY gateway ./gateway
+COPY --from=web /src/web/dist ./web/dist
 
-RUN pip install --no-cache-dir ".[gateway]" \
-    && rm -rf /root/.cache/pip
+# Wheels, not `pip install .`: the gateway's exact `agentica==X.Y.Z` pin must
+# resolve to this checkout's core, not to whatever PyPI has. Feishu stays in,
+# as it was in the old `agentica[gateway]` image.
+RUN pip wheel --no-cache-dir --no-deps -w /tmp/wheels . ./gateway \
+    && pip install --no-cache-dir /tmp/wheels/agentica-*.whl "$(ls /tmp/wheels/agentica_gateway-*.whl)[feishu]" \
+    && rm -rf /tmp/wheels /src /root/.cache/pip
 
 # Bind-mounted /workspace must stay writable; compose publishes only on loopback.
 ENV HOME=/data

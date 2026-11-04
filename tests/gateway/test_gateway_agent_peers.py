@@ -15,13 +15,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Gateway tests require fastapi etc. Skip cleanly if not installed.
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 from agentica import peers
 from agentica.peers import PeerSession, list_live_peers, unread_count
-from agentica.gateway.channels.base import Channel, ChannelType, Message
-from agentica.gateway.services.agent_peers import GatewayAgentPeers
-from agentica.gateway.services.peer_bridge import PeerBridge
+from agentica_gateway.channels.base import Channel, ChannelType, Message
+from agentica_gateway.services.agent_peers import GatewayAgentPeers
+from agentica_gateway.services.peer_bridge import PeerBridge
 
 
 @pytest.fixture(autouse=True)
@@ -356,7 +356,7 @@ class TestAgentServiceWiring:
     """The tools have to actually be on the agent the gateway runs."""
 
     def _service(self, tmp_path, peers_service):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
@@ -364,7 +364,7 @@ class TestAgentServiceWiring:
         return svc
 
     def _build(self, svc, session_id):
-        with patch("agentica.gateway.services.agent_service.create_model") as create:
+        with patch("agentica_gateway.services.agent_service.create_model") as create:
             create.return_value = MagicMock()
             return svc._build_agent(session_id)
 
@@ -438,9 +438,9 @@ class TestLifespanWiring:
         pytest.importorskip("httpx")
         from fastapi.testclient import TestClient
 
-        from agentica.gateway import deps
-        from agentica.gateway.config import settings
-        from agentica.gateway.main import app
+        from agentica_gateway import deps
+        from agentica_gateway.config import settings
+        from agentica_gateway.main import app
 
         with patch.object(settings, "peer_bridge_enabled", True):
             with TestClient(app, raise_server_exceptions=False):

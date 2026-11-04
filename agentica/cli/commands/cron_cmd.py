@@ -348,12 +348,12 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
             return
         con.print(f"[dim]Running job {job_id} once now...[/dim]")
         try:
-            from agentica.cron.scheduler import _execute_job
+            from agentica.cron.scheduler import execute_job
             from agentica.cron.cli_runner import CliAgentRunner, build_cli_agent_factory
 
             factory = build_cli_agent_factory(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
             runner = CliAgentRunner(factory)
-            asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
+            asyncio.run(execute_job(job, agent_runner=runner, verbose=False))
             con.print(f"[green]Job {job_id} executed.[/green]")
         except Exception as e:
             con.print(f"[red]Run failed: {e}[/red]")

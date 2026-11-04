@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture()
 def client():
-    from agentica.gateway.main import app
-    from agentica.gateway import deps
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
 
     svc = MagicMock()
     svc._ensure_initialized = AsyncMock()
@@ -48,8 +48,8 @@ def test_list_profiles_shape(client):
             "compact_token_limit": 300000,
         },
     }
-    with patch("agentica.gateway.routes.settings.get_profiles", return_value=profiles), \
-         patch("agentica.gateway.routes.settings.get_active_profile_name", return_value="default"):
+    with patch("agentica_gateway.routes.settings.get_profiles", return_value=profiles), \
+         patch("agentica_gateway.routes.settings.get_active_profile_name", return_value="default"):
         resp = c.get("/api/profiles")
     assert resp.status_code == 200
     data = resp.json()
@@ -65,7 +65,7 @@ def test_list_profiles_shape(client):
 
 def test_create_switch_delete_profile(client):
     c, svc = client
-    with patch("agentica.gateway.routes.settings.upsert_profile") as upsert:
+    with patch("agentica_gateway.routes.settings.upsert_profile") as upsert:
         created = c.post("/api/profile", json={
             "name": "web-v2-smoke",
             "model_provider": "openai",
@@ -78,15 +78,15 @@ def test_create_switch_delete_profile(client):
     assert upsert.call_args.args[0] == "web-v2-smoke"
     assert upsert.call_args.kwargs["make_active"] is False
 
-    with patch("agentica.gateway.routes.settings.get_profiles", return_value={"web-v2-smoke": {}}), \
-         patch("agentica.gateway.routes.settings.get_active_profile_name", return_value="default"):
+    with patch("agentica_gateway.routes.settings.get_profiles", return_value={"web-v2-smoke": {}}), \
+         patch("agentica_gateway.routes.settings.get_active_profile_name", return_value="default"):
         switched = c.post("/api/profile/switch", json={"name": "web-v2-smoke"})
     assert switched.status_code == 200, switched.text
     assert switched.json()["active_profile"] == "web-v2-smoke"
     svc.reload_profile.assert_awaited_with("web-v2-smoke")
 
-    with patch("agentica.gateway.routes.settings.get_profile", return_value={"model_name": "gpt-4o-mini"}), \
-         patch("agentica.gateway.routes.settings.delete_profile", return_value=True) as delete:
+    with patch("agentica_gateway.routes.settings.get_profile", return_value={"model_name": "gpt-4o-mini"}), \
+         patch("agentica_gateway.routes.settings.delete_profile", return_value=True) as delete:
         removed = c.delete("/api/profile/web-v2-smoke")
     assert removed.status_code == 200
     delete.assert_called_once_with("web-v2-smoke")

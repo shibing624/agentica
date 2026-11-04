@@ -1,0 +1,212 @@
+# Release everything from one tag:  git tag v1.5.1 && git push origin v1.5.1
+#
+# Prepare the tag with `python scripts/versions.py set 1.5.1` (commit it first);
+# the `check` job refuses a tag that does not match every version in the repo.
+#
+#   check ── web ── python ──┬── pypi            agentica + agentica-gateway
+#                            ├── desktop         installers (desktop.yml)
+#                            └── github-release  wheels + sdists + web tarball
+#   check ── sdk-ts ─────────── npm              @agentica-ai/sdk
+#
+# The Web UI is built once; the gateway wheel and every Desktop installer carry
+# those same bytes, and Desktop installs the same wheels PyPI gets.
+#
+# One-time setup (repo owner):
+#   PyPI   — add a Trusted Publisher for BOTH projects, `agentica` and
+#            `agentica-gateway`: owner shibing624, repo agentica, workflow
+#            release.yml, environment `pypi`. No API token is stored.
+#   npm    — secret NPM_TOKEN (automation token with publish rights on
+#            @agentica-ai/sdk). Provenance needs `id-token: write` (below).
+#   GitHub — environments `pypi` and `npm` (add required reviewers there if
+#            publishing should wait for a click).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # Manual runs build and verify every artifact and publish nothing: all
+  # publishing jobs require a tag push.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag matches every version in the repo
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            python scripts/versions.py check --tag "$GITHUB_REF_NAME"
+          else
+            python scripts/versions.py check
+          fi
+
+  web:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+
+  python:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          pip install build
+          python -m build --outdir dist .
+          python -m build --outdir dist gateway
+      - name: Verify
+        run: |
+          python scripts/verify_dists.py dist
+          python -m venv "$RUNNER_TEMP/v"
+          "$RUNNER_TEMP/v/bin/pip" install dist/agentica-*.whl dist/agentica_gateway-*.whl
+          cd "$RUNNER_TEMP" && "$RUNNER_TEMP/v/bin/agentica-gateway" --help >/dev/null && "$RUNNER_TEMP/v/bin/agentica" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+
+  pypi:
+    needs: python
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+      # Core first: agentica-gateway pins it exactly, so for the seconds in
+      # between, `pip install agentica-gateway` would otherwise fail to resolve.
+      - name: Split by project
+        run: |
+          mkdir core gw
+          mv dist/agentica_gateway-* gw/
+          mv dist/agentica-* core/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: core
+          skip-existing: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: gw
+          skip-existing: true
+
+  sdk-ts:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk-ts/package-lock.json
+      - working-directory: sdk-ts
+        run: |
+          npm ci
+          npm test
+          npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-ts-tarball
+          path: sdk-ts/*.tgz
+          if-no-files-found: error
+
+  npm:
+    needs: sdk-ts
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-ts-tarball
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Publish the tarball the sdk-ts job tested, not a rebuild.
+      - run: npm publish ./*.tgz --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  desktop:
+    needs: python
+    uses: ./.github/workflows/desktop.yml
+    with:
+      release_artifacts: true
+    secrets: inherit
+
+  github-release:
+    needs: [python, desktop]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: assets
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
+      # For people who host the UI themselves (behind nginx, in front of a
+      # remote gateway). Same bytes the gateway wheel carries.
+      - run: tar -czf "assets/agentica-web-${GITHUB_REF_NAME#v}.tar.gz" -C web-dist .
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -lh assets
+          # Release notes are usually written by hand before the tag; create
+          # one only if the tag has none yet.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" assets/* --clobber

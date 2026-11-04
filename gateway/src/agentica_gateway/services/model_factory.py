@@ -136,7 +136,7 @@ def create_model(
 
 
 def _gateway_cron_job_runner(job: Any) -> dict:
-    """Execute a cron job immediately and return its ``_execute_job`` result.
+    """Execute a cron job immediately and return its ``execute_job`` result.
 
     Called from ``CronTool``'s sync tool entrypoint, which itself runs in a
     worker thread (see ``Tool.execute``). Bridges back to the gateway's own
@@ -146,12 +146,12 @@ def _gateway_cron_job_runner(job: Any) -> dict:
     hazard.
     """
     from .. import deps
-    from agentica.cron.scheduler import _execute_job
+    from agentica.cron.scheduler import execute_job
 
     if deps.cron_runner is None or deps.main_loop is None:
         return {"job_id": job.id, "status": "failed", "error": "Cron runner not ready"}
     future = asyncio.run_coroutine_threadsafe(
-        _execute_job(job, agent_runner=deps.cron_runner, verbose=False),
+        execute_job(job, agent_runner=deps.cron_runner, verbose=False),
         deps.main_loop,
     )
     return future.result()

@@ -1736,7 +1736,7 @@ class AgentService:
 
     def _auto_extract_for(self, owner: Optional[str]) -> bool:
         """Per-account toggle for conversation memory extraction. Default on."""
-        from agentica.gateway.routes.settings import _clean_prefs, _read_prefs
+        from agentica_gateway.routes.settings import _clean_prefs, _read_prefs
         prefs = _clean_prefs(_read_prefs(self._owner(owner)))
         return bool(prefs.get("auto_extract_memory", True))
 

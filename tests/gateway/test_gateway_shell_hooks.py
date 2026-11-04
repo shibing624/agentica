@@ -1,7 +1,7 @@
 """The gateway wires ``settings.hooks`` only when ``settings.hooks.gateway`` is on."""
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway] extras")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 from agentica.shell_hooks import get_hook_egress, reset_hook_egress_for_tests
 from agentica.shell_hooks.config import HookConsumer, ShellHooksConfig
@@ -23,7 +23,7 @@ def _cfg(*, gateway):
 
 
 def test_hooks_stay_off_without_the_gateway_switch(monkeypatch):
-    import agentica.gateway.main as gateway_main
+    import agentica_gateway.main as gateway_main
 
     monkeypatch.setattr(gateway_main, "load_shell_hooks_config", lambda: _cfg(gateway=False))
     gateway_main._install_gateway_hooks()
@@ -31,7 +31,7 @@ def test_hooks_stay_off_without_the_gateway_switch(monkeypatch):
 
 
 def test_gateway_switch_installs_the_configured_consumers(monkeypatch):
-    import agentica.gateway.main as gateway_main
+    import agentica_gateway.main as gateway_main
 
     monkeypatch.setattr(gateway_main, "load_shell_hooks_config", lambda: _cfg(gateway=True))
     gateway_main._install_gateway_hooks()

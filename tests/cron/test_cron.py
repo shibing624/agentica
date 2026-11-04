@@ -683,7 +683,7 @@ class TestCronToolClass:
     def test_cron_tool_immediate_run_manages_own_timeout(self):
         """The immediate-run path spawns an uncancellable worker thread, so the
         cronjob Function must opt out of the outer asyncio.wait_for wrapper
-        (_execute_job enforces the job's timeout_seconds internally)."""
+        (execute_job enforces the job's timeout_seconds internally)."""
         from agentica.tools.cron_tool import CronTool
         tool = CronTool(job_runner=lambda j: {"status": "ok", "result": ""})
         assert tool.functions["cronjob"].manages_own_timeout is True

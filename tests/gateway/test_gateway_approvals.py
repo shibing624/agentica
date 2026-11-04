@@ -10,14 +10,14 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
 from agentica.agent.approvals import PendingApproval
-from agentica.gateway.models import ApprovalDecisionRequest
-from agentica.gateway.services import live_turn
+from agentica_gateway.models import ApprovalDecisionRequest
+from agentica_gateway.services import live_turn
 from agentica.tools.base import Function, FunctionCall
 
 
@@ -51,8 +51,8 @@ def _pending(tool_call_id="t1"):
 
 @pytest.fixture()
 def client():
-    from agentica.gateway.main import app
-    from agentica.gateway import deps
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
 
     with TestClient(app, raise_server_exceptions=False) as c:
         original = deps.agent_service
@@ -77,7 +77,7 @@ class TestApprovalPost:
         assert resp.status_code == 422
 
     def test_allow_resolves_wait(self):
-        from agentica.gateway.routes.chat import decide_session_approval
+        from agentica_gateway.routes.chat import decide_session_approval
 
         async def _run():
             turn = live_turn.start("s1", owner="default")
@@ -93,7 +93,7 @@ class TestApprovalPost:
         asyncio.run(_run())
 
     def test_allow_prefix_and_deny_round_trip(self):
-        from agentica.gateway.routes.chat import decide_session_approval
+        from agentica_gateway.routes.chat import decide_session_approval
 
         async def _run():
             turn = live_turn.start("s1", owner="default")
@@ -113,7 +113,7 @@ class TestApprovalPost:
         asyncio.run(_run())
 
     def test_unknown_id_on_live_turn_is_404(self):
-        from agentica.gateway.routes.chat import decide_session_approval
+        from agentica_gateway.routes.chat import decide_session_approval
         from fastapi import HTTPException
 
         async def _run():
@@ -128,7 +128,7 @@ class TestApprovalPost:
         asyncio.run(_run())
 
     def test_other_owner_cannot_decide(self):
-        from agentica.gateway.routes.chat import decide_session_approval
+        from agentica_gateway.routes.chat import decide_session_approval
         from fastapi import HTTPException
 
         async def _run():
@@ -148,7 +148,7 @@ class TestApprovalPost:
 
 class TestApprovalReplay:
     def test_subscribe_republishes_still_pending(self):
-        from agentica.gateway.routes import chat as chat_mod
+        from agentica_gateway.routes import chat as chat_mod
 
         async def _run():
             turn = live_turn.start("s1", owner="default")
@@ -184,7 +184,7 @@ class TestApprovalReplay:
         asyncio.run(_run())
 
     def test_tool_call_sse_includes_tool_call_id(self):
-        from agentica.gateway.routes.chat import _sse_stream_hooks
+        from agentica_gateway.routes.chat import _sse_stream_hooks
 
         published = []
         _, on_tool_call, _, _ = _sse_stream_hooks(published.append)
@@ -196,7 +196,7 @@ class TestApprovalReplay:
 
 class TestNoLiveTurnDeny:
     def test_injected_approve_denies_without_live_turn(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))
@@ -207,7 +207,7 @@ class TestNoLiveTurnDeny:
         asyncio.run(_run())
 
     def test_injected_approve_parks_when_live_turn_exists(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))

@@ -14,7 +14,7 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 import pytest
 
 # Guard: only run if fastapi + httpx are available
-pytest.importorskip("fastapi")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
@@ -27,9 +27,9 @@ def mock_app():
     The lifespan creates real services; we patch deps.agent_service
     with a mock after startup to intercept all agent calls.
     """
-    from agentica.gateway.services.agent_service import ChatResult
-    from agentica.gateway.main import app
-    from agentica.gateway import deps
+    from agentica_gateway.services.agent_service import ChatResult
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
 
     mock_svc = MagicMock()
     mock_svc.chat = AsyncMock(return_value=ChatResult(
@@ -87,7 +87,7 @@ def mock_app():
     mock_svc._cache.keys = MagicMock(return_value=[])
     mock_svc._workspace = None
 
-    from agentica.gateway.services import live_turn
+    from agentica_gateway.services import live_turn
     live_turn.reset()
     with TestClient(app, raise_server_exceptions=False) as client:
         # Override deps AFTER lifespan has initialized
@@ -257,7 +257,7 @@ class TestSessionEndpoints:
     @pytest.fixture(autouse=True)
     def _cli_sessions_hidden(self):
         # The pref lives in $AGENTICA_HOME/gateway/prefs; do not read the real one.
-        with patch("agentica.gateway.routes.chat.show_cli_sessions_pref", return_value=False):
+        with patch("agentica_gateway.routes.chat.show_cli_sessions_pref", return_value=False):
             yield
 
     def test_list_sessions(self, mock_app):
@@ -287,7 +287,7 @@ class TestSessionEndpoints:
 
     def test_list_sessions_follows_the_show_cli_sessions_pref(self, mock_app):
         client, mock_svc = mock_app
-        with patch("agentica.gateway.routes.chat.show_cli_sessions_pref", return_value=True):
+        with patch("agentica_gateway.routes.chat.show_cli_sessions_pref", return_value=True):
             client.get("/api/sessions")
         assert mock_svc.list_sessions.call_args.kwargs["include_cli"] is True
 
@@ -556,7 +556,7 @@ class TestDirHistoryAndConfigFile:
 class TestWebPrefs:
     def test_prefs_roundtrip_on_disk(self, mock_app, tmp_path, monkeypatch):
         client, _ = mock_app
-        import agentica.gateway.routes.settings as settings_routes
+        import agentica_gateway.routes.settings as settings_routes
         monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
         empty = client.get("/api/prefs")
         assert empty.status_code == 200
@@ -581,7 +581,7 @@ class TestWebPrefs:
 
     def test_auto_extract_memory_pref_roundtrip(self, mock_app, tmp_path, monkeypatch):
         client, mock_svc = mock_app
-        import agentica.gateway.routes.settings as settings_routes
+        import agentica_gateway.routes.settings as settings_routes
         monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
         saved = client.put("/api/prefs", json={"auto_extract_memory": False})
         assert saved.status_code == 200
@@ -646,7 +646,7 @@ class TestMemoryEndpoints:
 class TestOpenUrlAndWechatQr:
     def test_open_url(self, mock_app, monkeypatch):
         client, _ = mock_app
-        import agentica.gateway.routes.settings as settings_routes
+        import agentica_gateway.routes.settings as settings_routes
         called = []
         monkeypatch.setattr(
             settings_routes.subprocess,
@@ -665,7 +665,7 @@ class TestOpenUrlAndWechatQr:
 
     def test_reveal_selects_the_file_in_its_folder(self, mock_app, monkeypatch, tmp_path):
         client, _ = mock_app
-        import agentica.gateway.routes.settings as settings_routes
+        import agentica_gateway.routes.settings as settings_routes
 
         target = tmp_path / "notes.md"
         target.write_text("x", encoding="utf-8")
@@ -681,7 +681,7 @@ class TestOpenUrlAndWechatQr:
 
     def test_reveal_with_a_relative_path_never_opens_an_empty_string(self, mock_app, monkeypatch, tmp_path):
         client, _ = mock_app
-        import agentica.gateway.routes.settings as settings_routes
+        import agentica_gateway.routes.settings as settings_routes
 
         (tmp_path / "notes.md").write_text("x", encoding="utf-8")
         called = []
@@ -700,8 +700,8 @@ class TestOpenUrlAndWechatQr:
 
     def test_wechat_qr_start_and_poll(self, mock_app):
         client, _ = mock_app
-        from agentica.gateway import deps
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway import deps
+        from agentica_gateway.channels.base import ChannelType
 
         ch = deps.channel_manager.get_channel(ChannelType.WECHAT)
         assert ch is not None
@@ -723,7 +723,7 @@ class TestTempDirAndCompactEndpoints:
     def test_temp_workspace_is_created_under_agentica_home(self, mock_app, tmp_path, monkeypatch):
         client, _ = mock_app
         monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
-        import agentica.gateway.routes.settings as settings_routes
+        import agentica_gateway.routes.settings as settings_routes
         monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
         resp = client.post("/api/fs/temp", json={})
         assert resp.status_code == 200
@@ -785,8 +785,8 @@ class TestSchedulerEndpoints:
 
     def test_list_jobs(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
-             patch("agentica.gateway.routes.scheduler.schedule_to_human", return_value="daily 7:30"):
+        with patch("agentica_gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
+             patch("agentica_gateway.routes.scheduler.schedule_to_human", return_value="daily 7:30"):
             resp = client.get("/api/scheduler/jobs")
         assert resp.status_code == 200
         data = resp.json()
@@ -796,7 +796,7 @@ class TestSchedulerEndpoints:
 
     def test_create_job_body(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.cronjob",
+        with patch("agentica_gateway.routes.scheduler.cronjob",
                    return_value='{"success":true,"job":{"id":"j1"}}') as m:
             resp = client.post("/api/scheduler/jobs", json={
                 "prompt": "daily report", "schedule": "30 7 * * *", "name": "rep",
@@ -813,7 +813,7 @@ class TestSchedulerEndpoints:
         """The id of another account's job must 404, not 403 — otherwise the
         status code confirms it exists."""
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job",
+        with patch("agentica_gateway.routes.scheduler.get_job",
                    return_value=self._fake_job(user_id="kk")):
             assert client.get("/api/scheduler/jobs/j1").status_code == 404
             assert client.post("/api/scheduler/jobs/j1/pause").status_code == 404
@@ -821,7 +821,7 @@ class TestSchedulerEndpoints:
 
     def test_create_ignores_a_user_id_in_the_body(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.cronjob",
+        with patch("agentica_gateway.routes.scheduler.cronjob",
                    return_value='{"success":true,"job":{"id":"j1"}}') as m:
             resp = client.post("/api/scheduler/jobs", json={
                 "prompt": "daily report", "schedule": "30 7 * * *", "user_id": "kk",
@@ -837,8 +837,8 @@ class TestSchedulerEndpoints:
 
     def test_update_job(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler.cronjob",
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.cronjob",
                    return_value='{"success":true,"job":{"id":"j1"}}') as m:
             resp = client.put("/api/scheduler/jobs/j1", json={"schedule": "every 2h"})
         assert resp.status_code == 200
@@ -848,39 +848,39 @@ class TestSchedulerEndpoints:
 
     def test_update_job_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=None):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=None):
             resp = client.put("/api/scheduler/jobs/none", json={"name": "x"})
         assert resp.status_code == 404
 
     def test_update_job_empty_body(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()):
             resp = client.put("/api/scheduler/jobs/j1", json={})
         assert resp.status_code == 400
 
     def test_delete_job(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler.remove_job", return_value=True):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.remove_job", return_value=True):
             resp = client.delete("/api/scheduler/jobs/j1")
         assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"
 
     def test_pause_resume(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler.pause_job", return_value=self._fake_job()):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.pause_job", return_value=self._fake_job()):
             assert client.post("/api/scheduler/jobs/j1/pause").status_code == 200
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler.resume_job", return_value=self._fake_job()):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.resume_job", return_value=self._fake_job()):
             assert client.post("/api/scheduler/jobs/j1/resume").status_code == 200
 
     def test_trigger(self, mock_app):
-        """Trigger runs the job for real (via _execute_job), not just marks it due."""
+        """Trigger runs the job for real (via execute_job), not just marks it due."""
         client, _ = mock_app
         fake_run = {"job_id": "j1", "status": "ok", "result": "done"}
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler._execute_job", new=AsyncMock(return_value=fake_run)) as m:
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.execute_job", new=AsyncMock(return_value=fake_run)) as m:
             resp = client.post("/api/scheduler/jobs/j1/trigger")
         assert resp.status_code == 200
         data = resp.json()
@@ -891,8 +891,8 @@ class TestSchedulerEndpoints:
     def test_trigger_failed_run(self, mock_app):
         client, _ = mock_app
         fake_run = {"job_id": "j1", "status": "failed", "error": "boom"}
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler._execute_job", new=AsyncMock(return_value=fake_run)):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.execute_job", new=AsyncMock(return_value=fake_run)):
             resp = client.post("/api/scheduler/jobs/j1/trigger")
         assert resp.status_code == 200
         assert resp.json()["success"] is False
@@ -901,10 +901,10 @@ class TestSchedulerEndpoints:
         """validate_run=True runs the freshly created job immediately."""
         client, _ = mock_app
         fake_run = {"job_id": "j1", "status": "ok", "result": "done"}
-        with patch("agentica.gateway.routes.scheduler.cronjob",
+        with patch("agentica_gateway.routes.scheduler.cronjob",
                    return_value='{"success":true,"job":{"job_id":"j1"}}'), \
-             patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler._execute_job", new=AsyncMock(return_value=fake_run)) as m:
+             patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.execute_job", new=AsyncMock(return_value=fake_run)) as m:
             resp = client.post("/api/scheduler/jobs", json={
                 "prompt": "daily report", "schedule": "30 7 * * *", "validate_run": True,
             })
@@ -915,8 +915,8 @@ class TestSchedulerEndpoints:
 
     def test_list_runs(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
-             patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
+        with patch("agentica_gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
+             patch("agentica_gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
             resp = client.get("/api/scheduler/runs")
         assert resp.status_code == 200
         data = resp.json()
@@ -930,22 +930,22 @@ class TestSchedulerEndpoints:
     def test_list_runs_result_full_uses_error_when_no_result(self, mock_app):
         client, _ = mock_app
         run = self._fake_run(result=None, error="boom")
-        with patch("agentica.gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
-             patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[run]):
+        with patch("agentica_gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
+             patch("agentica_gateway.routes.scheduler.list_task_runs", return_value=[run]):
             resp = client.get("/api/scheduler/runs")
         assert resp.json()["runs"][0]["result_full"] == "boom"
 
     def test_list_job_runs(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica_gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
             resp = client.get("/api/scheduler/jobs/j1/runs")
         assert resp.status_code == 200
         assert resp.json()["job_id"] == "j1"
 
     def test_list_job_runs_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.scheduler.get_job", return_value=None):
+        with patch("agentica_gateway.routes.scheduler.get_job", return_value=None):
             resp = client.get("/api/scheduler/jobs/none/runs")
         assert resp.status_code == 404
 
@@ -966,7 +966,7 @@ class TestProfileCrudEndpoints:
                                 "base_url": "https://open.bigmodel.cn", "api_key": "sk-aux"},
             "env": {"SERPER_API_KEY": "xxx"},
         }
-        with patch("agentica.gateway.routes.settings.get_profile", return_value=fake):
+        with patch("agentica_gateway.routes.settings.get_profile", return_value=fake):
             resp = client.get("/api/profile/default")
         assert resp.status_code == 200
         d = resp.json()
@@ -981,13 +981,13 @@ class TestProfileCrudEndpoints:
 
     def test_get_profile_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
+        with patch("agentica_gateway.routes.settings.get_profile", return_value={}):
             resp = client.get("/api/profile/none")
         assert resp.status_code == 404
 
     def test_create_profile(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.settings.upsert_profile") as m:
+        with patch("agentica_gateway.routes.settings.upsert_profile") as m:
             resp = client.post("/api/profile", json={
                 "name": "test-p", "model_provider": "deepseek",
                 "model_name": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",
@@ -1004,7 +1004,7 @@ class TestProfileCrudEndpoints:
 
     def test_create_responses_profile(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.settings.upsert_profile") as upsert:
+        with patch("agentica_gateway.routes.settings.upsert_profile") as upsert:
             resp = client.post("/api/profile", json={
                 "name": "a",
                 "model_provider": "openai",
@@ -1027,8 +1027,8 @@ class TestProfileCrudEndpoints:
         client, _ = mock_app
         existing = {"model_provider": "deepseek", "model_name": "deepseek-v4-flash",
                     "base_url": "https://api.deepseek.com", "api_key": "sk-existing"}
-        with patch("agentica.gateway.routes.settings.get_profile", return_value=existing), \
-             patch("agentica.gateway.routes.settings.upsert_profile") as m:
+        with patch("agentica_gateway.routes.settings.get_profile", return_value=existing), \
+             patch("agentica_gateway.routes.settings.upsert_profile") as m:
             resp = client.put("/api/profile/default", json={
                 "name": "default", "model_provider": "deepseek",
                 "model_name": "deepseek-v4-flash", "temperature": 0.5,
@@ -1043,7 +1043,7 @@ class TestProfileCrudEndpoints:
 
     def test_update_profile_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
+        with patch("agentica_gateway.routes.settings.get_profile", return_value={}):
             resp = client.put("/api/profile/none", json={
                 "name": "none", "model_provider": "x", "model_name": "y",
             })
@@ -1051,15 +1051,15 @@ class TestProfileCrudEndpoints:
 
     def test_delete_profile(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.settings.get_profile", return_value={"model_provider": "x"}), \
-             patch("agentica.gateway.routes.settings.delete_profile", return_value=True) as m:
+        with patch("agentica_gateway.routes.settings.get_profile", return_value={"model_provider": "x"}), \
+             patch("agentica_gateway.routes.settings.delete_profile", return_value=True) as m:
             resp = client.delete("/api/profile/default")
         assert resp.status_code == 200
         m.assert_called_with("default")
 
     def test_delete_profile_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
+        with patch("agentica_gateway.routes.settings.get_profile", return_value={}):
             resp = client.delete("/api/profile/none")
         assert resp.status_code == 404
 
@@ -1068,7 +1068,7 @@ class TestChatRunRegistry:
     """Background run: disconnect does not cancel; Stop waits; reconnect replays."""
 
     def test_create_run_returns_id_immediately(self, mock_app):
-        from agentica.gateway.services.agent_service import ChatResult
+        from agentica_gateway.services.agent_service import ChatResult
         client, mock_svc = mock_app
         mock_svc.chat_stream = AsyncMock(return_value=ChatResult(
             content="hi", session_id="s1",
@@ -1081,7 +1081,7 @@ class TestChatRunRegistry:
         assert body["status"] in ("starting", "running", "completed")
 
     def test_active_run_and_events_replay(self, mock_app):
-        from agentica.gateway.services.agent_service import ChatResult
+        from agentica_gateway.services.agent_service import ChatResult
         client, mock_svc = mock_app
 
         async def fake_stream(*_a, on_content=None, **_k):
@@ -1110,7 +1110,7 @@ class TestChatRunRegistry:
         assert resp.json()["status"] == "completed"
 
     def test_second_run_on_same_session_409s_while_active(self, mock_app):
-        from agentica.gateway.services.agent_service import ChatResult
+        from agentica_gateway.services.agent_service import ChatResult
         client, mock_svc = mock_app
         gate = {"release": False}
 
@@ -1131,8 +1131,8 @@ class TestChatRunRegistry:
         client.post(f"/api/chat/runs/{run_id}/cancel")
 
     def test_disconnect_does_not_cancel_run(self, mock_app):
-        from agentica.gateway.services import live_turn
-        from agentica.gateway.services.agent_service import ChatResult
+        from agentica_gateway.services import live_turn
+        from agentica_gateway.services.agent_service import ChatResult
         client, mock_svc = mock_app
         gate = {"release": False}
 

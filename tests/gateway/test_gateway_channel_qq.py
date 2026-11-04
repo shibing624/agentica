@@ -13,7 +13,7 @@ import pytest
 # Mock LLM key per project convention
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 def _install_fake_botpy(monkeypatch):
@@ -30,21 +30,21 @@ def _install_fake_botpy(monkeypatch):
     monkeypatch.setitem(sys.modules, "botpy.message", fake_msg)
 
     # Reset module-level cached SDK refs so _ensure_qq_sdk re-imports.
-    from agentica.gateway.channels import qq as qq_mod
+    from agentica_gateway.channels import qq as qq_mod
     monkeypatch.setattr(qq_mod, "botpy", None)
     monkeypatch.setattr(qq_mod, "C2CMessage", None)
     monkeypatch.setattr(qq_mod, "GroupMessage", None)
 
 
 def test_channel_type_enum_has_qq():
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.base import ChannelType
     assert ChannelType.QQ.value == "qq"
 
 
 def test_lazy_import_error_points_to_extras(monkeypatch):
     """When qq-botpy is not installed, the error should mention the extras."""
     monkeypatch.setitem(sys.modules, "botpy", None)
-    from agentica.gateway.channels import qq as qq_mod
+    from agentica_gateway.channels import qq as qq_mod
     monkeypatch.setattr(qq_mod, "botpy", None)
 
     # Patch __import__ to raise ImportError for botpy
@@ -65,8 +65,8 @@ def test_lazy_import_error_points_to_extras(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_c2c_emits_unified_message(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
-    from agentica.gateway.channels.base import ChannelType, Message
+    from agentica_gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.base import ChannelType, Message
 
     ch = QQChannel(app_id="appid", app_secret="secret", allowed_users=[])
     received = []
@@ -96,7 +96,7 @@ async def test_on_message_c2c_emits_unified_message(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_group_uses_group_prefix(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="appid", app_secret="secret")
     received = []
@@ -122,7 +122,7 @@ async def test_on_message_group_uses_group_prefix(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_dedupes_by_id(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="x", app_secret="y")
     received = []
@@ -146,7 +146,7 @@ async def test_on_message_dedupes_by_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_allowlist_blocks(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="x", app_secret="y", allowed_users=["allowed_user"])
     received = []
@@ -168,7 +168,7 @@ async def test_on_message_allowlist_blocks(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_c2c_calls_post_c2c(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="x", app_secret="y")
     ch._client = MagicMock()
@@ -190,7 +190,7 @@ async def test_send_c2c_calls_post_c2c(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_group_calls_post_group(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="x", app_secret="y")
     ch._client = MagicMock()
@@ -209,7 +209,7 @@ async def test_send_group_calls_post_group(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_splits_long_text(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="x", app_secret="y")
     ch._client = MagicMock()
@@ -223,7 +223,7 @@ async def test_send_splits_long_text(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_when_not_connected_returns_false(monkeypatch):
     _install_fake_botpy(monkeypatch)
-    from agentica.gateway.channels.qq import QQChannel
+    from agentica_gateway.channels.qq import QQChannel
 
     ch = QQChannel(app_id="x", app_secret="y")
     assert await ch.send("u1", "hi") is False

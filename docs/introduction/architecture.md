@@ -127,7 +127,7 @@ Layer 1 绝不淘汰模型还没看过的尾部工具结果，也绝不收缩正
 
 ---
 
-## Gateway 审批与鉴权内部设计 (`agentica/gateway/`)
+## Gateway 审批与鉴权内部设计 (`gateway/src/agentica_gateway/`)
 
 1. **机器令牌与浏览器会话分离**：
    - 每次启动生成的随机 `token` 写入 `0600` 的 `runtime.json`，仅供本机进程（Desktop 壳、CLI、本机脚本）通过 `Authorization: Bearer` 调用。

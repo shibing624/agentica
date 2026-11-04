@@ -77,7 +77,7 @@ uv tool install "agentica[gateway]"
 
 Already have the CLI and want the Web UI: `uv tool install --force "agentica[gateway]"`. Upgrade with `uv tool upgrade agentica`. If the command is missing, run `uv tool update-shell`.
 
-Embed Agentica in your own Python project with `uv add agentica`. Only checkout development uses `pip install -e .`. Details: [Installation docs](https://shibing624.github.io/agentica/getting-started/installation).
+Embed Agentica in your own Python project with `uv add agentica`. Only checkout development uses `pip install -e . -e ./gateway` (the Web backend is its own distribution, `agentica-gateway`; `agentica[gateway]` installs it for you). Details: [Installation docs](https://shibing624.github.io/agentica/getting-started/installation).
 
 ### Desktop app
 

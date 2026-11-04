@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
@@ -15,9 +15,9 @@ from agentica.memory.session_log import SessionLog
 
 @pytest.fixture()
 def client_and_svc(tmp_path):
-    from agentica.gateway.main import app
-    from agentica.gateway import deps
-    from agentica.gateway.services.agent_service import AgentService
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
+    from agentica_gateway.services.agent_service import AgentService
 
     svc = MagicMock()
     svc._ensure_initialized = AsyncMock()
@@ -77,8 +77,8 @@ def test_trace_analysis_and_events(client_and_svc):
 
 def test_trace_header_uses_session_work_dir_not_stamped_process_cwd(tmp_path, monkeypatch):
     """A session in /Temp with no git must not show git:main …/Codes/agentica."""
-    from agentica.gateway.main import app
-    from agentica.gateway import deps
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
 
     gateway = tmp_path / "Codes" / "agentica"
     gateway.mkdir(parents=True)
@@ -122,7 +122,7 @@ def test_chat_and_traces_serve_html(client_and_svc):
 
 
 def test_spa_index_explains_how_to_build_when_dist_is_missing(tmp_path, monkeypatch):
-    import agentica.gateway.main as gateway_main
+    import agentica_gateway.main as gateway_main
 
     monkeypatch.setattr(gateway_main, "_UI_DIR", tmp_path)
     resp = gateway_main._spa_index()

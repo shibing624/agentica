@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 def _install_fake_dingtalk(monkeypatch):
@@ -47,7 +47,7 @@ def _install_fake_dingtalk(monkeypatch):
     monkeypatch.setitem(sys.modules, "dingtalk_stream", fake)
     monkeypatch.setitem(sys.modules, "dingtalk_stream.chatbot", fake_chatbot)
 
-    from agentica.gateway.channels import dingtalk as dt
+    from agentica_gateway.channels import dingtalk as dt
     monkeypatch.setattr(dt, "AckMessage", None)
     monkeypatch.setattr(dt, "CallbackHandler", None)
     monkeypatch.setattr(dt, "Credential", None)
@@ -56,12 +56,12 @@ def _install_fake_dingtalk(monkeypatch):
 
 
 def test_channel_type_enum_has_dingtalk():
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.base import ChannelType
     assert ChannelType.DINGTALK.value == "dingtalk"
 
 
 def test_lazy_import_error_points_to_extras(monkeypatch):
-    from agentica.gateway.channels import dingtalk as dt
+    from agentica_gateway.channels import dingtalk as dt
     monkeypatch.setattr(dt, "AckMessage", None)
 
     import builtins
@@ -81,8 +81,8 @@ def test_lazy_import_error_points_to_extras(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_one_to_one(monkeypatch):
     _install_fake_dingtalk(monkeypatch)
-    from agentica.gateway.channels.dingtalk import DingTalkChannel
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.dingtalk import DingTalkChannel
+    from agentica_gateway.channels.base import ChannelType
 
     ch = DingTalkChannel(client_id="cid", client_secret="cs")
     received = []
@@ -105,7 +105,7 @@ async def test_on_message_one_to_one(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_group_uses_prefix(monkeypatch):
     _install_fake_dingtalk(monkeypatch)
-    from agentica.gateway.channels.dingtalk import DingTalkChannel
+    from agentica_gateway.channels.dingtalk import DingTalkChannel
 
     ch = DingTalkChannel(client_id="cid", client_secret="cs")
     received = []
@@ -125,7 +125,7 @@ async def test_on_message_group_uses_prefix(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_message_allowlist_blocks(monkeypatch):
     _install_fake_dingtalk(monkeypatch)
-    from agentica.gateway.channels.dingtalk import DingTalkChannel
+    from agentica_gateway.channels.dingtalk import DingTalkChannel
 
     ch = DingTalkChannel(client_id="c", client_secret="s", allowed_users=["other"])
     received = []
@@ -140,7 +140,7 @@ async def test_on_message_allowlist_blocks(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_access_token_caches(monkeypatch):
     _install_fake_dingtalk(monkeypatch)
-    from agentica.gateway.channels.dingtalk import DingTalkChannel
+    from agentica_gateway.channels.dingtalk import DingTalkChannel
 
     ch = DingTalkChannel(client_id="c", client_secret="s")
 
@@ -148,7 +148,7 @@ async def test_get_access_token_caches(monkeypatch):
     fake_resp.json.return_value = {"accessToken": "tok-1", "expireIn": 3600}
     fake_resp.raise_for_status = MagicMock()
 
-    with patch("agentica.gateway.channels.dingtalk.requests.post", return_value=fake_resp) as mock_post:
+    with patch("agentica_gateway.channels.dingtalk.requests.post", return_value=fake_resp) as mock_post:
         t1 = await ch._get_access_token()
         t2 = await ch._get_access_token()
 
@@ -160,7 +160,7 @@ async def test_get_access_token_caches(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_one_to_one_endpoint(monkeypatch):
     _install_fake_dingtalk(monkeypatch)
-    from agentica.gateway.channels.dingtalk import DingTalkChannel
+    from agentica_gateway.channels.dingtalk import DingTalkChannel
 
     ch = DingTalkChannel(client_id="cid", client_secret="cs")
     ch._access_token = "tok"
@@ -172,7 +172,7 @@ async def test_send_one_to_one_endpoint(monkeypatch):
     fake_resp.text = "{}"
     fake_resp.json.return_value = {}
 
-    with patch("agentica.gateway.channels.dingtalk.requests.post", return_value=fake_resp) as mock_post:
+    with patch("agentica_gateway.channels.dingtalk.requests.post", return_value=fake_resp) as mock_post:
         ok = await ch.send("u1", "hello")
 
     assert ok is True
@@ -187,7 +187,7 @@ async def test_send_one_to_one_endpoint(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_group_endpoint(monkeypatch):
     _install_fake_dingtalk(monkeypatch)
-    from agentica.gateway.channels.dingtalk import DingTalkChannel
+    from agentica_gateway.channels.dingtalk import DingTalkChannel
 
     ch = DingTalkChannel(client_id="cid", client_secret="cs")
     ch._access_token = "tok"
@@ -199,7 +199,7 @@ async def test_send_group_endpoint(monkeypatch):
     fake_resp.text = "{}"
     fake_resp.json.return_value = {}
 
-    with patch("agentica.gateway.channels.dingtalk.requests.post", return_value=fake_resp) as mock_post:
+    with patch("agentica_gateway.channels.dingtalk.requests.post", return_value=fake_resp) as mock_post:
         ok = await ch.send("group:conv-x", "hello")
 
     assert ok is True

@@ -48,7 +48,13 @@ IM 等 extras 写进同一个 spec（zsh 下括号要加引号）：
 uv tool install --force "agentica[gateway,wechat,telegram]"
 ```
 
-Desktop 安装包自带 Python 和同版本的 `agentica`，打开即用，不需要另装 Python、Node、uv，也不用联网。它和 `uv tool install` 装的 CLI 共用 `~/.agentica` 数据，但各用各的可执行包。
+从 1.5.1 起，Web 后端是单独的发行包 `agentica-gateway`（含 Web UI、IM 渠道、cron），和 `agentica` 同版本发布。`agentica[gateway]` 就是「`agentica` + 同版本的 `agentica-gateway[feishu]`」，上面的命令不用改。几点区别：
+
+- `uv tool install agentica-gateway` 也能装，但只会暴露 `agentica-gateway` 一个命令；要 CLI 和 Web 两个命令，用 `"agentica[gateway]"`。
+- 不用 uv 时：`pip install agentica-gateway`（加飞书：`"agentica-gateway[feishu]"`，全部渠道：`"agentica-gateway[all]"`）。
+- 只装 `agentica` 时运行 `agentica-gateway`，会提示你装哪个包，而不是报 `command not found`。
+
+Desktop 安装包自带 Python 和同版本的 `agentica`、`agentica-gateway`，打开即用，不需要另装 Python、Node、uv，也不用联网。它和 `uv tool install` 装的 CLI 共用 `~/.agentica` 数据，但各用各的可执行包。
 
 ## 当库用（自己的项目）
 
@@ -66,11 +72,17 @@ uv add "agentica[rag]"          # 可选 extras
 ```bash
 git clone https://github.com/shibing624/agentica.git
 cd agentica
-pip install -e .
-# 或：uv pip install -e ".[dev,gateway]"
+pip install -e .                         # SDK + CLI
+pip install -e ./gateway                 # + Web 后端（agentica-gateway），改 gateway / Web 时需要
+# 或：uv pip install -e ".[dev]" -e "./gateway[all]"
+cd web && npm ci && npm run build        # Web UI → web/dist，网关直接读这里
 ```
 
-开发模式下，代码修改立即生效，无需重新安装。
+开发模式下，代码修改立即生效，无需重新安装；改了前端重新 `npm run build` 后刷新页面即可。
+
+不要用 `pip install -e ".[gateway]"`：这个 extra 指向 PyPI 上的 `agentica-gateway`，装不到你本地 checkout 的网关代码。
+
+仓库布局：`agentica/`（SDK + CLI，PyPI `agentica`）、`gateway/`（PyPI `agentica-gateway`）、`web/`（Web UI，构建产物打进 gateway wheel）、`desktop/`（Electron 安装包）、`sdk-ts/`（npm `@agentica-ai/sdk`）。全部同版本，由 `python scripts/versions.py set X.Y.Z` 一次改齐，推 `vX.Y.Z` tag 后 `.github/workflows/release.yml` 统一发布。
 
 ### 可选依赖
 

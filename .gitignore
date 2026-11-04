@@ -219,9 +219,15 @@ examples/self_evolution/03_self_evolution_e2e_glm.py
 node_modules/
 web/dist/
 sdk-ts/dist/
-# Vite production output. Source lives in web/; `npm run build` writes here
-# and the sdist/wheel ships it. Hashed filenames change every build.
+# Web UI is built into web/dist (above) and copied into the agentica-gateway
+# wheel at build time (gateway/hatch_build.py). Nothing writes into a Python
+# source tree any more; the old location stays ignored for stale local builds.
 agentica/gateway/ui/
+gateway/src/agentica_gateway/ui/
+gateway/dist/
+gateway/build/
+# A test once wrote a MagicMock repr as a path.
+/MagicMock/
 desktop/node_modules/
 # Bundled Python + agentica, assembled by desktop/scripts/prepare-runtime.js.
 desktop/runtime/

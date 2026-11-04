@@ -9,10 +9,10 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
-from agentica.gateway.services import live_turn
-from agentica.gateway.services.live_turn import cancel_and_wait
+from agentica_gateway.services import live_turn
+from agentica_gateway.services.live_turn import cancel_and_wait
 
 
 @pytest.fixture(autouse=True)
@@ -212,7 +212,7 @@ def test_slow_subscriber_is_dropped(monkeypatch):
 
 
 def test_sse_keepalive_when_queue_is_idle(monkeypatch):
-    from agentica.gateway.routes import chat as chat_mod
+    from agentica_gateway.routes import chat as chat_mod
 
     monkeypatch.setattr(chat_mod, "_SSE_KEEPALIVE_S", 0.05)
     turn = live_turn.start("k", owner="default")

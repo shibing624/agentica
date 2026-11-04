@@ -22,3 +22,7 @@ desktop/dist
 .sessions
 .worktrees
 .env
+web/dist
+gateway/dist
+gateway/build
+gateway/src/agentica_gateway/ui

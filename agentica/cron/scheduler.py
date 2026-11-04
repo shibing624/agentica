@@ -176,7 +176,7 @@ async def tick(
 
         results = []
         for job in due_jobs:
-            result = await _execute_job(job, agent_runner, verbose)
+            result = await execute_job(job, agent_runner, verbose)
             results.append(result)
 
         return results
@@ -185,12 +185,16 @@ async def tick(
         lock.release()
 
 
-async def _execute_job(
+async def execute_job(
     job: CronJob,
     agent_runner: AgentRunner | None,
     verbose: bool,
 ) -> dict[str, Any]:
-    """Execute a single cron job."""
+    """Execute a single cron job.
+
+    Public: the gateway (a separate distribution) and the CLI both run jobs
+    through this, so it is part of the cross-package API.
+    """
     logger.info(f"Executing job {job.id}: {job.name}")
     started_at_ms = now_ms()
     attempt = job.retry_count + 1
@@ -295,3 +299,7 @@ async def _execute_job(
         if verbose:
             print(f"  FAILED: {error_msg}")
         return {"job_id": job.id, "status": "failed", "error": error_msg}
+
+
+# Pre-1.5.1 name, kept for callers outside this repo.
+_execute_job = execute_job

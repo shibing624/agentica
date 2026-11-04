@@ -8,12 +8,12 @@ import asyncio
 import pytest
 
 # Gateway tests require fastapi etc. Skip cleanly if not installed.
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 from agentica import peers
 from agentica.peers import PeerSession, drain_inbox
-from agentica.gateway.channels.base import Channel, ChannelType, Message
-from agentica.gateway.services.peer_bridge import (
+from agentica_gateway.channels.base import Channel, ChannelType, Message
+from agentica_gateway.services.peer_bridge import (
     PeerBridge,
     parse_bridge_line,
 )

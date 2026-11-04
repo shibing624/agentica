@@ -13,7 +13,7 @@ import unicodedata
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
@@ -34,15 +34,15 @@ def client(monkeypatch, tmp_path):
     generated password exists and is flagged as generated. A test that wants no
     password at all has to clear it and say why.
     """
-    from agentica.gateway import auth, deps, runtime
-    from agentica.gateway.main import app
+    from agentica_gateway import auth, deps, runtime
+    from agentica_gateway.main import app
 
     monkeypatch.setenv("GATEWAY_AUTH", "true")
     monkeypatch.setenv("AGENTICA_GATEWAY_TOKEN", TOKEN)
     monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "gateway" / "runtime.json")
     auth.reset_token_for_tests()
     monkeypatch.setattr(
-        "agentica.gateway.routes.auth._scaffold_user",
+        "agentica_gateway.routes.auth._scaffold_user",
         lambda uid: (tmp_path / "ws" / "users" / uid).mkdir(parents=True, exist_ok=True),
     )
 
@@ -104,7 +104,7 @@ class TestGate:
 
     def test_a_header_token_mints_no_session(self, client):
         """A script polling with a header must not write a session per call."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         for _ in range(3):
             assert client.get("/api/status", headers=_auth()).status_code == 200
@@ -169,7 +169,7 @@ class TestGate:
         assert "access-control-allow-origin" not in evil.headers
 
     def test_env_token_pins_the_value(self, client):
-        from agentica.gateway import auth
+        from agentica_gateway import auth
         assert auth.get_token() == TOKEN
 
 
@@ -190,7 +190,7 @@ class TestPasswordLogin:
     def test_the_seeded_password_is_the_way_in(self, client):
         """What a user does on a fresh install: read the password out of the
         startup banner and type it."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         password = accounts.store().read_initial_password()
         assert password and len(password) >= 6
@@ -200,7 +200,7 @@ class TestPasswordLogin:
     def test_seeding_is_idempotent(self, client):
         """It runs on every boot, so a second call must not mint a new password
         and lock the user out of the one they wrote down."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         first = accounts.store().read_initial_password()
         assert accounts.store().seed_default_account() is None
@@ -209,14 +209,14 @@ class TestPasswordLogin:
     def test_the_generated_password_is_readable_but_only_by_its_owner(self, client):
         """It is kept in plaintext on purpose — a gateway started detached or by
         the desktop shell prints to a log nobody reads — so the mode matters."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         path = accounts.store().initial_password_path
         assert path.is_file()
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     def test_changing_it_retires_the_plaintext_copy(self, client):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         path = accounts.store().initial_password_path
         assert path.is_file()
@@ -230,7 +230,7 @@ class TestPasswordLogin:
         assert resp.status_code != 401
 
     def test_login_then_api_works_without_any_token(self, client):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         assert client.post(
@@ -240,7 +240,7 @@ class TestPasswordLogin:
         assert client.get("/api/status").status_code == 200
 
     def test_wrong_password_is_refused(self, client):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         assert client.post("/api/auth/login", json={"password": "wrong"}).status_code == 401
@@ -251,7 +251,7 @@ class TestPasswordLogin:
 
         Only reachable by clearing it explicitly now that first start seeds one.
         """
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().clear_password(ADMIN_ID)
         resp = client.post("/api/auth/login", json={"password": "anything"})
@@ -261,7 +261,7 @@ class TestPasswordLogin:
     def test_repeated_failures_are_throttled(self, client):
         """The password is guessable at machine speed, and this endpoint is
         reachable from the LAN in the deployment that required a password."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         codes = [
@@ -279,8 +279,8 @@ class TestPasswordLogin:
         """The whole reason sessions are on disk: the machine token is per
         process, so a cookie holding it sent the user back to the terminal
         after every restart."""
-        from agentica.gateway import accounts, auth, deps, runtime
-        from agentica.gateway.main import app
+        from agentica_gateway import accounts, auth, deps, runtime
+        from agentica_gateway.main import app
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
@@ -300,7 +300,7 @@ class TestPasswordLogin:
 
     def test_logout_kills_the_session_server_side(self, client):
         """Clearing the cookie is not enough: a copied cookie must stop too."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
@@ -311,7 +311,7 @@ class TestPasswordLogin:
         assert client.get("/api/status").status_code == 401
 
     def test_shell_route_sends_a_signed_out_browser_to_the_login_page(self, client):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         resp = client.get("/chat", follow_redirects=False)
@@ -322,7 +322,7 @@ class TestPasswordLogin:
         """The banner used to print `/chat?token=…`, which changed on every
         restart and was the only way in. A password is what a person can be
         told once."""
-        from agentica.gateway.main import _sign_in_notice
+        from agentica_gateway.main import _sign_in_notice
 
         notice = _sign_in_notice(ADMIN_ID, "abcd-efgh")
         assert f"{ADMIN_ID} / abcd-efgh" in notice
@@ -338,7 +338,7 @@ class TestPasswordLogin:
     def test_changing_the_password_signs_other_browsers_out(self, client):
         """A password change is what a user does after "somebody may have my
         cookie"; keeping those sessions alive would defeat the point."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
@@ -365,7 +365,7 @@ class TestPasswordLogin:
         ).status_code == 200
 
     def test_a_password_session_needs_the_old_one(self, client):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"password": "correct horse battery"})
@@ -389,7 +389,7 @@ class TestAccountStore:
     """The store on its own — no HTTP, so a failure here is unambiguous."""
 
     def store(self, tmp_path):
-        from agentica.gateway.accounts import AccountStore
+        from agentica_gateway.accounts import AccountStore
 
         return AccountStore(tmp_path / "auth.json")
 
@@ -446,7 +446,7 @@ class TestAccountStore:
         assert datetime.fromisoformat(renewed) > soon + timedelta(days=1)
 
     def test_a_hand_edited_hash_is_a_failed_login_not_a_crash(self, tmp_path):
-        from agentica.gateway.accounts import verify_password
+        from agentica_gateway.accounts import verify_password
 
         assert verify_password("x", "garbage") is False
         assert verify_password("x", "") is False
@@ -458,7 +458,7 @@ class TestAccountStore:
         assert st.read_session("whatever") is None
 
     def test_throttling_does_not_leak_which_ids_exist(self, tmp_path):
-        from agentica.gateway.accounts import LoginThrottled
+        from agentica_gateway.accounts import LoginThrottled
 
         st = self.store(tmp_path)
         st.set_password(ADMIN_ID, "correct horse battery")
@@ -472,14 +472,14 @@ class TestAccounts:
     """More than one account, and the partition each of them owns."""
 
     def store(self, tmp_path):
-        from agentica.gateway.accounts import AccountStore
+        from agentica_gateway.accounts import AccountStore
 
         return AccountStore(tmp_path / "auth.json")
 
     def test_the_seeded_account_is_named_after_its_data_partition(self, tmp_path):
         """It used to be `admin`, and an account id is now a directory name:
         `users/admin/` is not where any existing conversation lives."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         st = self.store(tmp_path)
         assert st.seed_default_account()
@@ -557,7 +557,7 @@ class TestAccounts:
             st.create_account(reserved)
 
     def test_scaffold_project_folder_is_the_username(self, tmp_path, monkeypatch):
-        from agentica.gateway.routes.auth import _scaffold_user
+        from agentica_gateway.routes.auth import _scaffold_user
 
         monkeypatch.setattr("agentica.workspace.AGENTICA_WORKSPACE_DIR", str(tmp_path / "ws"))
         _scaffold_user("kk")
@@ -618,7 +618,7 @@ class TestUserRoutes:
     """`/api/auth/users` — the only admin-only surface in the gateway."""
 
     def _sign_in_as(self, client, user_id):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         password = accounts.store().create_account(user_id)
         client.cookies.clear()
@@ -663,7 +663,7 @@ class TestUserRoutes:
     def test_changing_someone_else_does_not_need_a_current_password(self, client):
         """The admin is already signed in. Changing a user is the new password
         alone; asking for a current one is a reset in disguise."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "admin-pass")
         assert client.post("/api/auth/users", headers=_auth(),
@@ -677,7 +677,7 @@ class TestUserRoutes:
                            json={"username": "kk", "password": "new-kk"}).status_code == 200
 
     def test_changing_your_own_still_needs_the_current_password(self, client):
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "admin-pass")
         client.cookies.clear()
@@ -711,7 +711,7 @@ class TestUserRoutes:
 
     def test_you_cannot_remove_the_account_you_are_holding(self, client):
         """It would sign the admin out and can leave the machine with none."""
-        from agentica.gateway import accounts
+        from agentica_gateway import accounts
 
         accounts.store().set_password(ADMIN_ID, "correct horse battery")
         client.post("/api/auth/login", json={"username": ADMIN_ID, "password": "correct horse battery"})
@@ -734,8 +734,8 @@ class TestUserRoutes:
 
     def test_new_session_routes_pass_the_credential_account(self, client, monkeypatch):
         """The owner comes from the token, never from the request body."""
-        from agentica.gateway import deps
-        import agentica.gateway.routes.chat as chat_routes
+        from agentica_gateway import deps
+        import agentica_gateway.routes.chat as chat_routes
 
         deps.agent_service.fork_session = MagicMock(return_value="branch")
         deps.agent_service.set_session_feedback = MagicMock(return_value={})
@@ -755,10 +755,10 @@ class TestUserRoutes:
     def test_sessions_are_listed_per_account(self, client, monkeypatch):
         """The route reads the owner off the credential, so two accounts asking
         the same question get two different partitions."""
-        from agentica.gateway import deps
+        from agentica_gateway import deps
 
         # The pref lives in $AGENTICA_HOME/gateway/prefs; do not read the real one.
-        monkeypatch.setattr("agentica.gateway.routes.chat.show_cli_sessions_pref", lambda uid: False)
+        monkeypatch.setattr("agentica_gateway.routes.chat.show_cli_sessions_pref", lambda uid: False)
         client.get("/api/sessions", headers=_auth())
         assert deps.agent_service.list_sessions.call_args.kwargs == {
             "owner": ADMIN_ID, "scope": "recent", "recent_days": 30,
@@ -849,14 +849,14 @@ class TestCsrf:
 
 class TestOpenBindGuard:
     def test_loopback_needs_no_password(self):
-        from agentica.gateway.main import _refuse_open_bind
+        from agentica_gateway.main import _refuse_open_bind
 
         assert _refuse_open_bind("127.0.0.1") is None
 
     def test_lan_bind_without_a_password_is_refused(self, monkeypatch):
         """The token is printed in a terminal and cannot be rotated without a
         restart; a password is the credential a person can change."""
-        from agentica.gateway.main import _refuse_open_bind
+        from agentica_gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
         assert "set-password" in _refuse_open_bind("0.0.0.0")
@@ -865,8 +865,8 @@ class TestOpenBindGuard:
         """Seeding must not quietly satisfy this guard. The generated password
         is printed to a log and kept in plaintext so a locked-out owner can get
         in on loopback — neither is true of a credential facing a network."""
-        from agentica.gateway import accounts
-        from agentica.gateway.main import _refuse_open_bind
+        from agentica_gateway import accounts
+        from agentica_gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
         accounts.store().seed_default_account()
@@ -874,8 +874,8 @@ class TestOpenBindGuard:
         assert "generated" in _refuse_open_bind("0.0.0.0")
 
     def test_lan_bind_with_a_chosen_password_is_allowed(self, monkeypatch):
-        from agentica.gateway import accounts
-        from agentica.gateway.main import _refuse_open_bind
+        from agentica_gateway import accounts
+        from agentica_gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
         accounts.store().seed_default_account()
@@ -884,7 +884,7 @@ class TestOpenBindGuard:
 
     def test_gate_off_is_an_explicit_instruction_and_is_obeyed(self, monkeypatch):
         """An explicit argument is intent. It gets a loud warning, not a veto."""
-        from agentica.gateway.main import _refuse_open_bind
+        from agentica_gateway.main import _refuse_open_bind
 
         monkeypatch.setenv("GATEWAY_AUTH", "false")
         assert _refuse_open_bind("0.0.0.0") is None
@@ -899,7 +899,7 @@ class TestDesktopShutdown:
     def test_the_token_holder_gets_a_graceful_stop(self, client, monkeypatch):
         """This exists for Windows, where killing a child is a hard
         TerminateProcess and the channels would never disconnect."""
-        from agentica.gateway import main as gw_main
+        from agentica_gateway import main as gw_main
 
         server = MagicMock()
         server.should_exit = False
@@ -908,7 +908,7 @@ class TestDesktopShutdown:
         assert server.should_exit is True
 
     def test_without_a_server_object_it_declines(self, client, monkeypatch):
-        from agentica.gateway import main as gw_main
+        from agentica_gateway import main as gw_main
 
         monkeypatch.setattr(gw_main, "_server", None)
         assert client.post("/api/desktop/shutdown", headers=_auth()).status_code == 503
@@ -916,8 +916,8 @@ class TestDesktopShutdown:
 
 class TestGateOff:
     def test_gateway_auth_false_opens_everything(self, monkeypatch, tmp_path):
-        from agentica.gateway import deps, runtime
-        from agentica.gateway.main import app
+        from agentica_gateway import deps, runtime
+        from agentica_gateway.main import app
 
         monkeypatch.setenv("GATEWAY_AUTH", "false")
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "runtime.json")
@@ -932,8 +932,8 @@ class TestGateOff:
 
     def test_the_record_carries_no_token_when_the_gate_is_off(self, monkeypatch, tmp_path):
         """Writing a token nobody checks would suggest the API is guarded."""
-        from agentica.gateway import deps, runtime
-        from agentica.gateway.main import app
+        from agentica_gateway import deps, runtime
+        from agentica_gateway.main import app
 
         monkeypatch.setenv("GATEWAY_AUTH", "false")
         path = tmp_path / "runtime.json"
@@ -978,7 +978,7 @@ class TestWebSocketGate:
 
 class TestRuntimeRecord:
     def test_publish_then_read_round_trips(self, monkeypatch, tmp_path):
-        from agentica.gateway import runtime
+        from agentica_gateway import runtime
 
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "gateway" / "runtime.json")
         rec = runtime.GatewayRuntime(pid=os.getpid(), host="127.0.0.1", port=54321,
@@ -991,7 +991,7 @@ class TestRuntimeRecord:
         assert not list(path.parent.glob("*.tmp"))
 
     def test_url_never_hands_out_the_bind_address(self):
-        from agentica.gateway.runtime import GatewayRuntime
+        from agentica_gateway.runtime import GatewayRuntime
 
         wildcard = GatewayRuntime(pid=1, host="0.0.0.0", port=8881, token="", version="")
         assert wildcard.url == "http://127.0.0.1:8881"
@@ -1001,7 +1001,7 @@ class TestRuntimeRecord:
     def test_unpublish_only_removes_your_own_record(self, monkeypatch, tmp_path):
         """A desktop-spawned gateway exiting must not unpublish the terminal
         one that has since taken the file."""
-        from agentica.gateway import runtime
+        from agentica_gateway import runtime
 
         path = tmp_path / "runtime.json"
         monkeypatch.setattr(runtime, "RUNTIME_FILE", path)
@@ -1014,7 +1014,7 @@ class TestRuntimeRecord:
 
     def test_a_corrupt_record_reads_as_no_gateway(self, monkeypatch, tmp_path):
         """Half a file means "start one", which is also right for junk."""
-        from agentica.gateway import runtime
+        from agentica_gateway import runtime
 
         path = tmp_path / "runtime.json"
         monkeypatch.setattr(runtime, "RUNTIME_FILE", path)
@@ -1025,7 +1025,7 @@ class TestRuntimeRecord:
         assert runtime.read() is None
 
     def test_pid_liveness(self):
-        from agentica.gateway.runtime import is_pid_alive
+        from agentica_gateway.runtime import is_pid_alive
 
         assert is_pid_alive(os.getpid()) is True
         assert is_pid_alive(0) is False
@@ -1036,7 +1036,7 @@ class TestPortReporting:
     def test_port_zero_binds_a_real_port(self):
         """--port 0 must be resolved by whoever holds the socket; handing the
         number to uvicorn instead re-opens the race the zero avoids."""
-        from agentica.gateway.main import _bind
+        from agentica_gateway.main import _bind
 
         sock = _bind("127.0.0.1", 0)
         try:
@@ -1046,7 +1046,7 @@ class TestPortReporting:
             sock.close()
 
     def test_explicit_port_is_honoured(self):
-        from agentica.gateway.main import _bind
+        from agentica_gateway.main import _bind
 
         probe = _bind("127.0.0.1", 0)
         wanted = probe.getsockname()[1]
@@ -1058,9 +1058,9 @@ class TestPortReporting:
             sock.close()
 
     def test_the_published_record_carries_the_bound_port(self, monkeypatch, tmp_path):
-        from agentica.gateway import deps, runtime
-        from agentica.gateway.config import settings
-        from agentica.gateway.main import app
+        from agentica_gateway import deps, runtime
+        from agentica_gateway.config import settings
+        from agentica_gateway.main import app
 
         monkeypatch.setenv("GATEWAY_AUTH", "true")
         monkeypatch.setenv("AGENTICA_GATEWAY_TOKEN", TOKEN)
@@ -1082,8 +1082,8 @@ class TestPortReporting:
 
 class TestDieWithParent:
     def test_exits_once_the_parent_is_gone(self, monkeypatch, tmp_path):
-        from agentica.gateway import main as gw_main
-        from agentica.gateway import runtime
+        from agentica_gateway import main as gw_main
+        from agentica_gateway import runtime
 
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "runtime.json")
         monkeypatch.setattr(gw_main, "PARENT_POLL_SECONDS", 0.01)
@@ -1099,8 +1099,8 @@ class TestDieWithParent:
         assert calls == [0]
 
     def test_stays_up_while_the_parent_lives(self, monkeypatch, tmp_path):
-        from agentica.gateway import main as gw_main
-        from agentica.gateway import runtime
+        from agentica_gateway import main as gw_main
+        from agentica_gateway import runtime
 
         monkeypatch.setattr(runtime, "RUNTIME_FILE", tmp_path / "runtime.json")
         monkeypatch.setattr(gw_main, "PARENT_POLL_SECONDS", 0.01)
@@ -1116,15 +1116,15 @@ class TestDieWithParent:
     def test_no_watchdog_without_parent_pid(self, monkeypatch, tmp_path):
         """Nobody passed a parent, so nothing polls — a plain `agentica-gateway`
         in a terminal must not exit because of this feature."""
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
 
         with monkeypatch.context() as m:
             m.delenv("AGENTICA_GATEWAY_PARENT_PID", raising=False)
             assert Settings.from_env().parent_pid == 0
 
     def test_parent_pid_comes_from_env_or_flag(self, monkeypatch):
-        from agentica.gateway.config import Settings
-        from agentica.gateway.main import _parse_args
+        from agentica_gateway.config import Settings
+        from agentica_gateway.main import _parse_args
 
         monkeypatch.setenv("AGENTICA_GATEWAY_PARENT_PID", "4242")
         assert Settings.from_env().parent_pid == 4242

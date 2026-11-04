@@ -7,16 +7,16 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 def test_channel_type_enum_has_wechat():
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.base import ChannelType
     assert ChannelType.WECHAT.value == "wechat"
 
 
 def test_wxbotclient_extract_text_concatenates():
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
     msg = {
         "item_list": [
             {"type": 1, "text_item": {"text": "hello"}},
@@ -28,15 +28,15 @@ def test_wxbotclient_extract_text_concatenates():
 
 
 def test_wxbotclient_is_user_msg():
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
     assert WxBotClient.is_user_msg({"message_type": 1}) is True
     assert WxBotClient.is_user_msg({"message_type": 2}) is False
 
 
 @pytest.mark.asyncio
 async def test_on_native_message_emits_unified_message(monkeypatch, tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.base import ChannelType
 
     ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
     ch._main_loop = asyncio.get_running_loop()
@@ -74,7 +74,7 @@ async def test_on_native_message_emits_unified_message(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_on_native_message_dedupes(monkeypatch, tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.wechat import WeChatChannel
 
     ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
     ch._main_loop = asyncio.get_running_loop()
@@ -101,7 +101,7 @@ async def test_on_native_message_dedupes(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_on_native_message_allowlist_blocks(monkeypatch, tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.wechat import WeChatChannel
 
     ch = WeChatChannel(
         token_file=str(tmp_path / "tok.json"),
@@ -130,7 +130,7 @@ async def test_on_native_message_allowlist_blocks(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_send_uses_cached_context_and_splits(monkeypatch, tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.wechat import WeChatChannel
 
     ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
     ch._bot = MagicMock()
@@ -150,14 +150,14 @@ async def test_send_uses_cached_context_and_splits(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_send_when_not_connected_returns_false(monkeypatch, tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.wechat import WeChatChannel
 
     ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
     assert await ch.send("u1", "hi") is False
 
 
 def test_base_info_carries_bot_agent_and_version():
-    from agentica.gateway.channels.wechat import WxBotClient, _BOT_AGENT, _VERSION
+    from agentica_gateway.channels.wechat import WxBotClient, _BOT_AGENT, _VERSION
 
     bi = WxBotClient(token="t")._base_info()
     assert bi["channel_version"] == _VERSION
@@ -166,7 +166,7 @@ def test_base_info_carries_bot_agent_and_version():
 
 
 def test_aes_ecb_roundtrip():
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t")
     key = os.urandom(16)
@@ -187,7 +187,7 @@ def test_parse_aes_key_accepts_raw16_b64_hex_b64_and_bare_hex():
     """
     import base64
 
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     key = os.urandom(16)
     assert WxBotClient._parse_aes_key(base64.b64encode(key).decode()) == key
@@ -208,7 +208,7 @@ def test_hex_encoded_aes_key_decrypts_voice_payload():
     from Crypto.Cipher import AES
     from Crypto.Util.Padding import unpad
 
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t")
     key = os.urandom(16)
@@ -232,7 +232,7 @@ def test_hex_encoded_aes_key_decrypts_voice_payload():
 def test_download_media_uses_parsed_key_and_default_cdn_base(monkeypatch):
     import base64
 
-    from agentica.gateway.channels.wechat import WxBotClient, _CDN_BASE_URL
+    from agentica_gateway.channels.wechat import WxBotClient, _CDN_BASE_URL
 
     bot = WxBotClient(token="t")
     key = os.urandom(16)
@@ -252,7 +252,7 @@ def test_download_media_uses_parsed_key_and_default_cdn_base(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(
-        "agentica.gateway.channels.wechat.requests.get", fake_get
+        "agentica_gateway.channels.wechat.requests.get", fake_get
     )
     out = bot.download_media({
         "encrypt_query_param": "enc-q",
@@ -264,7 +264,7 @@ def test_download_media_uses_parsed_key_and_default_cdn_base(monkeypatch):
 
 
 def test_download_media_skips_decrypt_when_encrypt_type_zero(monkeypatch):
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t")
     raw = b"\xff\xd8\xff\xe0plaintext-jpeg"
@@ -276,7 +276,7 @@ def test_download_media_skips_decrypt_when_encrypt_type_zero(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "agentica.gateway.channels.wechat.requests.get",
+        "agentica_gateway.channels.wechat.requests.get",
         lambda *a, **k: _Resp(),
     )
     out = bot.download_media({
@@ -288,7 +288,7 @@ def test_download_media_skips_decrypt_when_encrypt_type_zero(monkeypatch):
 
 
 def test_send_typing_uses_status_field(monkeypatch):
-    from agentica.gateway.channels.wechat import WxBotClient, _TYPING, _CANCEL
+    from agentica_gateway.channels.wechat import WxBotClient, _TYPING, _CANCEL
 
     bot = WxBotClient(token="t")
     captured = {}
@@ -311,7 +311,7 @@ def test_send_typing_uses_status_field(monkeypatch):
 
 
 def test_send_typing_fetches_ticket_from_getconfig(monkeypatch):
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t")
     captured = {}
@@ -331,7 +331,7 @@ def test_send_typing_fetches_ticket_from_getconfig(monkeypatch):
 
 
 def test_extract_media_pulls_cdn_refs():
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     msg = {
         "item_list": [
@@ -348,7 +348,7 @@ def test_extract_media_pulls_cdn_refs():
 
 @pytest.mark.asyncio
 async def test_on_native_message_attaches_media(tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.wechat import WeChatChannel
 
     ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
     ch._main_loop = asyncio.get_running_loop()
@@ -377,7 +377,7 @@ async def test_on_native_message_attaches_media(tmp_path):
 
 
 def test_extract_media_typed_kinds_and_skips_video_thumb():
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     msg = {
         "item_list": [
@@ -408,8 +408,8 @@ def test_extract_media_typed_kinds_and_skips_video_thumb():
 
 @pytest.mark.asyncio
 async def test_fetch_media_downloads_typed_payloads(tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel
-    from agentica.gateway.channels.base import ChannelType, Message
+    from agentica_gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.base import ChannelType, Message
 
     ch = WeChatChannel(token_file=str(tmp_path / "tok.json"))
     ch._bot = MagicMock()
@@ -442,7 +442,7 @@ async def test_fetch_media_downloads_typed_payloads(tmp_path):
 
 @pytest.mark.asyncio
 async def test_fetch_media_default_channel_returns_empty():
-    from agentica.gateway.channels.base import Channel, ChannelType, Message
+    from agentica_gateway.channels.base import Channel, ChannelType, Message
 
     class _TextOnly(Channel):
         @property
@@ -469,7 +469,7 @@ def test_get_updates_session_expired_clears_credentials_and_raises(tmp_path):
     """errcode -14: the token is dead, so both it and the cursor must be
     dropped from the persisted state (a plain restart then goes straight to
     QR login), and the caller is told via SessionExpiredError."""
-    from agentica.gateway.channels.wechat import WxBotClient, SessionExpiredError
+    from agentica_gateway.channels.wechat import WxBotClient, SessionExpiredError
 
     tf = tmp_path / "tok.json"
     tf.write_text(json.dumps({"bot_token": "dead", "ilink_bot_id": "b", "updates_buf": "cur"}))
@@ -488,7 +488,7 @@ def test_get_updates_session_expired_clears_credentials_and_raises(tmp_path):
 
 def test_get_updates_ret_minus_14_also_means_session_expired(tmp_path):
     """The server reports the expiry in either `errcode` or `ret`."""
-    from agentica.gateway.channels.wechat import WxBotClient, SessionExpiredError
+    from agentica_gateway.channels.wechat import WxBotClient, SessionExpiredError
 
     bot = WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
     bot._post = lambda *a, **k: {"ret": -14, "errmsg": "session timeout"}
@@ -499,7 +499,7 @@ def test_get_updates_ret_minus_14_also_means_session_expired(tmp_path):
 def test_get_updates_other_errcode_raises_so_the_loop_backs_off(tmp_path):
     """A persistent non--14 error must not be warn-and-return either — that
     was the hot loop: the server answers instantly, the loop retries at once."""
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
     bot._post = lambda *a, **k: {"errcode": -2, "errmsg": "bad param"}
@@ -508,7 +508,7 @@ def test_get_updates_other_errcode_raises_so_the_loop_backs_off(tmp_path):
 
 
 def test_get_updates_success_persists_new_cursor(tmp_path):
-    from agentica.gateway.channels.wechat import WxBotClient
+    from agentica_gateway.channels.wechat import WxBotClient
 
     bot = WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
     bot._post = lambda *a, **k: {"ret": 0, "get_updates_buf": "nb", "msgs": [{"message_id": 1}]}
@@ -518,7 +518,7 @@ def test_get_updates_success_persists_new_cursor(tmp_path):
 
 
 def test_run_loop_backs_off_2s_then_30s_on_persistent_errors(tmp_path, monkeypatch):
-    from agentica.gateway.channels import wechat
+    from agentica_gateway.channels import wechat
 
     bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
     polls = []
@@ -539,7 +539,7 @@ def test_run_loop_backs_off_2s_then_30s_on_persistent_errors(tmp_path, monkeypat
 
 
 def test_run_loop_logs_request_poll_errors_as_warning(tmp_path, monkeypatch):
-    from agentica.gateway.channels import wechat
+    from agentica_gateway.channels import wechat
 
     bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
     polls = []
@@ -567,7 +567,7 @@ def test_run_loop_logs_request_poll_errors_as_warning(tmp_path, monkeypatch):
 
 
 def test_run_loop_relogs_in_via_qr_on_session_expired(tmp_path, monkeypatch):
-    from agentica.gateway.channels import wechat
+    from agentica_gateway.channels import wechat
 
     bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
     polls = []
@@ -590,7 +590,7 @@ def test_run_loop_relogs_in_via_qr_on_session_expired(tmp_path, monkeypatch):
 def test_run_loop_stops_after_bounded_relogin_attempts(tmp_path, monkeypatch):
     """An unattended gateway must not mint QR codes forever: after the capped
     attempts the loop stops (the error log names the manual fix)."""
-    from agentica.gateway.channels import wechat
+    from agentica_gateway.channels import wechat
 
     bot = wechat.WxBotClient(token="t", token_file=str(tmp_path / "t.json"))
 
@@ -615,7 +615,7 @@ def test_run_loop_stops_after_bounded_relogin_attempts(tmp_path, monkeypatch):
 
 
 def test_create_login_qr_returns_png(tmp_path, monkeypatch):
-    from agentica.gateway.channels import wechat
+    from agentica_gateway.channels import wechat
 
     bot = wechat.WxBotClient(token_file=str(tmp_path / "t.json"))
 
@@ -652,7 +652,7 @@ def test_create_login_qr_returns_png(tmp_path, monkeypatch):
 
 
 def test_poll_login_qr_persists_token_on_confirmed(tmp_path, monkeypatch):
-    from agentica.gateway.channels import wechat
+    from agentica_gateway.channels import wechat
 
     bot = wechat.WxBotClient(token_file=str(tmp_path / "t.json"))
 
@@ -674,7 +674,7 @@ def test_poll_login_qr_persists_token_on_confirmed(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_connect_without_token_does_not_open_qr(tmp_path, monkeypatch):
-    from agentica.gateway.channels.wechat import WeChatChannel, WxBotClient
+    from agentica_gateway.channels.wechat import WeChatChannel, WxBotClient
 
     called = []
     monkeypatch.setattr(WxBotClient, "login_qr", lambda self: called.append(1))
@@ -687,7 +687,7 @@ async def test_connect_without_token_does_not_open_qr(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_start_web_qr_then_poll_confirmed_starts_loop(tmp_path, monkeypatch):
-    from agentica.gateway.channels.wechat import WeChatChannel, WxBotClient
+    from agentica_gateway.channels.wechat import WeChatChannel, WxBotClient
 
     ch = WeChatChannel(token_file=str(tmp_path / "t.json"))
     monkeypatch.setattr(
@@ -714,7 +714,7 @@ async def test_start_web_qr_then_poll_confirmed_starts_loop(tmp_path, monkeypatc
 
 
 def test_bind_owner_persists_across_new_client(tmp_path):
-    from agentica.gateway.channels.wechat import WeChatChannel, WxBotClient
+    from agentica_gateway.channels.wechat import WeChatChannel, WxBotClient
 
     tf = str(tmp_path / "t.json")
     ch = WeChatChannel(token_file=tf)

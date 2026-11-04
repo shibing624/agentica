@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 def _install_fake_wecom(monkeypatch, *, populate_globals: bool = True):
@@ -24,7 +24,7 @@ def _install_fake_wecom(monkeypatch, *, populate_globals: bool = True):
     fake.generate_req_id = lambda prefix="": f"{prefix}-rid"
     monkeypatch.setitem(sys.modules, "wecom_aibot_sdk", fake)
 
-    from agentica.gateway.channels import wecom as wm
+    from agentica_gateway.channels import wecom as wm
     if populate_globals:
         monkeypatch.setattr(wm, "WSClient", fake.WSClient)
         monkeypatch.setattr(wm, "generate_req_id", fake.generate_req_id)
@@ -34,12 +34,12 @@ def _install_fake_wecom(monkeypatch, *, populate_globals: bool = True):
 
 
 def test_channel_type_enum_has_wecom():
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.base import ChannelType
     assert ChannelType.WECOM.value == "wecom"
 
 
 def test_lazy_import_error_points_to_extras(monkeypatch):
-    from agentica.gateway.channels import wecom as wm
+    from agentica_gateway.channels import wecom as wm
     monkeypatch.setattr(wm, "WSClient", None)
 
     import builtins
@@ -59,8 +59,8 @@ def test_lazy_import_error_points_to_extras(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_text_emits_unified_message_and_caches_frame(monkeypatch):
     _install_fake_wecom(monkeypatch)
-    from agentica.gateway.channels.wecom import WeComChannel
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.wecom import WeComChannel
+    from agentica_gateway.channels.base import ChannelType
 
     ch = WeComChannel(bot_id="b", secret="s")
     received = []
@@ -92,7 +92,7 @@ async def test_on_text_emits_unified_message_and_caches_frame(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_text_dedupes(monkeypatch):
     _install_fake_wecom(monkeypatch)
-    from agentica.gateway.channels.wecom import WeComChannel
+    from agentica_gateway.channels.wecom import WeComChannel
 
     ch = WeComChannel(bot_id="b", secret="s")
     received = []
@@ -110,7 +110,7 @@ async def test_on_text_dedupes(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_text_allowlist_blocks(monkeypatch):
     _install_fake_wecom(monkeypatch)
-    from agentica.gateway.channels.wecom import WeComChannel
+    from agentica_gateway.channels.wecom import WeComChannel
 
     ch = WeComChannel(bot_id="b", secret="s", allowed_users=["someone_else"])
     received = []
@@ -127,7 +127,7 @@ async def test_on_text_allowlist_blocks(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_uses_cached_frame(monkeypatch):
     _install_fake_wecom(monkeypatch)
-    from agentica.gateway.channels.wecom import WeComChannel
+    from agentica_gateway.channels.wecom import WeComChannel
 
     ch = WeComChannel(bot_id="b", secret="s")
     ch._client = MagicMock()
@@ -146,7 +146,7 @@ async def test_send_uses_cached_frame(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_no_cached_frame_returns_false(monkeypatch):
     _install_fake_wecom(monkeypatch)
-    from agentica.gateway.channels.wecom import WeComChannel
+    from agentica_gateway.channels.wecom import WeComChannel
 
     ch = WeComChannel(bot_id="b", secret="s")
     ch._client = MagicMock()
@@ -160,7 +160,7 @@ async def test_send_no_cached_frame_returns_false(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_splits_long_text(monkeypatch):
     _install_fake_wecom(monkeypatch)
-    from agentica.gateway.channels.wecom import WeComChannel
+    from agentica_gateway.channels.wecom import WeComChannel
 
     ch = WeComChannel(bot_id="b", secret="s")
     ch._client = MagicMock()

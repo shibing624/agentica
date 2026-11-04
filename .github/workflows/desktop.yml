@@ -5,15 +5,17 @@
 # needs Linux (or docker), so a macOS dev box can only ever produce the two
 # dmgs. Three runners is the whole reason this file exists.
 #
-# Each installer carries its own CPython and the agentica wheel built from the
-# tagged commit (desktop/scripts/prepare-runtime.js), so the app needs no
-# system Python or network on first launch, and shell and gateway are always the
-# same version.
+# Each installer carries its own CPython plus the agentica and agentica-gateway
+# wheels of the same commit (desktop/scripts/prepare-runtime.js), so the app
+# needs no system Python or network on first launch, and shell and gateway are
+# always the same version.
 #
-# Pushing a v* tag builds and attaches the installers to that tag's Release,
-# together with the latest*.yml / blockmap files electron-updater reads.
-# workflow_dispatch builds the same artifacts without touching any Release, so
-# the packaging can be exercised on a branch before a release depends on it.
+# Releases call this from release.yml (`release_artifacts: true`): it then
+# installs the web-dist and python-dist artifacts that run already built, so
+# the installers carry the very wheels PyPI gets, and release.yml attaches the
+# installers plus the latest*.yml / blockmap files electron-updater reads.
+# workflow_dispatch builds everything from the branch on its own, so the
+# packaging can be exercised before a release depends on it.
 #
 # Signing is opt-in. With the secrets below set, macOS builds are signed and
 # notarized and the Windows exe is signed; without them the build is unsigned
@@ -24,8 +26,12 @@
 name: Desktop installers
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      release_artifacts:
+        description: Use the web-dist / python-dist artifacts of the calling run
+        type: boolean
+        default: false
   workflow_dispatch:
 
 jobs:
@@ -59,9 +65,32 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The gateway serves the SPA out of agentica/gateway/ui, and the wheel
-      # that goes into the installer must carry it.
+      - name: Use the release's web UI
+        if: inputs.release_artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Use the release's wheels
+        if: inputs.release_artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: ${{ runner.temp }}/python-dist
+
+      - name: Point the runtime at those wheels
+        if: inputs.release_artifacts
+        shell: bash
+        run: |
+          d="$RUNNER_TEMP/python-dist"
+          echo "AGENTICA_WHEEL=$(ls "$d"/agentica-*.whl)" >> "$GITHUB_ENV"
+          echo "AGENTICA_GATEWAY_WHEEL=$(ls "$d"/agentica_gateway-*.whl)" >> "$GITHUB_ENV"
+
+      # Standalone run: build the UI here; prepare-runtime.js builds both
+      # wheels from this checkout (the gateway wheel's build needs web/dist).
       - name: Build the web UI
+        if: ${{ !inputs.release_artifacts }}
         working-directory: web
         run: |
           npm ci
@@ -120,29 +149,3 @@ jobs:
             desktop/dist/*.blockmap
             desktop/dist/latest*.yml
 
-  attach:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: installers
-          merge-multiple: true
-
-      - name: Attach to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          ls -lh installers
-          # The release is normally created by hand (release notes are written,
-          # not generated). Create it only if the tag has none yet, so a plain
-          # `git push --tags` still produces something downloadable.
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" --verify-tag \
-              --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" installers/* --clobber

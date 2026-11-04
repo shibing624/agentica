@@ -21,7 +21,7 @@ from agentica.cron.jobs import (
     schedule_to_expr,
     schedule_to_human,
 )
-from agentica.cron.scheduler import _execute_job
+from agentica.cron.scheduler import execute_job
 from agentica.tools.cron_tool import cronjob
 
 from .. import deps
@@ -137,7 +137,7 @@ async def api_create_job(body: CronJobCreateRequest, request: Request):
         job_id = job.get("id")
         job_obj = get_job(job_id) if job_id else None
         if job_obj:
-            result["validation_run"] = await _execute_job(job_obj, agent_runner=deps.cron_runner, verbose=False)
+            result["validation_run"] = await execute_job(job_obj, agent_runner=deps.cron_runner, verbose=False)
             result["job"] = _job_dict(get_job(job_id))
     return result
 
@@ -184,11 +184,11 @@ async def api_resume_job(job_id: str, request: Request):
 @router.post("/jobs/{job_id}/trigger")
 async def api_trigger_job(job_id: str, request: Request):
     """Run this job once, right now, synchronously — same execution path
-    (`_execute_job` + the gateway's AgentRunner) the background ticker uses,
+    (`execute_job` + the gateway's AgentRunner) the background ticker uses,
     not just marking it due for the next tick.
     """
     job = _owned_job(request, job_id)
-    run_result = await _execute_job(job, agent_runner=deps.cron_runner, verbose=False)
+    run_result = await execute_job(job, agent_runner=deps.cron_runner, verbose=False)
     updated = get_job(job_id)
     return {
         "success": run_result.get("status") == "ok",

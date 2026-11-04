@@ -15,7 +15,7 @@ import pytest
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
 
 # Gateway tests require fastapi + lark-oapi etc. Skip cleanly if not installed.
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway] extras")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 class TestAgentServiceApprovalMode:
@@ -23,7 +23,7 @@ class TestAgentServiceApprovalMode:
     and mutates an already-cached Agent's permission mode in place."""
 
     def test_unknown_mode_falls_back_to_default(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         assert svc._DEFAULT_APPROVAL_MODE == "auto"
@@ -31,7 +31,7 @@ class TestAgentServiceApprovalMode:
         assert svc.get_session_approval_mode("s1") == "auto"
 
     def test_valid_modes_are_persisted(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         for mode in ("ask", "auto", "allow-all"):
@@ -39,7 +39,7 @@ class TestAgentServiceApprovalMode:
             assert svc.get_session_approval_mode("s1") == mode
 
     def test_switches_cached_agent_permission_mode_in_place(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         agent = MagicMock()
@@ -50,7 +50,7 @@ class TestAgentServiceApprovalMode:
         agent.set_permission_mode.assert_called_once_with("ask")
 
     def test_run_config_no_longer_carries_enabled_tools(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
@@ -63,7 +63,7 @@ class TestAgentServiceSteer:
     """Web interrupt is Agent.steer on the cached session agent."""
 
     def _svc(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         return AgentService(workspace_path=str(tmp_path))
 
     def test_steer_session_forwards_to_cached_agent(self, tmp_path):
@@ -87,7 +87,7 @@ class TestAgentServiceSteer:
             lambda text: "SKILL PROMPT for x" if text == "/review x" else None
         )
         with patch(
-            "agentica.gateway.services.agent_service.get_skill_registry",
+            "agentica_gateway.services.agent_service.get_skill_registry",
             return_value=registry,
         ):
             svc.steer_session("s1", "/review x")
@@ -120,7 +120,7 @@ class TestAgentServiceRunSource:
     """AgentService passes gateway/cron run source into RunConfig."""
 
     def test_chat_uses_gateway_source_by_default(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
@@ -136,7 +136,7 @@ class TestAgentServiceRunSource:
         assert config.source == RunSource.gateway
 
     def test_chat_accepts_cron_source_override(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
@@ -157,7 +157,7 @@ class TestAgentServiceChatMedia:
     fallback descriptions become text parts, and notes reach the reply."""
 
     def _svc_with_agent(self, tmp_path, agent):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -166,7 +166,7 @@ class TestAgentServiceChatMedia:
         return svc
 
     def test_base_capable_image_attaches_to_run(self, tmp_path):
-        from agentica.gateway.channels.base import InboundMedia
+        from agentica_gateway.channels.base import InboundMedia
 
         agent = MagicMock()
         agent.model = SimpleNamespace(id="gpt-4o", supports_images=True)
@@ -186,8 +186,8 @@ class TestAgentServiceChatMedia:
         assert result.media_notes == []
 
     def test_fallback_voice_transcript_appended_and_noted(self, tmp_path, monkeypatch):
-        from agentica.gateway.channels.base import InboundMedia
-        from agentica.gateway.services import media_understanding as mu
+        from agentica_gateway.channels.base import InboundMedia
+        from agentica_gateway.services import media_understanding as mu
 
         class _FakeModel:
             async def response(self, messages):
@@ -200,7 +200,7 @@ class TestAgentServiceChatMedia:
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
         } if key == "media_model" else default)
         monkeypatch.setattr(
-            "agentica.gateway.services.agent_service.media_understanding",
+            "agentica_gateway.services.agent_service.media_understanding",
             mu.MediaUnderstandingService(create_model_fn=lambda *a, **kw: _FakeModel()),
         )
 
@@ -270,7 +270,7 @@ class TestAgentServiceStreamToolDispatch:
         return chunks
 
     def _run(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         chunks = self._parallel_batch_chunks()
 
@@ -294,7 +294,7 @@ class TestAgentServiceStreamToolDispatch:
             results.append((name, result))
 
         with patch(
-            "agentica.gateway.services.agent_service.usage_payload",
+            "agentica_gateway.services.agent_service.usage_payload",
             AsyncMock(return_value=None),
         ):
             result = asyncio.run(svc.chat_stream(
@@ -318,7 +318,7 @@ class TestAgentServiceStreamToolDispatch:
         ]
 
     def test_write_file_completed_carries_unified_diff(self):
-        from agentica.gateway.services.agent_service import dispatch_stream_chunk
+        from agentica_gateway.services.agent_service import dispatch_stream_chunk
         from agentica.run.response import RunEvent, RunResponse, ToolCallInfo
 
         extras = []
@@ -347,14 +347,14 @@ class TestAgentServiceCronUsesAuxiliaryModel:
     cron sessions without an auxiliary model configured are unaffected."""
 
     def test_cron_session_uses_auxiliary_model_when_configured(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
         with patch.object(settings, "auxiliary_model_provider", "zhipuai"), \
              patch.object(settings, "auxiliary_model_name", "glm-4.7-flash"), \
-             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+             patch("agentica_gateway.services.agent_service.create_model") as mock_create:
             mock_create.return_value = MagicMock()
             svc._build_agent("scheduled_job1")
 
@@ -362,35 +362,35 @@ class TestAgentServiceCronUsesAuxiliaryModel:
         assert mock_create.call_args.args == ("zhipuai", "glm-4.7-flash")
 
     def test_cron_session_falls_back_to_main_model_without_auxiliary(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
         with patch.object(settings, "auxiliary_model_name", ""), \
-             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+             patch("agentica_gateway.services.agent_service.create_model") as mock_create:
             mock_create.return_value = MagicMock()
             svc._build_agent("scheduled_job1")
 
         assert mock_create.call_args.args == (svc.model_provider, svc.model_name)
 
     def test_interactive_session_ignores_auxiliary_model_shortcut(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
         with patch.object(settings, "auxiliary_model_provider", "zhipuai"), \
              patch.object(settings, "auxiliary_model_name", "glm-4.7-flash"), \
-             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+             patch("agentica_gateway.services.agent_service.create_model") as mock_create:
             mock_create.return_value = MagicMock()
             svc._build_agent("chat123")
 
         assert mock_create.call_args_list[0].args == (svc.model_provider, svc.model_name)
 
     def test_interactive_session_passes_responses_protocol(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
@@ -400,7 +400,7 @@ class TestAgentServiceCronUsesAuxiliaryModel:
              patch.object(settings, "model_reasoning", "high"), \
              patch.object(settings, "model_reasoning_effort", ""), \
              patch.object(settings, "auxiliary_model_name", ""), \
-             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+             patch("agentica_gateway.services.agent_service.create_model") as mock_create:
             mock_create.return_value = MagicMock()
             svc._build_agent("chat123")
 
@@ -417,14 +417,14 @@ class TestAgentServiceNumHistoryTurns:
     separate hardcoded literal."""
 
     def test_build_agent_uses_settings_num_history_turns(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
         with patch.object(settings, "num_history_turns", 9), \
-             patch("agentica.gateway.services.agent_service.create_model"), \
-             patch("agentica.gateway.services.agent_service.DeepAgent") as mock_agent_cls:
+             patch("agentica_gateway.services.agent_service.create_model"), \
+             patch("agentica_gateway.services.agent_service.DeepAgent") as mock_agent_cls:
             mock_agent_cls.return_value = MagicMock(tools=[])
             svc._build_agent("chat123")
 
@@ -434,21 +434,21 @@ class TestAgentServiceNumHistoryTurns:
         """Simulates a model switch (settings.num_history_turns changed at
         runtime) followed by an agent rebuild — the rebuilt agent must pick
         up the new value, not a stale hardcoded one."""
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._workspace = None
         with patch.object(settings, "num_history_turns", 3), \
-             patch("agentica.gateway.services.agent_service.create_model"), \
-             patch("agentica.gateway.services.agent_service.DeepAgent") as mock_agent_cls:
+             patch("agentica_gateway.services.agent_service.create_model"), \
+             patch("agentica_gateway.services.agent_service.DeepAgent") as mock_agent_cls:
             mock_agent_cls.return_value = MagicMock(tools=[])
             svc._build_agent("chat123")
         assert mock_agent_cls.call_args.kwargs["num_history_turns"] == 3
 
         with patch.object(settings, "num_history_turns", 12), \
-             patch("agentica.gateway.services.agent_service.create_model"), \
-             patch("agentica.gateway.services.agent_service.DeepAgent") as mock_agent_cls:
+             patch("agentica_gateway.services.agent_service.create_model"), \
+             patch("agentica_gateway.services.agent_service.DeepAgent") as mock_agent_cls:
             mock_agent_cls.return_value = MagicMock(tools=[])
             svc._build_agent("chat123")
         assert mock_agent_cls.call_args.kwargs["num_history_turns"] == 12
@@ -459,7 +459,7 @@ class TestGetContextWindow:
     the session actually compacts against — not the model's hard limit."""
 
     def _svc_with_model(self, tmp_path, *, provider_window, cap):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         model = SimpleNamespace(context_window=provider_window)
@@ -490,7 +490,7 @@ class TestAgentServiceRunCron:
     is excluded from the chat sidebar (list_sessions())."""
 
     def test_run_cron_never_touches_the_interactive_agent_cache(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
@@ -513,8 +513,8 @@ class TestAgentServiceRunCron:
 
     def test_cron_runner_passes_the_runs_token_usage_through(self, tmp_path):
         from agentica.cron.types import CronRunOutput
-        from agentica.gateway.main import _GatewayAgentRunner
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.main import _GatewayAgentRunner
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.model.cost import CostTracker
 
         svc = AgentService(workspace_path=str(tmp_path))
@@ -539,7 +539,7 @@ class TestAgentServiceRunCron:
                                   "cache_write_tokens", "api_calls", "cost_usd"}
 
     def test_run_cron_empty_mandate_clears_prior_per_job_overrides(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -572,7 +572,7 @@ class TestAgentServiceRunCron:
         assert svc._sk("scheduled_job1", "u1") not in svc._session_work_dirs
 
     def test_run_cron_rejects_concurrent_runs_of_the_same_job(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
@@ -584,8 +584,8 @@ class TestAgentServiceRunCron:
             asyncio.run(svc.run_cron("x", job_id="job1"))
 
     def test_list_sessions_excludes_scheduled_job_sessions(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.services import live_turn
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.services import live_turn
         from agentica.memory.session_log import SessionLog
 
         live_turn.reset()
@@ -602,7 +602,7 @@ class TestAgentServiceRunCron:
     def test_list_sessions_includes_every_project(self, tmp_path):
         """The web sidebar is grouped by work dir; listing only settings.base_dir
         dropped a just-finished chat after opening its trace."""
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         dir_a = tmp_path / "repo-a"
@@ -620,7 +620,7 @@ class TestAgentServiceRunCron:
         assert by_id["sess-b"]["work_dir"] == str(dir_b)
 
     def test_recent_scope_filters_legacy_logs_before_preview(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         now = time.time()
@@ -642,7 +642,7 @@ class TestAgentServiceRunCron:
         assert preview.call_count == 4
 
     def test_session_preview_cache_uses_file_version(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         entry = {"session_id": "s1", "path": "s1.jsonl", "source": "gateway", "size_bytes": 10, "mtime_ns": 20}
@@ -656,7 +656,7 @@ class TestAgentServiceRunCron:
         preview.assert_called_once_with("s1.jsonl")
 
     def test_session_preview_cache_is_bounded_lru(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         with patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
@@ -671,8 +671,8 @@ class TestAgentServiceRunCron:
     def test_list_sessions_orders_by_creation_time(self, tmp_path):
         """Sidebar order = creation time (first request), newest on top; a
         later message must not reshuffle it."""
-        from agentica.gateway.services.agent_service import AgentService
-        from agentica.gateway.services import live_turn
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.services import live_turn
         from agentica.memory.session_log import SessionLog
 
         live_turn.reset()
@@ -689,7 +689,7 @@ class TestAgentServiceRunCron:
 
     def test_list_sessions_real_files_keep_creation_order(self, tmp_path):
         """jsonl mtime follows the last write; web order must follow the first line."""
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         d = tmp_path / "repo"
@@ -716,8 +716,8 @@ class TestAgentServiceRunCron:
     def test_session_log_for_finds_other_project_after_restart(self, tmp_path, monkeypatch):
         """View trace used settings.base_dir after a restart, so a chat that
         lived in another project 404'd even though the jsonl was on disk."""
-        from agentica.gateway.config import settings
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         default_dir = tmp_path / "default-cwd"
@@ -740,8 +740,8 @@ class TestAgentServiceRunCron:
         the transcript. After restart, _locate_session used to return that stub
         (is_file() is True) and never search other projects — title became
         Chat and View trace was empty while localStorage still had the chat."""
-        from agentica.gateway.config import settings
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         default_dir = tmp_path / "default-cwd"
@@ -769,9 +769,9 @@ class TestAgentServiceRunCron:
         """Touch-before-append must create the jsonl under the session's work
         dir, not settings.base_dir. Otherwise the Agent writes the real log
         next to Temp/ and the sidebar lists an empty stub next to agentica/."""
-        from agentica.gateway.config import settings
-        from agentica.gateway.routes.chat import _touch_session_log
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
+        from agentica_gateway.routes.chat import _touch_session_log
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.config.project import project_base_dir
 
         default_dir = tmp_path / "agentica-checkout"
@@ -793,8 +793,8 @@ class TestAgentServiceRunCron:
     def test_list_sessions_prefers_real_log_over_empty_stub(self, tmp_path, monkeypatch):
         """Same session_id in two project dirs: the empty default-cwd stub
         must not overwrite the real transcript's title with Chat."""
-        from agentica.gateway.config import settings
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.config import settings
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         default_dir = tmp_path / "default-cwd"
@@ -821,8 +821,8 @@ class TestAgentServiceOwnerPartition:
     """Cache, lock, live_turn and list_sessions are per-account, not bare session_id."""
 
     def test_delete_does_not_drop_another_owners_run(self, tmp_path):
-        from agentica.gateway.services import live_turn
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services import live_turn
+        from agentica_gateway.services.agent_service import AgentService
 
         live_turn.reset()
         live_turn.start("s1", owner="alice")
@@ -839,8 +839,8 @@ class TestAgentServiceOwnerPartition:
         live_turn.reset()
 
     def test_list_sessions_includes_live_run_before_jsonl(self, tmp_path):
-        from agentica.gateway.services import live_turn
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services import live_turn
+        from agentica_gateway.services.agent_service import AgentService
 
         live_turn.reset()
         live_turn.start("brand-new-live", owner="default")
@@ -852,7 +852,7 @@ class TestAgentServiceOwnerPartition:
         live_turn.reset()
 
     def test_list_sessions_unread_when_activity_is_after_last_read(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         work = tmp_path / "repo"
@@ -872,7 +872,7 @@ class TestAgentServiceOwnerPartition:
         assert by_id["s-unread"]["unread"] is False
 
     def test_list_sessions_legacy_without_last_read_is_not_unread(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         from agentica.memory.session_log import SessionLog
 
         work = tmp_path / "repo"
@@ -885,7 +885,7 @@ class TestAgentServiceOwnerPartition:
         assert by_id["s-old"]["unread"] is False
 
     def test_same_session_id_locks_do_not_collide_across_owners(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         a = svc._get_session_lock("s1", "alice")
@@ -900,9 +900,9 @@ class TestSettings:
 
     def test_from_env_defaults(self):
         """Settings.from_env() with no env vars uses sensible defaults."""
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         with patch.dict(os.environ, {}, clear=True):
-            with patch("agentica.gateway.config.apply_global_config", return_value={}):
+            with patch("agentica_gateway.config.apply_global_config", return_value={}):
                 s = Settings.from_env()
         # Loopback, not 0.0.0.0: reaching this API is enough to run tools as
         # the user, so exposing it to the LAN has to be asked for.
@@ -915,18 +915,18 @@ class TestSettings:
 
     def test_peer_bridge_on_by_default_and_env_opts_out(self):
         """PEER_BRIDGE defaults to on; falsey values disable it."""
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         with patch.dict(os.environ, {}, clear=True):
-            with patch("agentica.gateway.config.apply_global_config", return_value={}):
+            with patch("agentica_gateway.config.apply_global_config", return_value={}):
                 assert Settings.from_env().peer_bridge_enabled is True
         for value in ("false", "0", "no", "off"):
             with patch.dict(os.environ, {"PEER_BRIDGE": value}, clear=True):
-                with patch("agentica.gateway.config.apply_global_config", return_value={}):
+                with patch("agentica_gateway.config.apply_global_config", return_value={}):
                     assert Settings.from_env().peer_bridge_enabled is False, value
 
     def test_from_env_custom(self):
         """Settings.from_env() reads custom env vars (profile mocked empty)."""
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         env = {
             "HOST": "127.0.0.1",
             "PORT": "9000",
@@ -937,7 +937,7 @@ class TestSettings:
             "AGENTICA_REASONING_EFFORT": "max",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch("agentica.gateway.config.apply_global_config", return_value={}):
+            with patch("agentica_gateway.config.apply_global_config", return_value={}):
                 s = Settings.from_env()
         assert s.host == "127.0.0.1"
         assert s.port == 9000
@@ -948,7 +948,7 @@ class TestSettings:
         assert s.model_reasoning_effort == "max"
 
     def test_from_env_responses_profile_ignores_chat_effort_env(self):
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         profile = {
             "model_provider": "openai",
             "model_name": "gpt-5.6-sol",
@@ -956,7 +956,7 @@ class TestSettings:
             "reasoning": "high",
         }
         with patch.dict(os.environ, {"AGENTICA_REASONING_EFFORT": "max"}, clear=False):
-            with patch("agentica.gateway.config.apply_global_config", return_value=profile):
+            with patch("agentica_gateway.config.apply_global_config", return_value=profile):
                 s = Settings.from_env()
         assert s.model_wire_api == "responses"
         assert s.model_reasoning == "high"
@@ -964,7 +964,7 @@ class TestSettings:
 
     def test_mutable_model_fields(self):
         """model_provider, model_name, model_thinking should be mutable."""
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         s = Settings()
         s.model_provider = "anthropic"
         s.model_name = "claude-3.5"
@@ -978,7 +978,7 @@ class TestSettings:
     def test_base_dir_mutable(self):
         """base_dir should be settable as both str and Path."""
         from pathlib import Path
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         s = Settings()
         s.base_dir = "/tmp/test_dir"
         assert s.base_dir == Path("/tmp/test_dir")
@@ -987,7 +987,7 @@ class TestSettings:
 
     def test_upload_allowed_ext_set(self):
         """upload_allowed_ext_set parses comma-separated extensions."""
-        from agentica.gateway.config import Settings
+        from agentica_gateway.config import Settings
         s = Settings(upload_allowed_extensions=".py,.js,.ts")
         ext_set = s.upload_allowed_ext_set
         assert ext_set == {".py", ".js", ".ts"}
@@ -1012,7 +1012,7 @@ class TestUploadFile:
 
     def test_oversized_upload_rejected_with_mb_unit(self, tmp_path):
         from fastapi import HTTPException
-        from agentica.gateway.routes import chat
+        from agentica_gateway.routes import chat
         up = self._make_upload(b"x" * (2 * 1024 * 1024), "big.txt")
         with patch.object(chat, "settings", self._settings(tmp_path, max_mb=1)):
             with pytest.raises(HTTPException) as ei:
@@ -1022,7 +1022,7 @@ class TestUploadFile:
         assert "1MB" in ei.value.detail and "KB" not in ei.value.detail
 
     def test_valid_upload_written_to_workspace(self, tmp_path):
-        from agentica.gateway.routes import chat
+        from agentica_gateway.routes import chat
         up = self._make_upload(b"hello", "note.txt")
         with patch.object(chat, "settings", self._settings(tmp_path)):
             result = asyncio.run(chat.upload_file(file=up, target_dir=""))
@@ -1031,7 +1031,7 @@ class TestUploadFile:
 
     def test_target_dir_outside_workspace_rejected(self, tmp_path):
         from fastapi import HTTPException
-        from agentica.gateway.routes import chat
+        from agentica_gateway.routes import chat
         up = self._make_upload(b"hi", "x.txt")
         outside = str(tmp_path.parent)  # parent dir escapes the workspace root
         with patch.object(chat, "settings", self._settings(tmp_path)):
@@ -1046,7 +1046,7 @@ class TestLRUAgentCache:
     """Test LRU cache for agent instances."""
 
     def test_put_and_get(self):
-        from agentica.gateway.services.agent_service import LRUAgentCache
+        from agentica_gateway.services.agent_service import LRUAgentCache
         cache = LRUAgentCache(max_size=3)
         mock_agent = MagicMock()
         cache.put("s1", mock_agent)
@@ -1055,7 +1055,7 @@ class TestLRUAgentCache:
 
     def test_eviction(self):
         """Oldest entry is evicted when cache exceeds max_size."""
-        from agentica.gateway.services.agent_service import LRUAgentCache
+        from agentica_gateway.services.agent_service import LRUAgentCache
         cache = LRUAgentCache(max_size=2)
         cache.put("s1", MagicMock())
         cache.put("s2", MagicMock())
@@ -1066,7 +1066,7 @@ class TestLRUAgentCache:
 
     def test_access_refreshes_lru_order(self):
         """Accessing an entry moves it to the end (most recent)."""
-        from agentica.gateway.services.agent_service import LRUAgentCache
+        from agentica_gateway.services.agent_service import LRUAgentCache
         cache = LRUAgentCache(max_size=2)
         cache.put("s1", MagicMock())
         cache.put("s2", MagicMock())
@@ -1076,7 +1076,7 @@ class TestLRUAgentCache:
         assert cache.get("s2") is None
 
     def test_delete(self):
-        from agentica.gateway.services.agent_service import LRUAgentCache
+        from agentica_gateway.services.agent_service import LRUAgentCache
         cache = LRUAgentCache(max_size=5)
         cache.put("s1", MagicMock())
         assert cache.delete("s1") is True
@@ -1084,7 +1084,7 @@ class TestLRUAgentCache:
         assert cache.get("s1") is None
 
     def test_clear(self):
-        from agentica.gateway.services.agent_service import LRUAgentCache
+        from agentica_gateway.services.agent_service import LRUAgentCache
         cache = LRUAgentCache(max_size=5)
         cache.put("s1", MagicMock())
         cache.put("s2", MagicMock())
@@ -1092,7 +1092,7 @@ class TestLRUAgentCache:
         assert len(cache) == 0
 
     def test_keys(self):
-        from agentica.gateway.services.agent_service import LRUAgentCache
+        from agentica_gateway.services.agent_service import LRUAgentCache
         cache = LRUAgentCache(max_size=5)
         cache.put("s1", MagicMock())
         cache.put("s2", MagicMock())
@@ -1101,8 +1101,8 @@ class TestLRUAgentCache:
     def test_pending_approval_pins_entry_against_eviction(self):
         """A LiveTurn with pending approvals is not LRU-evicted."""
         from agentica.agent.approvals import PendingApproval
-        from agentica.gateway.services import live_turn
-        from agentica.gateway.services.agent_service import AgentService, LRUAgentCache
+        from agentica_gateway.services import live_turn
+        from agentica_gateway.services.agent_service import AgentService, LRUAgentCache
 
         async def _run():
             live_turn.reset()
@@ -1127,7 +1127,7 @@ class TestMessageRouter:
     """Test message routing rules and priority."""
 
     def _make_message(self, channel="feishu", channel_id="chat1", sender_id="user1"):
-        from agentica.gateway.channels.base import ChannelType, Message
+        from agentica_gateway.channels.base import ChannelType, Message
         return Message(
             channel=ChannelType(channel),
             channel_id=channel_id,
@@ -1139,15 +1139,15 @@ class TestMessageRouter:
 
     def test_default_route(self):
         """No rules → default agent."""
-        from agentica.gateway.services.router import MessageRouter
+        from agentica_gateway.services.router import MessageRouter
         router = MessageRouter(default_agent="main")
         msg = self._make_message()
         assert router.route(msg) == "main"
 
     def test_sender_match(self):
         """Exact sender_id match routes to specific agent."""
-        from agentica.gateway.services.router import MessageRouter, RoutingRule
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.router import MessageRouter, RoutingRule
+        from agentica_gateway.channels.base import ChannelType
         router = MessageRouter(default_agent="main")
         router.add_rule(RoutingRule(agent_id="vip_agent", sender_id="user1"))
         msg = self._make_message(sender_id="user1")
@@ -1155,8 +1155,8 @@ class TestMessageRouter:
 
     def test_channel_match(self):
         """Channel type match."""
-        from agentica.gateway.services.router import MessageRouter, RoutingRule
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.router import MessageRouter, RoutingRule
+        from agentica_gateway.channels.base import ChannelType
         router = MessageRouter(default_agent="main")
         router.add_rule(RoutingRule(agent_id="tg_agent", channel=ChannelType.TELEGRAM))
         msg = self._make_message(channel="telegram")
@@ -1164,8 +1164,8 @@ class TestMessageRouter:
 
     def test_priority_ordering(self):
         """Higher priority rules are checked first."""
-        from agentica.gateway.services.router import MessageRouter, RoutingRule
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.router import MessageRouter, RoutingRule
+        from agentica_gateway.channels.base import ChannelType
         router = MessageRouter(default_agent="main")
         router.add_rule(RoutingRule(agent_id="low", channel=ChannelType.FEISHU, priority=1))
         router.add_rule(RoutingRule(agent_id="high", channel=ChannelType.FEISHU, priority=10))
@@ -1174,8 +1174,8 @@ class TestMessageRouter:
 
     def test_no_match_falls_to_default(self):
         """Non-matching rules fall through to default."""
-        from agentica.gateway.services.router import MessageRouter, RoutingRule
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.router import MessageRouter, RoutingRule
+        from agentica_gateway.channels.base import ChannelType
         router = MessageRouter(default_agent="main")
         router.add_rule(RoutingRule(agent_id="tg_agent", channel=ChannelType.TELEGRAM))
         msg = self._make_message(channel="feishu")
@@ -1183,7 +1183,7 @@ class TestMessageRouter:
 
     def test_session_id_format(self):
         """Session ID has deterministic format."""
-        from agentica.gateway.services.router import MessageRouter
+        from agentica_gateway.services.router import MessageRouter
         router = MessageRouter()
         msg = self._make_message(channel="feishu", channel_id="chat123")
         sid = router.get_session_id(msg, "agent1")
@@ -1191,8 +1191,8 @@ class TestMessageRouter:
 
     def test_remove_rule(self):
         """Removing a rule by agent_id."""
-        from agentica.gateway.services.router import MessageRouter, RoutingRule
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.router import MessageRouter, RoutingRule
+        from agentica_gateway.channels.base import ChannelType
         router = MessageRouter(default_agent="main")
         router.add_rule(RoutingRule(agent_id="x", channel=ChannelType.FEISHU))
         router.remove_rule("x")
@@ -1200,8 +1200,8 @@ class TestMessageRouter:
 
     def test_list_rules(self):
         """list_rules returns serialized dicts."""
-        from agentica.gateway.services.router import MessageRouter, RoutingRule
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.router import MessageRouter, RoutingRule
+        from agentica_gateway.channels.base import ChannelType
         router = MessageRouter()
         router.add_rule(RoutingRule(agent_id="a", channel=ChannelType.FEISHU, priority=5))
         rules = router.list_rules()
@@ -1217,7 +1217,7 @@ class TestChannelManager:
     """Test channel manager lifecycle and dispatch."""
 
     def _make_channel(self, channel_type_str="feishu", connected=True):
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.channels.base import ChannelType
         from unittest.mock import AsyncMock
         ch = MagicMock()
         ch.channel_type = ChannelType(channel_type_str)
@@ -1229,7 +1229,7 @@ class TestChannelManager:
         return ch
 
     def test_register_and_list(self):
-        from agentica.gateway.services.channel_manager import ChannelManager
+        from agentica_gateway.services.channel_manager import ChannelManager
         mgr = ChannelManager()
         ch = self._make_channel("feishu")
         mgr.register(ch)
@@ -1237,7 +1237,7 @@ class TestChannelManager:
         ch.set_handler.assert_called_once()
 
     def test_get_status(self):
-        from agentica.gateway.services.channel_manager import ChannelManager
+        from agentica_gateway.services.channel_manager import ChannelManager
         mgr = ChannelManager()
         ch = self._make_channel("telegram", connected=True)
         mgr.register(ch)
@@ -1246,21 +1246,21 @@ class TestChannelManager:
         assert status["telegram"]["connected"] is True
 
     def test_send_unknown_channel_type(self):
-        from agentica.gateway.services.channel_manager import ChannelManager
+        from agentica_gateway.services.channel_manager import ChannelManager
         mgr = ChannelManager()
         result = asyncio.run(mgr.send("nonexistent", "chat1", "hello"))
         assert result is False
 
     def test_send_channel_not_registered(self):
-        from agentica.gateway.services.channel_manager import ChannelManager
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.channel_manager import ChannelManager
+        from agentica_gateway.channels.base import ChannelType
         mgr = ChannelManager()
         result = asyncio.run(mgr.send(ChannelType.FEISHU, "chat1", "hello"))
         assert result is False
 
     def test_get_channel(self):
-        from agentica.gateway.services.channel_manager import ChannelManager
-        from agentica.gateway.channels.base import ChannelType
+        from agentica_gateway.services.channel_manager import ChannelManager
+        from agentica_gateway.channels.base import ChannelType
         mgr = ChannelManager()
         ch = self._make_channel("feishu")
         mgr.register(ch)
@@ -1272,7 +1272,7 @@ class TestChannelCatalog:
     """Personal Assistant page payload: every entry, live status."""
 
     def test_web_always_on_and_wechat_listed(self):
-        from agentica.gateway.channels.catalog import CATALOG, channel_overview
+        from agentica_gateway.channels.catalog import CATALOG, channel_overview
         data = channel_overview(
             None, host="127.0.0.1", port=8881,
             web_url="http://127.0.0.1:8881/chat",
@@ -1291,9 +1291,9 @@ class TestChannelCatalog:
         assert wechat["env"][0]["name"] == "WECHAT_TOKEN_FILE"
 
     def test_registered_im_is_configured(self):
-        from agentica.gateway.channels.base import ChannelType
-        from agentica.gateway.channels.catalog import channel_overview
-        from agentica.gateway.services.channel_manager import ChannelManager
+        from agentica_gateway.channels.base import ChannelType
+        from agentica_gateway.channels.catalog import channel_overview
+        from agentica_gateway.services.channel_manager import ChannelManager
         mgr = ChannelManager()
         ch = MagicMock()
         ch.channel_type = ChannelType.WECHAT
@@ -1317,7 +1317,7 @@ class TestResponseFormatter:
     """Test response formatting utilities."""
 
     def test_format_write_file_keeps_full_content(self):
-        from agentica.gateway.services.response_formatter import format_tool_call_args
+        from agentica_gateway.services.response_formatter import format_tool_call_args
         result = format_tool_call_args("write_file", {
             "file_path": "new.py",
             "content": "import os\nimport sys\n",
@@ -1326,7 +1326,7 @@ class TestResponseFormatter:
         assert result["content"] == "import os\nimport sys\n"
 
     def test_format_read_file_truncates_one_liner(self):
-        from agentica.gateway.services.response_formatter import format_tool_call_args
+        from agentica_gateway.services.response_formatter import format_tool_call_args
         long_str = "x" * 200
         result = format_tool_call_args("read_file", {"file_path": long_str, "offset": 0})
         assert result["file_path"].endswith("...")
@@ -1334,14 +1334,14 @@ class TestResponseFormatter:
         assert result["offset"] == 0
 
     def test_format_execute_keeps_full_command(self):
-        from agentica.gateway.services.response_formatter import format_tool_call_args
+        from agentica_gateway.services.response_formatter import format_tool_call_args
         cmd = "python3 /tmp/bubble_sort.py --n 10000 --seed 1"
         result = format_tool_call_args("execute", {"command": cmd, "timeout": 300})
         assert result["command"] == cmd
         assert result["timeout"] == 300
 
     def test_format_tool_result_hides_read_file(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="read_file", content="file contents here")
@@ -1351,7 +1351,7 @@ class TestResponseFormatter:
         assert extra == {}
 
     def test_format_tool_result_includes_tool_call_id(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         _, _, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="ok", tool_call_id="c9")
@@ -1359,7 +1359,7 @@ class TestResponseFormatter:
         assert extra["tool_call_id"] == "c9"
 
     def test_format_tool_result_keeps_write_and_search(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         for name, body in (
             ("write_file", "Wrote 12 lines to foo.py"),
@@ -1377,7 +1377,7 @@ class TestResponseFormatter:
             assert extra == {}
 
     def test_format_tool_result_write_file_includes_unified_diff(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(ToolCallInfo(
             tool_name="write_file",
@@ -1392,7 +1392,7 @@ class TestResponseFormatter:
         assert "+print(1)" in extra["diff"]
 
     def test_format_tool_result_apply_patch_multi_file_diff(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         _, _, extra = format_tool_result(ToolCallInfo(
             tool_name="apply_patch",
@@ -1409,7 +1409,7 @@ class TestResponseFormatter:
         assert "-gone" in extra["diff"]
 
     def test_format_tool_result_execute_keeps_full_output(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         body = ("sorted ok\n" * 80)  # well past the old 500-char clip
         name, result_str, extra = format_tool_result(
@@ -1420,7 +1420,7 @@ class TestResponseFormatter:
         assert extra == {}
 
     def test_format_tool_result_empty(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="")
@@ -1429,7 +1429,7 @@ class TestResponseFormatter:
         assert extra == {}
 
     def test_format_tool_result_error(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         name, result_str, extra = format_tool_result(
             ToolCallInfo(tool_name="execute", content="permission denied", is_error=True)
@@ -1438,7 +1438,7 @@ class TestResponseFormatter:
         assert extra == {}
 
     def test_format_tool_result_read_file_error_still_shown(self):
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         _, result_str, _ = format_tool_result(
             ToolCallInfo(tool_name="read_file", content="no such file", is_error=True)
@@ -1448,7 +1448,7 @@ class TestResponseFormatter:
 
     def test_format_tool_result_task_keeps_detail(self):
         import json
-        from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica_gateway.services.response_formatter import format_tool_result
         from agentica.run.response import ToolCallInfo
         payload = {
             "success": True,
@@ -1473,18 +1473,18 @@ class TestResponseFormatter:
         assert "explore-1" in result_str
 
     def test_extract_metrics_none(self):
-        from agentica.gateway.services.response_formatter import extract_metrics
+        from agentica_gateway.services.response_formatter import extract_metrics
         assert extract_metrics(None) is None
 
     def test_extract_metrics_with_data(self):
-        from agentica.gateway.services.response_formatter import extract_metrics
+        from agentica_gateway.services.response_formatter import extract_metrics
         agent = MagicMock()
         agent.run_response.metrics = {"input_tokens": [100], "output_tokens": [50]}
         result = extract_metrics(agent)
         assert result["input_tokens"] == [100]
 
     def test_apply_patch_keeps_full_patch(self):
-        from agentica.gateway.services.response_formatter import format_tool_call_args
+        from agentica_gateway.services.response_formatter import format_tool_call_args
         patch = """*** Begin Patch
 *** Update File: app.py
 @@
@@ -1501,17 +1501,17 @@ class TestModelFactory:
     """Test model factory provider dispatch."""
 
     def test_unknown_provider_raises(self):
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
         with pytest.raises(ValueError, match="Unknown model_provider"):
             create_model("nonexistent_provider", "some-model")
 
     def test_openai_provider(self):
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
         model = create_model("openai", "gpt-4o-mini")
         assert model.__class__.__name__ == "OpenAIChat"
 
     def test_openai_responses_wire_api(self):
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
         model = create_model(
             "openai",
             "gpt-5.6-sol",
@@ -1522,18 +1522,18 @@ class TestModelFactory:
         assert model.reasoning == "high"
 
     def test_reasoning_does_not_implicitly_select_responses(self):
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
         with pytest.raises(ValueError, match="requires wire_api='responses'"):
             create_model("openai", "gpt-5.6-sol", reasoning="high")
 
     def test_kimi_provider(self):
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
         model = create_model("kimi", "moonshot-v1")
         assert model.__class__.__name__ == "KimiChat"
 
     def test_openai_compat_provider(self):
         """Providers in PROVIDER_FACTORIES (e.g. deepseek) should be created via the factory dispatch."""
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
         from agentica import PROVIDER_FACTORIES
         provider_name = next(iter(PROVIDER_FACTORIES))
         model = create_model(provider_name, "test-model")
@@ -1545,7 +1545,7 @@ class TestModelFactory:
         Thinking is opt-in only via the ``thinking`` / ``reasoning_effort`` args.
         Empty args -> plain model so user-side ``extra_body`` won't conflict.
         """
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
 
         model = create_model("deepseek", "deepseek-v4-flash")
 
@@ -1557,14 +1557,14 @@ class TestModelFactory:
 
     def test_deepseek_provider_respects_gateway_reasoning_effort(self):
         """reasoning_effort arg should override DeepSeek provider defaults."""
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
 
         model = create_model("deepseek", "deepseek-v4-flash", reasoning_effort="max")
 
         assert model.reasoning_effort == "max"
 
     def test_gateway_reasoning_effort_is_not_an_enum(self):
-        from agentica.gateway.services.model_factory import create_model
+        from agentica_gateway.services.model_factory import create_model
 
         model = create_model(
             "openai", "openai/Kimi-k3", api_key="sk-x", reasoning_effort="max",
@@ -1577,23 +1577,23 @@ class TestModelFactory:
         assert model.reasoning_effort == "extra-high"
 
     def test_cron_tools_returns_list(self):
-        from agentica.gateway.services.model_factory import get_cron_tools
+        from agentica_gateway.services.model_factory import get_cron_tools
         tools = get_cron_tools()
         assert isinstance(tools, list)
 
     def test_cron_instructions_non_empty(self):
-        from agentica.gateway.services.model_factory import get_cron_instructions
+        from agentica_gateway.services.model_factory import get_cron_instructions
         instructions = get_cron_instructions()
         assert "cronjob" in instructions
 
     def test_self_manage_tools_returns_list(self):
-        from agentica.gateway.services.model_factory import get_self_manage_tools
+        from agentica_gateway.services.model_factory import get_self_manage_tools
         tools = get_self_manage_tools()
         assert isinstance(tools, list)
         assert len(tools) == 1
 
     def test_self_manage_instructions_non_empty(self):
-        from agentica.gateway.services.model_factory import get_self_manage_instructions
+        from agentica_gateway.services.model_factory import get_self_manage_instructions
         instructions = get_self_manage_instructions()
         assert "self_manage" in instructions
 
@@ -1604,25 +1604,25 @@ class TestChannelBase:
     """Test Channel base class shared utilities."""
 
     def test_split_text_normal(self):
-        from agentica.gateway.channels.base import Channel
+        from agentica_gateway.channels.base import Channel
         chunks = Channel.split_text("abcdefgh", 3)
         assert chunks == ["abc", "def", "gh"]
 
     def test_split_text_empty(self):
-        from agentica.gateway.channels.base import Channel
+        from agentica_gateway.channels.base import Channel
         assert Channel.split_text("", 100) == [""]
 
     def test_split_text_short(self):
-        from agentica.gateway.channels.base import Channel
+        from agentica_gateway.channels.base import Channel
         assert Channel.split_text("hi", 100) == ["hi"]
 
     def test_check_allowlist_empty_allows_all(self):
-        from agentica.gateway.channels.base import Channel
+        from agentica_gateway.channels.base import Channel
         # Create a concrete subclass for testing
         class _TestChannel(Channel):
             @property
             def channel_type(self):
-                from agentica.gateway.channels.base import ChannelType
+                from agentica_gateway.channels.base import ChannelType
                 return ChannelType.WEB
             async def connect(self): return True
             async def disconnect(self): pass
@@ -1632,7 +1632,7 @@ class TestChannelBase:
         assert ch.check_allowlist("anyone") is True
 
     def test_check_allowlist_filters(self):
-        from agentica.gateway.channels.base import Channel, ChannelType
+        from agentica_gateway.channels.base import Channel, ChannelType
         class _TestChannel(Channel):
             @property
             def channel_type(self):
@@ -1648,7 +1648,7 @@ class TestChannelBase:
 
 class TestGatewayStartupLogPath:
     def test_home_path_uses_tilde(self, tmp_path):
-        from agentica.gateway.main import _display_home_path
+        from agentica_gateway.main import _display_home_path
 
         home = Path.home()
         assert _display_home_path(str(home / ".agentica/logs/20260814-65634.log")) == (
@@ -1659,7 +1659,7 @@ class TestGatewayStartupLogPath:
 
 class TestCompactSession:
     def _svc(self, tmp_path, agent):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
         svc._workspace = None
@@ -1694,7 +1694,7 @@ class TestCompactSession:
         # agent enough that compact's return path can call it.
         svc = self._svc(tmp_path, agent)
         with patch(
-            "agentica.gateway.services.agent_service.usage_payload",
+            "agentica_gateway.services.agent_service.usage_payload",
             AsyncMock(return_value={"context_tokens": 12}),
         ):
             result = asyncio.run(svc.compact_session("s1"))
@@ -1718,7 +1718,7 @@ class TestCompactSession:
 
 class TestGoalEventPayload:
     def test_formats_token_progress(self):
-        from agentica.gateway.services.agent_service import goal_event_payload
+        from agentica_gateway.services.agent_service import goal_event_payload
         d = goal_event_payload({
             "status": "active",
             "objective": "ship it",
@@ -1734,14 +1734,14 @@ class TestGoalEventPayload:
         assert "wall" not in d["progress"]
 
     def test_unlimited_budget_is_bare_count(self):
-        from agentica.gateway.services.agent_service import goal_event_payload
+        from agentica_gateway.services.agent_service import goal_event_payload
         d = goal_event_payload({"tokens_used": 10, "turns_used": 1})
         assert d["progress"] == "tokens 10"
 
 
 class TestWebRunGoalBudgets:
     def _svc(self, tmp_path, agent):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
         svc = AgentService(workspace_path=str(tmp_path))
         svc._ensure_initialized = AsyncMock()
         svc._workspace = None
@@ -1790,7 +1790,7 @@ class TestAgentServiceMemoryIndex:
 
     @pytest.mark.asyncio
     async def test_read_memory_index_returns_entries_not_a_coroutine(self, tmp_path):
-        from agentica.gateway.services.agent_service import AgentService
+        from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         await svc._ensure_initialized()

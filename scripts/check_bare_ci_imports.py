@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Fail if a test imports optional extras at module top without importorskip.
 
-GitHub Actions is a bare ``pip install -e .``. A collection-time ImportError
-aborts the whole pytest run (exit 2). This has bitten gateway tests more than
-once: ``from agentica.gateway...`` loads ``gateway/__init__.py``, which
-imports fastapi.
+The core CI job is a bare ``pip install -e .`` — no fastapi, and no
+``agentica-gateway`` distribution at all. A collection-time ImportError aborts
+the whole pytest run (exit 2). This has bitten gateway tests more than once.
+Either skip works for the gateway: ``agentica_gateway`` itself raises
+ImportError when it or fastapi is missing.
 """
 from __future__ import annotations
 
@@ -15,10 +16,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 
-# Imported-module prefix → package that importorskip must name first.
+# Imported-module prefix → packages any one of which importorskip may name first.
 EXTRA_IMPORTS = {
-    "agentica.gateway": "fastapi",
-    "agentica.acp": "websockets",
+    "agentica_gateway": ("agentica_gateway", "fastapi"),
+    "agentica.gateway": ("agentica_gateway", "fastapi"),
+    "agentica.acp": ("websockets",),
 }
 
 
@@ -64,9 +66,10 @@ def check_file(path: Path) -> list[str]:
         mod = _imported_module(node)
         if not mod:
             continue
-        for prefix, extra in EXTRA_IMPORTS.items():
+        for prefix, extras in EXTRA_IMPORTS.items():
             if mod == prefix or mod.startswith(prefix + "."):
-                if extra not in skipped:
+                if not skipped.intersection(extras):
+                    extra = extras[0]
                     loc = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
                     errors.append(
                         f"{loc}:{node.lineno}: "

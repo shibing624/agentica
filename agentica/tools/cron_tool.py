@@ -436,7 +436,7 @@ class CronTool(Tool):
 
     Args:
         job_runner: optional ``(CronJob) -> dict`` callback that executes a job
-            once synchronously and returns the ``_execute_job`` result dict. When
+            once synchronously and returns the ``execute_job`` result dict. When
             provided (the interactive CLI wires this), ``action='run'`` performs a
             real immediate trial run and returns its output. When omitted (SDK /
             unattended usage), ``action='run'`` falls back to marking the job due
@@ -457,7 +457,7 @@ class CronTool(Tool):
         # The immediate-run path spawns a sub-agent in a worker thread via its
         # own asyncio.run() loop, which the outer asyncio.wait_for() cannot
         # cancel — a 120s outer timeout would orphan that thread (still burning
-        # tokens) while reporting a timeout to the LLM. _execute_job already
+        # tokens) while reporting a timeout to the LLM. execute_job already
         # enforces the job's own timeout_seconds internally, so let the tool
         # manage its own timeout instead of wrapping it.
         self.functions["cronjob"].manages_own_timeout = True

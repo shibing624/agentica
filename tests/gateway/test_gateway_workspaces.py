@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("fastapi")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 from fastapi import HTTPException  # noqa: E402
 
-from agentica.gateway.routes import settings as settings_routes  # noqa: E402
+from agentica_gateway.routes import settings as settings_routes  # noqa: E402
 
 
 def _request(body, user_id="u1"):

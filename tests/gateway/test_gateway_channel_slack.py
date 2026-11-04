@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 class _FakeSocketModeRequest:
@@ -61,13 +61,13 @@ def _install_fake_slack(monkeypatch):
 
 
 def test_channel_type_enum_has_slack():
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.base import ChannelType
     assert ChannelType.SLACK.value == "slack"
 
 
 @pytest.mark.asyncio
 async def test_connect_returns_false_without_tokens():
-    from agentica.gateway.channels.slack import SlackChannel
+    from agentica_gateway.channels.slack import SlackChannel
     ch = SlackChannel(bot_token=None, app_token=None)
     assert await ch.connect() is False
 
@@ -75,8 +75,8 @@ async def test_connect_returns_false_without_tokens():
 @pytest.mark.asyncio
 async def test_connect_registers_listener_and_emits_message(monkeypatch):
     _install_fake_slack(monkeypatch)
-    from agentica.gateway.channels.slack import SlackChannel
-    from agentica.gateway.channels.base import ChannelType
+    from agentica_gateway.channels.slack import SlackChannel
+    from agentica_gateway.channels.base import ChannelType
 
     ch = SlackChannel(bot_token="xoxb-x", app_token="xapp-x")
     received = []
@@ -117,7 +117,7 @@ async def test_connect_registers_listener_and_emits_message(monkeypatch):
 @pytest.mark.asyncio
 async def test_listener_ignores_bot_messages(monkeypatch):
     _install_fake_slack(monkeypatch)
-    from agentica.gateway.channels.slack import SlackChannel
+    from agentica_gateway.channels.slack import SlackChannel
 
     ch = SlackChannel(bot_token="xoxb-x", app_token="xapp-x")
     received = []
@@ -144,7 +144,7 @@ async def test_listener_ignores_bot_messages(monkeypatch):
 @pytest.mark.asyncio
 async def test_send_splits_and_calls_chat_postmessage(monkeypatch):
     _install_fake_slack(monkeypatch)
-    from agentica.gateway.channels.slack import SlackChannel
+    from agentica_gateway.channels.slack import SlackChannel
 
     ch = SlackChannel(bot_token="xoxb-x", app_token="xapp-x")
     await ch.connect()

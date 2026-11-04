@@ -3,7 +3,8 @@
  * Assemble the runtime that ships inside an installer:
  *
  *   desktop/runtime/<os>-<arch>/python/   relocatable CPython (python-build-standalone)
- *       .../site-packages/                 agentica[gateway] from THIS checkout
+ *       .../site-packages/                 agentica + agentica-gateway[feishu]
+ *                                          built from THIS checkout
  *
  * `<os>-<arch>` matches electron-builder's `${os}-${arch}` macros, so
  * `extraResources` picks the right directory per target. Dependencies are
@@ -15,7 +16,9 @@
  *   node scripts/prepare-runtime.js            # the host platform
  *
  * Needs a host `python3` with pip (PYTHON overrides it) and the web UI already
- * built into agentica/gateway/ui (the wheel carries it).
+ * built into web/dist: the agentica-gateway wheel carries it, and its build
+ * fails without it. AGENTICA_WHEEL / AGENTICA_GATEWAY_WHEEL reuse wheels CI
+ * already built, so the installer ships the exact bytes PyPI gets.
  */
 
 const { execFileSync } = require("node:child_process");
@@ -98,16 +101,37 @@ function sitePackages(pythonDir, key) {
     : path.join(pythonDir, "lib", `python${PYTHON_MINOR}`, "site-packages");
 }
 
-function buildWheel(tmp) {
-  const dir = path.join(tmp, "wheel");
+function buildWheel(tmp, srcDir, prefix) {
+  const dir = path.join(tmp, "wheel-" + prefix);
   fs.mkdirSync(dir, { recursive: true });
-  execFileSync(hostPython(), ["-m", "pip", "wheel", "--no-deps", "-w", dir, REPO_ROOT], { stdio: "inherit" });
-  const wheel = fs.readdirSync(dir).find((f) => f.startsWith("agentica-") && f.endsWith(".whl"));
-  if (!wheel) throw new Error("pip did not produce an agentica wheel");
+  execFileSync(hostPython(), ["-m", "pip", "wheel", "--no-deps", "-w", dir, srcDir], { stdio: "inherit" });
+  const wheel = fs.readdirSync(dir).find((f) => f.startsWith(prefix + "-") && f.endsWith(".whl"));
+  if (!wheel) throw new Error(`pip did not produce a ${prefix} wheel`);
   return path.join(dir, wheel);
 }
 
-async function prepare(key, wheel, tmp) {
+/** `{ core, gateway }` wheel paths: prebuilt ones from env, else built from this checkout. */
+function wheels(tmp) {
+  return {
+    core: process.env.AGENTICA_WHEEL || buildWheel(tmp, REPO_ROOT, "agentica"),
+    gateway: process.env.AGENTICA_GATEWAY_WHEEL || buildWheel(tmp, path.join(REPO_ROOT, "gateway"), "agentica_gateway"),
+  };
+}
+
+/**
+ * pip requirements for the bundled site-packages. Both wheels are named as
+ * direct references, so the gateway's exact `agentica==X.Y.Z` pin resolves to
+ * the core wheel of the same build instead of a PyPI download. Feishu stays
+ * in, as it was in `agentica[gateway]` before the split.
+ */
+function requirements(w) {
+  return [
+    `agentica @ ${pathToFileURL(w.core).href}`,
+    `agentica-gateway[feishu] @ ${pathToFileURL(w.gateway).href}`,
+  ];
+}
+
+async function prepare(key, w, tmp) {
   const spec = TARGETS[key];
   const outDir = path.join(OUT_ROOT, key);
   fs.rmSync(outDir, { recursive: true, force: true });
@@ -129,7 +153,7 @@ async function prepare(key, wheel, tmp) {
       "--target", site,
       ...platformArgs,
       "--python-version", PYTHON_MINOR, "--implementation", "cp", "--abi", `cp${PYTHON_MINOR.replace(".", "")}`,
-      `agentica[gateway] @ ${pathToFileURL(wheel).href}`,
+      ...requirements(w),
     ],
     { stdio: "inherit" },
   );
@@ -145,8 +169,8 @@ async function main() {
   const keys = parseTargets(process.argv.slice(2));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "agentica-runtime-"));
   try {
-    const wheel = process.env.AGENTICA_WHEEL || buildWheel(tmp);
-    for (const key of keys) await prepare(key, wheel, tmp);
+    const w = wheels(tmp);
+    for (const key of keys) await prepare(key, w, tmp);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -159,5 +183,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { TARGETS, parseTargets, sitePackages };
+module.exports = { TARGETS, parseTargets, sitePackages, requirements };
 

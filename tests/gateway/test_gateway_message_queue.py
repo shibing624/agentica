@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-pytest.importorskip("fastapi")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
-from agentica.gateway.channels.base import ChannelType, InboundMedia, Message
-from agentica.gateway import main as gw_main
-from agentica.gateway.services.agent_service import ChatResult
+from agentica_gateway.channels.base import ChannelType, InboundMedia, Message
+from agentica_gateway import main as gw_main
+from agentica_gateway.services.agent_service import ChatResult
 
 
 def _make_message(content: str, sender: str = "userA") -> Message:
@@ -256,8 +256,8 @@ async def test_im_chat_uses_home_account_not_sender(patched_deps):
 @pytest.mark.asyncio
 async def test_im_chat_uses_bound_wechat_owner(patched_deps, tmp_path):
     agent_service, channel_manager = patched_deps
-    from agentica.gateway.channels.base import ChannelType
-    from agentica.gateway.channels.wechat import WeChatChannel
+    from agentica_gateway.channels.base import ChannelType
+    from agentica_gateway.channels.wechat import WeChatChannel
 
     ch = WeChatChannel(token_file=str(tmp_path / "t.json"))
     ch.bind_owner("llli")
@@ -290,7 +290,7 @@ async def _drain(timeout: float = 2.0) -> None:
 async def test_im_turn_follows_web_approval_pref(patched_deps, tmp_path, monkeypatch):
     """IM has no approval card: the tier picked in the web selector applies."""
     import json
-    from agentica.gateway.routes import settings as settings_routes
+    from agentica_gateway.routes import settings as settings_routes
 
     agent_service, _ = patched_deps
     agent_service.chat = AsyncMock(return_value=ChatResult(content="ok", session_id="sess:wx"))
@@ -309,7 +309,7 @@ async def test_im_turn_follows_web_approval_pref(patched_deps, tmp_path, monkeyp
 
 @pytest.mark.asyncio
 async def test_im_turn_without_web_pref_keeps_default_mode(patched_deps, tmp_path, monkeypatch):
-    from agentica.gateway.routes import settings as settings_routes
+    from agentica_gateway.routes import settings as settings_routes
 
     agent_service, _ = patched_deps
     agent_service.chat = AsyncMock(return_value=ChatResult(content="ok", session_id="sess:wx"))
@@ -323,7 +323,7 @@ async def test_im_turn_without_web_pref_keeps_default_mode(patched_deps, tmp_pat
 @pytest.mark.asyncio
 async def test_im_turn_survives_a_corrupt_prefs_file(patched_deps, tmp_path, monkeypatch):
     """A half-written prefs file must not fail every IM message."""
-    from agentica.gateway.routes import settings as settings_routes
+    from agentica_gateway.routes import settings as settings_routes
 
     agent_service, _ = patched_deps
     agent_service.chat = AsyncMock(return_value=ChatResult(content="ok", session_id="sess:wx"))

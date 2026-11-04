@@ -145,7 +145,7 @@ class FeishuChannel(Channel):
             return True
 
         except ImportError as e:
-            logger.error(f"Feishu: SDK not installed: {e}")
+            logger.error(f"Feishu: SDK not installed ({e}). Run: pip install \"agentica-gateway[feishu]\"")
             return False
         except Exception as e:
             logger.error(f"Feishu: Connect failed: {e}")

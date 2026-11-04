@@ -1,3 +1,2 @@
 exclude tests/*
-recursive-include agentica/gateway/ui *
 global-exclude .DS_Store

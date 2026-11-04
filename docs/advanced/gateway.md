@@ -49,7 +49,7 @@ agentica-gateway --port 8890         # 指定监听端口
 
 如果你喜欢独立窗口应用，可以直接下载安装包（macOS `.dmg` / Windows `.exe` / Linux `.AppImage` & `.deb`），详见 [README 桌面版说明](https://github.com/shibing624/agentica#桌面版)。
 
-桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录，但**不共用可执行包**：安装包里自带 Python 3.12 和与桌面壳同一次构建的 `agentica[gateway]`，不依赖本机 Python、Node、uv，也不需要联网；壳和网关版本始终一致，一起更新。
+桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录，但**不共用可执行包**：安装包里自带 Python 3.12 和与桌面壳同一次构建的 `agentica` + `agentica-gateway[feishu]`，不依赖本机 Python、Node、uv，也不需要联网；壳和网关版本始终一致，一起更新。
 
 - **优先级**：`AGENTICA_GATEWAY_BIN` → 安装包内置运行环境 → 本机 `agentica-gateway`（仅 `npm start` 或不带运行环境的构建）。
 - **终端命令**：菜单 `Help › Install 'agentica' Command in Terminal…` 生成调用内置 Python 的 `agentica` 命令（macOS 优先 `/usr/local/bin`，否则 `~/.local/bin`；Windows 写用户 PATH），不会覆盖不是它创建的同名文件。
@@ -158,6 +158,8 @@ Gateway 支持多用户登录：
 | **Telegram** | `"agentica[gateway,telegram]"` | `TELEGRAM_BOT_TOKEN` | `TELEGRAM_ALLOWED_USERS` |
 | **QQ 机器人** | `"agentica[gateway,qq]"` | `QQ_APP_ID`<br>`QQ_APP_SECRET` | `QQ_ALLOWED_USERS` |
 | **钉钉 (DingTalk)** | `"agentica[gateway,dingtalk]"` | `DINGTALK_CLIENT_ID`<br>`DINGTALK_CLIENT_SECRET` | `DINGTALK_ALLOWED_USERS` |
+
+不用 uv、直接装网关包时，同名 extra 写在 `agentica-gateway` 上：`pip install "agentica-gateway[feishu,wecom]"`，`[all]` 是全部渠道。注意单装 `agentica-gateway` 不带飞书 SDK，`agentica[gateway]` 才默认带。
 | **Discord** | `"agentica[gateway,discord]"` | `DISCORD_BOT_TOKEN` | `DISCORD_ALLOWED_USERS`<br>`DISCORD_ALLOWED_GUILDS` |
 | **Slack** | `"agentica[gateway,slack]"` | `SLACK_BOT_TOKEN` (`xoxb-...`)<br>`SLACK_APP_TOKEN` (`xapp-...`) | `SLACK_ALLOWED_USERS`<br>`SLACK_ALLOWED_CHANNELS` |
 

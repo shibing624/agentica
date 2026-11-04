@@ -184,19 +184,23 @@ from agentica.guardrails import (
 )
 ```
 
-### Gateway — 产品用 `uv tool install "agentica[gateway]"`；当库用 `uv add "agentica[gateway]"`
+### Gateway — 独立发行包 `agentica-gateway`（产品用 `uv tool install "agentica[gateway]"`；当库用 `uv add agentica-gateway`）
 
 ```python
-from agentica.gateway.main import app, main  # FastAPI app
-from agentica.gateway.channels import (
+from agentica_gateway.main import app, main  # FastAPI app
+from agentica_gateway.channels import (
     Channel, ChannelType, Message,
-    FeishuChannel, TelegramChannel, DiscordChannel,
-    QQChannel,        # 需 agentica[qq]
-    WeComChannel,     # 需 agentica[wecom]
-    DingTalkChannel,  # 需 agentica[dingtalk]
-    WeChatChannel,    # 需 agentica[wechat]
+    FeishuChannel,    # 需 agentica-gateway[feishu]（agentica[gateway] 已含）
+    TelegramChannel,  # 需 agentica-gateway[telegram]
+    DiscordChannel,   # 需 agentica-gateway[discord]
+    QQChannel,        # 需 agentica-gateway[qq]
+    WeComChannel,     # 需 agentica-gateway[wecom]
+    DingTalkChannel,  # 需 agentica-gateway[dingtalk]
+    WeChatChannel,    # 需 agentica-gateway[wechat]
 )
 ```
+
+`agentica-gateway` 与 `agentica` 同版本发布，并精确锁定同版本的 `agentica`。旧路径 `agentica.gateway.*` 仍可导入（指向同一模块对象），但会给 `DeprecationWarning`，计划在 1.7 移除。
 
 详见 [Gateway 文档](advanced/gateway.md)。
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway]")
+pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
@@ -21,9 +21,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTICA_SKILL_DIR", str(skills))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
 
-    from agentica.gateway import deps
-    from agentica.gateway.main import app
-    from agentica.gateway.routes import plugins
+    from agentica_gateway import deps
+    from agentica_gateway.main import app
+    from agentica_gateway.routes import plugins
 
     monkeypatch.setattr(plugins, "AGENTICA_HOME", str(home))
     monkeypatch.setattr(plugins, "AGENTICA_SKILL_DIR", str(skills))
