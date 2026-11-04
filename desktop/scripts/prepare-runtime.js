@@ -86,9 +86,31 @@ function pythonAsset(triple) {
 }
 
 async function download(url, dest) {
-  const resp = await fetch(url, { headers: { "User-Agent": "agentica-desktop-build" } });
-  if (!resp.ok) throw new Error(`download ${url}: HTTP ${resp.status}`);
-  fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
+  let last;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(url, { headers: { "User-Agent": "agentica-desktop-build" } });
+      if (!resp.ok) throw new Error(`download ${url}: HTTP ${resp.status}`);
+      fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
+      return;
+    } catch (err) {
+      last = err;
+      if (attempt === 3) break;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+    }
+  }
+  throw last;
+}
+
+function tarBin() {
+  if (process.platform !== "win32") return "tar";
+  // `tar` on a GitHub Windows runner is Git's GNU tar. It reads `C:` as a
+  // remote host, and `--force-local` then escapes the drive letter
+  // (`D\:\a\...`) so the directory cannot be opened. System32 tar is bsdtar
+  // and takes the Windows path as given. execFileSync does not use a shell,
+  // so MSYS never rewrites the argument.
+  const root = process.env.SystemRoot || "C:\\Windows";
+  return path.join(root, "System32", "tar.exe");
 }
 
 function hostPython() {
@@ -141,12 +163,7 @@ async function prepare(key, w, tmp) {
   console.log(`[runtime] ${key}: ${asset.name}`);
   const archive = path.join(tmp, asset.name);
   await download(asset.url, archive);
-  // Git for Windows ships GNU tar, and GNU tar reads `C:` in `C:\...` as a
-  // remote host (`Cannot connect to C:`). `--force-local` is the GNU switch
-  // that keeps the drive letter. macOS and Linux tar ignore the extra flag
-  // only if we don't pass it, so it stays Windows-only.
-  const tarArgs = process.platform === "win32" ? ["--force-local"] : [];
-  execFileSync("tar", [...tarArgs, "-xzf", archive, "-C", outDir], { stdio: "inherit" });
+  execFileSync(tarBin(), ["-xzf", archive, "-C", outDir], { stdio: "inherit" });
 
   const site = sitePackages(path.join(outDir, "python"), key);
   fs.mkdirSync(site, { recursive: true });
