@@ -76,6 +76,29 @@ const en = {
     archivedSessions: "Archived",
   },
 
+  workspace: {
+    title: "Workspaces",
+    add: "Add workspace",
+    addTitle: "Add a workspace",
+    addDesc: "A workspace is a folder on this machine. Its chats are grouped under it, and the agent works inside it.",
+    addOk: "Add and start chat",
+    addFailed: "Could not add that folder",
+    rename: "Rename",
+    renamePrompt: "Workspace name",
+    renameFailed: "Could not rename the workspace",
+    delete: "Delete workspace",
+    deleteTitle: "Delete workspace",
+    deleteMsg: (name: string, n: number) =>
+      `Remove "${name}" from the sidebar and delete its ${n} chat${n === 1 ? "" : "s"}? The folder on disk is not touched.`,
+    deleteOk: "Delete",
+    deleted: "Workspace deleted",
+    deletePartial: (n: number) => `Workspace removed, but ${n} chat${n === 1 ? "" : "s"} could not be deleted`,
+    busy: "Stop the running chats in this workspace first",
+    more: "Workspace actions",
+    emptyHint: "No chats yet",
+    resize: "Drag to resize the sidebar",
+  },
+
   chat: {
     projects: "Projects",
     recentSessions: "Web + recent CLI",
@@ -640,6 +663,29 @@ const zh: Strings = {
     memory: "记忆",
     users: "用户管理",
     archivedSessions: "归档会话",
+  },
+
+  workspace: {
+    title: "工作区",
+    add: "添加工作区",
+    addTitle: "添加工作区",
+    addDesc: "工作区就是本机上的一个文件夹。对话按它归组，智能体也在这个文件夹里干活。",
+    addOk: "添加并新建对话",
+    addFailed: "无法添加该文件夹",
+    rename: "重命名",
+    renamePrompt: "工作区名称",
+    renameFailed: "重命名失败",
+    delete: "删除工作区",
+    deleteTitle: "删除工作区",
+    deleteMsg: (name: string, n: number) =>
+      `从侧栏移除「${name}」，并删除其中 ${n} 个对话？磁盘上的文件夹不会被动。`,
+    deleteOk: "删除",
+    deleted: "工作区已删除",
+    deletePartial: (n: number) => `工作区已移除，但有 ${n} 个对话删除失败`,
+    busy: "请先停止该工作区里正在运行的对话",
+    more: "工作区操作",
+    emptyHint: "还没有对话",
+    resize: "拖动调整侧栏宽度",
   },
 
   chat: {

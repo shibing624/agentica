@@ -171,6 +171,13 @@ export type AppState = {
   chatMenuOpen: boolean;
   selectedApprovalMode: string;
   sidebarCollapsed: boolean;
+  /** Expanded sidebar width in px; dragged by the handle, remembered per browser. */
+  sidebarWidth: number;
+  /** Folders the user added or renamed. A workspace is a directory; sessions
+   *  group under it by work dir, so this only carries what sessions cannot:
+   *  an empty folder and a display name. Mirrors `prefs.workspaces`. */
+  workspaces: Array<{ dir: string; name?: string }>;
+  workspaceAdd: { open: boolean; value: string };
   theme: string;
   /** UI language. Lives here rather than in i18n.ts so a component reading
    *  strings re-renders through the same `rev` bump as everything else. */
@@ -249,6 +256,20 @@ export function emptyMcpForm(): McpForm {
   return { name: "", kind: "stdio", command: "", args: "", url: "", envRows: [] };
 }
 
+export const SIDEBAR_MIN = 220;
+export const SIDEBAR_MAX = 480;
+export const SIDEBAR_DEFAULT = 280;
+
+export function clampSidebarWidth(w: number) {
+  if (!Number.isFinite(w)) return SIDEBAR_DEFAULT;
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w)));
+}
+
+function readSidebarWidth() {
+  const raw = Number(localStorage.getItem("ag_sidebar_w"));
+  return raw ? clampSidebarWidth(raw) : SIDEBAR_DEFAULT;
+}
+
 const listeners = new Set<() => void>();
 
 const state: AppState = {
@@ -281,6 +302,9 @@ const state: AppState = {
   chatMenuOpen: false,
   selectedApprovalMode: localStorage.getItem("ag_approval") || "auto",
   sidebarCollapsed: false,
+  sidebarWidth: readSidebarWidth(),
+  workspaces: [],
+  workspaceAdd: { open: false, value: "" },
   theme: localStorage.getItem("ag_theme") || "auto",
   lang: localStorage.getItem("ag_lang") === "zh" ? "zh" : "en",
   toast: { show: false, msg: "" },
@@ -437,6 +461,17 @@ export function projectNameForDir(dir: string) {
   if (!d) return "Unfiled";
   const parts = d.split("/").filter(Boolean);
   return parts[parts.length - 1] || d;
+}
+
+/** Display name of a workspace: the user's label if they gave one, else the folder name. */
+export function workspaceName(dir: string) {
+  const key = normDir(dir);
+  return state.workspaces.find((w) => normDir(w.dir) === key)?.name || projectNameForDir(dir);
+}
+
+export function normDir(dir: string) {
+  const d = (dir || "").trim();
+  return d.replace(/[/\\]+$/, "") || d;
 }
 
 export function enqueueApproval(sessId: string, req: ApprovalRequest) {

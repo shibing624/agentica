@@ -1,7 +1,7 @@
 import type { ReactNode, SVGProps } from "react";
-import catLogo from "./assets/cat.png";
+import roundLogo from "./assets/logo-round.png";
 
-export const LOGO_SRC = catLogo;
+export const LOGO_SRC = roundLogo;
 
 export function Logo({ className = "brand-logo" }: { className?: string }) {
   return <img className={className} src={LOGO_SRC} alt="Agentica" />;
@@ -175,6 +175,19 @@ export const IconStop = () => (
   <svg viewBox="0 0 16 16" width="16" height="16">
     <rect x="4.5" y="4.5" width="7" height="7" rx="1.8" fill="currentColor" />
   </svg>
+);
+export const IconMore = () => (
+  <S strokeWidth="1.4" strokeLinecap="round">
+    <circle cx="3.5" cy="8" r=".6" fill="currentColor" /><circle cx="8" cy="8" r=".6" fill="currentColor" /><circle cx="12.5" cy="8" r=".6" fill="currentColor" />
+  </S>
+);
+export const IconTrash = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.5 4.25h11M6.2 4.25V2.9a.9.9 0 01.9-.9h1.8a.9.9 0 01.9.9v1.35M4 4.25l.55 8.4a1 1 0 001 .93h4.9a1 1 0 001-.93l.55-8.4M6.6 7v4M9.4 7v4" />
+  </S>
+);
+export const IconChevronRight = () => (
+  <S strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5L10.5 8 6 12.5" /></S>
 );
 export const IconFolderPlus = () => (
   <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">

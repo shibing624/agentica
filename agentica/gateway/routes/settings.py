@@ -196,6 +196,44 @@ def _clean_prefs(raw: dict) -> dict:
         out["last_session_id"] = last.strip()
     if isinstance(raw.get("auto_extract_memory"), bool):
         out["auto_extract_memory"] = raw["auto_extract_memory"]
+    if "workspaces" in raw:
+        out["workspaces"] = _clean_workspaces(raw["workspaces"])
+    return out
+
+
+_MAX_WORKSPACES = 200
+_MAX_WORKSPACE_NAME = 80
+
+
+def _clean_workspaces(raw: Any) -> list:
+    """Sidebar workspaces the user added or renamed: ``[{"dir", "name"?}]``.
+
+    A workspace is a directory; sessions group under it by their work dir. An
+    entry exists here only when it carries something the session list cannot
+    derive — a folder added before its first chat, or a display name. Names are
+    labels, never a rename of the folder on disk.
+    """
+    if not isinstance(raw, list):
+        return []
+    seen: set = set()
+    out: list = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        d = item.get("dir")
+        if not isinstance(d, str) or not d.strip():
+            continue
+        d = d.strip().rstrip("/\\") or d.strip()
+        if d in seen:
+            continue
+        seen.add(d)
+        entry = {"dir": d}
+        name = item.get("name")
+        if isinstance(name, str) and name.strip():
+            entry["name"] = name.strip()[:_MAX_WORKSPACE_NAME]
+        out.append(entry)
+        if len(out) >= _MAX_WORKSPACES:
+            break
     return out
 
 
@@ -217,6 +255,21 @@ async def put_prefs(request: Request):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Expected a JSON object")
     previous = _read_prefs(uid)
+    if "workspaces" in body:
+        known = {w["dir"] for w in _clean_workspaces(previous.get("workspaces"))}
+        for w in _clean_workspaces(body["workspaces"]):
+            if w["dir"] in known:
+                continue
+            # Same rule as the working directory: we never create a folder on
+            # the user's behalf, so a new workspace must already exist.
+            p = Path(w["dir"]).expanduser()
+            if not p.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Directory does not exist: {p}. Create it first, then try again.",
+                )
+            if not p.is_dir():
+                raise HTTPException(status_code=400, detail=f"Path is not a directory: {p}")
     merged = _clean_prefs({**previous, **body})
     _write_prefs(uid, merged)
     old_extract = previous.get("auto_extract_memory", True)

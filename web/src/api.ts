@@ -38,6 +38,7 @@ export const fetchPrefs = () => request("/api/prefs");
 export const savePrefsApi = (body: {
   theme?: string; lang?: string; approval_mode?: string; last_session_id?: string | null;
   auto_extract_memory?: boolean;
+  workspaces?: Array<{ dir: string; name?: string }>;
 }) => putJson("/api/prefs", body);
 export const fetchProfiles = () => request("/api/profiles");
 export const fetchProviders = () => request("/api/providers");

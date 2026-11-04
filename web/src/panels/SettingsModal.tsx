@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import * as api from "../api";
 import {
   loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders,
@@ -7,7 +8,9 @@ import {
 import { openPasswordDialog } from "../components/ChangePasswordDialog";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
-import { IconClose, IconExpand } from "../icons";
+import {
+  IconArchive, IconChat, IconClock, IconClose, IconDatabase, IconExpand, IconGear, IconProfiles,
+} from "../icons";
 import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession } from "../sessions";
 import {
@@ -26,13 +29,13 @@ const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) =>
  *  jobs and archived chats. Web URL and IM connectors are the 个人助理 tab
  *  (same panel as `/assistant`).
  */
-const TABS: Array<[string, (S: Strings) => string]> = [
-  ["settings", (S) => S.settings.tabGeneral],
-  ["assistant", (S) => S.nav.assistant],
-  ["memory", (S) => S.nav.memory],
-  ["profiles", (S) => S.nav.profile],
-  ["cron", (S) => S.settings.tabCron],
-  ["archived", (S) => S.settings.tabArchived],
+const TABS: Array<[string, (S: Strings) => string, () => ReactNode]> = [
+  ["settings", (S) => S.settings.tabGeneral, () => <IconGear />],
+  ["profiles", (S) => S.nav.profile, () => <IconProfiles />],
+  ["memory", (S) => S.nav.memory, () => <IconDatabase />],
+  ["assistant", (S) => S.nav.assistant, () => <IconChat />],
+  ["cron", (S) => S.settings.tabCron, () => <IconClock />],
+  ["archived", (S) => S.settings.tabArchived, () => <IconArchive />],
 ];
 
 function patch(p: Partial<ProfileForm>) {
@@ -177,13 +180,13 @@ function AccessBlock() {
   return (
     <div className="settings-block">
       <div className="settings-block-title">{S.settings.access}</div>
-      <div className="settings-item-meta">
+      <div className="settings-row-hint access-hint">
         {S.settings.accessAccount(s.accountId)}{" "}
         {s.passwordIsInitial
           ? S.settings.accessInitial
           : s.passwordSet ? S.settings.accessSet : S.settings.accessNone}
       </div>
-      <div className="pf-row">
+      <div className="pf-row access-actions">
         <button className="dp-btn primary" onClick={() => openPasswordDialog()}>
           {s.passwordSet ? S.settings.changePassword : S.settings.setPassword}
         </button>
@@ -205,26 +208,34 @@ export function SettingsModal() {
   const S = useStrings();
   const archived = Object.entries(s.sessions).filter(([, sess]) => sess.archived);
   const close = () => setState({ settingsModal: { open: false }, profileForm: null, cronForm: null });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   return (
     <div className="settings-overlay open" onClick={close}>
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="settings-modal two-pane" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <nav className="settings-nav" aria-label={S.settings.title}>
+          <div className="settings-nav-title">{S.settings.title}</div>
+          {TABS.map(([id, label, icon]) => (
+            <button key={id} className={"settings-nav-item" + (s.settingsTab === id ? " active" : "")}
+                    onClick={() => setState({ settingsTab: id })}>
+              <span className="nav-icon">{icon()}</span>
+              <span>{label(S)}</span>
+            </button>
+          ))}
+          <div className="settings-nav-foot">{s.serverVersion ? "Agentica v" + s.serverVersion : ""}</div>
+        </nav>
+        <div className="settings-main">
         <div className="settings-head">
-          <h3>
-            {TABS.find((t) => t[0] === s.settingsTab)?.[1](S) || S.settings.title}
-            <span className="settings-ver">{s.serverVersion ? "Agentica v" + s.serverVersion : ""}</span>
-          </h3>
+          <h3>{TABS.find((t) => t[0] === s.settingsTab)?.[1](S) || S.settings.title}</h3>
           <div className="settings-head-actions">
             {s.settingsTab === "profiles" && (
               <button className="settings-new-btn" onClick={() => setState({ profileForm: emptyProfileForm() })}>{S.common.newItem}</button>
             )}
-            <button className="ib" onClick={close}><IconClose /></button>
+            <button className="ib" onClick={close} title={S.common.close}><IconClose /></button>
           </div>
-        </div>
-        <div className="plugins-tabs">
-          {TABS.map(([id, label]) => (
-            <button key={id} className={"plugins-tab" + (s.settingsTab === id ? " active" : "")}
-                    onClick={() => setState({ settingsTab: id })}>{label(S)}</button>
-          ))}
         </div>
         <div className="settings-body">
           {s.settingsTab === "settings" && <GeneralTab />}
@@ -249,6 +260,7 @@ export function SettingsModal() {
               ))}
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>
@@ -388,26 +400,32 @@ function GeneralTab() {
   const S = useStrings();
   return (
     <div className="settings-list">
-      <div className="settings-block">
-        <div className="settings-block-title">{S.settings.theme}</div>
-        <div className="pf-toggle">
-          {([["auto", S.settings.themeAuto], ["light", S.settings.themeLight], ["dark", S.settings.themeDark]] as const).map(([v, label]) => (
-            <button key={v} className={"pf-toggle-btn" + (s.theme === v ? " active" : "")} onClick={() => setTheme(v)}>{label}</button>
-          ))}
+      <div className="settings-group">
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">{S.settings.theme}</div>
+          </div>
+          <div className="seg">
+            {([["auto", S.settings.themeAuto], ["light", S.settings.themeLight], ["dark", S.settings.themeDark]] as const).map(([v, label]) => (
+              <button key={v} className={"seg-btn" + (s.theme === v ? " active" : "")} onClick={() => setTheme(v)}>{label}</button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Each language is labelled in itself, so it is readable to someone who
-          landed in the wrong one and cannot read the current UI. */}
-      <div className="settings-block">
-        <div className="settings-block-title">{S.settings.language}</div>
-        <div className="pf-toggle">
-          {LANGS.map(({ id, label }) => (
-            <button key={id} className={"pf-toggle-btn" + (s.lang === id ? " active" : "")}
-                    onClick={() => setLang(id)}>{label}</button>
-          ))}
+        {/* Each language is labelled in itself, so it is readable to someone who
+            landed in the wrong one and cannot read the current UI. */}
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">{S.settings.language}</div>
+            <div className="settings-row-hint">{S.settings.languageMeta}</div>
+          </div>
+          <div className="seg">
+            {LANGS.map(({ id, label }) => (
+              <button key={id} className={"seg-btn" + (s.lang === id ? " active" : "")}
+                      onClick={() => setLang(id)}>{label}</button>
+            ))}
+          </div>
         </div>
-        <div className="settings-item-meta">{S.settings.languageMeta}</div>
       </div>
 
       <div className="settings-block">

@@ -56,6 +56,15 @@ agentica-gateway --port 8890         # 指定监听端口
 - **自动更新**：基于 `electron-updater` 读取 GitHub Release。macOS 只接受已签名应用的更新，未签名构建会跳过检查，需要重新下载安装包；`AGENTICA_DESKTOP_NO_UPDATE=1` 可全局关闭。
 - **签名**：在仓库 secrets 配置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`（macOS 签名 + 公证）和 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`（Windows）即可，不配则产出未签名安装包。
 
+#### 工作区
+
+侧栏按**工作区**（本机一个文件夹）归组对话：
+
+- **添加**：标题行的文件夹图标，选择已存在的目录；不会替你创建目录。添加后立刻新建一个对话，空工作区也会显示。
+- **重命名 / 删除**：工作区行的 `⋯` 菜单（双击名称也可重命名）。重命名只改显示名；删除会移除该工作区下的对话，有运行中对话时拒绝，磁盘文件夹不动。
+- **存储**：账号偏好 `~/.agentica/gateway/prefs/<账号>.json` 的 `workspaces`（`[{dir, name?}]`），经 `GET/PUT /api/prefs` 读写。
+- **调宽**：拖拽侧栏右边缘（220–480px），双击恢复 280px。
+
 #### 会话侧栏
 
 - 侧栏默认只列**全部网页会话 + 最近 30 天的 CLI 会话 + 正在运行的会话 + 已归档会话**，点「显示全部」才加载几千条历史 CLI 会话。对应接口 `GET /api/sessions?scope=recent|all&recent_days=30`，默认 `recent`。

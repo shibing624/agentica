@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
 import { agoStr, lastQueryTs, sessionSideStatus } from "../lib/format";
 import { collapseSessionRows, sessionMatches } from "../lib/sessionRows";
 import { archiveSession, deleteSession, loadSessions, newChatInDir, renameSession, switchTo, syncSessionStatus } from "../sessions";
-import { IconArchive, IconClose, IconFolder, IconPencil, IconPlus, IconSpinner } from "../icons";
 import {
-  getState, projectIdForDir, projectNameForDir, setState, useAppState, type Session,
+  IconArchive, IconChevronRight, IconClose, IconFolder, IconMore, IconPencil, IconPlus, IconSpinner, IconTrash,
+} from "../icons";
+import {
+  getState, normDir, projectIdForDir, projectNameForDir, setState, useAppState, type Session,
 } from "../store";
+import { deleteWorkspace, renameWorkspace } from "../workspaces";
 
 type Group = {
   id: string;
@@ -24,28 +27,62 @@ export function SessionTree() {
   const q = s.sidebarSearch.trim();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const labels = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const w of s.workspaces) if (w.name) m[projectIdForDir(w.dir)] = w.name;
+    return m;
+  }, [s.workspaces]);
   const groups = useMemo(() => {
     const by: Record<string, Group> = {};
     for (const [id, sess] of Object.entries(s.sessions)) {
       if (sess.archived) continue;
       const pid = sess.projectId || projectIdForDir(sess.dir);
-      const name = projectNameForDir(sess.dir);
+      const name = labels[pid] || projectNameForDir(sess.dir);
       if (!sessionMatches({ id, session: sess }, name, q)) continue;
-      if (!by[pid]) by[pid] = { id: pid, name, dir: sess.dir, sessions: [] };
+      if (!by[pid]) by[pid] = { id: pid, name, dir: normDir(sess.dir), sessions: [] };
       const running = !!(sess.running || s.streams[id] || s.goalRuns[id] || s.commandRuns[id]);
       by[pid].sessions.push({ id, session: { ...sess, running } });
+    }
+    // A workspace the user added is listed even before its first chat.
+    for (const w of s.workspaces) {
+      const pid = projectIdForDir(w.dir);
+      if (by[pid]) continue;
+      const name = w.name || projectNameForDir(w.dir);
+      if (q && !name.toLocaleLowerCase().includes(q.toLocaleLowerCase())) continue;
+      by[pid] = { id: pid, name, dir: normDir(w.dir), sessions: [] };
     }
     const grouped = Object.values(by);
     for (const g of grouped) {
       g.sessions.sort((a, b) => lastQueryTs(b.session) - lastQueryTs(a.session));
     }
-    grouped.sort((a, b) => {
-      const aFirst = Math.min(...a.sessions.map((x) => x.session.ts));
-      const bFirst = Math.min(...b.sessions.map((x) => x.session.ts));
-      return bFirst - aFirst;
-    });
+    const first = (g: Group) => g.sessions.length ? Math.min(...g.sessions.map((x) => x.session.ts)) : Date.now();
+    grouped.sort((a, b) => first(b) - first(a));
     return grouped;
   }, [s.rev, s.sidebarSearch]);
+
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuFor(null); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuFor]);
+
+  const commitRename = (g: Group) => {
+    const text = renameText;
+    setRenaming(null);
+    void renameWorkspace(g.dir, text);
+  };
 
   useEffect(() => {
     const remoteBusy = Object.entries(s.sessions).some(
@@ -98,25 +135,62 @@ export function SessionTree() {
         const rows = collapseSessionRows(g.sessions, s.curSess, isExpanded || !!q);
         return (
           <section className="p-group" key={g.id}>
-            <div className="p-head">
-              <button type="button" className="p-caret" title={g.name}
+            <div className={"p-head" + (menuFor === g.id ? " menu-open" : "")}>
+              <button type="button" className={"p-caret" + (shut ? "" : " open")} title={g.name}
                       aria-label={shut ? S.chat.expandProject : S.chat.collapseProject}
                       onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}>
-                {shut ? "▸" : "▾"}
+                <IconChevronRight />
               </button>
-              <button type="button" className="p-main" title={g.dir}
-                      onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}>
-                <div className="p-title">
-                  <span className="p-icon"><IconFolder /></span>
-                  <span className="p-title-text">{g.name}</span>
-                  <span className="p-count">{g.sessions.length}</span>
+              {renaming === g.id ? (
+                <input className="p-rename-input" autoFocus value={renameText}
+                       placeholder={S.workspace.renamePrompt}
+                       onChange={(e) => setRenameText(e.target.value)}
+                       onBlur={() => commitRename(g)}
+                       onKeyDown={(e) => {
+                         if (e.nativeEvent.isComposing) return;
+                         if (e.key === "Enter") { e.preventDefault(); commitRename(g); }
+                         if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
+                       }} />
+              ) : (
+                <button type="button" className="p-main" title={g.dir}
+                        onClick={() => setCollapsed((c) => ({ ...c, [g.id]: !c[g.id] }))}
+                        onDoubleClick={() => { setRenameText(g.name); setRenaming(g.id); }}>
+                  <div className="p-title">
+                    <span className="p-icon"><IconFolder /></span>
+                    <span className="p-title-text">{g.name}</span>
+                  </div>
+                </button>
+              )}
+              {renaming !== g.id && (
+                <div className="p-tools">
+                  <span className="p-count">{g.sessions.length || ""}</span>
+                  <div className="p-menu-wrap" ref={menuFor === g.id ? menuRef : undefined}>
+                    <button type="button" className="p-more" title={S.workspace.more} aria-haspopup="menu"
+                            aria-expanded={menuFor === g.id}
+                            onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === g.id ? null : g.id); }}>
+                      <IconMore />
+                    </button>
+                    {menuFor === g.id && (
+                      <div className="p-menu" role="menu">
+                        <button type="button" role="menuitem" className="p-menu-item"
+                                onClick={() => { setMenuFor(null); setRenameText(g.name); setRenaming(g.id); }}>
+                          <IconPencil /><span>{S.workspace.rename}</span>
+                        </button>
+                        <button type="button" role="menuitem" className="p-menu-item danger"
+                                onClick={() => { setMenuFor(null); deleteWorkspace(g.dir, g.name); }}>
+                          <IconTrash /><span>{S.workspace.delete}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button type="button" className="p-add" title={S.chat.newInProject}
+                          onClick={(e) => { e.stopPropagation(); addIn(g.dir); }}>
+                    <IconPlus />
+                  </button>
                 </div>
-              </button>
-              <button type="button" className="p-add" title={S.chat.newInProject}
-                      onClick={(e) => { e.stopPropagation(); addIn(g.dir); }}>
-                <IconPlus />
-              </button>
+              )}
             </div>
+            {!shut && !g.sessions.length && <div className="s-hint">{S.workspace.emptyHint}</div>}
             {!shut && rows.visible.map(({ id, session }) => {
               const side = sessionSideStatus({
                 id, curSess: s.curSess, unread: session.unread, running: session.running,

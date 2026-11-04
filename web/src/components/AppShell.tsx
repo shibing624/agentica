@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import * as api from "../api";
 import { loadAuthStatus, loadCronJobs, loadPlugins, loadPrefs, loadProfiles, loadStatus } from "../data";
@@ -10,9 +11,11 @@ import { loadSessions, newChat } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
-  IconChat, IconDatabase,
+  IconChat, IconDatabase, IconFolderPlus,
 } from "../icons";
-import { setState, useAppState, type Session } from "../store";
+import { clampSidebarWidth, setState, useAppState, type Session } from "../store";
+import { openAddWorkspace } from "../workspaces";
+import { AddWorkspaceDialog } from "./AddWorkspaceDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DirModal } from "./DirModal";
 import { SessionTree } from "./SessionTree";
@@ -47,7 +50,7 @@ export function AppLayout() {
   return (
     <AppShell
       active={active}
-      list={<><div className="project-list-label">{S.chat.projects}</div><SessionTree /></>}
+      list={<SessionTree />}
     >
       <Outlet />
     </AppShell>
@@ -77,33 +80,50 @@ export function AppShell({
   }, []);
 
   const usage = accountUsage(s.sessions);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const asideRef = useRef<HTMLElement | null>(null);
+  const showSearch = active === "chat" || active === "traces";
+
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (s.sidebarCollapsed) return;
+    e.preventDefault();
+    const left = asideRef.current?.getBoundingClientRect().left ?? 0;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    setDragging(true);
+    let width = s.sidebarWidth;
+    const move = (ev: PointerEvent) => {
+      width = clampSidebarWidth(ev.clientX - left);
+      asideRef.current?.style.setProperty("--sidebar-w", width + "px");
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      setDragging(false);
+      localStorage.setItem("ag_sidebar_w", String(width));
+      setState({ sidebarWidth: width });
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
 
   return (
     <>
-      <aside className={"sidebar" + (s.sidebarCollapsed ? " collapsed" : "")}>
+      <aside ref={asideRef}
+             className={"sidebar" + (s.sidebarCollapsed ? " collapsed" : "") + (dragging ? " resizing" : "")}
+             style={{ "--sidebar-w": s.sidebarWidth + "px" } as React.CSSProperties}>
         <div className="side-head">
           <div className="brand"><Logo /><span>Agentica</span></div>
           <button className="ib" onClick={() => setState({ sidebarCollapsed: !s.sidebarCollapsed })}
-                  title={S.nav.collapse}><IconSidebar /></button>
+                  title={s.sidebarCollapsed ? S.nav.expand : S.nav.collapse}><IconSidebar /></button>
         </div>
+        <button className="side-new" onClick={() => { nav("/chat"); newChat(); }} title={S.nav.newChat}>
+          <IconPlus /><span className="nav-label">{S.nav.newChat}</span>
+        </button>
         <nav className="side-nav" aria-label="Primary">
-          <button className="side-nav-item" onClick={() => { nav("/chat"); newChat(); }} title={S.nav.newChat}>
-            <span className="nav-icon"><IconPlus /></span>
-            <span className="nav-label">{S.nav.newChat}</span>
-          </button>
-          {(active === "chat" || active === "traces") && (
-            <label className="side-nav-item side-search-item" title={S.nav.search}>
-              <span className="nav-icon"><IconSearch /></span>
-              <input placeholder={S.nav.searchSessions} value={s.sidebarSearch}
-                     onChange={(e) => setState({ sidebarSearch: e.target.value })} />
-              {s.sidebarSearch ? (
-                <button className="search-clear"
-                        onClick={(e) => { e.preventDefault(); setState({ sidebarSearch: "" }); }}>
-                  <IconClose />
-                </button>
-              ) : null}
-            </label>
-          )}
           <button className="side-nav-item" onClick={() => void primeSettings("cron")} title={S.nav.cron}>
             <span className="nav-icon"><IconClock /></span>
             <span className="nav-label">{S.nav.cron}</span>
@@ -115,6 +135,36 @@ export function AppShell({
             <span className="nav-label">{S.nav.plugins}</span>
           </button>
         </nav>
+        <div className="side-section">
+          <span className="side-section-title">{S.workspace.title}</span>
+          <div className="side-section-actions">
+            {showSearch && (
+              <button className={"ib sm" + (searchOpen || s.sidebarSearch ? " on" : "")}
+                      title={S.nav.search} onClick={() => setSearchOpen((v) => !v)}>
+                <IconSearch />
+              </button>
+            )}
+            <button className="ib sm" title={S.workspace.add} onClick={() => openAddWorkspace()}>
+              <IconFolderPlus />
+            </button>
+          </div>
+        </div>
+        {showSearch && (searchOpen || !!s.sidebarSearch) && (
+          <label className="side-search">
+            <IconSearch />
+            <input autoFocus placeholder={S.nav.searchSessions} value={s.sidebarSearch}
+                   onChange={(e) => setState({ sidebarSearch: e.target.value })}
+                   onKeyDown={(e) => {
+                     if (e.key === "Escape") { setState({ sidebarSearch: "" }); setSearchOpen(false); }
+                   }} />
+            {s.sidebarSearch ? (
+              <button className="search-clear"
+                      onClick={(e) => { e.preventDefault(); setState({ sidebarSearch: "" }); }}>
+                <IconClose />
+              </button>
+            ) : null}
+          </label>
+        )}
         {list}
         <div className="account-wrap">
           <div className={"account-pop" + (s.accountPanelOpen ? " open" : "")} onClick={(e) => e.stopPropagation()}>
@@ -164,11 +214,15 @@ export function AppShell({
             </span>
           </button>
         </div>
+        <div className="sidebar-resize-handle" role="separator" aria-orientation="vertical"
+             title={S.workspace.resize} onPointerDown={startResize}
+             onDoubleClick={() => { localStorage.removeItem("ag_sidebar_w"); setState({ sidebarWidth: clampSidebarWidth(280) }); }} />
       </aside>
       <div className={"account-pop-backdrop" + (s.accountPanelOpen ? " open" : "")}
            onClick={() => setState({ accountPanelOpen: false })} />
       {children}
       {s.dirModal.open && <DirModal />}
+      {s.workspaceAdd.open && <AddWorkspaceDialog />}
       {s.settingsModal.open && <SettingsModal />}
       {s.pluginsPanelOpen && <PluginsPanel />}
       <ChangePasswordDialog />
