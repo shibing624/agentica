@@ -44,6 +44,14 @@ export type ChatMsg = {
   errorTs?: number;
   /** Mid-run interrupt (CLI steer), not a new turn. */
   steer?: boolean;
+  /** SessionLog row this message ends at (assistant: its last row). Set when
+   *  the message comes from the server log; fork and feedback address it. */
+  uuid?: string;
+  /** Thumbs up/down left on this reply. */
+  feedback?: { rating: "up" | "down" | null; comment?: string };
+  /** A `/skill args` turn: the log holds the expanded SKILL.md prompt; the
+   *  bubble shows this chip instead. */
+  skill?: { name: string; args: string };
 };
 
 export type Session = {
@@ -205,6 +213,8 @@ export type AppState = {
   cronBusy: string;
   sidebarSearch: string;
   sessionScope: "recent" | "all";
+  /** List CLI/SDK sessions too (account pref; off keeps web history separate). */
+  showCliSessions: boolean;
   sessionsLoading: boolean;
   sessionsError: string;
   /** Whether a web password exists. Decides what the access-control block
@@ -330,6 +340,7 @@ const state: AppState = {
   cronBusy: "",
   sidebarSearch: "",
   sessionScope: "recent",
+  showCliSessions: false,
   sessionsLoading: false,
   sessionsError: "",
   passwordSet: false,

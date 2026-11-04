@@ -194,3 +194,30 @@ export const IconFolderPlus = () => (
     <path d="M3 4.5h3l1.2 1.5H13a1 1 0 011 1v4.5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-6A1 1 0 013 4.5z" />
   </S>
 );
+export const IconThumbUp = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5 7l2.4-4.6a1.3 1.3 0 012.4.8L9.4 6.3h3.3a1.3 1.3 0 011.3 1.5l-.8 4.6a1.3 1.3 0 01-1.3 1.1H5zM5 7H2.6v6.5H5" />
+  </S>
+);
+export const IconThumbDown = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 9l-2.4 4.6a1.3 1.3 0 01-2.4-.8l.4-3.1H3.3a1.3 1.3 0 01-1.3-1.5l.8-4.6A1.3 1.3 0 014.1 2.5H11zM11 9h2.4V2.5H11" />
+  </S>
+);
+export const IconFork = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="4.5" cy="3.5" r="1.5" /><circle cx="11.5" cy="3.5" r="1.5" /><circle cx="8" cy="12.5" r="1.5" />
+    <path d="M4.5 5v1.2c0 1 .8 1.8 1.8 1.8h3.4c1 0 1.8-.8 1.8-1.8V5M8 8v3" />
+  </S>
+);
+export const IconExternal = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.5 2.5h4v4M13.5 2.5L7.5 8.5M12 9.5v3a1 1 0 01-1 1H3.5a1 1 0 01-1-1V5a1 1 0 011-1h3" />
+  </S>
+);
+export const IconFileCode = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.5 1.75H4.25a1 1 0 00-1 1v10.5a1 1 0 001 1h7.5a1 1 0 001-1V4.75z" /><path d="M9.5 1.75v3h3" />
+    <path d="M6.6 8.2L5.3 9.6l1.3 1.4M9.4 8.2l1.3 1.4-1.3 1.4" />
+  </S>
+);

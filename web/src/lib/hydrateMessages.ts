@@ -1,5 +1,6 @@
 import type { ChatMsg, MsgPart } from "../store";
 import { settleWork } from "./msgParts";
+import { parseSkillTurn } from "./skillInvocation";
 
 /**
  * Rebuild the chat transcript from a SessionLog JSONL dump.
@@ -30,10 +31,14 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     const type = String(e.type || "");
     if (type === "user") {
       closeAssistant();
+      const content = String(e.content || "");
+      const skill = parseSkillTurn(content);
       msgs.push({
         role: "user",
-        content: String(e.content || ""),
+        content,
         ts: tsOf(e),
+        ...(uuidOf(e) ? { uuid: uuidOf(e) } : {}),
+        ...(skill ? { skill } : {}),
       });
       continue;
     }
@@ -41,11 +46,14 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       if (!assistantHasWork(e)) continue;
       assistant = ensureAssistant(msgs, assistant, tsOf(e));
       applyAssistant(assistant, e);
+      // The reply ends at its last row: fork / feedback address that one.
+      if (uuidOf(e)) assistant.uuid = uuidOf(e);
       continue;
     }
     if (type === "tool" || type === "tool_audit") {
       assistant = ensureAssistant(msgs, assistant, tsOf(e));
       applyToolResult(assistant, e);
+      if (uuidOf(e)) assistant.uuid = uuidOf(e);
       continue;
     }
     if (type === "compact_boundary") {
@@ -54,6 +62,10 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   }
   closeAssistant();
   return msgs;
+}
+
+function uuidOf(e: Record<string, unknown>): string {
+  return typeof e.uuid === "string" ? e.uuid : "";
 }
 
 function tsOf(e: Record<string, unknown>): number {

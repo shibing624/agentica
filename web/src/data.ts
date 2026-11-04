@@ -60,6 +60,7 @@ export async function loadPrefs() {
     setState({ selectedApprovalMode: data.approval_mode });
   }
   if (data.last_session_id) writeLastSessionId(data.last_session_id, false);
+  setState({ showCliSessions: !!data.show_cli_sessions });
   setState({ workspaces: Array.isArray(data.workspaces) ? data.workspaces : [] });
 }
 

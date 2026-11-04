@@ -15,8 +15,10 @@ Key design decisions:
 """
 import asyncio
 import os
+import tempfile
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +80,29 @@ _AGENT_BUILD_TIMEOUT_S = 30
 # history lives in the dedicated TaskRun store (agentica.cron.jobs), not the
 # chat session log. See AgentService.run_cron().
 CRON_SESSION_PREFIX = "scheduled_"
+
+_SYSTEM_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders")
+
+
+def is_system_temp_path(path: str) -> bool:
+    """Whether ``path`` is inside the OS temp dir (``/tmp``, ``/var/folders``, ``$TMPDIR``).
+
+    ``$AGENTICA_HOME`` is never temp, even when it lives under one (tests, a
+    throwaway home): the web's own "temporary workspace" is
+    ``$AGENTICA_HOME/tmp/web-chats``, a place the user chose to chat in.
+    """
+    if not path:
+        return False
+    try:
+        real = os.path.realpath(os.path.expanduser(path))
+        home = os.path.realpath(os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica")))
+        roots = {os.path.realpath(r) for r in _SYSTEM_TEMP_ROOTS}
+        roots.add(os.path.realpath(tempfile.gettempdir()))
+    except (OSError, ValueError):
+        return False
+    if real == home or real.startswith(home + os.sep):
+        return False
+    return any(real == r or real.startswith(r + os.sep) for r in roots)
 
 # Agent cache, run lock, work_dir and approval mode are partitioned by
 # owner. ``session_id`` is client-supplied; a bare key lets one account
@@ -1283,12 +1308,22 @@ class AgentService:
         owner: Optional[str] = None,
         scope: str = "recent",
         recent_days: int = 30,
+        include_cli: bool = True,
+        hide_temp_dirs: bool = False,
     ) -> List[Dict[str, Any]]:
         """List lightweight session summaries across the owner's projects.
 
         ``recent`` keeps every gateway session, archived session and active run,
         but only CLI/legacy sessions modified within ``recent_days``. Filtering
         happens before preview generation so old logs are never parsed.
+
+        ``include_cli=False`` keeps only sessions started from the gateway (web,
+        desktop, IM): the CLI and SDK write to the same project tree, and the
+        web lists them only when the user asks for it. ``hide_temp_dirs`` drops
+        sessions whose working directory is under the system temp dir
+        (``/tmp``, ``/var/folders``); those are left behind by test runs and
+        demos of programs that drive agentica, not conversations to go back to.
+        Running sessions are always listed.
         """
         if scope not in ("all", "recent"):
             raise ValueError(f"Unknown session scope: {scope}")
@@ -1314,6 +1349,16 @@ class AgentService:
                     candidates[sid] = (entry, work_dir)
 
         cutoff = time.time() - recent_days * 86400
+        # The gateway's own default directory is where it was told to work,
+        # even when that is under /tmp.
+        gateway_dir = os.path.realpath(str(settings.base_dir))
+
+        def _hidden_temp(work_dir: str) -> bool:
+            if not is_system_temp_path(work_dir):
+                return False
+            real = os.path.realpath(work_dir)
+            return not (real == gateway_dir or real.startswith(gateway_dir + os.sep))
+
         out: List[Dict[str, Any]] = []
         for entry, project_work_dir in candidates.values():
             sid = entry["session_id"]
@@ -1330,6 +1375,10 @@ class AgentService:
                 else:
                     source = "legacy"
             archived = bool(entry.get("archived"))
+            if not running and not include_cli and source != "gateway":
+                continue
+            if not running and hide_temp_dirs and _hidden_temp(entry.get("work_dir") or project_work_dir):
+                continue
             if (
                 scope == "recent"
                 and source != "gateway"
@@ -1481,6 +1530,42 @@ class AgentService:
             logger.warning(f"Failed to remove SessionLog for {session_id}: {e}")
         logger.debug(f"Session deleted: {session_id}")
         return removed or log_existed
+
+    def fork_session(self, session_id: str, at_uuid: Optional[str] = None, owner: Optional[str] = None) -> str:
+        """Copy a session up to ``at_uuid`` (inclusive) into a new one; return its id.
+
+        The branch lives in the same project and is marked as a gateway session,
+        so it shows in the web list even when CLI sessions are hidden. Its name
+        says where it came from; the original is untouched.
+        """
+        log = self.session_log_for(session_id, owner=owner)
+        if not log.path.exists() or log.path.stat().st_size == 0:
+            raise FileNotFoundError(f"Session not found: {session_id}")
+        if at_uuid and not log.has_entry(at_uuid):
+            raise ValueError(f"No entry {at_uuid} in session {session_id}")
+        new_id = str(uuid.uuid4())
+        branch = log.fork(new_id, at_uuid=at_uuid)
+        branch.set_source(RunSource.gateway.value)
+        meta = SessionLog._read_meta(log.meta_path)
+        title = SessionLog._meta_name(meta) or (log.first_user_message() or "Chat")[:40]
+        SessionLog.rename_session(new_id, f"{title} (fork)", base_dir=str(log.base_dir))
+        if log._cwd:
+            self._session_work_dirs[self._sk(new_id, owner)] = log._cwd
+        return new_id
+
+    def session_feedback(self, session_id: str, owner: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+        return self.session_log_for(session_id, owner=owner).read_feedback()
+
+    def set_session_feedback(
+        self, session_id: str, entry_uuid: str, rating: Optional[str], comment: str = "",
+        owner: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        log = self.session_log_for(session_id, owner=owner)
+        if not log.path.exists():
+            raise FileNotFoundError(f"Session not found: {session_id}")
+        if not log.has_entry(entry_uuid):
+            raise ValueError(f"No entry {entry_uuid} in session {session_id}")
+        return log.set_feedback(entry_uuid, rating, comment)
 
     def rename_session(self, session_id: str, name: str, owner: Optional[str] = None) -> None:
         """Rename a session by writing the sidecar .meta.json (SessionLog)."""

@@ -717,20 +717,24 @@ class TestUserRoutes:
         client.post("/api/auth/login", json={"username": ADMIN_ID, "password": "correct horse battery"})
         assert client.request("DELETE", f"/api/auth/users/{ADMIN_ID}").status_code == 400
 
-    def test_sessions_are_listed_per_account(self, client):
+    def test_sessions_are_listed_per_account(self, client, monkeypatch):
         """The route reads the owner off the credential, so two accounts asking
         the same question get two different partitions."""
         from agentica.gateway import deps
 
+        # The pref lives in $AGENTICA_HOME/gateway/prefs; do not read the real one.
+        monkeypatch.setattr("agentica.gateway.routes.chat.show_cli_sessions_pref", lambda uid: False)
         client.get("/api/sessions", headers=_auth())
         assert deps.agent_service.list_sessions.call_args.kwargs == {
             "owner": ADMIN_ID, "scope": "recent", "recent_days": 30,
+            "include_cli": False, "hide_temp_dirs": True,
         }
 
         self._sign_in_as(client, "kk")
         client.get("/api/sessions")
         assert deps.agent_service.list_sessions.call_args.kwargs == {
             "owner": "kk", "scope": "recent", "recent_days": 30,
+            "include_cli": False, "hide_temp_dirs": True,
         }
 
     def test_cron_jobs_are_listed_and_edited_per_account(self, client, tmp_path, monkeypatch):

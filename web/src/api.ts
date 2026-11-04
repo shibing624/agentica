@@ -38,6 +38,7 @@ export const fetchPrefs = () => request("/api/prefs");
 export const savePrefsApi = (body: {
   theme?: string; lang?: string; approval_mode?: string; last_session_id?: string | null;
   auto_extract_memory?: boolean;
+  show_cli_sessions?: boolean;
   workspaces?: Array<{ dir: string; name?: string }>;
 }) => putJson("/api/prefs", body);
 export const fetchProfiles = () => request("/api/profiles");
@@ -50,6 +51,8 @@ export const deleteDirHistoryApi = (path?: string) =>
 export const saveBaseDirApi = (base_dir: string) => postJson("/api/config/base_dir", { base_dir });
 export const openPathApi = (path: string, app: string) => postJson("/api/open", { path, app });
 export const openUrlApi = (url: string) => postJson("/api/open", { url, app: "finder" });
+/** Select the file in Finder / Explorer (Linux: open its folder). */
+export const revealPathApi = (path: string) => postJson("/api/open", { path, app: "reveal" });
 export const startWechatQrApi = () => postJson<{
   status: string; qrcode?: string; png?: string; expires_in?: number; detail?: string;
 }>("/api/channels/wechat/qr", {});
@@ -63,6 +66,13 @@ export const archiveSessionApi = (id: string) => request(`/api/sessions/${id}/ar
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
 export const markSessionReadApi = (id: string) => request(`/api/sessions/${id}/read`, { method: "POST" });
+export const forkSessionApi = (id: string, at_uuid?: string) =>
+  postJson<{ session_id: string }>(`/api/sessions/${id}/fork`, { at_uuid: at_uuid || null });
+export type MsgFeedback = { rating: "up" | "down" | null; comment?: string; at?: string };
+export const fetchFeedbackApi = (id: string) =>
+  request<{ feedback: Record<string, MsgFeedback> }>(`/api/sessions/${id}/feedback`);
+export const setFeedbackApi = (id: string, uuid: string, rating: "up" | "down" | null, comment = "") =>
+  postJson<{ feedback: Record<string, MsgFeedback> }>(`/api/sessions/${id}/feedback`, { uuid, rating, comment });
 
 export async function uploadFileApi(file: File, targetDir?: string) {
   const fd = new FormData();

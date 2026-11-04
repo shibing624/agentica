@@ -157,7 +157,67 @@ export async function hydrateSession(id: string, force = false) {
   sess.lastTs = lastQueryTs(sess);
   saveSessions();
   bump();
-  if (sess.msgs.length) void syncSessionRoundStats(id);
+  if (sess.msgs.length) {
+    void syncSessionRoundStats(id);
+    void syncFeedback(id);
+  }
+}
+
+/** Stamp thumbs up/down (kept in the session sidecar) onto the replies. */
+async function syncFeedback(id: string) {
+  const { ok, data } = await api.fetchFeedbackApi(id);
+  const sess = getState().sessions[id];
+  if (!ok || !data?.feedback || !sess) return;
+  let changed = false;
+  for (const m of sess.msgs) {
+    const fb = m.uuid ? data.feedback[m.uuid] : undefined;
+    if (!fb && !m.feedback) continue;
+    m.feedback = fb ? { rating: fb.rating, comment: fb.comment } : undefined;
+    changed = true;
+  }
+  if (changed) bump();
+}
+
+/** The log uuid of message ``idx``. A reply that just streamed in has none
+ *  until the transcript is read back from the server log. */
+async function msgUuid(id: string, idx: number): Promise<string | undefined> {
+  const cur = getState().sessions[id]?.msgs[idx];
+  if (cur?.uuid) return cur.uuid;
+  if (!getState().sessions[id]) return undefined;
+  const fresh = await fetchAllTraceEvents(id);
+  if (!fresh) return undefined;
+  return eventsToChatMsgs(fresh)[idx]?.uuid;
+}
+
+/** Branch the conversation after reply ``idx`` into a new session and open it. */
+export async function forkAt(id: string, idx: number) {
+  const S = getStrings();
+  const at = await msgUuid(id, idx);
+  if (!at) { showToast(S.chat.forkNotSaved, 2500); return; }
+  const { ok, data } = await api.forkSessionApi(id, at);
+  if (!ok || !data?.session_id) { showToast(S.chat.forkFailed, 2500); return; }
+  await loadSessions();
+  switchTo(data.session_id);
+  showToast(S.chat.forkDone);
+}
+
+/** Thumbs up/down (click the active one again to clear) and an optional note. */
+export async function rateMessage(
+  id: string, idx: number, rating: "up" | "down" | null, comment = "",
+) {
+  const S = getStrings();
+  const at = await msgUuid(id, idx);
+  if (!at) { showToast(S.chat.forkNotSaved, 2500); return false; }
+  const m = getState().sessions[id]?.msgs[idx];
+  const before = m?.feedback;
+  if (m) { m.uuid = at; m.feedback = rating || comment ? { rating, comment } : undefined; bump(); }
+  const { ok } = await api.setFeedbackApi(id, at, rating, comment);
+  if (!ok) {
+    if (m) { m.feedback = before; bump(); }
+    showToast(S.chat.feedbackFailed, 2500);
+    return false;
+  }
+  return true;
 }
 
 async function fetchAllTraceEvents(id: string): Promise<any[] | null> {

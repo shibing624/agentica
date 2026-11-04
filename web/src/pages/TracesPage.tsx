@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
 import { getStrings, useStrings, type Strings } from "../i18n";
-import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps, shortenPath } from "../lib/format";
+import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps } from "../lib/format";
 import { IconCopy, IconDatabase } from "../icons";
 import { showToast } from "../store";
 import { switchTo } from "../sessions";
@@ -174,7 +174,15 @@ function TraceDetail({ a }: { a: Analysis }) {
             <span>{fmtFileSize(a.file.sizeBytes)}</span>
             {a.meta.model && <span>{a.meta.model}</span>}
             {a.meta.gitBranch && <span>git:{a.meta.gitBranch}</span>}
-            {a.meta.cwd && <span title={a.meta.cwd}>{shortenPath(a.meta.cwd)}</span>}
+            {a.meta.cwd && (
+              <span className="trace-cwd">
+                <code>{a.meta.cwd}</code>
+                <button type="button" className="trace-cwd-copy" title={S.common.copy}
+                        onClick={() => { void navigator.clipboard.writeText(a.meta.cwd || "").then(() => showToast(S.common.copied)); }}>
+                  <IconCopy />
+                </button>
+              </span>
+            )}
           </div>
         </div>
         <div className="trace-head-r">

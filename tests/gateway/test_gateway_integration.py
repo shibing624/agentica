@@ -254,6 +254,12 @@ class TestGoalEndpoint:
 class TestSessionEndpoints:
     """Test /api/sessions endpoints."""
 
+    @pytest.fixture(autouse=True)
+    def _cli_sessions_hidden(self):
+        # The pref lives in $AGENTICA_HOME/gateway/prefs; do not read the real one.
+        with patch("agentica.gateway.routes.chat.show_cli_sessions_pref", return_value=False):
+            yield
+
     def test_list_sessions(self, mock_app):
         client, mock_svc = mock_app
         resp = client.get("/api/sessions")
@@ -266,14 +272,46 @@ class TestSessionEndpoints:
         assert sessions[1]["session_id"] == "s2"
         assert sessions[1]["archived"] is True
         assert data["scope"] == "recent"
-        mock_svc.list_sessions.assert_called_with(owner="default", scope="recent", recent_days=30)
+        mock_svc.list_sessions.assert_called_with(
+            owner="default", scope="recent", recent_days=30, include_cli=False, hide_temp_dirs=True,
+        )
 
     def test_list_all_sessions(self, mock_app):
         client, mock_svc = mock_app
         resp = client.get("/api/sessions?scope=all&recent_days=90")
         assert resp.status_code == 200
         assert resp.json()["scope"] == "all"
-        mock_svc.list_sessions.assert_called_with(owner="default", scope="all", recent_days=90)
+        mock_svc.list_sessions.assert_called_with(
+            owner="default", scope="all", recent_days=90, include_cli=False, hide_temp_dirs=True,
+        )
+
+    def test_list_sessions_follows_the_show_cli_sessions_pref(self, mock_app):
+        client, mock_svc = mock_app
+        with patch("agentica.gateway.routes.chat.show_cli_sessions_pref", return_value=True):
+            client.get("/api/sessions")
+        assert mock_svc.list_sessions.call_args.kwargs["include_cli"] is True
+
+    def test_fork_session(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.fork_session = MagicMock(return_value="new-id")
+        resp = client.post("/api/sessions/s1/fork", json={"at_uuid": "u-3"})
+        assert resp.status_code == 200 and resp.json() == {"session_id": "new-id"}
+        mock_svc.fork_session.assert_called_with("s1", "u-3", owner="default")
+        mock_svc.fork_session.side_effect = FileNotFoundError("x")
+        assert client.post("/api/sessions/nope/fork", json={}).status_code == 404
+        mock_svc.fork_session.side_effect = ValueError("No entry")
+        assert client.post("/api/sessions/s1/fork", json={"at_uuid": "zz"}).status_code == 400
+
+    def test_session_feedback(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.set_session_feedback = MagicMock(return_value={"u-3": {"rating": "down", "comment": "x"}})
+        mock_svc.session_feedback = MagicMock(return_value={"u-3": {"rating": "down", "comment": "x"}})
+        resp = client.post("/api/sessions/s1/feedback", json={"uuid": "u-3", "rating": "down", "comment": "x"})
+        assert resp.status_code == 200
+        mock_svc.set_session_feedback.assert_called_with("s1", "u-3", "down", "x", owner="default")
+        assert client.get("/api/sessions/s1/feedback").json()["feedback"]["u-3"]["rating"] == "down"
+        mock_svc.set_session_feedback.side_effect = ValueError("rating")
+        assert client.post("/api/sessions/s1/feedback", json={"uuid": "u-3", "rating": "meh"}).status_code == 400
 
     def test_delete_session(self, mock_app):
         client, mock_svc = mock_app

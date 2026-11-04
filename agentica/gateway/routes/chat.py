@@ -12,6 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from agentica.memory.trace import last_completed_round
 
@@ -24,6 +25,7 @@ from ..models import (
 )
 from ..services.agent_service import AgentService
 from ..services import live_turn
+from .settings import show_cli_sessions_pref
 
 try:
     from agentica.run.response import AgentCancelledError
@@ -503,11 +505,14 @@ async def list_sessions(
     recent_days: int = Query(30, ge=1, le=365),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
+    account = _account(request)
     rows = await asyncio.to_thread(
         svc.list_sessions,
-        owner=_account(request),
+        owner=account,
         scope=scope,
         recent_days=recent_days,
+        include_cli=show_cli_sessions_pref(account),
+        hide_temp_dirs=True,
     )
     return {
         "sessions": rows,
@@ -515,6 +520,65 @@ async def list_sessions(
         "recent_days": recent_days,
         "count": len(rows),
     }
+
+
+class ForkRequest(BaseModel):
+    at_uuid: Optional[str] = None
+
+
+@router.post("/api/sessions/{session_id}/fork")
+async def fork_session(
+    session_id: str,
+    body: ForkRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Branch a conversation at one of its entries into a new session."""
+    try:
+        new_id = await asyncio.to_thread(
+            svc.fork_session, session_id, body.at_uuid, owner=_account(request),
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"session_id": new_id}
+
+
+class FeedbackRequest(BaseModel):
+    uuid: str
+    rating: Optional[str] = None
+    comment: str = ""
+
+
+@router.get("/api/sessions/{session_id}/feedback")
+async def get_session_feedback(
+    session_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    feedback = await asyncio.to_thread(svc.session_feedback, session_id, owner=_account(request))
+    return {"feedback": feedback}
+
+
+@router.post("/api/sessions/{session_id}/feedback")
+async def set_session_feedback(
+    session_id: str,
+    body: FeedbackRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Thumbs up/down and an optional comment on one assistant reply."""
+    try:
+        feedback = await asyncio.to_thread(
+            svc.set_session_feedback, session_id, body.uuid, body.rating, body.comment,
+            owner=_account(request),
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"feedback": feedback}
 
 
 @router.delete("/api/sessions/{session_id}")

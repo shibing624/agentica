@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -196,6 +197,8 @@ def _clean_prefs(raw: dict) -> dict:
         out["last_session_id"] = last.strip()
     if isinstance(raw.get("auto_extract_memory"), bool):
         out["auto_extract_memory"] = raw["auto_extract_memory"]
+    if isinstance(raw.get("show_cli_sessions"), bool):
+        out["show_cli_sessions"] = raw["show_cli_sessions"]
     if "workspaces" in raw:
         out["workspaces"] = _clean_workspaces(raw["workspaces"])
     return out
@@ -235,6 +238,11 @@ def _clean_workspaces(raw: Any) -> list:
         if len(out) >= _MAX_WORKSPACES:
             break
     return out
+
+
+def show_cli_sessions_pref(user_id: str) -> bool:
+    """Whether this account's web session list includes CLI/SDK sessions (default: no)."""
+    return bool(_clean_prefs(_read_prefs(user_id)).get("show_cli_sessions", False))
 
 
 def approval_mode_pref(user_id: str) -> Optional[str]:
@@ -715,18 +723,27 @@ async def open_path(request: OpenRequest):
 
 
 def _open_os(target: str, app: str) -> None:
+    """``finder``: open with the default app (a folder opens in the file manager).
+    ``reveal``: show the item selected in its folder. ``terminal``: a shell there."""
     if sys.platform == "darwin":
         if app == "terminal":
             subprocess.Popen(["open", "-a", "Terminal", target])
+        elif app == "reveal":
+            subprocess.Popen(["open", "-R", target])
         else:
             subprocess.Popen(["open", target])
     elif sys.platform == "linux":
-        if app == "terminal":
+        if app == "reveal":
+            # No portable "select this file" on Linux file managers.
+            subprocess.Popen(["xdg-open", target if os.path.isdir(target) else os.path.dirname(target)])
+        elif app == "terminal":
             for term in ["gnome-terminal", "xterm", "konsole"]:
                 if shutil.which(term):
                     subprocess.Popen([term, f"--working-directory={target}"])
                     break
         else:
             subprocess.Popen(["xdg-open", target])
+    elif app == "reveal":
+        subprocess.Popen(["explorer", f"/select,{target}"])
     else:
         subprocess.Popen(["explorer", target])

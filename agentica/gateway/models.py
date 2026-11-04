@@ -198,4 +198,4 @@ class BaseDirRequest(BaseModel):
 class OpenRequest(BaseModel):
     path: str = ""
     url: str = ""
-    app: str = "finder"  # "finder" or "terminal"
+    app: str = "finder"  # "finder" (default app), "reveal" (select in folder) or "terminal"

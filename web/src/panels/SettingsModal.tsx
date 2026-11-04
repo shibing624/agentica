@@ -13,7 +13,7 @@ import {
   IconExpand, IconGear, IconProfiles,
 } from "../icons";
 import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
-import { unarchiveSession, deleteSession } from "../sessions";
+import { unarchiveSession, deleteSession, loadSessions } from "../sessions";
 import {
   askConfirm, emptyProfileForm, getState, saveSessions, setState, setTheme,
   showToast, useAppState, type ProfileForm,
@@ -279,7 +279,7 @@ function MemoryTab() {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [openEntry, setOpenEntry] = useState<string | null>(null);
-  const [entryDocs, setEntryDocs] = useState<Record<string, api.MemoryEntryDoc | "loading" | "error">>({});
+  const [entryDocs, setEntryDocs] = useState<Record<string, api.MemoryEntryDoc | "loading" | "error" | "notfound">>({});
 
   const applyAgents = (data: api.AgentsMdDoc) => {
     setContent(data.content || "");
@@ -338,10 +338,13 @@ function MemoryTab() {
     if (openEntry === filename) { setOpenEntry(null); return; }
     setOpenEntry(filename);
     const cached = entryDocs[filename];
-    if (cached && cached !== "error") return;
+    if (cached && cached !== "error" && cached !== "notfound") return;
     setEntryDocs((d) => ({ ...d, [filename]: "loading" }));
-    const { ok, data } = await api.fetchMemoryEntry(filename);
-    setEntryDocs((d) => ({ ...d, [filename]: ok && data ? data : "error" }));
+    const { ok, status, data } = await api.fetchMemoryEntry(filename);
+    // 404 from a gateway started before this route existed is a version skew,
+    // not a broken memory file — say so instead of blaming the file.
+    const state = ok && data ? data : status === 404 ? "notfound" : "error";
+    setEntryDocs((d) => ({ ...d, [filename]: state }));
   };
 
   const copyText = async (text: string) => {
@@ -430,7 +433,8 @@ function MemoryTab() {
                   {expanded && (
                     <div className="mem-entry-body">
                       {doc === "loading" ? <div className="mem-preview-empty">{S.common.loading}</div>
-                        : doc === "error" || !doc ? <div className="mem-preview-empty">{M.entryFailed}</div>
+                        : doc === "notfound" ? <div className="mem-preview-empty mem-entry-warn">{M.entryNotFound}</div>
+                          : doc === "error" || !doc ? <div className="mem-preview-empty">{M.entryFailed}</div>
                           : <>
                               <div className="mem-entry-toolbar">
                                 <span className="mem-entry-path" title={doc.path}>{doc.path}</span>
@@ -457,6 +461,19 @@ function MemoryTab() {
       </div>
     </div>
   );
+}
+
+/** Account pref; the server filters the list, so reload it after the change. */
+async function toggleCliSessions() {
+  const next = !getState().showCliSessions;
+  setState({ showCliSessions: next });
+  const { ok } = await api.savePrefsApi({ show_cli_sessions: next });
+  if (!ok) {
+    setState({ showCliSessions: !next });
+    showToast(getStrings().settings.setFailed, 2500);
+    return;
+  }
+  await loadSessions();
 }
 
 function GeneralTab() {
@@ -489,6 +506,18 @@ function GeneralTab() {
                       onClick={() => setLang(id)}>{label}</button>
             ))}
           </div>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">{S.settings.showCliSessions}</div>
+            <div className="settings-row-hint">{S.settings.showCliSessionsMeta}</div>
+          </div>
+          <button type="button" className={"mem-switch" + (s.showCliSessions ? " on" : "")}
+                  role="switch" aria-checked={s.showCliSessions} aria-label={S.settings.showCliSessions}
+                  onClick={() => void toggleCliSessions()}>
+            <i />
+          </button>
         </div>
       </div>
 

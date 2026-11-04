@@ -11,10 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / 桌面端会话列表与 CLI 分开，清掉测试残留；回复下方的文件卡片和 footer 重做**：
+  - **CLI 会话默认不显示。** 设置 › 常规新增开关「显示 CLI 会话」，默认关闭，按账号保存在 gateway prefs（`show_cli_sessions`）。`GET /api/sessions` 按这个开关过滤：关闭时只列出 gateway 发起的会话（Web、桌面端、IM），CLI、SDK 以及没有记录来源的旧会话都不出现；正在运行的会话始终列出。CLI 会话一旦在 Web 里继续聊，就算 gateway 会话。
+  - **系统临时目录里的会话不再列出。** 工作目录在 `/tmp`、`/private/tmp`、`/var/folders` 或 `$TMPDIR` 下的会话一律隐藏，这些是 VPet 等程序的测试和演示留下的；`$AGENTICA_HOME` 和 gateway 默认目录除外，所以 Web 的「临时工作区」（`$AGENTICA_HOME/tmp/web-chats`）照常显示。
+  - **测试残留会话已移走。** `Touch tmp/<ISO-timestamp>.txt in one run.`、`a much better thing` 等只有一句话的会话，是 9 月至 10 月 5 日 cron 测试任务漏进真实 `~/.agentica/cron`、被 CLI cron daemon 每分钟执行一次留下的。那条路径已经不再产生新会话：CLI runner 不写会话日志，gateway 的定时任务写入单独的 `scheduled_` 会话且不列出。本机 361 个这类会话已移到 `~/.agentica/trash/junk-sessions-20261104/`，跨会话提问索引里对应的 4,625 行也一并删除，避免 `<session_recall>` 再把它们召回。全部会话从 615 个降到 225 个，默认只显示 Web 会话时是 15 个。
+  - **查看轨迹显示完整 work_dir。** 不再缩写成 `…/最后两级`，可以直接选中，旁边加了复制按钮。
+  - **技能轮次显示成技能名。** CLI 和 gateway 写进会话日志的是展开后的完整 SKILL.md 提示，回看历史时整份技能文本都塞在用户气泡里。现在识别 `render_invocation()` 的格式，气泡里只显示带下划线的技能名和参数，点击弹窗预览 SKILL.md（Markdown 渲染，带路径和复制按钮）。刚发出、还没从日志读回的 `/trigger 参数` 也按同样方式显示。格式标记由 `tests/skills/test_skill_invocation_markers.py` 固定，改格式时 Web 不会悄悄退回长气泡。
+  - **回复下方的文件卡片。** 卡片铺满宽度；先列「已编辑 N 个文件」，按 `apply_patch` 的补丁统计每个文件的 `+增 -删` 行数（`write_file` 只计新写入的行数；失败的调用不计；原来 `apply_patch` 改过的文件根本不进卡片），再列回复里提到的其他文件。点击文件仍在侧边栏预览，行尾新增「用默认应用打开」和「打开所在文件夹」。后者对应 `POST /api/open` 新增的 `app: "reveal"`：macOS 用 `open -R`，Windows 用 `explorer /select,`，Linux 打开所在目录。
+  - **回复 footer。** 改为：复制、点赞、点踩（弹出可选的问题说明）、从这里分叉，以及「用量 N tok」（悬停显示输入、缓存、输出、tok/s、费用）、耗时和时间。新增接口：
+    - `GET/POST /api/sessions/{id}/feedback`：评价存在 sidecar 的 `feedback` 字段，以日志条目 uuid 为键，不写入 JSONL；再点一次已选中的赞或踩即撤销。
+    - `POST /api/sessions/{id}/fork`：复用 `SessionLog.fork`，在同一项目里复制到该回复的最后一条日志，标记为 gateway 会话，名字加「(fork)」，然后直接打开。
+    - 回放的消息现在带日志 uuid；刚流式输出完、还没有 uuid 的回复，会先从日志读回再执行分叉或评价。
 - **工作区只保留一个「New Chat」，记忆页能看正文**：
   - 工作区行的 `+`、顶部 `New chat`、`ensureSession()`（发送时）以及「添加工作区」都会落到同一个空草稿；连点 N 次不再堆 N 个一模一样的 `New Chat` 行。复用按工作区目录判断，且只认本地未发送、无服务端日志的草稿（已发过消息、已重命名、归档、运行中和来自服务端的空会话都不会被合并）；发现历史遗留的多个草稿时会保留最新一个并清掉其余。判定逻辑抽到 `web/src/lib/sessionDrafts.ts`，带单测。
   - 设置 › 记忆：**常驻规则改回源码显示**（之前用 Markdown 渲染，看不到 `#`、列表标记这些实际写进 system prompt 的内容），新增复制源码和打开文件按钮。
   - **生成对话记忆的条目可以点开**：新增 `GET /api/memory/entry?filename=…`，只接受本账号 `MEMORY.md` 索引里列出的文件名（路径穿越和索引外文件一律 404），返回去掉 frontmatter 且脱敏后的正文、原始文件路径和来源工作目录。条目展开后显示源码、路径、复制和打开文件按钮，正文按需懒加载；未列出的文件读不到，避免把 `AGENTS.md` 之类的文件暴露给页面。
+  - **区分「记忆文件坏了」和「gateway 是旧进程」**：前端已 rebuild 但 gateway 没重启时，请求新路由会得到 404，页面原来笼统显示「无法读取这条记忆文件」，让人以为是文件损坏。现在 404 单独提示重启 `agentica-gateway`，并说明若已是新进程则意味着条目已从索引移除或文件被删。
 - **CLI 启动从约 3.5–4.6 秒降到约 1 秒，`import agentica` 从 0.44 秒降到 0.31 秒**（M3 Pro，2 个 MCP server：一个远程 HTTP，一个本地 stdio。测量方法：在 pty 里启动 CLI，计时到出现输入提示）：
   - **MCP 工具列表按 server 配置缓存。** 原来每次建 agent（CLI 每次启动、gateway 每个会话）都要逐个连接全部 MCP server，只为拿工具列表，每个约 1 秒。而工具调用本来就是每次单独建连接，启动时这一步纯粹是取列表。现在 `prepare_mcp_servers` 先读 `~/.agentica/cache/mcp_tools/<hash>.json`：键由 server 名、url/headers、command/args/env 计算，不包含进程环境变量；命中缓存就直接注册工具，不连接 server。启动 5 秒后，后台线程用新建的实例重新拉一次列表、写回缓存，当前会话的工具列表不变（工具 schema 在缓存的提示词前缀里），新列表从下一个会话开始生效。没有缓存的 server 改为并行连接，启动只等最慢的那个，不再是所有 server 耗时之和；连不上的 server 会跳过并打印 warning，不写缓存，下次启动重试。设 `AGENTICA_MCP_TOOLS_CACHE=0` 关闭缓存。实测：首次启动（无缓存）2.8 秒，之后约 1.0 秒；从缓存建 agent 用时 8 ms，通过缓存注册的工具做真实调用正常。
   - **mcp SDK 改为用到时再导入。** `agentica.mcp` 的导出改为首次访问时加载（PEP 562）；`McpTool` 只在真正连接时才导入 mcp，`StdioServerParameters` 也在首次连接时才构造。命中缓存时整个进程都不导入 mcp，省约 0.2 秒。未安装 `[mcp]` extra 时，导入 `agentica.mcp` 仍报原来的错误。

@@ -1189,6 +1189,17 @@ class SessionLog:
                 except json.JSONDecodeError:
                     continue
 
+    def has_entry(self, entry_uuid: str) -> bool:
+        """Whether a row with this ``uuid`` is in the log."""
+        return bool(entry_uuid) and any(e.get("uuid") == entry_uuid for e in self._iter_entries())
+
+    def first_user_message(self) -> str:
+        """Text of the first ``user`` row, or ``""``."""
+        for e in self._iter_entries():
+            if e.get("type") == "user" and isinstance(e.get("content"), str):
+                return e["content"].strip()
+        return ""
+
     def _derived_count_after(self, since_uuid: str) -> Optional[int]:
         """How many projected messages come from entries after ``since_uuid``.
 
@@ -1718,6 +1729,43 @@ class SessionLog:
         if self._meta_source(self._read_meta(self.meta_path)) == normalized:
             return
         self._write_meta({"source": normalized})
+
+    FEEDBACK_RATINGS = ("up", "down")
+    FEEDBACK_COMMENT_MAX = 4000
+
+    def read_feedback(self) -> Dict[str, Dict[str, Any]]:
+        """Per-message feedback from the sidecar: ``{entry_uuid: {rating, comment, at}}``."""
+        value = self._read_meta(self.meta_path).get("feedback")
+        if not isinstance(value, dict):
+            return {}
+        return {k: dict(v) for k, v in value.items() if isinstance(k, str) and isinstance(v, dict)}
+
+    def set_feedback(self, entry_uuid: str, rating: Optional[str], comment: str = "") -> Dict[str, Dict[str, Any]]:
+        """Record a thumbs up/down (and optional comment) on one log entry.
+
+        ``rating=None`` with an empty comment clears it. Kept in the sidecar,
+        not the JSONL: the transcript is append-only replay input, and a vote
+        is a view annotation that may be changed or withdrawn.
+        """
+        from datetime import datetime, timezone
+
+        entry_uuid = (entry_uuid or "").strip()
+        if not entry_uuid:
+            raise ValueError("entry uuid is required")
+        if rating is not None and rating not in self.FEEDBACK_RATINGS:
+            raise ValueError(f"rating must be one of {self.FEEDBACK_RATINGS} or null")
+        comment = (comment or "").strip()[: self.FEEDBACK_COMMENT_MAX]
+        feedback = self.read_feedback()
+        if rating is None and not comment:
+            feedback.pop(entry_uuid, None)
+        else:
+            feedback[entry_uuid] = {
+                "rating": rating,
+                "comment": comment,
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+        self._write_meta({"feedback": feedback})
+        return feedback
 
     def _write_meta(self, updates: Dict[str, Any]) -> None:
         """Merge sidecar metadata updates and persist atomically."""

@@ -13,6 +13,10 @@
 .trace-head-l{min-width:0;flex:1}
 .trace-head h1{font-size:17px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trace-head-sub{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:11px;color:var(--fg3);font-family:var(--mono)}
+.trace-cwd{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%}
+.trace-cwd code{font:inherit;color:var(--fg2);user-select:all;word-break:break-all}
+.trace-cwd-copy{display:inline-flex;align-items:center;border:none;background:none;padding:2px;border-radius:4px;color:var(--fg3);cursor:pointer}
+.trace-cwd-copy:hover{color:var(--fg);background:var(--bg3)}
 .trace-head-r{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .trace-badge{font-family:var(--mono);font-size:10px;color:var(--fg2);border:1px solid var(--border);border-radius:6px;padding:2px 7px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trace-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:14px}

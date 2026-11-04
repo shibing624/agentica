@@ -5,16 +5,18 @@ import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { promptRename } from "../components/SessionTree";
-import { SlashMenu, SkillsPicker, filterSlashItems, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
+import { SlashMenu, SkillsPicker, filterSlashItems, invocableSkills, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
+import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
+import { parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtN, fmtTps, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
-import { createSession, hydrateSession, markSessionRead, syncSessionRoundStats } from "../sessions";
+import { createSession, forkAt, hydrateSession, markSessionRead, rateMessage, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
   IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook, IconDatabase,
-  IconChevronDown,
+  IconChevronDown, IconThumbUp, IconThumbDown, IconFork,
 } from "../icons";
 import {
   bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, setState,
@@ -274,7 +276,7 @@ export function ChatPage() {
                   <p>{S.chat.welcome}</p>
                 </div>
               ) : cur.msgs.map((m, i) => (
-                <MessageView key={i} idx={i} m={m} workspace={workspace} onOpenFile={files.browsePath}
+                <MessageView key={i} idx={i} m={m} sessionId={s.curSess} workspace={workspace} onOpenFile={files.browsePath}
                   live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
                   pendingToolCallId={pendingToolCallId} />
               ))}
@@ -590,10 +592,14 @@ export function ChatPage() {
   );
 }
 
-function MessageView({ idx, m, workspace, onOpenFile, live, pendingToolCallId }: {
-  idx: number; m: ChatMsg; workspace: string; onOpenFile: (path: string) => void; live?: boolean; pendingToolCallId?: string;
+function MessageView({ idx, m, sessionId, workspace, onOpenFile, live, pendingToolCallId }: {
+  idx: number; m: ChatMsg; sessionId: string | null; workspace: string; onOpenFile: (path: string) => void;
+  live?: boolean; pendingToolCallId?: string;
 }) {
   const S = useStrings();
+  const skill = m.role === "user"
+    ? (m.skill || parseSkillTurn(m.content, invocableSkills(getState().pluginsData.skills || [])))
+    : null;
   if (m.role === "user" && m.steer) {
     return (
       <div id={"msg-" + idx} className="m m-steer-wrap">
@@ -632,7 +638,7 @@ function MessageView({ idx, m, workspace, onOpenFile, live, pendingToolCallId }:
                   {m.previews.map((src, i) => <img key={i} src={src} alt="" />)}
                 </div>
               )}
-              {m.content}
+              {skill ? <SkillTurn name={skill.name} args={skill.args} /> : m.content}
             </div>
           )
         )}
@@ -651,45 +657,96 @@ function MessageView({ idx, m, workspace, onOpenFile, live, pendingToolCallId }:
             {` - ${formatErrorStamp(m.errorTs ?? m.ts)}`}
           </div>
         )}
-        <MessageFooter m={m} live={!!live} />
+        <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx}
+                       copyText={skill ? [skill.name, skill.args].filter(Boolean).join(" ") : undefined} />
       </div>
     </div>
   );
 }
 
-function MessageFooter({ m, live }: { m: ChatMsg; live?: boolean }) {
+function MessageFooter({ m, live, sessionId, idx, copyText }: {
+  m: ChatMsg; live?: boolean; sessionId: string | null; idx: number; copyText?: string;
+}) {
   const S = useStrings();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   if (live) return null;
-  const showStats = m.role === "assistant" && m.tokIn != null;
+  const copy = () => {
+    const text = copyText ?? m.content;
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));
+  };
+  const copyBtn = (
+    <button type="button" className="msg-act" title={S.common.copy} onClick={copy}>
+      <IconCopy />
+    </button>
+  );
+  if (m.role === "user") {
+    return (
+      <div className="msg-footer user">
+        <span title={S.chat.msgTimeTip}>{S.chat.msgStamp(m.ts || Date.now())}</span>
+        {copyBtn}
+      </div>
+    );
+  }
   const durationMs = m.durationMs ?? ((m.durationSec || 0) * 1000);
   const tps = (m.llmMs && m.tokOut)
     ? m.tokOut / (m.llmMs / 1000)
     : ((m.durationSec && m.tokOut) ? m.tokOut / m.durationSec : 0);
-  const copy = () => {
-    if (!m.content) return;
-    void navigator.clipboard.writeText(m.content).then(() => showToast(S.common.copied));
+  const hasStats = m.tokIn != null;
+  const usageTip = [
+    S.chat.usageTip,
+    `↑ ${S.chat.ctxInput} ${fmtN(m.tokIn || 0)}`,
+    m.cacheRead != null
+      ? `${S.chat.cacheTokensTip} ${fmtN(m.cacheRead)}${m.cacheHitPercent != null ? ` (${S.chat.cacheHitTip} ${m.cacheHitPercent.toFixed(1)}%)` : ""}`
+      : "",
+    `↓ ${S.chat.ctxOutput} ${fmtN(m.tokOut || 0)}`,
+    tps > 0 ? `${S.chat.tokPerSecTip} ${fmtTps(tps)}` : "",
+    (m.costUsd || 0) > 0 ? `${S.chat.costUsdTip} ${fmtCost(m.costUsd || 0)}` : "",
+  ].filter(Boolean).join("\n");
+  const rating = m.feedback?.rating || null;
+  const canAct = !!sessionId;
+  const rate = (next: "up" | "down" | null, comment = "") => {
+    if (!sessionId) return;
+    void rateMessage(sessionId, idx, next, comment).then((ok) => {
+      if (ok && next) showToast(S.chat.feedbackSaved);
+    });
   };
   return (
-    <div className={"msg-footer" + (m.role === "user" ? " user" : "")}>
-      <span title={S.chat.msgTimeTip}>{S.chat.msgStamp(m.ts || Date.now())}</span>
-      {showStats && (
+    <div className="msg-footer">
+      {copyBtn}
+      {canAct && (
         <>
-          <span title={S.chat.ctxInput}>↑ {fmtN(m.tokIn || 0)}</span>
-          {(m.cacheRead != null) && (
-            <span className="msg-cache" title={`${S.chat.cacheTokensTip} · ${S.chat.cacheHitTip}`}>
-              <IconDatabase />
-              {fmtN(m.cacheRead)}{m.cacheHitPercent != null ? ` / ${m.cacheHitPercent.toFixed(1)}%` : ""}
-            </span>
-          )}
-          <span title={S.chat.ctxOutput}>↓ {fmtN(m.tokOut || 0)}</span>
-          {tps > 0 && <span title={S.chat.tokPerSecTip}>{fmtTps(tps)}</span>}
-          {(m.costUsd || 0) > 0 && <span title={S.chat.costUsdTip}>{fmtCost(m.costUsd || 0)}</span>}
-          {!!durationMs && <span title={S.chat.durationTip}>{fmtDurationMs(durationMs)}</span>}
+          <button type="button" className={"msg-act" + (rating === "up" ? " on" : "")} title={S.chat.like}
+                  aria-pressed={rating === "up"}
+                  onClick={() => rate(rating === "up" ? null : "up")}>
+            <IconThumbUp />
+          </button>
+          <button type="button" className={"msg-act" + (rating === "down" ? " on" : "")} title={S.chat.dislike}
+                  aria-pressed={rating === "down"}
+                  onClick={() => (rating === "down" ? rate(null) : setFeedbackOpen(true))}>
+            <IconThumbDown />
+          </button>
+          <button type="button" className="msg-act" title={S.chat.fork}
+                  onClick={() => void forkAt(sessionId!, idx)}>
+            <IconFork />
+          </button>
         </>
       )}
-      <button type="button" className="msg-copy" title={S.common.copy} onClick={copy}>
-        <IconCopy />
-      </button>
+      {hasStats && (
+        <span className="msg-usage" title={usageTip}>
+          <IconDatabase />
+          {S.chat.usageTokens(fmtN((m.tokIn || 0) + (m.tokOut || 0)))}
+        </span>
+      )}
+      {!!durationMs && <span title={S.chat.durationTip}>{fmtDurationMs(durationMs)}</span>}
+      <span title={S.chat.msgTimeTip}>{S.chat.msgStamp(m.ts || Date.now())}</span>
+      {feedbackOpen && (
+        <FeedbackDialog
+          initial={m.feedback?.comment || ""}
+          onClose={() => setFeedbackOpen(false)}
+          onSubmit={(comment) => { setFeedbackOpen(false); rate("down", comment.trim()); }}
+        />
+      )}
     </div>
   );
 }
