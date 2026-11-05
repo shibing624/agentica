@@ -508,6 +508,7 @@ class SessionLog:
         model: Optional[str] = None,
         covered_prefix_hash: Optional[str] = None,
         window_id: Optional[int] = None,
+        trigger: str = "auto",
     ) -> str:
         """Mark a compaction boundary. Breaks the UUID chain (parent_uuid=null).
 
@@ -519,6 +520,11 @@ class SessionLog:
         the boundary records the identity it was compacted under (see
         ``lineage_key``) plus a hash of the replaced span, so a later resume
         can distrust a stale summary instead of replaying it blindly.
+
+        ``trigger`` is ``"manual"`` for a user's ``/compact`` (CLI or Web) and
+        ``"auto"`` for threshold / reactive cuts. The command itself is not a
+        logged user row, so a transcript rebuilt from the log (Web refresh)
+        reads this to show the ``/compact`` the user typed.
         """
         entry_uuid = str(uuid4())
         self._append({
@@ -532,6 +538,7 @@ class SessionLog:
             "git_branch": self._git_branch,
             "summary": summary,
             "window_id": window_id,
+            "trigger": trigger,
             "lineage_key": self.lineage_key(model),
             "model": model,
             "covered_prefix_hash": covered_prefix_hash,

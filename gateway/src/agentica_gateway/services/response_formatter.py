@@ -188,6 +188,14 @@ def format_tool_result(tool_call: ToolCallInfo) -> tuple[str, str, dict]:
                 extra["diff"] = diff
 
     if t_name == "task" and t_content:
+        # The Web draws a card from the payload itself (status, steps,
+        # report); the recap text stays as `result` for anything else.
+        try:
+            payload = json.loads(str(t_content))
+            if isinstance(payload, dict) and "success" in payload:
+                extra["task"] = payload
+        except (ValueError, TypeError):
+            pass
         try:
             t_content = _format_task_result(str(t_content))
         except (ValueError, TypeError):

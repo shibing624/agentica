@@ -53,3 +53,16 @@ test("a command also matches on its label, so typing in the UI language works", 
 test("the file picker is a + entry only, never a slash command", () => {
   assert.ok(!ids(slashMenuGroups("/f", skills, S)).includes("file"));
 });
+
+test("picker filter matches label or sub, drops emptied groups", async () => {
+  const { filterPicker } = await vite.ssrLoadModule("/src/lib/composerCommands.ts");
+  const groups = [
+    { title: "deepseek", options: [{ key: "a", label: "deepseek-v4-pro" }, { key: "b", label: "deepseek-v4-flash", sub: "fast" }] },
+    { title: "zhipu", options: [{ key: "c", label: "glm-5.3", sub: "work" }] },
+    { title: "empty", options: [] },
+  ];
+  assert.deepEqual(filterPicker(groups, "").map((g) => g.title), ["deepseek", "zhipu"]);
+  assert.deepEqual(filterPicker(groups, "FLASH").flatMap((g) => g.options.map((o) => o.key)), ["b"]);
+  assert.deepEqual(filterPicker(groups, "work").map((g) => g.title), ["zhipu"]);
+  assert.deepEqual(filterPicker(groups, "nope"), []);
+});

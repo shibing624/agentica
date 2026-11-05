@@ -1472,7 +1472,8 @@ class TestResponseFormatter:
             ToolCallInfo(tool_name="task", content=json.dumps(payload))
         )
         assert name == "task"
-        assert extra == {}
+        # The raw payload rides along for the Web's task card.
+        assert extra == {"task": payload}
         assert "Found foo in bar.py" in result_str
         assert "read_file bar.py" in result_str
         assert "grep foo" in result_str
@@ -1711,6 +1712,21 @@ class TestCompactSession:
         agent.tool_config.compression_manager.auto_compact.assert_awaited_once()
         agent._default_run_hooks.on_pre_compact.assert_awaited_once()
         agent._default_run_hooks.on_post_compact.assert_awaited_once()
+        # No session log → no notes file; the fields are still there.
+        assert result["notes"] == "" and result["notes_path"] == ""
+
+    def test_compact_notes_read_with_home_shortened(self, tmp_path, monkeypatch):
+        from agentica_gateway.services.agent_service import _read_compact_notes
+
+        monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
+        log = MagicMock()
+        log.path = tmp_path / "proj" / "s1.jsonl"
+        log.path.parent.mkdir()
+        agent = MagicMock()
+        agent._session_log = log
+        assert _read_compact_notes(agent) == ("", "~/proj/s1.notes.md")
+        (tmp_path / "proj" / "s1.notes.md").write_text("## Goal\n- ship", encoding="utf-8")
+        assert _read_compact_notes(agent) == ("## Goal\n- ship", "~/proj/s1.notes.md")
 
     def test_compact_refused_when_session_locked(self, tmp_path):
         agent = MagicMock()

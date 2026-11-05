@@ -18,6 +18,9 @@ import { parseSkillTurn } from "./skillInvocation";
 export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   const msgs: ChatMsg[] = [];
   let assistant: ChatMsg | null = null;
+  // `trigger` of the boundary whose preamble has not been seen yet ("" = not
+  // recorded); null once that preamble is consumed.
+  let pendingTrigger: string | null = null;
 
   const closeAssistant = () => {
     if (!assistant) return;
@@ -31,7 +34,27 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     const type = String(e.type || "");
     if (type === "user") {
       closeAssistant();
-      const content = String(e.content || "");
+      let content = String(e.content || "");
+      const pre = splitWindowPreamble(content);
+      if (pre) {
+        // A new window's preamble is chrome, not something the user said: it
+        // becomes the compact card (with the notes it started from), and only
+        // a question folded in behind it stays a user bubble.
+        const last = msgs[msgs.length - 1];
+        let card = last?.compact && last.compact.notes == null ? last : null;
+        if (!card) {
+          card = { role: "assistant", content: "", ts: tsOf(e), compact: {} };
+          msgs.push(card);
+        }
+        Object.assign(card.compact!, { notes: pre.notes, notesPath: pre.notesPath });
+        // Logs older than the boundary's `trigger`: an idle /compact folds no
+        // question behind its preamble; an auto cut keeps the pending one.
+        if (pendingTrigger === "" && !pre.rest) insertCompactCommand(msgs, card);
+        else if (pendingTrigger === "") card.compact!.auto = true;
+        pendingTrigger = null;
+        if (!pre.rest) continue;
+        content = pre.rest;
+      }
       const skill = parseSkillTurn(content);
       msgs.push({
         role: "user",
@@ -58,10 +81,51 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     }
     if (type === "compact_boundary") {
       closeAssistant();
+      const trigger = typeof e.trigger === "string" ? e.trigger : "";
+      const card: ChatMsg = { role: "assistant", content: "", ts: tsOf(e), compact: trigger === "auto" ? { auto: true } : {} };
+      msgs.push(card);
+      // The user's `/compact` is not a logged row; the boundary says it was one.
+      if (trigger === "manual") insertCompactCommand(msgs, card);
+      pendingTrigger = trigger;
     }
   }
   closeAssistant();
   return msgs;
+}
+
+/** Put the `/compact` user bubble right before its card. */
+function insertCompactCommand(msgs: ChatMsg[], card: ChatMsg) {
+  const at = msgs.indexOf(card);
+  msgs.splice(at < 0 ? msgs.length : at, 0, { role: "user", content: "/compact", ts: card.ts });
+}
+
+const WINDOW_OPEN = "<context_window>";
+const WINDOW_CLOSERS = ["</context_window>", "</session_notes>", "</dropped_span>"];
+const WINDOW_CONTINUATION = "New context window started. Continue from session notes and search_session.";
+
+/**
+ * Split a new-context-window preamble off a logged user row, the way
+ * `agentica.memory.session_search.strip_window_preamble` does: peel every
+ * layer, keep what follows. `notes` / `notesPath` come from the outermost
+ * (latest) layer's `<session_notes>`. `null` when the row is not a preamble.
+ */
+export function splitWindowPreamble(content: string): { notes: string; notesPath: string; rest: string } | null {
+  if (!content.trimStart().startsWith(WINDOW_OPEN)) return null;
+  const m = content.match(/<session_notes(?:\s+path="([^"]*)")?>([\s\S]*?)<\/session_notes>/);
+  let rest = content;
+  while (rest.trimStart().startsWith(WINDOW_OPEN)) {
+    let peeled = rest;
+    for (const closer of WINDOW_CLOSERS) {
+      const i = peeled.indexOf(closer);
+      if (i >= 0) peeled = peeled.slice(i + closer.length);
+    }
+    const at = peeled.indexOf(WINDOW_CONTINUATION);
+    if (at >= 0) peeled = peeled.slice(at + WINDOW_CONTINUATION.length);
+    peeled = peeled.trimStart();
+    if (peeled === rest) break;
+    rest = peeled;
+  }
+  return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || "", rest };
 }
 
 function uuidOf(e: Record<string, unknown>): string {

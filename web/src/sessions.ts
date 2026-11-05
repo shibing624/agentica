@@ -264,7 +264,8 @@ export async function syncSessionRoundStats(id: string) {
   }>).filter((r) => !r.compaction);
   // The log records the session's model once; per-round ids are not kept.
   const model = typeof data.meta?.model === "string" ? data.meta.model : "";
-  const assistants = sess.msgs.filter((m) => m.role === "assistant");
+  // Compact cards are not rounds (the analysis drops compaction rounds too).
+  const assistants = sess.msgs.filter((m) => m.role === "assistant" && !m.compact);
   const n = assistants.length;
   let changed = false;
   for (let i = 0; i < n && i < rounds.length; i++) {

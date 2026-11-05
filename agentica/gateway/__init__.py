@@ -69,9 +69,16 @@ class _AliasFinder(importlib.abc.MetaPathFinder):
         if not fullname.startswith(_OLD + "."):
             return None
         real = _NEW + fullname[len(_OLD):]
-        if importlib.util.find_spec(real) is None:
+        real_spec = importlib.util.find_spec(real)
+        if real_spec is None:
             return None
-        return importlib.machinery.ModuleSpec(fullname, _AliasLoader(real), is_package=False)
+        # Carry the real file as origin: runpy (`python -m agentica.gateway.main`)
+        # sets __file__ from it, and main.py resolves its UI dir off __file__.
+        spec = importlib.machinery.ModuleSpec(
+            fullname, _AliasLoader(real), origin=real_spec.origin, is_package=False,
+        )
+        spec.has_location = real_spec.has_location
+        return spec
 
 
 if not any(isinstance(f, _AliasFinder) for f in sys.meta_path):

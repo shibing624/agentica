@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
 import { getStrings, useStrings, type Strings } from "../i18n";
@@ -6,6 +6,8 @@ import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps } from "../lib/format
 import { IconCopy, IconDatabase } from "../icons";
 import { showToast } from "../store";
 import { switchTo } from "../sessions";
+import { TaskCard } from "../components/TaskCard";
+import type { TaskResult } from "../lib/workActivity";
 
 type Entry = {
   index: number;
@@ -17,6 +19,8 @@ type Entry = {
   toolCallId?: string;
   isError?: boolean;
   durationMs?: number;
+  /** `task` rows: the call's brief, or the subagent's parsed result. */
+  task?: Partial<TaskResult> & { description?: string; subagentType?: string; timeout?: number; maxTurns?: number };
 };
 
 type Tokens = {
@@ -121,6 +125,8 @@ export function TracesPage() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
+  // `call`: a tool call opened from a chat row; its round opens on it.
+  const focusCall = params.get("call") || "";
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   // The failure is kept as its status code, not as a sentence: a message
   // rendered once would stay in the language it was written in when the user
@@ -155,12 +161,12 @@ export function TracesPage() {
             <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
           </div>
         )}
-        {analysis && <TraceDetail a={analysis} />}
+        {analysis && <TraceDetail a={analysis} focusCall={focusCall} />}
     </div>
   );
 }
 
-function TraceDetail({ a }: { a: Analysis }) {
+function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
   const S = useStrings();
   const t = a.totals;
   const tokens = t.tokens;
@@ -214,7 +220,7 @@ function TraceDetail({ a }: { a: Analysis }) {
       </section>
 
       {a.rounds.map((r, i) => (
-        <RoundCard key={r.taskIndex} round={r} ordinal={i + 1} analysis={a} />
+        <RoundCard key={r.taskIndex} round={r} ordinal={i + 1} analysis={a} focusCall={focusCall} />
       ))}
     </>
   );
@@ -240,9 +246,12 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: Rea
   );
 }
 
-function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number; analysis: Analysis }) {
+function RoundCard({ round, ordinal, analysis, focusCall }: {
+  round: Round; ordinal: number; analysis: Analysis; focusCall: string;
+}) {
   const S = useStrings();
-  const [open, setOpen] = useState(ordinal === 1);
+  const hasFocus = !!focusCall && round.entries.some((e) => e.toolCallId === focusCall);
+  const [open, setOpen] = useState(focusCall ? hasFocus : ordinal === 1);
   const label = round.compaction ? S.traces.compaction : S.traces.round(ordinal);
   return (
     <section className={"trace-card round" + (round.compaction ? " compaction" : "")}>
@@ -269,7 +278,7 @@ function RoundCard({ round, ordinal, analysis }: { round: Round; ordinal: number
       {open && (
         <div className="round-body">
           <Timeline round={round} analysis={analysis} />
-          <EntryList entries={round.entries} />
+          <EntryList entries={round.entries} focusCall={hasFocus ? focusCall : ""} />
         </div>
       )}
     </section>
@@ -426,9 +435,16 @@ function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
   );
 }
 
-function EntryList({ entries }: { entries: Entry[] }) {
+function EntryList({ entries, focusCall }: { entries: Entry[]; focusCall: string }) {
   const S = useStrings();
   const [openAll, setOpenAll] = useState(false);
+  // A task result shows the brief its call carried.
+  const briefs = useMemo(() => {
+    const m = new Map<string, Entry["task"]>();
+    for (const e of entries) if (e.kind === "tool_call" && e.task && e.toolCallId) m.set(e.toolCallId, e.task);
+    return m;
+  }, [entries]);
+  const firstFocus = focusCall ? entries.find((e) => e.toolCallId === focusCall) : undefined;
   return (
     <div className="entry-block">
       <div className="entry-head">
@@ -438,18 +454,31 @@ function EntryList({ entries }: { entries: Entry[] }) {
         </button>
       </div>
       <div className="entry-list">
-        {entries.map((e) => <EntryRow key={`${e.index}-${e.kind}`} e={e} forceOpen={openAll} />)}
+        {entries.map((e) => (
+          <EntryRow key={`${e.index}-${e.kind}`} e={e} forceOpen={openAll}
+                    focus={!!focusCall && e.toolCallId === focusCall} scrollTo={e === firstFocus}
+                    callTask={e.toolCallId ? briefs.get(e.toolCallId) : undefined} />
+        ))}
       </div>
     </div>
   );
 }
 
-function EntryRow({ e, forceOpen }: { e: Entry; forceOpen: boolean }) {
-  const [open, setOpen] = useState(false);
+function EntryRow({ e, forceOpen, focus = false, scrollTo = false, callTask }: {
+  e: Entry; forceOpen: boolean; focus?: boolean; scrollTo?: boolean; callTask?: Entry["task"];
+}) {
+  const [open, setOpen] = useState(focus);
+  const [raw, setRaw] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (scrollTo) requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "center" }));
+  }, [scrollTo]);
   const expanded = forceOpen || open;
-  const expandable = !!e.detail;
+  const expandable = !!e.detail || !!e.task;
+  const task = e.task;
+  const S = useStrings();
   return (
-    <div className={"entry" + (e.isError ? " is-error" : "")}>
+    <div ref={ref} className={"entry" + (e.isError ? " is-error" : "") + (focus ? " focus" : "")}>
       <button
         className={"entry-row" + (expandable ? " expandable" : "")}
         onClick={() => expandable && setOpen(!open)}
@@ -457,10 +486,23 @@ function EntryRow({ e, forceOpen }: { e: Entry; forceOpen: boolean }) {
         <span className="entry-ts">{e.ts.slice(11, 19)}</span>
         <span className="entry-caret">{expandable ? (expanded ? "▾" : "▸") : ""}</span>
         <span className={"entry-kind k-" + e.kind}>{KIND_LABEL[e.kind] || e.kind}</span>
+        {e.kind === "tool_result" && e.toolName && <span className="entry-tool-tag">{e.toolName}</span>}
         <span className="entry-summary">{e.summary}</span>
         {e.durationMs !== undefined && <span className="entry-dur">{fmtDurationMs(e.durationMs)}</span>}
       </button>
-      {expanded && expandable && (
+      {expanded && task && (
+        <div className="entry-task">
+          <TaskCard
+            brief={e.kind === "tool_call" ? task.description || "" : callTask?.description || ""}
+            subagentType={task.subagentType || callTask?.subagentType}
+            result={e.kind === "tool_result" ? taskResultOf(task) : null}
+          />
+          {e.detail && (
+            <button className="entry-expand" onClick={() => setRaw(!raw)}>{raw ? S.traces.hideRaw : S.traces.showRaw}</button>
+          )}
+        </div>
+      )}
+      {expanded && expandable && e.detail && (!task || raw) && (
         <div className="entry-detail">
           <button className="entry-copy" onClick={() => { void navigator.clipboard.writeText(e.detail); showToast(getStrings().common.copied); }}>
             <IconCopy />
@@ -470,4 +512,20 @@ function EntryRow({ e, forceOpen }: { e: Entry; forceOpen: boolean }) {
       )}
     </div>
   );
+}
+
+function taskResultOf(t: NonNullable<Entry["task"]>): TaskResult {
+  return {
+    success: !!t.success,
+    status: t.status || (t.success ? "completed" : "error"),
+    subagentName: t.subagentName || "",
+    subagentType: t.subagentType || "",
+    executionMs: t.executionMs,
+    toolCount: t.toolCount || 0,
+    steps: t.steps || [],
+    stepsTruncated: t.stepsTruncated,
+    result: t.result || "",
+    error: t.error || "",
+    runId: t.runId,
+  };
 }

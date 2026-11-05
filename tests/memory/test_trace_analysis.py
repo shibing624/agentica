@@ -353,6 +353,47 @@ class TestRoundView:
         assert result["isError"] is False
         assert result["durationMs"] == 250
 
+    def test_task_rows_carry_structured_subagent_fields(self):
+        report = "x" * 50000  # past DETAIL_CHAR_CAP: the JSON in `detail` is cut
+        result = {
+            "success": True, "subagent_type": "explore", "subagent_name": "Explore Agent",
+            "result": report, "execution_time": 12.5, "tool_count": 2,
+            "tool_calls_summary": [{"name": "grep", "info": "pattern: foo"}, {"name": "read_file", "info": "a.py"}],
+        }
+        entries = [
+            _e("2026-01-01T00:00:00.100Z", type="user", content="find foo"),
+            _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+            _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="t1", tool_name="task"),
+            _e("2026-01-01T00:00:02.100Z", type="event", name="request_end", status="completed"),
+            _e("2026-01-01T00:00:02.200Z", type="assistant", content="",
+               tool_calls=[{"id": "t1", "type": "function", "function": {
+                   "name": "task", "arguments": json.dumps({"description": "Find foo\nin repo", "subagent_type": "explore"})}}]),
+            _e("2026-01-01T00:00:15.000Z", type="tool", tool_call_id="t1", tool_name="task",
+               content=json.dumps(result)),
+        ]
+        rd = analyze_entries(entries)["rounds"][0]
+        call = next(e for e in rd["entries"] if e["kind"] == "tool_call")
+        assert call["task"] == {"description": "Find foo\nin repo", "subagentType": "explore"}
+        assert call["summary"] == "task Find foo in repo"
+        out = next(e for e in rd["entries"] if e["kind"] == "tool_result")
+        task = out["task"]
+        assert task["success"] is True and task["status"] == "completed"
+        assert task["subagentName"] == "Explore Agent"
+        assert task["executionMs"] == 12500 and task["toolCount"] == 2
+        assert [s["name"] for s in task["steps"]] == ["grep", "read_file"]
+        assert task["result"].startswith("xxx")
+        assert out["summary"].startswith("Explore Agent · completed · ")
+
+    def test_failed_task_result_shows_its_error(self):
+        entries = [
+            _e("2026-01-01T00:00:00.100Z", type="user", content="go"),
+            _e("2026-01-01T00:00:01.000Z", type="tool", tool_call_id="t1", tool_name="task",
+               content=json.dumps({"success": False, "status": "timeout", "error": "timed out after 300s", "run_id": "r9"})),
+        ]
+        out = next(e for e in analyze_entries(entries)["rounds"][0]["entries"] if e["kind"] == "tool_result")
+        assert out["task"]["status"] == "timeout" and out["task"]["runId"] == "r9"
+        assert "timed out after 300s" in out["summary"]
+
     def test_phases_split_the_round_and_never_exceed_it(self):
         rd = analyze_entries(self._turn())["rounds"][0]
         phases = rd["phases"]

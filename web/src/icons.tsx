@@ -272,3 +272,26 @@ export const IconModel = () => (
     <rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.6" /><path d="M6.25 1.75v2M9.75 1.75v2M6.25 12.25v2M9.75 12.25v2M1.75 6.25h2M1.75 9.75h2M12.25 6.25h2M12.25 9.75h2" /><path d="M6.4 6.4h3.2v3.2H6.4z" />
   </S>
 );
+
+/* Work-row category icons (thinking, read, edit, web, subagents, plan, error). */
+export const IconBrain = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 3.2a2 2 0 00-3 1.7 2 2 0 00-.6 3.4A2 2 0 004 11.5a2 2 0 003.4 1.1V3.6A1.9 1.9 0 006 3.2z" />
+    <path d="M10 3.2a2 2 0 013 1.7 2 2 0 01.6 3.4A2 2 0 0112 11.5a2 2 0 01-3.4 1.1V3.6A1.9 1.9 0 0110 3.2z" />
+  </S>
+);
+export const IconFile = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round"><path d="M4 2.5h5l3 3v8H4z" /><path d="M9 2.5v3h3" /></S>
+);
+export const IconGlobe = () => (
+  <S strokeWidth="1.3"><circle cx="8" cy="8" r="5.5" /><path d="M2.5 8h11M8 2.5c1.7 1.6 2.5 3.4 2.5 5.5S9.7 11.9 8 13.5C6.3 11.9 5.5 10.1 5.5 8S6.3 4.1 8 2.5z" /></S>
+);
+export const IconUsers = () => (
+  <S strokeWidth="1.3" strokeLinecap="round"><circle cx="6" cy="5.5" r="2.2" /><path d="M2.2 13c.4-2.2 1.9-3.4 3.8-3.4s3.4 1.2 3.8 3.4" /><path d="M10.4 3.6a2 2 0 010 3.8M11.6 9.8c1.2.4 2 1.4 2.2 3.2" /></S>
+);
+export const IconListCheck = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 4.5l1.2 1.2L6 3.4M2.5 10l1.2 1.2L6 8.9M8 4.5h5.5M8 10h5.5" /></S>
+);
+export const IconAlert = () => (
+  <S strokeWidth="1.4" strokeLinecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 5v3.4M8 10.8v.1" /></S>
+);

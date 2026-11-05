@@ -58,6 +58,9 @@ export type ChatMsg = {
   /** A `/skill args` turn: the log holds the expanded SKILL.md prompt; the
    *  bubble shows this chip instead. */
   skill?: { name: string; args: string };
+  /** A Web `/compact` result. `pending` while the request runs; `notes` is the
+   *  `<session>.notes.md` the new window starts from (rendered as markdown). */
+  compact?: { pending?: boolean; before?: number; after?: number; notes?: string; notesPath?: string; auto?: boolean };
 };
 
 export type Session = {
@@ -183,6 +186,8 @@ export type AppState = {
   providers: string[];
   inputText: string;
   modelDDOpen: boolean;
+  /** Upward picker over the composer, opened from the `+` / `/` menus. */
+  composerPicker: "model" | "permission" | null;
   approvalMenuOpen: boolean;
   chatMenuOpen: boolean;
   selectedApprovalMode: string;
@@ -316,6 +321,7 @@ const state: AppState = {
   providers: [],
   inputText: "",
   modelDDOpen: false,
+  composerPicker: null,
   approvalMenuOpen: false,
   chatMenuOpen: false,
   selectedApprovalMode: localStorage.getItem("ag_approval") || "auto",

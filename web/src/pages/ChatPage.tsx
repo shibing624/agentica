@@ -5,10 +5,12 @@ import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { RenameInput } from "../components/SessionTree";
-import { CommandMenu, SkillsPicker, invocableSkills, slashQuery } from "../components/SlashMenu";
+import { CommandMenu, ComposerPicker, SkillsPicker, invocableSkills, slashQuery, type PickerGroup } from "../components/SlashMenu";
 import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
 import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
+import { TodoDock } from "../components/TaskCard";
+import { latestTodos } from "../lib/workActivity";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
 import { fmtDurationMs, fmtN, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
@@ -18,7 +20,7 @@ import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
   IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook,
-  IconChevronDown, IconThumbUp, IconThumbDown, IconFork,
+  IconChevronDown, IconThumbUp, IconThumbDown, IconFork, IconCompact, IconSpinner,
 } from "../icons";
 import {
   bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, setState,
@@ -67,6 +69,7 @@ export function ChatPage() {
   const ctxWrapRef = useRef<HTMLDivElement>(null);
   const skillHlRef = useRef<HTMLDivElement>(null);
   const skillMarkRef = useRef<HTMLElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (s.goalCompose && !hadGoalCompose.current) {
@@ -133,7 +136,7 @@ export function ChatPage() {
     }
   }, [slashOpen, pendingReq?.toolCallId]);
   useEffect(() => {
-    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen && !ctxOpen && !plusOpen) return;
+    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen && !ctxOpen && !plusOpen && !s.composerPicker) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       const patch: { modelDDOpen?: false; approvalMenuOpen?: false } = {};
@@ -143,16 +146,17 @@ export function ChatPage() {
       if (!skillsWrapRef.current?.contains(t)) setSkillsOpen(false);
       if (!ctxWrapRef.current?.contains(t)) setCtxOpen(false);
       if (!plusWrapRef.current?.contains(t)) setPlusOpen(false);
+      if (getState().composerPicker && !pickerRef.current?.contains(t)) setState({ composerPicker: null });
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
-      if (plusOpen) requestAnimationFrame(() => taRef.current?.focus());
+      if (plusOpen || getState().composerPicker) requestAnimationFrame(() => taRef.current?.focus());
       setSkillsOpen(false);
       setCtxOpen(false);
       setPlusOpen(false);
-      setState({ modelDDOpen: false, approvalMenuOpen: false });
+      setState({ modelDDOpen: false, approvalMenuOpen: false, composerPicker: null });
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey, true);
@@ -160,7 +164,7 @@ export function ChatPage() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen, ctxOpen, plusOpen]);
+  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen, ctxOpen, plusOpen, s.composerPicker]);
   useEffect(() => {
     if (!plusOpen) return;
     setPlusActive(0);
@@ -354,15 +358,11 @@ export function ChatPage() {
               onDecide={(d) => void decideCurrentApproval(d)}
             />
           )}
+          {cur && <TodoDock todos={latestTodos(cur.msgs)} />}
           {goalRun && (
             <div className="goal-bar" title={goalRun.progress}>
               <span className="goal-bar-status">{S.chat.goalBar(goalRun.status, goalRun.objective)}</span>
               {goalRun.progress && <span className="goal-bar-progress">{goalRun.progress}</span>}
-            </div>
-          )}
-          {compacting && (
-            <div className="goal-bar">
-              <span className="goal-bar-status">{S.chat.compactingBar}</span>
             </div>
           )}
           {!!queued.length && (
@@ -402,6 +402,29 @@ export function ChatPage() {
             {slashOpen && (
               <CommandMenu groups={slashGroups} active={slashActive} onPick={pick} onHover={setSlashActive}
                            className="slash-menu" emptyText={S.chat.slashEmpty} />
+            )}
+            {s.composerPicker && !slashOpen && !pendingReq && (
+              <ComposerPicker
+                key={s.composerPicker}
+                menuRef={pickerRef}
+                groups={s.composerPicker === "model" ? modelPickerGroups() : permissionPickerGroups()}
+                searchPlaceholder={s.composerPicker === "model" ? S.chat.pickerSearchModel : undefined}
+                emptyText={s.composerPicker === "model" && !(s.profilesData.profiles || []).length ? S.chat.noProfiles : S.chat.pickerNoMatch}
+                footer={s.composerPicker === "model"
+                  ? { label: S.chat.manageProfiles, onClick: () => { setState({ composerPicker: null }); void primeSettings("profiles"); } }
+                  : undefined}
+                onClose={() => {
+                  setState({ composerPicker: null });
+                  requestAnimationFrame(() => taRef.current?.focus());
+                }}
+                onPick={(key) => {
+                  const kind = getState().composerPicker;
+                  setState({ composerPicker: null });
+                  if (kind === "model") void switchProfile(key);
+                  else setApprovalMode(key as "ask" | "auto" | "allow-all");
+                  requestAnimationFrame(() => taRef.current?.focus());
+                }}
+              />
             )}
             {s.goalCompose && (
               <div className="goal-chip-row" inert={pendingReq ? true : undefined}>
@@ -612,11 +635,7 @@ export function ChatPage() {
                       {(["ask", "auto", "allow-all"] as const).map((mode) => (
                         <button key={mode} className={"quick-item" + (s.selectedApprovalMode === mode ? " active" : "")}
                                 title={S.chat.permHint(mode)}
-                                onClick={() => {
-                                  localStorage.setItem("ag_approval", mode);
-                                  setState({ selectedApprovalMode: mode, approvalMenuOpen: false });
-                                  pushPrefs();
-                                }}>
+                                onClick={() => setApprovalMode(mode)}>
                           <span className="quick-icon">{permIcon(mode)}</span>
                           <span className="approval-label">{S.chat.permLabel(mode)}</span>
                           <span className="approval-id">({mode})</span>
@@ -685,6 +704,43 @@ export function ChatPage() {
   );
 }
 
+/** `compact · compacted N -> M messages`; opens to the rendered notes. */
+function CompactCard({ c }: { c: NonNullable<ChatMsg["compact"]> }) {
+  const S = useStrings();
+  const [open, setOpen] = useState(false);
+  if (c.pending) {
+    return (
+      <div className="compact-card running">
+        <div className="compact-head">
+          <span className="work-icon"><IconSpinner /></span>
+          <span>{S.chat.compactRunning}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={"compact-card" + (open ? " open" : "")}>
+      <button type="button" className="compact-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="chev"><IconChevronDown /></span>
+        <span className="work-icon"><IconCompact /></span>
+        <span className="compact-kind">compact</span>
+        <span className="compact-sep">·</span>
+        <span>{c.before != null ? S.chat.compactDone(c.before, c.after ?? 0) : c.auto ? S.chat.compactDoneAuto : S.chat.compactDoneHistory}</span>
+        {c.notesPath && <span className="compact-path" title={c.notesPath}><bdi>{c.notesPath}</bdi></span>}
+      </button>
+      {open && (c.notes?.trim()
+        ? (
+          <div className="compact-body">
+            <Suspense fallback={<pre className="markdown-fallback">{c.notes}</pre>}>
+              <ChatMarkdown text={c.notes} streaming={false} />
+            </Suspense>
+          </div>
+        )
+        : <div className="compact-empty">{S.chat.compactNoNotes}</div>)}
+    </div>
+  );
+}
+
 function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenSkill, live, pendingToolCallId }: {
   idx: number; m: ChatMsg; sessionId: string | null; workspace: string; onOpenFile: (path: string) => void;
   onOpenSkill: (name: string) => void; live?: boolean; pendingToolCallId?: string;
@@ -697,6 +753,13 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenSkill, li
     return (
       <div id={"msg-" + idx} className="m m-steer-wrap">
         <SteerChip text={m.content} ts={m.ts} onOpenSkill={onOpenSkill} />
+      </div>
+    );
+  }
+  if (m.role === "assistant" && m.compact) {
+    return (
+      <div id={"msg-" + idx} className="m m-a">
+        <div className="msg-stack"><CompactCard c={m.compact} /></div>
       </div>
     );
   }
@@ -1131,7 +1194,10 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
   }
   if (evt.event === "tool_result") {
     const callId = unfinishedToolCallId(aiMsg, evt.data.tool_call_id);
-    finishTool(aiMsg, evt.data.result, evt.data.diff, evt.data.tool_call_id);
+    // `task`: keep the subagent's JSON payload (the card reads it, as it
+    // does from the session log after a refresh) rather than the text recap.
+    const result = evt.data.task && typeof evt.data.task === "object" ? JSON.stringify(evt.data.task) : evt.data.result;
+    finishTool(aiMsg, result, evt.data.diff, evt.data.tool_call_id);
     if (sessId && callId) dequeueApproval(sessId, callId);
     flushStream();
     return true;
@@ -1494,9 +1560,7 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
       // next tick: a pick fires on mousedown, and the document's outside-click
       // handler runs after it and would close a dropdown opened right now.
       setState({ inputText: clearIfSlash() });
-      setTimeout(() => setState(it.id === "model"
-        ? { modelDDOpen: true, approvalMenuOpen: false }
-        : { approvalMenuOpen: true, modelDDOpen: false }), 0);
+      setTimeout(() => setState({ composerPicker: it.id as "model" | "permission", modelDDOpen: false, approvalMenuOpen: false }), 0);
       return;
     case "export": {
       setState({ inputText: clearIfSlash() });
@@ -1505,12 +1569,7 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
         showToast(getStrings().chat.exportNothing);
         return;
       }
-      const a = document.createElement("a");
-      a.href = `/api/sessions/${encodeURIComponent(id)}/export`;
-      a.download = `${id}.jsonl`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      void exportSessionLog(id);
       return;
     }
     case "compact": {
@@ -1541,6 +1600,90 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
       setState({ inputText: it.cmd + " " });
       focus();
   }
+}
+
+function setApprovalMode(mode: "ask" | "auto" | "allow-all") {
+  localStorage.setItem("ag_approval", mode);
+  setState({ selectedApprovalMode: mode, approvalMenuOpen: false });
+  pushPrefs();
+}
+
+/** Model picker rows: profiles grouped by provider, model name first. */
+function modelPickerGroups(): PickerGroup[] {
+  const st = getState();
+  const active = st.serverProfile || st.profilesData.active;
+  const byProvider = new Map<string, PickerGroup>();
+  for (const p of st.profilesData.profiles || []) {
+    const provider = String(p.model_provider || "");
+    let g = byProvider.get(provider);
+    if (!g) byProvider.set(provider, g = { title: provider || "—", options: [] });
+    const model = String(p.model_name || p.name);
+    g.options.push({ key: p.name, label: model, sub: p.name !== model ? p.name : undefined, selected: p.name === active });
+  }
+  return [...byProvider.values()];
+}
+
+function permissionPickerGroups(): PickerGroup[] {
+  const S = getStrings();
+  const cur = getState().selectedApprovalMode;
+  return [{
+    title: S.chat.pickerPermTitle,
+    options: (["ask", "auto", "allow-all"] as const).map((mode) => ({
+      key: mode, label: S.chat.permLabel(mode), sub: S.chat.permHint(mode), icon: permIcon(mode), selected: cur === mode,
+    })),
+  }];
+}
+
+/**
+ * Download the session JSONL. Fetch first so a failure reaches the page (a
+ * bare `<a download>` to a 401/404 only gets the browser's "couldn't get the
+ * file"), then let the user choose where to save it when the browser can.
+ */
+async function exportSessionLog(sessId: string) {
+  const S = getStrings();
+  const name = `${sessId}.jsonl`;
+  let r: Response;
+  try {
+    r = await fetch(`/api/sessions/${encodeURIComponent(sessId)}/export`);
+  } catch (e: any) {
+    showToast(S.chat.exportFailed(String(e?.message || e)), 4000);
+    return;
+  }
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try { const j = await r.json(); if (j?.detail) detail = String(j.detail); } catch { /* not json */ }
+    // An unknown route 404s with FastAPI's bare "Not Found": a gateway started
+    // before this endpoint existed.
+    showToast(r.status === 404 && detail === "Not Found" ? S.chat.exportNoRoute : S.chat.exportFailed(detail), 4000);
+    return;
+  }
+  const picker = (window as any).showSaveFilePicker as undefined | ((o: any) => Promise<any>);
+  if (picker) {
+    try {
+      const handle = await picker({
+        suggestedName: name,
+        types: [{ description: "JSONL", accept: { "application/x-ndjson": [".jsonl"] } }],
+      });
+      const out = await handle.createWritable();
+      if (r.body) await r.body.pipeTo(out);
+      else { await out.write(await r.blob()); await out.close(); }
+      showToast(S.chat.exportSaved(handle.name || name));
+      return;
+    } catch (e: any) {
+      if (e?.name === "AbortError") { void r.body?.cancel(); return; }
+      if (r.bodyUsed) { showToast(S.chat.exportFailed(String(e?.message || e)), 4000); return; }
+      // No picker allowed here (lost user activation, embedder policy):
+      // fall through to the browser's own download.
+    }
+  }
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 /** The composer text, minus a lone `/command` the user was typing. */
@@ -1579,20 +1722,31 @@ async function runCompact(sessId: string, instructions: string) {
   const userText = instructions ? `/compact ${instructions}` : "/compact";
   const sess = beginCommand(sessId, userText);
   if (!sess) return;
-  const aiMsg: ChatMsg = { role: "assistant", content: "", ts: Date.now(), durationSec: 0 };
+  // In the transcript from the start, so progress shows where the result will
+  // land rather than in a bar under the composer.
+  const aiMsg: ChatMsg = { role: "assistant", content: "", ts: Date.now(), durationSec: 0, compact: { pending: true } };
+  sess.msgs.push(aiMsg);
+  bump();
   try {
     const { ok, data, status } = await api.compactSessionApi(sessId, instructions);
     if (!ok) {
       const detail = (data && (data.detail || data.error)) || `HTTP ${status}`;
+      delete aiMsg.compact;
       markChatError(aiMsg, S.chat.compactFailed(String(detail)));
     } else {
       aiMsg.content = S.chat.compactOk(data.messages_before, data.messages_after);
+      aiMsg.compact = {
+        before: data.messages_before,
+        after: data.messages_after,
+        notes: data.notes || "",
+        notesPath: data.notes_path || "",
+      };
       if (data.usage) applySessionUsage(sessId, data.usage);
     }
   } catch (e: any) {
+    delete aiMsg.compact;
     markChatError(aiMsg, S.chat.compactFailed(String(e?.message || e)));
   } finally {
-    sess.msgs.push(aiMsg);
     endCommand(sessId);
     await drainQueue(sessId);
   }

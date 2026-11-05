@@ -168,6 +168,7 @@ class CompressionManager:
         custom_instructions: Optional[str] = None,
         keep_trailing_turn: bool = True,
         notes_request: Optional[List["Message"]] = None,
+        trigger: str = "auto",
     ) -> bool:
         """Layer 2: install a fresh context window. No LLM summary.
 
@@ -182,6 +183,9 @@ class CompressionManager:
         cannot work: after a ``prompt_too_long`` rejection the same prompt
         would be rejected again, and before a cross-provider fallback the
         window still carries the failed provider's checkpoint.
+
+        ``trigger`` goes onto the ``compact_boundary`` row: ``"manual"`` from
+        ``apply_idle_compact`` (the user's ``/compact``), else ``"auto"``.
         """
         if not force and not self.should_auto_compact(messages, model):
             return False
@@ -237,6 +241,7 @@ class CompressionManager:
                     model=model.id if model is not None else None,
                     covered_prefix_hash=covered_hash,
                     window_id=self.window_id,
+                    trigger=trigger,
                 )
                 tail = [m for m in messages if m.role != "system"]
                 slog.append_post_compact_messages(tail)
@@ -295,6 +300,7 @@ async def apply_idle_compact(agent: Any) -> bool:
         force=True,
         keep_trailing_turn=False,
         notes_request=notes_request,
+        trigger="manual",
     )
     if compacted:
         wm.collapse_runs(messages)

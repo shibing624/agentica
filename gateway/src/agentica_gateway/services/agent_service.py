@@ -26,6 +26,7 @@ from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
 import inspect
 
 from agentica.compression.manager import apply_idle_compact
+from agentica.compression.new_window import notes_path_for
 from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
@@ -280,6 +281,28 @@ class LRUAgentCache:
 
     def __len__(self) -> int:
         return len(self._cache)
+
+
+# The notes go out in a JSON response and onto the chat page; a runaway file
+# should not turn one /compact into megabytes.
+_COMPACT_NOTES_LIMIT = 200_000
+
+
+def _read_compact_notes(agent: Any) -> tuple[str, str]:
+    """``(<session>.notes.md text, path shown with ~)``; empty strings if none."""
+    path = notes_path_for(getattr(agent, "_session_log", None))
+    if not path:
+        return "", ""
+    p = Path(path)
+    shown = str(p)
+    home = str(Path.home())
+    if shown == home or shown.startswith(home + os.sep):
+        shown = "~" + shown[len(home):]
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return "", shown
+    return text[:_COMPACT_NOTES_LIMIT], shown
 
 
 class AgentService:
@@ -1134,12 +1157,17 @@ class AgentService:
             if hooks is not None:
                 await hooks.on_post_compact(agent=agent, messages=messages)
 
+            notes, notes_path = _read_compact_notes(agent)
             return {
                 "ok": True,
                 "native": False,
                 "window_id": cm.window_id,
                 "messages_before": msg_count,
                 "messages_after": len(messages),
+                # What the new window starts from; the Web shows it under the
+                # compact result, as the CLI prints its path and diff.
+                "notes": notes,
+                "notes_path": notes_path,
                 "usage": await usage_payload(agent, model_provider=self.model_provider),
             }
 

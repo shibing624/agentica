@@ -486,6 +486,64 @@ def _system_prompt_tokens(entry: Dict[str, Any], model_id: Optional[str] = None)
     return count_text_tokens(content, model_id or "gpt-4o")
 
 
+# Subagent steps carried in a ``task`` row; a 50-turn run lists 50 tools.
+TASK_STEP_CAP = 60
+TASK_RESULT_CAP = 20000
+
+
+def _task_call_fields(raw_args: Any) -> Optional[Dict[str, Any]]:
+    """``task`` arguments the Trace page shows as a header, not as JSON."""
+    try:
+        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(args, dict):
+        return None
+    out = {
+        "description": str(args.get("description") or ""),
+        "subagentType": str(args.get("subagent_type") or "explore"),
+    }
+    for src, dst in (("timeout", "timeout"), ("max_turns", "maxTurns"), ("resume_from_run_id", "resumeFrom")):
+        if args.get(src) not in (None, ""):
+            out[dst] = args[src]
+    return out
+
+
+def _task_result_fields(content: Any) -> Optional[Dict[str, Any]]:
+    """The ``task`` tool's JSON result, flattened for display.
+
+    Parsed here rather than in the page: ``detail`` is capped at
+    DETAIL_CHAR_CAP, and a long subagent report would cut the JSON in half.
+    """
+    try:
+        data = json.loads(content) if isinstance(content, str) else content
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or "success" not in data:
+        return None
+    steps = []
+    for step in data.get("tool_calls_summary") or []:
+        if isinstance(step, dict):
+            steps.append({"name": str(step.get("name") or ""), "info": _clip(step.get("info") or "", 200)})
+    status = data.get("status") or ("completed" if data.get("success") else "error")
+    out: Dict[str, Any] = {
+        "success": bool(data.get("success")),
+        "status": str(status),
+        "subagentType": str(data.get("subagent_type") or ""),
+        "subagentName": str(data.get("subagent_name") or data.get("subagent_type") or ""),
+        "toolCount": int(data.get("tool_count") or len(steps)),
+        "steps": steps[:TASK_STEP_CAP],
+        "stepsTruncated": max(0, len(steps) - TASK_STEP_CAP),
+        "result": _detail(str(data.get("result") or ""))[:TASK_RESULT_CAP],
+        "error": str(data.get("error") or ""),
+    }
+    if isinstance(data.get("execution_time"), (int, float)):
+        out["executionMs"] = int(round(data["execution_time"] * 1000))
+    if data.get("run_id"):
+        out["runId"] = str(data["run_id"])
+    return out
+
+
 def _entry_row(
     messages: List[Dict[str, Any]],
     mi: int,
@@ -556,6 +614,12 @@ def _entry_row(
             row["toolCallId"] = call_id
             row["summary"] = f"{row['toolName']} {_clip(raw_args, 100)}".strip()
             row["detail"] = _detail(_pretty_json(raw_args)) if raw_args else ""
+            if row["toolName"] == "task":
+                task = _task_call_fields(raw_args)
+                if task is not None:
+                    row["task"] = task
+                    if task["description"]:
+                        row["summary"] = f"task {_clip(task['description'], SUMMARY_CHAR_CAP)}"
         elif name in ("thinking", "text"):
             body_mi = paired.get(mi)
             if body_mi is not None:
@@ -593,6 +657,13 @@ def _entry_row(
         row["isError"] = bool(entry.get("is_error"))
         row["summary"] = _clip(content, SUMMARY_CHAR_CAP)
         row["detail"] = _detail(content)
+        if row["toolName"] == "task":
+            task = _task_result_fields(content)
+            if task is not None:
+                row["task"] = task
+                head = task["subagentName"] or "task"
+                body = task["error"] if not task["success"] and task["error"] else task["result"]
+                row["summary"] = _clip(f"{head} · {task['status']} · {body}", SUMMARY_CHAR_CAP)
         metrics = entry.get("metrics") if isinstance(entry.get("metrics"), dict) else {}
         seconds = metrics.get("time")
         if isinstance(seconds, (int, float)):

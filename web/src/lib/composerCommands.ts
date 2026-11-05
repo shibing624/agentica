@@ -89,3 +89,22 @@ export function slashMenuGroups(query: string, skills: Array<Record<string, any>
 export function flatItems(groups: MenuGroup[]): MenuItem[] {
   return groups.flatMap((g) => g.items);
 }
+
+export type PickerOption = {
+  key: string;
+  label: string;
+  /** Grey text after the label (profile name, a mode's hint). */
+  sub?: string;
+  icon?: import("react").ReactNode;
+  selected?: boolean;
+};
+export type PickerGroup = { title: string; options: PickerOption[] };
+
+/** Options whose label or sub contains ``query`` (case-insensitive); empty groups dropped. */
+export function filterPicker(groups: PickerGroup[], query: string): PickerGroup[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return groups.filter((g) => g.options.length);
+  return groups
+    .map((g) => ({ ...g, options: g.options.filter((o) => (o.label + " " + (o.sub || "")).toLowerCase().includes(q)) }))
+    .filter((g) => g.options.length);
+}

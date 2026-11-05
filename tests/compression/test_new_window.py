@@ -275,6 +275,25 @@ class TestRunnerNewWindow(unittest.TestCase):
         self.assertIn("preserve idle compact notes", joined)
         self.assertIn("<session_notes", joined)
 
+    def test_boundary_records_manual_trigger_for_idle_compact(self):
+        """The Web rebuilds the user's `/compact` from this; auto cuts say "auto"."""
+        import json
+
+        from agentica.compression.manager import apply_idle_compact
+
+        agent = self._agent(session_id="idle-compact-trigger")
+        agent.working_memory.messages = [
+            Message(role="system", content="sys"),
+            Message(role="user", content="q"),
+            Message(role="assistant", content="a"),
+        ]
+        self.assertTrue(asyncio.run(apply_idle_compact(agent)))
+        cm = agent.tool_config.compression_manager
+        agent.working_memory.messages.append(Message(role="user", content="q2"))
+        self.assertTrue(asyncio.run(cm.auto_compact(agent.working_memory.messages, model=agent.model, force=True)))
+        rows = [json.loads(l) for l in agent._session_log.path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([r["trigger"] for r in rows if r["type"] == "compact_boundary"], ["manual", "auto"])
+
     def test_idle_compact_after_model_swap_still_resolves_notes_path(self):
         """/model assigns a fresh Model that no run() has bound to the agent."""
         from agentica.compression.manager import apply_idle_compact

@@ -107,7 +107,56 @@ test("tool errors keep the Error: prefix the live stream uses", () => {
   assert.equal(tool.result, "Error: exit 1");
 });
 
-test("compact_boundary starts a new assistant bubble", () => {
+const PREAMBLE = [
+  "<context_window>\nCurrent context window 2.\n</context_window>",
+  '<session_notes path="/h/p/s1.notes.md">\n- goal: ship\n</session_notes>',
+  "<dropped_span>\n- user: hi\n</dropped_span>",
+  "New context window started. Continue from session notes and search_session.",
+].join("\n\n");
+
+const view = (msgs) => msgs.map((m) => (m.compact ? "card" + (m.compact.auto ? ":auto" : "") : m.role + ":" + m.content));
+
+test("manual /compact replays as the user's command, then the card with notes", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "hi" },
+    { type: "assistant", content: "hello" },
+    { type: "compact_boundary", trigger: "manual", timestamp: "2026-11-05T05:25:42.691Z" },
+    { type: "user", content: PREAMBLE },
+    { type: "user", content: "next" },
+  ]);
+  assert.deepEqual(view(msgs), ["user:hi", "assistant:hello", "user:/compact", "card", "user:next"]);
+  assert.deepEqual(msgs[3].compact, { notes: "- goal: ship", notesPath: "/h/p/s1.notes.md" });
+  assert.equal(msgs[2].ts, Date.parse("2026-11-05T05:25:42.691Z"));
+});
+
+test("auto compact keeps the pending question and shows no /compact", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "old" },
+    { type: "assistant", content: "before" },
+    { type: "compact_boundary", trigger: "auto" },
+    { type: "user", content: PREAMBLE + "\n\n" + PREAMBLE + "\n\nwhat next?" },
+    { type: "assistant", content: "this" },
+  ]);
+  assert.deepEqual(view(msgs), ["user:old", "assistant:before", "card:auto", "user:what next?", "assistant:this"]);
+  assert.equal(msgs[2].compact.notes, "- goal: ship");
+});
+
+test("logs without trigger: bare preamble means /compact, a folded question means auto", () => {
+  const idle = eventsToChatMsgs([
+    { type: "user", content: "hi" },
+    { type: "assistant", content: "hello" },
+    { type: "compact_boundary" },
+    { type: "user", content: PREAMBLE },
+  ]);
+  assert.deepEqual(view(idle), ["user:hi", "assistant:hello", "user:/compact", "card"]);
+  const auto = eventsToChatMsgs([
+    { type: "compact_boundary" },
+    { type: "user", content: PREAMBLE + "\n\nq" },
+  ]);
+  assert.deepEqual(view(auto), ["card:auto", "user:q"]);
+});
+
+test("legacy boundary with no preamble after it is still a card between the windows", () => {
   const msgs = eventsToChatMsgs([
     { type: "user", content: "old" },
     { type: "assistant", content: "before compact" },
@@ -115,10 +164,7 @@ test("compact_boundary starts a new assistant bubble", () => {
     { type: "user", content: "new" },
     { type: "assistant", content: "after compact" },
   ]);
-  assert.equal(msgs.length, 4);
-  assert.equal(msgs[1].content, "before compact");
-  assert.equal(msgs[3].content, "after compact");
-  assert.notEqual(msgs[1], msgs[3]);
+  assert.deepEqual(view(msgs), ["user:old", "assistant:before compact", "card", "user:new", "assistant:after compact"]);
 });
 
 test("two user turns stay two assistant bubbles", () => {
