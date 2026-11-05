@@ -14,7 +14,7 @@ on the next `uv tool upgrade` — so anything that *could* ship over HTTP must.
 ## Run it
 
 ```bash
-pip install -e ".[gateway]"   # from the repo root; skip if you want first-launch bootstrap
+pip install -e . -e ./gateway   # from the repo root; skip if you want first-launch bootstrap
 cd desktop
 npm install
 npm start
@@ -116,7 +116,7 @@ The deb does not.
 A given OS can only build its own installers — the NSIS exe needs Windows and
 the deb/AppImage need Linux — so the full matrix runs in CI
 (`.github/workflows/desktop.yml`, called by `release.yml` on a `v*` tag, which
-attaches the installers to that release). Builds are unsigned; the root README documents the
+attaches the installers to that release). Builds are unsigned; [`docs/advanced/gateway.md`](../docs/advanced/gateway.md) documents the
 one-time unlock each OS asks for.
 
 ## Bundled runtime (no system dependencies)

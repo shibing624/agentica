@@ -47,14 +47,29 @@ agentica-gateway --port 8890         # 指定监听端口
 
 ### 3. 桌面应用（Desktop App）
 
-如果你喜欢独立窗口应用，可以直接下载安装包（macOS `.dmg` / Windows `.exe` / Linux `.AppImage` & `.deb`），详见 [README 桌面版说明](https://github.com/shibing624/agentica#桌面版)。
+直接下载对应系统的安装包（每个 [GitHub Release](https://github.com/shibing624/agentica/releases/latest) 页面同样附带）：
 
-桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录，但**不共用可执行包**：安装包里自带 Python 3.12 和与桌面壳同一次构建的 `agentica` + `agentica-gateway[feishu]`，不依赖本机 Python、Node、uv，也不需要联网；壳和网关版本始终一致，一起更新。
+| 系统 | 安装包下载 |
+|---|---|
+| **macOS** 11+ | [Apple Silicon (arm64)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-arm64.dmg) · [Intel (x64)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-darwin-x64.dmg) |
+| **Windows** 10+ | [x64 安装包 (.exe)](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-win32-x64.exe) |
+| **Linux** x64 | [AppImage](https://github.com/shibing624/agentica/releases/latest/download/Agentica-x86_64.AppImage) · [deb](https://github.com/shibing624/agentica/releases/latest/download/agentica-desktop-linux-amd64.deb) |
+
+桌面版与 CLI、Web 共用同一个 `~/.agentica` 配置与历史记录。安装包自带 Python 3.12 和同版本的 `agentica` + `agentica-gateway[feishu]`，不依赖本机 Python、Node、uv，首次打开也不需要联网。
+
+安装包当前**未签名**，首次启动若被系统拦截，按对应系统处理一次即可：
+
+- **macOS 提示「已损坏，无法打开」**：把 `Agentica.app` 拖进「应用程序」后，在终端执行一次 `sudo xattr -rd com.apple.quarantine /Applications/Agentica.app`。
+- **Windows 提示「Windows 已保护你的电脑」**：点「更多信息」→「仍要运行」。
+- **Linux 双击 AppImage 无反应**：先赋执行权限 `chmod +x Agentica-x86_64.AppImage`。
+
+几点说明（开发者与进阶用户）：
 
 - **优先级**：`AGENTICA_GATEWAY_BIN` → 安装包内置运行环境 → 本机 `agentica-gateway`（仅 `npm start` 或不带运行环境的构建）。
 - **终端命令**：菜单 `Help › Install 'agentica' Command in Terminal…` 生成调用内置 Python 的 `agentica` 命令（macOS 优先 `/usr/local/bin`，否则 `~/.local/bin`；Windows 写用户 PATH），不会覆盖不是它创建的同名文件。
-- **自动更新**：基于 `electron-updater` 读取 GitHub Release。macOS 只接受已签名应用的更新，未签名构建会跳过检查，需要重新下载安装包；`AGENTICA_DESKTOP_NO_UPDATE=1` 可全局关闭。
+- **自动更新**：基于 `electron-updater` 读取 GitHub Release。macOS 只接受已签名应用的更新，未签名构建会跳过检查，升级请重新下载安装包；`AGENTICA_DESKTOP_NO_UPDATE=1` 可全局关闭。
 - **签名**：在仓库 secrets 配置 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`（macOS 签名 + 公证）和 `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`（Windows）即可，不配则产出未签名安装包。
+- **源码运行**：`cd desktop && npm install && npm start`（Node 22+），详见 [`desktop/README.md`](https://github.com/shibing624/agentica/blob/main/desktop/README.md)。
 
 #### 工作区
 
@@ -74,6 +89,8 @@ agentica-gateway --port 8890         # 指定监听端口
 - 实测 5000 个会话：默认请求约 0.4 秒、12KB（原来约 5.5 秒、1.9MB）。
 
 ### 4. Docker 部署（可选）
+
+镜像内已编译好 Web UI，运行时不需要 Node。数据保存在 named volume，当前目录挂载到容器 `/workspace`：
 
 ```bash
 cp .env.docker.example .env   # 填入 OPENAI_API_KEY 等模型密钥

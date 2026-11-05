@@ -1,7 +1,7 @@
 # Agentica 使用文档
 
-**一个人，一支 agent 团队。**
-CLI 终端、本机 Web、Desktop App 与 Python SDK 共用同一套记忆、模型配置与工具，跑在你自己的机器上。
+**跑在你自己电脑上的全能 AI 工作台。**
+桌面端、CLI 终端、本机 Web、手机微信与 Python / TypeScript SDK 共用同一套记忆、技能与模型配置，越用越懂你。
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/logo.png" height="30" alt="Logo">

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### changes
+- **README 改为纯用户视角**。去掉安装包内置运行时说明、`uv tool` 子命令细节、环境变量与配置片段、Docker 命令以及 SDK 代码块，全部移入对应 `docs/` 页面；首页聚焦 Desktop、CLI、Web/IM 与 SDK 四种使用方式的下载和文档入口。
+
 #### fixes
 - **1.5.1 的 Desktop 安装包补打。** Windows 上 Git 自带的 GNU tar 不能解开带盘符的路径，改用 `System32\tar.exe`；macOS 上空的 `CSC_LINK` 被 electron-builder 当成证书路径，未签名构建直接失败；CPython 压缩包下载失败会再试两次。三条都只影响安装包，不影响已发布的 PyPI / npm 包。
 
