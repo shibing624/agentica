@@ -50,6 +50,17 @@ def test_trace_routes_404_when_session_missing(client_and_svc):
     client, svc = client_and_svc
     assert client.get("/api/sessions/missing/trace/analysis").status_code == 404
     assert client.get("/api/sessions/missing/trace/events").status_code == 404
+    assert client.get("/api/sessions/missing/export").status_code == 404
+
+
+def test_export_downloads_the_session_log_byte_for_byte(client_and_svc, tmp_path):
+    client, svc = client_and_svc
+    resp = client.get("/api/sessions/sess1/export")
+    assert resp.status_code == 200
+    assert resp.content == SessionLog(session_id="sess1", base_dir=str(tmp_path)).path.read_bytes()
+    assert 'filename="sess1.jsonl"' in resp.headers["content-disposition"]
+    # The log comes from the signed-in account's partition, as for the trace.
+    assert svc.session_log_for.call_args.kwargs["owner"]
 
 
 def test_trace_analysis_and_events(client_and_svc):

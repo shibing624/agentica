@@ -5,7 +5,8 @@ import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { RenameInput } from "../components/SessionTree";
-import { SlashMenu, SkillsPicker, filterSlashItems, invocableSkills, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
+import { CommandMenu, SkillsPicker, invocableSkills, slashQuery } from "../components/SlashMenu";
+import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
 import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
@@ -53,6 +54,10 @@ export function ChatPage() {
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [plusActive, setPlusActive] = useState(0);
+  const plusWrapRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
   const [ctxOpen, setCtxOpen] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
   const [goalBudgetOpen, setGoalBudgetOpen] = useState(false);
@@ -89,9 +94,10 @@ export function ChatPage() {
   const pendingApprovals = s.curSess ? (s.streams[s.curSess]?.pendingApprovals || []) : [];
   const pendingReq = pendingApprovals[0];
   const q = slashQuery(s.inputText);
-  const slashItems = q != null && !pendingReq
-    ? filterSlashItems(webSlashItems(s.pluginsData.skills || [], S.chat), q)
-    : [];
+  const slashGroups = q != null && !pendingReq ? slashMenuGroups(q, s.pluginsData.skills || [], S.chat) : [];
+  const slashItems = flatItems(slashGroups);
+  const plusGroups = plusMenuGroups(S.chat);
+  const plusItems = flatItems(plusGroups);
   const slashOpen = q != null && !pendingReq;
   const pendingToolCallId = pendingReq?.toolCallId;
   const decidingApproval = !!(s.curSess && s.streams[s.curSess]?.decidingApproval);
@@ -119,14 +125,15 @@ export function ChatPage() {
 
   useEffect(() => { void loadPlugins(); }, []);
   useEffect(() => {
-    if (slashOpen) setSkillsOpen(false);
+    if (slashOpen) { setSkillsOpen(false); setPlusOpen(false); }
     if (pendingReq) {
       setSkillsOpen(false);
+      setPlusOpen(false);
       setState({ approvalMenuOpen: false });
     }
   }, [slashOpen, pendingReq?.toolCallId]);
   useEffect(() => {
-    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen && !ctxOpen) return;
+    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen && !ctxOpen && !plusOpen) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       const patch: { modelDDOpen?: false; approvalMenuOpen?: false } = {};
@@ -135,13 +142,16 @@ export function ChatPage() {
       if (patch.modelDDOpen !== undefined || patch.approvalMenuOpen !== undefined) setState(patch);
       if (!skillsWrapRef.current?.contains(t)) setSkillsOpen(false);
       if (!ctxWrapRef.current?.contains(t)) setCtxOpen(false);
+      if (!plusWrapRef.current?.contains(t)) setPlusOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
+      if (plusOpen) requestAnimationFrame(() => taRef.current?.focus());
       setSkillsOpen(false);
       setCtxOpen(false);
+      setPlusOpen(false);
       setState({ modelDDOpen: false, approvalMenuOpen: false });
     };
     document.addEventListener("mousedown", onDown);
@@ -150,7 +160,17 @@ export function ChatPage() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen, ctxOpen]);
+  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen, ctxOpen, plusOpen]);
+  useEffect(() => {
+    if (!plusOpen) return;
+    setPlusActive(0);
+    requestAnimationFrame(() => plusMenuRef.current?.focus());
+  }, [plusOpen]);
+  const pick = (it: MenuItem) => {
+    setPlusOpen(false);
+    setSkillsOpen(false);
+    runCommand(it, taRef);
+  };
   useEffect(() => {
     if (!pendingReq) return;
     const onKey = (e: KeyboardEvent) => {
@@ -380,7 +400,8 @@ export function ChatPage() {
                if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
              }}>
             {slashOpen && (
-              <SlashMenu items={slashItems} active={slashActive} onPick={(it) => pickSlash(it, taRef)} />
+              <CommandMenu groups={slashGroups} active={slashActive} onPick={pick} onHover={setSlashActive}
+                           className="slash-menu" emptyText={S.chat.slashEmpty} />
             )}
             {s.goalCompose && (
               <div className="goal-chip-row" inert={pendingReq ? true : undefined}>
@@ -496,7 +517,7 @@ export function ChatPage() {
                   }
                   if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
                     e.preventDefault();
-                    pickSlash(slashItems[slashActive] || slashItems[0], taRef);
+                    pick(slashItems[slashActive] || slashItems[0]);
                     return;
                   }
                   if (e.key === "Escape") {
@@ -528,7 +549,31 @@ export function ChatPage() {
                   if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
                   e.currentTarget.value = "";
                 }} />
-                <button className="foot-btn plus-btn" title={S.chat.attach} onClick={() => document.getElementById("fileInput")?.click()}><IconPlus /></button>
+                <div className="plus-wrap" ref={plusWrapRef}>
+                  <button type="button" className={"foot-btn plus-btn" + (plusOpen ? " on" : "")}
+                          title={plusOpen ? undefined : S.chat.plusMenu} aria-haspopup="menu" aria-expanded={plusOpen}
+                          onClick={() => {
+                            setSkillsOpen(false);
+                            setState({ approvalMenuOpen: false, modelDDOpen: false });
+                            setPlusOpen(!plusOpen);
+                          }}>
+                    <IconPlus />
+                  </button>
+                  {plusOpen && (
+                    <CommandMenu groups={plusGroups} active={plusActive} onPick={pick} onHover={setPlusActive}
+                                 className="plus-menu" menuRef={plusMenuRef}
+                                 onKeyDown={(e) => {
+                                   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                                     e.preventDefault();
+                                     const d = e.key === "ArrowDown" ? 1 : -1;
+                                     setPlusActive((n) => (n + d + plusItems.length) % plusItems.length);
+                                   } else if (e.key === "Enter" || e.key === " ") {
+                                     e.preventDefault();
+                                     pick(plusItems[plusActive]);
+                                   }
+                                 }} />
+                  )}
+                </div>
                 <div className="skills-wrap" ref={skillsWrapRef}>
                   <button type="button" className="foot-btn skills-btn" title={S.chat.slashSkill}
                           onClick={() => {
@@ -1431,36 +1476,77 @@ function parseWebCommand(text: string): { kind: "compact" | "goal" | "queue"; ar
   return null;
 }
 
-function pickSlash(it: SlashItem, taRef: { current: HTMLTextAreaElement | null }) {
-  if (it.cmd === "/goal") {
-    setState({ inputText: "", goalCompose: { budgetText: "" } });
-    return;
-  }
-  if (it.cmd === "/compact") {
-    const st = getState();
-    if (st.curSess && isCompacting(st.curSess)) {
-      showToast(getStrings().chat.compactWait);
+/** Run a `+` / `/` menu item. Built-ins act directly; a skill puts its slash
+ *  command in the composer so the user can add arguments before sending. */
+function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }) {
+  const focus = () => requestAnimationFrame(() => taRef.current?.focus());
+  switch (it.id) {
+    case "file":
+      document.getElementById("fileInput")?.click();
       return;
-    }
-    setState({ inputText: "", goalCompose: null });
-    void (async () => {
-      const stNow = getState();
-      if (!stNow.curSess) {
-        const dir = stNow.pendingNewChatDir || stNow.serverDir;
-        if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: "" } }); return; }
-        createSession(dir);
-      }
-      const sessId = getState().curSess!;
-      if (isBusy(sessId)) {
-        enqueueMessage(sessId, "/compact", []);
+    case "goal":
+      setState({ inputText: "", goalCompose: { budgetText: "" } });
+      focus();
+      return;
+    case "permission":
+    case "model":
+      // The `/permission` text the user typed is not a message. Open on the
+      // next tick: a pick fires on mousedown, and the document's outside-click
+      // handler runs after it and would close a dropdown opened right now.
+      setState({ inputText: clearIfSlash() });
+      setTimeout(() => setState(it.id === "model"
+        ? { modelDDOpen: true, approvalMenuOpen: false }
+        : { approvalMenuOpen: true, modelDDOpen: false }), 0);
+      return;
+    case "export": {
+      setState({ inputText: clearIfSlash() });
+      const id = getState().curSess;
+      if (!id || !getState().sessions[id]?.msgs.length) {
+        showToast(getStrings().chat.exportNothing);
         return;
       }
-      await runCompact(sessId, "");
-    })();
-    return;
+      const a = document.createElement("a");
+      a.href = `/api/sessions/${encodeURIComponent(id)}/export`;
+      a.download = `${id}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    case "compact": {
+      const st = getState();
+      if (st.curSess && isCompacting(st.curSess)) {
+        showToast(getStrings().chat.compactWait);
+        return;
+      }
+      setState({ inputText: "", goalCompose: null });
+      void (async () => {
+        const stNow = getState();
+        if (!stNow.curSess) {
+          const dir = stNow.pendingNewChatDir || stNow.serverDir;
+          if (!dir) { setState({ dirModal: { open: true, forNewSession: true, value: "" } }); return; }
+          createSession(dir);
+        }
+        const sessId = getState().curSess!;
+        if (isBusy(sessId)) {
+          enqueueMessage(sessId, "/compact", []);
+          return;
+        }
+        await runCompact(sessId, "");
+      })();
+      return;
+    }
+    default:
+      // `/queue` and skills: a prefix for what the user types next.
+      setState({ inputText: it.cmd + " " });
+      focus();
   }
-  setState({ inputText: it.cmd + " " });
-  requestAnimationFrame(() => taRef.current?.focus());
+}
+
+/** The composer text, minus a lone `/command` the user was typing. */
+function clearIfSlash() {
+  const text = getState().inputText;
+  return slashQuery(text) != null ? "" : text;
 }
 
 function beginCommand(sessId: string, userText: string) {

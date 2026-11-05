@@ -1,33 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useStrings } from "../i18n";
-import { IconBook } from "../icons";
-
-export type SlashItem = { cmd: string; name: string; desc: string; kind: "command" | "skill" };
+import type { JSX, KeyboardEvent, Ref } from "react";
+import {
+  IconBook, IconCompact, IconDownload, IconModel, IconPaperclip, IconQueue, IconShield, IconTarget,
+} from "../icons";
+import type { CommandId, MenuGroup, MenuItem } from "../lib/composerCommands";
 
 export function slashQuery(text: string): string | null {
   const m = text.match(/^(\/[^\s]*)$/);
   return m ? m[1].toLowerCase() : null;
-}
-
-export function webSlashItems(skills: Array<Record<string, any>>, S: {
-  slashGoal: string; slashCompact: string; slashQueue: string;
-}): SlashItem[] {
-  const out: SlashItem[] = [
-    { cmd: "/goal", name: "/goal", desc: S.slashGoal, kind: "command" },
-    { cmd: "/queue", name: "/queue", desc: S.slashQueue, kind: "command" },
-    { cmd: "/compact", name: "/compact", desc: S.slashCompact, kind: "command" },
-  ];
-  for (const sk of skills || []) {
-    if (sk.is_hidden || sk.user_invocable === false) continue;
-    const cmd = String(sk.slash || sk.trigger || "").toLowerCase();
-    if (!cmd.startsWith("/")) continue;
-    out.push({ cmd, name: sk.name || cmd, desc: sk.description || "", kind: "skill" });
-  }
-  return out;
-}
-
-export function filterSlashItems(items: SlashItem[], query: string): SlashItem[] {
-  return items.filter((it) => it.cmd.startsWith(query) || it.cmd.slice(1).startsWith(query.slice(1)));
 }
 
 export function invocableSkills(skills: Array<Record<string, any>>): Array<{ cmd: string; name: string; desc: string }> {
@@ -41,39 +22,64 @@ export function invocableSkills(skills: Array<Record<string, any>>): Array<{ cmd
   return out;
 }
 
-export function SlashMenu({
-  items, active, onPick,
+const ICONS: Record<CommandId, () => JSX.Element> = {
+  file: IconPaperclip, goal: IconTarget, queue: IconQueue, compact: IconCompact,
+  permission: IconShield, model: IconModel, export: IconDownload,
+};
+
+/**
+ * One grouped command list (deepseek-harness style): a section title, then
+ * rows of icon, label, slash name in grey and a one-line description on the
+ * right. Used by the `+` menu and the `/` menu; ``active`` indexes the
+ * flattened rows so arrow keys walk across sections.
+ */
+export function CommandMenu({
+  groups, active, onPick, onHover, className = "", emptyText, menuRef, onKeyDown,
 }: {
-  items: SlashItem[];
+  groups: MenuGroup[];
   active: number;
-  onPick: (item: SlashItem) => void;
+  onPick: (item: MenuItem) => void;
+  onHover?: (index: number) => void;
+  className?: string;
+  emptyText?: string;
+  menuRef?: Ref<HTMLDivElement>;
+  onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
 }) {
-  const S = useStrings();
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const el = listRef.current?.querySelector(".quick-item.active");
+    const el = listRef.current?.querySelector(".cmd-item.active");
     if (el) el.scrollIntoView({ block: "nearest" });
   }, [active]);
-  if (!items.length) {
-    return <div className="quick-dd open slash-menu"><div className="quick-empty">{S.chat.slashEmpty}</div></div>;
-  }
+  let index = -1;
   return (
-    <div className="quick-dd open slash-menu">
-      <div className="quick-list" ref={listRef}>
-        {items.map((it, i) => (
-          <button
-            type="button"
-            key={it.kind + it.cmd}
-            className={"quick-item quick-item-ref" + (i === active ? " active" : "")}
-            title={it.desc}
-            onMouseDown={(e) => { e.preventDefault(); onPick(it); }}
-          >
-            {it.kind === "skill" && <span className="quick-icon"><IconBook /></span>}
-            <span className="quick-item-text">
-              <span>{it.name}</span>
-              {it.desc ? <span className="quick-item-desc">{it.desc}</span> : null}
-            </span>
-          </button>
+    <div className={"cmd-menu " + className} role="menu" ref={menuRef} tabIndex={-1} onKeyDown={onKeyDown}>
+      <div className="cmd-list" ref={listRef}>
+        {!groups.length && emptyText && <div className="quick-empty">{emptyText}</div>}
+        {groups.map((g) => (
+          <div className="cmd-group" key={g.title} role="group" aria-label={g.title}>
+            <div className="cmd-group-title">{g.title}</div>
+            {g.items.map((it) => {
+              index += 1;
+              const i = index;
+              const Icon = it.id ? ICONS[it.id] : null;
+              return (
+                <button
+                  type="button"
+                  role="menuitem"
+                  key={it.key}
+                  className={"cmd-item" + (it.kind === "skill" ? " skill" : "") + (i === active ? " active" : "")}
+                  title={it.desc || undefined}
+                  onMouseDown={(e) => { e.preventDefault(); onPick(it); }}
+                  onMouseMove={() => { if (i !== active) onHover?.(i); }}
+                >
+                  {Icon && <span className="cmd-icon"><Icon /></span>}
+                  <span className="cmd-label">{it.label}</span>
+                  {it.kind === "command" && <span className="cmd-slash">{it.cmd.slice(1)}</span>}
+                  {it.desc && <span className="cmd-desc">{it.desc}</span>}
+                </button>
+              );
+            })}
+          </div>
         ))}
       </div>
     </div>

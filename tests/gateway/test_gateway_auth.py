@@ -727,6 +727,7 @@ class TestUserRoutes:
         endpoints = [
             ("POST", "/api/sessions/s1/fork", {"at_uuid": "u-1"}),
             ("GET", "/api/sessions/s1/feedback", None),
+            ("GET", "/api/sessions/s1/export", None),
             ("POST", "/api/sessions/s1/feedback", {"uuid": "u-1", "rating": "up"}),
             ("GET", "/api/memory/entry?filename=x.md", None),
             ("POST", "/api/open", {"path": "/tmp", "app": "reveal"}),

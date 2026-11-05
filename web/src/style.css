@@ -718,8 +718,29 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .file-chip.img img{width:64px;height:64px;object-fit:cover;display:block}
 .file-chip.img .fx{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;padding:2px}
 .vision-note{margin:8px 12px 0;padding:8px 10px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--fg2);line-height:1.45}
-.slash-menu{left:12px;width:min(420px,calc(100% - 24px));bottom:calc(100% + 8px)}
-.slash-menu .quick-list{max-height:min(280px,42vh);overflow-y:auto}
+/* `+` and `/` command menus (deepseek-harness style): span the composer,
+   grey section titles, rows of icon · label · slash name · description. */
+.cmd-menu{position:absolute;left:0;right:0;bottom:calc(100% + 8px);z-index:220;padding:6px;background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.14),0 2px 6px rgba(0,0,0,.05);outline:none;animation:cmdMenuIn .12s ease-out}
+@keyframes cmdMenuIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.cmd-list{max-height:min(420px,52vh);overflow-y:auto;overscroll-behavior:contain}
+.cmd-group+.cmd-group{margin-top:4px}
+.cmd-group-title{padding:8px 12px 4px;font-size:12px;color:var(--fg3);user-select:none}
+.cmd-item{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:7px 12px;border:none;border-radius:10px;background:transparent;color:var(--fg);font:inherit;font-size:13.5px;text-align:left;cursor:pointer}
+.cmd-item.active{background:var(--bg3)}
+.cmd-icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--fg2)}
+.cmd-icon svg{width:16px;height:16px}
+.cmd-label{flex-shrink:0;white-space:nowrap}
+.cmd-slash{flex-shrink:0;color:var(--fg3);font-size:13px;white-space:nowrap}
+.cmd-desc{margin-left:auto;min-width:0;padding-left:16px;color:var(--fg3);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmd-item.skill .cmd-desc{margin-left:0;padding-left:4px}
+.slash-menu{left:8px;right:8px}
+/* The `+` menu spans the whole composer like the `/` one, so it positions
+   against .input-box rather than the footer's left cluster while open. */
+.input-box:has(.plus-menu) .input-foot-l{position:static}
+.plus-wrap{position:static;display:flex}
+.plus-menu{left:8px;right:8px}
+.plus-btn.on{color:var(--fg);background:var(--bg3);border-color:var(--fg3)}
+@media(max-width:560px){.cmd-desc{display:none}}
 .skills-wrap{position:relative}
 .skills-dd{min-width:280px;width:min(360px,72vw)}
 .skills-btn{gap:6px;padding:0 8px;font-size:12px}

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Read-only Trace endpoints: paginated events + whole-file analysis."""
+"""Read-only session log endpoints: paginated events, whole-file analysis, raw export."""
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 
 from .. import deps
 from ..services.agent_service import AgentService
@@ -41,3 +42,21 @@ async def trace_analysis(
         raise HTTPException(status_code=404, detail="Session not found")
     analysis = log.analyze()
     return analysis
+
+
+@router.get("/api/sessions/{session_id}/export")
+async def export_session(
+    session_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Download the session log as-is: the same JSONL the CLI's ``/export``
+    copies out, which ``agentica --resume`` and the Trace page both read."""
+    log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
+    if not log.path.exists():
+        raise HTTPException(status_code=404, detail="Session not found")
+    return FileResponse(
+        log.path,
+        media_type="application/x-ndjson",
+        filename=f"{session_id}.jsonl",
+    )

@@ -242,3 +242,33 @@ export const IconFileCode = () => (
     <path d="M6.6 8.2L5.3 9.6l1.3 1.4M9.4 8.2l1.3 1.4-1.3 1.4" />
   </S>
 );
+export const IconPaperclip = () => (
+  <S strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.75 4.75 5.6 9.9a1.4 1.4 0 002 2l5.4-5.4a2.75 2.75 0 00-3.9-3.9L3.7 8a4.1 4.1 0 005.8 5.8l4.25-4.25" />
+  </S>
+);
+export const IconTarget = () => (
+  <S strokeWidth="1.35" strokeLinecap="round">
+    <circle cx="8" cy="8" r="5.75" /><circle cx="8" cy="8" r="3.1" /><circle cx="8" cy="8" r=".7" fill="currentColor" />
+  </S>
+);
+export const IconQueue = () => (
+  <S strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.75 4h7.5M2.75 8h7.5M2.75 12h4.5M11.5 10.25 13.25 12 11.5 13.75" />
+  </S>
+);
+export const IconCompact = () => (
+  <S strokeWidth="1.35" strokeLinecap="round">
+    <path d="M8 2.25a5.75 5.75 0 105.75 5.75" /><path d="M10.6 2.85a5.8 5.8 0 012.55 2.55" strokeDasharray="1.2 1.6" />
+  </S>
+);
+export const IconShield = () => (
+  <S strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 1.9 3 3.75v3.9c0 3.05 2.1 5.4 5 6.45 2.9-1.05 5-3.4 5-6.45v-3.9L8 1.9z" /><path d="M8 5.25v3.2" /><path d="M8 10.6h.01" />
+  </S>
+);
+export const IconModel = () => (
+  <S strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.6" /><path d="M6.25 1.75v2M9.75 1.75v2M6.25 12.25v2M9.75 12.25v2M1.75 6.25h2M1.75 9.75h2M12.25 6.25h2M12.25 9.75h2" /><path d="M6.4 6.4h3.2v3.2H6.4z" />
+  </S>
+);
