@@ -119,7 +119,12 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 .search-clear{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:none;background:none;color:var(--fg3);cursor:pointer;border-radius:4px}
 .search-clear:hover{color:var(--fg);background:var(--hover)}
 .search-clear svg{width:10px;height:10px}
-.s-list{flex:1;overflow-y:auto;padding:0 8px 10px}
+.s-list{flex:1;overflow-y:auto;padding:0 8px 10px;scrollbar-width:thin;scrollbar-color:transparent transparent}
+.s-list:hover{scrollbar-color:var(--scroll) transparent}
+.s-list::-webkit-scrollbar{width:4px}
+.s-list::-webkit-scrollbar-thumb{background:transparent;border-radius:2px}
+.s-list:hover::-webkit-scrollbar-thumb{background:var(--scroll)}
+.s-list:hover::-webkit-scrollbar-thumb:hover{background:var(--fg3)}
 .p-group{margin-bottom:2px}
 .p-head{display:flex;align-items:center;gap:2px;height:34px;padding:0 4px 0 2px;border-radius:10px;color:var(--fg);position:relative}
 .p-head:hover,.p-head.menu-open{background:var(--hover)}
