@@ -73,12 +73,24 @@ function createWindow() {
   const stateFile = path.join(app.getPath("userData"), "window-state.json");
   const state = keepVisiblePosition(readWindowState(stateFile), screen.getAllDisplays());
   const { maximized, ...bounds } = state;
+  const mac = process.platform === "darwin";
   win = new BrowserWindow({
     ...bounds,
     minWidth: 720,
     minHeight: 480,
     title: "Agentica",
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff",
+    // macOS: no title bar, traffic lights inset into the sidebar, and a
+    // translucent sidebar over the system material. The page paints the chat
+    // column itself, so the window background has to be transparent there.
+    ...(mac
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 16, y: 18 },
+          vibrancy: "sidebar",
+          visualEffectState: "active",
+          backgroundColor: "#00000000",
+        }
+      : { backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff" }),
     show: false,
     ...(icon ? { icon } : {}),
     webPreferences: {
@@ -87,6 +99,10 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // The SPA lays out differently inside this shell (drag regions, room for the
+  // traffic lights), and the user agent is the one signal it can read without a
+  // preload script.
+  win.webContents.setUserAgent(`${win.webContents.getUserAgent()} AgenticaDesktop/${app.getVersion()}`);
   if (maximized) win.maximize();
 
   win.once("ready-to-show", () => win.show());

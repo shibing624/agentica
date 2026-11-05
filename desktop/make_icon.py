@@ -5,6 +5,7 @@ macOS / iOS app icons use: a square with continuously curved corners, not a
 circle and not a hard-cornered square. One source drives every output:
 
   desktop/build/icon.png        1024  electron-builder master (it refuses < 512)
+  desktop/build/icon-mac.png    1024  macOS only: full-bleed square, the OS rounds it
   web/src/assets/app-icon.png    256  sidebar / welcome / login brand mark
   web/public/favicon.png          64  browser tab
   web/public/favicon.ico           multi-resolution ICO, same artwork
@@ -45,6 +46,10 @@ SQUIRCLE_N = 4.6
 # roughly 20-30% air around the glyph; 0.66 leaves that without shrinking the
 # cat illegible at 16px.
 CAT_FILL = 0.66
+# Same, for the full-bleed macOS icon, as a share of the whole canvas. The
+# system mask trims the corners, so the cat sits a little smaller than
+# CAT_FILL * (1 - 2 * MARGIN) would suggest to keep it clear of the rounded edge.
+MAC_CAT_FILL = 0.62
 BADGE = (234, 243, 255, 255)  # the logo's own pale blue
 BORDER = (196, 219, 250, 255)  # a hairline so the pale badge reads on a light sidebar
 BORDER_W = 0.006  # share of the canvas
@@ -118,7 +123,31 @@ def build(size: int = SIZE) -> Image.Image:
     return canvas.resize((size, size), Image.LANCZOS)
 
 
+def build_mac(size: int = SIZE) -> Image.Image:
+    """Full-bleed square for macOS.
+
+    macOS 26+ applies the icon mask itself. An icon that carries its own rounded
+    shape and transparent margin (``build``) is treated as a legacy icon and
+    shrunk into a grey rounded container, which is the "icon does not fill the
+    tile" look. A flat opaque square that reaches every edge is masked directly,
+    so the artwork fills the tile. No margin, no corners, no border: the system
+    supplies all three.
+    """
+    scale = 4
+    work = size * scale
+    canvas = Image.new("RGBA", (work, work), BADGE)
+    cat = cut_out(Image.open(SOURCE).convert("RGBA").crop(CROP))
+    factor = work * MAC_CAT_FILL / max(cat.size)
+    cat = cat.resize((round(cat.width * factor), round(cat.height * factor)), Image.LANCZOS)
+    canvas.paste(cat, ((work - cat.width) // 2, (work - cat.height) // 2 + round(work * 0.012)), cat)
+    return canvas.resize((size, size), Image.LANCZOS)
+
+
 def main() -> None:
+    mac = HERE / "build" / "icon-mac.png"
+    build_mac(SIZE).save(mac)
+    print(f"wrote {mac.relative_to(ROOT)} ({SIZE}x{SIZE}, full-bleed)")
+
     master = build(SIZE)
     outputs = [
         (HERE / "build" / "icon.png", SIZE),

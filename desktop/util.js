@@ -58,9 +58,13 @@ function parsePort(content) {
  * every platform: `nativeImage` decodes PNG everywhere, whereas the ICO the
  * favicon ships as decodes **only** on Windows and yields an empty image — which
  * looks identical to having configured no icon at all — anywhere else.
+ *
+ * macOS gets its own full-bleed square (`icon-mac.png`): the OS rounds it, and
+ * an icon that brings its own rounded shape and margin is shrunk into a grey
+ * container on macOS 26+.
  */
-function iconPath() {
-  return path.join(__dirname, "build", "icon.png");
+function iconPath(platform = process.platform) {
+  return path.join(__dirname, "build", platform === "darwin" ? "icon-mac.png" : "icon.png");
 }
 
 module.exports = {

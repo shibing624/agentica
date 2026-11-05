@@ -83,6 +83,7 @@
         }
       ],
       "category": "public.app-category.developer-tools",
+      "icon": "build/icon-mac.png",
       "darkModeSupport": true,
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
