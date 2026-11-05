@@ -252,14 +252,18 @@ export async function syncSessionRoundStats(id: string) {
     compaction?: boolean;
     durationMs: number;
     llmMs: number;
+    requests?: number;
     tokens: {
       prompt: number;
       output: number;
       cacheRead: number;
+      cacheWrite?: number;
       cacheHitPercent: number | null;
     };
     costUsd: number | null;
   }>).filter((r) => !r.compaction);
+  // The log records the session's model once; per-round ids are not kept.
+  const model = typeof data.meta?.model === "string" ? data.meta.model : "";
   const assistants = sess.msgs.filter((m) => m.role === "assistant");
   const n = assistants.length;
   let changed = false;
@@ -271,6 +275,9 @@ export async function syncSessionRoundStats(id: string) {
       && m.durationMs === rd.durationMs
       && m.tokIn === rd.tokens.prompt
       && m.tokOut === rd.tokens.output
+      && m.cacheWrite === (rd.tokens.cacheWrite ?? m.cacheWrite)
+      && m.requests === (rd.requests ?? m.requests)
+      && (!model || m.model)
     ) continue;
     m.llmMs = rd.llmMs;
     m.durationMs = rd.durationMs;
@@ -278,7 +285,10 @@ export async function syncSessionRoundStats(id: string) {
     m.tokIn = rd.tokens.prompt;
     m.tokOut = rd.tokens.output;
     m.cacheRead = rd.tokens.cacheRead;
+    if (rd.tokens.cacheWrite != null) m.cacheWrite = rd.tokens.cacheWrite;
     m.cacheHitPercent = rd.tokens.cacheHitPercent;
+    if (rd.requests != null) m.requests = rd.requests;
+    if (model && !m.model) m.model = model;
     if (rd.costUsd != null) m.costUsd = rd.costUsd;
     changed = true;
   }

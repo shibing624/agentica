@@ -98,4 +98,7 @@ def turn_usage_payload(agent: Any) -> Optional[Dict[str, Any]]:
         "cost_usd": round(summary.cost_usd, 6),
         "net_new_tokens": summary.net_new_tokens,
         "api_calls": summary.api_calls,
+        # Every model this turn called (a fallback or a compaction model can
+        # differ from the session's), in first-use order.
+        "models": list(tracker.model_usage),
     }

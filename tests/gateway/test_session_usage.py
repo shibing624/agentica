@@ -75,6 +75,21 @@ def test_turn_usage_is_this_run_cache_split_not_session_total():
     assert session["cache_read_tokens"] == 4000
 
 
+def test_turn_usage_carries_what_the_footer_detail_shows():
+    """The click-open usage panel lists cache write, request count and models."""
+    from types import SimpleNamespace
+    agent = _agent()
+    tracker = CostTracker()
+    tracker.record("gpt-4o-mini", input_tokens=100, output_tokens=20, cache_write_tokens=300)
+    tracker.record("openai/gpt-4o", input_tokens=50, output_tokens=5, cache_read_tokens=400)
+    tracker.record("gpt-4o-mini", input_tokens=10, output_tokens=1)
+    agent.run_response = SimpleNamespace(cost_tracker=tracker)
+    payload = turn_usage_payload(agent)
+    assert payload["cache_write_tokens"] == 300
+    assert payload["api_calls"] == 3
+    assert payload["models"] == ["gpt-4o-mini", "gpt-4o"]
+
+
 def test_payload_window_is_the_budget_the_policy_compacts_against():
     """The web renders ``context_tokens / window``.
 

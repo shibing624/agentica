@@ -7,15 +7,16 @@ import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { RenameInput } from "../components/SessionTree";
 import { SlashMenu, SkillsPicker, filterSlashItems, invocableSkills, slashQuery, webSlashItems, type SlashItem } from "../components/SlashMenu";
 import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
+import { TurnUsagePanel } from "../components/TurnUsagePanel";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
-import { fmtCost, fmtDurationMs, fmtN, fmtTps, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
+import { fmtDurationMs, fmtN, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
 import { primeSettings, switchProfile } from "../panels/SettingsModal";
 import { createSession, forkAt, hydrateSession, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
-  IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook, IconDatabase,
+  IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook,
   IconChevronDown, IconThumbUp, IconThumbDown, IconFork,
 } from "../icons";
 import {
@@ -717,6 +718,7 @@ function MessageFooter({ m, live, sessionId, idx }: {
 }) {
   const S = useStrings();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   if (live) return null;
   const copy = () => {
     // Always the original message. A rendered skill chip is a view, not the text
@@ -739,20 +741,7 @@ function MessageFooter({ m, live, sessionId, idx }: {
     );
   }
   const durationMs = m.durationMs ?? ((m.durationSec || 0) * 1000);
-  const tps = (m.llmMs && m.tokOut)
-    ? m.tokOut / (m.llmMs / 1000)
-    : ((m.durationSec && m.tokOut) ? m.tokOut / m.durationSec : 0);
   const hasStats = m.tokIn != null;
-  const usageTip = [
-    S.chat.usageTip,
-    `↑ ${S.chat.ctxInput} ${fmtN(m.tokIn || 0)}`,
-    m.cacheRead != null
-      ? `${S.chat.cacheTokensTip} ${fmtN(m.cacheRead)}${m.cacheHitPercent != null ? ` (${S.chat.cacheHitTip} ${m.cacheHitPercent.toFixed(1)}%)` : ""}`
-      : "",
-    `↓ ${S.chat.ctxOutput} ${fmtN(m.tokOut || 0)}`,
-    tps > 0 ? `${S.chat.tokPerSecTip} ${fmtTps(tps)}` : "",
-    (m.costUsd || 0) > 0 ? `${S.chat.costUsdTip} ${fmtCost(m.costUsd || 0)}` : "",
-  ].filter(Boolean).join("\n");
   const rating = m.feedback?.rating || null;
   const canAct = !!sessionId;
   const rate = (next: "up" | "down" | null, comment = "") => {
@@ -762,7 +751,9 @@ function MessageFooter({ m, live, sessionId, idx }: {
     });
   };
   return (
-    <div className="msg-footer">
+    // Pinned while the usage panel is open: the footer otherwise fades out as
+    // soon as the pointer leaves the reply for the panel.
+    <div className={"msg-footer" + (usageOpen ? " pinned" : "")}>
       {copyBtn}
       {canAct && (
         <>
@@ -782,12 +773,7 @@ function MessageFooter({ m, live, sessionId, idx }: {
           </button>
         </>
       )}
-      {hasStats && (
-        <span className="msg-usage" title={usageTip}>
-          <IconDatabase />
-          {S.chat.usageTokens(fmtN((m.tokIn || 0) + (m.tokOut || 0)))}
-        </span>
-      )}
+      {hasStats && <TurnUsagePanel m={m} onOpenChange={setUsageOpen} />}
       {!!durationMs && <span title={S.chat.durationTip}>{fmtDurationMs(durationMs)}</span>}
       <span title={S.chat.msgTimeTip}>{S.chat.msgStamp(m.ts || Date.now())}</span>
       {feedbackOpen && (
@@ -1215,6 +1201,9 @@ async function consumeSse(
           aiMsg.tokOut = (turn.output_tokens ?? evt.data.output_tokens) || 0;
           aiMsg.cacheRead = turn.cache_read_tokens ?? evt.data.cache_read_tokens ?? 0;
           aiMsg.cacheHitPercent = turn.cache_hit_percent ?? evt.data.cache_hit_percent ?? null;
+          if (turn.cache_write_tokens != null) aiMsg.cacheWrite = turn.cache_write_tokens;
+          aiMsg.requests = turn.api_calls ?? evt.data.requests ?? aiMsg.requests;
+          if (Array.isArray(turn.models) && turn.models.length) aiMsg.model = turn.models.join(", ");
           sess.tokIn += evt.data.input_tokens || 0;
           sess.tokOut += evt.data.output_tokens || 0;
           sess.tokTotal += evt.data.total_tokens || 0;

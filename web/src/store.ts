@@ -36,7 +36,13 @@ export type ChatMsg = {
   tokOut?: number;
   costUsd?: number;
   cacheRead?: number;
+  /** Prompt tokens written to the provider cache this turn (Anthropic-style). */
+  cacheWrite?: number;
   cacheHitPercent?: number | null;
+  /** Model API calls this turn took (tool loops make it more than one). */
+  requests?: number;
+  /** Model ids this turn called, e.g. "deepseek-v4" or "a, b" after a fallback. */
+  model?: string;
   previews?: string[];
   aborted?: boolean;
   error?: string;

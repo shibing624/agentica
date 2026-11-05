@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web 回复 footer 的「用量」改为点击打开详情**（对照 deepseek-harness 的 TurnUsagePanel）。原来是悬停 `title` 提示，读不全、不能复制、触屏上打不开。现在是按钮，点开在上方弹出「本轮用量」：总 token 精确值，以及模型、缓存命中率、未缓存输入、缓存读取、缓存写入、输出、模型调用次数、输出速度和费用；拿不到的项不显示，不会显示成 0。面板贴着按钮、放不下时翻到下方并留在视口内，聊天滚动时跟随；再次点击、点外部或按 Esc 关闭（Esc 后焦点回到按钮），打开期间 footer 保持可见。`turn_usage` 新增本轮调用过的 `models`；重新打开的会话从轨迹分析补齐缓存写入、调用次数和模型。
 - **README 改为纯用户视角**。去掉安装包内置运行时说明、`uv tool` 子命令细节、环境变量与配置片段、Docker 命令以及 SDK 代码块，全部移入对应 `docs/` 页面；首页聚焦 Desktop、CLI、Web/IM 与 SDK 四种使用方式的下载和文档入口。
 
 #### fixes

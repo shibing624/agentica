@@ -427,8 +427,25 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .msg-footer:not(.user){gap:4px 12px}
 .msg-footer:not(.user) .msg-act + .msg-act{margin-left:-10px}
 .m-a:not(:hover) .msg-footer:has(.msg-act.on){opacity:1;pointer-events:auto}
-.msg-usage{display:inline-flex;align-items:center;gap:4px;cursor:default}
-.msg-usage svg{width:12px;height:12px}
+.msg-footer.pinned{opacity:1;pointer-events:auto}
+/* Token pill: a button that opens this reply's usage (TurnUsagePanel). */
+.msg-usage{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 7px;margin:0 -3px;border:none;border-radius:6px;background:transparent;color:var(--fg3);font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer;transition:background var(--t),color var(--t)}
+.msg-usage:hover,.msg-usage.open{background:var(--bg3);color:var(--fg2)}
+.msg-usage:focus-visible{outline:2px solid var(--accent-soft);outline-offset:1px}
+.msg-usage svg{width:12px;height:12px;flex-shrink:0}
+.turn-usage{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(280px,calc(100vw - 24px));max-width:min(420px,calc(100vw - 24px));padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--bg);box-shadow:0 12px 36px rgba(0,0,0,.16),0 2px 6px rgba(0,0,0,.06);font-size:12px;line-height:18px;color:var(--fg2);cursor:default;animation:turnUsageIn .12s ease-out}
+@keyframes turnUsageIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.turn-usage-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px;color:var(--fg);font-weight:600}
+.turn-usage-title{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.turn-usage-title svg{width:14px;height:14px;flex-shrink:0;color:var(--fg2)}
+.turn-usage-total{font-variant-numeric:tabular-nums;white-space:nowrap}
+.turn-usage-rule{border-top:1px solid var(--border2);margin-bottom:10px}
+.turn-usage-rows{display:grid;grid-template-columns:minmax(84px,auto) minmax(0,1fr);gap:6px 18px;margin:0}
+.turn-usage-row{display:contents}
+.turn-usage-rows dt{color:var(--fg3)}
+.turn-usage-rows dd{margin:0;text-align:right;color:var(--fg);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.turn-usage-rows dd.mono{font-family:var(--mono);font-size:11.5px}
+.turn-usage-note{margin-top:10px;padding-top:8px;border-top:1px solid var(--border2);font-size:11px;color:var(--fg3)}
 /* `/skill args` turn in a user bubble: name as a link, dotted until hovered. */
 .skill-ref{display:inline;border:none;background:transparent;padding:0;margin-right:6px;color:var(--skill-ref);font:inherit;font-family:var(--mono);font-size:.94em;font-weight:500;cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--skill-ref);text-underline-offset:3px;text-decoration-thickness:1px}
 .skill-ref:hover,.skill-ref:focus-visible{text-decoration-style:solid;outline:none}
