@@ -17,6 +17,27 @@ function parts(m) {
   return m.parts || [];
 }
 
+test("a turn with pictures shows them again and hides the media description", () => {
+  const a = "a".repeat(64) + ".png";
+  const b = "b".repeat(64) + ".jpg";
+  const msgs = eventsToChatMsgs([
+    {
+      type: "user",
+      content: `看下这个\n\n[图片: ${a}]\n\n[图片: ${b}]\n\n[图片内容]\n一张截图\n\n[图片内容]\n另一张`,
+      timestamp: "2026-08-28T01:00:00.000Z",
+    },
+    { type: "assistant", content: "ok", timestamp: "2026-08-28T01:00:02.000Z" },
+    { type: "user", content: `[图片: ${a}]\n\n[图片内容]\n只有图片`, timestamp: "2026-08-28T01:01:00.000Z" },
+    { type: "user", content: "文中提到 [图片: x] 不是附件", timestamp: "2026-08-28T01:02:00.000Z" },
+  ]);
+  assert.equal(msgs[0].content, "看下这个");
+  assert.deepEqual(msgs[0].previews, [`/api/chat-images/${a}`, `/api/chat-images/${b}`]);
+  assert.equal(msgs[2].content, "");
+  assert.deepEqual(msgs[2].previews, [`/api/chat-images/${a}`]);
+  assert.equal(msgs[3].content, "文中提到 [图片: x] 不是附件");
+  assert.equal(msgs[3].previews, undefined);
+});
+
 test("plain user/assistant text still hydrates as two bubbles", () => {
   const msgs = eventsToChatMsgs([
     { type: "user", content: "hello", timestamp: "2026-08-28T01:00:00.000Z" },
@@ -183,4 +204,21 @@ test("two user turns stay two assistant bubbles", () => {
   assert.equal(msgs.map((m) => m.role).join(","), "user,assistant,user,assistant");
   assert.equal(parts(msgs[1]).filter((p) => p.kind === "tool").length, 1);
   assert.equal(parts(msgs[3]).some((p) => p.kind === "tool"), false);
+});
+
+test("an automated row is a notice, not the user's query", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "fix the bug", timestamp: "2026-11-06T01:00:00.000Z" },
+    { type: "assistant", content: "started it", timestamp: "2026-11-06T01:00:02.000Z" },
+    {
+      type: "user", automated: true,
+      content: "[Background terminal #4 (term_4) failed: exit -15 after 35s]\nCommand: x",
+      timestamp: "2026-11-06T01:05:00.000Z",
+    },
+    { type: "assistant", content: "it was me stopping it", timestamp: "2026-11-06T01:05:03.000Z" },
+  ]);
+  assert.deepEqual(msgs.map((m) => [m.role, !!m.automated]), [
+    ["user", false], ["assistant", false], ["user", true], ["assistant", false],
+  ]);
+  assert.match(msgs[2].content, /^\[Background terminal #4/);
 });

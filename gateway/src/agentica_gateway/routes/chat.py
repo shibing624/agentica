@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agentica.memory.trace import last_completed_round
@@ -24,7 +24,7 @@ from ..models import (
     RenameRequest, GoalRequest, SteerRequest, ApprovalDecisionRequest,
 )
 from ..services.agent_service import AgentService
-from ..services import live_turn
+from ..services import chat_images, live_turn
 from .settings import show_cli_sessions_pref
 
 try:
@@ -187,6 +187,32 @@ def _images_to_media(images: list[ChatImage]) -> list[InboundMedia]:
     return out
 
 
+def _message_and_media(body: ChatRequest) -> tuple[str, Optional[list[InboundMedia]]]:
+    """The user text plus the decoded images.
+
+    Each image is also kept on disk and named by a marker appended to the text,
+    so the logged turn can show the picture again after a reload.
+    """
+    if not body.images:
+        return body.message, None
+    media = _images_to_media(body.images)
+    names = [chat_images.save(m.data, m.mime) for m in media]
+    return body.message + chat_images.marker(names), media or None
+
+
+@router.get("/api/chat-images/{name}")
+async def chat_image(name: str):
+    """A picture attached in the web chat (content-addressed, so cacheable forever)."""
+    path = chat_images.resolve(name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="image not found")
+    return FileResponse(
+        path,
+        media_type=chat_images.MEDIA_TYPE_BY_EXT[path.suffix.lstrip(".")],
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
 # ============== Non-streaming chat ==============
 
 @router.post("/api/chat", response_model=ChatResponse)
@@ -201,12 +227,13 @@ async def chat(
         await _apply_session_work_dir(svc, body.session_id, body.work_dir, account)
     svc.set_session_approval_mode(body.session_id, body.approval_mode, owner=account)
 
+    message, media = _message_and_media(body)
     result = await svc.chat(
-        message=body.message,
+        message=message,
         session_id=body.session_id,
         user_id=account,
         owner=account,
-        media=_images_to_media(body.images) if body.images else None,
+        media=media,
     )
     return ChatResponse(
         content=result.content,
@@ -301,12 +328,13 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
         await _apply_session_work_dir(svc, session_id, body.work_dir, account)
     svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
     _touch_session_log(svc, session_id, account)
+    message, media = _message_and_media(body)
 
     async def run_chat_turn(turn: live_turn.LiveTurn):
         on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
         t0 = time.time()
         result = await svc.chat_stream(
-            message=body.message,
+            message=message,
             session_id=session_id,
             user_id=account,
             owner=account,
@@ -314,7 +342,7 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_thinking=on_thinking,
-            media=_images_to_media(body.images) if body.images else None,
+            media=media,
         )
         elapsed = round(time.time() - t0, 2)
 

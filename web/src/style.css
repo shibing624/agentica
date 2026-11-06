@@ -54,8 +54,34 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
    header rows are the window's drag handle. Set by main.tsx from the
    AgenticaDesktop user agent; the browser UI never matches this. */
 html[data-desktop="mac"],html[data-desktop="mac"] body{background:transparent}
-html[data-desktop="mac"] .sidebar{background:color-mix(in srgb,var(--side-bg) 52%,transparent);border-right:none}
+/* The window material follows the system appearance, the page follows its own
+   theme setting. When they agree the sidebar is a thin tint over the material
+   with dsh's washes (blue at the top, violet at the bottom); when they do not —
+   a dark page on a light system — a thin tint would show a light-grey slab
+   behind dark icons, so the fill goes near-opaque. `prefers-color-scheme` in
+   the renderer is the system appearance, which is what the material uses. */
+html[data-desktop="mac"] .sidebar{border-right:none;background:
+  linear-gradient(to bottom,rgb(122 155 240 / .10),rgb(122 155 240 / 0) 35%,rgb(143 137 184 / 0) 68%,rgb(143 137 184 / .09)),
+  color-mix(in srgb,color-mix(in srgb,var(--side-bg) 97%,rgb(122 155 240)) 40%,transparent)}
+html[data-theme="dark"][data-desktop="mac"] .sidebar{background:
+  linear-gradient(to bottom,rgb(122 155 240 / .08),rgb(122 155 240 / 0) 35%,rgb(143 137 184 / 0) 68%,rgb(143 137 184 / .07)),
+  color-mix(in srgb,var(--side-bg) 50%,transparent)}
+@media (prefers-color-scheme: light){
+  html[data-theme="dark"][data-desktop="mac"] .sidebar{background:
+    linear-gradient(to bottom,rgb(122 155 240 / .08),rgb(122 155 240 / 0) 35%,rgb(143 137 184 / 0) 68%,rgb(143 137 184 / .07)),
+    color-mix(in srgb,var(--side-bg) 96%,transparent)}
+}
+@media (prefers-color-scheme: dark){
+  html[data-theme="light"][data-desktop="mac"] .sidebar{background:
+    linear-gradient(to bottom,rgb(122 155 240 / .10),rgb(122 155 240 / 0) 35%,rgb(143 137 184 / 0) 68%,rgb(143 137 184 / .09)),
+    color-mix(in srgb,var(--side-bg) 96%,transparent)}
+}
+@media (prefers-reduced-transparency: reduce){
+  html[data-desktop="mac"] .sidebar,html[data-theme][data-desktop="mac"] .sidebar{background:color-mix(in srgb,var(--side-bg) 92%,transparent)}
+}
 html[data-desktop="mac"] .main{background:var(--bg);border-left:var(--hair) solid var(--border)}
+html[data-desktop="mac"] .trace-main{background:var(--bg);border-left:var(--hair) solid var(--border)}
+html[data-desktop="mac"][data-sidebar-collapsed] :is(.main,.trace-main){border-left:none}
 html[data-desktop="mac"] .side-new{background:rgba(255,255,255,.55)}
 html[data-desktop="mac"] .side-new:hover{background:rgba(255,255,255,.3)}
 html[data-theme="dark"][data-desktop="mac"] .side-new{background:rgba(255,255,255,.12)}
@@ -65,34 +91,42 @@ html[data-theme="dark"][data-desktop="mac"] .side-new:hover{background:rgba(255,
 html[data-desktop="mac"] .side-head{flex-wrap:wrap;align-content:flex-start;padding:0 12px 4px 16px;min-height:96px}
 html[data-desktop="mac"] .side-head .ib{order:-1;margin:12px 0 0 auto;transform:translateX(2px)}
 html[data-desktop="mac"] .side-head .brand{order:1;flex:0 0 100%;height:40px;margin-top:2px}
-html[data-desktop="mac"] .sidebar.collapsed .side-head{padding:46px 0 8px;min-height:0}
-html[data-desktop="mac"] .sidebar.collapsed .side-head .ib{order:0;margin:0;transform:none}
-html[data-desktop="mac"] .sidebar.collapsed .side-head .brand{order:0;flex:0 0 auto;height:auto;margin:0}
 html[data-desktop="mac"] .side-head,html[data-desktop="mac"] .topbar,html[data-desktop="mac"] .login-wrap{-webkit-app-region:drag}
 html[data-desktop="mac"] :is(button,a,input,select,textarea,label,[role="button"],.tb-chat-title,.login-card){-webkit-app-region:no-drag}
 html[data-desktop="mac"] .topbar{padding-left:24px}
 
+/* ===== COLLAPSED SIDEBAR (web and desktop alike) =====
+   Collapsing hides the column entirely (dsh): no icon rail, which on macOS had
+   to be as wide as the traffic lights and still read as a grey slab. Two
+   controls stay in a fixed seat at the top-left — open the sidebar, new chat —
+   level with the page's header row. On macOS the seat starts after the traffic
+   lights. Pages make room for it with the clearance variable. */
+:root{--seat-left:12px;--seat-clear:0px}
+html[data-sidebar-collapsed]{--seat-clear:72px}
+html[data-desktop="mac"]{--seat-left:84px}
+html[data-desktop="mac"][data-sidebar-collapsed]{--seat-clear:144px}
+.side-seat{position:fixed;top:12px;left:var(--seat-left);z-index:120;display:flex;align-items:center;gap:4px}
+.side-seat .ib{width:28px;height:28px}
+.side-seat .ib svg{width:16px;height:16px}
+html[data-sidebar-collapsed] .topbar{padding-left:calc(20px + var(--seat-clear))}
+html[data-desktop="mac"][data-sidebar-collapsed] .topbar{padding-left:calc(12px + var(--seat-clear))}
+html[data-sidebar-collapsed] .trace-back{margin-left:var(--seat-clear)}
+
 /* ===== SIDEBAR ===== */
 .sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);height:100vh;background:var(--side-bg);border-right:var(--hair) solid var(--border);display:flex;flex-direction:column;position:relative;transition:width var(--t),min-width var(--t),background .2s}
-.sidebar-resize-handle{position:absolute;top:0;right:-3px;width:6px;height:100%;cursor:col-resize;z-index:5;background:transparent;transition:background var(--t)}
+.sidebar-resize-handle{position:absolute;top:56px;right:-3px;width:6px;height:calc(100% - 56px);cursor:col-resize;z-index:5;background:transparent;transition:background var(--t)}
 .sidebar-resize-handle:hover,.sidebar.resizing .sidebar-resize-handle{background:var(--accent-soft)}
 .sidebar.collapsed .sidebar-resize-handle{display:none}
 .sidebar.resizing{transition:none;user-select:none}
-.sidebar.collapsed{width:56px;min-width:56px}
-.sidebar.collapsed .s-list,
-.sidebar.collapsed .account-meta,
-.sidebar.collapsed .side-section,
-.sidebar.collapsed .side-search{display:none}
-.sidebar.collapsed .side-head{padding:14px 0 8px;flex-direction:column;align-items:center;gap:10px}
-.sidebar.collapsed .brand span{display:none}
-.sidebar.collapsed .brand{justify-content:center}
-.sidebar.collapsed .side-nav{padding:2px 10px}
-.sidebar.collapsed .side-nav-item{justify-content:center;padding:8px;width:36px;height:36px}
-.sidebar.collapsed .side-nav-item .nav-label,
-.sidebar.collapsed .side-nav-item .nav-badge{display:none}
-.sidebar.collapsed .side-new{width:36px;height:36px;padding:0;margin:4px auto 6px;justify-content:center;border-color:transparent;background:transparent;box-shadow:none}
-.sidebar.collapsed .side-new .nav-label{display:none}
-.sidebar.collapsed .account-entry{justify-content:center;padding:10px 0}
+/* The expanded content keeps its width while the column slides shut, so
+   nothing reflows mid-animation; the column clips it. */
+.sidebar.collapsed{width:0;min-width:0;overflow:hidden;border-right:none}
+.sidebar.collapsed > :not(.sidebar-resize-handle){min-width:var(--sidebar-w);box-sizing:border-box}
+.sidebar.collapsed > *{opacity:0;visibility:hidden;transition:opacity 100ms ease,visibility 0s 100ms}
+/* Electron computes drag regions from element boxes and ignores the column's
+   overflow clip: the hidden 280px head would stay a drag strip over the seat
+   and the chat title, swallowing their clicks. */
+html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-drag}
 .side-head{padding:14px 12px 8px 16px;display:flex;align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:17px;letter-spacing:.01em}
 .brand-logo{width:28px;height:28px;flex-shrink:0;object-fit:contain}
@@ -166,7 +200,6 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 .s-item .mt.busy{display:flex;align-items:center;color:var(--fg3)}
 .s-item .mt.busy svg{width:12px;height:12px;display:block}
 .s-item .mt.unread{width:8px;height:8px;border-radius:50%;background:#22c55e}
-.s-item:hover .mt{visibility:hidden}
 .s-actions{display:flex;align-items:center;gap:2px;opacity:0;position:absolute;right:8px;top:50%;transform:translateY(-50%) translateX(3px);transition:opacity var(--t),transform var(--t)}
 .s-item:hover .s-actions{opacity:1;transform:translateY(-50%)}
 .s-item .db{width:22px;height:22px;border:none;background:transparent;color:var(--fg3);border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all var(--t)}
@@ -194,9 +227,11 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 .s-item{min-height:34px;outline:none}
 .s-item:focus-visible{box-shadow:inset 0 0 0 2px var(--fg3)}
 .s-item:focus-within .s-actions{opacity:1;transform:translateY(-50%)}
-.s-item:focus-within .mt{visibility:hidden}
 .s-source{flex-shrink:0;color:var(--fg3);font:9px/1 var(--mono);letter-spacing:.04em}
-.s-item:hover .s-source,.s-item:focus-within .s-source{visibility:hidden}
+/* While the actions show, the title ellipsizes before them rather than
+   running underneath (they have no fill, so the text showed through). */
+.s-item:is(:hover,:focus-within):not(:has(.s-rename-input)){padding-right:84px}
+.s-item:is(:hover,:focus-within) :is(.mt,.s-source){display:none}
 .s-more{display:block;width:calc(100% - 28px);margin:2px 0 6px 28px;text-align:left;color:var(--fg3)}
 .account-entry{width:100%;border:none;border-top:var(--hair) solid var(--border);background:transparent;color:var(--fg);display:flex;align-items:center;gap:9px;padding:10px 12px;margin-top:auto;cursor:pointer;text-align:left;transition:background var(--t)}
 .account-entry:hover{background:var(--bg3)}
@@ -219,12 +254,6 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 .tb-l{display:flex;align-items:center;gap:8px;min-width:0;flex-shrink:0}
 .ib{width:28px;height:28px;border:none;background:transparent;color:var(--fg2);border-radius:var(--radius-sm);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:background var(--t),color var(--t);flex-shrink:0}
 .ib:hover{background:var(--hover);color:var(--fg)}
-/* On desktop, the collapsed sidebar stays as a 48px icon rail with its own
-   toggle button, so the topbar's expand button would be a redundant second
-   icon. It's only needed on narrow/mobile widths where the collapsed sidebar
-   fully disappears (width:0, see the responsive rule below) and takes its
-   in-rail toggle button with it. */
-.sidebar-expand-btn{display:none}
 
 /* current session info — chat icon + title + "..." menu (rename/fork/archive) */
 .tb-chat-info{display:flex;align-items:center;gap:6px;min-width:0}
@@ -857,8 +886,7 @@ a.side-nav-item{text-decoration:none;color:inherit}
 /* ===== RESPONSIVE ===== */
 @media(max-width:768px){
   .sidebar{position:fixed;z-index:100;height:100vh;box-shadow:2px 0 8px rgba(0,0,0,.1)}
-  .sidebar.collapsed{width:0;min-width:0;overflow:hidden;border:none}
-  .sidebar-expand-btn.show{display:flex}
+  .sidebar.collapsed{box-shadow:none}
   .model-dd{min-width:240px;max-height:min(360px,50vh)}
   .tb-info{font-size:9px;gap:6px}
 }
@@ -1540,7 +1568,8 @@ button.compact-head:hover{background:var(--bg3)}
 .state-dot{position:relative;flex-shrink:0;width:12px;height:12px;margin-top:4px;display:flex;align-items:center;justify-content:center}
 .state-dot::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--fg3);opacity:.5}
 .state-dot.completed::before{background:#16a34a;opacity:1}
-.state-dot.in_progress::before{width:10px;height:10px;box-sizing:border-box;background:none;border:1.5px solid rgba(37,99,235,.25);border-top-color:#2563eb;opacity:1;animation:icon-spin 1.2s linear infinite}
+.state-dot.in_progress::before{width:10px;height:10px;box-sizing:border-box;background:none;border:1.5px solid #2563eb;opacity:1}
+.todo-list.live .state-dot.in_progress::before{border-color:rgba(37,99,235,.25);border-top-color:#2563eb;animation:icon-spin 1.2s linear infinite}
 .todo-dock{max-width:var(--chat-content-w);margin:0 auto 6px;border:var(--hair) solid var(--border);border-radius:12px;background:var(--bg);box-shadow:var(--elev-pop)}
 .todo-dock-head{display:flex;align-items:center;gap:8px;width:100%;padding:7px 12px;border:none;background:transparent;color:var(--fg2);font:inherit;font-size:13px;text-align:left;cursor:pointer}
 .todo-dock-icon{display:flex;color:var(--fg3)}
@@ -1552,9 +1581,6 @@ button.compact-head:hover{background:var(--bg3)}
 .todo-dock.open .todo-dock-chev{transform:none}
 .todo-dock-chev svg{width:12px;height:12px}
 .todo-dock-body{padding:2px 12px 10px 34px;max-height:200px;overflow:auto}
-/* Trace: a call opened from the chat. */
-.entry.focus{outline:2px solid rgba(37,99,235,.45);outline-offset:-2px;border-radius:6px;animation:entry-focus 2.4s ease-out}
-@keyframes entry-focus{from{background:rgba(37,99,235,.12)}to{background:transparent}}
 .entry-task{padding:8px 10px 10px}
 .entry-tool-tag{flex-shrink:0;margin-right:6px;padding:0 6px;border-radius:4px;background:var(--bg3);font-family:var(--mono);font-size:10.5px;color:var(--fg2)}
 [data-theme="dark"] .task-status.ok{color:#4ade80}
@@ -1562,3 +1588,20 @@ button.compact-head:hover{background:var(--bg3)}
 [data-theme="dark"] .task-status.err,[data-theme="dark"] .task-error{color:#f87171}
 [data-theme="dark"] .task-status.run{color:#93c5fd}
 [data-theme="dark"] .wr-tool.error .wr-head,[data-theme="dark"] .wg-err,[data-theme="dark"] .step-pre.err{color:#f87171}
+
+/* Automatic reports (background command, delegated subagent, peer message):
+   a system notice on the assistant's side, never a user bubble. */
+.m-auto{margin:2px 0 6px}
+.auto-notice{max-width:var(--chat-content-w);width:100%;border-left:2px solid var(--border);padding-left:10px}
+.auto-notice-head{display:flex;align-items:center;gap:6px;width:100%;min-width:0;border:none;background:none;padding:2px 0;color:var(--fg3);font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.auto-notice-head:disabled{cursor:default}
+.auto-notice-head:not(:disabled):hover{color:var(--fg2)}
+.auto-notice-icon{display:flex}
+.auto-notice-icon svg{width:12px;height:12px}
+.auto-notice-label{flex-shrink:0;font-weight:600}
+.auto-notice-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11.5px}
+.auto-notice-ts{flex-shrink:0;font-size:11px}
+.auto-notice-chev{display:flex;transition:transform .12s}
+.auto-notice-chev svg{width:11px;height:11px}
+.auto-notice.open .auto-notice-chev{transform:rotate(180deg)}
+.auto-notice-body{margin:4px 0 2px;padding:8px 10px;max-height:320px;overflow:auto;border-radius:8px;background:var(--bg2);font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--fg2);white-space:pre-wrap;word-break:break-word}

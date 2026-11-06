@@ -12,12 +12,13 @@ export function previewText(text: string, n = 50): string {
   return text.trim().replace(/\s+/g, " ").slice(0, n);
 }
 
-/** One tick per real user query (steer chips are mid-run interrupts, not turns). */
+/** One tick per real user query (steer chips are mid-run interrupts, and
+ *  automated reports are not something the user asked). */
 export function buildChatNavTicks(msgs: ChatMsg[]): ChatNavTick[] {
   const ticks: ChatNavTick[] = [];
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i];
-    if (m.role !== "user" || m.steer) continue;
+    if (m.role !== "user" || m.steer || m.automated) continue;
     ticks.push({
       idx: i,
       query: previewText(m.content || ""),

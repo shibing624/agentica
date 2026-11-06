@@ -86,6 +86,19 @@ def test_trace_analysis_and_events(client_and_svc):
     assert text["detail"] == "hi"
 
 
+def test_trace_lite_analysis_and_call_body(client_and_svc):
+    client, _ = client_and_svc
+    lite = client.get("/api/sessions/sess1/trace/analysis?lite=true").json()
+    model = next(c for c in lite["rounds"][0]["calls"] if c["kind"] == "model")
+    assert "body" not in model and model["tokens"]["prompt"] == 10
+    body = client.get(f"/api/sessions/sess1/trace/calls/{model['index']}").json()
+    assert body["text"] == "hi"
+    assert client.get("/api/sessions/sess1/trace/calls/9999").status_code == 404
+    found = client.get("/api/sessions/sess1/trace/search", params={"q": "HI"}).json()
+    assert found["indices"] == [model["index"]]
+    assert client.get("/api/sessions/sess1/trace/search", params={"q": "nope"}).json()["indices"] == []
+
+
 def test_trace_header_uses_session_work_dir_not_stamped_process_cwd(tmp_path, monkeypatch):
     """A session in /Temp with no git must not show git:main …/Codes/agentica."""
     from agentica_gateway.main import app

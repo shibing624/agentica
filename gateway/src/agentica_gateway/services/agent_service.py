@@ -68,7 +68,7 @@ from agentica.agent.approvals import (
 
 from .response_formatter import extract_metrics, format_tool_call_args, format_tool_result
 from .session_usage import turn_usage_payload, usage_payload
-from . import live_turn
+from . import chat_images, live_turn
 
 if TYPE_CHECKING:
     from ..channels.base import InboundMedia
@@ -1432,7 +1432,7 @@ class AgentService:
             ):
                 continue
             preview = self._session_preview(entry)
-            first_user = preview.get("first_user", "")
+            first_user = chat_images.strip_markers(preview.get("first_user", "") or "")
             first_ts = entry.get("first_timestamp")
             if not first_ts and entry.get("mtime"):
                 first_ts = iso_timestamp(entry["mtime"])
@@ -1591,7 +1591,7 @@ class AgentService:
         branch = log.fork(new_id, at_uuid=at_uuid)
         branch.set_source(RunSource.gateway.value)
         meta = SessionLog._read_meta(log.meta_path)
-        title = SessionLog._meta_name(meta) or (log.first_user_message() or "Chat")[:40]
+        title = SessionLog._meta_name(meta) or (chat_images.strip_markers(log.first_user_message() or "") or "Chat")[:40]
         SessionLog.rename_session(new_id, f"{title} (fork)", base_dir=str(log.base_dir))
         if log._cwd:
             self._session_work_dirs[self._sk(new_id, owner)] = log._cwd

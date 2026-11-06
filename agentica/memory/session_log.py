@@ -2124,15 +2124,16 @@ class SessionLog:
     # Utilities
     # ------------------------------------------------------------------
 
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self, *, lite: bool = False) -> Dict[str, Any]:
         """Read-time Trace analysis over this JSONL (same payload as Web ``/traces``).
 
         Does not write. Empty or missing files still return a valid analysis
-        dict with ``hasTimeline=False``.
+        dict with ``hasTimeline=False``. ``lite`` leaves the bodies out (see
+        :func:`agentica.memory.trace.analyze_entries`).
         """
         from agentica.memory.trace import analyze_entries
 
-        analysis = analyze_entries(self.iter_raw_entries())
+        analysis = analyze_entries(self.iter_raw_entries(), lite=lite)
         analysis["session_id"] = self.session_id
         analysis["meta"]["cwd"] = self._cwd
         analysis["meta"]["gitBranch"] = self._git_branch

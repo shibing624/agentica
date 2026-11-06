@@ -1,27 +1,13 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
-import { getStrings, useStrings, type Strings } from "../i18n";
+import { useStrings, type Strings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps } from "../lib/format";
-import { IconCopy, IconDatabase } from "../icons";
+import { IconCopy, IconSearch } from "../icons";
 import { showToast } from "../store";
 import { switchTo } from "../sessions";
 import { TaskCard } from "../components/TaskCard";
 import type { TaskResult } from "../lib/workActivity";
-
-type Entry = {
-  index: number;
-  ts: string;
-  kind: string;
-  summary: string;
-  detail: string;
-  toolName?: string;
-  toolCallId?: string;
-  isError?: boolean;
-  durationMs?: number;
-  /** `task` rows: the call's brief, or the subagent's parsed result. */
-  task?: Partial<TaskResult> & { description?: string; subagentType?: string; timeout?: number; maxTurns?: number };
-};
 
 type Tokens = {
   input: number;
@@ -32,49 +18,68 @@ type Tokens = {
   cacheHitPercent: number | null;
 };
 
+/** One row of the call list (see `_round_calls` in agentica/memory/trace.py).
+ *  The body is not in the page payload; it is fetched per call. */
+type Call = {
+  kind: string;
+  index: number;
+  ts: string;
+  summary: string;
+  startTs?: string;
+  endTs?: string;
+  durationMs?: number | null;
+  waitMs?: number;
+  status?: string;
+  tokens?: Tokens | null;
+  toolCalls?: number;
+  toolName?: string;
+  toolCallId?: string;
+  isError?: boolean;
+  decision?: string;
+  resultSummary?: string;
+};
+
+type TaskFields = Partial<TaskResult> & { description?: string; subagentType?: string };
+
+type Body = {
+  args?: string;
+  result?: string;
+  approval?: string;
+  thinking?: string;
+  text?: string;
+  taskCall?: TaskFields;
+  taskResult?: TaskFields;
+};
+
 type Round = {
   taskIndex: number;
   title: string;
+  /** Opened by an automatic report (background job, subagent, peer), not by the user. */
+  automated?: boolean;
   compaction: boolean;
   startTs: string;
-  endTs: string;
   durationMs: number;
   llmMs: number;
   requests: number;
   waitMs: number;
   toolCalls: number;
-  toolResults: number;
   toolErrors: number;
   tokens: Tokens;
   costUsd: number | null;
   tps: number;
-  phases: Record<string, number>;
-  entries: Entry[];
+  calls: Call[];
 };
 
 type Analysis = {
   session_id: string;
   hasTimeline: boolean;
-  elapsedMs: number;
-  compactionCount: number;
   reconnectCount: number;
-  meta: {
-    model: string | null;
-    provider: string | null;
-    contextWindow: number | null;
-    cwd: string | null;
-    gitBranch: string | null;
-    version: string | null;
-    tools: string[];
-    systemPromptTokens: number;
-  };
+  meta: { model: string | null; provider: string | null; cwd: string | null; gitBranch: string | null };
   totals: {
     rounds: number;
     requests: number;
     toolCalls: number;
-    toolOk: number;
     toolErrors: number;
-    compactions: number;
     tokens: Tokens;
     elapsedMs: number;
     llmMs: number;
@@ -83,41 +88,40 @@ type Analysis = {
     tps: number;
   };
   rounds: Round[];
-  modelSegments: Array<{ kind: string; startTs: string; endTs: string; taskIndex: number; key: string; name?: string }>;
-  toolSpans: Array<{ toolCallId: string; name: string; callTs: string; approvalTs?: string; outputTs?: string; taskIndex: number }>;
   file: { path: string; sizeBytes: number; modifiedAt: string; name: string };
 };
 
-const PHASES: Array<{ key: string; label: (S: Strings) => string; cls: string }> = [
-  { key: "thinking", label: (S) => S.traces.phaseThinking, cls: "ph-thinking" },
-  { key: "text", label: (S) => S.traces.phaseText, cls: "ph-text" },
-  { key: "toolArgs", label: (S) => S.traces.phaseArgs, cls: "ph-args" },
-  { key: "toolWait", label: (S) => S.traces.phaseWait, cls: "ph-wait" },
-  { key: "toolExec", label: (S) => S.traces.phaseExec, cls: "ph-exec" },
-];
+type Tab = "duration" | "rounds" | "calls";
 
-const KIND_LABEL: Record<string, string> = {
-  session_meta: "session_meta",
-  tool_list_ready: "tool_list_ready",
-  system_prompt: "system_prompt",
-  user: "user",
-  steering: "steering",
-  request_begin: "request_begin",
-  request_end: "request_end",
-  thinking: "thinking",
-  text: "text",
-  tool_call: "tool_call",
-  tool_result: "tool_call_output",
-  approval_decision: "approval_decision",
-  token_usage: "token_usage",
-  assistant: "assistant",
-  compact_boundary: "compact_boundary",
-  goal: "goal",
-};
+function money(v: number | null | undefined) {
+  return v === null || v === undefined ? "—" : fmtCost(v);
+}
 
-function money(v: number | null) {
-  if (v === null || v === undefined) return "—";
-  return fmtCost(v);
+function roundLabel(r: Round, ordinal: number, S: Strings) {
+  if (r.compaction) return S.traces.compaction;
+  return r.automated ? `${S.traces.round(ordinal)} · ${S.traces.kind.automated}` : S.traces.round(ordinal);
+}
+
+/** Tools whose run is the user answering, not work being done. */
+const HUMAN_TOOLS = new Set(["ask_user_question"]);
+
+/** Wall clock of rounds split three ways: input (waiting on the user —
+ *  approvals and questions), model (its requests, approval waits excluded),
+ *  and tools (the rest: tools running between requests). */
+function split(rounds: Round[]) {
+  let input = 0;
+  let model = 0;
+  let wall = 0;
+  for (const r of rounds) {
+    wall += r.durationMs;
+    model += r.llmMs;
+    input += r.waitMs;
+    for (const c of r.calls) {
+      if (c.kind === "tool" && HUMAN_TOOLS.has(c.toolName || "")) input += c.durationMs || 0;
+    }
+  }
+  const tool = Math.max(0, wall - model - input);
+  return { input, model, tool, total: input + model + tool };
 }
 
 export function TracesPage() {
@@ -125,12 +129,10 @@ export function TracesPage() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
-  // `call`: a tool call opened from a chat row; its round opens on it.
+  // `call`: a tool call opened from a chat row; the Calls tab opens on it.
   const focusCall = params.get("call") || "";
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  // The failure is kept as its status code, not as a sentence: a message
-  // rendered once would stay in the language it was written in when the user
-  // switches languages.
+  // Kept as the status code, not a sentence, so a language switch re-renders it.
   const [errStatus, setErrStatus] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -154,14 +156,14 @@ export function TracesPage() {
 
   return (
     <div className="trace-main">
-        <button className="trace-back" onClick={backToChat}>{S.traces.backToChat}</button>
-        {loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
-        {!loading && !!errStatus && (
-          <div className="trace-empty">
-            <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
-          </div>
-        )}
-        {analysis && <TraceDetail a={analysis} focusCall={focusCall} />}
+      <button className="trace-back" onClick={backToChat}>{S.traces.backToChat}</button>
+      {loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
+      {!loading && !!errStatus && (
+        <div className="trace-empty">
+          <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
+        </div>
+      )}
+      {analysis && <TraceDetail key={sessionId} a={analysis} focusCall={focusCall} />}
     </div>
   );
 }
@@ -169,7 +171,21 @@ export function TracesPage() {
 function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
   const S = useStrings();
   const t = a.totals;
-  const tokens = t.tokens;
+  const focusInit = useMemo(() => {
+    if (!focusCall) return null;
+    for (const r of a.rounds) for (const c of r.calls) if (c.toolCallId === focusCall) return c.index;
+    return null;
+  }, [a, focusCall]);
+  const [tab, setTab] = useState<Tab>(focusInit != null ? "calls" : "duration");
+  // -1 = all rounds. Shared by the Duration charts and the Calls list.
+  const [scope, setScope] = useState(-1);
+  const [focus, setFocus] = useState<number | null>(focusInit);
+  const [query, setQuery] = useState("");
+  const hits = useTraceSearch(a.session_id, query);
+
+  const openCall = (index: number) => { setScope(-1); setFocus(index); setTab("calls"); };
+  const openRound = (i: number) => { setScope(i); setFocus(null); setTab("calls"); };
+
   return (
     <>
       <div className="trace-head">
@@ -180,19 +196,11 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
             <span>{fmtFileSize(a.file.sizeBytes)}</span>
             {a.meta.model && <span>{a.meta.model}</span>}
             {a.meta.gitBranch && <span>git:{a.meta.gitBranch}</span>}
-            {a.meta.cwd && (
-              <span className="trace-cwd">
-                <code>{a.meta.cwd}</code>
-                <button type="button" className="trace-cwd-copy" title={S.common.copy}
-                        onClick={() => { void navigator.clipboard.writeText(a.meta.cwd || "").then(() => showToast(S.common.copied)); }}>
-                  <IconCopy />
-                </button>
-              </span>
-            )}
+            {a.meta.cwd && <span className="trace-cwd"><code>{a.meta.cwd}</code></span>}
           </div>
         </div>
         <div className="trace-head-r">
-          <span className="trace-badge">{a.session_id}</span>
+          <span className="trace-badge" title={a.session_id}>{a.session_id}</span>
           <button className="trace-cwd-copy" title={S.traces.copyPath} aria-label={S.traces.copyPath}
                   onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast(S.traces.copiedPath); }}>
             <IconCopy />
@@ -200,321 +208,650 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
         </div>
       </div>
 
-      <section className="trace-card">
-        <div className="trace-card-title">{S.traces.totals}</div>
-        <div className="stat-grid">
-          <Stat label={S.traces.statRounds} value={String(t.rounds)} />
-          <Stat label={S.traces.statInput} value={fmtN(tokens.prompt)} hint={<CacheMark tokens={tokens} S={S} />} />
-          <Stat label={S.traces.statCost} value={money(t.costUsd)} hint={a.meta.model ? undefined : S.traces.noModelInfo} />
-          <Stat label={S.traces.statToolCalls} value={String(t.toolCalls)} hint={t.toolErrors ? S.traces.failed(t.toolErrors) : S.traces.succeeded(t.toolOk)} />
-          <Stat label={S.traces.statWait} value={fmtDurationMs(t.waitMs)} />
-          <Stat label={S.traces.statElapsed} value={fmtDurationMs(t.elapsedMs)} hint={S.traces.modelTime(fmtDurationMs(t.llmMs))} />
-          <Stat label={S.traces.statRequests} value={String(t.requests)} hint={a.reconnectCount ? S.traces.retried(a.reconnectCount) : undefined} />
-          <Stat label={S.traces.statOutput} value={fmtN(tokens.output)} />
-          <Stat label={S.traces.statTps} value={fmtTps(t.tps)} />
-        </div>
-        {!a.hasTimeline && <p className="trace-note">{S.traces.noTimeline}</p>}
-        {t.compactions > 0 && (
-          <p className="trace-note">{S.traces.compactions(t.compactions)}</p>
-        )}
-      </section>
+      <div className="tr-stats">
+        <Stat label={S.traces.statElapsed} value={fmtDurationMs(t.elapsedMs)} />
+        <Stat label={S.traces.statRounds} value={String(t.rounds)} />
+        <Stat label={S.traces.statRequests} value={String(t.requests)}
+              hint={a.reconnectCount ? S.traces.retried(a.reconnectCount) : undefined} />
+        <Stat label={S.traces.statToolCalls} value={String(t.toolCalls)}
+              hint={t.toolErrors ? S.traces.failed(t.toolErrors) : undefined} />
+        <Stat label={S.traces.statInput} value={fmtN(t.tokens.prompt)}
+              hint={t.tokens.cacheHitPercent != null ? `cache ${t.tokens.cacheHitPercent.toFixed(1)}%` : undefined} />
+        <Stat label={S.traces.statOutput} value={fmtN(t.tokens.output)} hint={fmtTps(t.tps)} />
+        <Stat label={S.traces.statCost} value={money(t.costUsd)} />
+      </div>
 
-      {a.rounds.map((r, i) => (
-        <RoundCard key={r.taskIndex} round={r} ordinal={i + 1} analysis={a} focusCall={focusCall} />
-      ))}
+      <div className="tr-tabs" role="tablist">
+        {(["duration", "rounds", "calls"] as Tab[]).map((k) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k}
+                  className={"tr-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
+            {k === "duration" ? S.traces.tabDuration : k === "rounds" ? S.traces.tabRounds : S.traces.tabCalls}
+          </button>
+        ))}
+        <label className="tr-search">
+          <IconSearch />
+          <input type="search" value={query} placeholder={S.traces.search}
+                 onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) { setTab("calls"); setScope(-1); } }}
+                 onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }} />
+          {query.trim() && (
+            <span className="tr-search-n">
+              {hits.loading ? S.traces.searching : hits.indices.size ? S.traces.searchHits(hits.indices.size) : S.traces.searchNone}
+            </span>
+          )}
+        </label>
+      </div>
+
+      {!a.hasTimeline && tab === "duration" && <p className="trace-note">{S.traces.noTimeline}</p>}
+      {tab === "duration" && <DurationView a={a} scope={scope} setScope={setScope} onOpenCall={openCall} />}
+      {tab === "rounds" && <RoundsView a={a} onOpenRound={openRound} />}
+      {tab === "calls" && (
+        <CallsView a={a} roundFilter={scope} setRoundFilter={setScope} focus={focus}
+                   hits={query.trim() && !hits.loading ? hits.indices : null} />
+      )}
     </>
   );
 }
 
-function CacheMark({ tokens, S }: { tokens: Tokens; S: Strings }) {
-  if (tokens.cacheHitPercent === null || tokens.cacheHitPercent === undefined) return null;
-  return (
-    <span className="trace-cache" title={S.traces.hCache}>
-      <IconDatabase />
-      {fmtN(tokens.cacheRead)} / {tokens.cacheHitPercent.toFixed(1)}%
-    </span>
+/** Server-side search over the whole log (bodies included), debounced. */
+function useTraceSearch(sessionId: string, query: string) {
+  const [state, setState] = useState<{ q: string; indices: Set<number>; loading: boolean }>(
+    { q: "", indices: new Set(), loading: false },
   );
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { setState({ q: "", indices: new Set(), loading: false }); return; }
+    setState((s) => ({ ...s, loading: true }));
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => {
+      void api.searchTraceCalls(sessionId, q, ctrl.signal).then(({ ok, data }) => {
+        if (ctrl.signal.aborted) return;
+        setState({ q, indices: new Set(ok && data ? data.indices : []), loading: false });
+      });
+    }, 250);
+    return () => { window.clearTimeout(timer); ctrl.abort(); };
+  }, [sessionId, query]);
+  return state;
 }
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: ReactNode }) {
   return (
-    <div className="stat">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      <div className="stat-hint">{hint || ""}</div>
+    <div className="tr-stat">
+      <div className="tr-stat-label">{label}</div>
+      <div className="tr-stat-value">{value}</div>
+      {hint ? <div className="tr-stat-hint">{hint}</div> : null}
     </div>
   );
 }
 
-function RoundCard({ round, ordinal, analysis, focusCall }: {
-  round: Round; ordinal: number; analysis: Analysis; focusCall: string;
-}) {
+function SplitBar({ parts, scale = 1 }: { parts: ReturnType<typeof split>; scale?: number }) {
   const S = useStrings();
-  const hasFocus = !!focusCall && round.entries.some((e) => e.toolCallId === focusCall);
-  const [open, setOpen] = useState(focusCall ? hasFocus : ordinal === 1);
-  const label = round.compaction ? S.traces.compaction : S.traces.round(ordinal);
+  const pct = (v: number) => (parts.total ? (v / parts.total) * 100 * scale : 0);
   return (
-    <section className={"trace-card round" + (round.compaction ? " compaction" : "")}>
-      <button className="round-head" onClick={() => setOpen(!open)}>
-        <span className={"round-caret" + (open ? " open" : "")}>▸</span>
-        <span className="round-title">{label}</span>
-        <span className="round-subject" title={round.title}>{round.title}</span>
-        <span className="round-stats">
-          <span title={S.traces.hRequests}>⇅ {round.requests}</span>
-          <span title={S.traces.hToolCalls}>🔧 {round.toolCalls}{round.toolErrors ? ` (${S.traces.failed(round.toolErrors)})` : ""}</span>
-          <span title={S.traces.hInput}>↓ {fmtN(round.tokens.prompt)}</span>
-          {round.tokens.cacheHitPercent != null && (
-            <span className="trace-cache" title={S.traces.hCache}>
-              <IconDatabase />
-              {fmtN(round.tokens.cacheRead)} / {round.tokens.cacheHitPercent.toFixed(1)}%
-            </span>
-          )}
-          <span title={S.traces.hOutput}>↑ {fmtN(round.tokens.output)}</span>
-          <span title={S.traces.hCost}>{money(round.costUsd)}</span>
-          <span title={S.traces.hElapsed}>{fmtDurationMs(round.durationMs)}</span>
-          <span title={S.traces.hTps}>{fmtTps(round.tps)}</span>
-        </span>
-      </button>
-      {open && (
-        <div className="round-body">
-          <Timeline round={round} analysis={analysis} />
-          <EntryList entries={round.entries} focusCall={hasFocus ? focusCall : ""} />
-        </div>
-      )}
-    </section>
+    <div className="tr-bar">
+      {parts.input > 0 && <span className="tr-seg ph-input" style={{ width: pct(parts.input) + "%" }}
+                                title={`${S.traces.phaseInput} ${fmtDurationMs(parts.input)}`} />}
+      {parts.model > 0 && <span className="tr-seg ph-model" style={{ width: pct(parts.model) + "%" }}
+                                title={`${S.traces.phaseModel} ${fmtDurationMs(parts.model)}`} />}
+      {parts.tool > 0 && <span className="tr-seg ph-tool" style={{ width: pct(parts.tool) + "%" }}
+                               title={`${S.traces.phaseTool} ${fmtDurationMs(parts.tool)}`} />}
+    </div>
   );
 }
 
-const TICKS = [0, 0.25, 0.5, 0.75, 1];
+const at = (ts?: string) => (ts ? Date.parse(ts) || 0 : 0);
 
-type ToolSpan = Analysis["toolSpans"][number];
+type Span = { lane: 0 | 1 | 2; start: number; end: number; call: Call };
 
-/**
- * One lane per tool name, so a round reads as "what did `execute` do" rather
- * than as one row per call — twenty parallel `read_file`s used to push the
- * model lane off the top of the card.
- *
- * A name gets a second lane when two of its calls overlap in time, which is
- * exactly what a parallel batch does: drawn in one lane they would cover each
- * other and the picture would claim the batch was serial.
- */
-function toolLanes(spans: ToolSpan[]): Array<{ key: string; name: string; spans: ToolSpan[] }> {
-  const at = (ts?: string) => (ts ? Date.parse(ts) || 0 : 0);
-  const byName = new Map<string, ToolSpan[]>();
-  for (const sp of spans) {
-    const name = sp.name || "tool";
-    (byName.get(name) || byName.set(name, []).get(name)!).push(sp);
-  }
-  const out: Array<{ key: string; name: string; spans: ToolSpan[] }> = [];
-  for (const [name, group] of byName) {
-    const rows: Array<{ spans: ToolSpan[]; end: number }> = [];
-    for (const sp of group) {
-      const start = at(sp.callTs);
-      const end = at(sp.outputTs) || at(sp.approvalTs) || start;
-      const row = rows.find((r) => r.end <= start);
-      if (row) {
-        row.spans.push(sp);
-        row.end = end;
-      } else {
-        rows.push({ spans: [sp], end });
+/** Every timed stretch of the scope, on three lanes: input (waiting on the
+ *  user's approval), model (one request), tool (running after approval). */
+function spansOf(rounds: Round[]): Span[] {
+  const out: Span[] = [];
+  for (const r of rounds) {
+    for (const c of r.calls) {
+      const s0 = at(c.startTs);
+      const e0 = at(c.endTs);
+      if (!s0 || !e0 || e0 < s0) continue;
+      if (c.kind === "model") out.push({ lane: 1, start: s0, end: e0, call: c });
+      else if (c.kind === "tool") {
+        if (HUMAN_TOOLS.has(c.toolName || "")) {
+          out.push({ lane: 0, start: s0, end: e0, call: c });
+          continue;
+        }
+        const wait = c.waitMs || 0;
+        if (wait > 0) out.push({ lane: 0, start: s0, end: Math.min(e0, s0 + wait), call: c });
+        out.push({ lane: 2, start: Math.min(e0, s0 + wait), end: e0, call: c });
       }
     }
-    rows.forEach((row, i) => out.push({ key: `${name}#${i}`, name, spans: row.spans }));
   }
   return out;
 }
 
-/**
- * The round on its own clock: a serial model lane, then one lane per tool name,
- * all sharing the round's time axis.
- *
- * This replaced a stacked bar of per-phase totals. The totals answered "where
- * did the time go" and nothing else — two tools running side by side and the
- * same two run back to back drew the identical picture, which is the one
- * question worth asking of a trace. They are still on the round header as
- * numbers, where a number is all they were.
- */
-function Timeline({ round, analysis }: { round: Round; analysis: Analysis }) {
-  const S = useStrings();
-  const segs = analysis.modelSegments.filter((s) => s.taskIndex === round.taskIndex);
-  const spans = useMemo(
-    () => analysis.toolSpans
-      .filter((s) => s.taskIndex === round.taskIndex)
-      .sort((a, b) => (Date.parse(a.callTs) || 0) - (Date.parse(b.callTs) || 0)),
-    [analysis.toolSpans, round.taskIndex],
-  );
-  const lanes = useMemo(() => toolLanes(spans), [spans]);
-  if (!segs.length && !spans.length) return null;
-
-  // The axis spans everything drawn, not `startTs..endTs`: a tool whose output
-  // lands after the round's last model event would otherwise run off the end
-  // and be clamped to a flat edge at 100%.
-  const stamps: number[] = [];
-  const at = (ts?: string) => (ts ? Date.parse(ts) || 0 : 0);
-  for (const s of segs) stamps.push(at(s.startTs), at(s.endTs));
-  for (const sp of spans) stamps.push(at(sp.callTs), at(sp.approvalTs), at(sp.outputTs));
-  const marks = stamps.filter((v) => v > 0);
-  const t0 = Math.min(...marks, at(round.startTs) || Infinity);
-  const t1 = Math.max(...marks, at(round.endTs) || 0);
-  const span = Math.max(t1 - t0, 1);
-
-  const pos = (from: string, to?: string) => {
-    const a = at(from) || t0;
-    const b = at(to) || a;
-    const left = Math.max(0, Math.min(100, ((a - t0) / span) * 100));
-    // A floor, so a sub-millisecond call is still a visible tick rather than a
-    // lane that reads as "never ran".
-    const width = Math.max(((b - a) / span) * 100, 0.6);
-    return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` };
+/** Cut the stretches where nothing ran (the user away between turns, a
+ *  session resumed next day), so the axis is time spent, not time elapsed. */
+function compress(spans: Span[], rounds: Round[]) {
+  const sorted = [...spans].sort((x, y) => x.start - y.start || x.end - y.end);
+  const shift = new Map<Span, number>();
+  let removed = 0;
+  let covered: number | null = null;
+  const cuts: Array<{ at: number; removed: number }> = [];
+  for (const sp of sorted) {
+    if (covered !== null && sp.start > covered) {
+      removed += sp.start - covered;
+      cuts.push({ at: sp.start, removed });
+    }
+    shift.set(sp, removed);
+    covered = covered === null ? sp.end : Math.max(covered, sp.end);
+  }
+  const origin = sorted.length ? sorted[0].start : 0;
+  const proj = (time: number) => {
+    let off = 0;
+    for (const c of cuts) { if (c.at <= time) off = c.removed; else break; }
+    return time - off - origin;
   };
-  const phaseFor = (kind: string) =>
-    kind === "thinking" ? "ph-thinking" : kind === "text" ? "ph-text" : "ph-args";
+  const placed = sorted.map((sp) => ({ ...sp, start: sp.start - shift.get(sp)! - origin, end: sp.end - shift.get(sp)! - origin }));
+  const total = placed.reduce((m, sp) => Math.max(m, sp.end), 0);
+  const marks = rounds
+    .map((r) => r.calls.find((c) => c.kind === "model" && at(c.startTs)))
+    .filter((c): c is Call => !!c)
+    .map((c) => proj(at(c.startTs)))
+    .filter((v) => v >= 0 && v <= total);
+  return { spans: placed, total, marks };
+}
 
+const LANE_CLS = ["ph-input", "ph-model", "ph-tool"] as const;
+
+function Timeline({ rounds, onOpenCall }: { rounds: Round[]; onOpenCall: (index: number) => void }) {
+  const S = useStrings();
+  const { spans, total, marks } = useMemo(() => compress(spansOf(rounds), rounds), [rounds]);
+  if (!spans.length || total <= 0) return <p className="trace-note">{S.traces.noTiming}</p>;
+  const lanes = [S.traces.phaseInput, S.traces.phaseModel, S.traces.phaseTool];
+  const pos = (sp: { start: number; end: number }) => ({
+    left: (sp.start / total) * 100 + "%",
+    width: Math.max(((sp.end - sp.start) / total) * 100, 0.15) + "%",
+  });
+  const label = (sp: Span) => {
+    const c = sp.call;
+    const head = c.kind === "tool" ? c.toolName || "tool" : S.traces.kind.model;
+    const what = sp.lane === 0 ? S.traces.phaseInput : "";
+    return `${head}${what ? " · " + what : ""} · ${fmtDurationMs(sp.end - sp.start)}\n${c.kind === "tool" ? toolArgsSummary(c) : c.summary}`;
+  };
   return (
-    <div className="lane-block">
-      <div className="lane-title">{S.traces.timeline}<span className="lane-total">{fmtDurationMs(span)}</span></div>
-      <div className="lane-row">
-        <span className="lane-name">{S.traces.laneModel}</span>
-        <div className="lane">
-          {segs.map((s) => (
-            <span key={s.key} className={"lane-seg " + phaseFor(s.kind)} style={pos(s.startTs, s.endTs)}
-                  title={`${s.kind}${s.name ? " · " + s.name : ""} ${fmtDurationMs(at(s.endTs) - at(s.startTs))}`} />
-          ))}
-        </div>
-      </div>
-      {lanes.map((lane) => (
-        <div className="lane-row" key={lane.key}>
-          <span className="lane-name" title={lane.name}>
-            {lane.name}
-            {lane.spans.length > 1 && <span className="lane-count">×{lane.spans.length}</span>}
-          </span>
-          <div className="lane is-tool">
-            {lane.spans.map((sp) => (
-              <Fragment key={sp.toolCallId}>
-                {sp.approvalTs && (
-                  <span className="lane-seg ph-wait" style={pos(sp.callTs, sp.approvalTs)}
-                        title={S.traces.approvalWait(fmtDurationMs(at(sp.approvalTs) - at(sp.callTs)))} />
-                )}
-                {sp.outputTs ? (
-                  <span className="lane-seg ph-exec" style={pos(sp.approvalTs || sp.callTs, sp.outputTs)}
-                        title={S.traces.exec(fmtDurationMs(at(sp.outputTs) - at(sp.approvalTs || sp.callTs)))} />
-                ) : (
-                  <span className="lane-seg ph-exec pending" style={pos(sp.callTs)}
-                        title={S.traces.noResult} />
-                )}
-              </Fragment>
+    <div className="tr-tl">
+      {lanes.map((name, lane) => (
+        <div key={lane} className="tr-tl-row">
+          <span className="tr-tl-name">{name}</span>
+          <div className="tr-tl-lane">
+            {marks.map((m, i) => <i key={i} className="tr-tl-mark" style={{ left: (m / total) * 100 + "%" }} />)}
+            {spans.filter((sp) => sp.lane === lane).map((sp, i) => (
+              <span key={i} className={"tr-tl-seg " + LANE_CLS[lane] + (sp.call.isError ? " err" : "")}
+                    style={pos(sp)} title={label(sp)} onClick={() => onOpenCall(sp.call.index)} />
             ))}
           </div>
         </div>
       ))}
-      <div className="lane-axis">
-        <span className="lane-name" />
-        <div className="lane-ticks">
-          {TICKS.map((f) => (
-            <span key={f} className="lane-tick" style={{ left: `${f * 100}%` }}>{fmtDurationMs(Math.round(f * span))}</span>
+      <div className="tr-tl-row tr-tl-axis">
+        <span className="tr-tl-name" />
+        <div className="tr-tl-ticks">
+          {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+            <span key={f} style={{ left: f * 100 + "%" }}>{fmtDurationMs(Math.round(f * total))}</span>
           ))}
         </div>
       </div>
-      {/* Colours only, and the five phases the lanes actually draw. The
-          per-phase totals used to be printed here and are a trap next to a
-          wall-clock axis: they are sums across lanes, so a round with four
-          parallel tools reads "tool execution 9.4s" under an axis that ends
-          at 6.8s. Each bar carries its own duration on hover, and the round
-          header carries the totals. The list is not filtered to the phases
-          present either — a legend that changes shape per round is one the
-          reader has to re-read, and "no approval wait in this round" is
-          worth seeing. */}
-      <div className="phase-legend">
-        {PHASES.map((p) => (
-          <span key={p.key} className="phase-key">
-            <i className={"phase-dot " + p.cls} />{p.label(S)}
+      <p className="trace-note">{S.traces.timelineNote}</p>
+    </div>
+  );
+}
+
+function ToolTable({ rounds }: { rounds: Round[] }) {
+  const S = useStrings();
+  const rows = useMemo(() => {
+    const by = new Map<string, { name: string; n: number; total: number; max: number; err: number }>();
+    for (const r of rounds) for (const c of r.calls) {
+      if (c.kind !== "tool") continue;
+      const name = c.toolName || "tool";
+      const row = by.get(name) || { name, n: 0, total: 0, max: 0, err: 0 };
+      const ms = c.durationMs || 0;
+      row.n++; row.total += ms; row.max = Math.max(row.max, ms); if (c.isError) row.err++;
+      by.set(name, row);
+    }
+    return [...by.values()].sort((x, y) => y.total - x.total);
+  }, [rounds]);
+  if (!rows.length) return <p className="trace-note">{S.traces.noTiming}</p>;
+  const top = rows[0].total || 1;
+  return (
+    <table className="tr-table">
+      <thead><tr><th>{S.traces.phaseTool}</th><th>{S.traces.colCount}</th><th>{S.traces.colTotal}</th>
+        <th>{S.traces.colAvg}</th><th>{S.traces.colMax}</th></tr></thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.name}>
+            <td>
+              <span className="tr-table-name">{r.name}</span>
+              <span className="tr-table-bar"><i className="ph-tool" style={{ width: (r.total / top) * 100 + "%" }} /></span>
+            </td>
+            <td>{r.n}{r.err ? <span className="err"> ({r.err})</span> : null}</td>
+            <td>{fmtDurationMs(r.total)}</td>
+            <td>{fmtDurationMs(r.total / r.n)}</td>
+            <td>{fmtDurationMs(r.max)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function SlowestCalls({ rounds, onOpenCall }: { rounds: Round[]; onOpenCall: (index: number) => void }) {
+  const S = useStrings();
+  const calls = useMemo(() => rounds
+    .flatMap((r) => r.calls)
+    .filter((c) => (c.kind === "tool" || c.kind === "model") && (c.durationMs || 0) > 0)
+    .sort((x, y) => (y.durationMs || 0) - (x.durationMs || 0))
+    .slice(0, 10), [rounds]);
+  if (!calls.length) return <p className="trace-note">{S.traces.noTiming}</p>;
+  const top = calls[0].durationMs || 1;
+  return (
+    <div className="tr-slow">
+      {calls.map((c) => (
+        <button key={c.index} type="button" className="tr-slow-row" onClick={() => onOpenCall(c.index)}>
+          <span className={"tr-tag " + (c.kind === "tool" ? "k-tool" : "k-model") + (c.isError ? " err" : "")}>
+            {c.kind === "tool" ? c.toolName || "tool" : S.traces.kind.model}
           </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function EntryList({ entries, focusCall }: { entries: Entry[]; focusCall: string }) {
-  const S = useStrings();
-  const [openAll, setOpenAll] = useState(false);
-  // A task result shows the brief its call carried.
-  const briefs = useMemo(() => {
-    const m = new Map<string, Entry["task"]>();
-    for (const e of entries) if (e.kind === "tool_call" && e.task && e.toolCallId) m.set(e.toolCallId, e.task);
-    return m;
-  }, [entries]);
-  const firstFocus = focusCall ? entries.find((e) => e.toolCallId === focusCall) : undefined;
-  return (
-    <div className="entry-block">
-      <div className="entry-head">
-        <span>{S.traces.summary(entries.length)}</span>
-        <button className="entry-expand" onClick={() => setOpenAll(!openAll)}>
-          {openAll ? S.traces.collapseAll : S.traces.expandAll}
+          <span className="tr-slow-sum">{c.kind === "tool" ? toolArgsSummary(c) : c.summary}</span>
+          <span className="tr-slow-bar"><i className={c.kind === "tool" ? "ph-tool" : "ph-model"}
+                                           style={{ width: ((c.durationMs || 0) / top) * 100 + "%" }} /></span>
+          <span className="tr-slow-ms">{fmtDurationMs(c.durationMs || 0)}</span>
         </button>
+      ))}
+    </div>
+  );
+}
+
+function DurationView({ a, scope, setScope, onOpenCall }: {
+  a: Analysis; scope: number; setScope: (i: number) => void; onOpenCall: (index: number) => void;
+}) {
+  const S = useStrings();
+  const scoped = useMemo(() => (scope >= 0 ? [a.rounds[scope]] : a.rounds), [a, scope]);
+  // The round list is at the bottom; the charts it scopes are at the top.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [scope]);
+  const total = scope >= 0
+    ? split([a.rounds[scope]])
+    : split(a.rounds);
+  const longest = Math.max(1, ...a.rounds.map((r) => split([r]).total));
+  const legend: Array<[string, string, number, string?]> = [
+    ["ph-input", S.traces.phaseInput, total.input, S.traces.phaseInputTip],
+    ["ph-model", S.traces.phaseModel, total.model],
+    ["ph-tool", S.traces.phaseTool, total.tool],
+  ];
+  return (
+    <div className="tr-scroll" ref={scrollRef}>
+      <section className="tr-card">
+        <div className="tr-card-head">
+          <span className="tr-card-title">
+            {scope >= 0 ? roundLabel(a.rounds[scope], ordinalOf(a.rounds, scope), S) : S.traces.allRounds}
+          </span>
+          {scope >= 0 && <button type="button" className="tr-chip" onClick={() => setScope(-1)}>{S.traces.allRounds} ×</button>}
+        </div>
+        <SplitBar parts={total} />
+        <div className="tr-legend">
+          {legend.map(([cls, label, ms, tip]) => (
+            <span key={cls} className="tr-legend-item" title={tip}>
+              <i className={"tr-dot " + cls} />{label}
+              <b>{fmtDurationMs(ms)}</b>
+              <em>{total.total ? Math.round((ms / total.total) * 100) : 0}%</em>
+            </span>
+          ))}
+        </div>
+      </section>
+      <section className="tr-card">
+        <div className="tr-card-title">{S.traces.timeline}</div>
+        <Timeline rounds={scoped} onOpenCall={onOpenCall} />
+      </section>
+      <div className="tr-grid2">
+        <section className="tr-card">
+          <div className="tr-card-title">{S.traces.byTool}</div>
+          <ToolTable rounds={scoped} />
+        </section>
+        <section className="tr-card">
+          <div className="tr-card-title">{S.traces.slowest}</div>
+          <SlowestCalls rounds={scoped} onOpenCall={onOpenCall} />
+        </section>
       </div>
-      <div className="entry-list">
-        {entries.map((e) => (
-          <EntryRow key={`${e.index}-${e.kind}`} e={e} forceOpen={openAll}
-                    focus={!!focusCall && e.toolCallId === focusCall} scrollTo={e === firstFocus}
-                    callTask={e.toolCallId ? briefs.get(e.toolCallId) : undefined} />
+      <section className="tr-card tr-rounds-dur">
+        <div className="tr-card-title" title={S.traces.perRoundTip}>{S.traces.perRound}</div>
+        {a.rounds.map((r, i) => {
+          const parts = split([r]);
+          return (
+            <button key={r.taskIndex} type="button" className={"tr-dur-row" + (scope === i ? " on" : "")}
+                    onClick={() => setScope(scope === i ? -1 : i)}>
+              <span className="tr-dur-name">{roundLabel(r, ordinalOf(a.rounds, i), S)}</span>
+              <span className="tr-dur-title" title={r.title}>{r.title}</span>
+              <span className="tr-dur-track"><SplitBar parts={parts} scale={parts.total / longest} /></span>
+              <span className="tr-dur-ms">{fmtDurationMs(r.durationMs)}</span>
+            </button>
+          );
+        })}
+      </section>
+    </div>
+  );
+}
+
+/** Rounds are numbered by user turn; compaction cards do not take a number. */
+function ordinalOf(rounds: Round[], i: number) {
+  let n = 0;
+  for (let k = 0; k <= i; k++) if (!rounds[k].compaction) n++;
+  return n;
+}
+
+function RoundsView({ a, onOpenRound }: { a: Analysis; onOpenRound: (i: number) => void }) {
+  const S = useStrings();
+  return (
+    <div className="tr-scroll">
+      <div className="tr-card tr-round-list">
+        {a.rounds.map((r, i) => (
+          <button key={r.taskIndex} type="button" className={"tr-round" + (r.compaction ? " compaction" : "")}
+                  onClick={() => onOpenRound(i)}>
+            <div className="tr-round-top">
+              <span className="tr-round-name">{roundLabel(r, ordinalOf(a.rounds, i), S)}</span>
+              <span className="tr-round-title" title={r.title}>{r.title}</span>
+              <span className="tr-round-ms">{fmtDurationMs(r.durationMs)}</span>
+            </div>
+            <div className="tr-round-meta">
+              <span>{S.traces.roundMeta(r.requests, r.toolCalls)}</span>
+              {r.toolErrors > 0 && <span className="err">{S.traces.failed(r.toolErrors)}</span>}
+              <span>↓ {fmtN(r.tokens.prompt)}{r.tokens.cacheHitPercent != null ? ` (${r.tokens.cacheHitPercent.toFixed(0)}%)` : ""}</span>
+              <span>↑ {fmtN(r.tokens.output)}</span>
+              <span>{money(r.costUsd)}</span>
+            </div>
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
-function EntryRow({ e, forceOpen, focus = false, scrollTo = false, callTask }: {
-  e: Entry; forceOpen: boolean; focus?: boolean; scrollTo?: boolean; callTask?: Entry["task"];
+type Row = { type: "head"; round: number } | { type: "call"; round: number; call: Call };
+
+const ROW_H = 30;
+const OVERSCAN = 12;
+
+function CallsView({ a, roundFilter, setRoundFilter, focus, hits }: {
+  a: Analysis; roundFilter: number; setRoundFilter: (i: number) => void;
+  focus: number | null; hits: Set<number> | null;
 }) {
-  const [open, setOpen] = useState(focus);
-  const [raw, setRaw] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (scrollTo) requestAnimationFrame(() => ref.current?.scrollIntoView({ block: "center" }));
-  }, [scrollTo]);
-  const expanded = forceOpen || open;
-  const expandable = !!e.detail || !!e.task;
-  const task = e.task;
   const S = useStrings();
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
+    a.rounds.forEach((r, i) => {
+      if (roundFilter >= 0 && roundFilter !== i) return;
+      const calls = hits ? r.calls.filter((c) => hits.has(c.index)) : r.calls;
+      if (!calls.length) return;
+      if (roundFilter < 0) out.push({ type: "head", round: i });
+      for (const c of calls) out.push({ type: "call", round: i, call: c });
+    });
+    return out;
+  }, [a, roundFilter, hits]);
+
+  const initial = useMemo(() => {
+    const target = focus != null ? rows.findIndex((r) => r.type === "call" && r.call.index === focus) : -1;
+    return target >= 0 ? target : rows.findIndex((r) => r.type === "call");
+  }, [rows, focus]);
+  const [sel, setSel] = useState(initial);
+  useEffect(() => { setSel(initial); }, [initial]);
+  const picked = sel >= 0 && rows[sel]?.type === "call" ? (rows[sel] as Extract<Row, { type: "call" }>) : null;
+
+  const move = (delta: number) => {
+    let i = sel;
+    do { i += delta; } while (i >= 0 && i < rows.length && rows[i].type !== "call");
+    if (i >= 0 && i < rows.length) setSel(i);
+  };
+
   return (
-    <div ref={ref} className={"entry" + (e.isError ? " is-error" : "") + (focus ? " focus" : "")}>
-      <button
-        className={"entry-row" + (expandable ? " expandable" : "")}
-        onClick={() => expandable && setOpen(!open)}
-      >
-        <span className="entry-ts">{e.ts.slice(11, 19)}</span>
-        <span className="entry-caret">{expandable ? (expanded ? "▾" : "▸") : ""}</span>
-        <span className={"entry-kind k-" + e.kind}>{KIND_LABEL[e.kind] || e.kind}</span>
-        {e.kind === "tool_result" && e.toolName && <span className="entry-tool-tag">{e.toolName}</span>}
-        <span className="entry-summary">{e.summary}</span>
-        {e.durationMs !== undefined && <span className="entry-dur">{fmtDurationMs(e.durationMs)}</span>}
-      </button>
-      {expanded && task && (
-        <div className="entry-task">
-          <TaskCard
-            brief={e.kind === "tool_call" ? task.description || "" : callTask?.description || ""}
-            subagentType={task.subagentType || callTask?.subagentType}
-            result={e.kind === "tool_result" ? taskResultOf(task) : null}
+    <div className="tr-split">
+      <div className="tr-list-pane">
+        <div className="tr-list-head">
+          <select value={roundFilter} onChange={(e) => setRoundFilter(Number(e.target.value))}>
+            <option value={-1}>{S.traces.allRounds}</option>
+            {a.rounds.map((r, i) => (
+              <option key={r.taskIndex} value={i}>
+                {roundLabel(r, ordinalOf(a.rounds, i), S)} · {r.title.slice(0, 40)}
+              </option>
+            ))}
+          </select>
+          <span className="tr-list-count">{S.traces.callsN(rows.filter((r) => r.type === "call").length)}</span>
+        </div>
+        {rows.length ? (
+          <VirtualList
+            rows={rows}
+            selected={sel}
+            onSelect={setSel}
+            onMove={move}
+            render={(row) => row.type === "head"
+              ? <RoundHead r={a.rounds[row.round]} label={roundLabel(a.rounds[row.round], ordinalOf(a.rounds, row.round), S)} />
+              : <CallRow c={row.call} />}
           />
-          {e.detail && (
-            <button className="entry-expand" onClick={() => setRaw(!raw)}>{raw ? S.traces.hideRaw : S.traces.showRaw}</button>
-          )}
-        </div>
-      )}
-      {expanded && expandable && e.detail && (!task || raw) && (
-        <div className="entry-detail">
-          <button className="entry-copy" onClick={() => { void navigator.clipboard.writeText(e.detail); showToast(getStrings().common.copied); }}>
-            <IconCopy />
-          </button>
-          <pre>{e.detail}</pre>
-        </div>
-      )}
+        ) : <div className="trace-empty"><p>{S.traces.searchNone}</p></div>}
+      </div>
+      <div className="tr-detail-pane">
+        {picked
+          ? <CallDetail key={picked.call.index} sessionId={a.session_id} c={picked.call}
+                        roundName={roundLabel(a.rounds[picked.round], ordinalOf(a.rounds, picked.round), S)} />
+          : <div className="trace-empty"><p>{S.traces.pickCall}</p></div>}
+      </div>
     </div>
   );
 }
 
-function taskResultOf(t: NonNullable<Entry["task"]>): TaskResult {
+/** Fixed-height rows, only the visible window in the DOM: a long session has
+ *  thousands of calls, and drawing them all is what made the page crawl. */
+function VirtualList({ rows, selected, onSelect, onMove, render }: {
+  rows: Row[];
+  selected: number;
+  onSelect: (i: number) => void;
+  onMove: (delta: number) => void;
+  render: (row: Row) => ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState(0);
+  const [height, setHeight] = useState(600);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
+    ro.observe(el);
+    setHeight(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+  // Keep the selection in view (a focus call from the chat, or arrow keys).
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || selected < 0) return;
+    const y = selected * ROW_H;
+    if (y < el.scrollTop) el.scrollTop = Math.max(0, y - ROW_H * 3);
+    else if (y + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = y - el.clientHeight + ROW_H * 4;
+  }, [selected]);
+  const from = Math.max(0, Math.floor(top / ROW_H) - OVERSCAN);
+  const to = Math.min(rows.length, Math.ceil((top + height) / ROW_H) + OVERSCAN);
+  const items: ReactNode[] = [];
+  for (let i = from; i < to; i++) {
+    const row = rows[i];
+    items.push(
+      <div key={i} className={"tr-row" + (row.type === "head" ? " head" : "") + (i === selected ? " sel" : "")}
+           style={{ top: i * ROW_H, height: ROW_H }}
+           onClick={() => row.type === "call" && onSelect(i)}>
+        {render(row)}
+      </div>,
+    );
+  }
+  return (
+    <div ref={ref} className="tr-list" tabIndex={0}
+         onScroll={(e) => setTop(e.currentTarget.scrollTop)}
+         onKeyDown={(e) => {
+           if (e.key === "ArrowDown") { e.preventDefault(); onMove(1); }
+           if (e.key === "ArrowUp") { e.preventDefault(); onMove(-1); }
+         }}>
+      <div style={{ height: rows.length * ROW_H, position: "relative" }}>{items}</div>
+    </div>
+  );
+}
+
+function RoundHead({ r, label }: { r: Round; label: string }) {
+  return (
+    <>
+      <span className="tr-row-round">{label}</span>
+      <span className="tr-row-sum" title={r.title}>{r.title}</span>
+      <span className="tr-row-ms">{fmtDurationMs(r.durationMs)}</span>
+    </>
+  );
+}
+
+function toolArgsSummary(c: Call) {
+  const name = c.toolName || "";
+  return name && c.summary.startsWith(name + " ") ? c.summary.slice(name.length + 1) : c.summary;
+}
+
+function CallRow({ c }: { c: Call }) {
+  const S = useStrings();
+  if (c.kind === "model") {
+    return (
+      <>
+        <span className="tr-tag k-model">{S.traces.kind.model}</span>
+        <span className="tr-row-sum">{c.summary}</span>
+        {c.tokens && <span className="tr-row-tok">{fmtN(c.tokens.prompt)} → {fmtN(c.tokens.output)}</span>}
+        <span className="tr-row-ms">{c.durationMs != null ? fmtDurationMs(c.durationMs) : ""}</span>
+      </>
+    );
+  }
+  if (c.kind === "tool") {
+    return (
+      <>
+        <span className={"tr-tag k-tool" + (c.isError ? " err" : "")} title={c.toolName}>{c.toolName || "tool"}</span>
+        <span className={"tr-row-sum" + (c.isError ? " err" : "")}>{toolArgsSummary(c)}</span>
+        {!!c.waitMs && <span className="tr-row-tok">⏸ {fmtDurationMs(c.waitMs)}</span>}
+        <span className="tr-row-ms">{c.durationMs != null ? fmtDurationMs(c.durationMs) : ""}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className={"tr-tag k-" + c.kind}>{S.traces.kind[c.kind] || c.kind}</span>
+      <span className="tr-row-sum">{c.summary}</span>
+    </>
+  );
+}
+
+const bodyCache = new Map<string, Body>();
+
+function CallDetail({ sessionId, c, roundName }: { sessionId: string; c: Call; roundName: string }) {
+  const S = useStrings();
+  const key = `${sessionId}:${c.index}`;
+  const [body, setBody] = useState<Body | null>(bodyCache.get(key) || null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (bodyCache.has(key)) return;
+    let live = true;
+    void api.fetchTraceCallBody(sessionId, c.index).then(({ ok, data }) => {
+      if (!live) return;
+      if (!ok || !data) { setFailed(true); return; }
+      bodyCache.set(key, data as Body);
+      setBody(data as Body);
+    });
+    return () => { live = false; };
+  }, [key, sessionId, c.index]);
+
+  const tabs: Array<[string, string]> = c.kind === "tool"
+    ? [["result", S.traces.tabResult], ["args", S.traces.tabArgs], ...(body?.approval ? [["approval", S.traces.tabApproval] as [string, string]] : [])]
+    : c.kind === "model"
+      ? [["text", S.traces.tabReply], ["thinking", S.traces.tabThinking]]
+      : [["text", S.traces.tabContent]];
+  const [tab, setTab] = useState(tabs[0][0]);
+
+  const title = c.kind === "tool" ? c.toolName || "tool" : S.traces.kind[c.kind] || c.kind;
+  return (
+    <div className="tr-detail">
+      <div className="tr-detail-head">
+        <span className={"tr-tag k-" + c.kind + (c.isError ? " err" : "")}>{title}</span>
+        <span className="tr-detail-round">{roundName}</span>
+      </div>
+      <Facts c={c} />
+      <div className="tr-dtabs" role="tablist">
+        {tabs.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k}
+                  className={"tr-dtab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+      <div className="tr-dbody">
+        {failed ? <p className="trace-note">{S.traces.bodyFailed}</p>
+          : !body ? <p className="trace-note">{S.traces.loadingBody}</p>
+          : <BodyView c={c} body={body} tab={tab} />}
+      </div>
+    </div>
+  );
+}
+
+function BodyView({ c, body, tab }: { c: Call; body: Body; tab: string }) {
+  const S = useStrings();
+  if (c.kind === "tool" && c.toolName === "task") {
+    if (tab === "result" && body.taskResult) {
+      return <TaskCard brief={body.taskCall?.description || ""} subagentType={body.taskCall?.subagentType}
+                       result={taskResultOf(body.taskResult)} />;
+    }
+  }
+  const text = tab === "args" ? body.args
+    : tab === "result" ? body.result
+    : tab === "approval" ? body.approval
+    : tab === "thinking" ? body.thinking
+    : body.text;
+  if (!text) return <p className="trace-note">{S.traces.empty}</p>;
+  return (
+    <div className="tr-pre-wrap">
+      <button className="entry-copy" title={S.common.copy}
+              onClick={() => { void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied)); }}>
+        <IconCopy />
+      </button>
+      <pre className={"tr-pre" + (tab === "result" && c.isError ? " err" : "")}>{text}</pre>
+    </div>
+  );
+}
+
+function Facts({ c }: { c: Call }) {
+  const S = useStrings();
+  const rows: Array<[string, string]> = [];
+  if (c.ts) rows.push([S.traces.dStarted, new Date(c.ts).toLocaleTimeString()]);
+  if (c.durationMs != null) rows.push([S.traces.dDuration, fmtDurationMs(c.durationMs)]);
+  if (c.waitMs) rows.push([S.traces.dWait, fmtDurationMs(c.waitMs)]);
+  if (c.kind === "tool" && c.decision) rows.push([S.traces.dDecision, c.decision]);
+  if (c.kind === "model") {
+    if (c.status) rows.push([S.traces.dStatus, c.status]);
+    if (c.toolCalls) rows.push([S.traces.dToolCalls, String(c.toolCalls)]);
+  }
+  const tok = c.kind === "model" ? c.tokens : null;
+  const active = (c.durationMs || 0) - (c.waitMs || 0);
+  return (
+    <>
+      <dl className="tr-facts">
+        {rows.map(([k, v]) => <Fact key={k} k={k} v={v} />)}
+      </dl>
+      {c.kind === "model" && (tok ? (
+        <dl className="tr-facts tr-usage">
+          <Fact k={S.traces.dPrompt} v={fmtN(tok.prompt)} />
+          <Fact k={S.traces.dFresh} v={fmtN(tok.input)} />
+          <Fact k={S.traces.dCache}
+                v={`${fmtN(tok.cacheRead)}${tok.cacheHitPercent != null ? ` / ${tok.cacheHitPercent.toFixed(1)}%` : ""}`} />
+          {!!tok.cacheWrite && <Fact k={S.traces.dCacheWrite} v={fmtN(tok.cacheWrite)} />}
+          <Fact k={S.traces.dOutput} v={fmtN(tok.output)} />
+          {active > 0 && <Fact k={S.traces.dTps} v={fmtTps(tok.output / (active / 1000))} />}
+        </dl>
+      ) : <p className="trace-note">{S.traces.noTokens}</p>)}
+    </>
+  );
+}
+
+function Fact({ k, v }: { k: string; v: string }) {
+  return <div className="tr-fact"><dt>{k}</dt><dd>{v}</dd></div>;
+}
+
+function taskResultOf(t: TaskFields): TaskResult {
   return {
     success: !!t.success,
     status: t.status || (t.success ? "completed" : "error"),

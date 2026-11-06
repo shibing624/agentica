@@ -59,9 +59,9 @@ function parsePort(content) {
  * favicon ships as decodes **only** on Windows and yields an empty image — which
  * looks identical to having configured no icon at all — anywhere else.
  *
- * macOS gets its own full-bleed square (`icon-mac.png`): the OS rounds it, and
- * an icon that brings its own rounded shape and margin is shrunk into a grey
- * container on macOS 26+.
+ * macOS gets its own `icon-mac.png`: the same squircle with the larger margin
+ * the Dock's icon grid uses. `app.dock.setIcon` draws the PNG as-is, so the
+ * shape has to be in the file.
  */
 function iconPath(platform = process.platform) {
   return path.join(__dirname, "build", platform === "darwin" ? "icon-mac.png" : "icon.png");

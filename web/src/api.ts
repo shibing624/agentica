@@ -131,7 +131,12 @@ export const makeTempDirApi = () => postJson<{ path: string }>("/api/fs/temp", {
 export const createProfileApi = (body: unknown) => postJson("/api/profile", body);
 export const updateProfileApi = (name: string, body: unknown) => putJson(`/api/profile/${encodeURIComponent(name)}`, body);
 export const deleteProfileApi = (name: string) => request(`/api/profile/${encodeURIComponent(name)}`, { method: "DELETE" });
-export const fetchTraceAnalysis = (sessionId: string) => request(`/api/sessions/${sessionId}/trace/analysis`);
+/** Lite: rounds, calls and numbers, no bodies (`fetchTraceCallBody` loads one). */
+export const fetchTraceAnalysis = (sessionId: string) => request(`/api/sessions/${sessionId}/trace/analysis?lite=true`);
+export const fetchTraceCallBody = (sessionId: string, index: number) =>
+  request(`/api/sessions/${sessionId}/trace/calls/${index}`);
+export const searchTraceCalls = (sessionId: string, q: string, signal?: AbortSignal) =>
+  request<{ indices: number[] }>(`/api/sessions/${sessionId}/trace/search?q=${encodeURIComponent(q)}`, { signal });
 export const fetchSessionUsage = (sessionId: string) => request(`/api/sessions/${sessionId}/usage`);
 export const fetchTraceEvents = (sessionId: string, offset = 0, limit = 200) =>
   request(`/api/sessions/${sessionId}/trace/events?offset=${offset}&limit=${limit}`);

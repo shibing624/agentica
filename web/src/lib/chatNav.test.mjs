@@ -35,3 +35,14 @@ test("preview collapses whitespace and truncates to 50 by default", () => {
   assert.equal(previewText(long).length, 50);
   assert.equal(buildChatNavTicks([{ role: "user", content: long }])[0].query, long.slice(0, 50));
 });
+
+test("automated reports get no minimap tick", () => {
+  const ticks = buildChatNavTicks([
+    { role: "user", content: "real question" },
+    { role: "assistant", content: "a" },
+    { role: "user", content: "[Background terminal #1 finished]", automated: true },
+    { role: "assistant", content: "b" },
+    { role: "user", content: "second question" },
+  ]);
+  assert.deepEqual(ticks.map((t) => t.idx), [0, 4]);
+});

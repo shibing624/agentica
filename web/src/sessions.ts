@@ -74,7 +74,9 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
     setState({ sessions: merged, sessionScope: scope, sessionsLoading: false, sessionsError: "" });
     saveSessions();
     const last = readLastSessionId();
-    if (last && merged[last] && getState().curSess !== last) switchTo(last);
+    // Restore the last open chat on start-up only: on a later refresh this
+    // key may hold what another tab opened since.
+    if (last && merged[last] && !getState().curSess) switchTo(last);
   })().finally(() => {
     if (catalogFlight?.promise === promise) catalogFlight = null;
     if (catalogAbort === controller) catalogAbort = null;
@@ -134,7 +136,27 @@ export async function syncSessionStatus() {
     if (!running) finished = true;
   }
   if (changed) bump();
-  if (finished) await loadSessions();
+  if (finished) await syncFromServer();
+}
+
+/**
+ * Pick up what another client (a browser tab, the desktop window, the CLI)
+ * did to these sessions: refresh the catalog, then bring the open session up
+ * to date — attach to a run started elsewhere, or re-read a log that grew
+ * since this client last read it. Each client otherwise only reads the
+ * catalog once at start-up and an open transcript once, so a turn finished
+ * in one window never showed in the other.
+ */
+export async function syncFromServer() {
+  await loadSessions();
+  const id = getState().curSess;
+  const sess = id ? getState().sessions[id] : null;
+  if (!id || !sess || sessionIsLive(id) || !sess.sizeBytes) return;
+  if (sess.hydratedSize !== sess.sizeBytes) await hydrateSession(id, true);
+  const now = getState().sessions[id];
+  if (getState().curSess === id && now?.running && !sessionIsLive(id)) {
+    setState({ pendingResume: id });
+  }
 }
 
 function sessionIsLive(id: string): boolean {

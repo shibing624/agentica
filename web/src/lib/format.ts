@@ -76,12 +76,12 @@ export type AgoLabels = {
 export function lastQueryTs(sess: {
   ts: number;
   lastTs?: number;
-  msgs?: Array<{ role: string; steer?: boolean; ts?: number }>;
+  msgs?: Array<{ role: string; steer?: boolean; automated?: boolean; ts?: number }>;
 }): number {
   const msgs = sess.msgs || [];
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];
-    if (m.role === "user" && !m.steer) return m.ts || sess.lastTs || sess.ts;
+    if (m.role === "user" && !m.steer && !m.automated) return m.ts || sess.lastTs || sess.ts;
   }
   return sess.lastTs || sess.ts;
 }
