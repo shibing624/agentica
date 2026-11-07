@@ -71,6 +71,23 @@ export const IconSidebar = () => (
     <line x1="5.5" y1="2.5" x2="5.5" y2="13.5" />
   </S>
 );
+/** The left sidebar glyph mirrored: the same affordance on the other edge. */
+export const IconSidebarRight = () => (
+  <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+    <line x1="10.5" y1="2.5" x2="10.5" y2="13.5" />
+  </S>
+);
+export const IconFullscreen = () => (
+  <S strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1.8 5.4V2.8c0-.55.45-1 1-1h2.7M10.5 1.8h2.7c.55 0 1 .45 1 1v2.6M14.2 10.6v2.6c0 .55-.45 1-1 1h-2.7M5.5 14.2H2.8c-.55 0-1-.45-1-1v-2.6" />
+  </S>
+);
+export const IconExitFullscreen = () => (
+  <S strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 2.5V6c0 .55.45 1 1 1h3.5M7 13.5V10c0-.55-.45-1-1-1H2.5" />
+  </S>
+);
 export const IconDatabase = () => (
   <S strokeWidth="1.3" strokeLinejoin="round">
     <ellipse cx="8" cy="4.2" rx="5.2" ry="2.1" />

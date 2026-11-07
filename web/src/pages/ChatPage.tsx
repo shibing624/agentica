@@ -19,7 +19,7 @@ import { primeSettings, switchProfile } from "../panels/SettingsModal";
 import { createSession, forkAt, hydrateSession, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
-  Logo, IconPlus, IconClose, IconChat, IconAsk, IconAuto,
+  Logo, IconPlus, IconClose, IconChat, IconAsk, IconAuto, IconSidebarRight,
   IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook,
   IconChevronDown, IconThumbUp, IconThumbDown, IconFork, IconCompact, IconSpinner,
 } from "../icons";
@@ -295,10 +295,14 @@ export function ChatPage() {
             </div>
           </div>
           <div className="tb-r">
-            <button type="button" className={"tb-workspace" + (files.open ? " on" : "")}
-                    onClick={() => files.setOpen(!files.open)}>
-              {S.chat.openWorkspace}
-            </button>
+            {/* dsh: the way in only shows while the panel is closed; the open
+                panel carries its own collapse button in its head. */}
+            {!files.open && (
+              <button type="button" className="ib" onClick={() => files.setOpen(true)}
+                      title={S.chat.openWorkspace} aria-label={S.chat.openWorkspace}>
+                <IconSidebarRight />
+              </button>
+            )}
           </div>
         </div>
         <div className="chat-wrap" ref={chatWrapRef}>

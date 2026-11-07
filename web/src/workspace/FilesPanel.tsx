@@ -1,4 +1,4 @@
-import { IconClose } from "../icons";
+import { IconExitFullscreen, IconFullscreen, IconSidebarRight } from "../icons";
 import { useStrings } from "../i18n";
 import { SkillPane } from "./SkillPane";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
@@ -11,21 +11,31 @@ export function FilesPanel({
   panel: FilesPanelState;
 }) {
   const S = useStrings();
+  // Width 0 = the window is too narrow to keep the chat at its minimum; the
+  // panel can still be opened fullscreen there.
+  const shown = panel.open && (panel.width > 0 || panel.fullscreen);
   return (
     <>
-      {panel.open && (
-        <div className="files-resize" onMouseDown={panel.startResize} title={S.files.resizeHandle} />
+      {shown && !panel.fullscreen && (
+        <div className="files-resize" onMouseDown={panel.startResize} onDoubleClick={panel.resetWidth}
+             title={S.files.resizeHandle} />
       )}
       <aside
-        className={"files-panel" + (panel.open ? " open" : "")}
-        style={{ width: panel.open ? panel.width : 0 }}
-        inert={!panel.open}
+        className={"files-panel" + (shown ? " open" : "") + (panel.fullscreen ? " fullscreen" : "")}
+        style={{ width: panel.fullscreen ? undefined : shown ? panel.width : 0 }}
+        inert={!shown}
       >
-        <div className="files-panel-inner" style={{ width: panel.width }}>
+        <div className="files-panel-inner" style={{ width: panel.fullscreen ? "100%" : panel.width }}>
           <div className="files-panel-head">
             <h4>{panel.skill ? S.files.skillTitle : S.files.title}</h4>
-            <button type="button" className="ib" title={S.common.close} onClick={() => panel.setOpen(false)}>
-              <IconClose />
+            <button type="button" className="ib" onClick={() => panel.setFullscreen(!panel.fullscreen)}
+                    title={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}
+                    aria-label={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}>
+              {panel.fullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
+            </button>
+            <button type="button" className="ib" title={S.files.collapse} aria-label={S.files.collapse}
+                    onClick={() => panel.setOpen(false)}>
+              <IconSidebarRight />
             </button>
           </div>
           {panel.skill && <SkillPane name={panel.skill} onBack={panel.closeSkill} />}

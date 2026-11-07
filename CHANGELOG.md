@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / Desktop 右侧工作区面板加宽、可全屏，入口改为图标（参照 deepseek-harness 的右侧栏）**。宽度规则与 dsh 一致：第一次打开占窗口的 45%，拖拽范围 300px 到窗口的 70%，聊天区至少保留 400px，窗口太窄时面板先变窄，再放不下就收起；双击拖拽条恢复默认宽度。原来是固定 360px、最宽 640px。面板标题栏右侧新增「全屏」按钮，全屏时覆盖整个窗口，按 Esc 或再点一次退出。顶栏的「打开工作区」文字按钮改为右侧栏图标（左侧栏图标的镜像），只在面板收起时显示；面板里的关闭按钮也换成同一个图标。旧的宽度设置换了存储键，不再沿用。
+- **滚动条改为细线**。聊天区、右侧面板等所有滚动区域的滚动条只画 3px 宽，颜色更淡，鼠标悬停时稍微加深；拖拽区仍保留 6px。
 - **Web 侧栏会话行悬浮不再挡住标题，新增「更多」菜单和置顶**（参照 deepseek-harness）。原来悬浮时重命名、归档、删除三个按钮浮在标题上，会盖住标题末尾。现在按钮占自己的位置，标题在按钮前省略；悬浮时时间、绿点和 CLI 标记让位。悬浮显示 `···`、归档、置顶三个按钮；`···` 菜单包含置顶会话、重命名、分叉会话（复制整个会话）、归档会话、复制 Session ID 和删除，支持方向键和 Esc，菜单固定定位，不会被侧栏滚动区裁掉，空间不够时向上弹出。置顶的会话排在所属项目最前，标题旁有图钉标记，折叠时也始终可见；状态写在会话 sidecar 的 `pinned` 字段，新增 `POST /api/sessions/{id}/pin`，刷新、换浏览器后都保留，在 recent 范围里也不会因为太久没动被过滤掉。
 - **CLI 新增 `AGENTICA_MODEL_*` 环境变量，临时换模型且不碰 `config.yaml`**（借鉴 kimi-code 的 `KIMI_MODEL_*`）。设 `AGENTICA_MODEL_NAME` 即生效，可选 `AGENTICA_MODEL_PROVIDER`（默认 `openai`）、`_BASE_URL`、`_API_KEY`、`_MAX_CONTEXT_SIZE`。只对当前进程有效，命令行参数仍然优先；它取代当前 profile，profile 里的推理强度、`max_tokens`、副模型和 fallback 不会套到这个模型上；不触发首次启动向导。单独成一组变量，是因为 shell 里被别的工具写入的 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 可能让 agentica 指向错误的地址。provider 或上下文大小填错时启动即报错并指出是哪个变量。说明见 `docs/guides/config.md`。
 - **Web / Desktop 轨迹页重做（参照 deepseek-harness desktop 的 Trajectory）**。顶部一条会话统计，下面三个 tab，右侧是搜索框。

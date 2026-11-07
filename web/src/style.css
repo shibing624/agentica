@@ -19,7 +19,8 @@
   --lane-track:#e2e5ea;
   --side-bg:#f9fafb;--hover:rgba(38,49,72,.06);--hover2:rgba(38,49,72,.10);
   --skill-ref:#4176e6;--skill-ref-bg:rgba(65,118,230,.10);
-  --scroll:rgba(97,102,107,.30);
+  --scroll:rgba(97,102,107,.16);
+  --scroll-hover:rgba(97,102,107,.36);
   --elev-pop:0 0 0 .5px rgba(0,0,0,.06),0 3px 8px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.09);
   --elev-card:0 0 0 .5px rgba(0,0,0,.10),0 4px 16px rgba(0,0,0,.04),0 0 24px rgba(0,0,0,.03);
   --elev-card-focus:0 0 0 .5px rgba(0,0,0,.18),0 6px 22px rgba(0,0,0,.07),0 0 28px rgba(0,0,0,.04);
@@ -34,7 +35,8 @@
   --lane-track:#2b2b2b;
   --side-bg:#1b1b1c;--hover:rgba(255,255,255,.08);--hover2:rgba(255,255,255,.14);
   --skill-ref:#7aaaff;--skill-ref-bg:rgba(122,170,255,.14);
-  --scroll:rgba(207,211,214,.28);
+  --scroll:rgba(207,211,214,.14);
+  --scroll-hover:rgba(207,211,214,.32);
   --elev-pop:0 0 0 .5px rgba(255,255,255,.12),0 10px 30px rgba(0,0,0,.5);
   --elev-card:0 0 0 .5px rgba(255,255,255,.14),0 4px 16px rgba(0,0,0,.3);
   --elev-card-focus:0 0 0 .5px rgba(255,255,255,.24),0 6px 22px rgba(0,0,0,.4);
@@ -43,10 +45,12 @@ html,body{height:100%;overflow:hidden}
 body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);background:var(--bg);display:flex;transition:background .2s,color .2s;-webkit-font-smoothing:antialiased}
 #root{display:flex;height:100%;width:100%;min-width:0}
 ::selection{background:rgba(65,118,230,.22)}
+/* A hairline, not a bar: a 3px thumb drawn inside a 6px track (the transparent
+   border keeps a wider grab area than what is painted), faint until hovered. */
 ::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:var(--fg3)}
-::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px;border:1.5px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-hover);background-clip:padding-box}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
 
 /* ===== DESKTOP SHELL (macOS) =====
    The window has no title bar: the traffic lights float over the sidebar's
@@ -158,7 +162,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .s-list::-webkit-scrollbar{width:4px}
 .s-list::-webkit-scrollbar-thumb{background:transparent;border-radius:2px}
 .s-list:hover::-webkit-scrollbar-thumb{background:var(--scroll)}
-.s-list:hover::-webkit-scrollbar-thumb:hover{background:var(--fg3)}
+.s-list:hover::-webkit-scrollbar-thumb:hover{background:var(--scroll-hover)}
 .p-group{margin-bottom:2px}
 .p-head{display:flex;align-items:center;gap:2px;height:34px;padding:0 4px 0 2px;border-radius:10px;color:var(--fg);position:relative}
 .p-head:hover,.p-head.menu-open{background:var(--hover)}
@@ -1294,12 +1298,14 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .dlg-foot .asst-guide{align-self:center;margin-right:auto}
 
 /* ===== Workspace files panel ===== */
-.tb-workspace{border:none;background:transparent;color:var(--fg2);border-radius:8px;padding:5px 12px;font-size:13px;font-weight:500;cursor:pointer;font-family:var(--sans);white-space:nowrap}
-.tb-workspace:hover,.tb-workspace.on{background:var(--hover);color:var(--fg)}
 .files-resize{width:5px;flex-shrink:0;cursor:col-resize;align-self:stretch;background:transparent}
 .files-resize:hover{background:var(--accent-soft)}
 .files-panel{height:100vh;flex-shrink:0;overflow:hidden;border-left:var(--hair) solid var(--border);background:var(--bg);display:flex;flex-direction:column}
 .files-panel:not(.open){border-left:none}
+/* Fullscreen covers the whole window (sidebar included), like dsh's right
+   panel; it sits above the collapsed-sidebar seat (z 120) but below modals. */
+.files-panel.fullscreen{position:fixed;inset:0;z-index:150;border-left:none}
+html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:84px;-webkit-app-region:drag}
 .files-panel-inner{height:100%;display:flex;flex-direction:column;min-width:0}
 .files-panel-head{display:flex;align-items:center;gap:8px;padding:10px 12px 6px;flex-shrink:0}
 .files-panel-head h4{flex:1;min-width:0;font-size:13px;font-weight:600;margin:0}
