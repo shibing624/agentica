@@ -1,4 +1,4 @@
-import type { DiffHunk } from "./fileDiff";
+import type { FileEdits } from "./fileDiff";
 
 /**
  * Right-panel tabs (dsh's sidebar-right, without split panes or floating).
@@ -11,8 +11,9 @@ export type PanelTab =
   | { key: "guide"; kind: "guide" }
   | { key: string; kind: "file"; path: string }
   | { key: string; kind: "skill"; name: string }
-  /** A reply's edits to one file, one hunk list per tool call. */
-  | { key: string; kind: "diff"; path: string; edits: DiffHunk[][] }
+  /** One round's edits (dsh's review tab): every file the reply changed,
+   *  `path` the one on screen; the header's selector switches between them. */
+  | { key: string; kind: "review"; turn: number; files: FileEdits[]; path: string }
   | { key: string; kind: "terminal"; id: string; ordinal: number };
 
 export type TabsState = { tabs: PanelTab[]; active: string };
@@ -27,7 +28,7 @@ export function initialTabs(): TabsState {
 
 export const fileKey = (path: string) => `file:${path}`;
 export const skillKey = (name: string) => `skill:${name}`;
-export const diffKey = (path: string) => `diff:${path}`;
+export const reviewKey = (turn: number) => `review:${turn}`;
 export const terminalKey = (id: string) => `term:${id}`;
 
 /** Open a tab, or focus it if one with the same key is already open. New tabs
@@ -56,8 +57,8 @@ export function activateTab(state: TabsState, key: string): TabsState {
   return state.tabs.some((t) => t.key === key) ? { ...state, active: key } : state;
 }
 
-/** Open a tab, or focus the open one with its content replaced: one diff tab
- *  per file, showing whichever reply's edits were opened last. */
+/** Open a tab, or focus the open one with its content replaced: one review
+ *  tab per round, showing whichever of its files was picked last. */
 export function upsertTab(state: TabsState, tab: PanelTab): TabsState {
   const at = state.tabs.findIndex((t) => t.key === tab.key);
   if (at < 0) return openTab(state, tab);

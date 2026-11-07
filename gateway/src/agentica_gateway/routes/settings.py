@@ -16,7 +16,7 @@ from io import StringIO
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from .. import deps
 from ..config import settings
@@ -320,11 +320,6 @@ async def switch_model(
                 f"Supported: {list_providers()}"
             ),
         )
-    if svc.has_active_runs():
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot switch model while a run is active. Wait for it to finish or cancel it first.",
-        )
     # AgentService.model_provider/model_name proxy directly to settings, so a
     # single write here is enough — no separate svc.xxx write needed.
     settings.model_provider = request.model_provider
@@ -409,14 +404,10 @@ async def switch_profile(
             status_code=404,
             detail=f"Profile '{name}' not found. Available: {list(profiles.keys())}",
         )
-    if svc.has_active_runs():
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot switch profile while a run is active. Wait for it to finish or cancel it first.",
-        )
     # reload_profile() writes the full tuning set (model_provider/model_name/
     # reasoning_effort/max_tokens/temperature/top_p/context_window/...)
-    # directly to `settings`, so no manual patch-up is needed here.
+    # directly to `settings`, so no manual patch-up is needed here. A session
+    # that is mid-run finishes on its current model and rebuilds afterwards.
     await svc.reload_profile(name)
     return {
         "status": "ok",
@@ -480,13 +471,10 @@ def _profile_body_to_dict(body: ProfileUpsertRequest) -> dict:
 @router.post("/api/profile")
 async def create_profile(
     body: ProfileUpsertRequest,
-    svc: AgentService = Depends(deps.get_agent_service),
 ):
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profile name must not be empty")
-    if svc.has_active_runs():
-        raise HTTPException(status_code=409, detail="Cannot change config while a run is active.")
     upsert_profile(name, _profile_body_to_dict(body), make_active=False)
     return {"status": "ok", "name": name}
 
@@ -495,13 +483,10 @@ async def create_profile(
 async def update_profile(
     name: str,
     body: ProfileUpsertRequest,
-    svc: AgentService = Depends(deps.get_agent_service),
 ):
     existing = get_profile(name)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
-    if svc.has_active_runs():
-        raise HTTPException(status_code=409, detail="Cannot change config while a run is active.")
     # Merge: keep existing fields the user left empty (esp. api_key).
     merged = dict(existing)
     for k, v in _profile_body_to_dict(body).items():
@@ -513,12 +498,9 @@ async def update_profile(
 @router.delete("/api/profile/{name}")
 async def remove_profile(
     name: str,
-    svc: AgentService = Depends(deps.get_agent_service),
 ):
     if not get_profile(name):
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
-    if svc.has_active_runs():
-        raise HTTPException(status_code=409, detail="Cannot change config while a run is active.")
     if not delete_profile(name):
         raise HTTPException(status_code=400, detail="Delete failed")
     return {"status": "deleted", "name": name}
@@ -694,11 +676,120 @@ async def make_temp_workspace():
     return {"path": str(path)}
 
 
-# ============== Open in Finder / Terminal ==============
+# ============== Open in Finder / Terminal / an app ==============
+
+# dsh's open-in-app catalog, macOS part: (id, kind, bundle names). An app is
+# offered only when one of its bundles is installed; `kind` groups the menu
+# (file manager, editors, terminals). Finder and Terminal ship with macOS.
+_MAC_APPS = (
+    ("finder", "files", ("/System/Library/CoreServices/Finder.app",)),
+    ("cursor", "editor", ("Cursor.app",)),
+    ("vscode", "editor", ("Visual Studio Code.app",)),
+    ("vscodeinsiders", "editor", ("Visual Studio Code - Insiders.app",)),
+    ("windsurf", "editor", ("Windsurf.app",)),
+    ("zed", "editor", ("Zed.app", "Zed Preview.app")),
+    ("sublimetext", "editor", ("Sublime Text.app",)),
+    ("pycharm", "editor", ("PyCharm.app", "PyCharm CE.app", "PyCharm Professional Edition.app")),
+    ("idea", "editor", ("IntelliJ IDEA.app", "IntelliJ IDEA CE.app", "IntelliJ IDEA Ultimate.app")),
+    ("xcode", "editor", ("Xcode.app",)),
+    ("terminal", "terminal", ("/System/Applications/Utilities/Terminal.app",)),
+    ("iterm", "terminal", ("iTerm.app",)),
+    ("warp", "terminal", ("Warp.app",)),
+    ("ghostty", "terminal", ("Ghostty.app",)),
+    ("cmux", "terminal", ("cmux.app",)),
+    ("kitty", "terminal", ("kitty.app",)),
+)
+_APP_NAMES = {
+    "finder": "Finder", "cursor": "Cursor", "vscode": "VS Code", "vscodeinsiders": "VS Code Insiders",
+    "windsurf": "Windsurf", "zed": "Zed", "sublimetext": "Sublime Text", "pycharm": "PyCharm",
+    "idea": "IntelliJ IDEA", "xcode": "Xcode", "terminal": "Terminal", "iterm": "iTerm2",
+    "warp": "Warp", "ghostty": "Ghostty", "cmux": "cmux", "kitty": "kitty",
+}
+
+
+def _mac_bundle(names, home: Optional[str] = None) -> Optional[str]:
+    """The first installed bundle: an absolute path as is, a bare name under
+    /Applications or ~/Applications."""
+    home = home or os.path.expanduser("~")
+    for name in names:
+        candidates = [name] if name.startswith("/") else [f"/Applications/{name}", f"{home}/Applications/{name}"]
+        for path in candidates:
+            if os.path.isdir(path):
+                return path
+    return None
+
+
+def installed_apps(platform: Optional[str] = None) -> list:
+    """Apps a folder can be opened in on this machine, in menu order."""
+    platform = platform or sys.platform
+    if platform != "darwin":
+        # Elsewhere the gateway knows the file manager and a terminal only.
+        return [{"id": "finder", "name": "Files", "kind": "files"},
+                {"id": "terminal", "name": "Terminal", "kind": "terminal"}]
+    out = []
+    for app_id, kind, names in _MAC_APPS:
+        if _mac_bundle(names):
+            out.append({"id": app_id, "name": _APP_NAMES[app_id], "kind": kind})
+    return out
+
+
+@router.get("/api/open/apps")
+async def open_apps():
+    return {"apps": installed_apps()}
+
+
+def _bundle_icon_png(bundle: str, out: Path) -> bool:
+    """The bundle's icon as a 64px PNG at ``out`` (``plutil`` + ``sips``, as dsh)."""
+    resources = Path(bundle) / "Contents" / "Resources"
+    icon = None
+    try:
+        info = subprocess.run(
+            ["plutil", "-extract", "CFBundleIconFile", "raw", "-o", "-", str(Path(bundle) / "Contents" / "Info.plist")],
+            capture_output=True, text=True, timeout=5,
+        )
+        name = info.stdout.strip()
+        if info.returncode == 0 and name:
+            icon = resources / (name if name.endswith(".icns") else f"{name}.icns")
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if icon is None or not icon.is_file():
+        found = sorted(resources.glob("*.icns")) if resources.is_dir() else []
+        icon = found[0] if found else None
+    if icon is None:
+        return False
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        done = subprocess.run(
+            ["sips", "-s", "format", "png", "-Z", "64", str(icon), "--out", str(out)],
+            capture_output=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0 and out.is_file()
+
+
+@router.get("/api/open/apps/{app_id}/icon")
+async def open_app_icon(app_id: str):
+    """The app's own icon, so the menu shows Finder / Cursor / iTerm2 as they look.
+    404 off macOS or when the bundle has none; the page then draws a glyph."""
+    if sys.platform != "darwin":
+        raise HTTPException(status_code=404, detail="No icon")
+    names = next((n for i, _k, n in _MAC_APPS if i == app_id), None)
+    bundle = _mac_bundle(names) if names else None
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="No icon")
+    out = Path(AGENTICA_HOME) / "cache" / "app-icons" / f"{app_id}.png"
+    if not out.is_file() and not await asyncio.to_thread(_bundle_icon_png, bundle, out):
+        raise HTTPException(status_code=404, detail="No icon")
+    return FileResponse(out, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
 @router.post("/api/open")
 async def open_path(request: OpenRequest):
-    """Open a local path or an http(s) URL with the OS default handler."""
+    """Open a local path or an http(s) URL with the OS default handler, or a
+    folder in one of the apps ``/api/open/apps`` lists."""
+    # Reject unknown values instead of silently opening with the wrong handler.
+    if request.app not in ("finder", "editor", "reveal", "terminal") and request.app not in _APP_NAMES:
+        raise HTTPException(status_code=422, detail=f"Unknown app: {request.app}")
     url = (request.url or "").strip()
     if url:
         if not url.startswith(("http://", "https://")):
@@ -733,6 +824,10 @@ def _open_command(target: str, app: str, platform: Optional[str] = None) -> Opti
     """
     platform = platform or sys.platform
     if platform == "darwin":
+        for app_id, _kind, names in _MAC_APPS:
+            if app == app_id and app_id not in ("finder", "terminal"):
+                bundle = _mac_bundle(names)
+                return ["open", "-a", bundle, target] if bundle else None
         if app == "terminal":
             return ["open", "-a", "Terminal", target]
         if app == "reveal":

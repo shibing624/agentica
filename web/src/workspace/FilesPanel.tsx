@@ -17,13 +17,13 @@ function TabLabel({ tab }: { tab: PanelTab }) {
   if (tab.kind === "files") return <>{S.files.title}</>;
   if (tab.kind === "guide") return <><IconCompass />{S.files.guideTitle}</>;
   if (tab.kind === "file") return <>{baseName(tab.path)}</>;
-  if (tab.kind === "diff") return <><IconDiff />{baseName(tab.path)}</>;
+  if (tab.kind === "review") return <><IconDiff />{S.files.reviewTitle(tab.turn)}</>;
   if (tab.kind === "skill") return <>/{tab.name}</>;
   return <><IconTerminal />{S.terminal.title(tab.ordinal)}</>;
 }
 
 function tabTitle(tab: PanelTab): string | undefined {
-  if (tab.kind === "file" || tab.kind === "diff") return tab.path;
+  if (tab.kind === "file") return tab.path;
   if (tab.kind === "skill") return tab.name;
   return undefined;
 }
@@ -181,8 +181,9 @@ export function FilesPanel({
                   : <p className="ws-muted">{S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
                 {tab.kind === "file" && root && <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />}
-                {tab.kind === "diff" && root && (
-                  <DiffView root={root} path={tab.path} edits={tab.edits} onOpenFile={panel.browsePath} />
+                {tab.kind === "review" && root && (
+                  <DiffView root={root} turn={tab.turn} files={tab.files} path={tab.path}
+                            onSelect={(path) => panel.selectReviewFile(tab.key, path)} onOpenFile={panel.browsePath} />
                 )}
                 {tab.kind === "skill" && <SkillPane name={tab.name} />}
                 {tab.kind === "terminal" && (

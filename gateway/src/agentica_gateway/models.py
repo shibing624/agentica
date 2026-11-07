@@ -199,6 +199,6 @@ class OpenRequest(BaseModel):
     path: str = ""
     url: str = ""
     # "finder" = default app, "editor" = default text editor, "reveal" = select
-    # in folder, "terminal" = shell there.
-    # Reject unknown values instead of silently opening with the wrong handler.
-    app: Literal["finder", "editor", "reveal", "terminal"] = "finder"
+    # in folder, "terminal" = shell there; any other value is an id from
+    # ``GET /api/open/apps`` (Cursor, iTerm2, ...), checked by the route.
+    app: str = "finder"

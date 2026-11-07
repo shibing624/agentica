@@ -15,7 +15,7 @@ after(() => vite.close());
 
 const S = {
   cmdGroupAdd: "添加", cmdGroupCommands: "指令", cmdGroupSkills: "技能",
-  cmdFile: "文件", cmdGoal: "目标", cmdQueue: "排队", cmdCompact: "压缩",
+  cmdFile: "文件", cmdSkill: "技能", cmdGoal: "目标", cmdQueue: "排队", cmdCompact: "压缩",
   cmdPermission: "权限", cmdModel: "模型", cmdExport: "下载日志",
   slashGoal: "g", slashQueue: "q", slashCompact: "c",
   cmdPermissionDesc: "p", cmdModelDesc: "m", cmdExportDesc: "e",
@@ -28,10 +28,10 @@ const skills = [
 ];
 const ids = (groups) => flatItems(groups).map((it) => it.id || it.cmd);
 
-test("+ menu: add (file, goal), then commands (compact, permission, model, export); no plan or feedback", () => {
+test("+ menu: add (file, skill picker, goal), then commands (compact, permission, model, export); no plan or feedback", () => {
   const g = plusMenuGroups(S);
   assert.deepEqual(g.map((x) => x.title), ["添加", "指令"]);
-  assert.deepEqual(ids(g), ["file", "goal", "compact", "permission", "model", "export"]);
+  assert.deepEqual(ids(g), ["file", "skill", "goal", "compact", "permission", "model", "export"]);
 });
 
 test("bare / lists every command, then only invocable skills", () => {
@@ -50,8 +50,10 @@ test("a command also matches on its label, so typing in the UI language works", 
   assert.deepEqual(ids(slashMenuGroups("/压", skills, S)), ["compact"]);
 });
 
-test("the file picker is a + entry only, never a slash command", () => {
+test("the file and skill pickers are + entries only, never slash commands", () => {
   assert.ok(!ids(slashMenuGroups("/f", skills, S)).includes("file"));
+  // Typed skills are the skills themselves, not a "skill" picker entry.
+  assert.ok(!ids(slashMenuGroups("/", skills, S)).includes("skill"));
 });
 
 test("picker filter matches label or sub, drops emptied groups", async () => {

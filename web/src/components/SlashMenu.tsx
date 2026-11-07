@@ -24,7 +24,7 @@ export function invocableSkills(skills: Array<Record<string, any>>): Array<{ cmd
 }
 
 const ICONS: Record<CommandId, () => JSX.Element> = {
-  file: IconPaperclip, goal: IconTarget, queue: IconQueue, compact: IconCompact,
+  file: IconPaperclip, skill: IconBook, goal: IconTarget, queue: IconQueue, compact: IconCompact,
   permission: IconShield, model: IconModel, export: IconDownload,
 };
 

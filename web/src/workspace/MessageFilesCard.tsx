@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
-import { IconExternal, IconFileCode, IconFinder } from "../icons";
+import { IconChevronDown, IconExternal, IconFileCode, IconFinder } from "../icons";
 import { fileEditsOf, type FileEdit } from "../lib/fileEdits";
-import { fileDiffsOf, type DiffHunk } from "../lib/fileDiff";
+import { fileDiffsOf, type FileEdits } from "../lib/fileDiff";
 import {
   extractFilePaths, extractToolPaths, toWorkspaceRelative,
 } from "../lib/file-path";
@@ -11,7 +11,8 @@ import { statWorkspaceFilesBatched } from "../lib/workspaceStat";
 import { showToast } from "../store";
 
 const MAX_VISIBLE = 3;
-const MAX_VISIBLE_EDITED = 8;
+/** Edited rows shown before the fold (dsh's turn-changes card). */
+const MAX_VISIBLE_EDITED = 4;
 
 function PathLabel({ path }: { path: string }) {
   const slash = path.lastIndexOf("/");
@@ -43,7 +44,8 @@ export function MessageFilesCard({
   uploaded?: string[];
   workspace: string | null;
   onOpenFile: (path: string) => void;
-  onOpenDiff: (path: string, edits: DiffHunk[][]) => void;
+  /** Open this round's review tab on `path`; `files` is every file the round changed. */
+  onOpenDiff: (files: FileEdits[], path: string) => void;
   live?: boolean;
 }) {
   const S = useStrings();
@@ -115,7 +117,7 @@ export function MessageFilesCard({
     <div key={rel} className="mfc-row">
       <button type="button" className="mfc-path"
               title={`${absPath(workspace, rel)}\n${diff ? S.chat.openDiff : S.chat.openPreview}`}
-              onClick={() => (diff ? onOpenDiff(rel, diff.edits) : onOpenFile(rel))}>
+              onClick={() => (diff ? onOpenDiff(reviewFiles, rel) : onOpenFile(rel))}>
         <PathLabel path={rel} />
       </button>
       <span className="mfc-actions">
@@ -132,30 +134,62 @@ export function MessageFilesCard({
     );
   };
 
+  // The review tab lists the edited files in the card's order.
+  const reviewFiles = edited.flatMap((e) => {
+    const d = diffs.get(e.path);
+    return d ? [d] : [];
+  });
+
   const editedVisible = expanded ? edited : edited.slice(0, MAX_VISIBLE_EDITED);
   const mentionedVisible = expanded ? mentioned : mentioned.slice(0, MAX_VISIBLE);
-  const hidden = edited.length - editedVisible.length + mentioned.length - mentionedVisible.length;
+  const foldable = edited.length > MAX_VISIBLE_EDITED || mentioned.length > MAX_VISIBLE;
+  const total = edited.length + mentioned.length;
+  // The round's whole edit volume, so the header says how big the turn was.
+  const added = edited.reduce((n, e) => n + e.added, 0);
+  const removed = edited.reduce((n, e) => n + e.removed, 0);
+  const headText = (
+    <span className="mfc-head-text">
+      <span className="mfc-title">
+        {edited.length ? S.chat.filesEdited(edited.length) : S.chat.filesMentioned(mentioned.length)}
+      </span>
+      <span className="mfc-sub">
+        {edited.length > 0 && (
+          <span className="mfc-total">
+            <span className="add">+{added.toLocaleString()}</span>
+            <span className="del">-{removed.toLocaleString()}</span>
+          </span>
+        )}
+        <span className="mfc-hint">{S.chat.filesPreviewHint}</span>
+      </span>
+    </span>
+  );
 
   return (
     <div className="msg-files-card">
-      <div className="mfc-head">
-        <span className="mfc-icon"><IconFileCode /></span>
-        <div className="mfc-head-text">
-          <div className="mfc-title">
-            {edited.length ? S.chat.filesEdited(edited.length) : S.chat.filesMentioned(mentioned.length)}
-          </div>
-          <div className="mfc-sub">{S.chat.filesPreviewHint}</div>
+      {reviewFiles.length > 0 ? (
+        // Like dsh, the header opens the round's review on its first file.
+        <button type="button" className="mfc-head mfc-head-btn" title={S.chat.openRoundReview}
+                onClick={() => onOpenDiff(reviewFiles, reviewFiles[0].path)}>
+          <span className="mfc-icon"><IconFileCode /></span>
+          {headText}
+        </button>
+      ) : (
+        <div className="mfc-head">
+          <span className="mfc-icon"><IconFileCode /></span>
+          {headText}
         </div>
-      </div>
+      )}
       <div className="mfc-body">
         {editedVisible.map((e) => row(e.path, e))}
         {edited.length > 0 && mentionedVisible.length > 0 && (
           <div className="mfc-section">{S.chat.filesMentioned(mentioned.length)}</div>
         )}
         {mentionedVisible.map((p) => row(p))}
-        {(hidden > 0 || expanded) && (edited.length > MAX_VISIBLE_EDITED || mentioned.length > MAX_VISIBLE) && (
-          <button type="button" className="msg-files-more" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? S.chat.showLess : S.chat.showMoreFiles(hidden)}
+        {foldable && (
+          <button type="button" className={`msg-files-more${expanded ? " open" : ""}`} aria-expanded={expanded}
+                  onClick={() => setExpanded((v) => !v)}>
+            <span>{expanded ? S.chat.showLess : S.chat.allFiles(total)}</span>
+            <IconChevronDown />
           </button>
         )}
       </div>

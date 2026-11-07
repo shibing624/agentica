@@ -50,6 +50,10 @@ export const deleteDirHistoryApi = (path?: string) =>
   request(`/api/config/dir_history${path ? "?path=" + encodeURIComponent(path) : ""}`, { method: "DELETE" });
 export const saveBaseDirApi = (base_dir: string) => postJson("/api/config/base_dir", { base_dir });
 export const openPathApi = (path: string, app: string) => postJson("/api/open", { path, app });
+export type OpenApp = { id: string; name: string; kind: "files" | "editor" | "terminal" };
+/** Apps installed on the gateway's machine that a folder can open in. */
+export const fetchOpenApps = () => request<{ apps: OpenApp[] }>("/api/open/apps");
+export const openAppIconUrl = (id: string) => `/api/open/apps/${encodeURIComponent(id)}/icon`;
 export const openUrlApi = (url: string) => postJson("/api/open", { url, app: "finder" });
 /** Select the file in Finder / Explorer (Linux: open its folder). */
 export const revealPathApi = (path: string) => postJson("/api/open", { path, app: "reveal" });
@@ -272,3 +276,9 @@ export const saveUserAgentsMd = (content: string) =>
 export const fetchMemoryIndex = () => request<MemoryIndexDoc>("/api/memory");
 export const fetchMemoryEntry = (filename: string) =>
   request<MemoryEntryDoc>(`/api/memory/entry?filename=${encodeURIComponent(filename)}`);
+
+export type GitStatus = { root: string; branch: string; upstream: string; ahead: number; behind: number; changed: string[]; ignored: string[] };
+export const gitStatusApi = (cwd: string, files: string[]) => postJson<GitStatus>("/api/git/status", { cwd, files });
+export const gitMessageApi = (cwd: string, files: string[]) => postJson<{ message: string }>("/api/git/message", { cwd, files });
+export const gitCommitApi = (cwd: string, files: string[], message: string, push: boolean) =>
+  postJson<{ sha: string; files: string[]; pushed: boolean; pushError?: string }>("/api/git/commit", { cwd, files, message, push });

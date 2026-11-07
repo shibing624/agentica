@@ -82,6 +82,12 @@ _AGENT_BUILD_TIMEOUT_S = 30
 # chat session log. See AgentService.run_cron().
 CRON_SESSION_PREFIX = "scheduled_"
 
+_TITLE_PROMPT = (
+    "Name this conversation for a sidebar list. Reply with ONLY the title: "
+    "at most 8 words (or 16 CJK characters), in the user's language, no quotes, "
+    "no trailing punctuation."
+)
+
 _SYSTEM_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders")
 
 
@@ -334,9 +340,16 @@ class AgentService:
         self._session_grants: Dict[str, SessionGrants] = {}
         self._session_preview_cache: OrderedDict[str, tuple[tuple[int, int], Dict[str, Any]]] = OrderedDict()
         self._session_preview_lock = threading.Lock()
+        # Sessions already handed to the background titler, and its live tasks.
+        self._titled: set[tuple[str, str]] = set()
+        self._title_tasks: set[asyncio.Task] = set()
         # Per-session run locks: prevents concurrent runs (chat or stream) on the same session.
         # The underlying Agent instance is NOT thread-safe for concurrent reuse.
         self._session_locks: Dict[str, asyncio.Lock] = {}
+        # Cached agents built under a model/profile that has since changed but
+        # were mid-run then: kept so cancel/steer still reach the run, rebuilt
+        # on the session's next request.
+        self._stale_agents: set[str] = set()
         self._workspace: Optional[Workspace] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
@@ -456,6 +469,33 @@ class AgentService:
             reasoning_effort=getattr(self, f"{prefix}_reasoning_effort"),
             thinking=settings.model_thinking,
         )
+
+    def side_task_model(self) -> Any:
+        """The model for gateway side tasks (titles, commit messages, prompt
+        polish): the auxiliary model when configured, else the main model."""
+        aux = self._build_sibling_model("auxiliary")
+        if aux is not None:
+            return aux
+        return create_model(
+            self.model_provider,
+            self.model_name,
+            base_url=self.model_base_url or None,
+            api_key=self.model_api_key or None,
+            wire_api=self.model_wire_api,
+            reasoning=self.model_reasoning,
+            reasoning_effort=self.model_reasoning_effort,
+        )
+
+    async def side_task(self, system: str, user: str) -> str:
+        """One system+user call on :meth:`side_task_model`; the reply text."""
+        from agentica.model.message import Message
+
+        model = self.side_task_model()
+        response = await model.response([
+            Message(role="system", content=system),
+            Message(role="user", content=user),
+        ])
+        return ((response.content if response else "") or "").strip()
 
     # ============== Initialization ==============
 
@@ -653,8 +693,9 @@ class AgentService:
         """
         key = self._sk(session_id, owner)
         agent = self._cache.get(key)
-        if agent is not None and agent.user_id == self._owner(owner):
+        if agent is not None and agent.user_id == self._owner(owner) and key not in self._stale_agents:
             return agent
+        self._stale_agents.discard(key)
 
         try:
             agent = await asyncio.wait_for(
@@ -1305,6 +1346,7 @@ class AgentService:
                     chunk, on_content, on_tool_call, on_tool_result, on_thinking,
                 )
 
+            self._schedule_title(session_id, owner, message, full_content)
             return ChatResult(
                 content=full_content.strip(),
                 tool_calls=tool_calls,
@@ -1555,13 +1597,20 @@ class AgentService:
             return str(hit["base_dir"]), work_dir
         return fallback, fallback_work
 
-    def has_active_runs(self) -> bool:
-        """Return True if any session currently has an in-flight run.
+    def _drop_cached_agents(self) -> None:
+        """Make every session rebuild its agent with the current settings.
 
-        Used by profile switch to reject switching mid-run (the agent cache
-        clear would evict an agent whose run is still streaming).
+        A session with a run in flight keeps its agent until the run ends (it
+        finishes on the model it started with; evicting it would also cut off
+        cancel and steer), then rebuilds. A model/profile switch therefore
+        never has to wait for, or refuse because of, another session's run.
         """
-        return any(lock.locked() for lock in self._session_locks.values())
+        running = {key for key, lock in self._session_locks.items() if lock.locked()}
+        for key in self._cache.keys():
+            if key in running:
+                self._stale_agents.add(key)
+            else:
+                self._cache.delete(key)
 
     def delete_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Delete a session: cached Agent + persistent SessionLog JSONL + meta.
@@ -1583,6 +1632,7 @@ class AgentService:
             # is still in every other session's list_agents.
             self.agent_peers.forget(session_id)
         self._session_locks.pop(key, None)
+        self._stale_agents.discard(key)
         log_existed = False
         try:
             log = SessionLog(session_id=session_id, base_dir=base_dir)
@@ -1639,6 +1689,40 @@ class AgentService:
         """Rename a session by writing the sidecar .meta.json (SessionLog)."""
         base_dir, _work_dir = self._locate_session(session_id, owner)
         SessionLog.rename_session(session_id, name, base_dir=base_dir)
+
+    def _schedule_title(self, session_id: str, owner: Optional[str], question: str, answer: str) -> None:
+        """Name an unnamed session from its first exchange, in the background.
+
+        One attempt per session per process: a failed call leaves the
+        first-message fallback the sidebar already shows.
+        """
+        if session_id.startswith(CRON_SESSION_PREFIX) or not answer.strip():
+            return
+        key = (owner or "", session_id)
+        if key in self._titled:
+            return
+        self._titled.add(key)
+        log = self.session_log_for(session_id, owner=owner)
+        if log.get_name():
+            return
+        task = asyncio.create_task(self._write_title(log, question, answer))
+        self._title_tasks.add(task)
+        task.add_done_callback(self._title_tasks.discard)
+
+    async def _write_title(self, log: SessionLog, question: str, answer: str) -> None:
+        prompt = (
+            f"User:\n{chat_images.strip_markers(question)[:2000]}\n\n"
+            f"Assistant:\n{answer[:2000]}"
+        )
+        try:
+            title = await self.side_task(_TITLE_PROMPT, prompt)
+        except Exception as e:
+            logger.warning(f"Session title generation failed ({log.session_id}): {e}")
+            return
+        title = title.splitlines()[0].strip().strip("\"'“”「」").strip() if title else ""
+        # The user may have renamed it while the call ran.
+        if title and not log.get_name():
+            log.set_name(title[:60])
 
     def archive_session(
         self, session_id: str, archived: bool = True, owner: Optional[str] = None,
@@ -1941,7 +2025,7 @@ class AgentService:
             settings.auxiliary_reasoning = aux_profile.get("reasoning") or ""
             settings.auxiliary_reasoning_effort = aux_profile.get("reasoning_effort") or ""
             self._initialized = False
-            self._cache.clear()
+            self._drop_cached_agents()
             logger.info(
                 f"Profile reloaded: {profile_name or 'active'} -> "
                 f"{self.model_provider}/{self.model_name}"
@@ -1955,7 +2039,7 @@ class AgentService:
         """
         async with self._init_lock:
             self._initialized = False
-            self._cache.clear()
+            self._drop_cached_agents()
             logger.info("Agent cache invalidated (will rebuild on next request)")
 
     async def add_tool(self, tool: Any) -> None:

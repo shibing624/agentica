@@ -788,11 +788,9 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .plus-menu{left:8px;right:8px}
 .plus-btn.on{color:var(--fg);background:var(--bg3);border-color:var(--fg3)}
 @media(max-width:560px){.cmd-desc{display:none}}
-.skills-wrap{position:relative}
 .skills-dd{min-width:280px;width:min(360px,72vw)}
-.skills-btn{gap:6px;padding:0 8px;font-size:12px}
-.skills-btn .arr,.approval-btn .arr{display:flex;width:12px;height:12px;color:var(--fg3)}
-.skills-btn .arr svg,.approval-btn .arr svg{width:12px;height:12px}
+.approval-btn .arr{display:flex;width:12px;height:12px;color:var(--fg3)}
+.approval-btn .arr svg{width:12px;height:12px}
 .composer-dir{position:relative}
 .composer-dir-btn{gap:6px;padding:0 8px;max-width:180px;font-size:12px}
 .composer-dir-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -815,7 +813,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .foot-btn svg{flex-shrink:0}
 /* attach button */
 .attach-btn{width:30px;padding:0}
-.input-plus-wrap,.approval-wrap,.skills-wrap{position:relative}
+.input-plus-wrap,.approval-wrap{position:relative}
 .plus-btn{width:32px;height:32px;padding:0;border-radius:999px;background:var(--bg3);color:var(--fg2);margin-right:4px}
 .plus-btn:hover{background:var(--hover2)}
 .approval-btn{gap:5px;padding:0 8px;min-width:0}
@@ -1381,16 +1379,28 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-sep{color:var(--fg3);font-size:11px}
 .ws-toolbar-grow{flex:1}
 .ws-tool-btn{border:none;background:transparent;color:var(--fg2);font-size:11px;padding:4px 8px;border-radius:6px;cursor:pointer;font-family:var(--sans)}
-.ws-tool-btn:hover,.ws-tool-btn.on{background:var(--bg3);color:var(--fg)}
-.ws-upload{display:inline-flex;align-items:center;cursor:pointer}
-.ws-details-wrap{position:relative}
-.ws-details-pop{position:absolute;right:0;top:100%;margin-top:4px;z-index:20;width:min(280px,70vw);background:var(--bg);border:var(--hair) solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:var(--elev-pop)}
-.ws-details-label{font-size:11px;color:var(--fg3);margin:0}
-.ws-details-path{font-family:var(--mono);font-size:11px;line-height:1.45;word-break:break-all;margin:6px 0 8px}
-.ws-details-acts{display:flex;gap:4px}
-.ws-details-acts button{border:var(--hair) solid var(--border);background:var(--bg);border-radius:6px;padding:4px 6px;cursor:pointer;color:var(--fg2);display:inline-flex}
-.ws-details-acts button:hover{background:var(--bg3);color:var(--fg)}
-.ws-details-acts svg{width:13px;height:13px}
+.ws-tool-btn:hover{background:var(--bg3);color:var(--fg)}
+/* Icon tools beside the breadcrumbs (dsh's files header): 26px squares. */
+.ws-tool{width:26px;height:26px;flex:none;border:none;border-radius:6px;background:transparent;color:var(--fg2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.ws-tool svg{width:14px;height:14px}
+.ws-tool:hover{background:var(--bg3);color:var(--fg)}
+.ws-tool.busy{opacity:.5;cursor:progress}
+/* dsh's open-in-app split pill: last-used app, chevron for the rest. */
+.ws-open{position:relative;display:inline-flex;flex:none;align-items:stretch;height:24px;margin-left:2px;border:var(--hair) solid var(--border);border-radius:6px}
+.ws-open-main,.ws-open-more{display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg2);cursor:pointer;padding:0 5px}
+.ws-open-main{border-radius:5px 0 0 5px}
+.ws-open-more{padding:0 4px 0 3px;border-left:var(--hair) solid var(--border);border-radius:0 5px 5px 0}
+.ws-open-main:hover,.ws-open-more:hover,.ws-open-more.on{background:var(--bg3);color:var(--fg)}
+.ws-open-main svg{width:13px;height:13px}
+.ws-open-more svg{width:10px;height:10px}
+.ws-app-icon{width:14px;height:14px;object-fit:contain;flex:none}
+.ws-open-menu{position:absolute;right:0;top:100%;margin-top:4px;z-index:30;min-width:200px;max-width:min(300px,70vw);background:var(--bg);border:var(--hair) solid var(--border);border-radius:10px;padding:4px;box-shadow:var(--elev-pop)}
+.ws-open-path{margin:2px 8px 4px;font-family:var(--mono);font-size:11px;color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.ws-open-group+.ws-open-group{margin-top:4px;padding-top:4px;border-top:var(--hair) solid var(--border)}
+.ws-open-item{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border:none;border-radius:6px;background:transparent;color:var(--fg);font:inherit;font-size:13px;cursor:pointer;text-align:left}
+.ws-open-item svg{width:14px;height:14px;color:var(--fg2);flex:none}
+.ws-open-item:hover{background:var(--bg3)}
+.ws-open-item.on span::after{content:" ✓";color:var(--fg3)}
 .ws-list{flex:1;overflow:auto}
 .ws-list ul{list-style:none;margin:0;padding:0}
 .ws-list ul.busy{opacity:.55}
@@ -1499,9 +1509,20 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .mfc-head{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg2);border-bottom:var(--hair) solid var(--border2)}
 .mfc-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:9px;background:var(--bg);border:var(--hair) solid var(--border2);color:var(--accent);flex-shrink:0}
 .mfc-icon svg{width:18px;height:18px}
-.mfc-head-text{min-width:0}
+.mfc-head-btn{width:100%;border:none;border-bottom:var(--hair) solid var(--border2);font:inherit;text-align:left;cursor:pointer;color:inherit}
+.mfc-head-btn:hover{background:var(--bg3)}
+.mfc-head-text{min-width:0;display:flex;flex-direction:column}
 .mfc-title{font-size:14px;font-weight:600;color:var(--fg)}
-.mfc-sub{font-size:12px;color:var(--fg3);margin-top:1px}
+.mfc-sub{font-size:12px;color:var(--fg3);margin-top:1px;display:flex;align-items:center;gap:8px}
+/* The round's total +/- (dsh): shown at rest, swapped for the hint on hover. */
+.mfc-total{display:inline-flex;gap:6px;font-family:var(--mono)}
+.mfc-total .add{color:#1a7f37}
+.mfc-total .del{color:#cf222e}
+[data-theme="dark"] .mfc-total .add{color:#3fb950}
+[data-theme="dark"] .mfc-total .del{color:#f85149}
+.mfc-head-btn .mfc-hint{display:none}
+.mfc-head-btn:hover .mfc-total{display:none}
+.mfc-head-btn:hover .mfc-hint,.mfc-head-btn:focus-visible .mfc-hint{display:inline}
 .mfc-body{padding:4px 0}
 .mfc-section{padding:8px 16px 2px;font-size:11px;color:var(--fg3)}
 .mfc-row{display:flex;align-items:center;gap:10px;padding:0 10px 0 6px}
@@ -1524,6 +1545,19 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 [data-theme="dark"] .fd-root{--fd-add-bg:rgba(46,160,67,.15);--fd-add-gutter:rgba(46,160,67,.25);--fd-add-mark:#3fb950;
   --fd-del-bg:rgba(248,81,73,.15);--fd-del-gutter:rgba(248,81,73,.25);--fd-del-mark:#f85149}
 .fd-name{display:flex;align-items:center;gap:8px}
+/* dsh's review header: file selector, the file's counts, then the tools. */
+.rv-select{position:relative;min-width:0;flex:0 1 auto}
+.rv-select-btn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:28px;padding:0 6px 0 8px;border:none;border-radius:6px;background:transparent;color:var(--fg);font:inherit;font-size:12px;cursor:pointer}
+.rv-select-btn:hover,.rv-select-btn.on{background:var(--bg3)}
+.rv-select-btn svg{width:12px;height:12px;flex:none;color:var(--fg2)}
+.rv-select-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.rv-single{font-size:12px}
+.rv-counts{flex:none;margin-right:auto}
+.rv-menu{position:absolute;left:0;top:100%;margin-top:4px;z-index:30;width:max-content;min-width:260px;max-width:min(460px,80vw);max-height:60vh;overflow:auto;background:var(--bg);border:var(--hair) solid var(--border);border-radius:10px;padding:4px;box-shadow:var(--elev-pop)}
+.rv-item{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:28px;padding:0 8px;border:none;border-radius:6px;background:transparent;color:var(--fg);font:inherit;font-size:12px;cursor:pointer;text-align:left}
+.rv-item:hover{background:var(--bg3)}
+.rv-item.on{background:var(--bg3);font-weight:600}
+.rv-item-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fd-name>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pv-icon.on{background:var(--bg3);color:var(--fg)}
 .fd-body{flex:1;min-height:0;overflow:auto;padding:8px 0 16px;font-family:var(--mono);font-size:12.5px}
@@ -1553,7 +1587,9 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .fd-del .fd-sign,.fd-del .fd-text{color:var(--fd-del-mark)}
 .fd-empty{background:var(--fd-empty)}
 .mfc-actions svg{width:14px;height:14px}
-.msg-files-more{width:100%;border:none;background:transparent;color:var(--fg3);font-size:12px;padding:8px 16px;cursor:pointer;text-align:left}
+.msg-files-more{width:100%;border:none;border-top:var(--hair) solid var(--border2);background:transparent;color:var(--fg3);font-size:12px;padding:9px 16px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:4px}
+.msg-files-more svg{width:14px;height:14px;transition:transform .15s}
+.msg-files-more.open svg{transform:rotate(180deg)}
 .msg-files-more:hover{background:var(--bg3);color:var(--fg)}
 
 
@@ -1721,3 +1757,29 @@ button.compact-head:hover{background:var(--bg3)}
 .auto-notice-chev svg{width:11px;height:11px}
 .auto-notice.open .auto-notice-chev{transform:rotate(180deg)}
 .auto-notice-body{margin:4px 0 2px;padding:8px 10px;max-height:320px;overflow:auto;border-radius:8px;background:var(--bg2);font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--fg2);white-space:pre-wrap;word-break:break-word}
+/* Review tab: commit / commit+push (Codex app style split button + dialog). */
+.git-split{position:relative;display:inline-flex;flex:none;align-items:stretch;height:24px;margin-right:4px;border-radius:6px;background:var(--fg);color:var(--bg)}
+.git-split-main,.git-split-arrow{display:inline-flex;align-items:center;border:none;background:transparent;color:inherit;font:inherit;font-size:12px;font-weight:500;cursor:pointer}
+.git-split-main{padding:0 9px;border-radius:6px 0 0 6px}
+.git-split-arrow{padding:0 5px;border-left:1px solid color-mix(in srgb,var(--bg) 30%,transparent);border-radius:0 6px 6px 0}
+.git-split-arrow svg{width:10px;height:10px}
+.git-split-main:hover,.git-split-arrow:hover,.git-split-arrow.on{background:color-mix(in srgb,var(--bg) 14%,transparent)}
+.git-menu{left:auto;right:0;min-width:160px}
+.git-dialog{display:flex;flex-direction:column;gap:10px;min-width:min(440px,80vw)}
+.git-branch{font-family:var(--mono);font-size:12px;color:var(--fg2)}
+.git-upstream{color:var(--fg3)}
+.git-files{max-height:180px;overflow:auto;border:var(--hair) solid var(--border);border-radius:8px;padding:4px}
+.git-file{display:flex;align-items:center;gap:8px;min-height:26px;padding:0 6px;border-radius:6px;font-size:12px;cursor:pointer}
+.git-file:hover{background:var(--bg3)}
+.git-file.clean{color:var(--fg3);cursor:default}
+.git-file-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+.git-msg{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.git-msg textarea{width:100%;box-sizing:border-box;min-height:96px;resize:vertical;border:var(--hair) solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;background:var(--bg);color:var(--fg)}
+.git-draft{height:24px;padding:0 8px;border:var(--hair) solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg2);font:inherit;font-size:12px;cursor:pointer}
+.git-draft:hover:not(:disabled){background:var(--bg3);color:var(--fg)}
+.git-draft:disabled{opacity:.5;cursor:default}
+.git-push{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--fg2);cursor:pointer}
+.git-warn,.git-error{margin:0;font-size:12px;color:#c4553a}
+.git-file-tag{flex:none;margin-left:auto;padding-left:8px;font-size:11px;color:var(--fg3)}
+.dlg.wide:has(.git-dialog){width:min(640px,92vw)}
+.git-dialog{min-width:0}

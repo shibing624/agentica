@@ -17,7 +17,6 @@ def client():
 
     svc = MagicMock()
     svc._ensure_initialized = AsyncMock()
-    svc.has_active_runs = MagicMock(return_value=False)
     svc.reload_profile = AsyncMock()
     svc.get_context_window = MagicMock(return_value=128000)
     svc.model_provider = "openai"

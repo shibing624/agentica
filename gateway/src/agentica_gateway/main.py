@@ -42,7 +42,7 @@ from .services.channel_manager import ChannelManager
 from .services.agent_peers import GatewayAgentPeers
 from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
-from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes, terminals as terminal_routes
+from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes, terminals as terminal_routes, git as git_routes
 from .terminals import manager as terminal_manager
 
 # ContextVar holding the current request ID — async-safe, no threading issues
@@ -465,6 +465,7 @@ app.include_router(settings_routes.router)
 app.include_router(chat.router)
 app.include_router(workspace_routes.router)
 app.include_router(terminal_routes.router)
+app.include_router(git_routes.router)
 app.include_router(traces_routes.router)
 app.include_router(scheduler_routes.router)
 app.include_router(plugins_routes.router)

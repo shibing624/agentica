@@ -53,6 +53,8 @@ hljs.registerLanguage("yaml", yaml);
 const ALIAS: Record<string, string> = {
   md: "markdown",
   py: "python",
+  python3: "python",
+  py3: "python",
   yml: "yaml",
   js: "javascript",
   mjs: "javascript",
@@ -125,7 +127,9 @@ const EXT_LANG: Record<string, string> = {
   patch: "diff",
 };
 
-export const HIGHLIGHT_LIMIT = 64 * 1024;
+// The workspace preview serves up to 256 KB; a core module (runner/loop.py is
+// ~110 KB) highlights in ~30 ms, so the cap only keeps pathological blobs plain.
+export const HIGHLIGHT_LIMIT = 256 * 1024;
 
 function escapeHtml(text: string) {
   return text

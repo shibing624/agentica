@@ -11,7 +11,7 @@ import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
 import { TodoDock } from "../components/TaskCard";
 import { AutomatedNotice } from "../components/AutomatedNotice";
-import { latestTodos } from "../lib/workActivity";
+import { dockTodos } from "../lib/workActivity";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
 import { fmtDurationMs, fmtN, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
@@ -20,7 +20,7 @@ import { createSession, forkAt, hydrateSession, markSessionRead, pushPendingName
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconChat, IconAsk, IconAuto, IconSidebarRight,
-  IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook,
+  IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil,
   IconChevronDown, IconThumbUp, IconThumbDown, IconFork, IconCompact, IconSpinner,
 } from "../icons";
 import {
@@ -33,7 +33,7 @@ import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
-import type { DiffHunk } from "../lib/fileDiff";
+import type { FileEdits } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
@@ -67,7 +67,6 @@ export function ChatPage() {
   const [goalBudgetOpen, setGoalBudgetOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   const approvalWrapRef = useRef<HTMLDivElement>(null);
-  const skillsWrapRef = useRef<HTMLDivElement>(null);
   const ctxWrapRef = useRef<HTMLDivElement>(null);
   const skillHlRef = useRef<HTMLDivElement>(null);
   const skillMarkRef = useRef<HTMLElement>(null);
@@ -145,7 +144,7 @@ export function ChatPage() {
       if (!modelWrapRef.current?.contains(t)) patch.modelDDOpen = false;
       if (!approvalWrapRef.current?.contains(t)) patch.approvalMenuOpen = false;
       if (patch.modelDDOpen !== undefined || patch.approvalMenuOpen !== undefined) setState(patch);
-      if (!skillsWrapRef.current?.contains(t)) setSkillsOpen(false);
+      if (!plusWrapRef.current?.contains(t)) setSkillsOpen(false);
       if (!ctxWrapRef.current?.contains(t)) setCtxOpen(false);
       if (!plusWrapRef.current?.contains(t)) setPlusOpen(false);
       if (getState().composerPicker && !pickerRef.current?.contains(t)) setState({ composerPicker: null });
@@ -175,6 +174,12 @@ export function ChatPage() {
   const pick = (it: MenuItem) => {
     setPlusOpen(false);
     setSkillsOpen(false);
+    if (it.id === "skill") {
+      // Next tick: the pick fires on mousedown, and the outside-click handler
+      // that follows would close a picker opened right now.
+      setTimeout(() => setSkillsOpen(true), 0);
+      return;
+    }
     runCommand(it, taRef);
   };
   useEffect(() => {
@@ -331,7 +336,8 @@ export function ChatPage() {
                 </div>
               ) : cur.msgs.map((m, i) => (
                 <MessageView key={i} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
-                  onOpenFile={files.browsePath} onOpenDiff={files.openDiff} onOpenSkill={files.openSkill}
+                  turn={turnOf(cur.msgs, i)}
+                  onOpenFile={files.browsePath} onOpenReview={files.openReview} onOpenSkill={files.openSkill}
                   live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
                   pendingToolCallId={pendingToolCallId} />
               ))}
@@ -363,7 +369,7 @@ export function ChatPage() {
               onDecide={(d) => void decideCurrentApproval(d)}
             />
           )}
-          {cur && <TodoDock todos={latestTodos(cur.msgs)} live={streaming} />}
+          {cur && <TodoDock todos={dockTodos(cur.msgs, busy)} live={streaming} />}
           {goalRun && (
             <div className="goal-bar" title={goalRun.progress}>
               <span className="goal-bar-status">{S.chat.goalBar(goalRun.status, goalRun.objective)}</span>
@@ -601,17 +607,6 @@ export function ChatPage() {
                                    }
                                  }} />
                   )}
-                </div>
-                <div className="skills-wrap" ref={skillsWrapRef}>
-                  <button type="button" className="foot-btn skills-btn" title={S.chat.slashSkill}
-                          onClick={() => {
-                            setState({ approvalMenuOpen: false, modelDDOpen: false });
-                            setSkillsOpen(!skillsOpen);
-                          }}>
-                    <IconBook />
-                    <span>{S.chat.slashSkill}</span>
-                    <span className="arr"><IconChevronDown /></span>
-                  </button>
                   {skillsOpen && (
                     <SkillsPicker
                       skills={s.pluginsData.skills || []}
@@ -744,9 +739,20 @@ function CompactCard({ c }: { c: NonNullable<ChatMsg["compact"]> }) {
   );
 }
 
-function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenDiff, onOpenSkill, live, pendingToolCallId }: {
-  idx: number; m: ChatMsg; sessionId: string | null; workspace: string; onOpenFile: (path: string) => void;
-  onOpenDiff: (path: string, edits: DiffHunk[][]) => void;
+/** Round number of message `idx`: real questions up to it (steer chips and
+ *  automated reports are not rounds), the same count the chat nav shows. */
+function turnOf(msgs: ChatMsg[], idx: number): number {
+  let n = 0;
+  for (let i = 0; i <= idx && i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role === "user" && !m.steer && !m.automated) n++;
+  }
+  return Math.max(1, n);
+}
+
+function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenReview, onOpenSkill, live, pendingToolCallId }: {
+  idx: number; m: ChatMsg; sessionId: string | null; workspace: string; turn: number; onOpenFile: (path: string) => void;
+  onOpenReview: (turn: number, files: FileEdits[], path: string) => void;
   onOpenSkill: (name: string) => void; live?: boolean; pendingToolCallId?: string;
 }) {
   const S = useStrings();
@@ -817,7 +823,7 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenDiff, onO
           uploaded={m.files}
           workspace={workspace || null}
           onOpenFile={onOpenFile}
-          onOpenDiff={onOpenDiff}
+          onOpenDiff={(files, path) => onOpenReview(turn, files, path)}
           live={!!live}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}

@@ -18,7 +18,7 @@ import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { joinWorkspacePath } from "../lib/file-path";
 import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
-import { IconCopy, IconFinder, IconFolder, IconTerminal } from "../icons";
+import { IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
 
 const TEXT_EXTS = new Set([
@@ -215,8 +215,6 @@ export function WorkspaceBrowser({
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
-  const [showPath, setShowPath] = useState(false);
-  const detailsRef = useRef<HTMLDivElement>(null);
 
   const [renderedRoot, setRenderedRoot] = useState(root);
   if (renderedRoot !== root) {
@@ -241,20 +239,6 @@ export function WorkspaceBrowser({
     if (active && !prevActive.current) setReloadTick((t) => t + 1);
     prevActive.current = active;
   }, [active]);
-
-  useEffect(() => {
-    if (!showPath) return;
-    const onDown = (e: MouseEvent) => {
-      if (!detailsRef.current?.contains(e.target as Node)) setShowPath(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowPath(false); };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [showPath]);
 
   const doUpload = (files: File[]) => {
     setUploading(true);
@@ -302,27 +286,16 @@ export function WorkspaceBrowser({
           </span>
         ))}
         <span className="ws-toolbar-grow" />
-        <div className="ws-details-wrap" ref={detailsRef}>
-          <button type="button" className={"ws-tool-btn" + (showPath ? " on" : "")} onClick={() => setShowPath((v) => !v)}>
-            {S.files.details}
-          </button>
-          {showPath && (
-            <div className="ws-details-pop">
-              <p className="ws-details-label">{S.files.workspacePath}</p>
-              <p className="ws-details-path">{root}</p>
-              <div className="ws-details-acts">
-                <button type="button" title={S.chat.copyPath} onClick={() => { void navigator.clipboard.writeText(root); showToast(S.common.copied); }}><IconCopy /></button>
-                <button type="button" title={S.chat.openFinder} onClick={() => void api.openPathApi(root, "finder")}><IconFinder /></button>
-                <button type="button" title={S.chat.openTerminal} onClick={() => void api.openPathApi(root, "terminal")}><IconTerminal /></button>
-              </div>
-            </div>
-          )}
-        </div>
-        <button type="button" className="ws-tool-btn" onClick={() => setReloadTick((t) => t + 1)}>{S.files.refresh}</button>
-        <label className="ws-tool-btn ws-upload">
+        <button type="button" className="ws-tool" title={S.files.refresh} aria-label={S.files.refresh}
+                onClick={() => setReloadTick((t) => t + 1)}>
+          <IconRefresh />
+        </button>
+        <label className={"ws-tool" + (uploading ? " busy" : "")} title={uploading ? S.files.uploading : S.files.upload}
+               aria-label={S.files.upload}>
           <input type="file" multiple hidden disabled={uploading} onChange={onUpload} />
-          {uploading ? S.files.uploading : S.files.upload}
+          <IconUpload />
         </label>
+        <OpenFolderButton dir={path ? root.replace(/\/+$/, "") + "/" + path : root} />
       </div>
       <div className="ws-list">
         {error ? <p className="ws-err">{error}</p>
@@ -350,6 +323,91 @@ export function WorkspaceBrowser({
             </ul>
           )}
       </div>
+    </div>
+  );
+}
+
+const APP_CHOICE_KEY = "ag_open_in_app";
+let appsCache: Promise<api.OpenApp[]> | null = null;
+function loadApps(): Promise<api.OpenApp[]> {
+  appsCache ??= api.fetchOpenApps().then(({ ok, data }) => (ok && data ? data.apps : []));
+  return appsCache;
+}
+
+/** The app's own icon from the gateway; a glyph by kind when it has none. */
+function AppIcon({ app }: { app: api.OpenApp }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return app.kind === "terminal" ? <IconTerminal /> : app.kind === "files" ? <IconFinder /> : <IconFolder />;
+  return <img className="ws-app-icon" src={api.openAppIconUrl(app.id)} alt="" draggable={false} onError={() => setFailed(true)} />;
+}
+
+/**
+ * dsh's open-in-app split button for the folder on screen: the main half opens
+ * it in the last app picked (Finder at first); the chevron lists every
+ * installed file manager, editor and terminal, with "copy path" below them.
+ */
+function OpenFolderButton({ dir }: { dir: string }) {
+  const S = useStrings();
+  const [apps, setApps] = useState<api.OpenApp[]>([]);
+  const [choice, setChoice] = useState(() => localStorage.getItem(APP_CHOICE_KEY) || "finder");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { void loadApps().then(setApps); }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const preferred = apps.find((a) => a.id === choice) ?? apps[0];
+  const launch = (app: api.OpenApp) => {
+    setOpen(false);
+    void api.openPathApi(dir, app.id).then(({ ok }) => {
+      if (!ok) { showToast(S.chat.openFailed, 2500); return; }
+      localStorage.setItem(APP_CHOICE_KEY, app.id);
+      setChoice(app.id);
+    });
+  };
+  const copy = () => {
+    setOpen(false);
+    void navigator.clipboard.writeText(dir).then(() => showToast(S.common.copied));
+  };
+  const icon = (a: api.OpenApp) => <AppIcon app={a} />;
+  const groups = (["files", "editor", "terminal"] as const)
+    .map((kind) => apps.filter((a) => a.kind === kind))
+    .filter((g) => g.length);
+  return (
+    <div className="ws-open" ref={ref}>
+      <button type="button" className="ws-open-main" disabled={!preferred} title={preferred ? S.files.openIn(preferred.name) : ""}
+              aria-label={preferred ? S.files.openIn(preferred.name) : ""} onClick={() => preferred && launch(preferred)}>
+        {preferred ? icon(preferred) : <IconFinder />}
+      </button>
+      <button type="button" className={"ws-open-more" + (open ? " on" : "")} aria-haspopup="menu" aria-expanded={open}
+              title={S.files.openInMore} aria-label={S.files.openInMore} onClick={() => setOpen((v) => !v)}>
+        <IconChevronDown />
+      </button>
+      {open && (
+        <div className="ws-open-menu" role="menu">
+          <p className="ws-open-path" title={dir}><bdi dir="ltr">{dir}</bdi></p>
+          {groups.map((g, gi) => (
+            <div key={gi} className="ws-open-group">
+              {g.map((a) => (
+                <button key={a.id} type="button" role="menuitem" className={"ws-open-item" + (a.id === preferred?.id ? " on" : "")}
+                        onClick={() => launch(a)}>
+                  {icon(a)}<span>{a.name}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+          <div className="ws-open-group">
+            <button type="button" role="menuitem" className="ws-open-item" onClick={copy}>
+              <IconCopy /><span>{S.files.copyFolderPath}</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

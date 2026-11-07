@@ -177,3 +177,16 @@ export function latestTodos(
   }
   return [];
 }
+
+/**
+ * The plan above the composer: only while a turn is running, as dsh clears
+ * its dock when the next turn starts. A finished turn's plan, often left with
+ * its last step `in_progress` because the model answered instead of writing
+ * the list once more, stays in the transcript's task card and leaves the dock.
+ */
+export function dockTodos(
+  msgs: Array<{ role?: string; steer?: boolean; automated?: boolean; parts?: MsgPart[] }>,
+  running: boolean,
+): Todo[] {
+  return running ? latestTodos(msgs) : [];
+}

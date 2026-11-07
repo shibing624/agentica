@@ -58,7 +58,6 @@ def mock_app():
     mock_svc.model_reasoning_effort = ""
     mock_svc._invalidate_cache = AsyncMock()
     mock_svc.reload_profile = AsyncMock()
-    mock_svc.has_active_runs = MagicMock(return_value=False)
     mock_svc.has_cached_session = MagicMock(return_value=False)
     mock_svc.is_session_active = MagicMock(return_value=False)
     mock_svc.cancel_session = MagicMock(return_value=False)
@@ -720,6 +719,28 @@ class TestOpenUrlAndWechatQr:
 
         assert _open_command(r"C:\a.txt", "reveal", platform="win32") == ["explorer", r"/select,C:\a.txt"]
         assert _open_command(r"C:\a.txt", "editor", platform="win32") == ["notepad", r"C:\a.txt"]
+
+    def test_only_installed_apps_are_offered_and_open_with_their_bundle(self, monkeypatch):
+        import agentica_gateway.routes.settings as settings_routes
+
+        installed = {"/Applications/Cursor.app", "/System/Library/CoreServices/Finder.app", "/Applications/cmux.app"}
+        monkeypatch.setattr(settings_routes.os.path, "isdir", lambda p: p in installed)
+        apps = settings_routes.installed_apps(platform="darwin")
+        assert [(a["id"], a["kind"]) for a in apps] == [("finder", "files"), ("cursor", "editor"), ("cmux", "terminal")]
+        assert settings_routes._open_command("/x", "cursor", platform="darwin") == [
+            "open", "-a", "/Applications/Cursor.app", "/x"]
+        assert settings_routes._open_command("/x", "cmux", platform="darwin") == [
+            "open", "-a", "/Applications/cmux.app", "/x"]
+        # An app the catalog knows but this machine lacks opens nothing.
+        assert settings_routes._open_command("/x", "iterm", platform="darwin") is None
+        # Finder keeps the default-app route, Terminal its own.
+        assert settings_routes._open_command("/x", "finder", platform="darwin") == ["open", "/x"]
+
+    def test_open_in_a_catalog_app_reaches_the_desktop(self, mock_app, opened_externally, tmp_path):
+        client, _ = mock_app
+        resp = client.post("/api/open", json={"path": str(tmp_path), "app": "cursor"})
+        assert resp.status_code == 200
+        assert opened_externally == [(str(tmp_path), "cursor")]
 
     def test_linux_terminal_without_any_terminal_opens_nothing(self, monkeypatch):
         import agentica_gateway.routes.settings as settings_routes

@@ -3,10 +3,10 @@ import * as api from "../api";
 import { useAppState, showToast } from "../store";
 import { useStrings } from "../i18n";
 import {
-  activateTab, adoptTerminals, closeTab, diffKey, fileKey, FILES_TAB, GUIDE_TAB, initialTabs, nextTerminalOrdinal,
+  activateTab, adoptTerminals, closeTab, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialTabs, nextTerminalOrdinal,
   openTab, replaceTab, skillKey, terminalKey, upsertTab, type PanelTab, type TabsState,
 } from "../lib/panelTabs";
-import type { DiffHunk } from "../lib/fileDiff";
+import type { FileEdits } from "../lib/fileDiff";
 import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth } from "./panelWidth";
 
 export type FilesPanelState = {
@@ -27,8 +27,9 @@ export type FilesPanelState = {
   browsePath: (path: string) => void;
   /** Open an installed skill's SKILL.md in a tab. */
   openSkill: (name: string) => void;
-  /** Review a reply's edits to one file (its diff tab, reused per file). */
-  openDiff: (path: string, edits: DiffHunk[][]) => void;
+  /** Review round `turn`'s edits with `path` on screen (one tab per round). */
+  openReview: (turn: number, files: FileEdits[], path: string) => void;
+  selectReviewFile: (key: string, path: string) => void;
   /** "+": open the start page (or focus it), where the user picks what to open. */
   openGuide: () => void;
   /** Start-page cards: the start page turns into the picked page. */
@@ -150,9 +151,13 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     update((st) => openTab(st, { key: skillKey(name), kind: "skill", name }));
   }, [update]);
 
-  const openDiff = useCallback((path: string, edits: DiffHunk[][]) => {
+  const openReview = useCallback((turn: number, files: FileEdits[], path: string) => {
     setOpen(true);
-    update((st) => upsertTab(st, { key: diffKey(path), kind: "diff", path, edits }));
+    update((st) => upsertTab(st, { key: reviewKey(turn), kind: "review", turn, files, path }));
+  }, [update]);
+
+  const selectReviewFile = useCallback((key: string, path: string) => {
+    update((st) => ({ ...st, tabs: st.tabs.map((t) => (t.key === key && t.kind === "review" ? { ...t, path } : t)) }));
   }, [update]);
 
   const activate = useCallback((key: string) => update((st) => activateTab(st, key)), [update]);
@@ -185,6 +190,6 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   return {
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close,
-    browsePath, openSkill, openDiff, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
+    browsePath, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
   };
 }

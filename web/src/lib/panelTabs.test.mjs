@@ -98,12 +98,13 @@ test("there is one start page: opening it again focuses it", () => {
   assert.equal(st.active, "guide");
 });
 
-test("a file's diff tab is reused: reopening it swaps the edits in place and focuses it", () => {
-  const diff = (path, n) => ({ key: T.diffKey(path), kind: "diff", path, edits: [[{ oldStart: n, oldLines: 1, newStart: n, newLines: 1, lines: ["+x"] }]] });
-  let st = T.upsertTab(T.initialTabs(), diff("a.py", 1));
-  st = T.openTab(st, file("b"));
-  st = T.upsertTab(st, diff("a.py", 9));
-  assert.deepEqual(keys(st), ["files", "diff:a.py", "file:b"]);
-  assert.equal(st.active, "diff:a.py");
-  assert.equal(st.tabs[1].edits[0][0].oldStart, 9);
+test("a round's review tab is reused: picking another of its files swaps it in place and focuses it", () => {
+  const files = [{ path: "a.py", edits: [] }, { path: "b.py", edits: [] }];
+  const review = (path) => ({ key: T.reviewKey(3), kind: "review", turn: 3, files, path });
+  let st = T.upsertTab(T.initialTabs(), review("a.py"));
+  st = T.openTab(st, file("c"));
+  st = T.upsertTab(st, review("b.py"));
+  assert.deepEqual(keys(st), ["files", "review:3", "file:c"]);
+  assert.equal(st.active, "review:3");
+  assert.equal(st.tabs[1].path, "b.py");
 });

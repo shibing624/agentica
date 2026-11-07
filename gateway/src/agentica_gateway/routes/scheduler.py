@@ -25,7 +25,6 @@ from agentica.cron.scheduler import execute_job
 from agentica.tools.cron_tool import cronjob
 
 from .. import deps
-from ..config import settings
 from ..models import CronJobCreateRequest, CronJobUpdateRequest, PolishPromptRequest
 
 router = APIRouter(prefix="/api/scheduler")
@@ -215,24 +214,10 @@ async def polish_prompt(body: PolishPromptRequest):
     if not draft:
         raise HTTPException(status_code=400, detail="draft must not be empty")
 
-    from agentica.model.message import Message
-    from ..services.model_factory import create_model
-
-    model = create_model(
-        settings.model_provider,
-        settings.model_name,
-        base_url=settings.model_base_url or None,
-        api_key=settings.model_api_key or None,
-    )
-    messages = [
-        Message(role="system", content=_POLISH_SYSTEM_PROMPT),
-        Message(role="user", content=draft),
-    ]
     try:
-        response = await model.response(messages)
+        polished = await deps.get_agent_service().side_task(_POLISH_SYSTEM_PROMPT, draft)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM call failed: {e}")
-    polished = (response.content or "").strip() if response else ""
     if not polished:
         raise HTTPException(status_code=502, detail="LLM returned an empty response")
     return {"prompt": polished}

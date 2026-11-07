@@ -23,6 +23,11 @@ export const IconRefresh = () => (
     <path d="M13.25 8a5.25 5.25 0 11-1.54-3.71" /><path d="M13.25 2.75v2.5h-2.5" />
   </S>
 );
+export const IconUpload = () => (
+  <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 10.5V3M4.75 6.25L8 3l3.25 3.25M3 13.25h10" />
+  </S>
+);
 export const IconDownload = () => (
   <S strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
     <path d="M8 2.5v7.5M4.75 7l3.25 3.25L11.25 7M3 13.25h10" />

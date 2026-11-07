@@ -100,3 +100,14 @@ test("an unfinished plan stays with its turn, not with later questions", () => {
   const next = [...interrupted, { role: "user", content: "q2" }, { role: "assistant", parts: [todos([{ content: "c", status: "pending" }])] }];
   assert.deepEqual(A.latestTodos(next).map((t) => t.content), ["c"]);
 });
+
+test("the dock shows the plan only while the turn runs; a finished turn leaves it", () => {
+  const todos = (list) => ({ kind: "tool", name: "write_todos", argsStr: JSON.stringify({ todos: list }), result: "ok" });
+  // The model finished the work but never wrote the last step as completed.
+  const msgs = [
+    { role: "user", content: "do it" },
+    { role: "assistant", parts: [todos([{ content: "a", status: "completed" }, { content: "b", status: "in_progress" }])] },
+  ];
+  assert.deepEqual(A.dockTodos(msgs, true).map((t) => t.status), ["completed", "in_progress"]);
+  assert.deepEqual(A.dockTodos(msgs, false), []);
+});
