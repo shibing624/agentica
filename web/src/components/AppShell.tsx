@@ -23,8 +23,6 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DirModal } from "./DirModal";
 import { SessionTree } from "./SessionTree";
 
-const SERVER_SYNC_MS = 5000;
-
 /**
  * The frame every page inside the app shares: left navigation, the account
  * popover, and the modals any of that navigation can open.
@@ -85,15 +83,14 @@ export function AppShell({
   }, []);
 
   // Another client (browser tab, desktop window, CLI) may have run a turn.
-  // Focus covers switching windows; the poll covers two windows side by side,
-  // where neither ever regains focus.
+  // Sync on window focus / tab visibility rather than polling `/api/sessions`
+  // every 5s in the background; active remote runs already poll their own
+  // `/api/sessions/{id}/run` status in `SessionTree`.
   useEffect(() => {
     const sync = () => { if (document.visibilityState === "visible") void syncFromServer(); };
-    const timer = window.setInterval(sync, SERVER_SYNC_MS);
     window.addEventListener("focus", sync);
     document.addEventListener("visibilitychange", sync);
     return () => {
-      window.clearInterval(timer);
       window.removeEventListener("focus", sync);
       document.removeEventListener("visibilitychange", sync);
     };
