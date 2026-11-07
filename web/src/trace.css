@@ -4,7 +4,10 @@
 .topbar-tabs .trace-link{margin-left:0;border-radius:0;padding:0 2px 7px}
 .topbar-tabs .trace-link:hover{background:transparent;color:var(--fg)}
 .topbar-tabs button.tb-tab{border:none;background:transparent;font-family:var(--sans)}
-.trace-head-meta{font-family:var(--mono);font-size:11px;color:var(--fg3);gap:10px}
+.trace-meta-bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-bottom:8px;font-size:11.5px;color:var(--fg3);font-family:var(--mono);flex-shrink:0}
+.trace-meta-item{white-space:nowrap}
+.trace-meta-path{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;color:var(--fg3)}
+.trace-meta-path code{font:inherit;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* ---- page column: header and tabs fixed, the active tab fills the rest ---- */
 .trace-main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:14px 20px 16px;min-width:0}
 .trace-empty{color:var(--fg2);padding:60px 0;text-align:center}

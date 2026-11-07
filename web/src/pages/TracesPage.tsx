@@ -1,9 +1,9 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useSearchParams } from "react-router";
 import * as api from "../api";
 import { useStrings, type Strings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps } from "../lib/format";
-import { IconCopy, IconSearch } from "../icons";
+import { IconChat, IconCopy, IconSearch } from "../icons";
 import { showToast, useAppState } from "../store";
 import { switchTo } from "../sessions";
 import { TaskCard } from "../components/TaskCard";
@@ -139,7 +139,6 @@ function split(rounds: Round[]) {
 export function TracesPage() {
   const S = useStrings();
   const s = useAppState();
-  const nav = useNavigate();
   const [params] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
   // `call`: a tool call opened from a chat row; the Calls tab opens on it.
@@ -162,10 +161,6 @@ export function TracesPage() {
 
   if (!sessionId) return <Navigate to="/chat" replace />;
 
-  const backToChat = () => {
-    switchTo(sessionId);
-    nav("/chat");
-  };
   const sessTitle = s.sessions[sessionId]?.title || analysis?.file.name || sessionId;
 
   return (
@@ -173,25 +168,17 @@ export function TracesPage() {
       <div className="topbar chat-topbar">
         <div className="topbar-row">
           <div className="tb-l">
-            <span className="chat-title">{sessTitle}</span>
-          </div>
-          {analysis && (
-            <div className="tb-r trace-head-meta">
-              {analysis.meta.model && <span>{analysis.meta.model}</span>}
-              {analysis.meta.gitBranch && <span>git:{analysis.meta.gitBranch}</span>}
-              <span>{fmtFileSize(analysis.file.sizeBytes)}</span>
-              <span className="trace-badge" title={analysis.session_id}>{analysis.session_id}</span>
-              <button type="button" className="trace-cwd-copy" title={S.traces.copyPath} aria-label={S.traces.copyPath}
-                      onClick={() => { void navigator.clipboard.writeText(analysis.file.path); showToast(S.traces.copiedPath); }}>
-                <IconCopy />
-              </button>
+            <div className="tb-chat-info">
+              <span className="tb-chat-icon"><IconChat /></span>
+              <span className="tb-chat-title">{sessTitle}</span>
             </div>
-          )}
+          </div>
+          <div className="tb-r" />
         </div>
         <div className="topbar-tabs" role="tablist">
-          <button type="button" className="tb-tab" role="tab" aria-selected="false" onClick={backToChat}>
+          <Link className="tb-tab" role="tab" aria-selected="false" to="/chat" onClick={() => switchTo(sessionId)}>
             {S.chat.chatTab}
-          </button>
+          </Link>
           <span className="tb-tab active" role="tab" aria-selected="true">
             {S.chat.viewTrace}
           </span>
@@ -288,6 +275,18 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
 
   return (
     <>
+      <div className="trace-meta-bar">
+        {a.meta.model && <span className="trace-meta-item">{a.meta.model}</span>}
+        {a.meta.gitBranch && <span className="trace-meta-item">git:{a.meta.gitBranch}</span>}
+        <span className="trace-meta-item">{fmtFileSize(a.file.sizeBytes)}</span>
+        <span className="trace-meta-path" title={a.file.path}>
+          <code>{a.file.path}</code>
+          <button type="button" className="trace-cwd-copy" title={S.traces.copyPath} aria-label={S.traces.copyPath}
+                  onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast(S.traces.copiedPath); }}>
+            <IconCopy />
+          </button>
+        </span>
+      </div>
       <div className="tr-stats">
         <Stat label={S.traces.statElapsed} value={fmtDurationMs(t.elapsedMs)} />
         <Stat label={S.traces.statRounds} value={String(t.rounds)} />
