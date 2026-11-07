@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
 import { agoStr, lastQueryTs, sessionSideStatus } from "../lib/format";
-import { collapseSessionRows, sessionMatches } from "../lib/sessionRows";
+import { collapseSessionRows, sessionMatches, type SessionContentHit } from "../lib/sessionRows";
 import {
-  archiveSession, deleteSession, forkSession, loadSessions, newChatInDir, pinSession, renameSession, switchTo, syncSessionStatus,
+  archiveSession, deleteSession, forkSession, loadSessions, newChatInDir, openSessionAtTurn,
+  pinSession, renameSession, searchAllSessionsContent, switchTo, syncSessionStatus,
 } from "../sessions";
 import {
   IconArchive, IconChevronRight, IconCopyOutline, IconFolder, IconFork, IconMore, IconPencil, IconPin, IconPlus,
@@ -35,6 +36,30 @@ export function SessionTree() {
   const [renameText, setRenameText] = useState("");
   const [editingSession, setEditingSession] = useState<string | null>(null);
   const [rowMenu, setRowMenu] = useState<{ id: string; anchor: DOMRect } | null>(null);
+  const [contentHits, setContentHits] = useState<Record<string, SessionContentHit[]>>({});
+  const [searchingContent, setSearchingContent] = useState(false);
+
+  useEffect(() => {
+    if (!q) {
+      setContentHits({});
+      setSearchingContent(false);
+      return;
+    }
+    setSearchingContent(true);
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => {
+      void searchAllSessionsContent(q, ctrl.signal).then((res) => {
+        if (ctrl.signal.aborted) return;
+        setContentHits(res);
+        setSearchingContent(false);
+      });
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [q, s.sessionScope]);
+
   const labels = useMemo(() => {
     const m: Record<string, string> = {};
     for (const w of s.workspaces) if (w.name) m[projectIdForDir(w.dir)] = w.name;
@@ -46,7 +71,7 @@ export function SessionTree() {
       if (sess.archived) continue;
       const pid = sess.projectId || projectIdForDir(sess.dir);
       const name = labels[pid] || projectNameForDir(sess.dir);
-      if (!sessionMatches({ id, session: sess }, name, q)) continue;
+      if (!sessionMatches({ id, session: sess }, name, q, contentHits[id])) continue;
       if (!by[pid]) by[pid] = { id: pid, name, dir: normDir(sess.dir), sessions: [] };
       const running = !!(sess.running || s.streams[id] || s.goalRuns[id] || s.commandRuns[id]);
       by[pid].sessions.push({ id, session: { ...sess, running } });
@@ -68,7 +93,7 @@ export function SessionTree() {
     const first = (g: Group) => g.sessions.length ? Math.min(...g.sessions.map((x) => x.session.ts)) : Date.now();
     grouped.sort((a, b) => first(b) - first(a));
     return grouped;
-  }, [s.rev, s.sidebarSearch]);
+  }, [s.rev, s.sidebarSearch, contentHits]);
 
   const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -91,18 +116,29 @@ export function SessionTree() {
     void renameWorkspace(g.dir, text);
   };
 
+  const remoteBusyKey = Object.entries(s.sessions)
+    .filter(([id, sess]) => sess.running && !s.streams[id] && !s.goalRuns[id] && !s.commandRuns[id])
+    .map(([id]) => id)
+    .sort()
+    .join(",");
   useEffect(() => {
-    const remoteBusy = Object.entries(s.sessions).some(
-      ([id, sess]) => sess.running && !s.streams[id] && !s.goalRuns[id] && !s.commandRuns[id],
-    );
-    if (!remoteBusy) return;
-    void syncSessionStatus();
+    if (!remoteBusyKey) return;
     const timer = window.setInterval(() => { void syncSessionStatus(); }, 2500);
     return () => window.clearInterval(timer);
-  }, [s.rev]);
+  }, [remoteBusyKey]);
 
   const pick = (id: string) => {
-    switchTo(id);
+    const firstHit = q ? contentHits[id]?.[0] : undefined;
+    if (firstHit) {
+      void openSessionAtTurn(id, firstHit.turn, q, firstHit.role);
+    } else {
+      switchTo(id);
+    }
+    if (pathname !== "/chat") nav("/chat");
+  };
+
+  const pickHit = (id: string, hit: SessionContentHit) => {
+    void openSessionAtTurn(id, hit.turn, q, hit.role);
     if (pathname !== "/chat") nav("/chat");
   };
 
@@ -133,7 +169,7 @@ export function SessionTree() {
       )}
       {!groups.length && (
         <div className="s-empty">
-          {s.sessionsLoading ? S.common.loading : q ? S.chat.noMatch : S.chat.noSessions}
+          {s.sessionsLoading || searchingContent ? S.common.loading : q ? S.chat.noMatch : S.chat.noSessions}
         </div>
       )}
       {groups.map((g) => {
@@ -202,8 +238,10 @@ export function SessionTree() {
               const side = sessionSideStatus({
                 id, curSess: s.curSess, unread: session.unread, running: session.running,
               });
+              const hits = q ? contentHits[id] : undefined;
               return (
-                <div key={id}
+                <div key={id} className="s-item-block">
+                <div
                      className={"s-item" + (id === s.curSess ? " active" : "") + (session.pinned ? " pinned" : "")
                        + (rowMenu?.id === id ? " menu-open" : "") + (editingSession === id ? " editing" : "")}
                      role="button" tabIndex={0}
@@ -228,15 +266,15 @@ export function SessionTree() {
                     )}
                   </div>
                   {editingSession !== id && session.source === "cli" && <span className="s-source">CLI</span>}
-                  {editingSession !== id && session.pinned && (
-                    <span className="s-pin-mark" title={S.chat.pinnedTip}><IconPin filled /></span>
-                  )}
                   {editingSession === id ? null : side === "busy" ? (
                     <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>
                   ) : side === "unread" ? (
                     <span className="mt unread" title={S.chat.sessionUnread} />
                   ) : (
                     <span className="mt">{agoStr(lastQueryTs(session), S.chat)}</span>
+                  )}
+                  {editingSession !== id && session.pinned && (
+                    <span className="s-pin-mark" title={S.chat.pinnedTip}><IconPin filled /></span>
                   )}
                   {editingSession !== id && (
                     <div className="s-actions">
@@ -261,6 +299,34 @@ export function SessionTree() {
                       </button>
                     </div>
                   )}
+                </div>
+                {hits && hits.length > 0 && (
+                  <div className="s-hits">
+                    {hits.slice(0, 3).map((hit, idx) => (
+                      <button
+                        key={`${hit.turn}:${hit.role}:${idx}`}
+                        type="button"
+                        className={"s-hit" + (s.chatSearchTarget?.sessionId === id && s.chatSearchTarget?.turn === hit.turn && s.chatSearchTarget?.role === hit.role ? " active" : "")}
+                        onClick={(e) => { e.stopPropagation(); pickHit(id, hit); }}
+                        title={hit.snippet}
+                      >
+                        <span className={"s-hit-tag " + hit.role}>
+                          {hit.role === "user" ? S.chat.searchTurnQ(hit.turn) : S.chat.searchTurnA(hit.turn)}
+                        </span>
+                        <span className="s-hit-text">{highlightSnippet(hit.snippet, q)}</span>
+                      </button>
+                    ))}
+                    {hits.length > 3 && (
+                      <button
+                        type="button"
+                        className="s-hit-more"
+                        onClick={(e) => { e.stopPropagation(); pickHit(id, hits[3]); }}
+                      >
+                        {S.chat.searchMoreHits(hits.length - 3)}
+                      </button>
+                    )}
+                  </div>
+                )}
                 </div>
               );
             })}
@@ -391,5 +457,21 @@ export function RenameInput({ initial, className, onDone }: {
              if (e.key === "Enter") { e.preventDefault(); finish(text); }
              if (e.key === "Escape") { e.preventDefault(); finish(null); }
            }} />
+  );
+}
+
+function highlightSnippet(snippet: string, query: string) {
+  const needle = query.trim();
+  if (!needle) return snippet;
+  const lower = snippet.toLocaleLowerCase();
+  const qLower = needle.toLocaleLowerCase();
+  const at = lower.indexOf(qLower);
+  if (at < 0) return snippet;
+  return (
+    <>
+      {snippet.slice(0, at)}
+      <mark>{snippet.slice(at, at + needle.length)}</mark>
+      {snippet.slice(at + needle.length)}
+    </>
   );
 }

@@ -33,7 +33,9 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
   catalogAbort = controller;
   const generation = ++catalogGeneration;
   const promise = (async () => {
-    if (getState().sessionScope === scope) setState({ sessionsLoading: true, sessionsError: "" });
+    const cur = getState();
+    const showSpinner = cur.sessionScope !== scope || Object.keys(cur.sessions).length === 0;
+    if (showSpinner) setState({ sessionsLoading: true, sessionsError: "" });
     const { ok, data, error } = await api.fetchSessions(scope, controller.signal);
     if (generation !== catalogGeneration) return;
     if (!ok || !Array.isArray(data?.sessions)) {
@@ -60,8 +62,10 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         ts: firstTs,
         lastTs: Math.max(serverLast, mem ? lastQueryTs(mem) : 0, firstTs),
         tokIn: lc.tokIn || 0, tokOut: lc.tokOut || 0, tokTotal: lc.tokTotal || 0,
-        requests: lc.requests || 0, totalTime: lc.totalTime || 0, lastInputTokens: lc.lastInputTokens || 0,
-        contextTokens: lc.contextTokens || 0, costUsd: lc.costUsd || 0,
+        requests: mem?.requests || lc.requests || 0, totalTime: mem?.totalTime || lc.totalTime || 0,
+        lastInputTokens: mem?.lastInputTokens || lc.lastInputTokens || 0,
+        contextTokens: mem?.contextTokens || lc.contextTokens || 0,
+        costUsd: mem?.costUsd || lc.costUsd || 0,
         dir,
         projectId: projectIdForDir(dir),
         archived: !!sv.archived,
@@ -148,7 +152,7 @@ export async function syncSessionStatus() {
     if (!running) finished = true;
   }
   if (changed) bump();
-  if (finished) await syncFromServer(true);
+  if (finished) await syncFromServer(false);
 }
 
 /**
@@ -383,10 +387,8 @@ export async function rateMessage(
 /** Stamp each assistant footer with the same round the Trace page draws. */
 export async function syncSessionRoundStats(id: string) {
   // New Chat has a client id and no jsonl yet; the analysis route 404s.
-  // A live round is not in the log either — `done` already stamped that footer.
-  if (getState().streams[id]) return;
   const existing = getState().sessions[id];
-  if (!existing?.msgs.some((m) => m.role === "assistant")) return;
+  if (!existing || (!existing.sizeBytes && !existing.msgs.some((m) => m.role === "assistant"))) return;
   const { ok, data } = await api.fetchTraceAnalysis(id);
   if (!ok || !data?.rounds) return;
   const sess = getState().sessions[id];
@@ -408,13 +410,20 @@ export async function syncSessionRoundStats(id: string) {
   // The log records the session's model once; per-round ids are not kept.
   const model = typeof data.meta?.model === "string" ? data.meta.model : "";
   // Compact cards are not rounds (the analysis drops compaction rounds too).
-  const assistants = sess.msgs.filter((m) => m.role === "assistant" && !m.compact);
+  const liveAi = getState().streams[id]?.aiMsg;
+  const assistants = sess.msgs.filter((m) => m.role === "assistant" && !m.compact && m !== liveAi);
+  const settledRounds = liveAi && rounds.length > assistants.length ? rounds.slice(0, rounds.length - 1) : rounds;
   const n = assistants.length;
-  const roundOffset = Math.max(0, rounds.length - n);
+  const roundOffset = Math.max(0, settledRounds.length - n);
   let changed = false;
-  for (let i = 0; i < n && roundOffset + i < rounds.length; i++) {
+  const lastRound = rounds[rounds.length - 1];
+  if (lastRound?.tokens?.prompt && sess.lastInputTokens !== lastRound.tokens.prompt) {
+    sess.lastInputTokens = lastRound.tokens.prompt;
+    changed = true;
+  }
+  for (let i = 0; i < n && roundOffset + i < settledRounds.length; i++) {
     const m = assistants[i];
-    const rd = rounds[roundOffset + i];
+    const rd = settledRounds[roundOffset + i];
     if (
       m.llmMs === rd.llmMs
       && m.durationMs === rd.durationMs
