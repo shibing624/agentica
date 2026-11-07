@@ -115,6 +115,15 @@ html[data-desktop="mac"][data-sidebar-collapsed]{--seat-clear:144px}
 html[data-sidebar-collapsed] .topbar{padding-left:calc(20px + var(--seat-clear))}
 html[data-desktop="mac"][data-sidebar-collapsed] .topbar{padding-left:calc(12px + var(--seat-clear))}
 html[data-sidebar-collapsed] .trace-back{margin-left:var(--seat-clear)}
+/* macOS full screen: no traffic lights, so nothing to make room for. The
+   sidebar's head goes back to one row with the toggle at the far left, and
+   the seat starts at the window edge like the web. */
+html[data-desktop="mac"][data-fullscreen]{--seat-left:12px}
+html[data-desktop="mac"][data-fullscreen][data-sidebar-collapsed]{--seat-clear:72px}
+html[data-desktop="mac"][data-fullscreen] .side-head{flex-wrap:nowrap;min-height:0;padding:12px 12px 8px 12px}
+html[data-desktop="mac"][data-fullscreen] .side-head .ib{order:-1;margin:0 6px 0 0;transform:none}
+html[data-desktop="mac"][data-fullscreen] .side-head .brand{flex:1 1 auto;height:auto;margin-top:0}
+html[data-desktop="mac"][data-fullscreen] .files-panel.fullscreen .files-panel-head{padding-left:12px}
 
 /* ===== SIDEBAR ===== */
 .sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);height:100vh;background:var(--side-bg);border-right:var(--hair) solid var(--border);display:flex;flex-direction:column;position:relative;transition:width var(--t),min-width var(--t),background .2s}
@@ -1298,8 +1307,12 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .dlg-foot .asst-guide{align-self:center;margin-right:auto}
 
 /* ===== Workspace files panel ===== */
-.files-resize{width:5px;flex-shrink:0;cursor:col-resize;align-self:stretch;background:transparent}
-.files-resize:hover{background:var(--accent-soft)}
+/* Zero-width in layout, like the left sidebar's handle: the seam is the panel's
+   own hairline. A real-width strip showed the window behind it (vibrancy on
+   macOS), which read as a thick bar beside the line. */
+.files-resize{width:0;flex-shrink:0;align-self:stretch;position:relative;z-index:5}
+.files-resize::before{content:"";position:absolute;top:0;bottom:0;left:-3px;width:6px;cursor:col-resize;background:transparent;transition:background var(--t)}
+.files-resize:hover::before{background:var(--accent-soft)}
 .files-panel{height:100vh;flex-shrink:0;overflow:hidden;border-left:var(--hair) solid var(--border);background:var(--bg);display:flex;flex-direction:column}
 .files-panel:not(.open){border-left:none}
 /* Fullscreen covers the whole window (sidebar included), like dsh's right
@@ -1307,8 +1320,39 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .files-panel.fullscreen{position:fixed;inset:0;z-index:150;border-left:none}
 html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:84px;-webkit-app-region:drag}
 .files-panel-inner{height:100%;display:flex;flex-direction:column;min-width:0}
-.files-panel-head{display:flex;align-items:center;gap:8px;padding:10px 12px 6px;flex-shrink:0}
-.files-panel-head h4{flex:1;min-width:0;font-size:13px;font-weight:600;margin:0}
+.files-panel-head{display:flex;align-items:center;gap:4px;padding:10px 8px 6px 10px;flex-shrink:0;min-width:0}
+/* ===== PANEL TABS (dsh's dockkit strip, one pane) =====
+   28px chips; the active one is filled, the rest are bare text with a hairline
+   slot between them that goes blank beside the active chip. The close sits
+   over the title's end and shows on the active, hovered or focused chip, so a
+   chip is the same width either way. Overflow scrolls with no scrollbar and
+   fades at the hidden edge. */
+.pt-strip{display:flex;align-items:center;min-width:0;flex:0 1 auto;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;mask-image:linear-gradient(to right,black calc(100% - 16px),transparent)}
+.pt-strip::-webkit-scrollbar{display:none}
+.pt-cell{display:flex;align-items:center;flex:0 1 auto;min-width:0}
+.pt-slot{flex:none;width:10px;height:28px;display:flex;align-items:center;justify-content:center}
+.pt-slot::before{content:"";width:var(--hair);height:14px;background:var(--border)}
+.pt-slot.blank::before{background:transparent}
+.pt-tab{position:relative;display:flex;align-items:center;min-width:80px;max-width:170px;height:28px;padding:0 10px;border-radius:var(--radius-sm);color:var(--fg2);font-size:13px;line-height:1;white-space:nowrap;cursor:pointer;user-select:none}
+.pt-tab.fixed{min-width:0}
+.pt-tab:hover{background:var(--bg3)}
+.pt-tab.active{color:var(--fg);background:var(--bg3)}
+.pt-title{display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;line-height:1.4;flex:1 1 auto}
+.pt-title svg{width:13px;height:13px;flex-shrink:0}
+.pt-tab:not(.fixed):is(.active,:hover,:focus-within) .pt-title{mask-image:linear-gradient(to right,black calc(100% - 30px),transparent calc(100% - 14px))}
+.pt-close{position:absolute;top:4px;right:4px;width:20px;height:20px;padding:0;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--fg3);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;pointer-events:none}
+.pt-close svg{width:12px;height:12px}
+.pt-tab:is(.active,:hover,:focus-within) .pt-close{opacity:1;pointer-events:auto}
+.pt-close:hover{color:var(--fg);background:var(--border2)}
+.pt-add{margin-left:2px}
+.pt-fill{flex:1 1 0;min-width:0}
+/* ===== TERMINAL TAB ===== */
+.term-pane{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);color:var(--fg)}
+.term-screen{flex:1;min-height:0;padding:6px 4px 4px 10px;background:var(--bg);color:var(--fg)}
+.term-screen .xterm{height:100%}
+.term-screen .xterm-viewport{background:transparent !important}
+.term-banner{position:absolute;left:10px;right:10px;bottom:10px;display:flex;align-items:center;gap:10px;padding:8px 10px;border:var(--hair) solid var(--border);border-radius:var(--radius-sm);background:var(--bg2);font-size:12px;color:var(--fg2)}
+.term-banner span{flex:1}
 .ws-browser{flex:1;min-height:0;display:flex;flex-direction:column}
 .ws-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 10px;border-bottom:var(--hair) solid var(--border);flex-shrink:0}
 .ws-crumb{border:none;background:transparent;color:var(--fg2);font-size:12px;padding:2px 6px;border-radius:6px;cursor:pointer;max-width:8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

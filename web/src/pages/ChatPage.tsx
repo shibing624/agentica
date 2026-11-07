@@ -260,8 +260,8 @@ export function ChatPage() {
   const windowSize = s.serverContextWindow || 128000;
   const occupancy = cur?.contextTokens || cur?.lastInputTokens || 0;
   const ctxPct = Math.min(100, Math.round((occupancy / windowSize) * 100));
-  const files = useFilesPanel(s.curSess);
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
+  const files = useFilesPanel(s.curSess, workspace);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
   const skillToken = leadingSkillToken(s.inputText, invocableSkills(s.pluginsData.skills || []));
   // The token is drawn in an overlay under the textarea; hit-test its boxes so

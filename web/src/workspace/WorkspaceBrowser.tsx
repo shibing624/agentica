@@ -58,37 +58,155 @@ function resolveRelative(baseDir: string, ref: string): string {
   return out.join("/");
 }
 
-let previewSeq = 0;
-
-export function WorkspaceBrowser({
-  root, openRequest, active, onPreviewOpen,
+/**
+ * One file in its own panel tab: loads on mount and on refresh, keeps its view
+ * mode. A relative link in rendered Markdown opens the target in another tab.
+ */
+export function FilePreview({
+  root, path: filePath, onOpenFile,
 }: {
   root: string;
-  openRequest?: { path: string } | null;
+  path: string;
+  onOpenFile: (path: string) => void;
+}) {
+  const S = useStrings();
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [mode, setMode] = useState<ViewMode>("markdown");
+  const [refreshing, setRefreshing] = useState(false);
+  const seq = useRef(0);
+
+  /** `keepMode` is a refresh: same file, same view. */
+  const load = useCallback(async (keepMode: boolean) => {
+    const name = filePath.includes("/") ? filePath.slice(filePath.lastIndexOf("/") + 1) : filePath;
+    const ext = extOf(name);
+    const nonce = ++seq.current;
+    const present = (p: Preview) => { if (nonce === seq.current) setPreview(p); };
+    if (IMAGE_EXTS.has(ext)) { present({ path: filePath, name, kind: "image" }); return; }
+    if (ext === "pdf") { present({ path: filePath, name, kind: "pdf" }); return; }
+    const isHtml = HTML_EXTS.has(ext);
+    const isMd = ext === "md";
+    if (!isHtml && !TEXT_EXTS.has(ext)) {
+      present({ path: filePath, name, kind: "unsupported" });
+      return;
+    }
+    const { ok, data } = await api.fetchWorkspacePreview(root, filePath);
+    if (nonce !== seq.current) return;
+    if (!ok || !data) { present({ path: filePath, name, kind: "unsupported" }); return; }
+    const content = data.content || "";
+    if (!keepMode) {
+      setMode(isMd ? (content.length > HIGHLIGHT_LIMIT ? "code" : "markdown") : isHtml ? "web" : "code");
+    }
+    present({
+      path: filePath,
+      name,
+      kind: isHtml ? "html" : isMd ? "md" : "text",
+      content,
+      truncated: !!data.truncated,
+    });
+  }, [root, filePath]);
+
+  useEffect(() => { void load(false); }, [load]);
+
+  if (!preview) return <div className="ws-browser"><p className="ws-muted">{S.common.loading}</p></div>;
+
+  const src = api.workspaceContentUrl(root, preview.path);
+  const dl = api.workspaceContentUrl(root, preview.path, true);
+  const hasText = preview.content !== undefined;
+  const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
+    : preview.kind === "html" ? ["web", "code", "text"]
+    : preview.kind === "text" ? ["code", "text"]
+    : [];
+  const view: ViewMode | null = modes.includes(mode) ? mode : (modes[0] ?? null);
+  const refresh = () => {
+    setRefreshing(true);
+    void load(true).finally(() => setRefreshing(false));
+  };
+  return (
+    <div className="ws-browser">
+      <div className="ws-preview-bar">
+        <span className="ws-preview-name" title={preview.path}>{preview.path}</span>
+        <PreviewActions
+          modes={modes}
+          mode={view ?? "code"}
+          onMode={setMode}
+          onRefresh={refresh}
+          refreshing={refreshing}
+          absPath={root.replace(/\/+$/, "") + "/" + preview.path}
+          downloadHref={dl}
+          downloadName={preview.name}
+        />
+      </div>
+      <div className={"ws-preview-body" + (view === "code" ? " source" : "")}>
+        {preview.kind === "image" && <img src={src} alt={preview.name} />}
+        {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
+        {view === "web" && hasText && (
+          <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
+        )}
+        {view === "markdown" && (
+          <div className="md-doc">
+            <Markdown
+              remarkPlugins={[...GFM_PLUGINS, remarkMath]}
+              rehypePlugins={[rehypeRaw, rehypeKatex]}
+              components={{
+              img: ({ src: href, alt }) => (
+                <img
+                  src={typeof href === "string" && !EXTERNAL_REF_RE.test(href)
+                    ? api.workspaceContentUrl(root, resolveRelative(dirOf(preview.path), href))
+                    : href}
+                  alt={alt || ""}
+                />
+              ),
+              a: ({ href, children }) => {
+                if (typeof href !== "string" || href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
+                  return <a href={href} target={EXTERNAL_REF_RE.test(href || "") ? "_blank" : undefined} rel="noreferrer">{children}</a>;
+                }
+                const target = resolveRelative(dirOf(preview.path), href);
+                return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); onOpenFile(target); }}>{children}</a>;
+              },
+              table: ({ children }) => <div className="md-table"><table>{children}</table></div>,
+              pre: ({ children }) => <>{children}</>,
+              code: MarkdownCode,
+            }}>{preview.content || ""}</Markdown>
+          </div>
+        )}
+        {view === "code" && (
+          <CodeFrame
+            code={preview.content || ""}
+            language={languageFromFilename(preview.name)}
+            highlight={(preview.content || "").length <= HIGHLIGHT_LIMIT}
+          />
+        )}
+        {view === "text" && <PlainText text={preview.content || ""} />}
+        {preview.truncated && view && <p className="ws-trunc">{S.files.previewTruncated}</p>}
+        {preview.kind === "unsupported" && <p className="ws-muted">{S.files.previewUnsupported}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** The panel's fixed first tab: the directory list. A file opens in a tab of its own. */
+export function WorkspaceBrowser({
+  root, active, onOpenFile,
+}: {
+  root: string;
   active?: boolean;
-  onPreviewOpen?: () => void;
+  onOpenFile: (path: string) => void;
 }) {
   const S = useStrings();
   const [path, setPath] = useState("");
   const [data, setData] = useState<{ base: string; entries: Entry[] } | null>(null);
   const [error, setError] = useState("");
-  const [preview, setPreview] = useState<Preview | null>(null);
   const [uploading, setUploading] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
   const [showPath, setShowPath] = useState(false);
-  const [mode, setMode] = useState<ViewMode>("markdown");
-  const [refreshing, setRefreshing] = useState(false);
   const detailsRef = useRef<HTMLDivElement>(null);
 
   const [renderedRoot, setRenderedRoot] = useState(root);
   if (renderedRoot !== root) {
     setRenderedRoot(root);
     setPath("");
-    setPreview(null);
     setData(null);
-    previewSeq++;
   }
-
   useEffect(() => {
     if (!root) return;
     let cancelled = false;
@@ -120,50 +238,6 @@ export function WorkspaceBrowser({
       document.removeEventListener("keydown", onKey);
     };
   }, [showPath]);
-
-  const onPreviewOpenRef = useRef(onPreviewOpen);
-  onPreviewOpenRef.current = onPreviewOpen;
-
-  /** `keepMode` is a refresh: same file, same view. */
-  const previewPath = useCallback(async (filePath: string, keepMode = false) => {
-    onPreviewOpenRef.current?.();
-    const name = filePath.includes("/") ? filePath.slice(filePath.lastIndexOf("/") + 1) : filePath;
-    const ext = extOf(name);
-    const nonce = ++previewSeq;
-    const present = (p: Preview) => { if (nonce === previewSeq) setPreview(p); };
-    if (IMAGE_EXTS.has(ext)) { present({ path: filePath, name, kind: "image" }); return; }
-    if (ext === "pdf") { present({ path: filePath, name, kind: "pdf" }); return; }
-    const isHtml = HTML_EXTS.has(ext);
-    const isMd = ext === "md";
-    if (!isHtml && !TEXT_EXTS.has(ext)) {
-      present({ path: filePath, name, kind: "unsupported" });
-      return;
-    }
-    const { ok, data } = await api.fetchWorkspacePreview(root, filePath);
-    if (nonce !== previewSeq) return;
-    if (!ok || !data) { present({ path: filePath, name, kind: "unsupported" }); return; }
-    const content = data.content || "";
-    if (!keepMode) {
-      setMode(isMd ? (content.length > HIGHLIGHT_LIMIT ? "code" : "markdown") : isHtml ? "web" : "code");
-    }
-    present({
-      path: filePath,
-      name,
-      kind: isHtml ? "html" : isMd ? "md" : "text",
-      content,
-      truncated: !!data.truncated,
-    });
-  }, [root]);
-
-  const handledOpenRequest = useRef<{ path: string } | null>(null);
-  useEffect(() => {
-    if (!openRequest || handledOpenRequest.current === openRequest) return;
-    handledOpenRequest.current = openRequest;
-    const target = openRequest.path;
-    setPath(dirOf(target));
-    setReloadTick((t) => t + 1);
-    void previewPath(target);
-  }, [openRequest, previewPath]);
 
   const doUpload = (files: File[]) => {
     setUploading(true);
@@ -199,85 +273,6 @@ export function WorkspaceBrowser({
 
   const crumbs = path === "" ? [] : path.split("/");
   const busy = error === "" && data !== null && data.base !== path;
-
-  if (preview) {
-    const src = api.workspaceContentUrl(root, preview.path);
-    const dl = api.workspaceContentUrl(root, preview.path, true);
-    const hasText = preview.content !== undefined;
-    const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
-      : preview.kind === "html" ? ["web", "code", "text"]
-      : preview.kind === "text" ? ["code", "text"]
-      : [];
-    const view: ViewMode | null = modes.includes(mode) ? mode : (modes[0] ?? null);
-    const refresh = () => {
-      setRefreshing(true);
-      void previewPath(preview.path, true).finally(() => setRefreshing(false));
-    };
-    return (
-      <div className="ws-browser">
-        <div className="ws-preview-bar">
-          <button type="button" className="ws-back" onClick={() => { setPreview(null); setReloadTick((t) => t + 1); }}>
-            {S.files.backToList}
-          </button>
-          <span className="ws-preview-name" title={preview.path}>{preview.name}</span>
-          <PreviewActions
-            modes={modes}
-            mode={view ?? "code"}
-            onMode={setMode}
-            onRefresh={refresh}
-            refreshing={refreshing}
-            absPath={root.replace(/\/+$/, "") + "/" + preview.path}
-            downloadHref={dl}
-            downloadName={preview.name}
-          />
-        </div>
-        <div className={"ws-preview-body" + (view === "code" ? " source" : "")}>
-          {preview.kind === "image" && <img src={src} alt={preview.name} />}
-          {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
-          {view === "web" && hasText && (
-            <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
-          )}
-          {view === "markdown" && (
-            <div className="md-doc">
-              <Markdown
-                remarkPlugins={[...GFM_PLUGINS, remarkMath]}
-                rehypePlugins={[rehypeRaw, rehypeKatex]}
-                components={{
-                img: ({ src: href, alt }) => (
-                  <img
-                    src={typeof href === "string" && !EXTERNAL_REF_RE.test(href)
-                      ? api.workspaceContentUrl(root, resolveRelative(dirOf(preview.path), href))
-                      : href}
-                    alt={alt || ""}
-                  />
-                ),
-                a: ({ href, children }) => {
-                  if (typeof href !== "string" || href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
-                    return <a href={href} target={EXTERNAL_REF_RE.test(href || "") ? "_blank" : undefined} rel="noreferrer">{children}</a>;
-                  }
-                  const target = resolveRelative(dirOf(preview.path), href);
-                  return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); void previewPath(target); }}>{children}</a>;
-                },
-                table: ({ children }) => <div className="md-table"><table>{children}</table></div>,
-                pre: ({ children }) => <>{children}</>,
-                code: MarkdownCode,
-              }}>{preview.content || ""}</Markdown>
-            </div>
-          )}
-          {view === "code" && (
-            <CodeFrame
-              code={preview.content || ""}
-              language={languageFromFilename(preview.name)}
-              highlight={(preview.content || "").length <= HIGHLIGHT_LIMIT}
-            />
-          )}
-          {view === "text" && <PlainText text={preview.content || ""} />}
-          {preview.truncated && view && <p className="ws-trunc">{S.files.previewTruncated}</p>}
-          {preview.kind === "unsupported" && <p className="ws-muted">{S.files.previewUnsupported}</p>}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="ws-browser">
@@ -323,7 +318,7 @@ export function WorkspaceBrowser({
                 return (
                   <li key={entry.name}>
                     <button type="button" className="ws-row" disabled={busy} title={entry.name}
-                            onClick={() => { if (entry.kind === "dir") setPath(target); else void previewPath(target); }}>
+                            onClick={() => { if (entry.kind === "dir") setPath(target); else onOpenFile(target); }}>
                       <span className="ws-row-icon">{entry.kind === "dir" ? <IconFolder /> : <span className="ws-file-dot" />}</span>
                       <span className="ws-row-name">{entry.name}</span>
                       <span className="ws-row-meta">{entry.kind === "file" ? fmtFileSize(entry.sizeBytes) : ""}</span>

@@ -154,6 +154,16 @@ export const fetchWorkspaceFiles = (root: string, path: string) =>
 export const fetchWorkspacePreview = (root: string, path: string) =>
   request(`/api/workspace/content?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}&preview=1`);
 
+export type TerminalInfo = {
+  id: string; session_id: string; cwd: string; shell: string;
+  cols: number; rows: number; created_at: number; exited: boolean; exit_code: number | null;
+};
+export const fetchTerminals = () => request<{ terminals: TerminalInfo[] }>("/api/terminals");
+export const createTerminal = (body: { cwd: string; session_id: string; cols?: number; rows?: number }) =>
+  postJson<TerminalInfo>("/api/terminals", body);
+export const closeTerminal = (id: string) =>
+  request(`/api/terminals/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 export const statWorkspaceFiles = (root: string, paths: string[]) =>
   postJson<{ existing: string[] }>("/api/workspace/stat", { root, paths });
 

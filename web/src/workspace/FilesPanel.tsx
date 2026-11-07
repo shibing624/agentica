@@ -1,8 +1,27 @@
-import { IconExitFullscreen, IconFullscreen, IconSidebarRight } from "../icons";
+import { lazy, Suspense } from "react";
+import { IconClose, IconExitFullscreen, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal } from "../icons";
 import { useStrings } from "../i18n";
+import { baseName, type PanelTab } from "../lib/panelTabs";
 import { SkillPane } from "./SkillPane";
-import { WorkspaceBrowser } from "./WorkspaceBrowser";
+import { FilePreview, WorkspaceBrowser } from "./WorkspaceBrowser";
 import type { FilesPanelState } from "./useFilesPanel";
+
+// xterm.js is ~300 kB; nobody who never opens a terminal downloads it.
+const TerminalView = lazy(() => import("./TerminalView").then((m) => ({ default: m.TerminalView })));
+
+function TabLabel({ tab }: { tab: PanelTab }) {
+  const S = useStrings();
+  if (tab.kind === "files") return <>{S.files.title}</>;
+  if (tab.kind === "file") return <>{baseName(tab.path)}</>;
+  if (tab.kind === "skill") return <>/{tab.name}</>;
+  return <><IconTerminal />{S.terminal.title(tab.ordinal)}</>;
+}
+
+function tabTitle(tab: PanelTab): string | undefined {
+  if (tab.kind === "file") return tab.path;
+  if (tab.kind === "skill") return tab.name;
+  return undefined;
+}
 
 export function FilesPanel({
   root, panel,
@@ -27,7 +46,37 @@ export function FilesPanel({
       >
         <div className="files-panel-inner" style={{ width: panel.fullscreen ? "100%" : panel.width }}>
           <div className="files-panel-head">
-            <h4>{panel.skill ? S.files.skillTitle : S.files.title}</h4>
+            <div className="pt-strip" role="tablist">
+              {panel.tabs.map((tab, i) => {
+                const active = tab.key === panel.active;
+                const prevActive = i > 0 && panel.tabs[i - 1].key === panel.active;
+                return (
+                  <div key={tab.key} className="pt-cell">
+                    {i > 0 && <span className={"pt-slot" + (active || prevActive ? " blank" : "")} />}
+                    <div className={"pt-tab" + (active ? " active" : "") + (tab.kind === "files" ? " fixed" : "")}
+                         role="tab" aria-selected={active} title={tabTitle(tab)}
+                         onMouseDown={(e) => { if (e.button === 1 && tab.kind !== "files") { e.preventDefault(); panel.close(tab.key); } }}
+                         onClick={() => panel.activate(tab.key)}>
+                      <span className="pt-title"><TabLabel tab={tab} /></span>
+                      {tab.kind !== "files" && (
+                        <button type="button" className="pt-close" aria-label={S.files.closeTab}
+                                title={S.files.closeTab}
+                                onClick={(e) => { e.stopPropagation(); panel.close(tab.key); }}>
+                          <IconClose />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {panel.canTerminal && (
+              <button type="button" className="ib pt-add" onClick={panel.newTerminal}
+                      title={S.terminal.newTerminal} aria-label={S.terminal.newTerminal}>
+                <IconPlus />
+              </button>
+            )}
+            <span className="pt-fill" />
             <button type="button" className="ib" onClick={() => panel.setFullscreen(!panel.fullscreen)}
                     title={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}
                     aria-label={panel.fullscreen ? S.files.exitFullscreen : S.files.fullscreen}>
@@ -38,16 +87,26 @@ export function FilesPanel({
               <IconSidebarRight />
             </button>
           </div>
-          {panel.skill && <SkillPane name={panel.skill} onBack={panel.closeSkill} />}
-          {/* Kept mounted under the skill view so going back restores the
-              folder and preview the user was on. */}
-          <div className="files-panel-body" hidden={!!panel.skill}>
-            {root ? (
-              <WorkspaceBrowser root={root} openRequest={panel.openRequest} active={panel.open && !panel.skill} />
-            ) : (
-              <p className="ws-muted">{S.files.noRoot}</p>
-            )}
-          </div>
+          {/* Every tab stays mounted while it is open, so switching does not
+              refetch a file or drop a terminal's screen. */}
+          {panel.tabs.map((tab) => {
+            const active = tab.key === panel.active;
+            return (
+              <div key={tab.key} className="files-panel-body" hidden={!active} role="tabpanel">
+                {tab.kind === "files" && (root
+                  ? <WorkspaceBrowser root={root} active={panel.open && active} onOpenFile={panel.browsePath} />
+                  : <p className="ws-muted">{S.files.noRoot}</p>)}
+                {tab.kind === "file" && root && <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />}
+                {tab.kind === "skill" && <SkillPane name={tab.name} />}
+                {tab.kind === "terminal" && (
+                  <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
+                    <TerminalView id={tab.id} visible={shown && active}
+                                  onGone={() => panel.terminalGone(tab.id)} />
+                  </Suspense>
+                )}
+              </div>
+            );
+          })}
         </div>
       </aside>
     </>

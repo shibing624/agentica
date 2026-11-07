@@ -11,10 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / Desktop 右侧面板改为多标签，新增终端（参照 deepseek-harness 的右侧栏）**。文件列表是固定的第一个标签；打开的文件、技能文档各占一个标签，重复打开会切到已有标签，新标签插在当前标签右侧，关闭当前标签时激活右侧、再左侧；切换标签不会重新加载文件，标签按会话分别保存。「+」新建终端：在会话工作目录里起登录 shell（`TERM=xterm-256color`），前端用 xterm.js，颜色跟随浅色/暗色主题；收起面板或刷新页面不会结束 shell，重新打开时回放屏幕内容，关闭标签才结束它。网关新增 `GET/POST /api/terminals`、`DELETE /api/terminals/{id}` 和流式接口 `/api/terminals/{id}/stream`；终端有网关进程的系统权限、不经过审批，只对管理员账号开放，WebSocket 拒绝跨站来源；最多 8 个，无人查看 2 小时后回收，仅支持 macOS / Linux。xterm.js 单独打包，只在第一次打开终端时下载。
+- **Desktop 支持 macOS 全屏下的布局**。全屏时没有红绿灯，侧栏顶部改为单行，展开/收起图标移到最左边；侧栏收起后左上角的按钮、右侧面板全屏时的标题栏也不再为红绿灯留空。
 - **`apply_patch` 能认出「抄了长行中间一句」的 hunk；`execute` 多行命令按最后一行判断退出码**。① 原来只认长行的开头：prompt、文档里一整段是一行上千字，模型拿段落中间的一句当上下文时报 `No line in the file matches it`，模型以为文件变了，去重读、再错。现在只要文件里恰好一行包含这段文字，就报 `Line N contains this text but is longer`，提示发整行或换短锚点。② `python3 - <<'EOF' … EOF` 后面再接一行 `rg`，rg 没有匹配退出 1 时，原来按 `;` `&&` `|` 切分，没认换行，最后一段被当成 `python3`，于是报成工具错误；现在换行也算命令分隔。
 - **CLI 后台命令被 `kill` / `pkill` / Ctrl+C 结束时显示「stopped」，不再算 failed**。收到 SIGTERM 或 SIGINT 退出的后台命令和 delegate，完成提示改为黄色 `■ … stopped in 1m29s (SIGTERM)`，交给 agent 的报告也写 stopped，不再显示红色 `✗ failed (exit -15)`。其他信号会把信号名显示出来，比如 `failed (SIGKILL)`，但仍然算失败，因为 OOM 杀进程用的也是 SIGKILL。
 - **Web / Desktop 右侧工作区面板加宽、可全屏，入口改为图标（参照 deepseek-harness 的右侧栏）**。宽度规则与 dsh 一致：第一次打开占窗口的 45%，拖拽范围 300px 到窗口的 70%，聊天区至少保留 400px，窗口太窄时面板先变窄，再放不下就收起；双击拖拽条恢复默认宽度。原来是固定 360px、最宽 640px。面板标题栏右侧新增「全屏」按钮，全屏时覆盖整个窗口，按 Esc 或再点一次退出。顶栏的「打开工作区」文字按钮改为右侧栏图标（左侧栏图标的镜像），只在面板收起时显示；面板里的关闭按钮也换成同一个图标。旧的宽度设置换了存储键，不再沿用。
 - **滚动条改为细线**。聊天区、右侧面板等所有滚动区域的滚动条只画 3px 宽，颜色更淡，鼠标悬停时稍微加深；拖拽区仍保留 6px。
+- **聊天区与右侧工作区面板之间只剩一根细线**，和左侧栏的分隔一致。原来面板左边有一条 5px 宽的拖拽条占着布局宽度，macOS 桌面端会透出窗口底色，看起来像一根粗实线；拖拽条改为不占宽度、叠在细线上的 6px 热区。
 - **Web 侧栏会话行悬浮不再挡住标题，新增「更多」菜单和置顶**（参照 deepseek-harness）。原来悬浮时重命名、归档、删除三个按钮浮在标题上，会盖住标题末尾。现在按钮占自己的位置，标题在按钮前省略；悬浮时时间、绿点和 CLI 标记让位。悬浮显示 `···`、归档、置顶三个按钮；`···` 菜单包含置顶会话、重命名、分叉会话（复制整个会话）、归档会话、复制 Session ID 和删除，支持方向键和 Esc，菜单固定定位，不会被侧栏滚动区裁掉，空间不够时向上弹出。置顶的会话排在所属项目最前，标题旁有图钉标记，折叠时也始终可见；状态写在会话 sidecar 的 `pinned` 字段，新增 `POST /api/sessions/{id}/pin`，刷新、换浏览器后都保留，在 recent 范围里也不会因为太久没动被过滤掉。
 - **CLI 新增 `AGENTICA_MODEL_*` 环境变量，临时换模型且不碰 `config.yaml`**（借鉴 kimi-code 的 `KIMI_MODEL_*`）。设 `AGENTICA_MODEL_NAME` 即生效，可选 `AGENTICA_MODEL_PROVIDER`（默认 `openai`）、`_BASE_URL`、`_API_KEY`、`_MAX_CONTEXT_SIZE`。只对当前进程有效，命令行参数仍然优先；它取代当前 profile，profile 里的推理强度、`max_tokens`、副模型和 fallback 不会套到这个模型上；不触发首次启动向导。单独成一组变量，是因为 shell 里被别的工具写入的 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 可能让 agentica 指向错误的地址。provider 或上下文大小填错时启动即报错并指出是哪个变量。说明见 `docs/guides/config.md`。
 - **Web / Desktop 轨迹页重做（参照 deepseek-harness desktop 的 Trajectory）**。顶部一条会话统计，下面三个 tab，右侧是搜索框。

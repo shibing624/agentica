@@ -42,7 +42,8 @@ from .services.channel_manager import ChannelManager
 from .services.agent_peers import GatewayAgentPeers
 from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
-from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes
+from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes, terminals as terminal_routes
+from .terminals import manager as terminal_manager
 
 # ContextVar holding the current request ID — async-safe, no threading issues
 _request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -314,6 +315,7 @@ async def lifespan(app: FastAPI):
         await deps.agent_peers.stop()
     if deps.channel_manager:
         await deps.channel_manager.disconnect_all()
+    terminal_manager.close_all()
     logger.info("Goodbye!")
 
 
@@ -462,6 +464,7 @@ app.include_router(auth_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(chat.router)
 app.include_router(workspace_routes.router)
+app.include_router(terminal_routes.router)
 app.include_router(traces_routes.router)
 app.include_router(scheduler_routes.router)
 app.include_router(plugins_routes.router)

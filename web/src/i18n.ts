@@ -736,6 +736,16 @@ const en = {
     collapse: "Hide workspace",
     noRoot: "Pick a working directory for this chat first.",
     uploading: "Uploading…",
+    closeTab: "Close tab",
+  },
+
+  terminal: {
+    title: (n: number) => (n === 1 ? "Terminal" : `Terminal ${n}`),
+    newTerminal: "New terminal",
+    startFailed: "Could not start a terminal",
+    disconnected: "Disconnected from the terminal.",
+    reconnect: "Reconnect",
+    exited: (code: number | null) => (code == null ? "process ended" : `process exited with code ${code}`),
   },
 
   login: {
@@ -1476,6 +1486,16 @@ const zh: Strings = {
     collapse: "收起工作区",
     noRoot: "先为这个对话选一个工作目录。",
     uploading: "上传中…",
+    closeTab: "关闭标签页",
+  },
+
+  terminal: {
+    title: (n: number) => (n === 1 ? "终端" : `终端 ${n}`),
+    newTerminal: "新建终端",
+    startFailed: "终端启动失败",
+    disconnected: "与终端的连接已断开。",
+    reconnect: "重新连接",
+    exited: (code: number | null) => (code == null ? "进程已结束" : `进程已退出，退出码 ${code}`),
   },
 
   login: {

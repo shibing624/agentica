@@ -106,6 +106,21 @@ function createWindow() {
   if (maximized) win.maximize();
 
   win.once("ready-to-show", () => win.show());
+  // macOS full screen hides the traffic lights, so the page stops leaving room
+  // for them. There is no preload; the main process marks <html> itself, and
+  // again after each load so a reload in full screen keeps it.
+  const markFullScreen = () => {
+    if (!win || win.isDestroyed()) return;
+    const on = win.isFullScreen();
+    void win.webContents
+      .executeJavaScript(
+        `document.documentElement.toggleAttribute("data-fullscreen", ${on ? "true" : "false"})`,
+      )
+      .catch(() => {});
+  };
+  win.on("enter-full-screen", markFullScreen);
+  win.on("leave-full-screen", markFullScreen);
+  win.webContents.on("did-finish-load", markFullScreen);
   win.on("close", () => {
     try {
       writeWindowState(stateFile, { ...win.getNormalBounds(), maximized: win.isMaximized() });

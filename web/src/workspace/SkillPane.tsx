@@ -24,7 +24,7 @@ type SkillDoc = {
 
 const MODES: ViewMode[] = ["markdown", "code", "text"];
 
-export function SkillPane({ name, onBack }: { name: string; onBack: () => void }) {
+export function SkillPane({ name }: { name: string }) {
   const S = useStrings();
   const [doc, setDoc] = useState<SkillDoc | null>(null);
   const [failed, setFailed] = useState(false);
@@ -78,7 +78,6 @@ export function SkillPane({ name, onBack }: { name: string; onBack: () => void }
   return (
     <div className="ws-browser">
       <div className="ws-preview-bar">
-        <button type="button" className="ws-back" onClick={onBack}>{S.files.backToFiles}</button>
         <span className="ws-preview-name" title={file || name}>/{name}</span>
         <PreviewActions
           modes={MODES}
