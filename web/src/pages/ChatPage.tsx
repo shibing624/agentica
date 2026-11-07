@@ -1,11 +1,11 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router";
 import * as api from "../api";
 import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
 import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { RenameInput } from "../components/SessionTree";
-import { CommandMenu, ComposerPicker, SkillsPicker, invocableSkills, slashQuery, type PickerGroup } from "../components/SlashMenu";
+import { CommandMenu, ComposerPicker, invocableSkills, slashQuery, type PickerGroup } from "../components/SlashMenu";
 import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
 import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
@@ -14,21 +14,30 @@ import { AutomatedNotice } from "../components/AutomatedNotice";
 import { dockTodos } from "../lib/workActivity";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
-import { fmtDurationMs, fmtN, formatErrorStamp, parseTokenBudget, uid, UNLIMITED_TOKEN_BUDGET } from "../lib/format";
-import { primeSettings, switchProfile } from "../panels/SettingsModal";
-import { createSession, forkAt, hydrateSession, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
+import {
+  fmtDurationMs, fmtN, fmtRunDuration, formatErrorStamp, parseTokenBudget,
+  uid, UNLIMITED_TOKEN_BUDGET, updateQueuedMessageText,
+} from "../lib/format";
+import { primeSettings } from "../panels/SettingsModal";
+import { applyPendingModel, loadSessionModel, pickSessionModel } from "../sessionModel";
+import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, openSessionAtTurn, pushPendingName, rateMessage, renameSession, searchAllSessionsContent, syncSessionRoundStats } from "../sessions";
+import { searchMsgsConversation, type SessionContentHit } from "../lib/sessionRows";
 import { loadPlugins } from "../data";
 import {
-  Logo, IconPlus, IconClose, IconChat, IconAsk, IconAuto, IconSidebarRight,
+  Logo, IconPlus, IconClose, IconChat, IconBook, IconAsk, IconAuto, IconSidebarRight,
   IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil,
   IconChevronDown, IconThumbUp, IconThumbDown, IconFork, IconCompact, IconSpinner,
+  IconCheck, IconTrash, IconQueue, IconSearch,
 } from "../icons";
 import {
   bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, setState,
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
-import { applySessionUsage, ContextUsageTip } from "../components/ContextUsageTip";
-import { appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts, partsOf, settleWork, unfinishedToolCallId } from "../lib/msgParts";
+import { applySessionUsage, ContextUsageTip, syncSessionUsage } from "../components/ContextUsageTip";
+import {
+  appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts,
+  partsOf, settleWork, unfinishedToolCallId, workSummary,
+} from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
@@ -37,6 +46,17 @@ import type { FileEdits } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
+const msgKeys = new WeakMap<ChatMsg, number>();
+let nextMsgKey = 1;
+function keyOfMsg(m: ChatMsg): string | number {
+  if (m.uuid) return m.uuid;
+  let k = msgKeys.get(m);
+  if (!k) {
+    k = nextMsgKey++;
+    msgKeys.set(m, k);
+  }
+  return k;
+}
 
 function permIcon(mode: string) {
   if (mode === "ask") return <IconAsk />;
@@ -55,9 +75,9 @@ export function ChatPage() {
   const chatWrapRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(createStreamFollow());
+  const pagingAnchorRef = useRef<{ node: HTMLElement; top: number; head: ChatMsg | undefined } | null>(null);
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
-  const [skillsOpen, setSkillsOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusActive, setPlusActive] = useState(0);
   const plusWrapRef = useRef<HTMLDivElement>(null);
@@ -129,22 +149,20 @@ export function ChatPage() {
 
   useEffect(() => { void loadPlugins(); }, []);
   useEffect(() => {
-    if (slashOpen) { setSkillsOpen(false); setPlusOpen(false); }
+    if (slashOpen) setPlusOpen(false);
     if (pendingReq) {
-      setSkillsOpen(false);
       setPlusOpen(false);
-      setState({ approvalMenuOpen: false });
+      setState({ approvalMenuOpen: false, composerPicker: null });
     }
   }, [slashOpen, pendingReq?.toolCallId]);
   useEffect(() => {
-    if (!s.modelDDOpen && !s.approvalMenuOpen && !skillsOpen && !ctxOpen && !plusOpen && !s.composerPicker) return;
+    if (!s.modelDDOpen && !s.approvalMenuOpen && !ctxOpen && !plusOpen && !s.composerPicker) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       const patch: { modelDDOpen?: false; approvalMenuOpen?: false } = {};
       if (!modelWrapRef.current?.contains(t)) patch.modelDDOpen = false;
       if (!approvalWrapRef.current?.contains(t)) patch.approvalMenuOpen = false;
       if (patch.modelDDOpen !== undefined || patch.approvalMenuOpen !== undefined) setState(patch);
-      if (!plusWrapRef.current?.contains(t)) setSkillsOpen(false);
       if (!ctxWrapRef.current?.contains(t)) setCtxOpen(false);
       if (!plusWrapRef.current?.contains(t)) setPlusOpen(false);
       if (getState().composerPicker && !pickerRef.current?.contains(t)) setState({ composerPicker: null });
@@ -154,7 +172,6 @@ export function ChatPage() {
       e.preventDefault();
       e.stopPropagation();
       if (plusOpen || getState().composerPicker) requestAnimationFrame(() => taRef.current?.focus());
-      setSkillsOpen(false);
       setCtxOpen(false);
       setPlusOpen(false);
       setState({ modelDDOpen: false, approvalMenuOpen: false, composerPicker: null });
@@ -165,7 +182,7 @@ export function ChatPage() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [s.modelDDOpen, s.approvalMenuOpen, skillsOpen, ctxOpen, plusOpen, s.composerPicker]);
+  }, [s.modelDDOpen, s.approvalMenuOpen, ctxOpen, plusOpen, s.composerPicker]);
   useEffect(() => {
     if (!plusOpen) return;
     setPlusActive(0);
@@ -173,19 +190,12 @@ export function ChatPage() {
   }, [plusOpen]);
   const pick = (it: MenuItem) => {
     setPlusOpen(false);
-    setSkillsOpen(false);
-    if (it.id === "skill") {
-      // Next tick: the pick fires on mousedown, and the outside-click handler
-      // that follows would close a picker opened right now.
-      setTimeout(() => setSkillsOpen(true), 0);
-      return;
-    }
     runCommand(it, taRef);
   };
   useEffect(() => {
     if (!pendingReq) return;
     const onKey = (e: KeyboardEvent) => {
-      if (s.modelDDOpen || s.approvalMenuOpen || skillsOpen) return;
+      if (s.modelDDOpen || s.approvalMenuOpen || s.composerPicker) return;
       if (e.isComposing || e.keyCode === 229) return;
       const action = approvalKeyAction(e.key, { shiftKey: e.shiftKey });
       if (!action) return;
@@ -195,7 +205,7 @@ export function ChatPage() {
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, skillsOpen]);
+  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, s.composerPicker]);
   useEffect(() => {
     const onHide = () => { pageUnloading = true; };
     const onShow = () => { pageUnloading = false; };
@@ -213,7 +223,10 @@ export function ChatPage() {
     void resumeLiveStream(id);
   }, [s.pendingResume]);
   useEffect(() => {
-    if (!s.curSess || streaming) return;
+    if (!s.curSess) return;
+    void syncSessionRoundStats(s.curSess);
+    void syncSessionUsage(s.curSess);
+    if (streaming) return;
     const sess = s.sessions[s.curSess];
     if (sess) {
       let healed = false;
@@ -222,11 +235,18 @@ export function ChatPage() {
       }
       if (healed) saveSessions();
     }
-    void syncSessionRoundStats(s.curSess);
   }, [s.curSess, streaming]);
 
   useLayoutEffect(() => {
+    const anchor = pagingAnchorRef.current;
     const el = msgsRef.current;
+    if (anchor && el && el.contains(anchor.node) && cur?.msgs[0] !== anchor.head) {
+      pagingAnchorRef.current = null;
+      const nowTop = anchor.node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      el.scrollTop += nowTop - anchor.top;
+      syncJump();
+      return;
+    }
     if (!el || !followRef.current.stick) return;
     stickToBottom(el, followRef.current);
   });
@@ -268,7 +288,23 @@ export function ChatPage() {
   const ctxPct = Math.min(100, Math.round((occupancy / windowSize) * 100));
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
   const files = useFilesPanel(s.curSess, workspace);
+  useLayoutEffect(() => {
+    pagingAnchorRef.current = null;
+    followRef.current.resume();
+    setShowJump(false);
+  }, [s.curSess]);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
+  // Each chat runs on its own model; a new-chat screen shows the project's
+  // default (or the one picked there) until the chat exists.
+  useEffect(() => { void loadSessionModel(s.curSess); }, [s.curSess]);
+  const chatModel = s.curSess && s.sessionModel?.id === s.curSess ? s.sessionModel : null;
+  const pendingProfile = !s.curSess && s.pendingModel
+    ? (s.profilesData.profiles || []).find((p: any) => p.name === s.pendingModel)
+    : null;
+  const shownProfile = pendingProfile?.name || chatModel?.profile || s.serverProfile || s.profilesData.active || "default";
+  const shownProvider = pendingProfile?.model_provider || chatModel?.provider || s.serverProvider;
+  const shownModel = pendingProfile?.model_name || chatModel?.model || s.serverModelName || s.serverModel;
+  const shownEffort = pendingProfile ? "" : chatModel ? chatModel.effort : s.serverReasoningEffort;
   const skillToken = leadingSkillToken(s.inputText, invocableSkills(s.pluginsData.skills || []));
   // The token is drawn in an overlay under the textarea; hit-test its boxes so
   // a click on the name opens the skill while a click elsewhere just edits.
@@ -321,6 +357,13 @@ export function ChatPage() {
           </div>
         </div>
         <div className="chat-wrap" ref={chatWrapRef}>
+          <ChatSearchBar
+            sessionId={s.curSess}
+            msgs={cur?.msgs || []}
+            olderTurns={cur?.olderTurns || 0}
+            areaRef={msgsRef}
+            onLeaveFollow={() => followRef.current.leave()}
+          />
           <div className="chat" id="chatArea" ref={msgsRef}
             onWheel={(e) => { followRef.current.wheel(e.deltaY); syncJump(); }}
             onTouchStart={(e) => followRef.current.touchStart(e.touches[0]?.clientY ?? 0)}
@@ -343,13 +386,41 @@ export function ChatPage() {
                   <h2>Agentica</h2>
                   <p>{S.chat.welcome}</p>
                 </div>
-              ) : cur.msgs.map((m, i) => (
-                <MessageView key={i} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
-                  turn={turnOf(cur.msgs, i)}
-                  onOpenFile={files.browsePath} onOpenReview={files.openReview} onOpenSkill={files.openSkill}
-                  live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
-                  pendingToolCallId={pendingToolCallId} />
-              ))}
+              ) : (
+                <>
+                  {cur.hasOlder && (
+                    <div className="chat-older">
+                      <button
+                        type="button"
+                        disabled={!!cur.loadingOlder}
+                        onClick={() => {
+                          if (!s.curSess) return;
+                          followRef.current.leave();
+                          const el = msgsRef.current;
+                          const first = el?.querySelector<HTMLElement>(".m");
+                          if (el && first) {
+                            pagingAnchorRef.current = {
+                              node: first,
+                              top: first.getBoundingClientRect().top - el.getBoundingClientRect().top,
+                              head: cur.msgs[0],
+                            };
+                          }
+                          void loadOlderMessages(s.curSess);
+                        }}
+                      >
+                        {cur.loadingOlder ? S.common.loading : S.chat.loadOlder}
+                      </button>
+                    </div>
+                  )}
+                  {cur.msgs.map((m, i) => (
+                    <MessageView key={keyOfMsg(m)} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
+                      turn={(cur.olderTurns || 0) + turnOf(cur.msgs, i)}
+                      onOpenFile={files.browsePath} onOpenReview={files.openReview} onOpenSkill={files.openSkill}
+                      live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
+                      pendingToolCallId={pendingToolCallId} />
+                  ))}
+                </>
+              )}
             </div>
           </div>
           <ChatNav
@@ -386,19 +457,7 @@ export function ChatPage() {
             </div>
           )}
           {!!queued.length && (
-            <div className="queue-bar">
-              <span className="queue-label">{S.chat.queuedCount(queued.length)}</span>
-              {queued.map((qItem) => (
-                <span className="queue-chip" key={qItem.id} title={qItem.text}>
-                  <button type="button" className="queue-chip-text" title={S.chat.editQueued}
-                          onClick={() => editQueued(qItem)}>
-                    {qItem.text.slice(0, 40) || S.chat.attachmentOnly}
-                  </button>
-                  <button type="button" title={S.chat.editQueued} onClick={() => editQueued(qItem)}><IconPencil /></button>
-                  <button type="button" onClick={() => setState({ messageQueue: getState().messageQueue.filter((x) => x.id !== qItem.id) })}><IconClose /></button>
-                </span>
-              ))}
-            </div>
+            <QueueDock queued={queued} streaming={streaming} />
           )}
           <div className={"input-box" + (pendingReq ? " approval-locked" : "")} onPaste={(e) => {
             if (pendingReq) return;
@@ -427,9 +486,15 @@ export function ChatPage() {
               <ComposerPicker
                 key={s.composerPicker}
                 menuRef={pickerRef}
-                groups={s.composerPicker === "model" ? modelPickerGroups() : permissionPickerGroups()}
-                searchPlaceholder={s.composerPicker === "model" ? S.chat.pickerSearchModel : undefined}
-                emptyText={s.composerPicker === "model" && !(s.profilesData.profiles || []).length ? S.chat.noProfiles : S.chat.pickerNoMatch}
+                groups={s.composerPicker === "model" ? modelPickerGroups() : s.composerPicker === "skill" ? skillPickerGroups() : permissionPickerGroups()}
+                searchPlaceholder={s.composerPicker === "model" ? S.chat.pickerSearchModel : s.composerPicker === "skill" ? S.chat.skillSearch : undefined}
+                emptyText={
+                  s.composerPicker === "model" && !(s.profilesData.profiles || []).length
+                    ? S.chat.noProfiles
+                    : s.composerPicker === "skill" && !invocableSkills(s.pluginsData.skills || []).length
+                      ? S.chat.skillNone
+                      : S.chat.pickerNoMatch
+                }
                 footer={s.composerPicker === "model"
                   ? { label: S.chat.manageProfiles, onClick: () => { setState({ composerPicker: null }); void primeSettings("profiles"); } }
                   : undefined}
@@ -440,7 +505,8 @@ export function ChatPage() {
                 onPick={(key) => {
                   const kind = getState().composerPicker;
                   setState({ composerPicker: null });
-                  if (kind === "model") void switchProfile(key);
+                  if (kind === "model") void pickSessionModel(key);
+                  else if (kind === "skill") setState({ inputText: key + " " });
                   else setApprovalMode(key as "ask" | "auto" | "allow-all");
                   requestAnimationFrame(() => taRef.current?.focus());
                 }}
@@ -596,8 +662,7 @@ export function ChatPage() {
                   <button type="button" className={"foot-btn plus-btn" + (plusOpen ? " on" : "")}
                           title={plusOpen ? undefined : S.chat.plusMenu} aria-haspopup="menu" aria-expanded={plusOpen}
                           onClick={() => {
-                            setSkillsOpen(false);
-                            setState({ approvalMenuOpen: false, modelDDOpen: false });
+                            setState({ approvalMenuOpen: false, modelDDOpen: false, composerPicker: null });
                             setPlusOpen(!plusOpen);
                           }}>
                     <IconPlus />
@@ -616,23 +681,12 @@ export function ChatPage() {
                                    }
                                  }} />
                   )}
-                  {skillsOpen && (
-                    <SkillsPicker
-                      skills={s.pluginsData.skills || []}
-                      onPick={(cmd) => {
-                        setState({ inputText: cmd + " " });
-                        setSkillsOpen(false);
-                        taRef.current?.focus();
-                      }}
-                    />
-                  )}
                 </div>
                 <ComposerDir />
                 <div className="approval-wrap" ref={approvalWrapRef}>
                   <button className="foot-btn approval-btn" title={S.chat.permHint(s.selectedApprovalMode)}
                           onClick={() => {
-                            setSkillsOpen(false);
-                            setState({ approvalMenuOpen: !s.approvalMenuOpen, modelDDOpen: false });
+                            setState({ approvalMenuOpen: !s.approvalMenuOpen, modelDDOpen: false, composerPicker: null });
                           }}>
                     <span className="quick-icon">{permIcon(s.selectedApprovalMode)}</span>
                     <span className="approval-label">{S.chat.permLabel(s.selectedApprovalMode)}</span>
@@ -667,31 +721,19 @@ export function ChatPage() {
                 </div>
                 <div className="input-model-wrap" ref={modelWrapRef}>
                   <button className="foot-btn model-sel" onClick={() => {
-                    setSkillsOpen(false);
-                    setState({ modelDDOpen: !s.modelDDOpen, approvalMenuOpen: false });
+                    setState({ modelDDOpen: !s.modelDDOpen, approvalMenuOpen: false, composerPicker: null });
                   }}>
-                    {s.serverModelName || s.serverModel}
+                    {shownModel}
                   </button>
                   {s.modelDDOpen && (
-                    <div className="model-dd open">
-                      <div className="dd-config-card">
-                        <div className="dd-config-row"><span>Profile</span><strong>{s.serverProfile || s.profilesData.active || "default"}</strong></div>
-                        <div className="dd-config-row"><span>{S.chat.model}</span><strong>{s.serverProvider}/{s.serverModelName || s.serverModel}</strong></div>
-                        {s.serverReasoningEffort && <div className="dd-config-row"><span>effort</span><strong>{s.serverReasoningEffort}</strong></div>}
-                      </div>
-                      <div className="dd-section">{S.chat.switchProfile}</div>
-                      {!(s.profilesData.profiles || []).length && (
-                        <div className="dd-empty">{S.chat.noProfiles}</div>
-                      )}
-                      {(s.profilesData.profiles || []).map((p: any) => (
-                        <button key={p.name} className={"dd-profile" + (p.name === (s.serverProfile || s.profilesData.active) ? " active" : "")}
-                                onClick={() => void switchProfile(p.name)}>
-                          <div className="dd-p-name">{p.name}{p.name === (s.serverProfile || s.profilesData.active) ? <span className="dd-active"> ●</span> : null}</div>
-                          <div className="dd-p-model">{p.model_provider}/{p.model_name}</div>
-                        </button>
-                      ))}
-                      <button className="dd-manage" onClick={() => { setState({ modelDDOpen: false }); void primeSettings("profiles"); }}>{S.chat.manageProfiles}</button>
-                    </div>
+                    <ModelDropdown
+                      profiles={s.profilesData.profiles || []}
+                      shownProfile={shownProfile}
+                      shownProvider={shownProvider}
+                      shownModel={shownModel}
+                      shownEffort={shownEffort}
+                      thisChat={!!(pendingProfile || chatModel?.source === "session")}
+                    />
                   )}
                 </div>
                 <button className={"act-btn " + (showStop ? "stop" : "send")}
@@ -711,8 +753,175 @@ export function ChatPage() {
   );
 }
 
+function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, shownEffort, thisChat }: {
+  profiles: any[]; shownProfile: string; shownProvider: string; shownModel: string; shownEffort: string; thisChat: boolean;
+}) {
+  const S = useStrings();
+  const [query, setQuery] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!q) return profiles;
+    return profiles.filter((p) =>
+      `${p.name || ""} ${p.model_provider || ""} ${p.model_name || ""}`.toLowerCase().includes(q));
+  }, [profiles, q]);
+  useEffect(() => {
+    const idx = filtered.findIndex((p: any) => p.name === shownProfile);
+    setCursor(idx >= 0 ? idx : 0);
+  }, [q, shownProfile, filtered.length]);
+  return (
+    <div className="model-dd open">
+      <div className="dd-config-card">
+        <div className="dd-config-row"><span>Profile</span><strong>{shownProfile}</strong></div>
+        <div className="dd-config-row"><span>{S.chat.model}</span><strong>{shownProvider}/{shownModel}</strong></div>
+        {shownEffort && <div className="dd-config-row"><span>effort</span><strong>{shownEffort}</strong></div>}
+        <div className="dd-config-note">{thisChat ? S.chat.modelThisChat : S.chat.modelProjectDefault}</div>
+      </div>
+      <div className="dd-section">{S.chat.switchProfile}</div>
+      {profiles.length > 0 && (
+        <label className="dd-search">
+          <IconSearch />
+          <input type="search" autoFocus value={query} placeholder={S.chat.pickerSearchModel}
+                 onChange={(e) => setQuery(e.target.value)}
+                 onKeyDown={(e) => {
+                   if (e.key === "ArrowDown" && filtered.length) {
+                     e.preventDefault();
+                     setCursor((c) => (c + 1) % filtered.length);
+                   } else if (e.key === "ArrowUp" && filtered.length) {
+                     e.preventDefault();
+                     setCursor((c) => (c - 1 + filtered.length) % filtered.length);
+                   } else if (e.key === "Enter" && filtered[cursor]) {
+                     e.preventDefault();
+                     void pickSessionModel(filtered[cursor].name);
+                   } else if (e.key === "Escape") {
+                     e.preventDefault();
+                     if (query) setQuery(""); else setState({ modelDDOpen: false });
+                   }
+                 }} />
+        </label>
+      )}
+      <div className="dd-profile-list">
+        {!profiles.length && <div className="dd-empty">{S.chat.noProfiles}</div>}
+        {profiles.length > 0 && !filtered.length && <div className="dd-empty">{S.chat.pickerNoMatch}</div>}
+        {filtered.map((p: any, i: number) => (
+          <button key={p.name}
+                  className={"dd-profile" + (p.name === shownProfile ? " active" : "") + (i === cursor ? " kb-focus" : "")}
+                  onMouseEnter={() => setCursor(i)}
+                  onClick={() => void pickSessionModel(p.name)}>
+            <div className="dd-p-name">{p.name}{p.name === shownProfile ? <span className="dd-active"> ●</span> : null}</div>
+            <div className="dd-p-model">{p.model_provider}/{p.model_name}</div>
+          </button>
+        ))}
+      </div>
+      <button className="dd-manage" onClick={() => { setState({ modelDDOpen: false }); void primeSettings("profiles"); }}>{S.chat.manageProfiles}</button>
+    </div>
+  );
+}
+
+function ChatSearchBar({ sessionId, msgs, olderTurns, areaRef, onLeaveFollow }: {
+  sessionId: string | null;
+  msgs: ChatMsg[];
+  olderTurns: number;
+  areaRef: RefObject<HTMLDivElement | null>;
+  onLeaveFollow: () => void;
+}) {
+  const s = useAppState();
+  const S = useStrings();
+  const target = s.chatSearchTarget?.sessionId === sessionId ? s.chatSearchTarget : null;
+  const activeQuery = (s.sidebarSearch.trim() || target?.query || "").trim();
+  const [remoteHits, setRemoteHits] = useState<SessionContentHit[]>([]);
+
+  useEffect(() => {
+    if (!sessionId || !activeQuery || olderTurns <= 0) {
+      setRemoteHits([]);
+      return;
+    }
+    const ctrl = new AbortController();
+    void searchAllSessionsContent(activeQuery, ctrl.signal).then((all) => {
+      if (ctrl.signal.aborted) return;
+      setRemoteHits(all[sessionId] || []);
+    });
+    return () => ctrl.abort();
+  }, [sessionId, activeQuery, olderTurns]);
+
+  const hits = useMemo(() => {
+    if (!activeQuery) return [];
+    const local = searchMsgsConversation(msgs, olderTurns, activeQuery, 100);
+    if (!remoteHits.length) return local;
+    const byKey = new Map<string, SessionContentHit>();
+    for (const h of remoteHits) byKey.set(`${h.turn}:${h.role}`, h);
+    for (const h of local) byKey.set(`${h.turn}:${h.role}`, h);
+    return [...byKey.values()].sort((a, b) => a.turn - b.turn || (a.role === "user" ? -1 : 1));
+  }, [msgs, olderTurns, activeQuery, remoteHits]);
+
+  const curIdx = useMemo(() => {
+    if (!hits.length) return -1;
+    if (target) {
+      const idx = hits.findIndex((h: SessionContentHit) => h.turn === target.turn && (!target.role || h.role === target.role));
+      if (idx >= 0) return idx;
+    }
+    return 0;
+  }, [hits, target]);
+
+  useEffect(() => {
+    if (!target || !areaRef.current) return;
+    onLeaveFollow();
+    const sel = target.role
+      ? `.m[data-turn="${target.turn}"][data-role="${target.role}"]`
+      : `.m[data-turn="${target.turn}"]`;
+    const el = areaRef.current.querySelector<HTMLElement>(sel)
+      || areaRef.current.querySelector<HTMLElement>(`.m[data-turn="${target.turn}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [target?.seq, target?.turn, target?.role, msgs.length]);
+
+  if (!sessionId || !activeQuery || (!hits.length && !s.sidebarSearch.trim())) return null;
+
+  const step = (delta: number) => {
+    if (!hits.length) return;
+    const nextIdx = (Math.max(0, curIdx) + delta + hits.length) % hits.length;
+    const next = hits[nextIdx];
+    if (next) void openSessionAtTurn(sessionId, next.turn, activeQuery, next.role);
+  };
+
+  const currentHit = curIdx >= 0 ? hits[curIdx] : null;
+  return (
+    <div className="chat-find-bar" role="region" aria-label={S.chat.searchInChatPlaceholder}>
+      <IconSearch />
+      <input
+        type="search"
+        className="chat-find-input"
+        value={s.sidebarSearch || activeQuery}
+        placeholder={S.chat.searchInChatPlaceholder}
+        onChange={(e) => setState({ sidebarSearch: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            step(e.shiftKey ? -1 : 1);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setState({ sidebarSearch: "", chatSearchTarget: null });
+          }
+        }}
+      />
+      <span className="chat-find-count">
+        {currentHit ? S.chat.searchTurnIndicator(curIdx + 1, hits.length, currentHit.turn) : "0 / 0"}
+      </span>
+      <button type="button" className="chat-find-btn" disabled={!hits.length} title={S.chat.searchPrev}
+              onClick={() => step(-1)}>↑</button>
+      <button type="button" className="chat-find-btn" disabled={!hits.length} title={S.chat.searchNext}
+              onClick={() => step(1)}>↓</button>
+      <button type="button" className="chat-find-btn" title={S.common.close}
+              onClick={() => setState({ sidebarSearch: "", chatSearchTarget: null })}>
+        <IconClose />
+      </button>
+    </div>
+  );
+}
+
 /** `compact · compacted N -> M messages`; opens to the rendered notes. */
-function CompactCard({ c }: { c: NonNullable<ChatMsg["compact"]> }) {
+function CompactCard({ c, onOpenFile }: { c: NonNullable<ChatMsg["compact"]>; onOpenFile?: (path: string) => void }) {
   const S = useStrings();
   const [open, setOpen] = useState(false);
   if (c.pending) {
@@ -727,14 +936,38 @@ function CompactCard({ c }: { c: NonNullable<ChatMsg["compact"]> }) {
   }
   return (
     <div className={"compact-card" + (open ? " open" : "")}>
-      <button type="button" className="compact-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="chev"><IconChevronDown /></span>
-        <span className="work-icon"><IconCompact /></span>
-        <span className="compact-kind">compact</span>
-        <span className="compact-sep">·</span>
-        <span>{c.before != null ? S.chat.compactDone(c.before, c.after ?? 0) : c.auto ? S.chat.compactDoneAuto : S.chat.compactDoneHistory}</span>
-        {c.notesPath && <span className="compact-path" title={c.notesPath}><bdi>{c.notesPath}</bdi></span>}
-      </button>
+      <div className="compact-head">
+        <button type="button" className="compact-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <span className="chev"><IconChevronDown /></span>
+          <span className="work-icon"><IconCompact /></span>
+          <span className="compact-kind">compact</span>
+          <span className="compact-sep">·</span>
+          <span>{c.before != null ? S.chat.compactDone(c.before, c.after ?? 0) : c.auto ? S.chat.compactDoneAuto : S.chat.compactDoneHistory}</span>
+        </button>
+        {c.notesPath && (
+          <span className="compact-path-wrap">
+            <button
+              type="button"
+              className="compact-path"
+              title={c.notesPath}
+              onClick={() => (onOpenFile ? onOpenFile(c.notesPath!) : setOpen(!open))}
+            >
+              <bdi>{c.notesPath}</bdi>
+            </button>
+            <button
+              type="button"
+              className="compact-path-copy"
+              title={S.files.copyPath}
+              aria-label={S.files.copyPath}
+              onClick={() => {
+                void navigator.clipboard.writeText(c.notesPath!).then(() => showToast(S.common.copied));
+              }}
+            >
+              <IconCopy />
+            </button>
+          </span>
+        )}
+      </div>
       {open && (c.notes?.trim()
         ? (
           <div className="compact-body">
@@ -785,19 +1018,71 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
   if (m.role === "assistant" && m.compact) {
     return (
       <div id={"msg-" + idx} className="m m-a">
-        <div className="msg-stack"><CompactCard c={m.compact} /></div>
+        <div className="msg-stack"><CompactCard c={m.compact} onOpenFile={onOpenFile} /></div>
       </div>
     );
   }
   if (!live) settleWork(m);
   const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
+  const hasWork = Boolean(segs?.some((seg) => seg.type === "work"));
+  const hasPendingApproval = Boolean(
+    pendingToolCallId && segs?.some(
+      (seg) => seg.type === "work" && seg.items.some((p) => p.kind === "tool" && p.toolCallId === pendingToolCallId),
+    ),
+  );
+  const [processOpen, setProcessOpen] = useState(() => Boolean(m.aborted || m.error || hasPendingApproval));
+  useEffect(() => {
+    if (hasPendingApproval || m.aborted || m.error) setProcessOpen(true);
+  }, [hasPendingApproval, m.aborted, m.error]);
+  const rawDur = m.durationMs ?? ((m.durationSec || 0) * 1000);
+  const workDur = segs
+    ? segs.reduce((acc, seg) => (seg.type === "work" ? acc + workSummary(seg.items, Date.now(), false).ms : acc), 0)
+    : 0;
+  const turnDurationMs = rawDur > 0 ? rawDur : workDur;
+  const showTurnProcess = !live && hasWork;
+  const turnProcessLabel = m.aborted
+    ? S.chat.turnProcessStopped
+    : m.error
+      ? S.chat.turnProcessFailed
+      : turnDurationMs > 0
+        ? `${S.chat.turnProcessTook}${fmtRunDuration(turnDurationMs, S.chat.runDurationUnits)}`
+        : S.chat.turnProcessWorked;
+  const st = getState();
+  const searchFocused = !!(
+    st.chatSearchTarget
+    && st.chatSearchTarget.sessionId === sessionId
+    && st.chatSearchTarget.turn === turn
+    && (!st.chatSearchTarget.role || st.chatSearchTarget.role === m.role)
+  );
   return (
-    <div id={"msg-" + idx} className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "")}>
+    <div id={"msg-" + idx} data-turn={turn} data-role={m.role}
+         className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "") + (searchFocused ? " search-focus" : "")}>
       <div className="msg-stack">
+        {showTurnProcess && (
+          <button
+            type="button"
+            className={"turn-process" + (processOpen ? " open" : "")}
+            aria-expanded={processOpen}
+            onClick={() => setProcessOpen((v) => !v)}
+          >
+            <span className="turn-process-label">{turnProcessLabel}</span>
+            <span className="turn-process-chev"><IconChevronDown /></span>
+          </button>
+        )}
         {segs ? segs.map((seg, i) => {
           const isLast = !!live && i === segs.length - 1;
           if (seg.type === "work") {
-            return <WorkGroup key={i} items={seg.items} isLast={isLast} live={!!live} pendingToolCallId={pendingToolCallId} />;
+            if (showTurnProcess && !processOpen) return null;
+            return (
+              <WorkGroup
+                key={i}
+                items={seg.items}
+                isLast={isLast}
+                live={!!live}
+                pendingToolCallId={pendingToolCallId}
+                defaultOpen={showTurnProcess && processOpen}
+              />
+            );
           }
           if (seg.part.kind === "steer") {
             return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} onOpenSkill={onOpenSkill} />;
@@ -1045,12 +1330,200 @@ async function requeueLateSteer(sessId: string) {
   }
 }
 
-function editQueued(qItem: QueuedMessage) {
-  setState({
-    inputText: qItem.text,
-    pendingFiles: [...getState().pendingFiles, ...qItem.files],
-    messageQueue: getState().messageQueue.filter((x) => x.id !== qItem.id),
-  });
+/**
+ * dsh `QueueDock`: queued messages stay in a list above the composer and edit
+ * in place so queue order (`1, 2, 3…`) is preserved and the main composer's
+ * draft is never overwritten.
+ */
+function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: boolean }) {
+  const S = useStrings();
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (editing && !queued.some((q) => q.id === editing.id)) setEditing(null);
+  }, [editing, queued]);
+
+  const expanded = queued.length === 1 || !collapsed || editing !== null;
+  const saveEdit = (qItem: QueuedMessage) => {
+    if (!editing || editing.id !== qItem.id) return;
+    const trimmed = editing.text.trim();
+    if (!trimmed && !qItem.files.length) return;
+    setState({
+      messageQueue: updateQueuedMessageText(getState().messageQueue, qItem.id, editing.text),
+    });
+    setEditing(null);
+  };
+  const removeQueued = (id: string) => {
+    setState({ messageQueue: getState().messageQueue.filter((x) => x.id !== id) });
+  };
+  const steerNow = async (qItem: QueuedMessage) => {
+    if (!streaming || qItem.files.length > 0 || !qItem.text.trim()) return;
+    removeQueued(qItem.id);
+    await applySteer(qItem.sessionId, qItem.text.trim());
+  };
+
+  return (
+    <div className="queue-dock" data-queue-dock="">
+      <div className="queue-dock-panel">
+        {queued.length > 1 && (
+          <button
+            type="button"
+            className="queue-dock-head"
+            aria-expanded={expanded}
+            disabled={editing !== null}
+            onClick={() => setCollapsed((v) => !v)}
+          >
+            <span className="queue-dock-lead" aria-hidden="true"><IconQueue /></span>
+            <span className="queue-dock-count">{S.chat.queuedCount(queued.length)}</span>
+            <span className={"queue-dock-chev" + (expanded ? " open" : "")} aria-hidden="true">
+              <IconChevronDown />
+            </span>
+          </button>
+        )}
+        {expanded && (
+          <ul className="queue-dock-list">
+            {queued.map((qItem, idx) => {
+              const isEditing = editing?.id === qItem.id;
+              return (
+                <li key={qItem.id} className="queue-row">
+                  {queued.length === 1 ? (
+                    <span className="queue-dock-lead" aria-hidden="true"><IconQueue /></span>
+                  ) : (
+                    <span className="queue-idx">{idx + 1}</span>
+                  )}
+                  {isEditing ? (
+                    <QueueInlineEditor
+                      value={editing.text}
+                      label={S.chat.editQueued}
+                      onChange={(text) => setEditing({ id: qItem.id, text })}
+                      onSave={() => saveEdit(qItem)}
+                      onCancel={() => setEditing(null)}
+                    />
+                  ) : (
+                    <>
+                      {qItem.files.length > 0 && (
+                        <span className="queue-files">
+                          {qItem.files.map((f, fi) => (
+                            <span key={fi} className="queue-file-tag" title={f.name}>{f.name}</span>
+                          ))}
+                        </span>
+                      )}
+                      <span
+                        className="queue-preview"
+                        title={qItem.text}
+                        onDoubleClick={() => setEditing({ id: qItem.id, text: qItem.text })}
+                      >
+                        {qItem.text || S.chat.attachmentOnly}
+                      </span>
+                    </>
+                  )}
+                  <div className="queue-actions">
+                    {isEditing ? (
+                      <>
+                        <button
+                          type="button"
+                          className="queue-act"
+                          title={S.chat.saveQueued}
+                          aria-label={S.chat.saveQueued}
+                          disabled={!editing.text.trim() && !qItem.files.length}
+                          onClick={() => saveEdit(qItem)}
+                        >
+                          <IconCheck />
+                        </button>
+                        <button
+                          type="button"
+                          className="queue-act"
+                          title={S.chat.cancelEditQueued}
+                          aria-label={S.chat.cancelEditQueued}
+                          onClick={() => setEditing(null)}
+                        >
+                          <IconClose />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="queue-act"
+                          title={S.chat.editQueued}
+                          aria-label={S.chat.editQueued}
+                          onClick={() => setEditing({ id: qItem.id, text: qItem.text })}
+                        >
+                          <IconPencil />
+                        </button>
+                        <button
+                          type="button"
+                          className="queue-act"
+                          title={S.chat.removeQueued}
+                          aria-label={S.chat.removeQueued}
+                          onClick={() => removeQueued(qItem.id)}
+                        >
+                          <IconTrash />
+                        </button>
+                        {streaming && qItem.files.length === 0 && (
+                          <button
+                            type="button"
+                            className="queue-act"
+                            title={S.chat.steerQueued}
+                            aria-label={S.chat.steerQueued}
+                            onClick={() => void steerNow(qItem)}
+                          >
+                            <IconSend />
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QueueInlineEditor({
+  value, label, onChange, onSave, onCancel,
+}: {
+  value: string;
+  label: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.min(120, node.scrollHeight + node.offsetHeight - node.clientHeight)}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      autoFocus
+      rows={1}
+      className="queue-edit-ta"
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+          return;
+        }
+        if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          onSave();
+        }
+      }}
+    />
+  );
 }
 
 function appendSteerBubble(sessId: string, text: string) {
@@ -1324,6 +1797,9 @@ async function consumeSse(
       if (evt.event === "done" || evt.event === "error" || evt.event === "aborted") {
         terminal = true;
       }
+      if (evt.event === "tool_completed") {
+        void syncSessionUsage(sessId);
+      }
       if (applyLiveSseEvent(aiMsg, evt, sessId)) continue;
       if (evt.event === "status" && evt.data && onStatus) onStatus(evt.data);
       if (evt.event === "done" && evt.data) {
@@ -1522,6 +1998,9 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
       return;
     }
 
+    // A model picked on the new-chat screen must be on the chat before its
+    // first run builds the agent.
+    await applyPendingModel(sessId);
     const created = await api.createChatRunApi({
       message,
       session_id: sessId,
@@ -1581,13 +2060,14 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
       setState({ inputText: "", goalCompose: { budgetText: "" } });
       focus();
       return;
+    case "skill":
     case "permission":
     case "model":
       // The `/permission` text the user typed is not a message. Open on the
       // next tick: a pick fires on mousedown, and the document's outside-click
       // handler runs after it and would close a dropdown opened right now.
       setState({ inputText: clearIfSlash() });
-      setTimeout(() => setState({ composerPicker: it.id as "model" | "permission", modelDDOpen: false, approvalMenuOpen: false }), 0);
+      setTimeout(() => setState({ composerPicker: it.id as "model" | "permission" | "skill", modelDDOpen: false, approvalMenuOpen: false }), 0);
       return;
     case "export": {
       setState({ inputText: clearIfSlash() });
@@ -1638,7 +2118,8 @@ function setApprovalMode(mode: "ask" | "auto" | "allow-all") {
 /** Model picker rows: profiles grouped by provider, model name first. */
 function modelPickerGroups(): PickerGroup[] {
   const st = getState();
-  const active = st.serverProfile || st.profilesData.active;
+  const chat = st.curSess && st.sessionModel?.id === st.curSess ? st.sessionModel.profile : "";
+  const active = (!st.curSess && st.pendingModel) || chat || st.serverProfile || st.profilesData.active;
   const byProvider = new Map<string, PickerGroup>();
   for (const p of st.profilesData.profiles || []) {
     const provider = String(p.model_provider || "");
@@ -1657,6 +2138,18 @@ function permissionPickerGroups(): PickerGroup[] {
     title: S.chat.pickerPermTitle,
     options: (["ask", "auto", "allow-all"] as const).map((mode) => ({
       key: mode, label: S.chat.permLabel(mode), sub: S.chat.permHint(mode), icon: permIcon(mode), selected: cur === mode,
+    })),
+  }];
+}
+
+function skillPickerGroups(): PickerGroup[] {
+  const S = getStrings();
+  const items = invocableSkills(getState().pluginsData.skills || []);
+  if (!items.length) return [];
+  return [{
+    title: S.chat.cmdGroupSkills,
+    options: items.map((it) => ({
+      key: it.cmd, label: it.name, sub: it.desc || undefined, icon: <IconBook />,
     })),
   }];
 }
@@ -1802,6 +2295,7 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
   const t0 = performance.now();
   let disconnected = false;
   try {
+    await applyPendingModel(sessId);
     const resp = await api.streamGoal({
       objective,
       session_id: sessId,

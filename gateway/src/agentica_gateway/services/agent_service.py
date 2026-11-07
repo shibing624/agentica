@@ -41,6 +41,8 @@ from agentica.config.profiles import (
     apply_global_config,
     get_setting,
     get_profile,
+    get_profiles,
+    get_project_profile,
     get_active_profile_name,
     set_active_profile,
     provider_api_key_env,
@@ -72,6 +74,45 @@ from . import chat_images, live_turn
 
 if TYPE_CHECKING:
     from ..channels.base import InboundMedia
+
+
+def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+    """One config.yaml profile as the flat model config the agent is built from.
+
+    Empty base_url / api_key stay empty so the provider's own defaults (and its
+    ``*_API_KEY`` env var) apply, as they do for the gateway default. The
+    auxiliary block inherits the main endpoint only on the same provider.
+    """
+    wire_api = profile.get("wire_api") or ""
+    aux = profile.get("auxiliary_model")
+    aux = aux if isinstance(aux, dict) else {}
+    provider = profile["model_provider"]
+    base_url = profile.get("base_url") or ""
+    api_key = profile.get("api_key") or ""
+    aux_provider = aux.get("model_provider") or provider
+    same = aux_provider == provider
+    aux_wire_api = aux.get("wire_api") or ""
+    return {
+        "profile": name,
+        "model_provider": provider,
+        "model_name": profile["model_name"],
+        "base_url": base_url,
+        "api_key": api_key,
+        "wire_api": wire_api,
+        "reasoning": profile.get("reasoning") or "",
+        "reasoning_effort": "" if wire_api == "responses" else (profile.get("reasoning_effort") or ""),
+        "max_tokens": int(profile.get("max_tokens") or 0),
+        "temperature": float(profile.get("temperature") or 0),
+        "top_p": float(profile.get("top_p") or 0),
+        "context_window": int(profile.get("context_window") or 0),
+        "auxiliary_model_provider": aux_provider if aux.get("model_name") else "",
+        "auxiliary_model_name": aux.get("model_name") or "",
+        "auxiliary_base_url": aux.get("base_url") or (base_url if same else ""),
+        "auxiliary_api_key": aux.get("api_key") or (api_key if same else ""),
+        "auxiliary_wire_api": aux_wire_api,
+        "auxiliary_reasoning": aux.get("reasoning") or "",
+        "auxiliary_reasoning_effort": "" if aux_wire_api == "responses" else (aux.get("reasoning_effort") or ""),
+    }
 
 # Timeout in seconds for building a new Agent instance (guards against SDK hangs)
 _AGENT_BUILD_TIMEOUT_S = 30
@@ -446,29 +487,110 @@ class AgentService:
     def auxiliary_reasoning_effort(self) -> str:
         return settings.auxiliary_reasoning_effort
 
-    def _build_sibling_model(self, prefix: str) -> Optional[Any]:
+    def _default_model_config(self) -> Dict[str, Any]:
+        """The gateway default (``settings``): config.yaml's active profile, or
+        the env vars when no profile is configured."""
+        return {
+            "profile": get_active_profile_name(),
+            "model_provider": self.model_provider,
+            "model_name": self.model_name,
+            "base_url": self.model_base_url,
+            "api_key": self.model_api_key,
+            "wire_api": self.model_wire_api,
+            "reasoning": self.model_reasoning,
+            "reasoning_effort": self.model_reasoning_effort,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "context_window": self.context_window,
+            "auxiliary_model_provider": self.auxiliary_model_provider,
+            "auxiliary_model_name": self.auxiliary_model_name,
+            "auxiliary_base_url": self.auxiliary_base_url,
+            "auxiliary_api_key": self.auxiliary_api_key,
+            "auxiliary_wire_api": self.auxiliary_wire_api,
+            "auxiliary_reasoning": self.auxiliary_reasoning,
+            "auxiliary_reasoning_effort": self.auxiliary_reasoning_effort,
+        }
+
+    def _session_profile(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
+        """``(profile, source)`` a session runs on; ``("", "default")`` is the
+        gateway default.
+
+        A session the user picked a model for keeps it (``<id>.meta.json``
+        ``profile_name``, the same sidecar field the CLI resumes from). A
+        session without a choice follows its project's default
+        (``project.json`` ``active_profile``), then config.yaml's. A name that
+        is no longer in config.yaml falls through to the next layer.
+        """
+        profiles = get_profiles()
+        picked = self.session_log_for(session_id, owner).get_profile_name()
+        if picked and picked in profiles:
+            return picked, "session"
+        project = get_project_profile(self.get_session_work_dir(session_id, owner))
+        if project and project in profiles:
+            return project, "project"
+        return "", "default"
+
+    def session_profile_name(self, session_id: str, owner: Optional[str] = None) -> str:
+        return self._session_profile(session_id, owner)[0]
+
+    def session_profile_source(self, session_id: str, owner: Optional[str] = None) -> str:
+        return self._session_profile(session_id, owner)[1]
+
+    def session_model_config(self, session_id: str, owner: Optional[str] = None) -> Dict[str, Any]:
+        """The flat model config a session's agent is built from."""
+        name = self.session_profile_name(session_id, owner)
+        if name:
+            profile = get_profile(name)
+            if profile.get("model_provider") and profile.get("model_name"):
+                return _profile_model_config(name, profile)
+        return self._default_model_config()
+
+    async def set_session_profile(self, session_id: str, name: str, owner: Optional[str] = None) -> Dict[str, Any]:
+        """Pin a session to a profile; other sessions keep theirs.
+
+        A run in flight finishes on its current model; the session rebuilds on
+        its next request.
+        """
+        self.session_log_for(session_id, owner).set_profile(name, "session")
+        key = self._sk(session_id, owner)
+        lock = self._session_locks.get(key)
+        if lock is not None and lock.locked():
+            self._stale_agents.add(key)
+        else:
+            self._cache.delete(key)
+        return self.session_model_config(session_id, owner)
+
+    def _session_provider(self, session_id: str, owner: Optional[str] = None) -> str:
+        """Provider slug of the session's model, for the ``provider/model`` label."""
+        if session_id.startswith(CRON_SESSION_PREFIX) and self.auxiliary_model_name:
+            return self.auxiliary_model_provider or self.model_provider
+        return self.session_model_config(session_id, owner)["model_provider"]
+
+    @staticmethod
+    def _sibling_model(cfg: Dict[str, Any], prefix: str) -> Optional[Any]:
         """Build a sibling (auxiliary) model if a model name is configured.
 
         Returns None when no sibling name is set — DeepAgent will reuse
         the main model. The auxiliary model also serves as the task subagent
         model (CLI unified them).
         """
-        sibling_name = getattr(self, f"{prefix}_model_name")
+        sibling_name = cfg[f"{prefix}_model_name"]
         if not sibling_name:
             return None
-        provider = getattr(self, f"{prefix}_model_provider") or self.model_provider
-        base_url = getattr(self, f"{prefix}_base_url") or None
-        api_key = getattr(self, f"{prefix}_api_key") or None
         return create_model(
-            provider,
+            cfg[f"{prefix}_model_provider"] or cfg["model_provider"],
             sibling_name,
-            base_url=base_url,
-            api_key=api_key,
-            wire_api=getattr(self, f"{prefix}_wire_api"),
-            reasoning=getattr(self, f"{prefix}_reasoning"),
-            reasoning_effort=getattr(self, f"{prefix}_reasoning_effort"),
+            base_url=cfg[f"{prefix}_base_url"] or None,
+            api_key=cfg[f"{prefix}_api_key"] or None,
+            wire_api=cfg[f"{prefix}_wire_api"],
+            reasoning=cfg[f"{prefix}_reasoning"],
+            reasoning_effort=cfg[f"{prefix}_reasoning_effort"],
             thinking=settings.model_thinking,
         )
+
+    def _build_sibling_model(self, prefix: str) -> Optional[Any]:
+        return self._sibling_model(self._default_model_config(), prefix)
 
     def side_task_model(self) -> Any:
         """The model for gateway side tasks (titles, commit messages, prompt
@@ -550,27 +672,32 @@ class AgentService:
         quality, and can run frequently — so when an auxiliary model is
         configured, cron sessions use it as their *main* model to cut cost.
         Interactive chat sessions are unaffected.
+
+        An interactive session builds from its own model config
+        (:meth:`session_model_config`): the profile picked for it, else its
+        project's, else the gateway default.
         """
         if session_id.startswith(CRON_SESSION_PREFIX) and self.auxiliary_model_name:
             model = self._build_sibling_model("auxiliary")
             auxiliary_model = None
             task_model = None
         else:
+            cfg = self.session_model_config(session_id, owner)
             model = create_model(
-                self.model_provider,
-                self.model_name,
-                base_url=self.model_base_url or None,
-                api_key=self.model_api_key or None,
-                wire_api=self.model_wire_api,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                context_window=self.context_window,
-                reasoning=self.model_reasoning,
-                reasoning_effort=self.model_reasoning_effort,
+                cfg["model_provider"],
+                cfg["model_name"],
+                base_url=cfg["base_url"] or None,
+                api_key=cfg["api_key"] or None,
+                wire_api=cfg["wire_api"],
+                max_tokens=cfg["max_tokens"],
+                temperature=cfg["temperature"],
+                top_p=cfg["top_p"],
+                context_window=cfg["context_window"],
+                reasoning=cfg["reasoning"],
+                reasoning_effort=cfg["reasoning_effort"],
                 thinking="enabled",
             )
-            auxiliary_model = self._build_sibling_model("auxiliary")
+            auxiliary_model = self._sibling_model(cfg, "auxiliary")
             # The auxiliary model also serves as the task subagent model (CLI
             # unified them — no separate task_model config anymore).
             task_model = auxiliary_model
@@ -615,7 +742,7 @@ class AgentService:
         permission_mode = self.get_session_approval_mode(session_id, owner)
         enable_evict = get_setting("enable_evict", True)
         enable_auto_compact = get_setting("enable_auto_compact", True)
-        profile = get_profile(get_active_profile_name()) or {}
+        profile = get_profile(self.session_profile_name(session_id, owner) or get_active_profile_name()) or {}
         compact_token_limit = parse_compact_token_limit(profile.get("compact_token_limit"))
         if compact_token_limit is None:
             compact_token_limit = parse_compact_token_limit(
@@ -672,6 +799,19 @@ class AgentService:
         agent.peer_session = peer_session
         agent.approve = self._make_session_approve(session_id, owner)
         self._restore_path_grants(agent, session_id, owner)
+        if (
+            agent._session_log is not None
+            and agent._session_log.exists()
+            and len(agent.working_memory.runs) == 0
+            and len(agent.working_memory.messages) == 0
+        ):
+            if not self.is_session_active(session_id, owner):
+                agent._session_log.seal_incomplete_turn()
+            resumed_messages = agent._session_log.load(
+                model=model.id if model is not None else None
+            )
+            if resumed_messages:
+                agent.working_memory.hydrate_runs_from_history(resumed_messages)
 
         tool_count = len(agent.tools) if agent.tools else 0
         logger.info(
@@ -693,8 +833,9 @@ class AgentService:
         """
         key = self._sk(session_id, owner)
         agent = self._cache.get(key)
-        if agent is not None and agent.user_id == self._owner(owner) and key not in self._stale_agents:
-            return agent
+        if agent is not None and agent.user_id == self._owner(owner):
+            if key not in self._stale_agents or self.is_session_active(session_id, owner):
+                return agent
         self._stale_agents.discard(key)
 
         try:
@@ -864,13 +1005,22 @@ class AgentService:
         """
         await self._ensure_initialized()
         agent = await self._get_agent(session_id, owner)
-        payload = await usage_payload(agent, model_provider=self.model_provider)
+        payload = await usage_payload(agent, model_provider=self._session_provider(session_id, owner))
         # Timing lives only in the log: the cached Agent forgets it on restart,
         # and these are the same numbers the Trace page shows.
         log = self.session_log_for(session_id, owner)
         if log.path.exists():
             totals = (await asyncio.to_thread(log.analyze, lite=True))["totals"]
             tokens = totals["tokens"]
+            if not payload["api_calls"] and totals["requests"]:
+                payload["api_calls"] = totals["requests"]
+                payload["input_tokens"] = tokens["prompt"]
+                payload["output_tokens"] = tokens["output"]
+                payload["cache_read_tokens"] = tokens["cacheRead"]
+                payload["cache_write_tokens"] = tokens["cacheWrite"]
+                payload["cache_hit_percent"] = tokens["cacheHitPercent"]
+                if totals["costUsd"] is not None:
+                    payload["cost_usd"] = round(float(totals["costUsd"]), 6)
             payload["stats"] = {
                 "rounds": totals["rounds"],
                 "steps": totals["requests"],
@@ -1029,7 +1179,7 @@ class AgentService:
                     tools_used=tools_used,
                     metrics=extract_metrics(agent),
                     media_notes=media_notes,
-                    usage=await usage_payload(agent, model_provider=self.model_provider),
+                    usage=await usage_payload(agent, model_provider=self._session_provider(session_id, owner)),
                     turn_usage=turn_usage_payload(agent),
                 )
 
@@ -1230,7 +1380,7 @@ class AgentService:
                 # compact result, as the CLI prints its path and diff.
                 "notes": notes,
                 "notes_path": notes_path,
-                "usage": await usage_payload(agent, model_provider=self.model_provider),
+                "usage": await usage_payload(agent, model_provider=self._session_provider(session_id, owner)),
             }
 
     async def chat_stream(
@@ -1356,7 +1506,7 @@ class AgentService:
                 reasoning=reasoning_content,
                 metrics=extract_metrics(agent),
                 media_notes=media_notes,
-                usage=await usage_payload(agent, model_provider=self.model_provider),
+                usage=await usage_payload(agent, model_provider=self._session_provider(session_id, owner)),
                 turn_usage=turn_usage_payload(agent),
             )
 
@@ -1816,8 +1966,11 @@ class AgentService:
 
     def get_session_work_dir(self, session_id: str, owner: Optional[str] = None) -> str:
         """Get the working directory for a session (falls back to global base_dir)."""
+        key = self._sk(session_id, owner)
+        if key not in self._session_work_dirs:
+            self._locate_session(session_id, owner)
         return self._session_work_dirs.get(
-            self._sk(session_id, owner), str(settings.base_dir),
+            key, str(settings.base_dir),
         )
 
     # ============== Session storage scoping ==============

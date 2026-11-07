@@ -111,3 +111,10 @@ test("the dock shows the plan only while the turn runs; a finished turn leaves i
   assert.deepEqual(A.dockTodos(msgs, true).map((t) => t.status), ["completed", "in_progress"]);
   assert.deepEqual(A.dockTodos(msgs, false), []);
 });
+
+test("toolResultPreview keeps execute output for inline arrow display and copy/paste", () => {
+  const out = "d727b86 benchmarks: adapt runner\n1 file changed, 12 insertions(+)";
+  assert.equal(A.toolResultPreview("execute", out), "d727b86 benchmarks: adapt runner 1 file changed, 12 insertions(+)");
+  assert.equal(A.toolResultPreview("read_file", "line 1\nline 2"), "");
+  assert.equal(A.toolResultPreview("apply_patch", "patched", true), "");
+});

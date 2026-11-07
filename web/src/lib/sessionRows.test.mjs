@@ -10,7 +10,9 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { collapseSessionRows, sessionMatches } = await vite.ssrLoadModule("/src/lib/sessionRows.ts");
+const {
+  collapseSessionRows, searchEventsConversation, searchMsgsConversation, sessionMatches,
+} = await vite.ssrLoadModule("/src/lib/sessionRows.ts");
 after(() => vite.close());
 
 const rows = Array.from({ length: 8 }, (_, i) => ({
@@ -50,4 +52,34 @@ test("pinned rows never disappear behind the fold", () => {
   const result = collapseSessionRows(changed, null, false);
   assert.ok(result.visible.some((row) => row.id === "s7"));
   assert.equal(result.visible.filter((row) => !row.session.pinned).length, 5);
+});
+
+test("conversation search matches both user queries and assistant answers with turn numbers", () => {
+  const events = [
+    { type: "user", content: "how do I configure sglang on gpu?" },
+    { type: "assistant", content: "Run tmux on 29.206.1.234." },
+    { type: "user", content: "what about vllm?" },
+    { type: "assistant", content: "Use gpu4 at 28.8.205.124." },
+  ];
+  const qHits = searchEventsConversation(events, "sglang");
+  assert.equal(qHits.length, 1);
+  assert.equal(qHits[0].turn, 1);
+  assert.equal(qHits[0].role, "user");
+  const aHits = searchEventsConversation(events, "28.8.205.124");
+  assert.equal(aHits.length, 1);
+  assert.equal(aHits[0].turn, 2);
+  assert.equal(aHits[0].role, "assistant");
+  assert.equal(sessionMatches(rows[0], "agentica", "28.8.205.124", aHits), true);
+
+  const msgHits = searchMsgsConversation(
+    [
+      { role: "user", content: "what about vllm?" },
+      { role: "assistant", content: "Use gpu4 at 28.8.205.124." },
+    ],
+    1,
+    "gpu4",
+  );
+  assert.equal(msgHits.length, 1);
+  assert.equal(msgHits[0].turn, 2);
+  assert.equal(msgHits[0].role, "assistant");
 });

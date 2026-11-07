@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """Read-only session log endpoints: paginated events, whole-file analysis, raw export."""
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
-from agentica.memory.trace import call_body, search_calls
+from agentica.memory.trace import call_body, chat_turn_page, search_calls
 
 from .. import deps
 from ..services.agent_service import AgentService
@@ -19,11 +20,16 @@ async def trace_events(
     request: Request,
     offset: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=1000),
+    turns: Optional[int] = Query(None, ge=1, le=200),
+    before: Optional[int] = Query(None, ge=0),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
     log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
+    if turns is not None:
+        page = await asyncio.to_thread(chat_turn_page, log.iter_raw_entries(), turns, before)
+        return {"session_id": session_id, **page}
     entries = list(log.iter_raw_entries())
     window = entries[offset:offset + limit]
     return {

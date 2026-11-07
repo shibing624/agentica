@@ -10,7 +10,10 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { agoStr, fmtDurationMs, fmtSpan, lastQueryTs, sessionSideStatus } = await vite.ssrLoadModule("/src/lib/format.ts");
+const {
+  agoStr, fmtDurationMs, fmtRunDuration, fmtSpan, lastQueryTs,
+  sessionSideStatus, updateQueuedMessageText,
+} = await vite.ssrLoadModule("/src/lib/format.ts");
 after(() => vite.close());
 
 const zh = {
@@ -95,4 +98,31 @@ test("fmtSpan rolls over into hours, days, months and years", () => {
   assert.equal(fmtSpan(30 * 86_400_000, u), "1个月");
   assert.equal(fmtSpan(70 * 86_400_000, u), "2个月10天");
   assert.equal(fmtSpan(800 * 86_400_000, u), "2年2个月");
+});
+
+test("fmtRunDuration formats whole-second turn elapsed time like dsh (7分31秒 / 7m 31s)", () => {
+  const zhUnits = { h: "小时", m: "分", s: "秒" };
+  const enUnits = { h: "h ", m: "m ", s: "s" };
+  assert.equal(fmtRunDuration(1, zhUnits), "1秒");
+  assert.equal(fmtRunDuration((7 * 60 + 31) * 1000, zhUnits), "7分31秒");
+  assert.equal(fmtRunDuration((7 * 60 + 31) * 1000, enUnits), "7m 31s");
+  assert.equal(fmtRunDuration((3600 + 2 * 60 + 5) * 1000, zhUnits), "1小时2分5秒");
+  assert.equal(fmtRunDuration((3600 + 2 * 60 + 5) * 1000, enUnits), "1h 2m 5s");
+});
+
+test("updateQueuedMessageText edits a queued item in place and preserves queue order", () => {
+  const queue = [
+    { id: "q1", sessionId: "s1", text: "first query", files: [], ts: 1 },
+    { id: "q2", sessionId: "s1", text: "second query", files: [], ts: 2 },
+    { id: "q3", sessionId: "s1", text: "third query", files: [], ts: 3 },
+  ];
+  const edited = updateQueuedMessageText(queue, "q1", "first query edited");
+  assert.deepEqual(
+    edited.map((q) => [q.id, q.text]),
+    [
+      ["q1", "first query edited"],
+      ["q2", "second query"],
+      ["q3", "third query"],
+    ],
+  );
 });

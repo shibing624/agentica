@@ -90,9 +90,12 @@ def _history_for_next_run(agent) -> List[Any]:
     """The conversation messages the next prompt would replay."""
     if not agent.add_history_to_context:
         return []
+    skip = agent.prompt_config.system_message_role
+    if agent._running and agent.run_response is not None and agent.run_response.messages:
+        return [m for m in agent.run_response.messages if m.role != skip]
     return agent.working_memory.get_messages_from_last_n_runs(
         last_n=agent.num_history_turns,
-        skip_role=agent.prompt_config.system_message_role,
+        skip_role=skip,
     )
 
 

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { fmtDurationMs } from "../lib/format";
 import { workSummary, type MsgPart } from "../lib/msgParts";
 import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
 import {
   diffStats, doneTitle, firstLine, groupCategories, parseTaskResult, parseTodos, runningTool, todoProgress,
-  toolCategory, type Category,
+  toolCategory, toolResultPreview, type Category,
 } from "../lib/workActivity";
 import {
   IconAlert, IconBook, IconBrain, IconChevronDown, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
@@ -19,6 +19,8 @@ import { parseSkillTurn } from "../lib/skillInvocation";
 import { SkillTurn } from "./MessageExtras";
 import { invocableSkills } from "./SlashMenu";
 import { TaskCard, TodoList } from "./TaskCard";
+
+const ChatMarkdown = lazy(() => import("./ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 
 function thinkLabel(
   streaming: boolean,
@@ -63,8 +65,12 @@ function toolSummary(part: Extract<MsgPart, { kind: "tool" }>, S: ReturnType<typ
     if (!p.total) return "";
     return S.chat.todoProgress(p.done, p.total) + (p.active ? " · " + p.active.content : "");
   }
+  if (part.name === "execute" || part.name === "bash" || part.name === "shell") {
+    const desc = firstLine(String(args.description ?? ""));
+    if (desc) return desc;
+  }
   const display = formatToolDisplay(part.name, args, sessionCwd());
-  if (part.name === "execute") return firstLine(display);
+  if (part.name === "execute") return display.replace(/\s+/g, " ").trim();
   return firstLine(layoutToolDisplay(part.name, display).header || display);
 }
 
@@ -80,20 +86,22 @@ export function WorkGroup({
   isLast: _isLast,
   live = false,
   pendingToolCallId,
+  defaultOpen = false,
 }: {
   items: MsgPart[];
   isLast: boolean;
   live?: boolean;
   pendingToolCallId?: string;
+  defaultOpen?: boolean;
 }) {
   const S = useStrings();
-  const { ms, running: unfinished } = workSummary(items, Date.now(), live);
+  const { running: unfinished } = workSummary(items, Date.now(), live);
   const running = live && unfinished;
   const containsPending = !!pendingToolCallId && items.some(
     (p) => p.kind === "tool" && p.toolCallId === pendingToolCallId,
   );
   // Folded unless a call in here waits on the user's approval.
-  const [open, setOpen] = useState(containsPending);
+  const [open, setOpen] = useState(defaultOpen || containsPending);
   const userToggled = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
@@ -103,12 +111,15 @@ export function WorkGroup({
   }, [containsPending]);
 
   useEffect(() => {
+    if (!userToggled.current && defaultOpen) setOpen(true);
+  }, [defaultOpen]);
+
+  useEffect(() => {
     if (!running) return;
     const id = window.setInterval(() => tick((n) => n + 1), 250);
     return () => window.clearInterval(id);
   }, [running]);
 
-  const errors = items.filter((p) => p.kind === "tool" && p.result != null && isErrorResult(String(p.result))).length;
   let title: string;
   let summary = "";
   let icon: JSX.Element;
@@ -143,9 +154,7 @@ export function WorkGroup({
       >
         <span className="wg-icon">{icon}<span className="wg-chev"><IconChevronDown /></span></span>
         <span className={"wg-title" + (running ? " shimmer" : "")}>{title}</span>
-        {summary && <><span className="wr-dot" /><span className="wg-sum">{summary}</span></>}
-        {errors > 0 && <span className="wg-err">{S.chat.workFailed(errors)}</span>}
-        {ms > 0 && <span className="wg-ms">{fmtDurationMs(ms)}</span>}
+        {!open && summary && <><span className="wr-dot" /><span className="wg-sum">{summary}</span></>}
       </button>
       {open && (
         <div className="wg-body">
@@ -179,9 +188,6 @@ function lastLine(text: string): string {
 function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" }>; streaming: boolean }) {
   const S = useStrings();
   const [open, setOpen] = useState(false);
-  const duration = part.ms != null
-    ? part.ms
-    : (streaming && part.t0 != null ? Date.now() - part.t0 : 0);
   const preview = streaming ? lastLine(part.text) : firstLine(part.text);
   return (
     <div className={"wr" + (streaming ? " running" : "") + (open ? " open" : "")}>
@@ -190,11 +196,21 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
                 onClick={() => setOpen((v) => !v)}>
           <span className="wr-icon">{streaming ? <IconSpinner /> : <IconBrain />}<span className="wr-chev"><IconChevronDown /></span></span>
           <span className="wr-title">{thinkLabel(streaming, S)}</span>
-          {preview && <><span className="wr-dot" /><span className="wr-sum">{preview}</span></>}
-          {duration > 0 && <span className="wr-ms">{fmtDurationMs(duration)}</span>}
+          {!open && preview && (
+            <>
+              <span className="wr-dot" />
+              <span className={"wr-sum" + (streaming ? " streaming" : "")}>{preview}</span>
+            </>
+          )}
         </button>
       </div>
-      {open && part.text ? <div className="wr-body think-text">{part.text}</div> : null}
+      {open && part.text ? (
+        <div className="wr-body think-text">
+          <Suspense fallback={<span className="markdown-fallback">{part.text}</span>}>
+            <ChatMarkdown text={part.text} streaming={streaming} />
+          </Suspense>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -229,7 +245,11 @@ function ToolRow({
     ? part.ms
     : (running && part.t0 != null ? Date.now() - part.t0 : 0);
   const sessionId = getState().curSess;
+  const isShell = part.name === "execute" || part.name === "bash" || part.name === "shell";
+  const hasExplicitDesc = isShell && Boolean(firstLine(String(args.description ?? "")));
   const summary = isError ? firstLine(resultText.slice("Error: ".length)) : toolSummary(part, S);
+  const showSummary = Boolean(summary) && (!open || !isShell || hasExplicitDesc);
+  const resultPreview = !open && !running && !isError ? toolResultPreview(part.name, resultText, Boolean(stats)) : "";
   const title = S.chat.toolTitle[cat] || part.name;
 
   return (
@@ -246,12 +266,26 @@ function ToolRow({
             <span className="wr-chev"><IconChevronDown /></span>
           </span>
           <span className="wr-title" title={part.name}>{title}</span>
-          {summary && <><span className="wr-dot" /><span className="wr-sum" title={summary}>{summary}</span></>}
+          {showSummary && (
+            <>
+              <span className="wr-dot" />
+              {resultPreview ? (
+                <span className="wr-sum has-result" title={`${summary} → ${resultPreview}`}>
+                  <span className="wr-call-req">{summary}</span>
+                  <span className="wr-call-res">
+                    <span className="wr-call-arr">{" → "}</span>
+                    <span className="wr-call-res-text">{resultPreview}</span>
+                  </span>
+                </span>
+              ) : (
+                <span className="wr-sum" title={summary}>{summary}</span>
+              )}
+            </>
+          )}
           {awaitingApproval && <span className="work-awaiting">{S.chat.approvalWaiting}</span>}
           {stats && (
             <span className="wr-diff"><span className="add">+{stats.added}</span> <span className="del">-{stats.removed}</span></span>
           )}
-          {duration > 0 && <span className="wr-ms">{fmtDurationMs(duration)}</span>}
         </button>
         {sessionId && part.toolCallId && !running && (
           <button type="button" className="wr-trace" title={S.chat.viewInTraceTip}
@@ -288,6 +322,19 @@ function ToolDetail({
   if (part.name === "write_todos" && !isError) {
     return <div className="wr-body"><TodoList todos={parseTodos(args)} /></div>;
   }
+  if (part.name === "execute" || part.name === "bash" || part.name === "shell") {
+    return (
+      <div className="wr-body">
+        <TerminalCard
+          command={String(args.command ?? "")}
+          workDir={String(args.work_dir ?? "") || sessionCwd()}
+          resultText={resultText}
+          running={running}
+          isError={isError}
+        />
+      </div>
+    );
+  }
   const display = formatToolDisplay(part.name, args, sessionCwd());
   const layout = layoutToolDisplay(part.name, display);
   const diff = part.diff || "";
@@ -305,6 +352,84 @@ function ToolDetail({
       ) : null}
       {showResult ? <pre className={"step-pre out" + (isError ? " err" : "")}>{resultText}</pre> : null}
       {!call && !showDiff && !showResult && !running && <pre className="step-pre">{part.argsStr || "{}"}</pre>}
+    </div>
+  );
+}
+
+function promptCwdLabel(cwd: string): string {
+  const trimmed = cwd.replace(/[/\\]+$/, "");
+  const seg = trimmed.split(/[/\\]/).pop();
+  return seg || "$";
+}
+
+function parseTerminalOutput(raw: string, isError: boolean): { output: string; exitCode: number | null } {
+  const text = isError && raw.startsWith("Error: ") ? raw.slice("Error: ".length) : raw;
+  const m = /\n*\[Exit code:\s*(-?\d+)\]\s*$/i.exec(text);
+  if (m) {
+    return { output: text.slice(0, m.index).replace(/\n$/, ""), exitCode: Number(m[1]) };
+  }
+  return { output: text.replace(/\n$/, ""), exitCode: isError ? 1 : 0 };
+}
+
+/** deepseek-harness `TerminalBlock` style card for `execute` / `bash` tool calls. */
+function TerminalCard({
+  command, workDir, resultText, running, isError,
+}: {
+  command: string;
+  workDir: string;
+  resultText: string;
+  running: boolean;
+  isError: boolean;
+}) {
+  const S = useStrings();
+  const [copied, setCopied] = useState(false);
+  const { output, exitCode } = parseTerminalOutput(resultText, isError);
+  const failed = !running && (isError || (exitCode !== null && exitCode !== 0));
+  const stateLabel = S.chat.taskStatus(running ? "running" : failed ? "error" : "completed");
+  const cwdLabel = promptCwdLabel(workDir);
+  const cmdBody = command.endsWith("\n") ? command.slice(0, -1) : command;
+  const cmdLines = (cmdBody || "").split("\n");
+  const empty = !output.trim();
+  const showBody = !running || !empty;
+  const copyPayload = !empty ? output : command;
+  const onCopy = () => {
+    if (!copyPayload) return;
+    void navigator.clipboard.writeText(copyPayload).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className={"term-card" + (running ? " running" : "") + (failed ? " error" : "") + (showBody ? " has-body" : "")}>
+      <div className="term-card-head">
+        <div className="term-prompt">
+          <span className="term-sr-state">{stateLabel}</span>
+          {cmdLines.map((line, i) => (
+            <div key={i} className="term-prompt-line">
+              {i === 0 && (
+                <span className={"term-state-dot " + (running ? "running" : failed ? "error" : "done")} aria-hidden />
+              )}
+              <span className="term-cwd">{i === 0 ? cwdLabel : "$"}</span>
+              <span className="term-cmd">{line}</span>
+            </div>
+          ))}
+        </div>
+        {!running && exitCode !== null && exitCode !== 0 && (
+          <span className="term-exit">exit {exitCode}</span>
+        )}
+        {copyPayload && (
+          <button type="button" className="term-copy" onClick={onCopy}>
+            {copied ? S.common.copied : S.common.copy}
+          </button>
+        )}
+      </div>
+      {showBody && (
+        empty ? (
+          <div className="term-empty">(no output)</div>
+        ) : (
+          <pre className={"term-output" + (failed ? " err" : "")}>{output}</pre>
+        )
+      )}
     </div>
   );
 }

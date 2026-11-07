@@ -115,6 +115,9 @@ export function FilePreview({
   const [mode, setMode] = useState<ViewMode>("markdown");
   const [refreshing, setRefreshing] = useState(false);
   const seq = useRef(0);
+  const isAbs = filePath.startsWith("/");
+  const targetRoot = isAbs ? (dirOf(filePath) || "/") : root;
+  const targetRel = isAbs ? filePath.slice(filePath.lastIndexOf("/") + 1) : filePath;
 
   /** `keepMode` is a refresh: same file, same view. */
   const load = useCallback(async (keepMode: boolean) => {
@@ -130,7 +133,7 @@ export function FilePreview({
       present({ path: filePath, name, kind: "unsupported" });
       return;
     }
-    const { ok, data } = await api.fetchWorkspacePreview(root, filePath);
+    const { ok, data } = await api.fetchWorkspacePreview(targetRoot, targetRel);
     if (nonce !== seq.current) return;
     if (!ok || !data) { present({ path: filePath, name, kind: "unsupported" }); return; }
     const content = data.content || "";
@@ -144,14 +147,15 @@ export function FilePreview({
       content,
       truncated: !!data.truncated,
     });
-  }, [root, filePath]);
+  }, [filePath, targetRoot, targetRel]);
 
   useEffect(() => { void load(false); }, [load]);
 
   if (!preview) return <div className="ws-browser"><p className="ws-muted">{S.common.loading}</p></div>;
 
-  const src = api.workspaceContentUrl(root, preview.path);
-  const dl = api.workspaceContentUrl(root, preview.path, true);
+  const src = api.workspaceContentUrl(targetRoot, targetRel);
+  const dl = api.workspaceContentUrl(targetRoot, targetRel, true);
+  const absPath = isAbs ? preview.path : (root.replace(/\/+$/, "") + "/" + preview.path);
   const hasText = preview.content !== undefined;
   const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
     : preview.kind === "html" ? ["web", "code", "text"]
@@ -172,7 +176,7 @@ export function FilePreview({
           onMode={setMode}
           onRefresh={refresh}
           refreshing={refreshing}
-          absPath={root.replace(/\/+$/, "") + "/" + preview.path}
+          absPath={absPath}
           downloadHref={dl}
           downloadName={preview.name}
         />
@@ -184,7 +188,7 @@ export function FilePreview({
           <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
         )}
         {view === "markdown" && (
-          <MarkdownDoc root={root} path={preview.path} content={preview.content || ""} onOpenFile={onOpenFile} />
+          <MarkdownDoc root={targetRoot} path={targetRel} content={preview.content || ""} onOpenFile={onOpenFile} />
         )}
         {view === "code" && (
           <CodeFrame

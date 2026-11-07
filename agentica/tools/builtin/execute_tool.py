@@ -610,6 +610,7 @@ class BuiltinExecuteTool(Tool):
     async def execute(
             self,
             command: str,
+            description: str = "",
             timeout: Optional[int] = None,
             background: bool = False,
             parallel_safe: bool = False,
@@ -648,6 +649,7 @@ class BuiltinExecuteTool(Tool):
 
         Args:
             command: Exact shell command. Not rewritten.
+            description: Clear, concise 5-10 word description of what this command does.
             timeout: seconds
             parallel_safe: run concurrently with adjacent calls in this message
 
@@ -656,7 +658,7 @@ class BuiltinExecuteTool(Tool):
         """
         # `parallel_safe` is read by the executor (via Function.parallel_arg) to
         # decide the schedule before this ever runs; it means nothing here.
-        del parallel_safe
+        del description, parallel_safe
 
         if (
             timeout is not None

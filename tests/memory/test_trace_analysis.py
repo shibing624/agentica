@@ -4,7 +4,8 @@ import json
 
 from agentica.memory.session_log import SessionLog
 from agentica.memory.trace import (
-    analyze_entries, call_body, format_trace_text, last_completed_round, search_calls,
+    analyze_entries, call_body, format_trace_text, last_completed_round,
+    search_calls, search_conversation,
 )
 
 
@@ -489,10 +490,15 @@ class TestRoundView:
         assert first["tokens"]["cacheHitPercent"] == 90.0
         assert first["toolCalls"] == 1
         assert first["body"]["thinking"] == "count them"
+        assert len(first["body"]["toolCalls"]) == 1
+        assert first["body"]["toolCalls"][0]["toolName"] == "execute"
+        assert first["body"]["toolCalls"][0]["resultSummary"] == "670"
         assert second["tokens"]["output"] == 30
         assert second["body"]["text"] == "670 files."
         assert second["summary"] == "670 files."
         assert tool["toolName"] == "execute" and tool["durationMs"] == 250
+        assert tool["summary"] == 'execute {"command": "ls"}'
+        assert tool["resultSummary"] == "670"
         assert '"command": "ls"' in tool["body"]["args"]
         assert tool["body"]["result"] == "670"
 
@@ -730,3 +736,16 @@ def test_automated_turn_is_its_own_kind_and_not_a_user_title():
     assert second["automated"] is True
     assert second["title"].startswith("[Background terminal #1")
     assert [c["kind"] for c in second["calls"]][:2] == ["automated", "model"]
+
+
+def test_search_conversation_matches_queries_and_answers_with_turn_numbers():
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="how do I start sglang?"),
+        _e("2026-01-01T00:00:01.000Z", type="assistant", content="Run it on gpu 29.206.1.234."),
+        _e("2026-01-01T00:00:02.000Z", type="user", content="what about vllm?"),
+        _e("2026-01-01T00:00:03.000Z", type="assistant", content="Use gpu4 at 28.8.205.124."),
+    ]
+    q_hits = search_conversation(entries, "sglang")
+    assert len(q_hits) == 1 and q_hits[0]["turn"] == 1 and q_hits[0]["role"] == "user"
+    a_hits = search_conversation(entries, "28.8.205.124")
+    assert len(a_hits) == 1 and a_hits[0]["turn"] == 2 and a_hits[0]["role"] == "assistant"

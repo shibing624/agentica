@@ -575,13 +575,34 @@ function ProfilesTab() {
   const s = useAppState();
   const S = useStrings();
   const active = s.serverProfile || s.profilesData.active;
+  const [query, setQuery] = useState("");
+  const allProfiles = (s.profilesData.profiles || []) as any[];
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? allProfiles.filter((p) =>
+      [p.name, p.model_provider, p.model_name, p.base_url]
+        .some((v) => String(v || "").toLowerCase().includes(q)))
+    : allProfiles;
   return (
     <>
       {s.profileForm && <ProfileForm />}
       <div className="settings-list">
         <ConfigFileBlock />
-        {!(s.profilesData.profiles || []).length && <div className="settings-empty">{S.settings.noProfiles}</div>}
-        {(s.profilesData.profiles || []).map((p: any) => (
+        {allProfiles.length > 0 && (
+          <div className="settings-profile-search">
+            <input
+              type="search"
+              className="pf-input"
+              placeholder={S.chat.pickerSearchModel}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape" && query) { e.stopPropagation(); setQuery(""); } }}
+            />
+          </div>
+        )}
+        {!allProfiles.length && <div className="settings-empty">{S.settings.noProfiles}</div>}
+        {allProfiles.length > 0 && !filtered.length && <div className="settings-empty">{S.chat.pickerNoMatch}</div>}
+        {filtered.map((p: any) => (
           <div key={p.name} className={"settings-item" + (p.name === active ? " active" : "")}>
             <div className="settings-item-head">
               <span className="settings-name">

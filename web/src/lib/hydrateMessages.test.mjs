@@ -88,6 +88,7 @@ test("one user turn folds tool_calls + tool rows into the assistant work group",
   assert.equal(tool.result, "agentica/runner/persist.py:1");
   assert.equal(tool.ms, 400);
   assert.equal(msgs[1].content, "It is in persist.py.");
+  assert.equal(msgs[1].durationMs, 2000);
 });
 
 test("parallel tool_calls pair results by tool_call_id", () => {
@@ -237,4 +238,32 @@ test("an automated row is a notice, not the user's query", () => {
     ["user", false], ["assistant", false], ["user", true], ["assistant", false],
   ]);
   assert.match(msgs[2].content, /^\[Background terminal #4/);
+});
+
+test("prepending turn-aligned pages matches hydrating the full transcript at once", () => {
+  const olderPage = [
+    { type: "user", content: "q1", uuid: "u1" },
+    { type: "assistant", content: "a1", uuid: "a1" },
+    { type: "user", content: "q2", uuid: "u2" },
+    { type: "assistant", content: "a2", uuid: "a2" },
+  ];
+  const tailPage = [
+    { type: "compact_boundary", trigger: "auto", summary: "" },
+    {
+      type: "user",
+      content:
+        '<context_window>\n<session_notes path="/tmp/n.md">notes</session_notes>\n' +
+        "New context window started. Continue from session notes and search_session.\n</context_window>\n\nq3",
+      uuid: "u3",
+    },
+    { type: "assistant", content: "a3", uuid: "a3" },
+    { type: "user", content: "q4", uuid: "u4" },
+    { type: "assistant", content: "a4", uuid: "a4" },
+  ];
+  const paged = [...eventsToChatMsgs(olderPage), ...eventsToChatMsgs(tailPage)];
+  const whole = eventsToChatMsgs([...olderPage, ...tailPage]);
+  assert.deepEqual(
+    paged.map((m) => [m.role, m.content, m.uuid, m.compact]),
+    whole.map((m) => [m.role, m.content, m.uuid, m.compact]),
+  );
 });

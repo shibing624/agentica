@@ -70,6 +70,31 @@ export function fmtDurationMs(ms: number) {
   return spanParts(sec).map(([u, n]) => `${n}${COMPACT[u]}`).join("");
 }
 
+/**
+ * dsh `formatRunDuration`: whole-second elapsed time without leading zeros,
+ * e.g. `7分31秒` / `7m 31s` / `1小时2分5秒`. Sub-second runs clamp to 1s.
+ */
+export function fmtRunDuration(ms: number, units: { h: string; m: string; s: string }): string {
+  const total = Math.max(1, Math.floor(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor(total / 60) % 60;
+  const seconds = total % 60;
+  let out = "";
+  if (hours > 0) out += `${hours}${units.h}`;
+  if (total >= 60) out += `${minutes}${units.m}`;
+  out += `${seconds}${units.s}`;
+  return out;
+}
+
+/** Edit one queued message in place without reordering the queue. */
+export function updateQueuedMessageText<T extends { id: string; text: string }>(
+  queue: readonly T[],
+  id: string,
+  text: string,
+): T[] {
+  return queue.map((item) => (item.id === id ? { ...item, text } : item));
+}
+
 /** A long span in words: `2小时32分` / `49.8秒` / `3天4小时`, units from the locale. */
 export type SpanUnits = Record<SpanUnit, (n: number) => string> & {
   sec: (s: string) => string;

@@ -180,7 +180,9 @@ export function FilesPanel({
                   ? <WorkspaceBrowser root={root} active={panel.open && active} onOpenFile={panel.browsePath} />
                   : <p className="ws-muted">{S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
-                {tab.kind === "file" && root && <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />}
+                {tab.kind === "file" && (root || tab.path.startsWith("/")) && (
+                  <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />
+                )}
                 {tab.kind === "review" && root && (
                   <DiffView root={root} turn={tab.turn} files={tab.files} path={tab.path}
                             onSelect={(path) => panel.selectReviewFile(tab.key, path)} onOpenFile={panel.browsePath} />

@@ -152,3 +152,48 @@ def test_spa_index_explains_how_to_build_when_dist_is_missing(tmp_path, monkeypa
     resp = gateway_main._spa_index()
     assert resp.status_code == 503
     assert b"npm run build" in resp.body
+
+
+def test_trace_events_turn_window_pages_backwards_and_keeps_compact_boundary(client_and_svc, tmp_path):
+    client, _ = client_and_svc
+    log = SessionLog(session_id="paged", base_dir=str(tmp_path))
+    log.append("user", "cron notice", automated=True)
+    for i in range(1, 6):
+        if i == 4:
+            log.append_compact_boundary("", trigger="auto")
+        log.append("user", f"q{i}")
+        log.append_event("request_begin")
+        log.append("assistant", f"a{i}")
+        log.append_event("request_end", status="completed")
+
+    p1 = client.get("/api/sessions/paged/trace/events?turns=2").json()
+    assert p1["has_more"] is True
+    assert p1["older_turns"] == 3
+    assert all(e["type"] != "event" for e in p1["events"])
+    assert [(e["type"], e.get("content")) for e in p1["events"]] == [
+        ("compact_boundary", None),
+        ("user", "q4"),
+        ("assistant", "a4"),
+        ("user", "q5"),
+        ("assistant", "a5"),
+    ]
+
+    p2 = client.get(f"/api/sessions/paged/trace/events?turns=2&before={p1['next_before']}").json()
+    assert p2["has_more"] is True
+    assert p2["older_turns"] == 1
+    assert [(e["type"], e.get("content")) for e in p2["events"]] == [
+        ("user", "q2"),
+        ("assistant", "a2"),
+        ("user", "q3"),
+        ("assistant", "a3"),
+    ]
+
+    p3 = client.get(f"/api/sessions/paged/trace/events?turns=2&before={p2['next_before']}").json()
+    assert p3["has_more"] is False
+    assert p3["older_turns"] == 0
+    assert p3["next_before"] == 0
+    assert [(e["type"], e.get("content")) for e in p3["events"]] == [
+        ("user", "cron notice"),
+        ("user", "q1"),
+        ("assistant", "a1"),
+    ]

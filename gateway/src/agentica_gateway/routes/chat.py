@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from agentica.memory.trace import last_completed_round
+from agentica.config.profiles import get_profiles
+from agentica.memory.trace import last_completed_round, search_conversation
 
 from .. import deps
 from ..channels.base import InboundMedia
@@ -550,6 +551,44 @@ async def list_sessions(
     }
 
 
+@router.get("/api/sessions/search")
+async def search_sessions(
+    request: Request,
+    q: str = Query("", max_length=200),
+    scope: str = Query("recent", pattern="^(recent|all)$"),
+    recent_days: int = Query(30, ge=1, le=365),
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Search user queries and assistant answers across sessions."""
+    needle = q.strip()
+    if not needle:
+        return {"results": {}}
+    account = _account(request)
+    include_cli = show_cli_sessions_pref(account)
+
+    def _scan() -> dict:
+        rows = svc.list_sessions(
+            owner=account, scope=scope, recent_days=recent_days,
+            include_cli=include_cli, hide_temp_dirs=True,
+        )
+        out: dict = {}
+        for row in rows:
+            if row.get("archived"):
+                continue
+            sid = row.get("session_id")
+            if not sid:
+                continue
+            log = svc.session_log_for(sid, owner=account)
+            if not log.path.exists():
+                continue
+            hits = search_conversation(log.iter_raw_entries(), needle)
+            if hits:
+                out[sid] = hits
+        return out
+
+    return {"results": await asyncio.to_thread(_scan)}
+
+
 class ForkRequest(BaseModel):
     at_uuid: Optional[str] = None
 
@@ -672,6 +711,56 @@ async def pin_session(
     """Pin a session to the top of its project in the sidebar (or unpin it)."""
     svc.pin_session(session_id, pinned=body.pinned, owner=_account(request))
     return {"status": "pinned" if body.pinned else "unpinned", "session_id": session_id}
+
+
+class SessionModelRequest(BaseModel):
+    profile: str
+
+
+def _session_model_payload(svc: AgentService, session_id: str, account: str) -> dict:
+    cfg = svc.session_model_config(session_id, owner=account)
+    return {
+        "session_id": session_id,
+        "profile": cfg["profile"],
+        # "session": picked for this chat; "project" / "default": inherited.
+        "source": svc.session_profile_source(session_id, owner=account),
+        "model_provider": cfg["model_provider"],
+        "model_name": cfg["model_name"],
+        "reasoning_effort": cfg["reasoning_effort"],
+    }
+
+
+@router.get("/api/sessions/{session_id}/model")
+async def get_session_model(
+    session_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+    work_dir: Optional[str] = Query(None),
+):
+    """The model this chat runs on: its own pick, else its project's default."""
+    account = _account(request)
+    if work_dir:
+        await _apply_session_work_dir(svc, session_id, work_dir, account)
+    return _session_model_payload(svc, session_id, account)
+
+
+@router.post("/api/sessions/{session_id}/model")
+async def set_session_model(
+    session_id: str,
+    body: SessionModelRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+    work_dir: Optional[str] = Query(None),
+):
+    """Pick a profile for this chat only; other chats keep theirs."""
+    name = body.profile.strip()
+    if name not in get_profiles():
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    account = _account(request)
+    if work_dir:
+        await _apply_session_work_dir(svc, session_id, work_dir, account)
+    await svc.set_session_profile(session_id, name, owner=account)
+    return _session_model_payload(svc, session_id, account)
 
 
 @router.post("/api/sessions/{session_id}/read")

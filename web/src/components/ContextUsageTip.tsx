@@ -47,8 +47,12 @@ export type SessionUsage = {
 export function applySessionUsage(sessionId: string, usage: SessionUsage) {
   const sess = getState().sessions[sessionId];
   if (sess) {
-    sess.contextTokens = usage.context_tokens;
-    sess.costUsd = usage.cost_usd;
+    if (usage.context_tokens > 0 || !sess.contextTokens) {
+      sess.contextTokens = usage.context_tokens;
+    }
+    if (usage.cost_usd > 0 || !sess.costUsd) {
+      sess.costUsd = usage.cost_usd;
+    }
     saveSessions();
   }
   // The ring divides occupancy by this, and occupancy is measured against the
@@ -56,6 +60,15 @@ export function applySessionUsage(sessionId: string, usage: SessionUsage) {
   // provider limit would put the two halves of the ratio in different units.
   if (usage.window) getState().serverContextWindow = usage.window;
   bump();
+}
+
+export async function syncSessionUsage(sessionId: string): Promise<SessionUsage | null> {
+  const sess = getState().sessions[sessionId];
+  if (!sess || (!sess.sizeBytes && !sess.msgs.length && !sess.running)) return null;
+  const { ok, data } = await api.fetchSessionUsage(sessionId);
+  if (!ok || !data) return null;
+  applySessionUsage(sessionId, data as SessionUsage);
+  return data as SessionUsage;
 }
 
 export function ContextUsageTip({ sessionId, fallback }: {

@@ -75,6 +75,24 @@ export function firstLine(text: string): string {
   return "";
 }
 
+/** Tools whose collapsed chat row already says enough without inline output. */
+const QUIET_RESULT_TOOLS = new Set([
+  "read_file", "glob", "grep", "write_file", "apply_patch", "edit_file", "multi_edit",
+  "write_todos", "task", "ask_user_question",
+]);
+
+/**
+ * Compact one-line result preview for a settled tool row (`command → output`),
+ * capped at 512 chars so CSS ellipsis does the visual clipping while copy/paste
+ * still captures the text after the ellipsis.
+ */
+export function toolResultPreview(name: string, resultText: string, hasDiff = false): string {
+  if (!resultText || hasDiff || QUIET_RESULT_TOOLS.has(name)) return "";
+  const flat = resultText.replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+  return flat.length > 512 ? flat.slice(0, 512) + "…" : flat;
+}
+
 /** `+added -removed` of a unified diff (file headers excluded). */
 export function diffStats(diff: string): { added: number; removed: number } | null {
   if (!diff) return null;

@@ -66,5 +66,6 @@ test("picker filter matches label or sub, drops emptied groups", async () => {
   assert.deepEqual(filterPicker(groups, "").map((g) => g.title), ["deepseek", "zhipu"]);
   assert.deepEqual(filterPicker(groups, "FLASH").flatMap((g) => g.options.map((o) => o.key)), ["b"]);
   assert.deepEqual(filterPicker(groups, "work").map((g) => g.title), ["zhipu"]);
+  assert.deepEqual(filterPicker(groups, "c").flatMap((g) => g.options.map((o) => o.key)), ["c"]);
   assert.deepEqual(filterPicker(groups, "nope"), []);
 });

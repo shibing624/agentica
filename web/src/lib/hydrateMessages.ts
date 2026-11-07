@@ -18,6 +18,8 @@ import { parseSkillTurn } from "./skillInvocation";
 export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   const msgs: ChatMsg[] = [];
   let assistant: ChatMsg | null = null;
+  let turnStartTs = 0;
+  let turnEndTs = 0;
   // `trigger` of the boundary whose preamble has not been seen yet ("" = not
   // recorded); null once that preamble is consumed.
   let pendingTrigger: string | null = null;
@@ -25,6 +27,9 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   const closeAssistant = () => {
     if (!assistant) return;
     settleWork(assistant);
+    if (assistant.durationMs == null && turnStartTs > 0 && turnEndTs > turnStartTs) {
+      assistant.durationMs = turnEndTs - turnStartTs;
+    }
     assistant = null;
   };
 
@@ -32,6 +37,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     if (!raw || typeof raw !== "object") continue;
     const e = raw as Record<string, unknown>;
     const type = String(e.type || "");
+    const explicitTs = rawTsOf(e);
     if (type === "user") {
       closeAssistant();
       let content = String(e.content || "");
@@ -68,6 +74,8 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       const attached = splitImageMarkers(content);
       content = attached.text;
       const skill = parseSkillTurn(content);
+      turnStartTs = explicitTs;
+      turnEndTs = explicitTs;
       msgs.push({
         role: "user",
         content,
@@ -80,6 +88,8 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     }
     if (type === "assistant") {
       if (!assistantHasWork(e)) continue;
+      if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
+      if (explicitTs > turnEndTs) turnEndTs = explicitTs;
       assistant = ensureAssistant(msgs, assistant, tsOf(e));
       applyAssistant(assistant, e);
       // The reply ends at its last row: fork / feedback address that one.
@@ -87,6 +97,8 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       continue;
     }
     if (type === "tool" || type === "tool_audit") {
+      if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
+      if (explicitTs > turnEndTs) turnEndTs = explicitTs;
       assistant = ensureAssistant(msgs, assistant, tsOf(e));
       applyToolResult(assistant, e);
       if (uuidOf(e)) assistant.uuid = uuidOf(e);
@@ -163,13 +175,17 @@ function uuidOf(e: Record<string, unknown>): string {
   return typeof e.uuid === "string" ? e.uuid : "";
 }
 
-function tsOf(e: Record<string, unknown>): number {
+function rawTsOf(e: Record<string, unknown>): number {
   const raw = e.timestamp;
   if (typeof raw === "string" && raw) {
     const ms = Date.parse(raw);
     if (Number.isFinite(ms)) return ms;
   }
-  return Date.now();
+  return 0;
+}
+
+function tsOf(e: Record<string, unknown>): number {
+  return rawTsOf(e) || Date.now();
 }
 
 function assistantHasWork(e: Record<string, unknown>): boolean {

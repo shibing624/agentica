@@ -19,11 +19,12 @@ from agentica.utils.tokens import count_text_tokens
 
 
 RELAYED_MARKER = "__RELAYED__"
+_CHAT_ENTRY_TYPES = frozenset({"user", "assistant", "tool", "tool_audit", "compact_boundary"})
 
 # One expandable body is a display payload, not an archive: the file keeps the
 # full row either way and the SPA holds every round of the session at once.
 DETAIL_CHAR_CAP = 40000
-SUMMARY_CHAR_CAP = 160
+SUMMARY_CHAR_CAP = 512
 
 
 def _parse_ts(value: Any) -> Optional[float]:
@@ -452,6 +453,125 @@ def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500
     return hits
 
 
+def _strip_window_preamble(content: str) -> str:
+    if not content.startswith("<context_window>"):
+        return content
+    for marker in ("\n</dropped_span>\n", "\n</session_notes>\n", "\n</context_window>\n"):
+        at = content.find(marker)
+        if at >= 0:
+            rest = content[at + len(marker):].lstrip("\n")
+            if rest.startswith("New context window started"):
+                nl = rest.find("\n")
+                rest = rest[nl + 1:].lstrip("\n") if nl >= 0 else ""
+            return rest
+    return ""
+
+
+def _snippet_around(text: str, needle: str, radius_before: int = 24, radius_after: int = 56) -> str:
+    flat = " ".join(text.split())
+    idx = flat.lower().find(needle)
+    if idx < 0:
+        return _clip(flat, 80)
+    start = max(0, idx - radius_before)
+    end = min(len(flat), idx + len(needle) + radius_after)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(flat) else ""
+    return f"{prefix}{flat[start:end]}{suffix}"
+
+
+def search_conversation(
+    entries: Iterable[Dict[str, Any]],
+    query: str,
+    max_hits: int = 8,
+) -> List[Dict[str, Any]]:
+    """Match ``query`` against user queries and assistant answers in a session log."""
+    needle = " ".join(query.strip().lower().split())
+    if not needle:
+        return []
+    hits: List[Dict[str, Any]] = []
+    turn = 0
+    seen_turn_role: set = set()
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        kind = e.get("type")
+        if kind == "user":
+            if e.get("automated"):
+                continue
+            raw = str(e.get("content") or "").strip()
+            if not _is_steering_user(e):
+                clean = _strip_window_preamble(raw).strip()
+                if not clean:
+                    continue
+                turn += 1
+            else:
+                clean = raw.replace(RELAYED_MARKER, "").strip()
+            if needle in " ".join(clean.lower().split()) and (turn, "user") not in seen_turn_role:
+                seen_turn_role.add((turn, "user"))
+                hits.append({
+                    "turn": max(1, turn),
+                    "role": "user",
+                    "snippet": _snippet_around(clean, needle),
+                })
+        elif kind == "assistant":
+            text = str(e.get("content") or "").strip()
+            if not text:
+                continue
+            if needle in " ".join(text.lower().split()) and (turn, "assistant") not in seen_turn_role:
+                seen_turn_role.add((turn, "assistant"))
+                hits.append({
+                    "turn": max(1, turn),
+                    "role": "assistant",
+                    "snippet": _snippet_around(text, needle),
+                })
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
+def chat_turn_page(
+    entries: Iterable[Dict[str, Any]],
+    turns: int,
+    before: Optional[int] = None,
+) -> Dict[str, Any]:
+    """One turn-aligned backwards page of conversation rows for the chat view.
+
+    Drops ``type="event"`` trace markers (which ``eventsToChatMsgs`` ignores)
+    and cuts at the ``turns``-th non-automated ``user`` row from ``before``
+    (or the end), keeping an immediately preceding ``compact_boundary`` attached
+    to the ``<context_window>`` user row that follows it.
+    """
+    chat_entries = [
+        e for e in entries
+        if isinstance(e, dict) and e.get("type") in _CHAT_ENTRY_TYPES
+    ]
+    total = len(chat_entries)
+    end = min(total, max(0, before)) if before is not None else total
+    turn_starts = [
+        i for i in range(end)
+        if chat_entries[i].get("type") == "user"
+        and not chat_entries[i].get("automated")
+        and not _is_steering_user(chat_entries[i])
+    ]
+    if len(turn_starts) <= turns:
+        start = 0
+        older_turns = 0
+    else:
+        start = turn_starts[-turns]
+        older_turns = len(turn_starts) - turns
+        if start > 0 and chat_entries[start - 1].get("type") == "compact_boundary":
+            start -= 1
+    return {
+        "offset": start,
+        "limit": end - start,
+        "total": total,
+        "events": chat_entries[start:end],
+        "has_more": start > 0,
+        "next_before": start,
+        "older_turns": older_turns,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Round view — what the Trace page draws per user turn.
 #
@@ -673,7 +793,7 @@ def _entry_row(
             tool_name, raw_args = args_by_id.get(call_id, ("", ""))
             row["toolName"] = entry.get("tool_name") or tool_name
             row["toolCallId"] = call_id
-            row["summary"] = f"{row['toolName']} {_clip(raw_args, 100)}".strip()
+            row["summary"] = f"{row['toolName']} {_clip(raw_args, SUMMARY_CHAR_CAP)}".strip()
             row["detail"] = _detail(_pretty_json(raw_args)) if raw_args else ""
             if row["toolName"] == "task":
                 task = _task_call_fields(raw_args)
@@ -873,6 +993,7 @@ def _round_calls(
     by_begin = {r["index"]: r for r in requests if "index" in r}
     calls: List[Dict[str, Any]] = []
     tools: Dict[str, Dict[str, Any]] = {}
+    tc_refs: Dict[str, Dict[str, Any]] = {}
     model: Optional[Dict[str, Any]] = None
 
     for e in entries:
@@ -891,7 +1012,7 @@ def _round_calls(
                 "status": req.get("status") or "",
                 "tokens": _token_view(req["tokens"]) if req.get("tokens") else None,
                 "toolCalls": 0,
-                "body": {"thinking": "", "text": ""},
+                "body": {"thinking": "", "text": "", "toolCalls": []},
             }
             calls.append(model)
             continue
@@ -925,6 +1046,19 @@ def _round_calls(
                 row["body"]["taskCall"] = e["task"]
             if model is not None:
                 model["toolCalls"] += 1
+                tc_ref = {
+                    "index": e["index"],
+                    "toolCallId": call_id,
+                    "toolName": e.get("toolName") or "",
+                    "summary": e["summary"],
+                    "args": e["detail"],
+                    "resultSummary": "",
+                    "isError": False,
+                    "durationMs": None,
+                }
+                model["body"]["toolCalls"].append(tc_ref)
+                if call_id:
+                    tc_refs[call_id] = tc_ref
             tools[call_id] = row
             calls.append(row)
             continue
@@ -955,6 +1089,11 @@ def _round_calls(
                 row["durationMs"] = e["durationMs"]
             elif row["startTs"] and row["endTs"]:
                 row["durationMs"] = _ms_between(row["startTs"], row["endTs"])
+            tc_ref = tc_refs.get(call_id)
+            if tc_ref is not None:
+                tc_ref["resultSummary"] = e["summary"]
+                tc_ref["isError"] = bool(e.get("isError"))
+                tc_ref["durationMs"] = row["durationMs"]
             continue
         # user / steering / system_prompt / assistant (pre-event logs) /
         # compact_boundary / goal: a row of their own, body as is.

@@ -97,6 +97,14 @@ export type Session = {
   userCount?: number;
   sizeBytes?: number;
   hydratedSize?: number;
+  /** True when earlier turns exist before `msgs` (not loaded yet). */
+  hasOlder?: boolean;
+  /** Entry cursor passed as `before` when loading the next older page. */
+  olderCursor?: number;
+  /** Number of user turns before `msgs`, so turn numbers stay exact. */
+  olderTurns?: number;
+  /** True while an older page request is in flight. */
+  loadingOlder?: boolean;
 };
 
 export type QueuedMessage = { id: string; sessionId: string; text: string; files: File[]; ts: number };
@@ -189,6 +197,10 @@ export type AppState = {
   serverReasoningEffort: string;
   serverContextWindow: number;
   serverProfile: string;
+  /** The model the open chat runs on; null until the gateway answers. */
+  sessionModel: { id: string; profile: string; source: string; provider: string; model: string; effort: string } | null;
+  /** A model picked on the new-chat screen, applied when the chat is created. */
+  pendingModel: string;
     serverSupportsImages: boolean;
     serverMediaModel: string;
   profilesData: { active: string; profiles: any[] };
@@ -196,7 +208,7 @@ export type AppState = {
   inputText: string;
   modelDDOpen: boolean;
   /** Upward picker over the composer, opened from the `+` / `/` menus. */
-  composerPicker: "model" | "permission" | null;
+  composerPicker: "model" | "permission" | "skill" | null;
   approvalMenuOpen: boolean;
   chatMenuOpen: boolean;
   selectedApprovalMode: string;
@@ -234,6 +246,8 @@ export type AppState = {
   cronRunsOpen: string[];
   cronBusy: string;
   sidebarSearch: string;
+  /** Jump target inside the open chat when the user clicks a search match or steps prev/next. */
+  chatSearchTarget: { sessionId: string; query: string; turn: number; role?: "user" | "assistant"; seq: number } | null;
   sessionScope: "recent" | "all";
   /** List CLI/SDK sessions too (account pref; off keeps web history separate). */
   showCliSessions: boolean;
@@ -327,6 +341,8 @@ const state: AppState = {
   serverReasoningEffort: "",
   serverContextWindow: 128000,
   serverProfile: "",
+  sessionModel: null,
+  pendingModel: "",
     serverSupportsImages: false,
     serverMediaModel: "",
   profilesData: { active: "", profiles: [] },
@@ -365,6 +381,7 @@ const state: AppState = {
   cronRunsOpen: [],
   cronBusy: "",
   sidebarSearch: "",
+  chatSearchTarget: null,
   sessionScope: "recent",
   showCliSessions: false,
   sessionsLoading: false,

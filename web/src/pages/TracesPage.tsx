@@ -1,13 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import * as api from "../api";
 import { useStrings, type Strings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps } from "../lib/format";
 import { IconCopy, IconSearch } from "../icons";
-import { showToast } from "../store";
+import { showToast, useAppState } from "../store";
 import { switchTo } from "../sessions";
 import { TaskCard } from "../components/TaskCard";
 import type { TaskResult } from "../lib/workActivity";
+
+const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 
 type Tokens = {
   input: number;
@@ -41,12 +43,24 @@ type Call = {
 
 type TaskFields = Partial<TaskResult> & { description?: string; subagentType?: string };
 
+type ModelToolCall = {
+  index: number;
+  toolCallId?: string;
+  toolName: string;
+  summary: string;
+  args?: string;
+  resultSummary?: string;
+  isError?: boolean;
+  durationMs?: number | null;
+};
+
 type Body = {
   args?: string;
   result?: string;
   approval?: string;
   thinking?: string;
   text?: string;
+  toolCalls?: ModelToolCall[];
   taskCall?: TaskFields;
   taskResult?: TaskFields;
 };
@@ -91,8 +105,6 @@ type Analysis = {
   file: { path: string; sizeBytes: number; modifiedAt: string; name: string };
 };
 
-type Tab = "duration" | "rounds" | "calls";
-
 function money(v: number | null | undefined) {
   return v === null || v === undefined ? "—" : fmtCost(v);
 }
@@ -126,6 +138,7 @@ function split(rounds: Round[]) {
 
 export function TracesPage() {
   const S = useStrings();
+  const s = useAppState();
   const nav = useNavigate();
   const [params] = useSearchParams();
   const sessionId = params.get("sessionId") || "";
@@ -153,17 +166,46 @@ export function TracesPage() {
     switchTo(sessionId);
     nav("/chat");
   };
+  const sessTitle = s.sessions[sessionId]?.title || analysis?.file.name || sessionId;
 
   return (
-    <div className="trace-main">
-      <button className="trace-back" onClick={backToChat}>{S.traces.backToChat}</button>
-      {loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
-      {!loading && !!errStatus && (
-        <div className="trace-empty">
-          <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
+    <div className="main">
+      <div className="topbar chat-topbar">
+        <div className="topbar-row">
+          <div className="tb-l">
+            <span className="chat-title">{sessTitle}</span>
+          </div>
+          {analysis && (
+            <div className="tb-r trace-head-meta">
+              {analysis.meta.model && <span>{analysis.meta.model}</span>}
+              {analysis.meta.gitBranch && <span>git:{analysis.meta.gitBranch}</span>}
+              <span>{fmtFileSize(analysis.file.sizeBytes)}</span>
+              <span className="trace-badge" title={analysis.session_id}>{analysis.session_id}</span>
+              <button type="button" className="trace-cwd-copy" title={S.traces.copyPath} aria-label={S.traces.copyPath}
+                      onClick={() => { void navigator.clipboard.writeText(analysis.file.path); showToast(S.traces.copiedPath); }}>
+                <IconCopy />
+              </button>
+            </div>
+          )}
         </div>
-      )}
-      {analysis && <TraceDetail key={sessionId} a={analysis} focusCall={focusCall} />}
+        <div className="topbar-tabs" role="tablist">
+          <button type="button" className="tb-tab" role="tab" aria-selected="false" onClick={backToChat}>
+            {S.chat.chatTab}
+          </button>
+          <span className="tb-tab active" role="tab" aria-selected="true">
+            {S.chat.viewTrace}
+          </span>
+        </div>
+      </div>
+      <div className="trace-main">
+        {loading && <div className="trace-empty"><p>{S.common.loading}</p></div>}
+        {!loading && !!errStatus && (
+          <div className="trace-empty">
+            <p>{errStatus === 404 ? S.traces.missing : S.traces.loadFailed(errStatus)}</p>
+          </div>
+        )}
+        {analysis && <TraceDetail key={sessionId} a={analysis} focusCall={focusCall} />}
+      </div>
     </div>
   );
 }
@@ -176,38 +218,76 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
     for (const r of a.rounds) for (const c of r.calls) if (c.toolCallId === focusCall) return c.index;
     return null;
   }, [a, focusCall]);
-  const [tab, setTab] = useState<Tab>(focusInit != null ? "calls" : "duration");
-  // -1 = all rounds. Shared by the Duration charts and the Calls list.
+  const [showDuration, setShowDuration] = useState(a.hasTimeline);
+  // -1 = all rounds. Scopes both the top duration timeline and the call table.
   const [scope, setScope] = useState(-1);
   const [focus, setFocus] = useState<number | null>(focusInit);
   const [query, setQuery] = useState("");
   const hits = useTraceSearch(a.session_id, query);
+  const [collapsedRounds, setCollapsedRounds] = useState<Set<number>>(() => new Set());
+  const [collapsedAssistants, setCollapsedAssistants] = useState<Set<number>>(() => new Set());
 
-  const openCall = (index: number) => { setScope(-1); setFocus(index); setTab("calls"); };
-  const openRound = (i: number) => { setScope(i); setFocus(null); setTab("calls"); };
+  const allRoundIndices = useMemo(() => a.rounds.map((_, i) => i), [a.rounds]);
+  const collapsibleAssistantIndices = useMemo(() => {
+    const ids: number[] = [];
+    for (const r of a.rounds) {
+      for (const c of r.calls) {
+        if (c.kind === "model" && (c.toolCalls || 0) > 0) ids.push(c.index);
+      }
+    }
+    return ids;
+  }, [a.rounds]);
+
+  const allRoundsCollapsed = allRoundIndices.length > 0 && allRoundIndices.every((i) => collapsedRounds.has(i));
+  const allToolsCollapsed = collapsibleAssistantIndices.length > 0
+    && collapsibleAssistantIndices.every((idx) => collapsedAssistants.has(idx));
+
+  const toggleAllRounds = () => {
+    setCollapsedRounds(allRoundsCollapsed ? new Set() : new Set(allRoundIndices));
+  };
+  const toggleRound = (rIdx: number) => {
+    setCollapsedRounds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rIdx)) next.delete(rIdx); else next.add(rIdx);
+      return next;
+    });
+  };
+  const toggleAllTools = () => {
+    setCollapsedAssistants(allToolsCollapsed ? new Set() : new Set(collapsibleAssistantIndices));
+  };
+  const toggleAssistantTools = (modelIdx: number) => {
+    setCollapsedAssistants((prev) => {
+      const next = new Set(prev);
+      if (next.has(modelIdx)) next.delete(modelIdx); else next.add(modelIdx);
+      return next;
+    });
+  };
+
+  const openCall = (index: number) => {
+    a.rounds.forEach((r, rIdx) => {
+      let curModelIdx: number | null = null;
+      for (const c of r.calls) {
+        if (c.kind === "model") curModelIdx = c.index;
+        if (c.index === index) {
+          setCollapsedRounds((prev) => {
+            if (!prev.has(rIdx)) return prev;
+            const next = new Set(prev); next.delete(rIdx); return next;
+          });
+          if (c.kind === "tool" && curModelIdx != null) {
+            const mIdx = curModelIdx;
+            setCollapsedAssistants((prev) => {
+              if (!prev.has(mIdx)) return prev;
+              const next = new Set(prev); next.delete(mIdx); return next;
+            });
+          }
+        }
+      }
+    });
+    setFocus(index);
+  };
 
   return (
     <>
-      <div className="trace-head">
-        <div className="trace-head-l">
-          <h1>{a.file.name || a.session_id}</h1>
-          <div className="trace-head-sub">
-            <span>{new Date(a.file.modifiedAt).toLocaleString()}</span>
-            <span>{fmtFileSize(a.file.sizeBytes)}</span>
-            {a.meta.model && <span>{a.meta.model}</span>}
-            {a.meta.gitBranch && <span>git:{a.meta.gitBranch}</span>}
-            {a.meta.cwd && <span className="trace-cwd"><code>{a.meta.cwd}</code></span>}
-          </div>
-        </div>
-        <div className="trace-head-r">
-          <span className="trace-badge" title={a.session_id}>{a.session_id}</span>
-          <button className="trace-cwd-copy" title={S.traces.copyPath} aria-label={S.traces.copyPath}
-                  onClick={() => { void navigator.clipboard.writeText(a.file.path); showToast(S.traces.copiedPath); }}>
-            <IconCopy />
-          </button>
-        </div>
-      </div>
-
       <div className="tr-stats">
         <Stat label={S.traces.statElapsed} value={fmtDurationMs(t.elapsedMs)} />
         <Stat label={S.traces.statRounds} value={String(t.rounds)} />
@@ -222,16 +302,52 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
       </div>
 
       <div className="tr-tabs" role="tablist">
-        {(["duration", "rounds", "calls"] as Tab[]).map((k) => (
-          <button key={k} type="button" role="tab" aria-selected={tab === k}
-                  className={"tr-tab" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>
-            {k === "duration" ? S.traces.tabDuration : k === "rounds" ? S.traces.tabRounds : S.traces.tabCalls}
+        <div className="tr-toolbar-actions">
+          <button
+            type="button"
+            className={"tr-tbtn" + (showDuration ? " on" : "")}
+            aria-pressed={showDuration}
+            onClick={() => setShowDuration((v) => !v)}
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+              <circle cx="8" cy="8" r="5.5" />
+              <path d="M8 4.8V8l2.2 1.5" strokeLinecap="round" />
+            </svg>
+            <span>{S.traces.tabDuration}</span>
           </button>
-        ))}
+          <button
+            type="button"
+            className={"tr-tbtn" + (!allRoundsCollapsed ? " on" : "")}
+            aria-pressed={!allRoundsCollapsed}
+            title={allRoundsCollapsed ? S.traces.expandTurns : S.traces.collapseTurns}
+            onClick={toggleAllRounds}
+          >
+            <span className="tr-tbtn-ico" aria-hidden="true">{allRoundsCollapsed ? "⊞" : "⊟"}</span>
+            <span>{S.traces.tabRounds}</span>
+          </button>
+          <button
+            type="button"
+            className={"tr-tbtn" + (!allToolsCollapsed ? " on" : "")}
+            aria-pressed={!allToolsCollapsed}
+            title={allToolsCollapsed ? S.traces.expandTools : S.traces.collapseTools}
+            onClick={toggleAllTools}
+          >
+            <span className="tr-tbtn-ico" aria-hidden="true">{allToolsCollapsed ? "⊞" : "⊟"}</span>
+            <span>{S.traces.tabCalls}</span>
+          </button>
+          <select className="tr-scope-select" value={scope} onChange={(e) => setScope(Number(e.target.value))}>
+            <option value={-1}>{S.traces.allRounds}</option>
+            {a.rounds.map((r, i) => (
+              <option key={r.taskIndex} value={i}>
+                {roundLabel(r, ordinalOf(a.rounds, i), S)} · {r.title.slice(0, 40)}
+              </option>
+            ))}
+          </select>
+        </div>
         <label className="tr-search">
           <IconSearch />
           <input type="search" value={query} placeholder={S.traces.search}
-                 onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) { setTab("calls"); setScope(-1); } }}
+                 onChange={(e) => { setQuery(e.target.value); if (e.target.value.trim()) setScope(-1); }}
                  onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }} />
           {query.trim() && (
             <span className="tr-search-n">
@@ -241,13 +357,22 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
         </label>
       </div>
 
-      {!a.hasTimeline && tab === "duration" && <p className="trace-note">{S.traces.noTimeline}</p>}
-      {tab === "duration" && <DurationView a={a} scope={scope} setScope={setScope} onOpenCall={openCall} />}
-      {tab === "rounds" && <RoundsView a={a} onOpenRound={openRound} />}
-      {tab === "calls" && (
-        <CallsView a={a} roundFilter={scope} setRoundFilter={setScope} focus={focus}
-                   hits={query.trim() && !hits.loading ? hits.indices : null} />
+      {showDuration && (
+        a.hasTimeline
+          ? <DurationBanner a={a} scope={scope} setScope={setScope} onOpenCall={openCall} />
+          : <p className="trace-note">{S.traces.noTimeline}</p>
       )}
+      <CallsView
+        a={a}
+        roundFilter={scope}
+        focus={focus}
+        onOpenCall={openCall}
+        hits={query.trim() && !hits.loading ? hits.indices : null}
+        collapsedRounds={collapsedRounds}
+        onToggleRound={toggleRound}
+        collapsedAssistants={collapsedAssistants}
+        onToggleAssistant={toggleAssistantTools}
+      />
     </>
   );
 }
@@ -373,7 +498,10 @@ function Timeline({ rounds, onOpenCall }: { rounds: Round[]; onOpenCall: (index:
     const c = sp.call;
     const head = c.kind === "tool" ? c.toolName || "tool" : S.traces.kind.model;
     const what = sp.lane === 0 ? S.traces.phaseInput : "";
-    return `${head}${what ? " · " + what : ""} · ${fmtDurationMs(sp.end - sp.start)}\n${c.kind === "tool" ? toolArgsSummary(c) : c.summary}`;
+    const sum = c.kind === "tool"
+      ? (c.resultSummary ? `${toolArgsSummary(c)} → ${c.resultSummary}` : toolArgsSummary(c))
+      : c.summary;
+    return `${head}${what ? " · " + what : ""} · ${fmtDurationMs(sp.end - sp.start)}\n${sum}`;
   };
   return (
     <div className="tr-tl">
@@ -397,102 +525,30 @@ function Timeline({ rounds, onOpenCall }: { rounds: Round[]; onOpenCall: (index:
           ))}
         </div>
       </div>
-      <p className="trace-note">{S.traces.timelineNote}</p>
     </div>
   );
 }
 
-function ToolTable({ rounds }: { rounds: Round[] }) {
-  const S = useStrings();
-  const rows = useMemo(() => {
-    const by = new Map<string, { name: string; n: number; total: number; max: number; err: number }>();
-    for (const r of rounds) for (const c of r.calls) {
-      if (c.kind !== "tool") continue;
-      const name = c.toolName || "tool";
-      const row = by.get(name) || { name, n: 0, total: 0, max: 0, err: 0 };
-      const ms = c.durationMs || 0;
-      row.n++; row.total += ms; row.max = Math.max(row.max, ms); if (c.isError) row.err++;
-      by.set(name, row);
-    }
-    return [...by.values()].sort((x, y) => y.total - x.total);
-  }, [rounds]);
-  if (!rows.length) return <p className="trace-note">{S.traces.noTiming}</p>;
-  const top = rows[0].total || 1;
-  return (
-    <table className="tr-table">
-      <thead><tr><th>{S.traces.phaseTool}</th><th>{S.traces.colCount}</th><th>{S.traces.colTotal}</th>
-        <th>{S.traces.colAvg}</th><th>{S.traces.colMax}</th></tr></thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.name}>
-            <td>
-              <span className="tr-table-name">{r.name}</span>
-              <span className="tr-table-bar"><i className="ph-tool" style={{ width: (r.total / top) * 100 + "%" }} /></span>
-            </td>
-            <td>{r.n}{r.err ? <span className="err"> ({r.err})</span> : null}</td>
-            <td>{fmtDurationMs(r.total)}</td>
-            <td>{fmtDurationMs(r.total / r.n)}</td>
-            <td>{fmtDurationMs(r.max)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function SlowestCalls({ rounds, onOpenCall }: { rounds: Round[]; onOpenCall: (index: number) => void }) {
-  const S = useStrings();
-  const calls = useMemo(() => rounds
-    .flatMap((r) => r.calls)
-    .filter((c) => (c.kind === "tool" || c.kind === "model") && (c.durationMs || 0) > 0)
-    .sort((x, y) => (y.durationMs || 0) - (x.durationMs || 0))
-    .slice(0, 10), [rounds]);
-  if (!calls.length) return <p className="trace-note">{S.traces.noTiming}</p>;
-  const top = calls[0].durationMs || 1;
-  return (
-    <div className="tr-slow">
-      {calls.map((c) => (
-        <button key={c.index} type="button" className="tr-slow-row" onClick={() => onOpenCall(c.index)}>
-          <span className={"tr-tag " + (c.kind === "tool" ? "k-tool" : "k-model") + (c.isError ? " err" : "")}>
-            {c.kind === "tool" ? c.toolName || "tool" : S.traces.kind.model}
-          </span>
-          <span className="tr-slow-sum">{c.kind === "tool" ? toolArgsSummary(c) : c.summary}</span>
-          <span className="tr-slow-bar"><i className={c.kind === "tool" ? "ph-tool" : "ph-model"}
-                                           style={{ width: ((c.durationMs || 0) / top) * 100 + "%" }} /></span>
-          <span className="tr-slow-ms">{fmtDurationMs(c.durationMs || 0)}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function DurationView({ a, scope, setScope, onOpenCall }: {
+function DurationBanner({ a, scope, setScope, onOpenCall }: {
   a: Analysis; scope: number; setScope: (i: number) => void; onOpenCall: (index: number) => void;
 }) {
   const S = useStrings();
   const scoped = useMemo(() => (scope >= 0 ? [a.rounds[scope]] : a.rounds), [a, scope]);
-  // The round list is at the bottom; the charts it scopes are at the top.
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [scope]);
   const total = scope >= 0
     ? split([a.rounds[scope]])
     : split(a.rounds);
-  const longest = Math.max(1, ...a.rounds.map((r) => split([r]).total));
   const legend: Array<[string, string, number, string?]> = [
     ["ph-input", S.traces.phaseInput, total.input, S.traces.phaseInputTip],
     ["ph-model", S.traces.phaseModel, total.model],
     ["ph-tool", S.traces.phaseTool, total.tool],
   ];
   return (
-    <div className="tr-scroll" ref={scrollRef}>
-      <section className="tr-card">
-        <div className="tr-card-head">
-          <span className="tr-card-title">
-            {scope >= 0 ? roundLabel(a.rounds[scope], ordinalOf(a.rounds, scope), S) : S.traces.allRounds}
-          </span>
-          {scope >= 0 && <button type="button" className="tr-chip" onClick={() => setScope(-1)}>{S.traces.allRounds} ×</button>}
-        </div>
-        <SplitBar parts={total} />
+    <section className="tr-card tr-duration-banner">
+      <div className="tr-banner-top">
+        <span className="tr-card-title">
+          {scope >= 0 ? roundLabel(a.rounds[scope], ordinalOf(a.rounds, scope), S) : S.traces.allRounds}
+        </span>
+        {scope >= 0 && <button type="button" className="tr-chip" onClick={() => setScope(-1)}>{S.traces.allRounds} ×</button>}
         <div className="tr-legend">
           {legend.map(([cls, label, ms, tip]) => (
             <span key={cls} className="tr-legend-item" title={tip}>
@@ -502,37 +558,9 @@ function DurationView({ a, scope, setScope, onOpenCall }: {
             </span>
           ))}
         </div>
-      </section>
-      <section className="tr-card">
-        <div className="tr-card-title">{S.traces.timeline}</div>
-        <Timeline rounds={scoped} onOpenCall={onOpenCall} />
-      </section>
-      <div className="tr-grid2">
-        <section className="tr-card">
-          <div className="tr-card-title">{S.traces.byTool}</div>
-          <ToolTable rounds={scoped} />
-        </section>
-        <section className="tr-card">
-          <div className="tr-card-title">{S.traces.slowest}</div>
-          <SlowestCalls rounds={scoped} onOpenCall={onOpenCall} />
-        </section>
       </div>
-      <section className="tr-card tr-rounds-dur">
-        <div className="tr-card-title" title={S.traces.perRoundTip}>{S.traces.perRound}</div>
-        {a.rounds.map((r, i) => {
-          const parts = split([r]);
-          return (
-            <button key={r.taskIndex} type="button" className={"tr-dur-row" + (scope === i ? " on" : "")}
-                    onClick={() => setScope(scope === i ? -1 : i)}>
-              <span className="tr-dur-name">{roundLabel(r, ordinalOf(a.rounds, i), S)}</span>
-              <span className="tr-dur-title" title={r.title}>{r.title}</span>
-              <span className="tr-dur-track"><SplitBar parts={parts} scale={parts.total / longest} /></span>
-              <span className="tr-dur-ms">{fmtDurationMs(r.durationMs)}</span>
-            </button>
-          );
-        })}
-      </section>
-    </div>
+      <Timeline rounds={scoped} onOpenCall={onOpenCall} />
+    </section>
   );
 }
 
@@ -543,54 +571,46 @@ function ordinalOf(rounds: Round[], i: number) {
   return n;
 }
 
-function RoundsView({ a, onOpenRound }: { a: Analysis; onOpenRound: (i: number) => void }) {
-  const S = useStrings();
-  return (
-    <div className="tr-scroll">
-      <div className="tr-card tr-round-list">
-        {a.rounds.map((r, i) => (
-          <button key={r.taskIndex} type="button" className={"tr-round" + (r.compaction ? " compaction" : "")}
-                  onClick={() => onOpenRound(i)}>
-            <div className="tr-round-top">
-              <span className="tr-round-name">{roundLabel(r, ordinalOf(a.rounds, i), S)}</span>
-              <span className="tr-round-title" title={r.title}>{r.title}</span>
-              <span className="tr-round-ms">{fmtDurationMs(r.durationMs)}</span>
-            </div>
-            <div className="tr-round-meta">
-              <span>{S.traces.roundMeta(r.requests, r.toolCalls)}</span>
-              {r.toolErrors > 0 && <span className="err">{S.traces.failed(r.toolErrors)}</span>}
-              <span>↓ {fmtN(r.tokens.prompt)}{r.tokens.cacheHitPercent != null ? ` (${r.tokens.cacheHitPercent.toFixed(0)}%)` : ""}</span>
-              <span>↑ {fmtN(r.tokens.output)}</span>
-              <span>{money(r.costUsd)}</span>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type Row = { type: "head"; round: number } | { type: "call"; round: number; call: Call };
+type Row =
+  | { type: "head"; round: number; collapsed: boolean }
+  | { type: "call"; round: number; call: Call; toolsCollapsed?: boolean };
 
 const ROW_H = 30;
 const OVERSCAN = 12;
 
-function CallsView({ a, roundFilter, setRoundFilter, focus, hits }: {
-  a: Analysis; roundFilter: number; setRoundFilter: (i: number) => void;
-  focus: number | null; hits: Set<number> | null;
+function CallsView({
+  a, roundFilter, focus, onOpenCall, hits,
+  collapsedRounds, onToggleRound, collapsedAssistants, onToggleAssistant,
+}: {
+  a: Analysis; roundFilter: number;
+  focus: number | null; onOpenCall: (index: number) => void; hits: Set<number> | null;
+  collapsedRounds: Set<number>; onToggleRound: (round: number) => void;
+  collapsedAssistants: Set<number>; onToggleAssistant: (modelIndex: number) => void;
 }) {
   const S = useStrings();
+  const longestRound = useMemo(() => Math.max(1, ...a.rounds.map((r) => split([r]).total)), [a.rounds]);
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     a.rounds.forEach((r, i) => {
       if (roundFilter >= 0 && roundFilter !== i) return;
       const calls = hits ? r.calls.filter((c) => hits.has(c.index)) : r.calls;
       if (!calls.length) return;
-      if (roundFilter < 0) out.push({ type: "head", round: i });
-      for (const c of calls) out.push({ type: "call", round: i, call: c });
+      const roundFolded = !hits && collapsedRounds.has(i);
+      out.push({ type: "head", round: i, collapsed: roundFolded });
+      if (roundFolded) return;
+      let activeModelCollapsed = false;
+      for (const c of calls) {
+        if (c.kind === "model") {
+          activeModelCollapsed = !hits && collapsedAssistants.has(c.index);
+          out.push({ type: "call", round: i, call: c, toolsCollapsed: activeModelCollapsed });
+          continue;
+        }
+        if (c.kind === "tool" && activeModelCollapsed) continue;
+        out.push({ type: "call", round: i, call: c });
+      }
     });
     return out;
-  }, [a, roundFilter, hits]);
+  }, [a, roundFilter, hits, collapsedRounds, collapsedAssistants]);
 
   const initial = useMemo(() => {
     const target = focus != null ? rows.findIndex((r) => r.type === "call" && r.call.index === focus) : -1;
@@ -609,33 +629,38 @@ function CallsView({ a, roundFilter, setRoundFilter, focus, hits }: {
   return (
     <div className="tr-split">
       <div className="tr-list-pane">
-        <div className="tr-list-head">
-          <select value={roundFilter} onChange={(e) => setRoundFilter(Number(e.target.value))}>
-            <option value={-1}>{S.traces.allRounds}</option>
-            {a.rounds.map((r, i) => (
-              <option key={r.taskIndex} value={i}>
-                {roundLabel(r, ordinalOf(a.rounds, i), S)} · {r.title.slice(0, 40)}
-              </option>
-            ))}
-          </select>
-          <span className="tr-list-count">{S.traces.callsN(rows.filter((r) => r.type === "call").length)}</span>
-        </div>
         {rows.length ? (
           <VirtualList
             rows={rows}
             selected={sel}
             onSelect={setSel}
+            onToggleRound={onToggleRound}
             onMove={move}
             render={(row) => row.type === "head"
-              ? <RoundHead r={a.rounds[row.round]} label={roundLabel(a.rounds[row.round], ordinalOf(a.rounds, row.round), S)} />
-              : <CallRow c={row.call} />}
+              ? (
+                <RoundHead
+                  r={a.rounds[row.round]}
+                  label={roundLabel(a.rounds[row.round], ordinalOf(a.rounds, row.round), S)}
+                  collapsed={row.collapsed}
+                  longest={longestRound}
+                />
+              )
+              : (
+                <CallRow
+                  c={row.call}
+                  toolsCollapsed={row.toolsCollapsed}
+                  onToggleTools={() => onToggleAssistant(row.call.index)}
+                />
+              )}
           />
         ) : <div className="trace-empty"><p>{S.traces.searchNone}</p></div>}
       </div>
       <div className="tr-detail-pane">
         {picked
           ? <CallDetail key={picked.call.index} sessionId={a.session_id} c={picked.call}
-                        roundName={roundLabel(a.rounds[picked.round], ordinalOf(a.rounds, picked.round), S)} />
+                        round={a.rounds[picked.round]}
+                        roundName={roundLabel(a.rounds[picked.round], ordinalOf(a.rounds, picked.round), S)}
+                        onOpenCall={onOpenCall} />
           : <div className="trace-empty"><p>{S.traces.pickCall}</p></div>}
       </div>
     </div>
@@ -644,10 +669,11 @@ function CallsView({ a, roundFilter, setRoundFilter, focus, hits }: {
 
 /** Fixed-height rows, only the visible window in the DOM: a long session has
  *  thousands of calls, and drawing them all is what made the page crawl. */
-function VirtualList({ rows, selected, onSelect, onMove, render }: {
+function VirtualList({ rows, selected, onSelect, onToggleRound, onMove, render }: {
   rows: Row[];
   selected: number;
   onSelect: (i: number) => void;
+  onToggleRound: (round: number) => void;
   onMove: (delta: number) => void;
   render: (row: Row) => ReactNode;
 }) {
@@ -678,7 +704,7 @@ function VirtualList({ rows, selected, onSelect, onMove, render }: {
     items.push(
       <div key={i} className={"tr-row" + (row.type === "head" ? " head" : "") + (i === selected ? " sel" : "")}
            style={{ top: i * ROW_H, height: ROW_H }}
-           onClick={() => row.type === "call" && onSelect(i)}>
+           onClick={() => row.type === "head" ? onToggleRound(row.round) : onSelect(i)}>
         {render(row)}
       </div>,
     );
@@ -695,11 +721,16 @@ function VirtualList({ rows, selected, onSelect, onMove, render }: {
   );
 }
 
-function RoundHead({ r, label }: { r: Round; label: string }) {
+function RoundHead({ r, label, collapsed, longest }: { r: Round; label: string; collapsed: boolean; longest: number }) {
+  const S = useStrings();
+  const parts = split([r]);
   return (
     <>
+      <span className="tr-fold-chev" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
       <span className="tr-row-round">{label}</span>
       <span className="tr-row-sum" title={r.title}>{r.title}</span>
+      <span className="tr-round-inline-meta">{S.traces.roundMeta(r.requests, r.toolCalls)}</span>
+      <span className="tr-round-inline-bar"><SplitBar parts={parts} scale={parts.total / longest} /></span>
       <span className="tr-row-ms">{fmtDurationMs(r.durationMs)}</span>
     </>
   );
@@ -710,13 +741,46 @@ function toolArgsSummary(c: Call) {
   return name && c.summary.startsWith(name + " ") ? c.summary.slice(name.length + 1) : c.summary;
 }
 
-function CallRow({ c }: { c: Call }) {
+/**
+ * Tool call row summary (deepseek-harness style): `args → result`. Both halves
+ * keep their full single-line text in the DOM and clip via CSS ellipsis, so
+ * selecting and copying a row copies the elided command tail and output too.
+ */
+function ToolCallSummary({ c, className = "tr-row-sum" }: { c: Call; className?: string }) {
+  const args = toolArgsSummary(c);
+  const res = c.resultSummary;
+  if (!res) {
+    return <span className={className + (c.isError ? " err" : "")} title={args}>{args}</span>;
+  }
+  return (
+    <span className={className + " has-result"} title={args ? `${args} → ${res}` : res}>
+      <span className="tr-call-req">{args}</span>
+      <span className={"tr-call-res" + (c.isError ? " err" : "")}>
+        <span className="tr-call-arr">{" → "}</span>
+        <span className="tr-call-res-text">{res}</span>
+      </span>
+    </span>
+  );
+}
+
+function CallRow({ c, toolsCollapsed, onToggleTools }: { c: Call; toolsCollapsed?: boolean; onToggleTools?: () => void }) {
   const S = useStrings();
   if (c.kind === "model") {
+    const text = c.summary || ((c.toolCalls || 0) > 0 ? S.traces.toolCallOnly : "");
     return (
       <>
         <span className="tr-tag k-model">{S.traces.kind.model}</span>
-        <span className="tr-row-sum">{c.summary}</span>
+        <span className={"tr-row-sum" + (!c.summary ? " muted" : "")} title={text}>{text}</span>
+        {!!c.toolCalls && (
+          <button
+            type="button"
+            className={"tr-tool-badge" + (toolsCollapsed ? " folded" : "")}
+            title={toolsCollapsed ? S.traces.expandTools : S.traces.collapseTools}
+            onClick={(e) => { e.stopPropagation(); onToggleTools?.(); }}
+          >
+            🔧 {c.toolCalls}
+          </button>
+        )}
         {c.tokens && <span className="tr-row-tok">{fmtN(c.tokens.prompt)} → {fmtN(c.tokens.output)}</span>}
         <span className="tr-row-ms">{c.durationMs != null ? fmtDurationMs(c.durationMs) : ""}</span>
       </>
@@ -726,7 +790,7 @@ function CallRow({ c }: { c: Call }) {
     return (
       <>
         <span className={"tr-tag k-tool" + (c.isError ? " err" : "")} title={c.toolName}>{c.toolName || "tool"}</span>
-        <span className={"tr-row-sum" + (c.isError ? " err" : "")}>{toolArgsSummary(c)}</span>
+        <ToolCallSummary c={c} className="tr-row-sum" />
         {!!c.waitMs && <span className="tr-row-tok">⏸ {fmtDurationMs(c.waitMs)}</span>}
         <span className="tr-row-ms">{c.durationMs != null ? fmtDurationMs(c.durationMs) : ""}</span>
       </>
@@ -735,14 +799,39 @@ function CallRow({ c }: { c: Call }) {
   return (
     <>
       <span className={"tr-tag k-" + c.kind}>{S.traces.kind[c.kind] || c.kind}</span>
-      <span className="tr-row-sum">{c.summary}</span>
+      <span className="tr-row-sum" title={c.summary}>{c.summary}</span>
     </>
   );
 }
 
 const bodyCache = new Map<string, Body>();
 
-function CallDetail({ sessionId, c, roundName }: { sessionId: string; c: Call; roundName: string }) {
+function deriveModelToolCalls(round: Round, modelCall: Call, fromBody?: ModelToolCall[]): ModelToolCall[] {
+  if (fromBody && fromBody.length > 0) return fromBody;
+  const out: ModelToolCall[] = [];
+  let collect = false;
+  for (const item of round.calls) {
+    if (item.index === modelCall.index) { collect = true; continue; }
+    if (!collect) continue;
+    if (item.kind === "model") break;
+    if (item.kind === "tool") {
+      out.push({
+        index: item.index,
+        toolCallId: item.toolCallId,
+        toolName: item.toolName || "tool",
+        summary: item.summary,
+        resultSummary: item.resultSummary,
+        isError: item.isError,
+        durationMs: item.durationMs,
+      });
+    }
+  }
+  return out;
+}
+
+function CallDetail({ sessionId, c, round, roundName, onOpenCall }: {
+  sessionId: string; c: Call; round: Round; roundName: string; onOpenCall: (index: number) => void;
+}) {
   const S = useStrings();
   const key = `${sessionId}:${c.index}`;
   const [body, setBody] = useState<Body | null>(bodyCache.get(key) || null);
@@ -762,9 +851,13 @@ function CallDetail({ sessionId, c, roundName }: { sessionId: string; c: Call; r
   const tabs: Array<[string, string]> = c.kind === "tool"
     ? [["result", S.traces.tabResult], ["args", S.traces.tabArgs], ...(body?.approval ? [["approval", S.traces.tabApproval] as [string, string]] : [])]
     : c.kind === "model"
-      ? [["text", S.traces.tabReply], ["thinking", S.traces.tabThinking]]
+      ? [["overview", S.traces.tabOverview], ["text", S.traces.tabReply], ["thinking", S.traces.tabThinking]]
       : [["text", S.traces.tabContent]];
   const [tab, setTab] = useState(tabs[0][0]);
+  const modelTools = useMemo(
+    () => (c.kind === "model" ? deriveModelToolCalls(round, c, body?.toolCalls) : []),
+    [c, round, body?.toolCalls],
+  );
 
   const title = c.kind === "tool" ? c.toolName || "tool" : S.traces.kind[c.kind] || c.kind;
   return (
@@ -783,14 +876,87 @@ function CallDetail({ sessionId, c, roundName }: { sessionId: string; c: Call; r
       <div className="tr-dbody">
         {failed ? <p className="trace-note">{S.traces.bodyFailed}</p>
           : !body ? <p className="trace-note">{S.traces.loadingBody}</p>
-          : <BodyView c={c} body={body} tab={tab} />}
+          : <BodyView c={c} body={body} tab={tab} modelTools={modelTools} onOpenCall={onOpenCall} />}
       </div>
     </div>
   );
 }
 
-function BodyView({ c, body, tab }: { c: Call; body: Body; tab: string }) {
+function AssistantOverview({ body, modelTools, onOpenCall }: {
+  body: Body; modelTools: ModelToolCall[]; onOpenCall: (index: number) => void;
+}) {
   const S = useStrings();
+  const [thinkOpen, setThinkOpen] = useState(!body.text && modelTools.length === 0);
+  const hasAny = Boolean(body.thinking?.trim() || body.text?.trim() || modelTools.length);
+  if (!hasAny) return <p className="trace-note">{S.traces.empty}</p>;
+  return (
+    <div className="tr-assistant-overview">
+      {body.thinking?.trim() && (
+        <div className={"tr-think-quote" + (thinkOpen ? " open" : "")}>
+          <button type="button" className="tr-think-toggle" aria-expanded={thinkOpen} onClick={() => setThinkOpen((v) => !v)}>
+            <span>{S.traces.tabThinking}</span>
+            <span className="tr-think-chev" aria-hidden="true">{thinkOpen ? "▾" : "▸"}</span>
+          </button>
+          {thinkOpen && (
+            <div className="tr-think-body">
+              <Suspense fallback={<pre className="tr-pre">{body.thinking}</pre>}>
+                <ChatMarkdown text={body.thinking} streaming={false} />
+              </Suspense>
+            </div>
+          )}
+        </div>
+      )}
+      {body.text?.trim() && (
+        <div className="tr-assistant-reply">
+          <Suspense fallback={<pre className="tr-pre">{body.text}</pre>}>
+            <ChatMarkdown text={body.text} streaming={false} />
+          </Suspense>
+        </div>
+      )}
+      {modelTools.length > 0 && (
+        <ul className="tr-assistant-tools">
+          {modelTools.map((tc) => {
+            const args = tc.toolName && tc.summary.startsWith(tc.toolName + " ")
+              ? tc.summary.slice(tc.toolName.length + 1)
+              : tc.summary;
+            return (
+              <li key={tc.toolCallId || tc.index}>
+                <button
+                  type="button"
+                  className={"tr-assistant-tool-btn" + (tc.isError ? " err" : "")}
+                  title={tc.resultSummary ? `${tc.toolName} ${args} → ${tc.resultSummary}` : `${tc.toolName} ${args}`}
+                  onClick={() => onOpenCall(tc.index)}
+                >
+                  <svg className="tr-assistant-tool-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"
+                          stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="tr-assistant-tool-name">{tc.toolName}</span>
+                  <span className="tr-assistant-tool-args">{args}</span>
+                  {tc.resultSummary && (
+                    <span className="tr-assistant-tool-res">
+                      <span className="tr-call-arr">{" → "}</span>
+                      <span>{tc.resultSummary}</span>
+                    </span>
+                  )}
+                  {tc.durationMs != null && <span className="tr-assistant-tool-ms">{fmtDurationMs(tc.durationMs)}</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function BodyView({ c, body, tab, modelTools, onOpenCall }: {
+  c: Call; body: Body; tab: string; modelTools: ModelToolCall[]; onOpenCall: (index: number) => void;
+}) {
+  const S = useStrings();
+  if (c.kind === "model" && tab === "overview") {
+    return <AssistantOverview body={body} modelTools={modelTools} onOpenCall={onOpenCall} />;
+  }
   if (c.kind === "tool" && c.toolName === "task") {
     if (tab === "result" && body.taskResult) {
       return <TaskCard brief={body.taskCall?.description || ""} subagentType={body.taskCall?.subagentType}

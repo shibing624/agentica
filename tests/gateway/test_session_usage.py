@@ -192,3 +192,58 @@ def test_session_stats_come_from_the_log_and_survive_a_gateway_restart(tmp_path,
     assert stats["cache_read_tokens"] == 900
     assert stats["output_tokens"] == 40
     assert stats["cache_hit_percent"] == 90.0
+
+
+def test_usage_payload_includes_inflight_messages_while_agent_is_running():
+    """Refreshing mid-turn must measure ``run_response.messages``, not an empty ``working_memory.runs``."""
+    from agentica.model.message import Message
+    from agentica.run.response import RunResponse
+
+    agent = _agent(add_history_to_context=True)
+    agent.model.context_window = 128_000
+    agent._running = True
+    agent.run_response = RunResponse(messages=[
+        Message(role="system", content="sys"),
+        Message(role="user", content="question " * 80),
+        Message(role="assistant", content="thinking " * 80),
+        Message(role="tool", content="result " * 80),
+    ])
+
+    payload = asyncio.run(usage_payload(agent, model_provider="openai"))
+    by_label = {s["label"]: s["tokens"] for s in payload["sections"]}
+
+    assert payload["messages"] == 3
+    assert by_label.get("Conversation", 0) > 150
+
+
+def test_build_agent_hydrates_working_memory_from_existing_session_log(tmp_path, monkeypatch):
+    """Opening an old session in Desktop/Web must hydrate ``working_memory`` before any new run."""
+    from agentica.memory.session_log import SessionLog
+    from agentica_gateway.services import agent_service as svc_mod
+    from agentica_gateway.services.agent_service import AgentService
+
+    monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(tmp_path / "projects"))
+    work = tmp_path / "proj"
+    work.mkdir()
+    log = SessionLog(session_id="old-sess", work_dir=str(work), user_id="default")
+    log.append("user", "explain context window " * 40)
+    log.append("assistant", "here is the explanation " * 40)
+
+    monkeypatch.setattr(svc_mod, "get_profiles", lambda: {})
+    monkeypatch.setattr(svc_mod, "get_project_profile", lambda wd: None)
+    monkeypatch.setattr(svc_mod, "get_active_profile_name", lambda: "")
+    monkeypatch.setattr(svc_mod, "get_profile", lambda name: None)
+
+    svc = AgentService(workspace_path=str(tmp_path / "ws"))
+    svc.model_provider = "openai"
+    svc.model_name = "gpt-4o-mini"
+    svc.api_key = "sk-test"
+    asyncio.run(svc._ensure_initialized())
+
+    agent = svc._build_agent("old-sess")
+    payload = asyncio.run(usage_payload(agent, model_provider="openai"))
+    by_label = {s["label"]: s["tokens"] for s in payload["sections"]}
+
+    assert len(agent.working_memory.runs) == 1
+    assert payload["messages"] == 2
+    assert by_label.get("Conversation", 0) > 100

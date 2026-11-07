@@ -71,13 +71,12 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
   if (name === "web_search") {
     const queries = args.queries;
     if (Array.isArray(queries)) {
-      return queries.slice(0, 3).map((q) => String(q).slice(0, 40)).join(", ");
+      return queries.map((q) => collapseInline(String(q))).join(", ");
     }
-    return String(queries ?? "").slice(0, 80);
+    return collapseInline(String(queries ?? ""));
   }
   if (name === "fetch_url") {
-    const url = String(args.url ?? "");
-    return url.length > 60 ? url.slice(0, 57) + "..." : url;
+    return collapseInline(String(args.url ?? ""));
   }
   if (name === "glob") {
     const pattern = String(args.pattern ?? "*");
@@ -85,9 +84,9 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
     return `${pattern} in ${shortenPath(path, cwd)}`;
   }
   if (name === "grep") {
-    const pattern = String(args.pattern ?? "");
+    const pattern = collapseInline(String(args.pattern ?? ""));
     const path = String(args.path ?? ".");
-    return `'${pattern.slice(0, 40)}' in ${shortenPath(path, cwd)}`;
+    return `'${pattern}' in ${shortenPath(path, cwd)}`;
   }
   if (name === "task") {
     // No ``model=`` label here, unlike the CLI. It is resolved from the live
@@ -112,7 +111,7 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
   const brief: string[] = [];
   for (const [key, value] of Object.entries(args)) {
     if (typeof value === "string") {
-      brief.push(`${key}=${reprStr(value.length > 40 ? value.slice(0, 37) + "..." : value)}`);
+      brief.push(`${key}=${reprStr(collapseInline(value, 200))}`);
     } else if (typeof value === "number" || typeof value === "boolean") {
       brief.push(`${key}=${value}`);
     } else if (Array.isArray(value)) {
@@ -142,6 +141,11 @@ function formatHandoff(args: Record<string, unknown>, bodyKey: string, metaKeys:
 
 function reprStr(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+function collapseInline(value: string, cap = 512): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > cap ? flat.slice(0, cap) + "…" : flat;
 }
 
 function lineRange(offset: number, limit: number): string {

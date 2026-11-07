@@ -106,6 +106,6 @@ export function filterPicker(groups: PickerGroup[], query: string): PickerGroup[
   const q = query.trim().toLowerCase();
   if (!q) return groups.filter((g) => g.options.length);
   return groups
-    .map((g) => ({ ...g, options: g.options.filter((o) => (o.label + " " + (o.sub || "")).toLowerCase().includes(q)) }))
+    .map((g) => ({ ...g, options: g.options.filter((o) => (o.label + " " + (o.sub || "") + " " + o.key).toLowerCase().includes(q)) }))
     .filter((g) => g.options.length);
 }

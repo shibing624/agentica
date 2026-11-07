@@ -74,9 +74,29 @@ export const pollWechatQrApi = (id: string) =>
 export const fetchFsBrowse = (path: string) => request(`/api/fs/browse${path ? "?path=" + encodeURIComponent(path) : ""}`);
 export const fetchSessions = (scope: "recent" | "all" = "recent", signal?: AbortSignal) =>
   request(`/api/sessions?scope=${scope}&recent_days=30`, { signal });
+export type SessionContentHit = {
+  turn: number;
+  role: "user" | "assistant";
+  snippet: string;
+};
+export const searchSessionsApi = (q: string, scope: "recent" | "all" = "recent", signal?: AbortSignal) =>
+  request<{ results: Record<string, SessionContentHit[]> }>(
+    `/api/sessions/search?q=${encodeURIComponent(q)}&scope=${scope}`,
+    { signal },
+  );
 export const deleteSessionApi = (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" });
 export const archiveSessionApi = (id: string) => request(`/api/sessions/${id}/archive`, { method: "POST" });
 export const pinSessionApi = (id: string, pinned: boolean) => postJson(`/api/sessions/${id}/pin`, { pinned });
+/** The model one chat runs on (its own pick, else its project's default). */
+export type SessionModel = {
+  session_id: string; profile: string; source: "session" | "project" | "default";
+  model_provider: string; model_name: string; reasoning_effort: string;
+};
+const workDirQuery = (workDir: string) => (workDir ? `?work_dir=${encodeURIComponent(workDir)}` : "");
+export const fetchSessionModel = (id: string, workDir: string) =>
+  request<SessionModel>(`/api/sessions/${encodeURIComponent(id)}/model${workDirQuery(workDir)}`);
+export const setSessionModelApi = (id: string, profile: string, workDir: string) =>
+  postJson<SessionModel>(`/api/sessions/${encodeURIComponent(id)}/model${workDirQuery(workDir)}`, { profile });
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
 export const markSessionReadApi = (id: string) => request(`/api/sessions/${id}/read`, { method: "POST" });
@@ -152,8 +172,22 @@ export const fetchTraceCallBody = (sessionId: string, index: number) =>
 export const searchTraceCalls = (sessionId: string, q: string, signal?: AbortSignal) =>
   request<{ indices: number[] }>(`/api/sessions/${sessionId}/trace/search?q=${encodeURIComponent(q)}`, { signal });
 export const fetchSessionUsage = (sessionId: string) => request(`/api/sessions/${sessionId}/usage`);
+export type TraceEventsPage = {
+  session_id: string;
+  offset: number;
+  limit: number;
+  total: number;
+  events: any[];
+  has_more?: boolean;
+  next_before?: number;
+  older_turns?: number;
+};
 export const fetchTraceEvents = (sessionId: string, offset = 0, limit = 200) =>
-  request(`/api/sessions/${sessionId}/trace/events?offset=${offset}&limit=${limit}`);
+  request<TraceEventsPage>(`/api/sessions/${sessionId}/trace/events?offset=${offset}&limit=${limit}`);
+export const fetchTraceTurnPage = (sessionId: string, turns: number, before?: number) =>
+  request<TraceEventsPage>(
+    `/api/sessions/${sessionId}/trace/events?turns=${turns}${before != null ? `&before=${before}` : ""}`,
+  );
 
 export function workspaceContentUrl(root: string, path: string, download = false) {
   const q = new URLSearchParams({ root, path });
