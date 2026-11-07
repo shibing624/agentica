@@ -71,8 +71,30 @@ env:
 当同一个配置在多处出现时，按从高到低生效：
 
 1. **命令行参数**（如 `agentica --profile gpt_responses`、`--max_tokens 4096`）
-2. **Shell 环境变量 / `.env` 文件**（当前项目 `.env` 或 `~/.agentica/.env`）
-3. **`~/.agentica/config.yaml`**
+2. **`AGENTICA_MODEL_*` 环境变量**（仅限选模型，见下节）
+3. **Shell 环境变量 / `.env` 文件**（当前项目 `.env` 或 `~/.agentica/.env`）
+4. **`~/.agentica/config.yaml`**
+
+---
+
+## 临时换一个模型：`AGENTICA_MODEL_*`
+
+想临时试一个不在任何 profile 里的模型，又不想改 `config.yaml`，用这组环境变量：
+
+```bash
+export AGENTICA_MODEL_NAME="gpt-4o"                                  # 设了它才生效
+export AGENTICA_MODEL_BASE_URL="https://api.example.com/v1"
+export AGENTICA_MODEL_API_KEY="sk-..."
+export AGENTICA_MODEL_PROVIDER="openai"          # 可选，默认 openai（即任意 OpenAI 兼容端点）
+export AGENTICA_MODEL_MAX_CONTEXT_SIZE="1048576" # 可选，上下文窗口（token）
+agentica
+```
+
+- 只对本次进程生效，**不写 `config.yaml`**，退出即消失；命令行参数（`--model_name`、`--base_url` 等）仍然优先。
+- 它**取代**当前 profile：profile 里的推理强度、`max_tokens`、副模型、fallback 都不会套到这个模型上，状态栏也不显示 profile 名。
+- 不会触发首次启动向导，没有 `config.yaml` 也能直接启动。
+- 单独成一组变量，是因为 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 这类通用变量常被别的工具写进 shell，容易把 agentica 指到不对的地址。`AGENTICA_MODEL_*` 只会是你为 agentica 设的。
+- `--model_provider` 指向另一个提供商时，这组变量整体不再适用（它的 key 和地址不属于那个提供商）。
 
 ---
 

@@ -37,6 +37,12 @@ _PROVIDER_API_KEY_ENV_VARS = (
     "ANTHROPIC_API_KEY",
     "MOONSHOT_API_KEY",
     "YI_API_KEY",
+    "OPENAI_BASE_URL",
+    "AGENTICA_MODEL_PROVIDER",
+    "AGENTICA_MODEL_NAME",
+    "AGENTICA_MODEL_BASE_URL",
+    "AGENTICA_MODEL_API_KEY",
+    "AGENTICA_MODEL_MAX_CONTEXT_SIZE",
     "AGENTICA_HOME",   # ensure the user's real ~/.agentica is never touched
 )
 
@@ -370,6 +376,106 @@ class TestReportedSessionProfile(_CliSetupTestBase):
         self._profile()
         name, _source = cli_setup.session_profile({})
         self.assertEqual(name, "work")
+
+
+class TestEnvModelOverride(_CliSetupTestBase):
+    """AGENTICA_MODEL_*: a one-off model for this run, never written to config.yaml."""
+
+    ENV = {
+        "AGENTICA_MODEL_NAME": "my-model",
+        "AGENTICA_MODEL_API_KEY": "sk-env",
+        "AGENTICA_MODEL_BASE_URL": "https://api.example.com/v1",
+        "AGENTICA_MODEL_MAX_CONTEXT_SIZE": "1048576",
+    }
+
+    def _work_profile(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-profile",
+            "reasoning_effort": "max", "max_tokens": 8192,
+            "auxiliary_model": {"model_provider": "zhipuai", "model_name": "glm-flash"},
+        }, name="work")
+
+    def test_unset_means_no_override(self):
+        self.assertIsNone(cli_setup.env_model_override())
+        with patch.dict(os.environ, {"AGENTICA_MODEL_API_KEY": "sk-x"}, clear=False):
+            # A key with no model name is not a model.
+            self.assertIsNone(cli_setup.env_model_override())
+
+    def test_env_model_replaces_the_active_profile_for_this_run(self):
+        self._work_profile()
+        with patch.dict(os.environ, self.ENV, clear=False):
+            resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["model_provider"], "openai")  # default: OpenAI-compatible
+        self.assertEqual(resolved["model_name"], "my-model")
+        self.assertEqual(resolved["base_url"], "https://api.example.com/v1")
+        self.assertEqual(resolved["api_key"], "sk-env")
+        self.assertEqual(resolved["context_window"], 1048576)
+        # The profile was written for another model: none of it carries over.
+        self.assertIsNone(resolved["reasoning_effort"])
+        self.assertIsNone(resolved["max_tokens"])
+        self.assertIsNone(resolved["auxiliary_model_name"])
+        self.assertEqual(resolved["profile_name"], "")
+
+    def test_shared_openai_variables_cannot_redirect_it(self):
+        polluted = {"OPENAI_API_KEY": "sk-other-tool", "OPENAI_BASE_URL": "https://api5.other.chat/v1"}
+        with patch.dict(os.environ, {**self.ENV, **polluted}, clear=False):
+            resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["api_key"], "sk-env")
+        self.assertEqual(resolved["base_url"], "https://api.example.com/v1")
+
+    def test_works_without_any_config_and_skips_onboarding(self):
+        console = MagicMock()
+        with patch.dict(os.environ, self.ENV, clear=False), \
+                patch.object(cli_setup, "should_onboard", return_value=True), \
+                patch.object(cli_setup, "run_onboarding") as onboard:
+            resolved = cli_setup.resolve_model_config(_make_args(), console=console)
+        onboard.assert_not_called()
+        self.assertEqual(resolved["model_name"], "my-model")
+
+    def test_nothing_is_written_to_config_yaml(self):
+        self._work_profile()
+        import agentica.config.profiles as gc
+        before = gc.load_global_config()
+        with patch.dict(os.environ, self.ENV, clear=False):
+            cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(gc.load_global_config(), before)
+
+    def test_cli_flags_win_over_env(self):
+        with patch.dict(os.environ, self.ENV, clear=False):
+            resolved = cli_setup.resolve_model_config(
+                _make_args(model_name="gpt-5", base_url="https://flag.example/v1"), console=None,
+            )
+        self.assertEqual(resolved["model_name"], "gpt-5")
+        self.assertEqual(resolved["base_url"], "https://flag.example/v1")
+        self.assertEqual(resolved["api_key"], "sk-env")  # same provider: its key still applies
+
+    def test_flag_naming_another_provider_drops_the_env_layer(self):
+        self._work_profile()
+        with patch.dict(os.environ, self.ENV, clear=False):
+            resolved = cli_setup.resolve_model_config(_make_args(model_provider="deepseek"), console=None)
+        self.assertEqual(resolved["model_provider"], "deepseek")
+        self.assertEqual(resolved["model_name"], "deepseek-v4-flash")
+        self.assertEqual(resolved["base_url"], "https://api.deepseek.com")
+        self.assertEqual(resolved["api_key"], "sk-profile")
+
+    def test_provider_can_be_named(self):
+        env = {"AGENTICA_MODEL_NAME": "claude-x", "AGENTICA_MODEL_PROVIDER": "anthropic"}
+        with patch.dict(os.environ, env, clear=False):
+            resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["model_provider"], "anthropic")
+        self.assertEqual(resolved["base_url"], "https://api.anthropic.com")
+
+    def test_bad_values_stop_the_start_with_a_message(self):
+        with patch.dict(os.environ, {"AGENTICA_MODEL_NAME": "m", "AGENTICA_MODEL_PROVIDER": "nope"}, clear=False):
+            with self.assertRaises(SystemExit) as ctx:
+                cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertIn("AGENTICA_MODEL_PROVIDER", str(ctx.exception))
+        for bad in ("abc", "0", "-5"):
+            with patch.dict(os.environ, {"AGENTICA_MODEL_NAME": "m", "AGENTICA_MODEL_MAX_CONTEXT_SIZE": bad}, clear=False):
+                with self.assertRaises(SystemExit) as ctx:
+                    cli_setup.resolve_model_config(_make_args(), console=None)
+            self.assertIn("AGENTICA_MODEL_MAX_CONTEXT_SIZE", str(ctx.exception))
 
 
 class TestResolveAuxModel(_CliSetupTestBase):

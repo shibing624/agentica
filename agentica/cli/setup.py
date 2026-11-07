@@ -1371,8 +1371,57 @@ def session_profile(agent_config: Dict, work_dir: Optional[str] = None) -> Tuple
     return resolve_active_profile_name(work_dir=work_dir or os.getcwd())
 
 
+def env_model_override() -> Optional[Dict[str, Any]]:
+    """A one-off model taken from ``AGENTICA_MODEL_*``, or None.
+
+    Lets a run use a model that is in no profile without touching
+    ``config.yaml``: nothing is written, nothing outlives the process. The
+    variables live in their own namespace on purpose. ``OPENAI_API_KEY`` /
+    ``OPENAI_BASE_URL`` / ``ANTHROPIC_*`` are shared with every other tool on the
+    machine, so whatever one of them left in the shell must not be able to
+    redirect or break this CLI; these are only ever set for agentica.
+
+    ``AGENTICA_MODEL_NAME`` switches it on; the rest are optional:
+    ``AGENTICA_MODEL_PROVIDER`` (default ``openai``, i.e. any OpenAI-compatible
+    endpoint), ``AGENTICA_MODEL_BASE_URL``, ``AGENTICA_MODEL_API_KEY`` and
+    ``AGENTICA_MODEL_MAX_CONTEXT_SIZE`` (the model's context window in tokens).
+    """
+    name = (os.environ.get("AGENTICA_MODEL_NAME") or "").strip()
+    if not name:
+        return None
+    provider = (os.environ.get("AGENTICA_MODEL_PROVIDER") or "").strip() or "openai"
+    if provider not in PROVIDER_PRESETS:
+        raise SystemExit(
+            f"AGENTICA_MODEL_PROVIDER={provider!r} is not a known provider.\n"
+            f"Available: {', '.join(PROVIDER_PRESETS)}"
+        )
+    context_window = None
+    raw_window = (os.environ.get("AGENTICA_MODEL_MAX_CONTEXT_SIZE") or "").strip()
+    if raw_window:
+        try:
+            context_window = int(raw_window)
+        except ValueError:
+            context_window = 0
+        if context_window <= 0:
+            raise SystemExit(
+                f"AGENTICA_MODEL_MAX_CONTEXT_SIZE={raw_window!r} must be a positive integer (tokens)."
+            )
+    return {
+        "provider": provider,
+        "model_name": name,
+        "base_url": (os.environ.get("AGENTICA_MODEL_BASE_URL") or "").strip() or None,
+        "api_key": (os.environ.get("AGENTICA_MODEL_API_KEY") or "").strip() or None,
+        "context_window": context_window,
+    }
+
+
 def resolve_model_config(args, console=None) -> Dict:
     """Resolve provider/model/base_url/api_key with CLI args > profile > env.
+
+    ``AGENTICA_MODEL_*`` (see :func:`env_model_override`) sits between the two:
+    it replaces the active profile for this run, so the profile's tuning,
+    auxiliary model and fallbacks do not carry over to a model they were not
+    written for, and it never starts the first-run wizard.
 
     Triggers the first-run wizard when appropriate. Returns a dict with the
     main ``model_provider``/``model_name``/``base_url``/``api_key``, optional
@@ -1413,23 +1462,41 @@ def resolve_model_config(args, console=None) -> Dict:
     active_profile = get_profile(profile_name)
     profile_provider = active_profile.get("model_provider")
 
-    provider = args.model_provider or profile_provider or DEFAULT_PROVIDER
-    use_profile = provider == profile_provider
+    # A flag naming another provider points at a different endpoint, which the
+    # AGENTICA_MODEL_* key / base_url were not written for.
+    env_model = env_model_override()
+    if env_model and args.model_provider not in (None, env_model["provider"]):
+        env_model = None
+
+    provider = (
+        args.model_provider
+        or (env_model["provider"] if env_model else None)
+        or profile_provider
+        or DEFAULT_PROVIDER
+    )
+    use_profile = env_model is None and provider == profile_provider
 
     model_name = (
         args.model_name
+        or (env_model["model_name"] if env_model else None)
         or (active_profile.get("model_name") if use_profile else None)
         or default_model_name(provider)
     )
     base_url = (
         args.base_url
+        or (env_model["base_url"] if env_model else None)
         or (active_profile.get("base_url") if use_profile else None)
         or default_base_url(provider)
     )
 
-    # Only consider onboarding when the user didn't pin a provider via flags.
+    # Only consider onboarding when the user didn't pin a model via flags or env.
     resolved_key: Optional[str] = None
-    if args.model_provider is None and console is not None and should_onboard(provider, base_url):
+    if (
+        args.model_provider is None
+        and env_model is None
+        and console is not None
+        and should_onboard(provider, base_url)
+    ):
         result = run_onboarding(console)
         provider = args.model_provider or result["model_provider"]
         model_name = args.model_name or result["model_name"]
@@ -1442,7 +1509,10 @@ def resolve_model_config(args, console=None) -> Dict:
             active_profile = get_profile(profile_name)
         use_profile = provider == active_profile.get("model_provider")
 
-    # API key resolution: active profile -> any profile matching provider/base_url.
+    # API key resolution: AGENTICA_MODEL_API_KEY -> active profile -> any profile
+    # matching provider/base_url.
+    if resolved_key is None and env_model:
+        resolved_key = env_model["api_key"]
     if resolved_key is None and use_profile:
         resolved_key = active_profile.get("api_key")
     if resolved_key is None:
@@ -1527,7 +1597,11 @@ def resolve_model_config(args, console=None) -> Dict:
         "reasoning_effort": profile_params.get("reasoning_effort"),
         "reasoning": profile_params.get("reasoning"),
         "top_p": profile_params.get("top_p"),
-        "context_window": profile_params.get("context_window"),
+        "context_window": (
+            env_model["context_window"]
+            if env_model and env_model["context_window"] is not None
+            else profile_params.get("context_window")
+        ),
         "compact_token_limit": profile_params.get("compact_token_limit"),
         # Raw passthrough dicts for endpoints whose tuning knobs don't map to
         # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
