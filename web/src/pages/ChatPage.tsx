@@ -281,33 +281,42 @@ export function ChatPage() {
   return (
     <>
       <div className={"main" + (!cur || !cur.msgs.length ? " chat-empty" : "")}>
-        <div className="topbar">
-          <div className="tb-l">
-            <div className="tb-chat-info">
-              {cur && <span className="tb-chat-icon"><IconChat /></span>}
-              {titleEditing && s.curSess && cur ? (
-                <RenameInput className="tb-chat-rename-input" initial={cur.title}
-                             onDone={(name) => {
-                               setTitleEditing(false);
-                               if (name !== null && s.curSess) void renameSession(s.curSess, name);
-                             }} />
-              ) : (
-                <span className="tb-chat-title" title={cur ? S.chat.dblclickRename : undefined}
-                      onDoubleClick={() => { if (cur) setTitleEditing(true); }}>
-                  {cur?.title || S.chat.newConversation}
-                </span>
+        <div className="topbar chat-topbar">
+          <div className="topbar-row">
+            <div className="tb-l">
+              <div className="tb-chat-info">
+                {cur && <span className="tb-chat-icon"><IconChat /></span>}
+                {titleEditing && s.curSess && cur ? (
+                  <RenameInput className="tb-chat-rename-input" initial={cur.title}
+                               onDone={(name) => {
+                                 setTitleEditing(false);
+                                 if (name !== null && s.curSess) void renameSession(s.curSess, name);
+                               }} />
+                ) : (
+                  <span className="tb-chat-title" title={cur ? S.chat.dblclickRename : undefined}
+                        onDoubleClick={() => { if (cur) setTitleEditing(true); }}>
+                    {cur?.title || S.chat.newConversation}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="tb-r">
+              {/* dsh: the way in only shows while the panel is closed; the open
+                  panel carries its own collapse button in its head. */}
+              {!files.open && (
+                <button type="button" className="ib" onClick={() => files.setOpen(true)}
+                        title={S.chat.openWorkspace} aria-label={S.chat.openWorkspace}>
+                  <IconSidebarRight />
+                </button>
               )}
-              {s.curSess && <Link className="trace-link" to={`/traces?sessionId=${s.curSess}`}>{S.chat.viewTrace}</Link>}
             </div>
           </div>
-          <div className="tb-r">
-            {/* dsh: the way in only shows while the panel is closed; the open
-                panel carries its own collapse button in its head. */}
-            {!files.open && (
-              <button type="button" className="ib" onClick={() => files.setOpen(true)}
-                      title={S.chat.openWorkspace} aria-label={S.chat.openWorkspace}>
-                <IconSidebarRight />
-              </button>
+          <div className="topbar-tabs" role="tablist">
+            <span className="tb-tab active" role="tab" aria-selected="true">{S.chat.chatTab}</span>
+            {s.curSess && (
+              <Link className="tb-tab trace-link" to={`/traces?sessionId=${s.curSess}`}>
+                {S.chat.viewTrace}
+              </Link>
             )}
           </div>
         </div>

@@ -1826,3 +1826,90 @@ class TestAgentServiceMemoryIndex:
         assert result["entries"] == [
             {"title": "user_city", "filename": "user_city.md", "hook": "用户住在北京"},
         ]
+
+
+class TestGatewayUpdateRoutes:
+    """Web/Desktop sidebar version check and one-click auto-upgrade routes."""
+
+    def test_check_update_reports_upgrade_availability_and_caches(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from agentica.cli import self_manage
+        from agentica_gateway.main import app
+        from agentica_gateway.routes import settings as settings_routes
+
+        calls: list[int] = []
+        monkeypatch.setattr(self_manage, "get_current_version", lambda: "1.5.0")
+
+        def fake_latest():
+            calls.append(1)
+            return "1.5.2"
+
+        monkeypatch.setattr(self_manage, "get_latest_version", fake_latest)
+        settings_routes._update_cache["checked_at"] = 0.0
+        settings_routes._update_cache["latest"] = None
+
+        with TestClient(app) as client:
+            r1 = client.get("/api/update/check")
+            assert r1.status_code == 200
+            assert r1.json() == {
+                "current_version": "1.5.0",
+                "latest_version": "1.5.2",
+                "update_available": True,
+            }
+            assert len(calls) == 1
+
+            # Cached lookup does not hit PyPI again unless force=true.
+            r2 = client.get("/api/update/check")
+            assert r2.status_code == 200
+            assert len(calls) == 1
+
+            r3 = client.get("/api/update/check?force=true")
+            assert r3.status_code == 200
+            assert len(calls) == 2
+
+    def test_apply_update_upgrades_both_packages_and_schedules_restart(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from agentica.cli import self_manage
+        from agentica_gateway import main as gw_main
+        from agentica_gateway.main import app
+
+        upgraded_targets: list[tuple] = []
+        monkeypatch.setattr(self_manage, "get_current_version", lambda: "1.5.0")
+        monkeypatch.setattr(self_manage, "get_latest_version", lambda: "1.5.2")
+
+        def fake_pip(target="agentica", pre=False):
+            upgraded_targets.append(tuple(target) if not isinstance(target, str) else (target,))
+            return 0, "Successfully installed agentica-1.5.2 agentica-gateway-1.5.2"
+
+        monkeypatch.setattr(self_manage, "run_pip_upgrade", fake_pip)
+        fake_server = MagicMock()
+        fake_server.should_exit = False
+        monkeypatch.setattr(gw_main, "_server", fake_server)
+        monkeypatch.setattr(gw_main, "_restart_requested", False)
+
+        with TestClient(app) as client:
+            resp = client.post("/api/update/apply")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["status"] == "ok"
+            assert body["previous_version"] == "1.5.0"
+            assert body["version"] == "1.5.2"
+            assert body["restarting"] is True
+            assert upgraded_targets == [("agentica", "agentica-gateway")]
+
+        assert gw_main.request_restart() is True
+        assert gw_main._restart_requested is True
+        assert fake_server.should_exit is True
+
+    def test_apply_update_surfaces_pip_failure(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from agentica.cli import self_manage
+        from agentica_gateway.main import app
+
+        monkeypatch.setattr(
+            self_manage, "run_pip_upgrade", lambda target="agentica", pre=False: (1, "ERROR: network unreachable")
+        )
+        with TestClient(app) as client:
+            resp = client.post("/api/update/apply")
+            assert resp.status_code == 500
+            assert "network unreachable" in resp.json()["detail"]

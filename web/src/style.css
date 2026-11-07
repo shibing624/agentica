@@ -109,7 +109,7 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 html[data-sidebar-collapsed]{--seat-clear:72px}
 html[data-desktop="mac"]{--seat-left:84px}
 html[data-desktop="mac"][data-sidebar-collapsed]{--seat-clear:144px}
-.side-seat{position:fixed;top:12px;left:var(--seat-left);z-index:120;display:flex;align-items:center;gap:4px}
+.side-seat{position:fixed;top:10px;left:var(--seat-left);z-index:120;display:flex;align-items:center;gap:4px}
 .side-seat .ib{width:28px;height:28px}
 .side-seat .ib svg{width:16px;height:16px}
 html[data-sidebar-collapsed] .topbar{padding-left:calc(20px + var(--seat-clear))}
@@ -237,13 +237,18 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .s-item:focus-visible{box-shadow:inset 0 0 0 2px var(--fg3)}
 .s-source{flex-shrink:0;color:var(--fg3);font:9px/1 var(--mono);letter-spacing:.04em}
 .s-more{display:block;width:calc(100% - 28px);margin:2px 0 6px 28px;text-align:left;color:var(--fg3)}
-.account-entry{width:100%;border:none;border-top:var(--hair) solid var(--border);background:transparent;color:var(--fg);display:flex;align-items:center;gap:9px;padding:10px 12px;margin-top:auto;cursor:pointer;text-align:left;transition:background var(--t)}
-.account-entry:hover{background:var(--bg3)}
-.account-avatar{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--fg2);flex-shrink:0;overflow:hidden}
-.account-avatar svg{width:15px;height:15px}
-.account-meta{min-width:0;display:flex;flex-direction:column;line-height:1.2}
-.account-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.account-sub{font-size:10px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 12px 10px}
+.account-entry{width:34px;height:34px;border:none;border-radius:50%;background:transparent;color:var(--fg);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer;flex-shrink:0;transition:background var(--t),box-shadow var(--t),transform var(--t)}
+.account-entry:hover,.account-entry.active{background:var(--hover);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.account-avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:transparent;color:var(--fg2);flex-shrink:0;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.account-avatar svg{width:100%;height:100%;display:block}
+.side-update-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border-radius:var(--radius-sm);border:var(--hair) solid transparent;background:transparent;color:var(--fg3);font:500 12px/1 var(--sans);white-space:nowrap;cursor:pointer;transition:background var(--t),color var(--t),border-color var(--t)}
+.side-update-btn svg{width:13px;height:13px;flex-shrink:0}
+.side-update-btn:hover{background:var(--hover);color:var(--fg2)}
+.side-update-btn.has-update{color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);border-color:color-mix(in srgb,var(--accent) 24%,transparent)}
+.side-update-btn.has-update:hover{background:color-mix(in srgb,var(--accent) 16%,transparent);border-color:color-mix(in srgb,var(--accent) 34%,transparent)}
+.side-update-btn.busy{cursor:progress;opacity:.8}
+.side-update-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0}
 
 /* ===== MAIN ===== */
 .main{flex:1;display:flex;flex-direction:column;height:100vh;min-width:0;transition:background .2s}
@@ -255,6 +260,15 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
    (overflow:hidden + .chat{overflow-y:auto}), so it's the only region that
    should ever give up space. */
 .topbar{padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:var(--hair) solid var(--border);min-height:52px;gap:8px;flex-shrink:0}
+/* dsh 76px conversation header (38px title row + 38px view-tab strip), so its
+   bottom rule meets the right panel's 38px tab strip + 38px toolbar rule. */
+.topbar.chat-topbar{flex-direction:column;justify-content:flex-start;align-items:stretch;height:76px;min-height:76px;padding:10px 20px 0;gap:0;box-sizing:border-box}
+.topbar-row{display:flex;align-items:center;justify-content:space-between;height:28px;gap:8px;min-width:0}
+.topbar-tabs{display:flex;align-items:flex-end;gap:20px;flex:1;min-height:0;min-width:0}
+.tb-tab{position:relative;display:inline-flex;align-items:center;height:30px;padding:0 2px 7px;font-size:13px;font-weight:500;line-height:16px;color:var(--fg3);text-decoration:none;border-radius:0;margin:0;cursor:pointer;user-select:none;transition:color var(--t)}
+.tb-tab:hover{color:var(--fg);background:transparent}
+.tb-tab.active{color:var(--accent)}
+.tb-tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-0.5px;height:2px;border-radius:2px;background:var(--accent)}
 .tb-l{display:flex;align-items:center;gap:8px;min-width:0;flex-shrink:0}
 .ib{width:28px;height:28px;border:none;background:transparent;color:var(--fg2);border-radius:var(--radius-sm);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:background var(--t),color var(--t);flex-shrink:0}
 .ib:hover{background:var(--hover);color:var(--fg)}
@@ -454,16 +468,17 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .skill-form textarea{resize:vertical;font-family:var(--mono);font-size:12px}
 
 /* account popover (anchored above the account button, bottom-left of sidebar) */
-.account-wrap{position:relative;margin-top:auto}
+.account-wrap{position:relative;margin-top:auto;flex-shrink:0}
+.account-wrap::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:18px;background:linear-gradient(to bottom,transparent,var(--side-bg));pointer-events:none}
 .account-pop-backdrop{position:fixed;inset:0;z-index:219;display:none}
 .account-pop-backdrop.open{display:block}
-.account-pop{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);background:var(--bg);border:var(--hair) solid var(--border);border-radius:14px;box-shadow:var(--elev-pop);padding:8px;display:none;flex-direction:column;gap:6px;z-index:220;animation:modalIn .12s ease}
+.account-pop{position:absolute;left:10px;right:10px;bottom:calc(100% + 4px);background:var(--bg);border:var(--hair) solid var(--border);border-radius:14px;box-shadow:var(--elev-pop);padding:6px;display:none;flex-direction:column;gap:2px;z-index:220;animation:modalIn .12s ease}
 .account-pop.open{display:flex}
-.account-pop-usage{padding:8px 10px;border:var(--hair) solid var(--border);border-radius:10px;background:var(--bg2);margin-bottom:2px}
+.account-pop-usage{padding:8px 10px;border:var(--hair) solid var(--border2);border-radius:10px;background:var(--bg2);margin-bottom:4px}
 .account-usage-scope{font-size:10px;color:var(--fg3);font-weight:400;text-transform:none;letter-spacing:0}
-.account-action{height:34px;border:var(--hair) solid var(--border);border-radius:10px;background:var(--bg2);color:var(--fg);display:flex;align-items:center;gap:9px;padding:0 10px;cursor:pointer;font-size:13px;text-align:left}
-.account-action svg{width:15px;height:15px;flex-shrink:0}
-.account-action:hover{background:var(--bg3)}
+.account-action{height:34px;border:none;border-radius:8px;background:transparent;color:var(--fg);display:flex;align-items:center;gap:9px;padding:0 10px;cursor:pointer;font-size:13px;text-align:left;transition:background var(--t)}
+.account-action svg{width:15px;height:15px;flex-shrink:0;color:var(--fg2)}
+.account-action:hover{background:var(--hover)}
 
 /* archived sessions (rendered inside the Settings modal's "Archived" tab) */
 .account-empty{font-size:12px;color:var(--fg3);border:var(--hair) dashed var(--border);border-radius:10px;padding:12px;text-align:center}
@@ -1032,6 +1047,11 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .panel-bar-actions{margin-left:auto;display:flex;gap:6px}
 .nav-badge{margin-left:auto;font-size:10px;font-family:var(--mono);color:var(--fg3);background:var(--accent-soft);border-radius:999px;padding:0 6px}
 .settings-block{border:var(--hair) solid var(--border);border-radius:10px;background:var(--bg2);padding:12px}
+.settings-account-card{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.settings-account-meta{display:flex;align-items:center;gap:8px;min-width:0}
+.settings-account-name{font-size:13px;font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.settings-role-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:var(--bg3);color:var(--fg2)}
+.settings-role-badge.admin{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
 .settings-block-title{font-size:11px;font-weight:700;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
 .mem-page{display:flex;flex-direction:column;gap:18px;padding-bottom:8px}
 .mem-intro{margin:0;font-size:13px;line-height:1.55;color:var(--fg2)}
@@ -1318,7 +1338,7 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .files-panel.fullscreen{position:fixed;inset:0;z-index:150;border-left:none}
 html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:84px;-webkit-app-region:drag}
 .files-panel-inner{height:100%;display:flex;flex-direction:column;min-width:0}
-.files-panel-head{display:flex;align-items:center;gap:4px;padding:10px 8px 6px 10px;flex-shrink:0;min-width:0}
+.files-panel-head{display:flex;align-items:center;gap:4px;height:38px;padding:10px 8px 0 10px;flex-shrink:0;min-width:0;box-sizing:border-box}
 /* ===== PANEL TABS (dsh's dockkit strip, one pane) =====
    28px chips; the active one is filled, the rest are bare text with a hairline
    slot between them that goes blank beside the active chip. The close sits
@@ -1372,7 +1392,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .term-banner{position:absolute;left:10px;right:10px;bottom:10px;display:flex;align-items:center;gap:10px;padding:8px 10px;border:var(--hair) solid var(--border);border-radius:var(--radius-sm);background:var(--bg2);font-size:12px;color:var(--fg2)}
 .term-banner span{flex:1}
 .ws-browser{flex:1;min-height:0;display:flex;flex-direction:column}
-.ws-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 10px;border-bottom:var(--hair) solid var(--border);flex-shrink:0}
+.ws-toolbar{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;height:38px;padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
 .ws-crumb{border:none;background:transparent;color:var(--fg2);font-size:12px;padding:2px 6px;border-radius:6px;cursor:pointer;max-width:8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-crumb:hover{background:var(--bg3);color:var(--fg)}
 .ws-crumb-wrap{display:inline-flex;align-items:center;gap:2px;min-width:0}
@@ -1416,7 +1436,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-row-dl:hover{color:var(--fg)}
 .ws-muted,.ws-err{padding:14px 12px;font-size:13px;color:var(--fg3)}
 .ws-err{color:#c62828}
-.ws-preview-bar{display:flex;align-items:center;gap:6px;padding:6px 8px 6px 10px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0}
+.ws-preview-bar{display:flex;align-items:center;gap:6px;height:38px;padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
 .ws-back{border:none;background:transparent;color:var(--fg2);font-size:12px;cursor:pointer;padding:4px 6px;border-radius:6px;flex-shrink:0;white-space:nowrap}
 .ws-back:hover{background:var(--bg3);color:var(--fg)}
 .ws-preview-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:12px;font-weight:600}

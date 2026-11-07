@@ -10,7 +10,7 @@ import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import {
   IconArchive, IconChat, IconChevronRight, IconClock, IconClose, IconCopy, IconDatabase,
-  IconExpand, IconGear, IconProfiles,
+  IconExpand, IconGear, IconProfiles, DefaultAvatar,
 } from "../icons";
 import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession, loadSessions } from "../sessions";
@@ -176,11 +176,20 @@ async function applyBaseDir(dir: string) {
 function AccessBlock() {
   const s = useAppState();
   const S = useStrings();
+  const roleLabel = s.accountRole === "admin" ? S.users.roleAdmin : S.users.roleUser;
   return (
     <div className="settings-block">
       <div className="settings-block-title">{S.settings.access}</div>
+      <div className="settings-account-card">
+        <span className="account-avatar"><DefaultAvatar /></span>
+        <div className="settings-account-meta">
+          <span className="settings-account-name">{s.accountId}</span>
+          <span className={"settings-role-badge" + (s.accountRole === "admin" ? " admin" : "")}>
+            {roleLabel}
+          </span>
+        </div>
+      </div>
       <div className="settings-row-hint access-hint">
-        {S.settings.accessAccount(s.accountId)}{" "}
         {s.passwordIsInitial
           ? S.settings.accessInitial
           : s.passwordSet ? S.settings.accessSet : S.settings.accessNone}

@@ -349,3 +349,27 @@ export const IconPin = ({ filled = false }: { filled?: boolean }) => (
 export const IconCopyOutline = () => (
   <S strokeWidth="1.3" strokeLinejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 5.5V3.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2" /></S>
 );
+
+/** Illustrated default user avatar (sidebar footer & settings account card). */
+export const DefaultAvatar = () => (
+  <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="ag-avatar-bg" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stopColor="#6ea8fe" />
+        <stop offset="0.52" stopColor="#4f6bed" />
+        <stop offset="1" stopColor="#7c5cfc" />
+      </linearGradient>
+      <linearGradient id="ag-avatar-fg" x1="16" y1="7" x2="16" y2="29" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stopColor="#ffffff" />
+        <stop offset="1" stopColor="#e4ecff" />
+      </linearGradient>
+    </defs>
+    <circle cx="16" cy="16" r="16" fill="url(#ag-avatar-bg)" />
+    <circle cx="22.5" cy="8.5" r="6" fill="#ffffff" fillOpacity="0.14" />
+    <circle cx="16" cy="12.2" r="4.9" fill="url(#ag-avatar-fg)" />
+    <path
+      d="M6.8 27.6c1.4-4.7 5.05-7.4 9.2-7.4s7.8 2.7 9.2 7.4a13.2 13.2 0 01-18.4 0z"
+      fill="url(#ag-avatar-fg)"
+    />
+  </svg>
+);

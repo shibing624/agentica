@@ -432,6 +432,17 @@ async def web_spa(full_path: str = ""):
 # a TestClient (no server object), which is exactly when the route should
 # decline rather than kill the test runner.
 _server: Optional["uvicorn.Server"] = None
+_restart_requested: bool = False
+
+
+def request_restart() -> bool:
+    """Schedule a clean uvicorn exit followed by an in-place re-exec on the same port."""
+    global _restart_requested
+    if _server is None:
+        return False
+    _restart_requested = True
+    _server.should_exit = True
+    return True
 
 
 @app.post("/api/desktop/shutdown")
@@ -986,10 +997,24 @@ def main(argv: Optional[list[str]] = None) -> None:
     # name — so `main()` would set `_server` on the `__main__` copy while the
     # shutdown route ran in the other one and answered "not under uvicorn".
     # Passing the object also means the module is only executed once.
-    global _server
+    global _server, _restart_requested
+    _restart_requested = False
     config = uvicorn.Config(app, reload=False)
     _server = uvicorn.Server(config)
     _server.run(sockets=[sock])
+    try:
+        sock.close()
+    except OSError:
+        pass
+    if _restart_requested:
+        restart_argv = [
+            sys.executable, "-m", "agentica_gateway.main",
+            "--host", str(settings.host),
+            "--port", str(settings.port),
+        ]
+        if settings.parent_pid:
+            restart_argv += ["--parent-pid", str(settings.parent_pid)]
+        os.execv(sys.executable, restart_argv)
 
 
 if __name__ == "__main__":

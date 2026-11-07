@@ -182,6 +182,9 @@ export type AppState = {
   serverProvider: string;
   serverModelName: string;
   serverVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  updateBusy: "idle" | "checking" | "updating";
   serverConfigPath: string;
   serverReasoningEffort: string;
   serverContextWindow: number;
@@ -317,6 +320,9 @@ const state: AppState = {
   serverProvider: "",
   serverModelName: "",
   serverVersion: "",
+  latestVersion: "",
+  updateAvailable: false,
+  updateBusy: "idle",
   serverConfigPath: "",
   serverReasoningEffort: "",
   serverContextWindow: 128000,

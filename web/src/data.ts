@@ -1,6 +1,6 @@
 import * as api from "./api";
-import { applyLang } from "./i18n";
-import { applyTheme, getState, setState, writeLastSessionId } from "./store";
+import { applyLang, getStrings } from "./i18n";
+import { applyTheme, getState, setState, showToast, writeLastSessionId } from "./store";
 
 /** Server-owned state loaders, shared by the chat page and every panel so a
  *  mutation can refresh its own list without reaching into a component. */
@@ -23,6 +23,63 @@ export async function loadStatus() {
     serverSupportsImages: !!data.supports_images,
     serverMediaModel: data.media_model || "",
   });
+}
+
+export async function loadUpdateCheck(force = false) {
+  const { ok, data } = await api.fetchUpdateCheck(force);
+  if (!ok || !data) return;
+  setState({
+    serverVersion: data.current_version || getState().serverVersion,
+    latestVersion: data.latest_version || "",
+    updateAvailable: !!data.update_available,
+  });
+}
+
+export async function triggerUpdateOrCheck() {
+  const s = getState();
+  if (s.updateBusy !== "idle") return;
+  const S = getStrings();
+  if (!s.updateAvailable) {
+    setState({ updateBusy: "checking" });
+    await loadUpdateCheck(true);
+    setState({ updateBusy: "idle" });
+    const next = getState();
+    if (next.updateAvailable && next.latestVersion) {
+      showToast(S.nav.updateFound(next.latestVersion), 3000);
+    } else {
+      showToast(S.nav.alreadyLatest(next.serverVersion || "-"), 2200);
+    }
+    return;
+  }
+  setState({ updateBusy: "updating" });
+  const { ok, data } = await api.applyUpdateApi();
+  if (!ok || !data) {
+    setState({ updateBusy: "idle" });
+    showToast((data as any)?.detail || S.nav.updateFailed, 3500);
+    return;
+  }
+  if (data.restarting) {
+    showToast(S.nav.updateRestarting(data.version), 6000);
+    await new Promise((r) => setTimeout(r, 900));
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      const h = await api.fetchHealth();
+      if (h.ok) {
+        window.location.reload();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    setState({ updateBusy: "idle" });
+    window.location.reload();
+    return;
+  }
+  setState({
+    serverVersion: data.version || s.serverVersion,
+    updateAvailable: false,
+    updateBusy: "idle",
+  });
+  showToast(S.nav.updateDone(data.version || s.latestVersion), 3000);
 }
 
 export async function loadAuthStatus() {

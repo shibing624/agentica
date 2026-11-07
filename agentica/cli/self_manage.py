@@ -13,10 +13,11 @@ blocks shared by the slash commands (human-facing) and the agent tools
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.version import __version__
 from agentica.config.profiles import (
@@ -92,18 +93,47 @@ def is_upgrade_available(current: str, latest: Optional[str]) -> bool:
     return _version_tuple(latest) > _version_tuple(current)
 
 
-def run_pip_upgrade(target: str = "agentica", pre: bool = False) -> Tuple[int, str]:
-    """Run ``pip install -U`` for the target package in the current interpreter.
+def _find_uv_binary() -> Optional[str]:
+    found = shutil.which("uv")
+    if found:
+        return found
+    if sys.platform == "darwin":
+        candidate = os.path.expanduser("~/Library/Application Support/Agentica/bin/uv")
+    elif sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/AppData/Local")
+        candidate = os.path.join(local, "Agentica", "bin", "uv.exe")
+    else:
+        data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        candidate = os.path.join(data, "agentica", "bin", "uv")
+    return candidate if os.path.isfile(candidate) and os.access(candidate, os.X_OK) else None
+
+
+def run_pip_upgrade(
+    target: Union[str, Sequence[str]] = "agentica", pre: bool = False
+) -> Tuple[int, str]:
+    """Run ``pip install -U`` for the target package(s) in the current interpreter.
+
+    Falls back to ``uv pip install --python <sys.executable> -U`` when running
+    inside a ``uv venv`` that has no ``pip`` module installed.
 
     Returns ``(exit_code, combined_output)``. Output (stdout+stderr) is captured
     and returned verbatim so callers can surface the real pip signal rather than
     swallowing failures.
     """
-    cmd = [sys.executable, "-m", "pip", "install", "-U", target]
+    targets = [target] if isinstance(target, str) else [str(t) for t in target]
+    cmd = [sys.executable, "-m", "pip", "install", "-U", *targets]
     if pre:
         cmd.append("--pre")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     output = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode != 0 and "No module named pip" in output:
+        uv = _find_uv_binary()
+        if uv:
+            uv_cmd = [uv, "pip", "install", "--python", sys.executable, "-U", *targets]
+            if pre:
+                uv_cmd.append("--prerelease=allow")
+            proc = subprocess.run(uv_cmd, capture_output=True, text=True)
+            output = (proc.stdout or "") + (proc.stderr or "")
     return proc.returncode, output
 
 

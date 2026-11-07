@@ -1,6 +1,8 @@
 /* Traces: a session accessory opened from the chat title chip, not a tab. */
 .trace-link{margin-left:6px;font-size:13px;font-weight:500;color:var(--fg3);text-decoration:none;border-radius:8px;padding:3px 9px}
 .trace-link:hover{background:var(--hover);color:var(--accent)}
+.topbar-tabs .trace-link{margin-left:0;border-radius:0;padding:0 2px 7px}
+.topbar-tabs .trace-link:hover{background:transparent;color:var(--fg)}
 .trace-back{display:inline-flex;align-items:center;gap:6px;border:var(--hair) solid var(--border);background:transparent;color:var(--fg2);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-bottom:12px;font-family:var(--sans);align-self:flex-start}
 .trace-back:hover{background:var(--bg3);color:var(--fg)}
 .trace-back::before{content:"←";font-size:13px;line-height:1}

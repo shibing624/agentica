@@ -33,6 +33,15 @@ function putJson<T = any>(url: string, body: unknown) {
 }
 
 export const fetchStatus = () => request("/api/status");
+export const fetchHealth = () => request<{ status: string; version: string }>("/api/health");
+export const fetchUpdateCheck = (force = false) =>
+  request<{ current_version: string; latest_version: string | null; update_available: boolean }>(
+    `/api/update/check${force ? "?force=true" : ""}`,
+  );
+export const applyUpdateApi = () =>
+  postJson<{ status: string; previous_version: string; version: string; restarting: boolean; output: string }>(
+    "/api/update/apply", {},
+  );
 export const fetchChannels = () => request("/api/channels");
 export const fetchPrefs = () => request("/api/prefs");
 export const savePrefsApi = (body: {

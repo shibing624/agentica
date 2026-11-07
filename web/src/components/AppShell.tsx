@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import * as api from "../api";
-import { loadAuthStatus, loadCronJobs, loadPlugins, loadPrefs, loadProfiles, loadStatus } from "../data";
+import {
+  loadAuthStatus, loadCronJobs, loadPlugins, loadPrefs, loadProfiles,
+  loadStatus, loadUpdateCheck, triggerUpdateOrCheck,
+} from "../data";
 import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
 import { PluginsPanel } from "../panels/PluginsPanel";
@@ -11,7 +14,7 @@ import { loadSessions, newChat, syncFromServer } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
-  IconChat, IconDatabase, IconFolderPlus,
+  IconChat, IconDatabase, IconFolderPlus, IconDownload, IconSpinner, DefaultAvatar,
 } from "../icons";
 import { clampSidebarWidth, setState, useAppState, type Session } from "../store";
 import { openAddWorkspace } from "../workspaces";
@@ -74,7 +77,7 @@ export function AppShell({
   // one loaded (a deep link to /traces is a cold start too).
   useEffect(() => {
     void (async () => {
-      await Promise.all([loadStatus(), loadAuthStatus()]);
+      await Promise.all([loadStatus(), loadAuthStatus(), loadUpdateCheck()]);
       await loadPrefs();
       await loadSessions();
       await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs()]);
@@ -225,19 +228,53 @@ export function AppShell({
               <IconLogout /><span>{S.settings.logout}</span>
             </button>
           </div>
-          <button className="account-entry" onClick={() => setState({ accountPanelOpen: !s.accountPanelOpen })} title={S.nav.account}>
-            <span className="account-avatar"><IconUser /></span>
-            {/* The signed-in account, not the model profile. The profile used
-                to be here and answered a question nobody asks of an avatar —
-                and now that the same install can have several accounts, whose
-                conversations these are is the thing worth naming. */}
-            <span className="account-meta">
-              <span className="account-name">{s.accountId}</span>
-              <span className="account-sub">
-                {s.accountRole === "admin" ? S.users.roleAdmin : S.users.roleUser}
-              </span>
-            </span>
-          </button>
+          <div className="side-foot">
+            <button
+              type="button"
+              className={"account-entry" + (s.accountPanelOpen ? " active" : "")}
+              onClick={() => setState({ accountPanelOpen: !s.accountPanelOpen })}
+              title={S.nav.account}
+              aria-label={S.nav.account}
+              aria-expanded={s.accountPanelOpen}
+            >
+              <span className="account-avatar"><DefaultAvatar /></span>
+            </button>
+            <button
+              type="button"
+              className={
+                "side-update-btn"
+                + (s.updateAvailable ? " has-update" : "")
+                + (s.updateBusy !== "idle" ? " busy" : "")
+              }
+              disabled={s.updateBusy !== "idle"}
+              title={
+                s.updateAvailable && s.latestVersion
+                  ? S.nav.updateHint(s.serverVersion || "-", s.latestVersion)
+                  : S.nav.checkUpdateTitle
+              }
+              onClick={() => void triggerUpdateOrCheck()}
+            >
+              {s.updateBusy === "updating" ? (
+                <>
+                  <IconSpinner />
+                  <span>{S.nav.updating}</span>
+                </>
+              ) : s.updateBusy === "checking" ? (
+                <>
+                  <IconSpinner />
+                  <span>{S.nav.checkingUpdate}</span>
+                </>
+              ) : s.updateAvailable && s.latestVersion ? (
+                <>
+                  <IconDownload />
+                  <span>{S.nav.updateTo(s.latestVersion)}</span>
+                  <span className="side-update-dot" aria-hidden="true" />
+                </>
+              ) : (
+                <span>{s.serverVersion ? "v" + s.serverVersion : S.nav.checkUpdate}</span>
+              )}
+            </button>
+          </div>
         </div>
         <div className="sidebar-resize-handle" role="separator" aria-orientation="vertical"
              title={S.workspace.resize} onPointerDown={startResize}

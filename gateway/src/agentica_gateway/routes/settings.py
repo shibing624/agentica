@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, fields
 from pathlib import Path
 from io import StringIO
@@ -49,6 +50,9 @@ from ..services.media_understanding import is_gemini, media_model_label
 router = APIRouter()
 
 _DIR_HISTORY_MAX = 20
+_UPDATE_CACHE_TTL_S = 600.0
+_update_cache: dict[str, Any] = {"checked_at": 0.0, "latest": None}
+_update_lock = asyncio.Lock()
 
 
 @dataclass
@@ -99,6 +103,64 @@ async def health():
         "channels": deps.channel_manager.get_status() if deps.channel_manager else {},
         "scheduler": {"active_jobs": active_jobs},
     }
+
+
+@router.get("/api/update/check")
+async def check_update(force: bool = False):
+    """Return installed version and latest PyPI version (cached briefly unless forced)."""
+    current = self_manage.get_current_version()
+    now = time.monotonic()
+    if (
+        force
+        or _update_cache["latest"] is None
+        or (now - float(_update_cache["checked_at"])) > _UPDATE_CACHE_TTL_S
+    ):
+        latest = await asyncio.to_thread(self_manage.get_latest_version)
+        if latest:
+            _update_cache["latest"] = latest
+            _update_cache["checked_at"] = now
+    else:
+        latest = _update_cache["latest"]
+    return {
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": self_manage.is_upgrade_available(current, latest),
+    }
+
+
+@router.post("/api/update/apply")
+async def apply_update(request: Request):
+    """Upgrade agentica + agentica-gateway via pip/uv and restart the gateway."""
+    principal = request.state.principal
+    if not principal.is_admin:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    if _update_lock.locked():
+        raise HTTPException(status_code=409, detail="Update already in progress")
+    async with _update_lock:
+        current = self_manage.get_current_version()
+        code, output = await asyncio.to_thread(
+            self_manage.run_pip_upgrade, ("agentica", "agentica-gateway")
+        )
+        if code != 0:
+            tail = "\n".join((output or "").strip().splitlines()[-12:])
+            raise HTTPException(
+                status_code=500,
+                detail=tail or f"pip exited with code {code}",
+            )
+        latest = await asyncio.to_thread(self_manage.get_latest_version)
+        _update_cache["latest"] = latest or current
+        _update_cache["checked_at"] = time.monotonic()
+        from .. import main as gw_main
+        restarting = gw_main._server is not None
+        if restarting:
+            asyncio.get_running_loop().call_later(0.35, gw_main.request_restart)
+        return {
+            "status": "ok",
+            "previous_version": current,
+            "version": latest or current,
+            "restarting": restarting,
+            "output": (output or "").strip(),
+        }
 
 
 @router.get("/api/status")
