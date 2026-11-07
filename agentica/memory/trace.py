@@ -115,7 +115,7 @@ def _ensure_task(task_stats: Dict[int, Dict[str, Any]], ti: int) -> Dict[str, An
     return t
 
 
-def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) -> Dict[str, Any]:
     """Scan a session log once and return the Trace analysis payload.
 
     Invariants (aligned with PenguinHarness ``analyze()``, agentica envelope):
@@ -135,6 +135,16 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     turn: phase breakdown, counts, tokens, cost, and the expandable entry list
     with tool arguments, tool results, thinking and the system prompt resolved
     from the conversation rows) and ``totals``.
+
+    Each round also carries ``calls``: the same turn as the page lists it —
+    one row per model request (its tokens and duration folded in, so the
+    ``request_begin`` / ``token_usage`` / ``request_end`` markers are not rows
+    of their own) and one per tool call (arguments and result paired by id).
+
+    ``lite`` drops every body: per-round ``entries``, each call's ``body`` and
+    the lane arrays. A long session's bodies are megabytes of thinking and
+    tool output, and the page shows one at a time; it fetches that one by
+    index (:func:`call_body`).
     """
     messages = list(entries)
     requests: List[Dict[str, Any]] = []
@@ -218,7 +228,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             if not continuation:
                 task_index += 1
             saw_tool_call_this_request = False
-            open_request = {"beginTs": ts, "taskIndex": task_index}
+            open_request = {"beginTs": ts, "taskIndex": task_index, "index": mi}
             requests.append(open_request)
             t = _ensure_task(task_stats, task_index)
             if t["startTs"] == "":
@@ -292,6 +302,11 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                 fresh_input = max(total - output - cache_read - cache_write, 0)
             else:
                 fresh_input = int(request.get("input") or 0)
+            if open_request is not None:
+                open_request["tokens"] = {
+                    "input": fresh_input, "cacheRead": cache_read,
+                    "cacheWrite": cache_write, "output": output,
+                }
             t["tokens"]["input"] += fresh_input
             t["tokens"]["cacheRead"] += cache_read
             t["tokens"]["cacheWrite"] += cache_write
@@ -335,6 +350,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                             "callTs": ts,
                             "taskIndex": task_index,
                             "key": tool_call_id,
+                            "index": mi,
                         }
                         open_spans[tool_call_id] = span
                         tool_spans.append(span)
@@ -374,7 +390,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         elapsed_ms += dur or 0
 
     rounds = _build_rounds(messages, msg_task, tasks, model_segments, tool_spans, requests, meta)
-    return {
+    out = {
         "elapsedMs": elapsed_ms,
         "hasTimeline": has_timeline,
         "requests": requests,
@@ -390,6 +406,44 @@ def analyze_entries(entries: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "rounds": rounds,
         "totals": _totals(rounds, requests, elapsed_ms, compaction_count),
     }
+    if lite:
+        for key in ("requests", "tasks", "modelSegments", "toolSpans", "otherSpans", "usageTrend", "messageTask"):
+            out.pop(key)
+        for r in rounds:
+            r.pop("entries")
+            for c in r["calls"]:
+                c.pop("body")
+    return out
+
+
+def call_body(entries: Iterable[Dict[str, Any]], index: int) -> Optional[Dict[str, Any]]:
+    """The body of the call that starts at log line ``index``, or None."""
+    for r in analyze_entries(entries)["rounds"]:
+        for c in r["calls"]:
+            if c["index"] == index:
+                return c["body"]
+    return None
+
+
+def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500) -> List[int]:
+    """Indices of calls whose text contains ``query`` (case-insensitive).
+
+    Searches what the page can show for a call: its summary, tool name,
+    result line and every body field (arguments, result, thinking, reply).
+    """
+    needle = query.strip().lower()
+    if not needle:
+        return []
+    hits: List[int] = []
+    for r in analyze_entries(entries)["rounds"]:
+        for c in r["calls"]:
+            texts = [c.get("summary"), c.get("toolName"), c.get("resultSummary")]
+            texts.extend(v for v in c["body"].values() if isinstance(v, str))
+            if any(needle in t.lower() for t in texts if t):
+                hits.append(c["index"])
+                if len(hits) >= limit:
+                    return hits
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +637,7 @@ def _entry_row(
         elif name == "approval_decision":
             decision = entry.get("decision") or ""
             tool = entry.get("tool") or ""
+            row["toolCallId"] = str(entry.get("tool_call_id") or "")
             wait_s = entry.get("wait_s")
             grant = entry.get("grant") if isinstance(entry.get("grant"), dict) else None
             parts = [str(decision), str(tool)]
@@ -631,7 +686,12 @@ def _entry_row(
 
     if entry_type == "user":
         content = entry.get("content") or ""
-        row["kind"] = "steering" if _is_steering_user(entry) else "user"
+        if entry.get("automated") is True:
+            # A background command's / subagent's report or a peer message:
+            # it opens a round, but nobody typed it.
+            row["kind"] = "automated"
+        else:
+            row["kind"] = "steering" if _is_steering_user(entry) else "user"
         row["summary"] = _clip(content, SUMMARY_CHAR_CAP)
         row["detail"] = _detail(content)
         return row
@@ -755,13 +815,18 @@ def _build_rounds(
         tool_errors = sum(1 for r in tool_results if r.get("is_error"))
         tokens = task["tokens"]
         title = next((e["summary"] for e in entries if e["kind"] == "user"), "")
+        automated = not title and any(e["kind"] == "automated" for e in entries)
+        if automated:
+            title = next(e["summary"] for e in entries if e["kind"] == "automated")
         if not title:
             title = "Context compaction" if task.get("compaction") else f"Round {ti + 1}"
 
         llm_ms = task["llmMs"]
+        spans_by_id = {s["toolCallId"]: s for s in tool_spans if s["taskIndex"] == ti}
         rounds.append({
             "taskIndex": ti,
             "title": title,
+            "automated": automated,
             "compaction": bool(task.get("compaction")),
             "startTs": task["startTs"],
             "endTs": task["endTs"],
@@ -776,9 +841,128 @@ def _build_rounds(
             "costUsd": _cost(model_id, tokens),
             "tps": (tokens["output"] / (llm_ms / 1000)) if llm_ms > 0 else 0.0,
             "phases": _phase_breakdown(task, model_segments, tool_spans, duration_ms),
+            "calls": _round_calls(entries, task_requests, spans_by_id),
             "entries": entries,
         })
     return rounds
+
+
+# Rows the call list never shows: the prelude is in ``meta``, and the request
+# markers are folded into the model call they open and close.
+_FOLDED_KINDS = {"session_meta", "tool_list_ready", "request_begin", "request_end", "token_usage"}
+
+
+def _round_calls(
+    entries: List[Dict[str, Any]],
+    requests: List[Dict[str, Any]],
+    spans_by_id: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """A round as the Trace page lists it: prompts, model calls, tool calls.
+
+    A model call is one request: its thinking and reply bodies, tokens and
+    duration. A tool call is the call and its result paired by id, with the
+    approval wait split from the run. Bodies sit under ``body`` so the lite
+    payload can drop them in one place.
+    """
+    by_begin = {r["index"]: r for r in requests if "index" in r}
+    calls: List[Dict[str, Any]] = []
+    tools: Dict[str, Dict[str, Any]] = {}
+    model: Optional[Dict[str, Any]] = None
+
+    for e in entries:
+        kind = e["kind"]
+        if kind == "request_begin":
+            req = by_begin.get(e["index"], {})
+            model = {
+                "kind": "model",
+                "index": e["index"],
+                "ts": e["ts"],
+                "startTs": req.get("beginTs") or e["ts"],
+                "endTs": req.get("endTs") or "",
+                "summary": "",
+                "durationMs": req.get("durationMs"),
+                "waitMs": req.get("approvalWaitMs") or 0,
+                "status": req.get("status") or "",
+                "tokens": _token_view(req["tokens"]) if req.get("tokens") else None,
+                "toolCalls": 0,
+                "body": {"thinking": "", "text": ""},
+            }
+            calls.append(model)
+            continue
+        if kind in _FOLDED_KINDS:
+            continue
+        if kind in ("thinking", "text") and model is not None:
+            body = model["body"]
+            body[kind] = f"{body[kind]}\n\n{e['detail']}" if body[kind] else e["detail"]
+            if kind == "text" or not model["summary"]:
+                model["summary"] = e["summary"]
+            continue
+        if kind == "tool_call":
+            call_id = e.get("toolCallId") or ""
+            span = spans_by_id.get(call_id, {})
+            row = {
+                "kind": "tool",
+                "index": e["index"],
+                "ts": e["ts"],
+                "startTs": e["ts"],
+                "endTs": span.get("outputTs") or "",
+                "toolName": e.get("toolName") or "",
+                "toolCallId": call_id,
+                "summary": e["summary"],
+                "isError": False,
+                "durationMs": None,
+                "waitMs": (_ms_between(span["callTs"], span["approvalTs"]) or 0) if span.get("approvalTs") else 0,
+                "decision": span.get("decision") or "",
+                "body": {"args": e["detail"], "result": "", "approval": ""},
+            }
+            if e.get("task"):
+                row["body"]["taskCall"] = e["task"]
+            if model is not None:
+                model["toolCalls"] += 1
+            tools[call_id] = row
+            calls.append(row)
+            continue
+        if kind == "approval_decision":
+            row = tools.get(e.get("toolCallId") or "")
+            if row is not None:
+                row["body"]["approval"] = e["detail"]
+            continue
+        if kind == "tool_result":
+            call_id = e.get("toolCallId") or ""
+            row = tools.get(call_id)
+            if row is None:
+                # Logs older than the tool_call event: the result is all there is.
+                row = {
+                    "kind": "tool", "index": e["index"], "ts": e["ts"], "startTs": "", "endTs": "",
+                    "toolName": e.get("toolName") or "", "toolCallId": call_id, "summary": "",
+                    "isError": False, "durationMs": None, "waitMs": 0, "decision": "",
+                    "body": {"args": "", "result": "", "approval": ""},
+                }
+                tools[call_id] = row
+                calls.append(row)
+            row["isError"] = bool(e.get("isError"))
+            row["resultSummary"] = e["summary"]
+            row["body"]["result"] = e["detail"]
+            if e.get("task"):
+                row["body"]["taskResult"] = e["task"]
+            if e.get("durationMs") is not None:
+                row["durationMs"] = e["durationMs"]
+            elif row["startTs"] and row["endTs"]:
+                row["durationMs"] = _ms_between(row["startTs"], row["endTs"])
+            continue
+        # user / steering / system_prompt / assistant (pre-event logs) /
+        # compact_boundary / goal: a row of their own, body as is.
+        if kind == "assistant" and not e["detail"].strip():
+            # Carried only tool calls, which are rows already.
+            continue
+        calls.append({
+            "kind": kind,
+            "index": e["index"],
+            "ts": e["ts"],
+            "summary": e["summary"],
+            "body": {"text": e["detail"]},
+        })
+    return calls
 
 
 def _cost(model_id: Optional[str], tokens: Dict[str, int]) -> Optional[float]:

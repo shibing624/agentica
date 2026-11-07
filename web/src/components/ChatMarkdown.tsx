@@ -1,17 +1,17 @@
 import { memo, type ReactNode } from "react";
 import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MarkdownCode } from "./CodeFrame";
+import { GFM_PLUGINS } from "../lib/markdownPlugins";
 
 /**
  * Frozen plugin / component maps so a per-frame stream bump does not remount
  * every code block (new `components={{}}` identity was the flash). Streaming
  * skips KaTeX + highlight; settle flips `streaming` once and highlights.
  */
-const STREAM_REMARK = [remarkGfm];
-const SETTLED_REMARK = [remarkGfm, remarkMath];
+const STREAM_REMARK = GFM_PLUGINS;
+const SETTLED_REMARK = [...GFM_PLUGINS, remarkMath];
 const SETTLED_REHYPE = [rehypeKatex];
 
 function StreamCode({ className, children }: { className?: string; children?: ReactNode }) {

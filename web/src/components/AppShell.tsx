@@ -7,7 +7,7 @@ import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
 import { PluginsPanel } from "../panels/PluginsPanel";
 import { primeSettings, SettingsModal } from "../panels/SettingsModal";
-import { loadSessions, newChat } from "../sessions";
+import { loadSessions, newChat, syncFromServer } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
@@ -19,6 +19,8 @@ import { AddWorkspaceDialog } from "./AddWorkspaceDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DirModal } from "./DirModal";
 import { SessionTree } from "./SessionTree";
+
+const SERVER_SYNC_MS = 5000;
 
 /**
  * The frame every page inside the app shares: left navigation, the account
@@ -79,11 +81,34 @@ export function AppShell({
     })();
   }, []);
 
+  // Another client (browser tab, desktop window, CLI) may have run a turn.
+  // Focus covers switching windows; the poll covers two windows side by side,
+  // where neither ever regains focus.
+  useEffect(() => {
+    const sync = () => { if (document.visibilityState === "visible") void syncFromServer(); };
+    const timer = window.setInterval(sync, SERVER_SYNC_MS);
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
+
   const usage = accountUsage(s.sessions);
   const [searchOpen, setSearchOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const asideRef = useRef<HTMLElement | null>(null);
   const showSearch = active === "chat" || active === "traces";
+
+  // On <html> so every page (chat topbar, trace page, users) can clear the
+  // floating seat without each one reading the store for it.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (s.sidebarCollapsed) root.dataset.sidebarCollapsed = "";
+    else delete root.dataset.sidebarCollapsed;
+  }, [s.sidebarCollapsed]);
 
   const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (s.sidebarCollapsed) return;
@@ -221,6 +246,17 @@ export function AppShell({
       <div className={"account-pop-backdrop" + (s.accountPanelOpen ? " open" : "")}
            onClick={() => setState({ accountPanelOpen: false })} />
       {children}
+      {/* After the page on purpose: on macOS the window's drag regions are
+          applied in document order, so a control has to come after every
+          drag row it overlaps (sidebar head, page topbar) to stay clickable. */}
+      {s.sidebarCollapsed && (
+        <div className="side-seat">
+          <button className="ib" onClick={() => setState({ sidebarCollapsed: false })}
+                  title={S.nav.expand} aria-label={S.nav.expand}><IconSidebar /></button>
+          <button className="ib" onClick={() => { nav("/chat"); newChat(); }}
+                  title={S.nav.newChat} aria-label={S.nav.newChat}><IconPlus /></button>
+        </div>
+      )}
       {s.dirModal.open && <DirModal />}
       {s.workspaceAdd.open && <AddWorkspaceDialog />}
       {s.settingsModal.open && <SettingsModal />}

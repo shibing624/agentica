@@ -50,6 +50,10 @@ export type ChatMsg = {
   errorTs?: number;
   /** Mid-run interrupt (CLI steer), not a new turn. */
   steer?: boolean;
+  /** A turn no person wrote: a background command's or a delegated subagent's
+   *  report, another session's message. The log marks the row `automated`;
+   *  it renders as a notice, not as the user's query. */
+  automated?: boolean;
   /** SessionLog row this message ends at (assistant: its last row). Set when
    *  the message comes from the server log; fork and feedback address it. */
   uuid?: string;

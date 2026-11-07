@@ -62,9 +62,12 @@ export function TaskCard({
   );
 }
 
-export function TodoList({ todos }: { todos: Todo[] }) {
+/** `live`: this list is the plan the agent is working through right now, so
+ *  its in-progress item spins. A `write_todos` row in the transcript is a
+ *  snapshot from that moment; spinning there claims work that has long ended. */
+export function TodoList({ todos, live = false }: { todos: Todo[]; live?: boolean }) {
   return (
-    <ul className="todo-list">
+    <ul className={"todo-list" + (live ? " live" : "")}>
       {todos.map((t, i) => (
         <li key={i} className={"todo-item " + t.status}>
           <span className={"state-dot " + t.status} aria-hidden />
@@ -80,7 +83,7 @@ export function TodoList({ todos }: { todos: Todo[] }) {
  * folded to one line ("Tasks  2 done · 1 in progress · 3 pending — <current>").
  * Hidden once every item is done, so a finished plan does not sit there.
  */
-export function TodoDock({ todos }: { todos: Todo[] }) {
+export function TodoDock({ todos, live }: { todos: Todo[]; live: boolean }) {
   const S = useStrings();
   const [open, setOpen] = useState(false);
   if (!todos.length || todos.every((t) => t.status === "completed")) return null;
@@ -96,7 +99,7 @@ export function TodoDock({ todos }: { todos: Todo[] }) {
         {!open && active[0] && <span className="todo-dock-cur">{active[0].content}</span>}
         <span className="todo-dock-chev"><IconChevronDown /></span>
       </button>
-      {open && <div className="todo-dock-body"><TodoList todos={todos} /></div>}
+      {open && <div className="todo-dock-body"><TodoList todos={todos} live={live} /></div>}
     </div>
   );
 }

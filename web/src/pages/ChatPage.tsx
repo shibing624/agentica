@@ -10,6 +10,7 @@ import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../li
 import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
 import { TodoDock } from "../components/TaskCard";
+import { AutomatedNotice } from "../components/AutomatedNotice";
 import { latestTodos } from "../lib/workActivity";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
@@ -18,7 +19,7 @@ import { primeSettings, switchProfile } from "../panels/SettingsModal";
 import { createSession, forkAt, hydrateSession, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
-  Logo, IconPlus, IconClose, IconSidebar, IconChat, IconAsk, IconAuto,
+  Logo, IconPlus, IconClose, IconChat, IconAsk, IconAuto,
   IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil, IconBook,
   IconChevronDown, IconThumbUp, IconThumbDown, IconFork, IconCompact, IconSpinner,
 } from "../icons";
@@ -276,7 +277,6 @@ export function ChatPage() {
       <div className={"main" + (!cur || !cur.msgs.length ? " chat-empty" : "")}>
         <div className="topbar">
           <div className="tb-l">
-            <button className="ib sidebar-expand-btn" onClick={() => setState({ sidebarCollapsed: false })} title={S.nav.expand}><IconSidebar /></button>
             <div className="tb-chat-info">
               {cur && <span className="tb-chat-icon"><IconChat /></span>}
               {titleEditing && s.curSess && cur ? (
@@ -358,7 +358,7 @@ export function ChatPage() {
               onDecide={(d) => void decideCurrentApproval(d)}
             />
           )}
-          {cur && <TodoDock todos={latestTodos(cur.msgs)} />}
+          {cur && <TodoDock todos={latestTodos(cur.msgs)} live={streaming} />}
           {goalRun && (
             <div className="goal-bar" title={goalRun.progress}>
               <span className="goal-bar-status">{S.chat.goalBar(goalRun.status, goalRun.objective)}</span>
@@ -749,6 +749,13 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenSkill, li
   const skill = m.role === "user"
     ? (m.skill || parseSkillTurn(m.content, invocableSkills(getState().pluginsData.skills || [])))
     : null;
+  if (m.role === "user" && m.automated) {
+    return (
+      <div id={"msg-" + idx} className="m m-a m-auto">
+        <AutomatedNotice text={m.content} ts={m.ts} />
+      </div>
+    );
+  }
   if (m.role === "user" && m.steer) {
     return (
       <div id={"msg-" + idx} className="m m-steer-wrap">

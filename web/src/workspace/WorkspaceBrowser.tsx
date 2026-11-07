@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
@@ -17,6 +16,7 @@ import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { joinWorkspacePath } from "../lib/file-path";
+import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
 import { IconCopy, IconFinder, IconFolder, IconTerminal } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
@@ -240,7 +240,7 @@ export function WorkspaceBrowser({
           {view === "markdown" && (
             <div className="md-doc">
               <Markdown
-                remarkPlugins={[remarkGfm, remarkMath]}
+                remarkPlugins={[...GFM_PLUGINS, remarkMath]}
                 rehypePlugins={[rehypeRaw, rehypeKatex]}
                 components={{
                 img: ({ src: href, alt }) => (

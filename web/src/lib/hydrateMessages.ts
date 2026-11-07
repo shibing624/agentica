@@ -35,6 +35,16 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     if (type === "user") {
       closeAssistant();
       let content = String(e.content || "");
+      if (e.automated === true) {
+        msgs.push({
+          role: "user",
+          automated: true,
+          content,
+          ts: tsOf(e),
+          ...(uuidOf(e) ? { uuid: uuidOf(e) } : {}),
+        });
+        continue;
+      }
       const pre = splitWindowPreamble(content);
       if (pre) {
         // A new window's preamble is chrome, not something the user said: it
@@ -55,6 +65,8 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         if (!pre.rest) continue;
         content = pre.rest;
       }
+      const attached = splitImageMarkers(content);
+      content = attached.text;
       const skill = parseSkillTurn(content);
       msgs.push({
         role: "user",
@@ -62,6 +74,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         ts: tsOf(e),
         ...(uuidOf(e) ? { uuid: uuidOf(e) } : {}),
         ...(skill ? { skill } : {}),
+        ...(attached.previews.length ? { previews: attached.previews } : {}),
       });
       continue;
     }
@@ -91,6 +104,24 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   }
   closeAssistant();
   return msgs;
+}
+
+const IMAGE_MARK_RE = /(?:^|\n\n)\[图片: ([0-9a-f]{64}\.(?:png|jpg|gif|webp))\]/g;
+
+/**
+ * A web turn with pictures is logged as `text` + `[图片: <file>]` markers
+ * (+ the media model's description when the base model cannot see images).
+ * Everything from the first marker on is machine-added: show the pictures again
+ * and keep only what the user typed.
+ */
+export function splitImageMarkers(content: string): { text: string; previews: string[] } {
+  const previews: string[] = [];
+  let cut = -1;
+  for (const m of content.matchAll(IMAGE_MARK_RE)) {
+    if (cut < 0) cut = m.index ?? 0;
+    previews.push(`/api/chat-images/${m[1]}`);
+  }
+  return cut < 0 ? { text: content, previews } : { text: content.slice(0, cut), previews };
 }
 
 /** Put the `/compact` user bubble right before its card. */

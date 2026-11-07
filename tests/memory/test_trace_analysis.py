@@ -3,7 +3,9 @@
 import json
 
 from agentica.memory.session_log import SessionLog
-from agentica.memory.trace import analyze_entries, format_trace_text, last_completed_round
+from agentica.memory.trace import (
+    analyze_entries, call_body, format_trace_text, last_completed_round, search_calls,
+)
 
 
 def _e(ts, **fields):
@@ -466,6 +468,59 @@ class TestRoundView:
         assert out["totals"]["toolErrors"] == 1
         assert out["totals"]["toolOk"] == 0
 
+    def test_calls_fold_request_markers_into_model_calls(self):
+        calls = analyze_entries(self._turn())["rounds"][0]["calls"]
+        # The markers are not rows; the prelude lives in `meta`.
+        assert [c["kind"] for c in calls] == ["system_prompt", "user", "model", "tool", "model"]
+        first, tool, second = calls[2], calls[3], calls[4]
+        assert first["durationMs"] == 3200
+        assert first["tokens"]["prompt"] == 1000 and first["tokens"]["output"] == 20
+        assert first["tokens"]["cacheHitPercent"] == 90.0
+        assert first["toolCalls"] == 1
+        assert first["body"]["thinking"] == "count them"
+        assert second["tokens"]["output"] == 30
+        assert second["body"]["text"] == "670 files."
+        assert second["summary"] == "670 files."
+        assert tool["toolName"] == "execute" and tool["durationMs"] == 250
+        assert '"command": "ls"' in tool["body"]["args"]
+        assert tool["body"]["result"] == "670"
+
+    def test_tool_call_carries_its_approval_wait_and_decision(self):
+        entries = [
+            _e("2026-01-01T00:00:00.000Z", type="user", content="rm"),
+            _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+            _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="execute"),
+            _e("2026-01-01T00:00:05.000Z", type="event", name="approval_decision",
+               tool_call_id="c1", decision="allow", tool="execute", wait_s=3.0),
+            _e("2026-01-01T00:00:06.000Z", type="event", name="request_end", status="completed"),
+            _e("2026-01-01T00:00:07.000Z", type="tool", tool_call_id="c1", content="ok"),
+        ]
+        tool = next(c for c in analyze_entries(entries)["rounds"][0]["calls"] if c["kind"] == "tool")
+        assert tool["waitMs"] == 3000 and tool["decision"] == "allow"
+        assert '"decision": "allow"' in tool["body"]["approval"]
+
+    def test_lite_drops_every_body_and_call_body_returns_one(self):
+        full = analyze_entries(self._turn())
+        lite = analyze_entries(self._turn(), lite=True)
+        assert "modelSegments" not in lite and "entries" not in lite["rounds"][0]
+        assert all("body" not in c for c in lite["rounds"][0]["calls"])
+        assert lite["totals"] == full["totals"]
+        tool = next(c for c in lite["rounds"][0]["calls"] if c["kind"] == "tool")
+        assert call_body(self._turn(), tool["index"])["result"] == "670"
+        assert call_body(self._turn(), 9999) is None
+
+    def test_search_matches_bodies_not_just_summaries(self):
+        calls = analyze_entries(self._turn())["rounds"][0]["calls"]
+        tool = next(c for c in calls if c["kind"] == "tool")
+        model = next(c for c in calls if c["kind"] == "model")
+        # "670" is only in the tool's result body and the final reply.
+        hits = search_calls(self._turn(), "670")
+        assert tool["index"] in hits
+        assert model["index"] not in hits  # the first request only thought
+        # Thinking is searched too, case-insensitively.
+        assert search_calls(self._turn(), "COUNT THEM") == [model["index"]]
+        assert search_calls(self._turn(), "   ") == []
+
 
 def test_interrupt_compensation_tool_call_stays_off_the_lane():
     entries = [
@@ -642,3 +697,25 @@ def test_format_trace_uses_human_file_size():
     )
     assert "3.9MB" in text
     assert "4,141,579" not in text
+
+
+def test_automated_turn_is_its_own_kind_and_not_a_user_title():
+    """A background job's report opens a round, but nobody typed it."""
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="run the tests"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="text"),
+        _e("2026-01-01T00:00:03.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:03.100Z", type="assistant", content="started"),
+        _e("2026-01-01T00:05:00.000Z", type="user", automated=True,
+           content="[Background terminal #1 (term_1) finished: exit 0 after 5m]\nCommand: pytest"),
+        _e("2026-01-01T00:05:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:05:02.000Z", type="event", name="text"),
+        _e("2026-01-01T00:05:03.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:05:03.100Z", type="assistant", content="all green"),
+    ]
+    first, second = analyze_entries(entries)["rounds"]
+    assert first["title"] == "run the tests" and first["automated"] is False
+    assert second["automated"] is True
+    assert second["title"].startswith("[Background terminal #1")
+    assert [c["kind"] for c in second["calls"]][:2] == ["automated", "model"]
