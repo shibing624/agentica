@@ -44,3 +44,10 @@ test("expanded groups retain every row", () => {
   assert.equal(result.visible.length, rows.length);
   assert.equal(result.hiddenCount, 0);
 });
+test("pinned rows never disappear behind the fold", () => {
+  const changed = rows.map((row) => ({ ...row, session: { ...row.session } }));
+  changed[7].session.pinned = true;
+  const result = collapseSessionRows(changed, null, false);
+  assert.ok(result.visible.some((row) => row.id === "s7"));
+  assert.equal(result.visible.filter((row) => !row.session.pinned).length, 5);
+});

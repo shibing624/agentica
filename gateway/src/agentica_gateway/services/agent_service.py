@@ -1410,6 +1410,7 @@ class AgentService:
                 else:
                     source = "legacy"
             archived = bool(entry.get("archived"))
+            pinned = bool(entry.get("pinned"))
             if not running and not (source == "gateway" or (include_cli and source == "cli")):
                 continue
             if (
@@ -1428,6 +1429,7 @@ class AgentService:
                 and source != "gateway"
                 and not running
                 and not archived
+                and not pinned
                 and float(entry.get("mtime") or 0) < cutoff
             ):
                 continue
@@ -1449,6 +1451,7 @@ class AgentService:
                 "unread": (not running) and is_session_unread(last_ts, last_read_at),
                 "size_bytes": entry.get("size_bytes", 0),
                 "archived": archived,
+                "pinned": pinned,
                 "work_dir": entry.get("work_dir") or project_work_dir,
                 "running": running,
                 "source": source,
@@ -1622,6 +1625,13 @@ class AgentService:
         """Archive/unarchive a session by writing SessionLog sidecar metadata."""
         base_dir, _work_dir = self._locate_session(session_id, owner)
         SessionLog.archive_session(session_id, archived=archived, base_dir=base_dir)
+
+    def pin_session(
+        self, session_id: str, pinned: bool = True, owner: Optional[str] = None,
+    ) -> None:
+        """Pin/unpin a session (sidebar order) by writing sidecar metadata."""
+        base_dir, _work_dir = self._locate_session(session_id, owner)
+        SessionLog.pin_session(session_id, pinned=pinned, base_dir=base_dir)
 
     def mark_session_read(self, session_id: str, owner: Optional[str] = None) -> str:
         """Stamp ``last_read_at`` so the sidebar drops the unread dot."""

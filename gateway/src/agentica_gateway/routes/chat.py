@@ -630,6 +630,22 @@ async def unarchive_session(
     return {"status": "unarchived", "session_id": session_id}
 
 
+class PinRequest(BaseModel):
+    pinned: bool = True
+
+
+@router.post("/api/sessions/{session_id}/pin")
+async def pin_session(
+    session_id: str,
+    body: PinRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Pin a session to the top of its project in the sidebar (or unpin it)."""
+    svc.pin_session(session_id, pinned=body.pinned, owner=_account(request))
+    return {"status": "pinned" if body.pinned else "unpinned", "session_id": session_id}
+
+
 @router.post("/api/sessions/{session_id}/read")
 async def mark_session_read(
     session_id: str,

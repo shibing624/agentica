@@ -63,6 +63,7 @@ export const fetchSessions = (scope: "recent" | "all" = "recent", signal?: Abort
   request(`/api/sessions?scope=${scope}&recent_days=30`, { signal });
 export const deleteSessionApi = (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" });
 export const archiveSessionApi = (id: string) => request(`/api/sessions/${id}/archive`, { method: "POST" });
+export const pinSessionApi = (id: string, pinned: boolean) => postJson(`/api/sessions/${id}/pin`, { pinned });
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
 export const markSessionReadApi = (id: string) => request(`/api/sessions/${id}/read`, { method: "POST" });

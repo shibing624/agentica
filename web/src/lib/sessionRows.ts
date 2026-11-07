@@ -6,6 +6,7 @@ export type SessionRow = {
     title: string;
     preview?: string;
     running?: boolean;
+    pinned?: boolean;
   };
 };
 
@@ -25,7 +26,7 @@ export function collapseSessionRows<T extends SessionRow>(
   if (expanded) return { visible: rows, hiddenCount: 0 };
   let idleCount = 0;
   const visible = rows.filter((row) => {
-    if (row.id === currentId || row.session.running) return true;
+    if (row.id === currentId || row.session.running || row.session.pinned) return true;
     idleCount += 1;
     return idleCount <= limit;
   });

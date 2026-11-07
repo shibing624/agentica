@@ -166,12 +166,7 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 .s-item .mt.busy{display:flex;align-items:center;color:var(--fg3)}
 .s-item .mt.busy svg{width:12px;height:12px;display:block}
 .s-item .mt.unread{width:8px;height:8px;border-radius:50%;background:#22c55e}
-.s-item:hover .mt{visibility:hidden}
-.s-actions{display:flex;align-items:center;gap:2px;opacity:0;position:absolute;right:8px;top:50%;transform:translateY(-50%) translateX(3px);transition:opacity var(--t),transform var(--t)}
-.s-item:hover .s-actions{opacity:1;transform:translateY(-50%)}
 .s-item .db{width:22px;height:22px;border:none;background:transparent;color:var(--fg3);border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all var(--t)}
-.s-item .db:hover{background:var(--fg);color:var(--bg)}
-.s-item .db.danger:hover{background:#dc2626;color:#fff}
 .s-rename-input{width:100%;height:24px;border:var(--hair) solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;padding:2px 6px;outline:none}
 .s-rename-input:focus{border-color:var(--fg3);box-shadow:0 0 0 2px var(--accent-soft)}
 .m-u,.m-a{position:relative}
@@ -193,10 +188,7 @@ html[data-desktop="mac"] .topbar{padding-left:24px}
 .session-error{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:4px 6px 8px;padding:7px 8px;border:1px solid rgba(220,38,38,.2);border-radius:8px;color:#dc2626;font-size:11px}
 .s-item{min-height:34px;outline:none}
 .s-item:focus-visible{box-shadow:inset 0 0 0 2px var(--fg3)}
-.s-item:focus-within .s-actions{opacity:1;transform:translateY(-50%)}
-.s-item:focus-within .mt{visibility:hidden}
 .s-source{flex-shrink:0;color:var(--fg3);font:9px/1 var(--mono);letter-spacing:.04em}
-.s-item:hover .s-source,.s-item:focus-within .s-source{visibility:hidden}
 .s-more{display:block;width:calc(100% - 28px);margin:2px 0 6px 28px;text-align:left;color:var(--fg3)}
 .account-entry{width:100%;border:none;border-top:var(--hair) solid var(--border);background:transparent;color:var(--fg);display:flex;align-items:center;gap:9px;padding:10px 12px;margin-top:auto;cursor:pointer;text-align:left;transition:background var(--t)}
 .account-entry:hover{background:var(--bg3)}
@@ -1562,3 +1554,22 @@ button.compact-head:hover{background:var(--bg3)}
 [data-theme="dark"] .task-status.err,[data-theme="dark"] .task-error{color:#f87171}
 [data-theme="dark"] .task-status.run{color:#93c5fd}
 [data-theme="dark"] .wr-tool.error .wr-head,[data-theme="dark"] .wg-err,[data-theme="dark"] .step-pre.err{color:#f87171}
+/* Session row hover (deepseek-harness style): the buttons take their own
+   space instead of covering the title, which ellipsizes before them; the
+   time / dot / CLI tag step aside while they show. */
+.s-actions{display:none;align-items:center;gap:0;flex-shrink:0;margin-right:-4px}
+.s-item:hover:not(.editing) .s-actions,.s-item.menu-open .s-actions,.s-item:focus-within:not(.editing) .s-actions{display:flex}
+.s-item:hover .mt,.s-item.menu-open .mt,.s-item:focus-within .mt,
+.s-item:hover .s-source,.s-item.menu-open .s-source,.s-item:focus-within .s-source,
+.s-item:hover .s-pin-mark,.s-item.menu-open .s-pin-mark,.s-item:focus-within .s-pin-mark{display:none}
+.s-item .db{width:24px;height:24px;border-radius:6px;color:var(--fg3)}
+.s-item .db svg{width:14px;height:14px}
+.s-item .db:hover{background:var(--hover2);color:var(--fg)}
+.s-item .db.on{color:var(--fg2)}
+.s-item.menu-open .db[aria-expanded="true"]{background:var(--hover2);color:var(--fg)}
+.s-pin-mark{display:flex;flex-shrink:0;color:var(--fg3)}
+.s-pin-mark svg{width:12px;height:12px}
+.s-menu{position:fixed;right:auto;min-width:188px;z-index:300}
+.s-menu .p-menu-item{padding:8px 10px;font-size:13px}
+.s-menu .p-menu-item:focus-visible{outline:none;background:var(--hover)}
+.p-menu-sep{height:var(--hair);margin:4px 6px;background:var(--border)}

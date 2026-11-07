@@ -353,6 +353,26 @@ class TestSessionEndpoints:
         assert resp.json()["status"] == "unarchived"
         mock_svc.archive_session.assert_called_with("s1", archived=False, owner="default")
 
+    def test_pin_and_unpin_session(self, mock_app):
+        client, mock_svc = mock_app
+        resp = client.post("/api/sessions/s1/pin", json={"pinned": True})
+        assert resp.status_code == 200 and resp.json()["status"] == "pinned"
+        mock_svc.pin_session.assert_called_with("s1", pinned=True, owner="default")
+        resp = client.post("/api/sessions/s1/pin", json={"pinned": False})
+        assert resp.json()["status"] == "unpinned"
+        mock_svc.pin_session.assert_called_with("s1", pinned=False, owner="default")
+
+    def test_pinned_flag_round_trips_through_the_sidecar(self, tmp_path):
+        from agentica.memory.session_log import SessionLog
+
+        log = SessionLog(session_id="s1", base_dir=str(tmp_path))
+        log.append("user", "hi")
+        assert SessionLog.list_sessions(base_dir=str(tmp_path))[0]["pinned"] is False
+        SessionLog.pin_session("s1", pinned=True, base_dir=str(tmp_path))
+        assert SessionLog.list_sessions(base_dir=str(tmp_path))[0]["pinned"] is True
+        SessionLog.pin_session("s1", pinned=False, base_dir=str(tmp_path))
+        assert SessionLog.list_sessions(base_dir=str(tmp_path))[0]["pinned"] is False
+
     def test_mark_session_read(self, mock_app):
         client, mock_svc = mock_app
         mock_svc.mark_session_read = MagicMock(return_value="2026-01-01T00:00:00.000Z")

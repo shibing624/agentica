@@ -58,6 +58,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         dir,
         projectId: projectIdForDir(dir),
         archived: !!sv.archived,
+        pinned: !!sv.pinned,
         running: sessionIsLive(id) || !!sv.running,
         unread: !!sv.unread,
         source: sv.source || "legacy",
@@ -404,6 +405,34 @@ export function archiveSession(id: string) {
   }
   bump();
   showToast(getStrings().session.archived);
+}
+
+export function pinSession(id: string, pinned: boolean) {
+  const sess = getState().sessions[id];
+  if (!sess) return;
+  sess.pinned = pinned;
+  saveSessions();
+  bump();
+  // A session with no log yet has no sidecar to write; the flag stays local
+  // until its first message creates one.
+  if (!sess.msgs.length && !sess.sizeBytes) return;
+  void api.pinSessionApi(id, pinned).then(({ ok }) => {
+    if (ok) return;
+    sess.pinned = !pinned;
+    saveSessions();
+    bump();
+    showToast(getStrings().session.pinFailed, 2500);
+  });
+}
+
+/** Branch the whole conversation into a new session and open it. */
+export async function forkSession(id: string) {
+  const S = getStrings();
+  const { ok, data } = await api.forkSessionApi(id);
+  if (!ok || !data?.session_id) { showToast(S.chat.forkFailed, 2500); return; }
+  await loadSessions();
+  switchTo(data.session_id);
+  showToast(S.chat.forkDone);
 }
 
 export function unarchiveSession(id: string) {

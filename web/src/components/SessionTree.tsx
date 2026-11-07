@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
 import { agoStr, lastQueryTs, sessionSideStatus } from "../lib/format";
 import { collapseSessionRows, sessionMatches } from "../lib/sessionRows";
-import { archiveSession, deleteSession, loadSessions, newChatInDir, renameSession, switchTo, syncSessionStatus } from "../sessions";
 import {
-  IconArchive, IconChevronRight, IconClose, IconFolder, IconMore, IconPencil, IconPlus, IconSpinner, IconTrash,
+  archiveSession, deleteSession, forkSession, loadSessions, newChatInDir, pinSession, renameSession, switchTo, syncSessionStatus,
+} from "../sessions";
+import {
+  IconArchive, IconChevronRight, IconCopyOutline, IconFolder, IconFork, IconMore, IconPencil, IconPin, IconPlus,
+  IconSpinner, IconTrash,
 } from "../icons";
 import {
-  getState, normDir, projectIdForDir, projectNameForDir, setState, useAppState, type Session,
+  getState, normDir, projectIdForDir, projectNameForDir, setState, showToast, useAppState, type Session,
 } from "../store";
 import { deleteWorkspace, renameWorkspace } from "../workspaces";
 
@@ -31,6 +34,7 @@ export function SessionTree() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameText, setRenameText] = useState("");
   const [editingSession, setEditingSession] = useState<string | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ id: string; anchor: DOMRect } | null>(null);
   const labels = useMemo(() => {
     const m: Record<string, string> = {};
     for (const w of s.workspaces) if (w.name) m[projectIdForDir(w.dir)] = w.name;
@@ -57,7 +61,9 @@ export function SessionTree() {
     }
     const grouped = Object.values(by);
     for (const g of grouped) {
-      g.sessions.sort((a, b) => lastQueryTs(b.session) - lastQueryTs(a.session));
+      // Pinned first, then most recent.
+      g.sessions.sort((a, b) => (Number(!!b.session.pinned) - Number(!!a.session.pinned))
+        || (lastQueryTs(b.session) - lastQueryTs(a.session)));
     }
     const first = (g: Group) => g.sessions.length ? Math.min(...g.sessions.map((x) => x.session.ts)) : Date.now();
     grouped.sort((a, b) => first(b) - first(a));
@@ -197,7 +203,9 @@ export function SessionTree() {
                 id, curSess: s.curSess, unread: session.unread, running: session.running,
               });
               return (
-                <div key={id} className={"s-item" + (id === s.curSess ? " active" : "")}
+                <div key={id}
+                     className={"s-item" + (id === s.curSess ? " active" : "") + (session.pinned ? " pinned" : "")
+                       + (rowMenu?.id === id ? " menu-open" : "") + (editingSession === id ? " editing" : "")}
                      role="button" tabIndex={0}
                      onClick={() => pick(id)}
                      onKeyDown={(e) => {
@@ -220,6 +228,9 @@ export function SessionTree() {
                     )}
                   </div>
                   {editingSession !== id && session.source === "cli" && <span className="s-source">CLI</span>}
+                  {editingSession !== id && session.pinned && (
+                    <span className="s-pin-mark" title={S.chat.pinnedTip}><IconPin filled /></span>
+                  )}
                   {editingSession === id ? null : side === "busy" ? (
                     <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>
                   ) : side === "unread" ? (
@@ -229,9 +240,25 @@ export function SessionTree() {
                   )}
                   {editingSession !== id && (
                     <div className="s-actions">
-                      <button className="db" title={S.chat.rename} onClick={(e) => { e.stopPropagation(); setEditingSession(id); }}><IconPencil /></button>
-                      <button className="db" title={S.chat.archive} onClick={(e) => { e.stopPropagation(); archiveSession(id); }}><IconArchive /></button>
-                      <button className="db danger" title={S.common.delete} onClick={(e) => { e.stopPropagation(); deleteSession(id); }}><IconClose /></button>
+                      <button type="button" className="db" title={S.chat.sessionMore} aria-label={S.chat.sessionMore}
+                              aria-haspopup="menu" aria-expanded={rowMenu?.id === id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const anchor = e.currentTarget.getBoundingClientRect();
+                                setRowMenu(rowMenu?.id === id ? null : { id, anchor });
+                              }}>
+                        <IconMore />
+                      </button>
+                      <button type="button" className="db" title={S.chat.archiveSession} aria-label={S.chat.archiveSession}
+                              onClick={(e) => { e.stopPropagation(); archiveSession(id); }}>
+                        <IconArchive />
+                      </button>
+                      <button type="button" className={"db" + (session.pinned ? " on" : "")}
+                              title={session.pinned ? S.chat.unpinSession : S.chat.pinSession}
+                              aria-label={session.pinned ? S.chat.unpinSession : S.chat.pinSession} aria-pressed={!!session.pinned}
+                              onClick={(e) => { e.stopPropagation(); pinSession(id, !session.pinned); }}>
+                        <IconPin filled={!!session.pinned} />
+                      </button>
                     </div>
                   )}
                 </div>
@@ -246,6 +273,91 @@ export function SessionTree() {
           </section>
         );
       })}
+      {rowMenu && s.sessions[rowMenu.id] && (
+        <SessionMenu
+          id={rowMenu.id}
+          anchor={rowMenu.anchor}
+          pinned={!!s.sessions[rowMenu.id].pinned}
+          onClose={() => setRowMenu(null)}
+          onRename={() => setEditingSession(rowMenu.id)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The row's `···` menu (deepseek-harness style). Fixed-positioned so the
+ * sidebar's scroll box cannot clip it; opens below the button, or above it
+ * when there is no room, and closes on outside click, Esc or scroll.
+ */
+function SessionMenu({ id, anchor, pinned, onClose, onRename }: {
+  id: string;
+  anchor: DOMRect;
+  pinned: boolean;
+  onClose: () => void;
+  onRename: () => void;
+}) {
+  const S = useStrings();
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.left, top: anchor.bottom + 4 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const h = el.offsetHeight;
+    const w = el.offsetWidth;
+    const below = anchor.bottom + 4;
+    const top = below + h > window.innerHeight - 8 ? Math.max(8, anchor.top - h - 4) : below;
+    const left = Math.min(Math.max(8, anchor.left - 8), window.innerWidth - w - 8);
+    setPos({ left, top });
+    el.querySelector<HTMLButtonElement>(".p-menu-item")?.focus();
+  }, [anchor]);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>(".p-menu-item") || [])];
+      const at = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    };
+    const onScroll = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+  const run = (fn: () => void) => () => { onClose(); fn(); };
+  return (
+    <div ref={ref} className="p-menu s-menu" role="menu" style={{ left: pos.left, top: pos.top }}>
+      <button type="button" role="menuitem" className="p-menu-item" onClick={run(() => pinSession(id, !pinned))}>
+        <IconPin filled={pinned} /><span>{pinned ? S.chat.unpinSession : S.chat.pinSession}</span>
+      </button>
+      <button type="button" role="menuitem" className="p-menu-item" onClick={run(onRename)}>
+        <IconPencil /><span>{S.chat.rename}</span>
+      </button>
+      <button type="button" role="menuitem" className="p-menu-item" onClick={run(() => { void forkSession(id); })}>
+        <IconFork /><span>{S.chat.forkSession}</span>
+      </button>
+      <button type="button" role="menuitem" className="p-menu-item" onClick={run(() => archiveSession(id))}>
+        <IconArchive /><span>{S.chat.archiveSession}</span>
+      </button>
+      <button type="button" role="menuitem" className="p-menu-item"
+              onClick={run(() => { void navigator.clipboard.writeText(id).then(() => showToast(S.chat.sessionIdCopied)); })}>
+        <IconCopyOutline /><span>{S.chat.copySessionId}</span>
+      </button>
+      <div className="p-menu-sep" role="separator" />
+      <button type="button" role="menuitem" className="p-menu-item danger" onClick={run(() => deleteSession(id))}>
+        <IconTrash /><span>{S.chat.deleteSession}</span>
+      </button>
     </div>
   );
 }

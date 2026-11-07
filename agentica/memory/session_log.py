@@ -1457,6 +1457,7 @@ class SessionLog:
             "last_timestamp": last_timestamp,
             "name": cls._meta_name(meta),
             "archived": cls._meta_archived(meta),
+            "pinned": cls._meta_pinned(meta),
             "profile_name": cls._meta_profile_name(meta),
             "profile_source": cls._meta_profile_source(meta),
             "last_read_at": cls._meta_last_read_at(meta),
@@ -1692,6 +1693,10 @@ class SessionLog:
         return bool(data.get("archived"))
 
     @staticmethod
+    def _meta_pinned(data: Dict[str, Any]) -> bool:
+        return bool(data.get("pinned"))
+
+    @staticmethod
     def _meta_profile_name(data: Dict[str, Any]) -> Optional[str]:
         name = data.get("profile_name")
         if isinstance(name, str) and name.strip():
@@ -1874,6 +1879,10 @@ class SessionLog:
         """Set the archived flag in sidecar metadata."""
         self._write_meta({"archived": bool(archived)})
 
+    def set_pinned(self, pinned: bool = True) -> None:
+        """Pin the session to the top of its project in the Web sidebar."""
+        self._write_meta({"pinned": bool(pinned)})
+
     def get_last_read_at(self) -> Optional[str]:
         """When the web UI last opened this session, or None if never marked."""
         return self._meta_last_read_at(self._read_meta(self.meta_path))
@@ -1949,6 +1958,23 @@ class SessionLog:
         )
         log = cls(session_id=session_id, base_dir=str(base))
         log.set_archived(archived)
+        return True
+
+    @classmethod
+    def pin_session(
+        cls,
+        session_id: str,
+        pinned: bool = True,
+        base_dir: Optional[str] = None,
+        work_dir: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> bool:
+        """Pin or unpin a session by id using sidecar metadata."""
+        base = (
+            Path(base_dir) if base_dir
+            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
+        )
+        cls(session_id=session_id, base_dir=str(base)).set_pinned(pinned)
         return True
 
     @classmethod

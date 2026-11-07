@@ -83,6 +83,8 @@ export type Session = {
   named?: boolean;
   projectId?: string;
   archived?: boolean;
+  /** Kept at the top of its project in the sidebar (sidecar `pinned`). */
+  pinned?: boolean;
   unread?: boolean;
   /** Server says a run is in flight (refresh can reattach). */
   running?: boolean;

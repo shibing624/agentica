@@ -295,3 +295,13 @@ export const IconListCheck = () => (
 export const IconAlert = () => (
   <S strokeWidth="1.4" strokeLinecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 5v3.4M8 10.8v.1" /></S>
 );
+
+export const IconPin = ({ filled = false }: { filled?: boolean }) => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.6 2.2l4.2 4.2-1.6.5-2.4 2.4.3 3-1.3 1.3-2.4-2.4-3.3 3.3M5.3 8.5L2.9 6.1l1.3-1.3 3 .3 2.4-2.4z"
+          fill={filled ? "currentColor" : "none"} />
+  </S>
+);
+export const IconCopyOutline = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 5.5V3.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2" /></S>
+);
