@@ -172,6 +172,14 @@ class TestExpectedNonzeroExit:
         from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
         assert _expected_nonzero_exit("cat file.txt | grep pattern", 1) is True
 
+    def test_newline_separates_commands(self):
+        """A heredoc script then `rg`: the exit code is rg's, 1 means no match."""
+        from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
+        command = "python3 - <<'EOF'\nprint('edit')\nEOF\nrg -n 'TODO' docs/x.md"
+        assert _expected_nonzero_exit(command, 1) is True
+        # The last line decides: a python script ending the command keeps 2 a failure.
+        assert _expected_nonzero_exit("rg -n x a.md\npython3 run.py", 2) is False
+
     def test_env_var_stripping(self):
         from agentica.tools.builtin.execute_tool import _expected_nonzero_exit
         assert _expected_nonzero_exit("LANG=C grep 'x' file", 1) is True

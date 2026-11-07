@@ -78,9 +78,9 @@ class ContextFailure:
     #                squeezing prose is the production case)
     #   "above"    — the block is in the file as written, more than once, but
     #                only above where the previous hunk matched
-    #   "truncated" — exactly one file line starts with this text (leading
-    #                whitespace aside) and goes on: the hunk carries only the
-    #                head of a long line (prose, CHANGELOG)
+    #   "truncated" — exactly one file line contains this text and is longer:
+    #                the hunk carries only a piece of a long line (the head of
+    #                a CHANGELOG entry, a sentence from a prose paragraph)
     #   "absent"   — no line in the file resembles it
     reason: str = ""
     line_number: int = 0
@@ -119,9 +119,9 @@ class ContextFailure:
             )
         if self.reason == "truncated":
             return (
-                f" Line {self.line_number} starts with this text and continues "
-                f"past it; a hunk line must be the whole line. Send the full "
-                f"line exactly as the file has it, or anchor on a shorter line."
+                f" Line {self.line_number} contains this text but is longer; "
+                f"a hunk line must be the whole line. Send the full line "
+                f"exactly as the file has it, or anchor on a shorter line."
             )
         return " No line in the file matches it; read the file again before patching."
 
@@ -449,7 +449,7 @@ def _context_failure(
                 hunk_number=hunk_number, eof=eof, unmatched=missing,
                 reason="near", line_number=line_number,
             )
-        line_number = _prefix_line_number(missing, input_lines, start)
+        line_number = _containing_line_number(missing, input_lines)
         return ContextFailure(
             hunk_number=hunk_number, eof=eof, unmatched=missing,
             reason="truncated" if line_number else "absent", line_number=line_number,
@@ -484,20 +484,20 @@ def _near_line_number(wanted: str, input_lines: List[str], start: int) -> int:
     return first
 
 
-def _prefix_line_number(wanted: str, input_lines: List[str], start: int) -> int:
-    """1-based line that begins with ``wanted`` and is longer, else 0.
+def _containing_line_number(wanted: str, input_lines: List[str]) -> int:
+    """1-based line that contains ``wanted`` and is longer, else 0.
 
-    Leading whitespace is ignored on both sides: a hand-copied long line is
-    often cut short and re-indented at once. Only a unique match is reported —
-    a short head (``}`` against ``});``) that begins many lines does not say
-    which line was meant. Never quotes the line, as ``_near_line_number``.
+    Surrounding whitespace on the hunk line is ignored: a hand-copied piece
+    of a long line is often re-indented too. Only a unique match is reported —
+    a short piece (``}`` inside ``});``) found on many lines does not say which
+    line was meant. Never quotes the line, as ``_near_line_number``.
     """
     head = wanted.strip()
     if not head:
         return 0
     hits = [
         index + 1 for index, line in enumerate(input_lines)
-        if (body := line.lstrip()).startswith(head) and len(body.rstrip()) > len(head)
+        if head in line and len(line.strip()) > len(head)
     ]
     return hits[0] if len(hits) == 1 else 0
 

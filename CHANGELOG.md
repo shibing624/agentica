@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **`apply_patch` 能认出「抄了长行中间一句」的 hunk；`execute` 多行命令按最后一行判断退出码**。① 原来只认长行的开头：prompt、文档里一整段是一行上千字，模型拿段落中间的一句当上下文时报 `No line in the file matches it`，模型以为文件变了，去重读、再错。现在只要文件里恰好一行包含这段文字，就报 `Line N contains this text but is longer`，提示发整行或换短锚点。② `python3 - <<'EOF' … EOF` 后面再接一行 `rg`，rg 没有匹配退出 1 时，原来按 `;` `&&` `|` 切分，没认换行，最后一段被当成 `python3`，于是报成工具错误；现在换行也算命令分隔。
 - **CLI 后台命令被 `kill` / `pkill` / Ctrl+C 结束时显示「stopped」，不再算 failed**。收到 SIGTERM 或 SIGINT 退出的后台命令和 delegate，完成提示改为黄色 `■ … stopped in 1m29s (SIGTERM)`，交给 agent 的报告也写 stopped，不再显示红色 `✗ failed (exit -15)`。其他信号会把信号名显示出来，比如 `failed (SIGKILL)`，但仍然算失败，因为 OOM 杀进程用的也是 SIGKILL。
 - **Web / Desktop 右侧工作区面板加宽、可全屏，入口改为图标（参照 deepseek-harness 的右侧栏）**。宽度规则与 dsh 一致：第一次打开占窗口的 45%，拖拽范围 300px 到窗口的 70%，聊天区至少保留 400px，窗口太窄时面板先变窄，再放不下就收起；双击拖拽条恢复默认宽度。原来是固定 360px、最宽 640px。面板标题栏右侧新增「全屏」按钮，全屏时覆盖整个窗口，按 Esc 或再点一次退出。顶栏的「打开工作区」文字按钮改为右侧栏图标（左侧栏图标的镜像），只在面板收起时显示；面板里的关闭按钮也换成同一个图标。旧的宽度设置换了存储键，不再沿用。
 - **滚动条改为细线**。聊天区、右侧面板等所有滚动区域的滚动条只画 3px 宽，颜色更淡，鼠标悬停时稍微加深；拖拽区仍保留 6px。

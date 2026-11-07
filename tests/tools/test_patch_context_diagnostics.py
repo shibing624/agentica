@@ -81,10 +81,26 @@ class TestContextMissIsDiagnosable(unittest.TestCase):
             "*** End Patch",
             src=src,
         )
-        self.assertIn("Line 3 starts with this text and continues past it", out)
+        self.assertIn("Line 3 contains this text but is longer", out)
         self.assertNotIn("No line in the file matches", out)
         # The rest of the file's line is not quoted back.
         self.assertNotIn("看不出写在哪", out)
+
+    def test_sentence_from_middle_of_long_line_is_truncated(self):
+        """Production case: a prompt paragraph is one 1,300-char line and the
+        model anchored on a sentence from its middle."""
+        long_line = "- 凡用户问消耗时，先查账户。本轮所有明细收录进同一个数据页，但链接由你决定要不要生成。"
+        src = "# Prompt\n\n" + long_line + "\n- next rule\n"
+        out = _apply(
+            "*** Begin Patch\n*** Update File: m.py\n@@\n"
+            "-本轮所有明细收录进同一个数据页，\n"
+            "+本轮只发一个链接，\n"
+            "*** End Patch",
+            src=src,
+        )
+        self.assertIn("Line 3 contains this text but is longer", out)
+        self.assertNotIn("No line in the file matches", out)
+        self.assertNotIn("先查账户", out)
 
     def test_head_of_long_line_with_wrong_indent_is_truncated(self):
         src = "def f():\n    return compute_total(items, discount=0.1, tax=0.2)\n"
@@ -95,7 +111,7 @@ class TestContextMissIsDiagnosable(unittest.TestCase):
             "*** End Patch",
             src=src,
         )
-        self.assertIn("Line 2 starts with this text and continues past it", out)
+        self.assertIn("Line 2 contains this text but is longer", out)
 
     def test_short_head_starting_many_lines_is_not_truncated(self):
         """`}` begins several `});` lines; naming one of them would be a guess."""
@@ -107,7 +123,7 @@ class TestContextMissIsDiagnosable(unittest.TestCase):
             "*** End Patch",
             src=src,
         )
-        self.assertNotIn("starts with this text", out)
+        self.assertNotIn("contains this text", out)
         self.assertIn("No line in the file matches", out)
 
     def test_dropped_internal_spaces_is_named_as_spacing(self):

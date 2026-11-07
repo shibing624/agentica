@@ -80,7 +80,9 @@ def _expected_nonzero_exit(command: str, exit_code: int) -> bool:
     """True when this command's non-zero exit is a normal result."""
     if exit_code == 0:
         return False
-    segments = re.split(r"\s*(?:\|\||&&|[|;])\s*", command)
+    # A newline separates commands like `;` does: a heredoc script followed by
+    # `rg ...` exits with rg's code.
+    segments = [s for s in re.split(r"\s*(?:\|\||&&|[|;\n])\s*", command) if s.strip()]
     last_segment = (segments[-1] if segments else command).strip()
     return exit_code in _EXPECTED_NONZERO.get(_first_command_name(last_segment), ())
 
