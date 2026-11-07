@@ -5,6 +5,7 @@
 
 Eliminates boilerplate json.dumps across all tool implementations.
 """
+import difflib
 import json
 from typing import Any, Dict, List, Optional
 
@@ -47,6 +48,40 @@ def file_display_meta(changes: List[Dict[str, Any]]) -> Dict[str, Any]:
     one file, ``apply_patch`` reports every file it mutated atomically.
     """
     return {"files": changes}
+
+
+def files_unified_diff(files: List[Dict[str, Any]]) -> str:
+    """Unified diffs of a write tool's ``display_meta["files"]``.
+
+    One ``diff -- path`` block per file, context of 2, no ``---``/``+++``
+    lines (the CLI edit-tool shape). A missing before on an add (or after on
+    a delete) counts as empty, so a new file renders as a full ``+`` dump.
+    """
+    parts: List[str] = []
+    for change in files:
+        path = str(change.get("path") or "")
+        action = change.get("action") or "update"
+        old_content = change.get("before")
+        new_content = change.get("after")
+        if action == "add" and old_content is None:
+            old_content = ""
+        if action == "delete" and new_content is None:
+            new_content = ""
+        if old_content is None or new_content is None:
+            continue
+        unified_lines = list(difflib.unified_diff(
+            old_content.splitlines(),
+            new_content.splitlines(),
+            fromfile=path,
+            tofile=path,
+            n=2,
+            lineterm="",
+        ))
+        if not unified_lines:
+            continue
+        hunks = "\n".join(unified_lines[2:]).rstrip("\n")
+        parts.append(f"diff -- {path}\n{hunks}")
+    return "\n\n".join(parts)
 
 
 def tool_error(message: str, **extra) -> str:

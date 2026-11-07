@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { agoStr, fmtDurationMs, lastQueryTs, sessionSideStatus } = await vite.ssrLoadModule("/src/lib/format.ts");
+const { agoStr, fmtDurationMs, fmtSpan, lastQueryTs, sessionSideStatus } = await vite.ssrLoadModule("/src/lib/format.ts");
 after(() => vite.close());
 
 const zh = {
@@ -18,12 +18,16 @@ const zh = {
   agoMinutes: (n) => `${n}分钟前`,
   agoHours: (n) => `${n}小时前`,
   agoDays: (n) => `${n}天前`,
+  agoMonths: (n) => `${n}个月前`,
+  agoYears: (n) => `${n}年前`,
 };
 const en = {
   agoJustNow: "just now",
   agoMinutes: (n) => `${n} min ago`,
   agoHours: (n) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
   agoDays: (n) => (n === 1 ? "1 day ago" : `${n} days ago`),
+  agoMonths: (n) => (n === 1 ? "1 month ago" : `${n} months ago`),
+  agoYears: (n) => (n === 1 ? "1 year ago" : `${n} years ago`),
 };
 
 const now = Date.parse("2026-08-22T15:32:00Z");
@@ -34,6 +38,9 @@ test("duration drops leading zeros", () => {
   assert.equal(fmtDurationMs(5 * 60_000), "5m");
   assert.equal(fmtDurationMs(3_600_000 + 5 * 60_000), "1h5m");
   assert.equal(fmtDurationMs(3_600_000), "1h");
+  assert.equal(fmtDurationMs((26 * 3600 + 5 * 60) * 1000), "1d2h");
+  assert.equal(fmtDurationMs(45 * 86_400_000), "1mo15d");
+  assert.equal(fmtDurationMs(400 * 86_400_000), "1y1mo");
 });
 
 test("idle label is coarse and bilingual", () => {
@@ -46,6 +53,8 @@ test("idle label is coarse and bilingual", () => {
   assert.equal(agoStr(now - 11 * 3_600_000, en, now), "11 hours ago");
   assert.equal(agoStr(now - 2 * 86_400_000, zh, now), "2天前");
   assert.equal(agoStr(now - 1 * 86_400_000, en, now), "1 day ago");
+  assert.equal(agoStr(now - 45 * 86_400_000, zh, now), "1个月前");
+  assert.equal(agoStr(now - 400 * 86_400_000, en, now), "1 year ago");
 });
 
 test("lastQueryTs prefers the latest non-steer user turn", () => {
@@ -68,4 +77,22 @@ test("sidebar slot is busy, unread, or idle — never two at once", () => {
   assert.equal(sessionSideStatus({ id: "a", curSess: "b", running: false, unread: true }), "unread");
   assert.equal(sessionSideStatus({ id: "a", curSess: "a", running: false, unread: true }), "idle");
   assert.equal(sessionSideStatus({ id: "a", curSess: "b", running: false, unread: false }), "idle");
+});
+
+test("fmtSpan rolls over into hours, days, months and years", () => {
+  const u = {
+    y: (n) => `${n}年`, mo: (n) => `${n}个月`, d: (n) => `${n}天`,
+    h: (n) => `${n}小时`, m: (n) => `${n}分`, s: (n) => `${n}秒`,
+    sec: (s) => `${s}秒`, ms: (ms) => `${ms}毫秒`, join: "",
+  };
+  assert.equal(fmtSpan(450, u), "450毫秒");
+  assert.equal(fmtSpan(49_800, u), "49.8秒");
+  assert.equal(fmtSpan((22 * 60 + 35) * 1000, u), "22分35秒");
+  assert.equal(fmtSpan(3_599_000, u), "59分59秒");
+  assert.equal(fmtSpan(3_600_000, u), "1小时");
+  assert.equal(fmtSpan((152 * 60 + 54) * 1000, u), "2小时32分");
+  assert.equal(fmtSpan((27 * 3600 + 10 * 60) * 1000, u), "1天3小时");
+  assert.equal(fmtSpan(30 * 86_400_000, u), "1个月");
+  assert.equal(fmtSpan(70 * 86_400_000, u), "2个月10天");
+  assert.equal(fmtSpan(800 * 86_400_000, u), "2年2个月");
 });

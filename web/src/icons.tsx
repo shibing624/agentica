@@ -165,6 +165,13 @@ export const IconFinder = () => (
     <path d="M1.75 1A1.75 1.75 0 000 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0016 13.25v-8.5A1.75 1.75 0 0014.25 3H7.5a.25.25 0 01-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75z" />
   </svg>
 );
+/** dsh's compass: a ring with the needle pointing north-east. */
+export const IconCompass = () => (
+  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+    <path d="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12Z" stroke="currentColor" />
+    <path d="M10.61 5.39 8.99 8.99l-3.6 1.62 1.62-3.6 3.6-1.62Z" fill="currentColor" />
+  </svg>
+);
 export const IconTerminal = () => (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
     <path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0114.25 15H1.75A1.75 1.75 0 010 13.25V2.75zm7 7.5a.75.75 0 000 1.5h4.25a.75.75 0 000-1.5H7zm-3.22-4.97a.75.75 0 00-1.06 1.06L4.44 8 2.72 9.72a.75.75 0 101.06 1.06l2-2a.75.75 0 000-1.06l-2-2z" />
@@ -211,7 +218,7 @@ export const IconSend = () => (
 );
 export const IconStop = () => (
   <svg viewBox="0 0 16 16" width="16" height="16">
-    <rect x="4.5" y="4.5" width="7" height="7" rx="1.8" fill="currentColor" />
+    <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
   </svg>
 );
 export const IconMore = () => (
@@ -257,6 +264,21 @@ export const IconFileCode = () => (
   <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
     <path d="M9.5 1.75H4.25a1 1 0 00-1 1v10.5a1 1 0 001 1h7.5a1 1 0 001-1V4.75z" /><path d="M9.5 1.75v3h3" />
     <path d="M6.6 8.2L5.3 9.6l1.3 1.4M9.4 8.2l1.3 1.4-1.3 1.4" />
+  </S>
+);
+export const IconSplit = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round">
+    <rect x="2" y="2.75" width="12" height="10.5" rx="1.5" /><path d="M8 2.75v10.5" />
+  </S>
+);
+export const IconDiff = () => (
+  <S strokeWidth="1.3" strokeLinecap="round">
+    <path d="M5 2.5v5M2.5 5h5M2.5 12h5M10.5 2.5v11M13.5 10.5l-3 3-3-3" />
+  </S>
+);
+export const IconWrap = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.5 4h11M2.5 8h9a2 2 0 010 4H8.5M10 10.5L8.5 12l1.5 1.5M2.5 12h3" />
   </S>
 );
 export const IconPaperclip = () => (

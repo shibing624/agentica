@@ -233,10 +233,19 @@ class PersistMixin:
             ):
                 return
             PersistMixin._persist_turn_user_message(agent, message, user_messages)
+            records = PersistMixin._tool_records_from_messages(answered)
+            # Messages carry no display diff; the run's tool records do.
+            diffs = {
+                tc.get("tool_call_id"): tc["diff"]
+                for tc in (agent.run_response.tools or []) if tc.get("diff")
+            }
+            for rec in records:
+                if rec.get("tool_call_id") in diffs:
+                    rec["diff"] = diffs[rec["tool_call_id"]]
             PersistMixin._persist_assistant_tool_calls(
                 agent,
                 messages=answered,
-                tool_records=PersistMixin._tool_records_from_messages(answered),
+                tool_records=records,
             )
         except Exception:
             logger.warning("in-turn session-log flush failed", exc_info=True)
@@ -331,6 +340,12 @@ class PersistMixin:
                 _tool_content = (
                     _tool_content[:DEFAULT_MAX_RESULT_SIZE_CHARS] + "\n... [truncated]"
                 )
+            _diff_meta: Dict[str, Any] = {}
+            _diff = _tc.get("diff")
+            if _diff:
+                if len(_diff) > DEFAULT_MAX_RESULT_SIZE_CHARS:
+                    _diff = _diff[:DEFAULT_MAX_RESULT_SIZE_CHARS] + "\n... [truncated]"
+                _diff_meta["diff"] = _diff
             _origin_meta: Dict[str, Any] = {}
             _fn = _functions.get(_tc.get("tool_name", ""))
             if _fn is not None and _fn.origin is not None:
@@ -351,6 +366,7 @@ class PersistMixin:
                 fallback_model=_tc.get("fallback_model"),
                 replay=_tc.get("replay", True),
                 **PersistMixin._provider_replay_meta(msg),
+                **_diff_meta,
                 **_origin_meta,
             )
 

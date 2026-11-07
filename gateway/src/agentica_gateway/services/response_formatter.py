@@ -8,12 +8,12 @@ Extracted from AgentService — these are pure functions with no state,
 making them easy to test and reuse across different response paths
 (SSE streaming, WebSocket, non-streaming chat).
 """
-import difflib
 import json
 from typing import Any, Dict, List, Optional
 
 from agentica.cli.display.status_bar import format_turn_clock
 from agentica.run.response import ToolCallInfo
+from agentica.tools.helpers import files_unified_diff
 
 
 def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:
@@ -115,41 +115,6 @@ def _format_task_result(raw: str) -> str:
         lines.append("")
         lines.append(str(data["next_action"]).rstrip())
     return "\n".join(lines).rstrip() + "\n"
-
-
-def files_unified_diff(files: List[Dict[str, Any]]) -> str:
-    """CLI-style unified diffs from write_file / apply_patch display_meta.
-
-    Same shape as ``cli/display/messages.py`` ``build_file_diff``: one
-    ``diff -- path`` block per file, context of 2. Missing before on an
-    add (or after on a delete) is treated as empty so a new file still
-    renders as a full ``+`` dump.
-    """
-    parts: List[str] = []
-    for change in files:
-        path = str(change.get("path") or "")
-        action = change.get("action") or "update"
-        old_content = change.get("before")
-        new_content = change.get("after")
-        if action == "add" and old_content is None:
-            old_content = ""
-        if action == "delete" and new_content is None:
-            new_content = ""
-        if old_content is None or new_content is None:
-            continue
-        unified_lines = list(difflib.unified_diff(
-            old_content.splitlines(),
-            new_content.splitlines(),
-            fromfile=path,
-            tofile=path,
-            n=2,
-            lineterm="",
-        ))
-        if not unified_lines:
-            continue
-        hunks = "\n".join(unified_lines[2:]).rstrip("\n")
-        parts.append(f"diff -- {path}\n{hunks}")
-    return "\n\n".join(parts)
 
 
 def format_tool_result(tool_call: ToolCallInfo) -> tuple[str, str, dict]:

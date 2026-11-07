@@ -823,7 +823,28 @@ class AgentService:
         """
         await self._ensure_initialized()
         agent = await self._get_agent(session_id, owner)
-        return await usage_payload(agent, model_provider=self.model_provider)
+        payload = await usage_payload(agent, model_provider=self.model_provider)
+        # Timing lives only in the log: the cached Agent forgets it on restart,
+        # and these are the same numbers the Trace page shows.
+        log = self.session_log_for(session_id, owner)
+        if log.path.exists():
+            totals = (await asyncio.to_thread(log.analyze, lite=True))["totals"]
+            tokens = totals["tokens"]
+            payload["stats"] = {
+                "rounds": totals["rounds"],
+                "steps": totals["requests"],
+                "llm_ms": totals["llmMs"],
+                "tool_ms": totals["toolMs"],
+                "ttft_ms": totals["ttftMs"],
+                "tps": totals["tps"],
+                "uncached_input_tokens": tokens["input"],
+                "cache_read_tokens": tokens["cacheRead"],
+                "cache_write_tokens": tokens["cacheWrite"],
+                "output_tokens": tokens["output"],
+                "cache_hit_percent": tokens["cacheHitPercent"],
+                "cost_usd": totals["costUsd"],
+            }
+        return payload
 
     def get_context_window(
         self, session_id: Optional[str] = None, owner: Optional[str] = None,

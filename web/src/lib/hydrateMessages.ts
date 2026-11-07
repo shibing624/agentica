@@ -249,11 +249,14 @@ function applyToolResult(m: ChatMsg, e: Record<string, unknown>) {
   }
   if (!hit) return;
   hit.result = result;
+  const diff = typeof e.diff === "string" && e.diff ? e.diff : undefined;
+  if (diff) hit.diff = diff;
   if (hit.t0 != null) hit.ms = Math.max(0, ts - hit.t0);
   const steps = m.steps || [];
   const step = findOpenToolStep(steps, callId);
   if (step) {
     step.result = result;
+    if (diff) step.diff = diff;
     if (step.t0 != null) step.ms = Math.max(0, ts - step.t0);
   }
 }

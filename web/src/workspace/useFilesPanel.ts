@@ -3,9 +3,10 @@ import * as api from "../api";
 import { useAppState, showToast } from "../store";
 import { useStrings } from "../i18n";
 import {
-  activateTab, adoptTerminals, closeTab, fileKey, initialTabs, nextTerminalOrdinal, openTab, skillKey,
-  terminalKey, type PanelTab, type TabsState,
+  activateTab, adoptTerminals, closeTab, diffKey, fileKey, FILES_TAB, GUIDE_TAB, initialTabs, nextTerminalOrdinal,
+  openTab, replaceTab, skillKey, terminalKey, upsertTab, type PanelTab, type TabsState,
 } from "../lib/panelTabs";
+import type { DiffHunk } from "../lib/fileDiff";
 import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth } from "./panelWidth";
 
 export type FilesPanelState = {
@@ -26,9 +27,15 @@ export type FilesPanelState = {
   browsePath: (path: string) => void;
   /** Open an installed skill's SKILL.md in a tab. */
   openSkill: (name: string) => void;
-  /** Start a shell in the session's working directory, in a new tab. Admin only. */
+  /** Review a reply's edits to one file (its diff tab, reused per file). */
+  openDiff: (path: string, edits: DiffHunk[][]) => void;
+  /** "+": open the start page (or focus it), where the user picks what to open. */
+  openGuide: () => void;
+  /** Start-page cards: the start page turns into the picked page. */
+  pickFiles: () => void;
+  /** Start a shell in the session's working directory. Admin only. */
   canTerminal: boolean;
-  newTerminal: () => void;
+  pickTerminal: () => void;
   /** The gateway no longer has this shell (closed elsewhere, or the gateway
    *  restarted): drop its tab without asking the gateway to close it. */
   terminalGone: (id: string) => void;
@@ -143,6 +150,11 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     update((st) => openTab(st, { key: skillKey(name), kind: "skill", name }));
   }, [update]);
 
+  const openDiff = useCallback((path: string, edits: DiffHunk[][]) => {
+    setOpen(true);
+    update((st) => upsertTab(st, { key: diffKey(path), kind: "diff", path, edits }));
+  }, [update]);
+
   const activate = useCallback((key: string) => update((st) => activateTab(st, key)), [update]);
 
   const close = useCallback((key: string) => {
@@ -152,12 +164,19 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
     update((st) => closeTab(st, key));
   }, [update]);
 
-  const newTerminal = useCallback(() => {
-    if (!workspace) { showToast(S.files.noRoot, 2500); return; }
+  const openGuide = useCallback(() => {
     setOpen(true);
+    update((st) => openTab(st, GUIDE_TAB));
+  }, [update]);
+
+  const pickFiles = useCallback(() => update((st) => replaceTab(st, GUIDE_TAB.key, FILES_TAB)), [update]);
+
+  const pickTerminal = useCallback(() => {
+    if (!workspace) { showToast(S.files.noRoot, 2500); return; }
     void api.createTerminal({ cwd: workspace, session_id: sessionKey }).then(({ ok, data }) => {
       if (!ok || !data) { showToast((data as any)?.detail || S.terminal.startFailed, 3000); return; }
-      update((st) => openTab(st, { key: terminalKey(data.id), kind: "terminal", id: data.id, ordinal: nextTerminalOrdinal(st) }));
+      update((st) => replaceTab(st, GUIDE_TAB.key,
+        { key: terminalKey(data.id), kind: "terminal", id: data.id, ordinal: nextTerminalOrdinal(st) }));
     });
   }, [workspace, sessionKey, update, S.files.noRoot, S.terminal.startFailed]);
 
@@ -166,6 +185,6 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   return {
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close,
-    browsePath, openSkill, canTerminal, newTerminal, terminalGone,
+    browsePath, openSkill, openDiff, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
   };
 }

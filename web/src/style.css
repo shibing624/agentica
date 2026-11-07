@@ -328,6 +328,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .ctx-bar-seg{flex:none;min-width:2px;height:100%;border-radius:1px;background:var(--tint,var(--fg3))}
 .ctx-swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:var(--tint,var(--fg3));flex-shrink:0}
 .ctx-tip-title{margin:10px 0 4px;padding-top:8px;border-top:var(--hair) solid var(--border);font-weight:600;color:var(--fg)}
+.ctx-tip-sub{margin-left:8px;font-weight:400;color:var(--fg3)}
 .ctx-details{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:2px 16px;margin:0}
 .ctx-details dt{color:var(--fg3)}
 .ctx-details dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;color:var(--fg);font-family:var(--mono);font-size:11px}
@@ -820,7 +821,6 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .approval-btn{gap:5px;padding:0 8px;min-width:0}
 .approval-btn .arr{margin-left:0}
 .approval-label{font-size:12px;color:var(--fg)}
-.approval-id{font-size:11px;color:var(--fg3)}
 .quick-dd,.approval-dd{position:absolute;bottom:calc(100% + 8px);left:0;min-width:220px;background:var(--bg);border:var(--hair) solid var(--border);border-radius:12px;box-shadow:var(--elev-pop);padding:8px;display:none;z-index:220}
 .approval-dd{min-width:0;width:max-content;padding:4px;border-radius:10px;gap:2px}
 .approval-dd .quick-item{gap:6px;padding:5px 8px;font-size:12px;white-space:nowrap}
@@ -846,7 +846,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .act-btn.send{background:var(--accent);color:#fff}
 .act-btn.send:hover:not(:disabled){opacity:.85}
 .act-btn.send:disabled{opacity:.4;cursor:not-allowed}
-.act-btn.stop{background:var(--fg);color:var(--bg)}
+.act-btn.stop{background:var(--accent);color:#fff}
 .act-btn.stop:hover{opacity:.85}
 .act-btn svg{width:16px;height:16px}
 .act-btn.send svg{fill:none}
@@ -1327,9 +1327,12 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
    over the title's end and shows on the active, hovered or focused chip, so a
    chip is the same width either way. Overflow scrolls with no scrollbar and
    fades at the hidden edge. */
-.pt-strip{display:flex;align-items:center;min-width:0;flex:0 1 auto;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;mask-image:linear-gradient(to right,black calc(100% - 16px),transparent)}
+.pt-strip{display:flex;align-items:center;min-width:0;flex:0 1 auto;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;scroll-behavior:smooth}
+.pt-strip[data-scroll="start"]{mask-image:linear-gradient(to right,transparent,black 24px)}
+.pt-strip[data-scroll="end"]{mask-image:linear-gradient(to right,black calc(100% - 24px),transparent)}
+.pt-strip[data-scroll="start end"]{mask-image:linear-gradient(to right,transparent,black 24px,black calc(100% - 24px),transparent)}
 .pt-strip::-webkit-scrollbar{display:none}
-.pt-cell{display:flex;align-items:center;flex:0 1 auto;min-width:0}
+.pt-cell{display:flex;align-items:center;flex:none}
 .pt-slot{flex:none;width:10px;height:28px;display:flex;align-items:center;justify-content:center}
 .pt-slot::before{content:"";width:var(--hair);height:14px;background:var(--border)}
 .pt-slot.blank::before{background:transparent}
@@ -1339,13 +1342,30 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .pt-tab.active{color:var(--fg);background:var(--bg3)}
 .pt-title{display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;line-height:1.4;flex:1 1 auto}
 .pt-title svg{width:13px;height:13px;flex-shrink:0}
-.pt-tab:not(.fixed):is(.active,:hover,:focus-within) .pt-title{mask-image:linear-gradient(to right,black calc(100% - 30px),transparent calc(100% - 14px))}
+/* The close button sits over the title's last 18px: reserve them, so a short
+   title is never faded, and fade only what overflows into them. */
+.pt-tab:not(.fixed) .pt-title{padding-right:18px}
+.pt-tab:not(.fixed):is(.active,:hover,:focus-within) .pt-title{mask-image:linear-gradient(to right,black calc(100% - 22px),transparent calc(100% - 12px))}
 .pt-close{position:absolute;top:4px;right:4px;width:20px;height:20px;padding:0;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--fg3);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;pointer-events:none}
 .pt-close svg{width:12px;height:12px}
 .pt-tab:is(.active,:hover,:focus-within) .pt-close{opacity:1;pointer-events:auto}
 .pt-close:hover{color:var(--fg);background:var(--border2)}
 .pt-add{margin-left:2px}
 .pt-fill{flex:1 1 0;min-width:0}
+/* ===== START PAGE (dsh guide) ===== */
+/* Cards in one centred column, lifted above the middle by the ::after spacer;
+   min-height centres a short guide and lets a tall one scroll. */
+.pg-guide{display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;box-sizing:border-box;min-height:100%;padding:0 24px}
+.pg-guide::after{content:"";flex:0 1 10%}
+.pg-hero{display:flex;margin-bottom:16px;color:var(--fg3);opacity:.35}
+.pg-hero svg{width:56px;height:56px}
+.pg-entry{display:flex;gap:14px;align-items:center;box-sizing:border-box;width:380px;max-width:100%;min-height:56px;padding:14px 20px;color:var(--fg);font:inherit;text-align:left;background:var(--bg2);border:var(--hair) solid var(--border);border-radius:14px;cursor:pointer}
+.pg-entry:hover{background:var(--bg3)}
+.pg-entry-icon{display:flex;flex:none;align-items:center;justify-content:center;width:26px;height:26px;color:var(--fg2)}
+.pg-entry-icon svg{width:22px;height:22px}
+.pg-entry-text{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0}
+.pg-entry-title{overflow:hidden;font-size:14px;line-height:1.4;white-space:nowrap;text-overflow:ellipsis}
+.pg-entry-desc{overflow:hidden;color:var(--fg3);font-size:11px;line-height:1.4;white-space:nowrap;text-overflow:ellipsis}
 /* ===== TERMINAL TAB ===== */
 .term-pane{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg);color:var(--fg)}
 .term-screen{flex:1;min-height:0;padding:6px 4px 4px 10px;background:var(--bg);color:var(--fg)}
@@ -1496,6 +1516,42 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .mfc-row:hover .mfc-actions,.mfc-actions:focus-within{opacity:1}
 .mfc-actions button{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:none;border-radius:6px;background:transparent;color:var(--fg3);cursor:pointer}
 .mfc-actions button:hover{background:var(--bg);color:var(--fg)}
+/* Edit review tab (dsh FileDiff): hunk headers, two number gutters, red/green rows
+   whose first gutter carries a marker bar. Unified by default; split pairs
+   deletion runs with the addition runs after them. */
+.fd-root{--fd-add-bg:rgba(46,160,67,.12);--fd-add-gutter:rgba(46,160,67,.2);--fd-add-mark:#1a7f37;
+  --fd-del-bg:rgba(207,34,46,.1);--fd-del-gutter:rgba(207,34,46,.18);--fd-del-mark:#cf222e;--fd-empty:var(--bg2)}
+[data-theme="dark"] .fd-root{--fd-add-bg:rgba(46,160,67,.15);--fd-add-gutter:rgba(46,160,67,.25);--fd-add-mark:#3fb950;
+  --fd-del-bg:rgba(248,81,73,.15);--fd-del-gutter:rgba(248,81,73,.25);--fd-del-mark:#f85149}
+.fd-name{display:flex;align-items:center;gap:8px}
+.fd-name>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pv-icon.on{background:var(--bg3);color:var(--fg)}
+.fd-body{flex:1;min-height:0;overflow:auto;padding:8px 0 16px;font-family:var(--mono);font-size:12.5px}
+.fd-body[data-view=unified]:not(.wrap) .fd-edit{display:grid;grid-template-columns:minmax(max-content,100%)}
+.fd-note{margin:0;padding:4px 16px 8px;color:var(--fg3);font:12px/1.5 var(--sans)}
+.fd-edit-head{padding:10px 16px 2px;color:var(--fg3);font:600 11.5px/1.4 var(--sans)}
+.fd-hunk{margin-bottom:8px}
+.fd-hunk-head{padding:4px 16px;color:var(--fg3);white-space:pre}
+.fd-line,.fd-split{min-height:22px;line-height:22px;white-space:pre}
+.fd-line{display:grid;grid-template-columns:3.5em 3.5em 1.4em minmax(0,1fr)}
+.fd-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.fd-cell{display:grid;grid-template-columns:3.5em minmax(0,1fr);min-width:0;overflow:hidden}
+.fd-cell+.fd-cell{border-left:var(--hair) solid var(--border)}
+.fd-body.wrap .fd-line,.fd-body.wrap .fd-split{white-space:pre-wrap}
+.fd-body.wrap .fd-text{overflow-wrap:anywhere}
+.fd-no{padding-right:8px;text-align:right;color:var(--fg3);user-select:none}
+.fd-sign{text-align:center;user-select:none}
+.fd-text{padding-right:16px}
+.fd-context .fd-text{color:var(--fg2)}
+.fd-add{background:var(--fd-add-bg)}
+.fd-del{background:var(--fd-del-bg)}
+.fd-add .fd-no{background:var(--fd-add-gutter);color:var(--fd-add-mark)}
+.fd-del .fd-no{background:var(--fd-del-gutter);color:var(--fd-del-mark)}
+.fd-add .fd-no:first-child{box-shadow:inset 3px 0 0 var(--fd-add-mark)}
+.fd-del .fd-no:first-child{box-shadow:inset 3px 0 0 var(--fd-del-mark)}
+.fd-add .fd-sign,.fd-add .fd-text{color:var(--fd-add-mark)}
+.fd-del .fd-sign,.fd-del .fd-text{color:var(--fd-del-mark)}
+.fd-empty{background:var(--fd-empty)}
 .mfc-actions svg{width:14px;height:14px}
 .msg-files-more{width:100%;border:none;background:transparent;color:var(--fg3);font-size:12px;padding:8px 16px;cursor:pointer;text-align:left}
 .msg-files-more:hover{background:var(--bg3);color:var(--fg)}

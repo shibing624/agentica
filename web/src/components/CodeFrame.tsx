@@ -18,6 +18,9 @@ const MIN_THUMB = 24;
 function CodeScroll({ html }: { html: string }) {
   const scroller = useRef<HTMLPreElement>(null);
   const [bars, setBars] = useState<Bars>({ v: false, h: false, top: 0, height: 0, left: 0, width: 0 });
+  // One object per html: a fresh `{__html}` makes React rewrite the block's
+  // innerHTML on every render, and each scroll-bar update is a render.
+  const markup = useMemo(() => ({ __html: html }), [html]);
 
   const sync = useCallback(() => {
     const el = scroller.current;
@@ -102,7 +105,7 @@ function CodeScroll({ html }: { html: string }) {
   return (
     <div className={"code-scroll" + (bars.v ? " has-v" : "") + (bars.h ? " has-h" : "")}>
       <pre ref={scroller} className="code-frame-pre">
-        <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
+        <code className="hljs" dangerouslySetInnerHTML={markup} />
       </pre>
       {bars.v && (
         <div className="sb sb-y" onMouseDown={(e) => jump("y", e)}>

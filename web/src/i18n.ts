@@ -14,9 +14,8 @@ import { getState, pushPrefs, setState, useAppState } from "./store";
  *
  * Not translated on purpose: log event kinds (`tool_call`, `request_begin`),
  * config field names (`base_url`, `max_tokens`), and profile names. Approval
- * mode *ids* (`ask` / `auto` / `allow-all`) stay in parentheses so they stay
- * greppable; the surrounding label is Codex's three-tier copy (Ask for
- * approval / Approve for me / Full access).
+ * modes show only the localized Codex three-tier label (Ask for approval /
+ * Approve for me / Full access); the mode id is not appended.
  */
 
 export type Lang = "en" | "zh";
@@ -183,7 +182,6 @@ const en = {
       : mode === "allow-all"
         ? "Never asks and never denies. Project deny-similar applies only in ask/auto; hard-unsafe is logged and still run."
         : "Asks for file writes outside the workspace, sensitive paths, and hard-unsafe commands (rm -rf /, /etc, ~/.ssh).",
-    permTip: (mode: string): string => `${mode === "ask" ? "Ask for approval" : mode === "allow-all" ? "Full access" : "Approve for me"} (${mode})`,
     approvalDeny: "Deny",
     approvalAllowOnce: "Allow once",
     approvalAllowSimilar: (name: string, similarLabel?: string): string => {
@@ -245,6 +243,8 @@ const en = {
     agoMinutes: (n: number) => `${n} min ago`,
     agoHours: (n: number) => (n === 1 ? "1 hour ago" : `${n} hours ago`),
     agoDays: (n: number) => (n === 1 ? "1 day ago" : `${n} days ago`),
+    agoMonths: (n: number) => (n === 1 ? "1 month ago" : `${n} months ago`),
+    agoYears: (n: number) => (n === 1 ? "1 year ago" : `${n} years ago`),
     sessionBusy: "Replying",
     sessionUnread: "Unread reply",
     placeholder: "Message or / for commands · Shift+Enter newline · paste images",
@@ -267,6 +267,17 @@ const en = {
     ctxCached: "Cached",
     ctxOutput: "Output",
     ctxNoCalls: "No API calls yet this session.",
+    ctxStats: "Session stats",
+    ctxCounts: (rounds: number, steps: number) => `${rounds} rounds · ${steps} steps`,
+    ctxLlmTime: "Model time",
+    ctxToolTime: "Tool time",
+    ctxTtft: "Avg first token (TTFT)",
+    ctxTps: "Output speed (TPS)",
+    ctxTokenUsage: "Token usage",
+    ctxTokenTotal: "Total",
+    ctxUncached: "Uncached input",
+    ctxCacheRead: "Cache read",
+    ctxSpan: { y: (n: number) => `${n}y`, mo: (n: number) => `${n}mo`, d: (n: number) => `${n}d`, h: (n: number) => `${n}h`, m: (n: number) => `${n}m`, s: (n: number) => `${n}s`, sec: (s: string) => `${s}s`, ms: (ms: number) => `${ms}ms`, join: " " },
     ctxSection: (label: string) => ({
       "System prompt": "System prompt",
       "Rules & workspace": "Rules & workspace",
@@ -343,6 +354,7 @@ const en = {
     openWorkspace: "Open workspace",
     filesInMessage: (n: number) => `${n} file${n === 1 ? "" : "s"}`,
     openPreview: "Preview",
+    openDiff: "Review the changes",
     showMoreFiles: (n: number) => `Show ${n} more`,
     showLess: "Show less",
     filesEdited: (n: number) => `Edited ${n} file${n === 1 ? "" : "s"}`,
@@ -719,6 +731,13 @@ const en = {
     overwriteConfirm: (n: number) => `${n} file${n === 1 ? "" : "s"} already exist in this folder and will be replaced:`,
     previewUnsupported: "This type cannot be previewed — download it instead.",
     previewTruncated: "File too large; preview truncated. Download for the full file.",
+    diffSplit: "Switch to split view",
+    diffUnified: "Switch to unified view",
+    diffWrap: "Enable line wrap",
+    diffNoWrap: "Disable line wrap",
+    diffOpenFile: "Open the whole file in the side panel",
+    diffTruncated: (n: number) => `Only the first ${n.toLocaleString()} lines are shown.`,
+    diffEdit: (i: number, n: number) => `Edit ${i} of ${n}`,
     workspacePath: "Workspace path",
     viewMarkdown: "Markdown",
     viewWeb: "Web page",
@@ -737,11 +756,16 @@ const en = {
     noRoot: "Pick a working directory for this chat first.",
     uploading: "Uploading…",
     closeTab: "Close tab",
+    newTab: "New tab",
+    guideTitle: "Start",
+    guideFiles: "Workspace files",
+    guideFilesDesc: "Browse files in this chat's working directory",
   },
 
   terminal: {
     title: (n: number) => (n === 1 ? "Terminal" : `Terminal ${n}`),
     newTerminal: "New terminal",
+    guideDesc: "Run commands in this chat's working directory",
     startFailed: "Could not start a terminal",
     disconnected: "Disconnected from the terminal.",
     reconnect: "Reconnect",
@@ -934,7 +958,6 @@ const zh: Strings = {
       : mode === "allow-all"
         ? "不询问、不拒绝。项目里「拒绝类似」只约束 ask/auto；硬不安全会记 warning 并照跑。"
         : "询问工作区外/敏感路径的文件写入，以及硬不安全命令（rm -rf /、/etc、~/.ssh）。",
-    permTip: (mode: string): string => `${mode === "ask" ? "征求批准" : mode === "allow-all" ? "完全访问" : "代为批准"} (${mode})`,
     approvalDeny: "拒绝",
     approvalAllowOnce: "允许一次",
     approvalAllowSimilar: (name: string, similarLabel?: string): string => {
@@ -996,6 +1019,8 @@ const zh: Strings = {
     agoMinutes: (n: number) => `${n}分钟前`,
     agoHours: (n: number) => `${n}小时前`,
     agoDays: (n: number) => `${n}天前`,
+    agoMonths: (n: number) => `${n}个月前`,
+    agoYears: (n: number) => `${n}年前`,
     sessionBusy: "正在回复",
     sessionUnread: "未读回复",
     placeholder: "输入 / 使用命令 · Shift+Enter 换行 · 可粘贴图片",
@@ -1018,6 +1043,17 @@ const zh: Strings = {
     ctxCached: "缓存命中",
     ctxOutput: "输出",
     ctxNoCalls: "本会话还没有 API 调用。",
+    ctxStats: "会话统计",
+    ctxCounts: (rounds: number, steps: number) => `${rounds} 轮 ${steps} 步`,
+    ctxLlmTime: "模型用时",
+    ctxToolTime: "工具调用用时",
+    ctxTtft: "首 token 平均（TTFT）",
+    ctxTps: "输出速度（TPS）",
+    ctxTokenUsage: "Token 用量",
+    ctxTokenTotal: "合计",
+    ctxUncached: "未缓存输入",
+    ctxCacheRead: "缓存读取",
+    ctxSpan: { y: (n: number) => `${n}年`, mo: (n: number) => `${n}个月`, d: (n: number) => `${n}天`, h: (n: number) => `${n}小时`, m: (n: number) => `${n}分`, s: (n: number) => `${n}秒`, sec: (s: string) => `${s}秒`, ms: (ms: number) => `${ms}毫秒`, join: "" },
     ctxSection: (label: string) => ({
       "System prompt": "系统提示",
       "Rules & workspace": "规则与工作区",
@@ -1093,6 +1129,7 @@ const zh: Strings = {
     openWorkspace: "打开工作区",
     filesInMessage: (n: number) => `${n} 个文件`,
     openPreview: "点击预览",
+    openDiff: "点击查看改动",
     showMoreFiles: (n: number) => `显示其余 ${n} 个文件`,
     filesEdited: (n: number) => `已编辑 ${n} 个文件`,
     filesMentioned: (n: number) => `本条回复涉及 ${n} 个文件`,
@@ -1469,6 +1506,13 @@ const zh: Strings = {
     overwriteConfirm: (n: number) => `当前目录已存在以下 ${n} 个同名文件，上传将覆盖：`,
     previewUnsupported: "该类型不支持预览，请下载查看",
     previewTruncated: "内容过大，预览已截断，请下载查看完整文件",
+    diffSplit: "切换为左右对比",
+    diffUnified: "切换为单栏对比",
+    diffWrap: "开启自动换行",
+    diffNoWrap: "关闭自动换行",
+    diffOpenFile: "在侧边栏打开整个文件",
+    diffTruncated: (n: number) => `只显示前 ${n.toLocaleString()} 行。`,
+    diffEdit: (i: number, n: number) => `第 ${i} 次编辑，共 ${n} 次`,
     workspacePath: "工作区路径",
     viewMarkdown: "Markdown",
     viewWeb: "网页",
@@ -1487,11 +1531,16 @@ const zh: Strings = {
     noRoot: "先为这个对话选一个工作目录。",
     uploading: "上传中…",
     closeTab: "关闭标签页",
+    newTab: "新建标签页",
+    guideTitle: "开始",
+    guideFiles: "工作区文件",
+    guideFilesDesc: "浏览这个对话工作目录里的文件",
   },
 
   terminal: {
     title: (n: number) => (n === 1 ? "终端" : `终端 ${n}`),
     newTerminal: "新建终端",
+    guideDesc: "在这个对话的工作目录里运行命令",
     startFailed: "终端启动失败",
     disconnected: "与终端的连接已断开。",
     reconnect: "重新连接",

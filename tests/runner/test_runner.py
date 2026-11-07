@@ -1027,6 +1027,66 @@ class TestSessionLogInTurnPersistence(unittest.TestCase):
             asyncio.run(_drive())
             self._assert_single_tool_turn(agent)
 
+    def test_streaming_write_tool_row_keeps_its_diff(self):
+        """A write tool's diff reaches the log row, so a reload can review it."""
+        import tempfile
+        from types import SimpleNamespace
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
+
+        def edit(text: str) -> str:
+            """Pretend to rewrite a.py."""
+            return ToolDisplayOutput("Updated a.py", file_display_meta([
+                file_change_meta("a.py", "update", "one\ntwo\n", f"one\n{text}\n"),
+            ]))
+
+        def _chunk(content=None, tool_calls=None, finish_reason=None):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    finish_reason=finish_reason,
+                    delta=SimpleNamespace(content=content, reasoning_content=None,
+                                          audio=None, tool_calls=tool_calls),
+                )],
+                usage=None,
+            )
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        turns = iter([
+            [_chunk(
+                tool_calls=[SimpleNamespace(
+                    index=0, id="call_1", type="function",
+                    function=SimpleNamespace(name="edit", arguments='{"text": "TWO"}'),
+                )],
+                finish_reason="tool_calls",
+            )],
+            [_chunk(content="done", finish_reason="stop")],
+        ])
+
+        async def fake_invoke_stream(messages):
+            for chunk in next(turns):
+                yield chunk
+
+        model.invoke_stream = fake_invoke_stream
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = Agent(
+                name="t", model=model, tools=[edit],
+                session_id="s-diff-row", session_base_dir=tmp,
+            )
+
+            async def _drive():
+                async for _ in agent.run_stream("edit it"):
+                    pass
+
+            asyncio.run(_drive())
+            rows = [e for e in self._entries(agent) if e["type"] == "tool"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["diff"], "diff -- a.py\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO")
+            self.assertNotIn("tool_display_meta", rows[0])
+            # The diff is display-only: resume does not hand it to the model.
+            derived = agent._session_log.load()
+            self.assertNotIn("diff", [k for m in derived for k in m])
+
     def test_streaming_asides_stay_on_tool_round_not_final(self):
         """Tool-round asides must not be concatenated into the final answer.
 

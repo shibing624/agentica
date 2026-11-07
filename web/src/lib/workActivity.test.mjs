@@ -83,3 +83,20 @@ test("latest todos come from the newest successful write_todos", () => {
   assert.deepEqual(A.todoProgress(got), { done: 1, total: 2, active: got[1] });
   assert.deepEqual(A.latestTodos([{ parts: [] }]), []);
 });
+
+test("an unfinished plan stays with its turn, not with later questions", () => {
+  const todos = (list) => ({ kind: "tool", name: "write_todos", argsStr: JSON.stringify({ todos: list }), result: "ok" });
+  const plan = [{ content: "a", status: "in_progress" }, { content: "b", status: "pending" }];
+  const interrupted = [
+    { role: "user", content: "q1" },
+    { role: "assistant", parts: [todos(plan)] },
+  ];
+  assert.equal(A.latestTodos(interrupted).length, 2);
+  assert.deepEqual(A.latestTodos([...interrupted, { role: "user", content: "q2" }, { role: "assistant", parts: [] }]), []);
+  // a steer chip or an automated report is not a new question: the plan stays
+  assert.equal(A.latestTodos([...interrupted, { role: "user", content: "hurry", steer: true }]).length, 2);
+  assert.equal(A.latestTodos([...interrupted, { role: "user", content: "[Background]", automated: true }]).length, 2);
+  // a new plan written in the new turn shows
+  const next = [...interrupted, { role: "user", content: "q2" }, { role: "assistant", parts: [todos([{ content: "c", status: "pending" }])] }];
+  assert.deepEqual(A.latestTodos(next).map((t) => t.content), ["c"]);
+});

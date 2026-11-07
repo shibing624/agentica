@@ -1,13 +1,29 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
-import { fmtCost, fmtN } from "../lib/format";
+import { fmtCost, fmtN, fmtSpan } from "../lib/format";
 import { bump, getState, saveSessions, type Session } from "../store";
 
 export type UsageSection = {
   label: string;
   tokens: number;
   share: number;
+};
+
+/** Read from the session log, so a gateway restart does not zero it. */
+export type SessionStats = {
+  rounds: number;
+  steps: number;
+  llm_ms: number;
+  tool_ms: number;
+  ttft_ms: number | null;
+  tps: number;
+  uncached_input_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  cache_hit_percent: number | null;
+  cost_usd: number | null;
 };
 
 export type SessionUsage = {
@@ -25,6 +41,7 @@ export type SessionUsage = {
   cache_write_tokens: number;
   cache_hit_percent: number | null;
   sections: UsageSection[];
+  stats?: SessionStats;
 };
 
 export function applySessionUsage(sessionId: string, usage: SessionUsage) {
@@ -84,6 +101,11 @@ export function ContextUsageTip({ sessionId, fallback }: {
   const segments = sectionTotal > 0
     ? sections.map((sec, i) => ({ key: sec.label, tint: SECTION_TINTS[i % SECTION_TINTS.length], width: pct * sec.tokens / sectionTotal }))
     : [{ key: "total", tint: undefined, width: pct }];
+  const stats = usage?.stats && usage.stats.steps > 0 ? usage.stats : null;
+  const tokenTotal = stats
+    ? stats.uncached_input_tokens + stats.cache_read_tokens + stats.cache_write_tokens + stats.output_tokens
+    : 0;
+  const tok = (n: number) => `${n.toLocaleString("en-US")} tok`;
 
   return (
     <div className="ctx-tip" role="dialog" aria-label={S.chat.ctxWindowTitle}>
@@ -112,27 +134,48 @@ export function ContextUsageTip({ sessionId, fallback }: {
           ))}
         </dl>
       )}
-      <div className="ctx-tip-title">{S.chat.ctxSessionUsage}</div>
-      <dl className="ctx-details">
-        <dt>{S.chat.ctxMessages}</dt><dd>{messages}</dd>
-        <dt>{S.chat.ctxApiCalls}</dt><dd>{apiCalls}</dd>
-        <dt>{S.chat.ctxInput}</dt><dd>{fmtN(inputTokens)}</dd>
-        {!!usage?.cache_read_tokens && (
-          <>
-            <dt>{S.chat.ctxCached}</dt>
-            <dd>
-              {fmtN(usage.cache_read_tokens)}
-              {usage.cache_hit_percent != null ? ` / ${usage.cache_hit_percent.toFixed(1)}%` : ""}
-            </dd>
-          </>
-        )}
-        {!!usage?.cache_write_tokens && (
-          <><dt>{S.chat.ctxCacheWrite}</dt><dd>{fmtN(usage.cache_write_tokens)}</dd></>
-        )}
-        <dt>{S.chat.ctxOutput}</dt><dd>{fmtN(outputTokens)}</dd>
-        <dt>{S.chat.ctxCost}</dt><dd>~{fmtCost(cost)}</dd>
-      </dl>
-      {apiCalls === 0 && !loading && (
+      {stats ? (
+        <>
+          <div className="ctx-tip-title">
+            {S.chat.ctxStats}
+            <span className="ctx-tip-sub">{S.chat.ctxCounts(stats.rounds, stats.steps)}</span>
+          </div>
+          <dl className="ctx-details">
+            <dt>{S.chat.ctxLlmTime}</dt><dd>{fmtSpan(stats.llm_ms, S.chat.ctxSpan)}</dd>
+            <dt>{S.chat.ctxToolTime}</dt><dd>{fmtSpan(stats.tool_ms, S.chat.ctxSpan)}</dd>
+            {stats.ttft_ms != null && (
+              <><dt>{S.chat.ctxTtft}</dt><dd>{fmtSpan(stats.ttft_ms, S.chat.ctxSpan)}</dd></>
+            )}
+            {stats.tps > 0 && <><dt>{S.chat.ctxTps}</dt><dd>{Math.round(stats.tps)} tok/s</dd></>}
+          </dl>
+          <div className="ctx-tip-title">{S.chat.ctxTokenUsage}</div>
+          <dl className="ctx-details">
+            <dt>{S.chat.ctxTokenTotal}</dt><dd>{tok(tokenTotal)}</dd>
+            {stats.cache_hit_percent != null && (
+              <><dt>{S.chat.ctxCached}</dt><dd>{stats.cache_hit_percent.toFixed(1)}%</dd></>
+            )}
+            <dt>{S.chat.ctxUncached}</dt><dd>{tok(stats.uncached_input_tokens)}</dd>
+            <dt>{S.chat.ctxCacheRead}</dt><dd>{tok(stats.cache_read_tokens)}</dd>
+            {stats.cache_write_tokens > 0 && (
+              <><dt>{S.chat.ctxCacheWrite}</dt><dd>{tok(stats.cache_write_tokens)}</dd></>
+            )}
+            <dt>{S.chat.ctxOutput}</dt><dd>{tok(stats.output_tokens)}</dd>
+            {stats.cost_usd != null && <><dt>{S.chat.ctxCost}</dt><dd>~{fmtCost(stats.cost_usd)}</dd></>}
+          </dl>
+        </>
+      ) : (
+        <>
+          <div className="ctx-tip-title">{S.chat.ctxSessionUsage}</div>
+          <dl className="ctx-details">
+            <dt>{S.chat.ctxMessages}</dt><dd>{messages}</dd>
+            <dt>{S.chat.ctxApiCalls}</dt><dd>{apiCalls}</dd>
+            <dt>{S.chat.ctxInput}</dt><dd>{fmtN(inputTokens)}</dd>
+            <dt>{S.chat.ctxOutput}</dt><dd>{fmtN(outputTokens)}</dd>
+            <dt>{S.chat.ctxCost}</dt><dd>~{fmtCost(cost)}</dd>
+          </dl>
+        </>
+      )}
+      {apiCalls === 0 && !stats && !loading && (
         <div className="ctx-tip-muted">{S.chat.ctxNoCalls}</div>
       )}
     </div>

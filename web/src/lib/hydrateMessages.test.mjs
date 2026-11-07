@@ -128,6 +128,22 @@ test("tool errors keep the Error: prefix the live stream uses", () => {
   assert.equal(tool.result, "Error: exit 1");
 });
 
+test("a write tool row's diff comes back on reload, on the part and the step", () => {
+  const diff = "diff -- a.py\n@@ -1 +1 @@\n-x\n+y";
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "edit" },
+    {
+      type: "assistant",
+      content: "",
+      tool_calls: [{ id: "w", type: "function", function: { name: "apply_patch", arguments: "{}" } }],
+    },
+    { type: "tool", tool_call_id: "w", tool_name: "apply_patch", content: "ok", diff },
+    { type: "assistant", content: "done" },
+  ]);
+  assert.equal(parts(msgs[1]).find((p) => p.kind === "tool").diff, diff);
+  assert.equal(msgs[1].steps.find((s) => s.type === "tool").diff, diff);
+});
+
 const PREAMBLE = [
   "<context_window>\nCurrent context window 2.\n</context_window>",
   '<session_notes path="/h/p/s1.notes.md">\n- goal: ship\n</session_notes>',

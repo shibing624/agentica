@@ -163,6 +163,8 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
     reconnect_count = 0
     compaction_count = 0
     usage_trend: List[Dict[str, Any]] = []
+    # Seconds to the first streamed token, one per answered request.
+    ttfts: List[float] = []
     meta: Dict[str, Any] = {
         "model": None,
         "provider": None,
@@ -197,6 +199,10 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
             meta["systemPromptTokens"] = _system_prompt_tokens(entry, meta.get("model"))
         elif entry_type == "assistant" and meta["model"] is None and entry.get("model"):
             meta["model"] = entry.get("model")
+        if entry_type == "assistant":
+            ttft = (entry.get("metrics") or {}).get("time_to_first_token")
+            if isinstance(ttft, (int, float)) and ttft > 0:
+                ttfts.append(float(ttft))
 
         is_steering = _is_steering_user(entry)
         if is_steering:
@@ -404,7 +410,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
         "messageTask": msg_task,
         "meta": meta,
         "rounds": rounds,
-        "totals": _totals(rounds, requests, elapsed_ms, compaction_count),
+        "totals": _totals(rounds, requests, elapsed_ms, compaction_count, ttfts),
     }
     if lite:
         for key in ("requests", "tasks", "modelSegments", "toolSpans", "otherSpans", "usageTrend", "messageTask"):
@@ -984,12 +990,17 @@ def _totals(
     requests: List[Dict[str, Any]],
     elapsed_ms: int,
     compaction_count: int,
+    ttfts: List[float],
 ) -> Dict[str, Any]:
     tokens = _empty_tokens()
     for r in rounds:
         for key in tokens:
             tokens[key] += r["tokens"].get(key, 0)
     llm_ms = sum(r["llmMs"] for r in rounds)
+    # Each call's own run time; parallel calls each count, as in the CLI.
+    tool_ms = sum(
+        c.get("durationMs") or 0 for r in rounds for c in r["calls"] if c["kind"] == "tool"
+    )
     costs = [r["costUsd"] for r in rounds if r["costUsd"] is not None]
     tool_results = sum(r["toolResults"] for r in rounds)
     tool_errors = sum(r["toolErrors"] for r in rounds)
@@ -1003,6 +1014,8 @@ def _totals(
         "tokens": _token_view(tokens),
         "elapsedMs": elapsed_ms,
         "llmMs": llm_ms,
+        "toolMs": tool_ms,
+        "ttftMs": int(round(sum(ttfts) / len(ttfts) * 1000)) if ttfts else None,
         "waitMs": sum(r["waitMs"] for r in rounds),
         "costUsd": sum(costs) if costs else None,
         "tps": (tokens["output"] / (llm_ms / 1000)) if llm_ms > 0 else 0.0,

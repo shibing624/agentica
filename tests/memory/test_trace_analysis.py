@@ -427,6 +427,17 @@ class TestRoundView:
         assert rd["tokens"]["prompt"] == 2050
         assert rd["tokens"]["cacheHitPercent"] == 92.7
 
+    def test_totals_carry_tool_time_and_mean_first_token_latency(self):
+        turn = self._turn()
+        # Two answered requests: first tokens at 0.8s and 1.6s.
+        turn[9]["metrics"] = {"time_to_first_token": 0.8}
+        turn[-1]["metrics"] = {"time_to_first_token": 1.6}
+        totals = analyze_entries(turn)["totals"]
+        assert totals["ttftMs"] == 1200
+        # The tool's own run time (metrics.time), not the gap around it.
+        assert totals["toolMs"] == 250
+        assert analyze_entries(self._turn())["totals"]["ttftMs"] is None
+
     def test_cost_is_none_without_a_known_model(self):
         entries = [e for e in self._turn() if e.get("name") != "session_meta"]
         entries = [e for e in entries if e.get("type") != "assistant" or "content" not in e]

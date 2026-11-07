@@ -158,3 +158,37 @@ def test_payload_message_count_is_zero_when_history_is_not_replayed():
     payload = asyncio.run(usage_payload(agent, model_provider="openai"))
 
     assert payload["messages"] == 0
+
+
+def test_session_stats_come_from_the_log_and_survive_a_gateway_restart(tmp_path, monkeypatch):
+    """The cached Agent forgets its usage on restart; the log does not."""
+    from unittest.mock import AsyncMock
+
+    from agentica.memory.session_log import SessionLog
+    from agentica_gateway.services import agent_service as svc_mod
+    from agentica_gateway.services.agent_service import AgentService
+
+    log = SessionLog(session_id="s1", base_dir=str(tmp_path))
+    log.append("user", "count files")
+    log.append_event("request_begin", timestamp="2026-01-01T00:00:01.000Z")
+    log.append_event("token_usage", timestamp="2026-01-01T00:00:03.000Z",
+                     request={"input": 100, "cache_read": 900, "cache_write": 0, "output": 40, "total": 1040})
+    log.append_event("request_end", timestamp="2026-01-01T00:00:03.000Z", status="completed")
+    log.append("assistant", "12 files", metrics={"time_to_first_token": 0.5})
+
+    svc = AgentService(workspace_path=str(tmp_path))
+    monkeypatch.setattr(svc, "_ensure_initialized", AsyncMock())
+    monkeypatch.setattr(svc, "_get_agent", AsyncMock(return_value=None))
+    # A freshly built Agent: no requests in memory.
+    monkeypatch.setattr(svc_mod, "usage_payload", AsyncMock(return_value={"api_calls": 0, "cost_usd": 0}))
+    monkeypatch.setattr(svc, "session_log_for", lambda sid, owner=None: log)
+
+    stats = asyncio.run(svc.session_usage("s1"))["stats"]
+    assert stats["rounds"] == 1 and stats["steps"] == 1
+    assert stats["llm_ms"] == 2000
+    assert stats["ttft_ms"] == 500
+    assert stats["tps"] == 20.0
+    assert stats["uncached_input_tokens"] == 100
+    assert stats["cache_read_tokens"] == 900
+    assert stats["output_tokens"] == 40
+    assert stats["cache_hit_percent"] == 90.0

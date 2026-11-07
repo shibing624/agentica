@@ -1,17 +1,25 @@
+import type { DiffHunk } from "./fileDiff";
+
 /**
  * Right-panel tabs (dsh's sidebar-right, without split panes or floating).
  * The file browser is the fixed first tab; files, skills and terminals open
- * after it. Pure, so the open/close/activate rules are testable without React.
+ * after it. "+" opens the start page (dsh's guide), a doorway that turns into
+ * the page picked on it. Pure, so the rules are testable without React.
  */
 export type PanelTab =
   | { key: "files"; kind: "files" }
+  | { key: "guide"; kind: "guide" }
   | { key: string; kind: "file"; path: string }
   | { key: string; kind: "skill"; name: string }
+  /** A reply's edits to one file, one hunk list per tool call. */
+  | { key: string; kind: "diff"; path: string; edits: DiffHunk[][] }
   | { key: string; kind: "terminal"; id: string; ordinal: number };
 
 export type TabsState = { tabs: PanelTab[]; active: string };
 
 export const FILES_TAB: PanelTab = { key: "files", kind: "files" };
+/** One start page per panel: "+" focuses it when it is already open. */
+export const GUIDE_TAB: PanelTab = { key: "guide", kind: "guide" };
 
 export function initialTabs(): TabsState {
   return { tabs: [FILES_TAB], active: FILES_TAB.key };
@@ -19,6 +27,7 @@ export function initialTabs(): TabsState {
 
 export const fileKey = (path: string) => `file:${path}`;
 export const skillKey = (name: string) => `skill:${name}`;
+export const diffKey = (path: string) => `diff:${path}`;
 export const terminalKey = (id: string) => `term:${id}`;
 
 /** Open a tab, or focus it if one with the same key is already open. New tabs
@@ -45,6 +54,29 @@ export function closeTab(state: TabsState, key: string): TabsState {
 
 export function activateTab(state: TabsState, key: string): TabsState {
   return state.tabs.some((t) => t.key === key) ? { ...state, active: key } : state;
+}
+
+/** Open a tab, or focus the open one with its content replaced: one diff tab
+ *  per file, showing whichever reply's edits were opened last. */
+export function upsertTab(state: TabsState, tab: PanelTab): TabsState {
+  const at = state.tabs.findIndex((t) => t.key === tab.key);
+  if (at < 0) return openTab(state, tab);
+  const tabs = [...state.tabs];
+  tabs[at] = tab;
+  return { tabs, active: tab.key };
+}
+
+/** Put `tab` where `key` is (the start page becoming the page picked on it).
+ *  A page that is already open elsewhere is revealed instead, and `key` closes. */
+export function replaceTab(state: TabsState, key: string, tab: PanelTab): TabsState {
+  const at = state.tabs.findIndex((t) => t.key === key);
+  if (at < 0) return openTab(state, tab);
+  if (state.tabs.some((t) => t.key === tab.key)) {
+    return { tabs: state.tabs.filter((t) => t.key !== key), active: tab.key };
+  }
+  const tabs = [...state.tabs];
+  tabs[at] = tab;
+  return { tabs, active: tab.key };
 }
 
 /** The lowest ordinal not in use, so "Terminal 2" is reused after it closes. */

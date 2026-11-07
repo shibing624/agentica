@@ -152,10 +152,19 @@ export function todoProgress(todos: Todo[]): { done: number; total: number; acti
   };
 }
 
-/** The newest `write_todos` list across these messages, or [] when there is none. */
-export function latestTodos(msgs: Array<{ parts?: MsgPart[] }>): Todo[] {
+/**
+ * The plan of the latest turn: the newest `write_todos` list written after the
+ * last real user query (steer chips and automated reports do not start a new
+ * question). A plan left unfinished by an interrupted turn stays with that
+ * turn instead of riding along under every later question.
+ */
+export function latestTodos(
+  msgs: Array<{ role?: string; steer?: boolean; automated?: boolean; parts?: MsgPart[] }>,
+): Todo[] {
   for (let i = msgs.length - 1; i >= 0; i--) {
-    const parts = msgs[i].parts || [];
+    const m = msgs[i];
+    if (m.role === "user" && !m.steer && !m.automated) break;
+    const parts = m.parts || [];
     for (let j = parts.length - 1; j >= 0; j--) {
       const p = parts[j];
       if (p.kind !== "tool" || p.name !== "write_todos") continue;

@@ -71,3 +71,39 @@ test("adopting terminals after a reload adds the missing ones only, without stea
   assert.deepEqual(st.tabs.slice(1).map((t) => t.ordinal), [1, 2, 3]);
   assert.equal(st.active, "files");
 });
+
+test("the start page turns into the page picked on it, in its own place", () => {
+  let st = T.openTab(T.initialTabs(), file("a"));
+  st = T.activateTab(st, "files");
+  st = T.openTab(st, T.GUIDE_TAB);
+  assert.deepEqual(keys(st), ["files", "guide", "file:a"]);
+  st = T.replaceTab(st, "guide", term("x", 1));
+  assert.deepEqual(keys(st), ["files", "term:x", "file:a"]);
+  assert.equal(st.active, "term:x");
+});
+
+test("picking a page that is already open reveals it and closes the start page", () => {
+  let st = T.openTab(T.initialTabs(), T.GUIDE_TAB);
+  assert.equal(st.active, "guide");
+  st = T.replaceTab(st, "guide", T.FILES_TAB);
+  assert.deepEqual(keys(st), ["files"]);
+  assert.equal(st.active, "files");
+});
+
+test("there is one start page: opening it again focuses it", () => {
+  let st = T.openTab(T.initialTabs(), T.GUIDE_TAB);
+  st = T.openTab(st, file("a"));
+  st = T.openTab(st, T.GUIDE_TAB);
+  assert.deepEqual(keys(st), ["files", "guide", "file:a"]);
+  assert.equal(st.active, "guide");
+});
+
+test("a file's diff tab is reused: reopening it swaps the edits in place and focuses it", () => {
+  const diff = (path, n) => ({ key: T.diffKey(path), kind: "diff", path, edits: [[{ oldStart: n, oldLines: 1, newStart: n, newLines: 1, lines: ["+x"] }]] });
+  let st = T.upsertTab(T.initialTabs(), diff("a.py", 1));
+  st = T.openTab(st, file("b"));
+  st = T.upsertTab(st, diff("a.py", 9));
+  assert.deepEqual(keys(st), ["files", "diff:a.py", "file:b"]);
+  assert.equal(st.active, "diff:a.py");
+  assert.equal(st.tabs[1].edits[0][0].oldStart, 9);
+});

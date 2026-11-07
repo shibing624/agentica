@@ -49,6 +49,7 @@ from agentica.run.response import (
 )
 from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import FunctionCall
+from agentica.tools.helpers import files_unified_diff
 from agentica.utils.langfuse_integration import (
     bound_langfuse_value,
     langfuse_observation_context,
@@ -1379,6 +1380,13 @@ class LoopMixin:
                                             key: value for key, value in tool_call_dict.items()
                                             if key != "tool_display_meta"
                                         }
+                                        # The before/after texts stay out of the record; the
+                                        # session log keeps only their diff, for the Web review.
+                                        _files = (tool_call_dict.get("tool_display_meta") or {}).get("files")
+                                        if _files:
+                                            _diff = files_unified_diff(_files)
+                                            if _diff:
+                                                persisted_tool_call["diff"] = _diff
                                         for tool_call in agent.run_response.tools:
                                             if target_id is not None and tool_call.get("tool_call_id") == target_id:
                                                 tool_call.update(persisted_tool_call)

@@ -3,6 +3,7 @@ import * as api from "../api";
 import { useStrings } from "../i18n";
 import { IconExternal, IconFileCode, IconFinder } from "../icons";
 import { fileEditsOf, type FileEdit } from "../lib/fileEdits";
+import { fileDiffsOf, type DiffHunk } from "../lib/fileDiff";
 import {
   extractFilePaths, extractToolPaths, toWorkspaceRelative,
 } from "../lib/file-path";
@@ -30,17 +31,19 @@ function absPath(workspace: string, rel: string) {
 
 /**
  * The files a reply touched, under the answer: what it edited (with +/- lines)
- * first, then other files it named. A row previews in the side panel; its
- * buttons open the file with the OS default app or show it in its folder.
+ * first, then other files it named. An edited row opens its diff in the side
+ * panel (a file the reply only named opens its preview); the buttons open the
+ * file with the OS default app or show it in its folder.
  */
 export function MessageFilesCard({
-  text, steps, uploaded, workspace, onOpenFile, live,
+  text, steps, uploaded, workspace, onOpenFile, onOpenDiff, live,
 }: {
   text: string;
   steps?: Array<Record<string, any>>;
   uploaded?: string[];
   workspace: string | null;
   onOpenFile: (path: string) => void;
+  onOpenDiff: (path: string, edits: DiffHunk[][]) => void;
   live?: boolean;
 }) {
   const S = useStrings();
@@ -55,6 +58,7 @@ export function MessageFilesCard({
     }
     return out;
   }, [steps, workspace]);
+  const diffs = useMemo(() => fileDiffsOf(steps, workspace), [steps, workspace]);
   const candidates = useMemo(() => {
     const raw = [
       ...edits.map((e) => e.path),
@@ -105,24 +109,28 @@ export function MessageFilesCard({
       .then(({ ok }) => { if (!ok) showToast(S.chat.openFailed, 2500); });
   };
 
-  const row = (rel: string, edit?: FileEdit) => (
+  const row = (rel: string, edit?: FileEdit) => {
+    const diff = edit ? diffs.get(rel) : undefined;
+    return (
     <div key={rel} className="mfc-row">
-      <button type="button" className="mfc-path" title={`${absPath(workspace, rel)}\n${S.chat.openPreview}`}
-              onClick={() => onOpenFile(rel)}>
+      <button type="button" className="mfc-path"
+              title={`${absPath(workspace, rel)}\n${diff ? S.chat.openDiff : S.chat.openPreview}`}
+              onClick={() => (diff ? onOpenDiff(rel, diff.edits) : onOpenFile(rel))}>
         <PathLabel path={rel} />
       </button>
+      <span className="mfc-actions">
+        <button type="button" title={S.chat.openExternal} onClick={() => open(rel, "finder")}><IconExternal /></button>
+        <button type="button" title={S.chat.revealInFolder} onClick={() => open(rel, "reveal")}><IconFinder /></button>
+      </span>
       {edit && (
         <span className="mfc-diff">
           <span className="add">+{edit.added.toLocaleString()}</span>
           <span className="del">-{edit.removed.toLocaleString()}</span>
         </span>
       )}
-      <span className="mfc-actions">
-        <button type="button" title={S.chat.openExternal} onClick={() => open(rel, "finder")}><IconExternal /></button>
-        <button type="button" title={S.chat.revealInFolder} onClick={() => open(rel, "reveal")}><IconFinder /></button>
-      </span>
     </div>
-  );
+    );
+  };
 
   const editedVisible = expanded ? edited : edited.slice(0, MAX_VISIBLE_EDITED);
   const mentionedVisible = expanded ? mentioned : mentioned.slice(0, MAX_VISIBLE);

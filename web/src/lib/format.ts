@@ -32,9 +32,32 @@ export function fmtCost(cost: number) {
 export function fmtTime(sec: number) {
   if (!sec) return "0s";
   if (sec < 60) return `${sec.toFixed(1)}s`;
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  return `${m}m ${s}s`;
+  return spanParts(sec).map(([u, n]) => `${n}${COMPACT[u]}`).join(" ");
+}
+
+export type SpanUnit = "y" | "mo" | "d" | "h" | "m" | "s";
+const SPAN_STEPS: Array<[SpanUnit, number]> = [
+  ["y", 365 * 86_400], ["mo", 30 * 86_400], ["d", 86_400], ["h", 3_600], ["m", 60], ["s", 1],
+];
+const COMPACT: Record<SpanUnit, string> = { y: "y", mo: "mo", d: "d", h: "h", m: "m", s: "s" };
+
+/**
+ * A span (seconds, >= 1) as its two largest units — `2h 32m`, `3d 4h`,
+ * `1y 2mo` — dropping the smaller one when it is zero. Months are 30 days and
+ * years 365, which is what a long-running session needs, not a calendar.
+ */
+export function spanParts(sec: number): Array<[SpanUnit, number]> {
+  const total = Math.round(sec);
+  const i = Math.max(0, SPAN_STEPS.findIndex(([, size]) => total >= size));
+  const [unit, size] = SPAN_STEPS[i];
+  const major = Math.floor(total / size);
+  const parts: Array<[SpanUnit, number]> = [[unit, major]];
+  const next = SPAN_STEPS[i + 1];
+  if (next) {
+    const minor = Math.floor((total - major * size) / next[1]);
+    if (minor) parts.push([next[0], minor]);
+  }
+  return parts;
 }
 
 /** Wall / LLM duration, shared by the chat footer and the Trace round header. */
@@ -44,13 +67,20 @@ export function fmtDurationMs(ms: number) {
   const sec = ms / 1000;
   if (sec < 10) return `${sec.toFixed(2)}s`;
   if (sec < 60) return `${sec.toFixed(1)}s`;
-  let total = Math.round(sec);
-  const hours = Math.floor(total / 3600);
-  total %= 3600;
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  if (hours) return minutes ? `${hours}h${minutes}m` : `${hours}h`;
-  return seconds ? `${minutes}m${seconds}s` : `${minutes}m`;
+  return spanParts(sec).map(([u, n]) => `${n}${COMPACT[u]}`).join("");
+}
+
+/** A long span in words: `2小时32分` / `49.8秒` / `3天4小时`, units from the locale. */
+export type SpanUnits = Record<SpanUnit, (n: number) => string> & {
+  sec: (s: string) => string;
+  ms: (ms: number) => string;
+  join: string;
+};
+export function fmtSpan(ms: number, u: SpanUnits) {
+  if (ms < 1000) return u.ms(Math.round(ms));
+  const sec = ms / 1000;
+  if (sec < 60) return u.sec(sec.toFixed(1));
+  return spanParts(sec).map(([unit, n]) => u[unit](n)).join(u.join);
 }
 
 export function fmtTps(n: number) {
@@ -70,6 +100,8 @@ export type AgoLabels = {
   agoMinutes: (n: number) => string;
   agoHours: (n: number) => string;
   agoDays: (n: number) => string;
+  agoMonths: (n: number) => string;
+  agoYears: (n: number) => string;
 };
 
 /** Last real user query (steer chips are mid-run). Falls back to lastTs then ts. */
@@ -101,7 +133,7 @@ export function sessionSideStatus(opts: {
 }
 
 /**
- * Coarse idle label: just now / 5-min steps / hours / days.
+ * Coarse idle label: just now / 5-min steps / hours / days / months / years.
  * Exact minutes like ``7m`` made the sidebar feel twitchy.
  */
 export function agoStr(ts: number, labels: AgoLabels, now = Date.now()): string {
@@ -112,7 +144,9 @@ export function agoStr(ts: number, labels: AgoLabels, now = Date.now()): string 
     return labels.agoMinutes(Math.max(5, Math.floor(mins / 5) * 5));
   }
   if (d < 24 * 60 * 60_000) return labels.agoHours(Math.floor(d / 3_600_000));
-  return labels.agoDays(Math.floor(d / 86_400_000));
+  if (d < 30 * 86_400_000) return labels.agoDays(Math.floor(d / 86_400_000));
+  if (d < 365 * 86_400_000) return labels.agoMonths(Math.floor(d / (30 * 86_400_000)));
+  return labels.agoYears(Math.floor(d / (365 * 86_400_000)));
 }
 
 export function fmtFileSize(n: number) {

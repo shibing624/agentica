@@ -4,7 +4,7 @@
  * Markdown has rendered/source views. Source views (and fenced blocks inside
  * rendered Markdown) use CodeFrame.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -62,6 +62,47 @@ function resolveRelative(baseDir: string, ref: string): string {
  * One file in its own panel tab: loads on mount and on refresh, keeps its view
  * mode. A relative link in rendered Markdown opens the target in another tab.
  */
+/** A workspace Markdown file. Memoized on its inputs: `img` / `a` are component
+ *  types, and fresh ones on every app-state tick (each keystroke in the
+ *  composer) remounted every image and link, which reloaded and jumped. */
+const MarkdownDoc = memo(function MarkdownDoc({
+  root, path: docPath, content, onOpenFile,
+}: {
+  root: string;
+  path: string;
+  content: string;
+  onOpenFile: (path: string) => void;
+}) {
+  const components = useMemo(() => ({
+    img: ({ src: href, alt }: { src?: unknown; alt?: string }) => (
+      <img
+        src={typeof href === "string" && !EXTERNAL_REF_RE.test(href)
+          ? api.workspaceContentUrl(root, resolveRelative(dirOf(docPath), href))
+          : (href as string | undefined)}
+        alt={alt || ""}
+      />
+    ),
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      if (typeof href !== "string" || href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
+        return <a href={href} target={EXTERNAL_REF_RE.test(href || "") ? "_blank" : undefined} rel="noreferrer">{children}</a>;
+      }
+      const target = resolveRelative(dirOf(docPath), href);
+      return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); onOpenFile(target); }}>{children}</a>;
+    },
+    table: ({ children }: { children?: React.ReactNode }) => <div className="md-table"><table>{children}</table></div>,
+    pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    code: MarkdownCode,
+  }), [root, docPath, onOpenFile]);
+  return (
+    <div className="md-doc">
+      <Markdown remarkPlugins={MD_REMARK} rehypePlugins={MD_REHYPE} components={components}>{content}</Markdown>
+    </div>
+  );
+});
+
+const MD_REMARK = [...GFM_PLUGINS, remarkMath];
+const MD_REHYPE = [rehypeRaw, rehypeKatex];
+
 export function FilePreview({
   root, path: filePath, onOpenFile,
 }: {
@@ -143,31 +184,7 @@ export function FilePreview({
           <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
         )}
         {view === "markdown" && (
-          <div className="md-doc">
-            <Markdown
-              remarkPlugins={[...GFM_PLUGINS, remarkMath]}
-              rehypePlugins={[rehypeRaw, rehypeKatex]}
-              components={{
-              img: ({ src: href, alt }) => (
-                <img
-                  src={typeof href === "string" && !EXTERNAL_REF_RE.test(href)
-                    ? api.workspaceContentUrl(root, resolveRelative(dirOf(preview.path), href))
-                    : href}
-                  alt={alt || ""}
-                />
-              ),
-              a: ({ href, children }) => {
-                if (typeof href !== "string" || href.startsWith("#") || EXTERNAL_REF_RE.test(href)) {
-                  return <a href={href} target={EXTERNAL_REF_RE.test(href || "") ? "_blank" : undefined} rel="noreferrer">{children}</a>;
-                }
-                const target = resolveRelative(dirOf(preview.path), href);
-                return <a href={api.workspaceContentUrl(root, target)} onClick={(e) => { e.preventDefault(); onOpenFile(target); }}>{children}</a>;
-              },
-              table: ({ children }) => <div className="md-table"><table>{children}</table></div>,
-              pre: ({ children }) => <>{children}</>,
-              code: MarkdownCode,
-            }}>{preview.content || ""}</Markdown>
-          </div>
+          <MarkdownDoc root={root} path={preview.path} content={preview.content || ""} onOpenFile={onOpenFile} />
         )}
         {view === "code" && (
           <CodeFrame

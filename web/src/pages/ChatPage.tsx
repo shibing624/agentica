@@ -33,6 +33,7 @@ import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
+import type { DiffHunk } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
@@ -330,7 +331,7 @@ export function ChatPage() {
                 </div>
               ) : cur.msgs.map((m, i) => (
                 <MessageView key={i} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
-                  onOpenFile={files.browsePath} onOpenSkill={files.openSkill}
+                  onOpenFile={files.browsePath} onOpenDiff={files.openDiff} onOpenSkill={files.openSkill}
                   live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
                   pendingToolCallId={pendingToolCallId} />
               ))}
@@ -624,14 +625,13 @@ export function ChatPage() {
                 </div>
                 <ComposerDir />
                 <div className="approval-wrap" ref={approvalWrapRef}>
-                  <button className="foot-btn approval-btn" title={S.chat.permTip(s.selectedApprovalMode)}
+                  <button className="foot-btn approval-btn" title={S.chat.permHint(s.selectedApprovalMode)}
                           onClick={() => {
                             setSkillsOpen(false);
                             setState({ approvalMenuOpen: !s.approvalMenuOpen, modelDDOpen: false });
                           }}>
                     <span className="quick-icon">{permIcon(s.selectedApprovalMode)}</span>
                     <span className="approval-label">{S.chat.permLabel(s.selectedApprovalMode)}</span>
-                    <span className="approval-id">({s.selectedApprovalMode})</span>
                     <span className="arr"><IconChevronDown /></span>
                   </button>
                   {s.approvalMenuOpen && (
@@ -642,7 +642,6 @@ export function ChatPage() {
                                 onClick={() => setApprovalMode(mode)}>
                           <span className="quick-icon">{permIcon(mode)}</span>
                           <span className="approval-label">{S.chat.permLabel(mode)}</span>
-                          <span className="approval-id">({mode})</span>
                           {s.selectedApprovalMode === mode && <span className="quick-check">✓</span>}
                         </button>
                       ))}
@@ -745,8 +744,9 @@ function CompactCard({ c }: { c: NonNullable<ChatMsg["compact"]> }) {
   );
 }
 
-function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenSkill, live, pendingToolCallId }: {
+function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenDiff, onOpenSkill, live, pendingToolCallId }: {
   idx: number; m: ChatMsg; sessionId: string | null; workspace: string; onOpenFile: (path: string) => void;
+  onOpenDiff: (path: string, edits: DiffHunk[][]) => void;
   onOpenSkill: (name: string) => void; live?: boolean; pendingToolCallId?: string;
 }) {
   const S = useStrings();
@@ -817,6 +817,7 @@ function MessageView({ idx, m, sessionId, workspace, onOpenFile, onOpenSkill, li
           uploaded={m.files}
           workspace={workspace || null}
           onOpenFile={onOpenFile}
+          onOpenDiff={onOpenDiff}
           live={!!live}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}
