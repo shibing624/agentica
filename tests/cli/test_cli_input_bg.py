@@ -200,6 +200,34 @@ class TestBackgroundCompletionNotice(unittest.TestCase):
         self.assertIn("exit 1", rendered)
         self.assertIn("command failed", rendered)
 
+    def test_print_background_sigterm_notice_is_stopped(self):
+        from agentica.cli.interactive import btw as it
+        from agentica.tools.background_processes import BackgroundProcessCompleted
+
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "term.log"
+            log_path.write_text("$ server\n\nShutting down\n", encoding="utf-8")
+            event = BackgroundProcessCompleted(
+                id="term_6",
+                num=6,
+                pid=789,
+                command="server",
+                cwd=td,
+                log_path=str(log_path),
+                started_at=1.0,
+                completed_at=90.0,
+                returncode=-15,
+            )
+            fake_console = MagicMock()
+
+            with patch.object(it, "get_console", return_value=fake_console):
+                it._print_background_completion(event)
+
+        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        self.assertIn("Background terminal #6 stopped in 1m29s (SIGTERM)", rendered)
+        self.assertNotIn("failed", rendered)
+        self.assertNotIn("✗", rendered)
+
     def test_print_background_completion_shows_full_command_and_output(self):
         """Completion notice shows the whole command and log body — no Ctrl+O fold."""
         from agentica.cli.interactive import btw as it

@@ -47,6 +47,17 @@ class TestReportText:
     def test_a_failure_is_named_as_one(self):
         assert "failed" in _background_result_for_agent(_event(returncode=1))
 
+    def test_a_sigterm_is_a_stop_not_a_failure(self):
+        # `pkill` / `kill` on a server the agent started: Popen reports -15.
+        text = _background_result_for_agent(_event(returncode=-15))
+
+        assert "#3 (term_3) stopped: SIGTERM after" in text
+        assert "failed" not in text
+
+    def test_a_sigkill_is_still_a_failure(self):
+        # SIGKILL is also the OOM killer; it must not read as a clean stop.
+        assert "failed: SIGKILL after" in _background_result_for_agent(_event(returncode=-9))
+
     def test_the_full_command_is_never_truncated(self):
         command = "cd /very/long/path && " + " && ".join(f"step_{i}" for i in range(40))
 

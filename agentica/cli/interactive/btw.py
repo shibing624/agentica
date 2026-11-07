@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import signal
 from typing import List, Optional
 
 from rich.markup import escape as rich_escape
@@ -89,14 +90,42 @@ def promote_late_steer(state: SessionState, pending_queue) -> List[str]:
     return promoted
 
 
+# Signals that ask a process to stop (`kill`, `pkill`, Ctrl+C). A command
+# ended by one of these was stopped, it did not fail.
+# SIGKILL is deliberately absent: it is also how the OOM killer ends a job.
+_STOP_SIGNALS = {signal.SIGTERM, signal.SIGINT}
+
+
+def _exit_status(returncode: int) -> str:
+    """``finished`` / ``stopped`` / ``failed`` from a Popen return code.
+
+    Popen reports death-by-signal as ``-signum``.
+    """
+    if returncode == 0:
+        return "finished"
+    if returncode < 0 and -returncode in _STOP_SIGNALS:
+        return "stopped"
+    return "failed"
+
+
+def _exit_detail(returncode: int) -> str:
+    """``exit 1`` for a normal exit, ``SIGTERM`` for death by signal."""
+    if returncode < 0:
+        try:
+            return signal.Signals(-returncode).name
+        except ValueError:
+            pass
+    return f"exit {returncode}"
+
+
 def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     """Render a finished background command as a report for the agent."""
-    status = "finished" if event.returncode == 0 else "failed"
+    status = _exit_status(event.returncode)
     if event.kind == "delegate":
         return _delegate_result_for_agent(event, status)
     lines = [
         f"[Background terminal #{event.num} ({event.id}) {status}: "
-        f"exit {event.returncode} after {event.elapsed}]",
+        f"{_exit_detail(event.returncode)} after {event.elapsed}]",
         f"Command: {event.command}",
         f"Log: {event.log_path}",
     ]
@@ -160,20 +189,24 @@ def _print_background_completion(event: BackgroundProcessCompleted) -> None:
     Folding behind Ctrl+O hid the identity of long overnight jobs.
     """
     con = get_console()
-    ok = event.returncode == 0
-    marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
-    status = "finished" if ok else "failed"
+    status = _exit_status(event.returncode)
+    marker = {
+        "finished": "[green]✓[/green]",
+        "stopped": "[yellow]■[/yellow]",
+        "failed": "[red]✗[/red]",
+    }[status]
+    detail = _exit_detail(event.returncode)
     delegated = event.kind == "delegate"
     con.print()
     if delegated:
         con.print(
             f'{marker} Delegated task "{rich_escape(event.label)}" {status} in '
-            f"{event.elapsed} (exit {event.returncode})"
+            f"{event.elapsed} ({detail})"
         )
     else:
         con.print(
             f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
-            f"(exit {event.returncode})"
+            f"({detail})"
         )
     # The delegated command line is a `python -m agentica.cli.main --query <the
     # whole task>` — the label above already says what it was, so showing it
