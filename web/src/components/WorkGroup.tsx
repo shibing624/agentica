@@ -572,8 +572,14 @@ export function SteerChip({ text, ts, onOpenSkill }: { text: string; ts?: number
   };
   return (
     <div className="steer-chip">
-      <div className="steer-chip-bub">
-        {skill ? <SkillTurn name={skill.name} args={skill.args} source={text} onOpen={onOpenSkill} /> : text}
+      <div className="steer-chip-box">
+        <div className="steer-chip-row">
+          <IconUser />
+          <p className="steer-chip-text">
+            <span className="steer-chip-label">{S.chat.userSteering}</span>
+            {skill ? <SkillTurn name={skill.name} args={skill.args} source={text} onOpen={onOpenSkill} /> : text}
+          </p>
+        </div>
       </div>
       <div className="steer-chip-footer">
         {text && (
