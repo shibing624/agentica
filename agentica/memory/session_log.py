@@ -1776,6 +1776,10 @@ class SessionLog:
         value = data.get("source")
         return value.strip() if isinstance(value, str) and value.strip() else None
 
+    def get_source(self) -> Optional[str]:
+        """Return the entry point that created this session, if recorded."""
+        return self._meta_source(self._read_meta(self.meta_path))
+
     def set_source(self, source: str) -> None:
         """Persist the entry point that created this session."""
         normalized = source.strip()

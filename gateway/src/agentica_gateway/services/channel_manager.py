@@ -113,6 +113,30 @@ class ChannelManager:
 
         return await channel.send(channel_id, content, **kwargs)
 
+    async def send_file(
+        self,
+        channel_type: Union[ChannelType, str],
+        channel_id: str,
+        data: bytes,
+        filename: str,
+        mime_type: str = "application/octet-stream",
+    ) -> bool:
+        """Send a file/image payload to a specific channel if supported."""
+        if isinstance(channel_type, str):
+            try:
+                channel_type = ChannelType(channel_type)
+            except ValueError:
+                logger.warning(f"Unknown channel type: {channel_type}")
+                return False
+
+        channel = self.channels.get(channel_type)
+        if not channel or not channel.is_connected:
+            return False
+
+        return await channel.send_file(
+            channel_id, data, filename=filename, mime_type=mime_type,
+        )
+
     def get_status(self) -> Dict[str, dict]:
         """Return the connection status of all registered channels.
 

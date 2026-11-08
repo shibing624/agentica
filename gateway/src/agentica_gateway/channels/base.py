@@ -137,6 +137,19 @@ class Channel(ABC):
         """
         return []
 
+    async def send_file(
+        self,
+        channel_id: str,
+        data: bytes,
+        filename: str,
+        mime_type: str = "application/octet-stream",
+    ) -> bool:
+        """Send a binary file or image to the specified conversation.
+
+        Channels that support outbound media override this method.
+        """
+        return False
+
     def check_allowlist(self, user_id: str) -> bool:
         """Check whether a user is permitted by the allowlist.
 

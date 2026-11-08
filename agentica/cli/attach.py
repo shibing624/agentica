@@ -76,6 +76,7 @@ METHODS = (
     "session/load",
     "session/prompt",
     "session/cancel",
+    "session/answer",
     "ping",
 )
 
@@ -108,26 +109,22 @@ def attach_dir() -> Path:
 def attach_enabled(config: Optional[Dict[str, Any]] = None) -> bool:
     """Is the attach point switched on for this process?
 
-    Off unless ``settings.attach_enabled`` is true — a **flat settings key**, the
-    same shape the notify sink uses (``settings.notify.enabled`` is a nested
-    block, but the CLI's other toggles read flat keys like
-    ``settings.deliver_background_results``). Env ``AGENTICA_ATTACH_ENABLED=1``
-    overrides, matching the rest of the project's config handling.
-
-    Read once, at session start: the socket is created then, so a mid-session
-    flip could not take effect anyway and pretending otherwise would be worse
-    than saying so.
+    On by default so the local IM gateway / controller can attach to any live
+    CLI session without extra setup (the socket lives in a ``0700`` directory
+    with a ``0600`` token file). Set ``settings.attach_enabled: false`` or
+    ``AGENTICA_ATTACH_ENABLED=0`` to opt out.
     """
     override = os.getenv("AGENTICA_ATTACH_ENABLED")
     if override is not None:
-        return override.strip().lower() in ("1", "true", "yes", "on")
+        return override.strip().lower() not in ("0", "false", "no", "off")
     try:
         from agentica.config.profiles import get_setting
 
-        return bool(get_setting("attach_enabled", False, config=config))
+        val = get_setting("attach_enabled", True, config=config)
+        return True if val is None else bool(val)
     except Exception as exc:  # a broken config must not break session start
         logger.debug(f"attach: could not read settings.attach_enabled: {exc}")
-        return False
+        return True
 
 
 def socket_path(peer_id: str) -> Path:
@@ -206,6 +203,7 @@ class AttachServer:
         session_id: Optional[Callable[[], Optional[str]]] = None,
         cancel: Optional[Callable[[], None]] = None,
         answer: Optional[Callable[[], Optional[str]]] = None,
+        answer_interaction: Optional[Callable[[str, Optional[str]], bool]] = None,
         grace: float = 600.0,
         settle: float = 1.0,
     ):
@@ -216,6 +214,7 @@ class AttachServer:
         self._session_id = session_id
         self._cancel = cancel
         self._answer = answer
+        self._answer_interaction = answer_interaction
         # How long a prompt may wait for its turn. Generous because a turn
         # legitimately takes minutes and the alternative is claiming an answer
         # that is still being produced. Injectable so tests do not sit for it.
@@ -479,7 +478,21 @@ class AttachServer:
         if method == "session/cancel":
             self._cancel_current(params)
             return {}
+        if method == "session/answer":
+            return self._answer_pending_interaction(params)
         raise AttachError(ERR_METHOD_NOT_FOUND, f"method not found: {method}")
+
+    def _answer_pending_interaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Deliver a user answer to a parked question or approval card."""
+        raw_answer = params.get("answer")
+        if not isinstance(raw_answer, str) or not raw_answer.strip():
+            raise AttachError(ERR_INVALID_PARAMS, "answer must be a non-empty string")
+        request_id = params.get("requestId")
+        req_id_str = str(request_id).strip() if request_id else None
+        if self._answer_interaction is None:
+            return {"accepted": False}
+        accepted = bool(self._answer_interaction(raw_answer.strip(), req_id_str))
+        return {"accepted": accepted}
 
     def _load(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Attach to this session. A mismatched id means you are on the wrong socket."""

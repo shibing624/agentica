@@ -21,9 +21,13 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from agentica.peers import git_state
 from agentica import config
 from agentica.cli.approvals import (
+    approval_decision_from_key,
     build_interactive_approve,
+    complete_approval,
     human_wait_timeout,
     interrupt_approvals,
+    is_approval_request,
+    visible_approval_decisions,
 )
 from agentica.cli.commands.context import (
     IMAGE_EXTENSIONS,
@@ -1353,6 +1357,39 @@ def run_interactive(
     )
     peer_message_thread.start()
 
+    def _pending_interaction_snapshot(session_state) -> Optional[dict]:
+        req = session_state.input_request
+        if req is None or req.resolved:
+            return None
+        req_id = req.hook_request_id or req.approval_id or ""
+        if is_approval_request(req):
+            options = list(visible_approval_decisions(req.options))
+        else:
+            options = list(req.options) if req.options else []
+        return {
+            "requestId": req_id,
+            "kind": req.kind,
+            "prompt": req.prompt,
+            "options": options,
+        }
+
+    def _answer_pending_interaction(answer_text: str, request_id: Optional[str] = None) -> bool:
+        req = state.input_request
+        if req is None or req.resolved:
+            return False
+        current_id = req.hook_request_id or req.approval_id or ""
+        if request_id and current_id and request_id != current_id:
+            return False
+        if is_approval_request(req):
+            decision = approval_decision_from_key(answer_text, req.options)
+            if decision is None:
+                return False
+            return complete_approval(state, decision, app=app)
+        ok = req.submit(answer_text, source="attach")
+        if ok and app.is_running:
+            app.invalidate()
+        return ok
+
     # Attach point: let an external program (a desktop app, a pet, a script the
     # user runs) send a message into *this* session as the user. JSON-RPC over a
     # unix socket, because the TUI owns stdin/stdout so ACP's stdio transport
@@ -1360,7 +1397,7 @@ def run_interactive(
     # session — no names to collide, no prefixes to be ambiguous about, and no
     # cwd matching (which symlinks make treacherous).
     #
-    # Off unless switched on, and every failure is non-fatal: without the
+    # On by default, and every failure is non-fatal: without the
     # socket the terminal behaves exactly as before, there is just no attach
     # point.
     attach_server = None
@@ -1389,9 +1426,11 @@ def run_interactive(
             # The last answer, for a client that would otherwise have to read the
             # transcript to see what its prompt produced.
             answer=lambda: _last_answer_text(state),
+            answer_interaction=_answer_pending_interaction,
             snapshot=lambda: {
                 "cwd": state.current_agent.work_dir if state.current_agent else None,
                 "busy": state.agent_running,
+                "pendingInteraction": _pending_interaction_snapshot(state),
             },
         )
         attach_server.start()

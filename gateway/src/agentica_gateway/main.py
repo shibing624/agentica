@@ -15,12 +15,14 @@ import asyncio
 import os
 import socket
 import sys
+import time
 import unicodedata
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+from urllib.parse import parse_qs
 from uuid import uuid4
 
 if TYPE_CHECKING:
@@ -35,12 +37,18 @@ from agentica.cron.types import CronRunOutput
 from agentica.shell_hooks import install_hook_egress, load_shell_hooks_config
 from agentica.utils.log import enable_process_file_logging, logger
 from . import accounts, auth, deps, runtime
+from .card_page import (
+    LINK_LIFETIME_SECONDS,
+    PAGE_HEADERS,
+    CardRegistry,
+    card_page,
+    words_page,
+)
 from agentica.version import __version__
 from .config import settings
 from .services.agent_service import AgentService
 from .services.channel_manager import ChannelManager
-from .services.agent_peers import GatewayAgentPeers
-from .services.peer_bridge import PeerBridge
+from .services.im_bot import ImBotController
 from .services.router import MessageRouter
 from .routes import auth as auth_routes, chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes, traces as traces_routes, workspace as workspace_routes, terminals as terminal_routes, git as git_routes
 from .terminals import manager as terminal_manager
@@ -191,57 +199,14 @@ async def lifespan(app: FastAPI):
     # Channels (IM integrations: WeChat / WeCom / Feishu / QQ / ... )
     await _setup_channels()
 
-    # Peer bridge: `@list` / `@<session> <text>` from a chat app reaches the
-    # agentica CLI sessions running on this machine. Started after the channels
-    # because it sends through them.
-    if settings.peer_bridge_enabled:
-        # The same reach for the gateway's own agent: an `@` command is the
-        # user addressing a session themselves, this is the agent doing it on
-        # their behalf ("让三个会话都把改动提交了"). Same switch, because it is
-        # the same trust boundary, and same ordering — replies are pushed back
-        # through the channels. Built before the bridge, which needs its peer
-        # ids to keep the gateway agent out of `@list`.
-        async def _queued_mail_starts_a_turn(session_id: str, text: str) -> None:
-            """Leftover ``delivery=queue`` mail becomes this chat's next turn."""
-            if not text.strip() or deps.agent_peers is None:
-                return
-            route = deps.agent_peers.route_for(session_id)
-            if route is None:
-                return
-            from .channels.base import Message
-
-            channel, channel_id = route
-            await _enqueue_session_message(
-                session_id,
-                Message(
-                    channel=channel,
-                    channel_id=channel_id,
-                    sender_id="peer",
-                    sender_name="peer",
-                    content=text,
-                    message_id=f"peer-queue-{session_id}",
-                ),
-            )
-
-        deps.agent_peers = GatewayAgentPeers(
-            channel_manager=deps.channel_manager,
-            is_live=deps.agent_service.has_cached_session,
-            is_busy=deps.agent_service.is_session_active,
-            start_turn=_queued_mail_starts_a_turn,
-        )
-        deps.agent_service.agent_peers = deps.agent_peers
-        deps.agent_peers.start()
-
-        deps.peer_bridge = PeerBridge(
-            deps.channel_manager,
-            gateway_peer_ids=deps.agent_peers.peer_ids,
-        )
-        deps.peer_bridge.start()
-    else:
-        logger.info(
-            "Peer bridge disabled (PEER_BRIDGE=false) — the gateway's own agent "
-            "also gets no list_agents / send_message"
-        )
+    deps.card_registry = CardRegistry(secret_provider=auth.get_token)
+    deps.im_bot = ImBotController(
+        channel_manager=deps.channel_manager,
+        agent_service=deps.agent_service,
+        card_registry=deps.card_registry,
+        user_id_provider=_home_account,
+    )
+    logger.info("IM bot controller started (/menu, /resume, /switch, /new, /cancel, /c/<token>)")
 
     # Publish how to reach this process (port + token) so a desktop shell or a
     # second terminal can find it.
@@ -309,10 +274,8 @@ async def lifespan(app: FastAPI):
             await cron_task
         except (asyncio.CancelledError, Exception):
             pass
-    if deps.peer_bridge:
-        await deps.peer_bridge.stop()
-    if deps.agent_peers:
-        await deps.agent_peers.stop()
+    if deps.im_bot:
+        await deps.im_bot.stop()
     if deps.channel_manager:
         await deps.channel_manager.disconnect_all()
     terminal_manager.close_all()
@@ -406,6 +369,75 @@ async def web_favicon(request: Request):
         return Response(status_code=404)
     media = "image/x-icon" if name.endswith(".ico") else "image/png"
     return FileResponse(path, media_type=media)
+
+
+@app.get("/c/{token}")
+async def get_card_page(token: str) -> Response:
+    """Serve the zero-JS capability card page (/c/<token>) for mobile webviews."""
+    registry = deps.card_registry
+    card = registry.get_by_token(token) if registry is not None else None
+    if card is None:
+        return Response(
+            content=words_page("没有这张卡片"),
+            status_code=404,
+            headers=PAGE_HEADERS,
+        )
+    if time.time() - card.created_at > LINK_LIFETIME_SECONDS:
+        return Response(
+            content=words_page("这个链接已经过期了"),
+            status_code=401,
+            headers=PAGE_HEADERS,
+        )
+    return Response(content=card_page(card), status_code=200, headers=PAGE_HEADERS)
+
+
+@app.post("/c/{token}")
+async def post_card_page(token: str, request: Request) -> Response:
+    """Accept a form submission on /c/<token> and redirect (303 PRG)."""
+    registry = deps.card_registry
+    card = registry.get_by_token(token) if registry is not None else None
+    if card is None:
+        return Response(
+            content=words_page("没有这张卡片"),
+            status_code=404,
+            headers=PAGE_HEADERS,
+        )
+    if time.time() - card.created_at > LINK_LIFETIME_SECONDS:
+        return Response(
+            content=words_page("这个链接已经过期了"),
+            status_code=401,
+            headers=PAGE_HEADERS,
+        )
+    raw_body = (await request.body()).decode("utf-8", errors="replace")
+    form = parse_qs(raw_body, keep_blank_values=True)
+    choice_vals = form.get("choice")
+    choice = (
+        int(choice_vals[0])
+        if choice_vals and choice_vals[0].strip().lstrip("-").isdigit()
+        else None
+    )
+    text_vals = form.get("text")
+    text = text_vals[0] if text_vals else None
+    registry.answer(token, choice=choice, text=text, by="链接")
+    return Response(
+        status_code=303,
+        headers={"Location": f"/c/{token}", "Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/cards/hook")
+async def post_card_hook(request: Request) -> JSONResponse:
+    """Receive a CLI shell_hook event (needs.approval / needs.input / request.resolved)."""
+    if deps.im_bot is None:
+        return JSONResponse({"ok": False, "error": "im_bot not initialized"}, status_code=503)
+    payload = await request.json()
+    wait_param = request.query_params.get("wait") or payload.get("wait") or 0
+    try:
+        wait_s = min(max(float(wait_param), 0.0), 300.0)
+    except (TypeError, ValueError):
+        wait_s = 0.0
+    result = await deps.im_bot.handle_hook_event(payload, wait_seconds=wait_s)
+    return JSONResponse(result)
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -655,18 +687,10 @@ def _home_account() -> str:
 
 
 async def _handle_channel_message(message) -> None:
-    """Steer an inbound line into the session's running turn, or queue it.
-
-    Returns immediately. A per-session worker task drains the queue in
-    batches via ``_process_channel_batch``, so rapid-fire messages from the
-    same user never hit the session run-lock.
-    """
+    """Route an inbound IM message through ImBotController, or the fallback queue."""
     logger.info(f"[{message.channel.value}] {message.sender_id}: {message.content[:500]}")
 
-    # Relaying to a CLI session runs no agent here, so it skips the queue: a
-    # `@session stop` typed while the gateway's own agent is mid-turn must not
-    # wait behind that turn — being able to interrupt is the whole point of it.
-    if deps.peer_bridge is not None and await deps.peer_bridge.handle(message):
+    if deps.im_bot is not None and await deps.im_bot.handle(message):
         return
 
     if not deps.agent_service:
@@ -675,12 +699,6 @@ async def _handle_channel_message(message) -> None:
 
     agent_id = deps.message_router.route(message)
     session_id = deps.message_router.get_session_id(message, agent_id)
-
-    # Where a CLI session's answer to this chat session should be pushed. Noted
-    # here, on the one path that knows both the session id and the conversation
-    # it belongs to, rather than recovered later by splitting the session id.
-    if deps.agent_peers is not None:
-        deps.agent_peers.note_route(session_id, message.channel, message.channel_id)
 
     if await _steer_running_turn(session_id, message):
         return

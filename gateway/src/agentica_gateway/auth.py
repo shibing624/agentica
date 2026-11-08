@@ -69,9 +69,9 @@ QUERY_NAME = "token"
 CLIENT_HEADER = "X-Agentica-Client"
 
 # Prefixes served without a credential. Matched as prefixes, so
-# `/webhook/feishu` and any future channel callback are covered by the one
-# entry.
-_OPEN_PREFIXES = ("/webhook/", "/assets/")
+# `/webhook/feishu`, `/c/<token>` capability cards, and any future channel
+# callback are covered by the one entry.
+_OPEN_PREFIXES = ("/webhook/", "/assets/", "/c/")
 _OPEN_PATHS = (
     "/", "/health", "/api/health", "/docs", "/openapi.json", "/redoc",
     "/login", "/api/auth/status", "/api/auth/login", "/api/auth/logout",

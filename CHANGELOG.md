@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **重构 Gateway IM 远控架构：移除 IM 层的 `PeerBridge` / `GatewayAgentPeers`，新增会话级遥控器 `ImBotController` 与免 JS 签名卡片页 `/c/<token>`**（借鉴 OpenBitFun `remote_connect/bot/` 与 `agent-autoloop` `card-page`）：
+  - **删除 `gateway/services/peer_bridge.py` 与 `gateway/services/agent_peers.py`**（底层 `agentica/peers/` 保留给纯 CLI 多终端间协作）：旧设计将微信消息作为 peer 信箱投递，依赖对端模型主动调用 `send_message` 才能回传结果（漏调即失联），且只能寻址当前开着的终端进程、与网关自身 Agent 割裂。
+  - **IM 会话直接绑定本机 `(work_dir, session_id)` 并共享 `SessionLog`**（`gateway/services/im_bot.py`）：支持 `/menu`（`菜单`/`0`）、`/resume`（`恢复`，列出当前项目历史会话与在线 CLI 终端，回复数字 `1..N` 挂载，`0` 翻页）、`/new [prompt]`（`新建`）、`/switch`（`切换` 工作区目录）、`/model`（切换模型 Profile）、`/status`（`状态`）、`/cancel`（`取消`/`停止`）、`/verbose` 与 `/concise`，支持全角数字 `１..９` 与标点后缀归一化；无待决菜单时纯数字作为普通对话发送。
+  - **终端直连（CLI `AttachServer`）与后台直跑双路径无缝切换**：CLI `attach_enabled` 默认开启并新增 `session/answer` 与 `pendingInteraction` 快照。当绑定的 `session_id` 正由某个打开的 CLI 终端持有时，IM 任务通过 Unix socket 直接注入该终端执行，回合结束由 Harness 自动将 `agenticaAnswer` 推回 IM；当终端关闭时，由 Gateway `AgentService` 在同一份 `<session_id>.jsonl` 上执行，回到电脑前 `agentica --resume` 即可无缝接续。
+  - **免登录零 JS 签名卡片页 `/c/<token>` 与双通道审批/提问竞速**（`gateway/card_page.py`）：每次工具审批（`needs.approval`）或追问（`ask_user_question`）以及 CLI `POST /api/cards/hook` 请求都会签发自包含 `HMAC-SHA256` 令牌的 `/c/<token>` 短链（严格 `default-src 'none'` CSP、自适应深浅色、选项与文本输入双 `<form>` 防回车误触、`303 See Other` PRG 重定向）；用户既可在手机微信内点开链接一键点选或输入文字，也可直接在 IM 回复数字 `1..N` 或 `y`/`n`。
+  - **产物文件自动提取与推送**（`gateway/services/im_files.py`）：自动提取助手回复 Markdown 中引用的图表、PDF、表格等非源码产物文件（跳过代码块示例并校验路径边界），通过渠道媒体接口（如微信 `send_media`）直接推送到手机。
 - **Desktop（macOS Dock 右键菜单）显示当前打开的会话标题与最近运行会话**：右键点击 Dock 图标可直接「新建对话」、查看「当前打开：<会话标题>」，并列出最近运行的会话（运行中的会话带 `●` 置顶，当前会话带 `✓` 勾选，附带所属工作区目录名），点击任一条即唤醒窗口并切到该会话（窗口已关闭时也会重新打开并定位到所选会话）；同时 Web 与 Desktop 的窗口/标签页标题实时同步当前会话标题与运行状态。
 - **Worktree 默认目录改为 `<repo>/.worktrees/<name>`，改用 `.git/info/exclude` 排除，并修复 `grep` / `glob` / `read_file` 对 worktree 的路径与搜索问题**：
   - **默认目录改为 `.worktrees/<name>`**（`agentica/peers/worktrees.py` `DEFAULT_ROOT = ".worktrees"`）：替换原先嵌在噪声目录 `.agentica` 下的 `.agentica/worktrees/<name>`，层级更短，也不会与 `_NOISE_DIRS` 中的 `.agentica` 冲突。

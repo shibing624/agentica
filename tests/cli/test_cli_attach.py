@@ -984,10 +984,10 @@ class TestLifecycle:
         session.publish()
         assert "attach" not in dict(peers.list_live_peers()[0].detail_rows())
 
-    def test_disabled_by_default(self, monkeypatch):
-        """Off unless switched on: this channel's effect is the user speaking."""
+    def test_enabled_by_default(self, monkeypatch):
+        """On by default so local controllers can attach; false opts out."""
         monkeypatch.delenv("AGENTICA_ATTACH_ENABLED", raising=False)
-        assert attach.attach_enabled({}) is False
+        assert attach.attach_enabled({}) is True
         assert attach.attach_enabled({"settings": {"attach_enabled": False}}) is False
 
     def test_enabled_by_config(self, monkeypatch):
@@ -1000,12 +1000,12 @@ class TestLifecycle:
         monkeypatch.setenv("AGENTICA_ATTACH_ENABLED", "0")
         assert attach.attach_enabled({"settings": {"attach_enabled": True}}) is False
 
-    def test_a_broken_settings_block_is_off_not_a_crash(self, monkeypatch):
+    def test_a_broken_settings_block_defaults_on_not_a_crash(self, monkeypatch):
         monkeypatch.delenv("AGENTICA_ATTACH_ENABLED", raising=False)
         # `settings` itself not being a mapping: get_setting returns the default,
         # which is what the rest of the CLI relies on too.
-        assert attach.attach_enabled({"settings": "nonsense"}) is False
-        assert attach.attach_enabled({}) is False
+        assert attach.attach_enabled({"settings": "nonsense"}) is True
+        assert attach.attach_enabled({}) is True
 
     def test_stop_removes_the_socket_and_the_token(self, tmp_path):
         server, _, _ = _server(tmp_path)
@@ -1105,3 +1105,40 @@ class TestTheIncomingLineIsEchoed:
         display_attached_user_message("hi", from_name="vpet-desktop")
 
         assert "vpet-desktop" in capsys.readouterr().out
+
+
+class TestSessionAnswer:
+    """``session/answer`` resolves a parked question or approval card."""
+
+    def test_session_answer_delivers_to_callback(self):
+        received = []
+        server = AttachServer(
+            "ans12345",
+            inject=lambda t: "queued",
+            is_running=lambda: True,
+            answer_interaction=lambda ans, req_id: (received.append((ans, req_id)) or True),
+            snapshot=lambda: {
+                "cwd": "/tmp",
+                "busy": True,
+                "pendingInteraction": {
+                    "requestId": "req-99",
+                    "kind": "ask",
+                    "prompt": "Pick one",
+                    "options": ["A", "B"],
+                },
+            },
+        )
+        assert server.start()
+        try:
+            client = _Client(server.path, token=server.token_file.read_text().strip())
+            loaded = client.call("session/load")["result"]
+            assert loaded["pendingInteraction"]["requestId"] == "req-99"
+            reply = client.call("session/answer", {"answer": "1", "requestId": "req-99"})
+            assert reply["result"] == {"accepted": True}
+            assert received == [("1", "req-99")]
+            bad = client.call("session/answer", {"answer": "  "})
+            assert "error" in bad
+            client.close()
+        finally:
+            server.stop()
+

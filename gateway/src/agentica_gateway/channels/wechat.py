@@ -893,6 +893,21 @@ class WeChatChannel(Channel):
             logger.error(f"WeChat: send_media error: {e} channel_id={channel_id}")
             return False
 
+    async def send_file(
+        self,
+        channel_id: str,
+        data: bytes,
+        filename: str,
+        mime_type: str = "application/octet-stream",
+    ) -> bool:
+        media_type = _MEDIA_IMAGE if mime_type.startswith("image/") else _MEDIA_FILE
+        return await self.send_media(
+            channel_id=channel_id,
+            media_type=media_type,
+            data=data,
+            filename=filename,
+        )
+
     async def fetch_media(self, message: Message) -> List[InboundMedia]:
         """Download + decrypt the media referenced by an inbound message.
 

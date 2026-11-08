@@ -412,12 +412,7 @@ class AgentService:
         self._workspace: Optional[Workspace] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
-        # Peer-channel identity for this gateway's own agent sessions
-        # (gateway/services/agent_peers.py), injected at startup by main.py's
-        # lifespan once the channels exist. None means "no peer channel": the
-        # SDK-embedded AgentService and every test build agents without one,
-        # and they simply get no list_agents / send_message.
-        self.agent_peers: Optional[Any] = None
+        self._session_ask_callbacks: Dict[str, Callable] = {}
 
     # ============== Model config (single source of truth: `settings`) ==============
     # These proxy directly to the gateway's global `settings` singleton instead
@@ -802,18 +797,11 @@ class AgentService:
         self_manage_tools = get_self_manage_tools()
         extra.extend(self_manage_tools)
 
-        # Peer messaging: the same list_agents / send_message a CLI session has,
-        # so a line typed in IM ("让三个会话都把改动提交了") reaches this
-        # machine's live CLI sessions instead of an agent that cannot see them.
-        # A cron run is excluded: it builds a throwaway agent that is never
-        # cached, so publishing presence for it would advertise a mailbox that
-        # stops being read the moment the job ends.
-        peer_session = None
-        if self.agent_peers is not None and not session_id.startswith(CRON_SESSION_PREFIX):
-            from agentica.tools.peer_tool import PeerMessagingTool
+        ask_cb = self._session_ask_callbacks.get(self._sk(session_id, owner))
+        if ask_cb is not None and not session_id.startswith(CRON_SESSION_PREFIX):
+            from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
-            peer_session = self.agent_peers.session_for(session_id, cwd=work_dir)
-            extra.insert(0, PeerMessagingTool(peer_session))
+            extra.append(AskUserQuestionTool(input_callback=ask_cb))
 
         instructions = list(self.extra_instructions) if self.extra_instructions else None
         if cron_tools:
@@ -893,9 +881,6 @@ class AgentService:
             ),
         )
 
-        # Lets the Runner drain replies from other sessions between tool
-        # batches (agent.peer_session), exactly as it does in the CLI.
-        agent.peer_session = peer_session
         agent.approve = self._make_session_approve(session_id, owner)
         self._restore_path_grants(agent, session_id, owner)
         if (
@@ -979,16 +964,30 @@ class AgentService:
                 return True
         return False
 
-    def _note_peer_turn(self, session_id: str, message: str) -> None:
-        """Publish "what this session is working on" for other sessions to read.
+    def set_session_ask_callback(
+        self,
+        session_id: str,
+        callback: Optional[Callable[[str, Optional[List[str]]], str]],
+        owner: Optional[str] = None,
+    ) -> None:
+        """Register or clear the ``ask_user_question`` callback for a session."""
+        key = self._sk(session_id, owner)
+        if callback is None:
+            self._session_ask_callbacks.pop(key, None)
+        else:
+            self._session_ask_callbacks[key] = callback
+            cached = self._cache.get(key)
+            if cached is not None:
+                from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
-        A CLI peer publishes the line the user typed; this is the same thing for
-        a chat session, and it is what makes a listing on the other side
-        ("working on: 把 gateway 的 peer 工具接上") worth reading. Called after
-        the agent exists, so the session is already registered.
-        """
-        if self.agent_peers is not None:
-            self.agent_peers.note_turn(session_id, message)
+                found = False
+                for t in cached.tools or []:
+                    if isinstance(t, AskUserQuestionTool):
+                        t.input_callback = callback
+                        found = True
+                        break
+                if not found:
+                    self._stale_agents.add(key)
 
     # Default approval mode for web sessions: "auto" — file edits and commands
     # are allowed (writes restricted to work_dir). "ask" is opt-in via the
@@ -1240,7 +1239,6 @@ class AgentService:
         async with lock:
             agent = await self._get_agent(session_id, owner)
             message = replace_invalid_utf8(message)
-            self._note_peer_turn(session_id, message)
             message, run_images, run_audio, media_notes = await self._prepare_run_media(
                 agent, message, media,
             )
@@ -1550,7 +1548,6 @@ class AgentService:
         await self._ensure_initialized()
         agent = await self._get_agent(session_id, owner)
         message = replace_invalid_utf8(message)
-        self._note_peer_turn(session_id, message)
         message, run_images, run_audio, media_notes = await self._prepare_run_media(
             agent, message, media,
         )
@@ -1875,11 +1872,7 @@ class AgentService:
         self._session_work_dirs.pop(key, None)
         self._session_approval_modes.pop(key, None)
         self._session_grants.pop(key, None)
-        if self.agent_peers is not None:
-            # A deleted session must stop being addressable at once, not on the
-            # peer loop's next liveness sweep: until it is unpublished its name
-            # is still in every other session's list_agents.
-            self.agent_peers.forget(session_id)
+        self._session_ask_callbacks.pop(key, None)
         self._session_locks.pop(key, None)
         self._stale_agents.discard(key)
         log_existed = False
