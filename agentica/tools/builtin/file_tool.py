@@ -101,9 +101,11 @@ def _nested_checkouts(base: "Path") -> tuple:
     """Worktrees of this repository that live under ``base``, from git itself.
 
     A worktree inside the checkout is a second copy of every file, so searches
-    skip it — see ``agentica.peers.worktrees.nested_worktrees`` for why this is asked
-    of git instead of matched by name. Never the base itself: a session bound to
-    that worktree searches from inside it and must see its own files.
+    from the repository root skip it — see ``agentica.peers.worktrees.nested_worktrees``
+    for why this is asked of git instead of matched by name. Never the base
+    itself (a session or call pointed at that worktree must see its own files),
+    and never when ``base`` is the worktrees container directory itself
+    (e.g. ``path=".worktrees"`` or ``path=".agentica/worktrees"``).
     """
     try:
         from agentica.peers.worktrees import nested_worktrees
@@ -111,10 +113,41 @@ def _nested_checkouts(base: "Path") -> tuple:
         here = os.path.realpath(str(base))
         return tuple(
             path for path in nested_worktrees(str(base))
-            if path != here and not here.startswith(path + os.sep)
+            if path.startswith(here + os.sep) and here != os.path.dirname(path)
         )
     except Exception:
         return ()
+
+
+def _in_worktree_tree(base: "Path") -> bool:
+    """True when ``base`` is inside a nested worktree or is its container dir."""
+    try:
+        from agentica.peers.worktrees import nested_worktrees
+
+        here = os.path.realpath(str(base))
+        for wt in nested_worktrees(str(base)):
+            if here == wt or here.startswith(wt + os.sep) or here == os.path.dirname(wt):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _glob_pattern_base(base: "Path", pattern: str) -> "Path":
+    """Deepest literal directory prefix in ``pattern`` below ``base``."""
+    prefix_parts: List[str] = []
+    for part in Path(pattern).parts:
+        if any(ch in part for ch in ("*", "?", "[")):
+            break
+        prefix_parts.append(part)
+    if not prefix_parts:
+        return base
+    candidate = base.joinpath(*prefix_parts)
+    if candidate.is_dir():
+        return candidate
+    if candidate.parent.is_dir():
+        return candidate.parent
+    return base
 
 
 def _in_noise_dir(
@@ -198,14 +231,24 @@ def _relativize(path: str, root: Path) -> str:
     """
     if not path:
         return path
+    root_str = str(root)
     try:
-        rel = os.path.relpath(path, str(root))
+        rel = os.path.relpath(path, root_str)
+        if rel != os.curdir and rel != os.pardir and not rel.startswith(os.pardir + os.sep):
+            return Path(rel).as_posix()
     except (ValueError, OSError):
-        # Different drive on Windows, or an unresolvable path.
         return path
-    if rel == os.curdir or rel.startswith(os.pardir + os.sep) or rel == os.pardir:
-        return path
-    return Path(rel).as_posix()
+    try:
+        rel_real = os.path.relpath(os.path.realpath(path), os.path.realpath(root_str))
+        if (
+            rel_real != os.curdir
+            and rel_real != os.pardir
+            and not rel_real.startswith(os.pardir + os.sep)
+        ):
+            return Path(rel_real).as_posix()
+    except (ValueError, OSError):
+        pass
+    return path
 
 
 def _match_end_at(content: str, pattern: str, start: int) -> int:
@@ -628,6 +671,10 @@ class BuiltinFileTool(Tool):
         - ~ paths are expanded to user home directory
         - Absolute paths are used directly
         - Relative paths are resolved relative to ``root`` or the session work_dir
+        - If ``root`` is an explicit ``work_dir`` inside ``self.work_dir`` and
+          ``path`` already begins with that worktree's relative prefix (e.g.
+          ``path=".worktrees/feat/docs/a.md"`` with ``work_dir=".worktrees/feat"``),
+          deduplicate the prefix instead of doubling it.
         """
         base = root if root is not None else self.work_dir
         if path.startswith("~"):
@@ -635,7 +682,17 @@ class BuiltinFileTool(Tool):
         p = Path(path)
         if p.is_absolute():
             return p
-        return base / p
+        candidate = base / p
+        if root is not None and root != self.work_dir and not candidate.exists():
+            from_session = self.work_dir / p
+            try:
+                root_real = os.path.realpath(str(root))
+                sess_real = os.path.realpath(str(from_session))
+                if sess_real == root_real or sess_real.startswith(root_real + os.sep):
+                    return from_session
+            except OSError:
+                pass
+        return candidate
 
     def _lexical_abs_path(self, path: Path) -> Path:
         """Return an absolute path without requiring the target to exist."""
@@ -669,9 +726,7 @@ class BuiltinFileTool(Tool):
     def _result_path(self, raw_path: str, *, root: Optional[Path] = None) -> str:
         """Return the lexical tool path relative to the call's work directory."""
         base = root if root is not None else self.work_dir
-        path = Path(raw_path).expanduser()
-        if not path.is_absolute():
-            path = base / path
+        path = self._resolve_path(raw_path, root=root)
         lexical_path = Path(os.path.abspath(path))
         work_roots = (
             Path(os.path.abspath(base.expanduser())),
@@ -1366,11 +1421,12 @@ class BuiltinFileTool(Tool):
         stop = threading.Event()
 
         def _glob_sync():
-            nested = _nested_checkouts(base_path)
+            effective_base = _glob_pattern_base(base_path, pattern)
+            nested = _nested_checkouts(effective_base)
             for m in base_path.glob(pattern):
                 if stop.is_set():
                     return
-                if not _in_noise_dir(m, base_path, _NOISE_DIRS, nested):
+                if not _in_noise_dir(m, effective_base, _NOISE_DIRS, nested):
                     found.append(str(m))
 
         loop = asyncio.get_running_loop()
@@ -1443,10 +1499,13 @@ class BuiltinFileTool(Tool):
         cmd: List[str] = [
             rg_path, "--line-number", "--column", "--with-filename",
         ]
+        if _in_worktree_tree(base_path):
+            cmd.append("--no-ignore-parent")
         for d in sorted(_NOISE_DIRS - {'.git'}):
             cmd.extend(["--glob", f"!{d}/"])
-        for root in _nested_checkouts(base_path):
-            cmd.extend(["--glob", f"!{os.path.relpath(root, str(base_path))}/"])
+        base_real = os.path.realpath(str(base_path))
+        for wt_root in _nested_checkouts(base_path):
+            cmd.extend(["--glob", f"!{os.path.relpath(wt_root, base_real)}/"])
         cmd.extend(["--", pattern, str(base_path)])
 
         proc = None

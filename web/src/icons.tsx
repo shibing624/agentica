@@ -188,8 +188,8 @@ export const IconArrowDown = () => (
   </S>
 );
 export const IconChevronDown = () => (
-  <S strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3.5 6.5L8 11l4.5-4.5" />
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 6L7.29289 9.29289C7.68342 9.68342 8.31658 9.68342 8.70711 9.29289L12 6" />
   </S>
 );
 export const IconBook = () => (

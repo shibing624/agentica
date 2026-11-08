@@ -24,14 +24,14 @@ trees are git's to refuse; unique commits stay on the branch because
 A registration that is no longer a checkout is reported, not destroyed.
 ``remove`` the name first, or pick another.
 
-**Default path is inside the repository.** ``<repo>/.agentica/worktrees/<task>``,
-the Claude Code shape. Sibling ``../<repo>-<task>`` is ``worktree.root: sibling``
+**Default path is inside the repository.** ``<repo>/.worktrees/<task>``.
+Sibling ``../<repo>-<task>`` is ``worktree.root: sibling``
 for machines that want it. An existing directory that is *not* a registered
 worktree is still an error rather than something to clear out of the way.
 
 **Paths hang off the main worktree, never the current one.** ``git worktree
 add`` works from inside any worktree, so a session that is already in
-``.agentica/worktrees/gateway`` would otherwise nest another copy. The main
+``.worktrees/gateway`` would otherwise nest another copy. The main
 checkout is found via ``--git-common-dir`` and every path is derived from it.
 
 **gitignored files do not travel.** A fresh worktree has no ``.env`` — the
@@ -59,15 +59,15 @@ BRANCH_PREFIX = "wt/"
 # exists in one place on disk. Override with `worktree.link` in config.yaml.
 LINKED_PATHS: Tuple[str, ...] = (".env",)
 
-# Where worktrees are created. Default is Claude Code's shape, inside the
-# repository: ``<repo>/.agentica/worktrees/<task>``. ``git clean -xdf`` (one
-# ``-f``) skips the nested checkout; ``git clean -xdff`` will remove it.
+# Where worktrees are created. Default is inside the repository:
+# ``<repo>/.worktrees/<task>``. ``git clean -xdf`` (one ``-f``) skips the
+# nested checkout; ``git clean -xdff`` will remove it.
 # Opt out with:
 #
 #   * ``worktree.root: sibling`` → ``../<repo>-<task>`` (the old default);
 #   * an absolute path → ``<root>/<repo>/<task>`` (one farm, many repos);
 #   * any other relative path → ``<repo>/<that>/<task>``.
-DEFAULT_ROOT = ".agentica/worktrees"
+DEFAULT_ROOT = ".worktrees"
 SIBLING_ROOT = "sibling"
 ROOT_SETTING = "worktree.root"
 LINK_SETTING = "worktree.link"
@@ -196,7 +196,7 @@ def _nearest_existing_dir(cwd: str) -> str:
     """``cwd`` if it exists, else the closest ancestor that does.
 
     A worktree removed by another session leaves this one pointing at a path
-    with nothing behind it. Its parent (``.agentica/worktrees``, or the
+    with nothing behind it. Its parent (``.worktrees``, or the
     repository itself) is still there and still inside the same repository, so
     that is where a git question about "this session's repo" can be answered.
     """
@@ -266,7 +266,7 @@ def default_base(cwd: str) -> str:
 def worktree_path(cwd: str, name: str) -> str:
     """Where the worktree for ``name`` lives.
 
-    Default: ``<repo>/.agentica/worktrees/<task>``. ``sibling`` restores
+    Default: ``<repo>/.worktrees/<task>``. ``sibling`` restores
     ``../<repo>-<task>``. An absolute ``worktree.root`` namespaces by repository
     (``<root>/<repo>/<task>``); any other relative value is inside the checkout.
     """
@@ -276,9 +276,9 @@ def worktree_path(cwd: str, name: str) -> str:
         return str(root.parent / f"{root.name}-{slug(name)}")
     base = Path(os.path.expanduser(configured))
     if not base.is_absolute():
-        # In-repo (``.agentica/worktrees``): the repository is already implied by
+        # In-repo (``.worktrees``): the repository is already implied by
         # where the root lives, so ``<root>/<task>`` — inserting the repo name
-        # again would read ``proj/.agentica/worktrees/proj/docs``.
+        # again would read ``proj/.worktrees/proj/docs``.
         return str(root / base / slug(name))
     # One directory serving several repositories has to say which one.
     return str(base / root.name / slug(name))
@@ -347,6 +347,8 @@ def nested_worktrees(cwd: str, *, ttl: float = NESTED_CACHE_TTL) -> Tuple[str, .
             if not entry.is_main
             and os.path.realpath(entry.path).startswith(main + os.sep)
         )
+        for wt_path in inside:
+            _self_ignore(Path(wt_path).parent, main)
     except (WorktreeError, OSError):
         # Not a repository, no git, a locked index: nothing to exclude.
         inside = ()
@@ -647,37 +649,66 @@ def link_ignored(src_root: str, dst_root: str, names: Optional[Sequence[str]] = 
     return linked
 
 def _self_ignore(parent: Path, repo_root: str) -> None:
-    """Make a worktree root inside the repository ignore itself.
+    """Exclude an in-repository worktree root via ``.git/info/exclude``.
 
-    Only when it *is* inside: a root under the checkout (``.agentica/worktrees``,
-    the shape Claude Code uses) would otherwise show up as untracked in every
-    ``git status`` until someone edits the repository's ``.gitignore`` — and that
-    edit is a change to a tracked, shared file, made by a tool, in someone
-    else's repository. A ``.gitignore`` containing ``*`` *inside* the root ignores
-    the tree and itself, touches nothing tracked, and needs no per-repo setup
-    (the same trick pip uses for its caches).
+    Only when ``parent`` sits inside ``repo_root`` (e.g. ``.agentica/worktrees``
+    or ``.worktrees``). Without an exclude rule, the nested checkout shows up in
+    ``git status`` and ``git add -A`` stages it as a submodule gitlink.
 
-    Note what this does not fix: an ignored tree is in range of
-    ``git clean -xdff`` run in the main checkout. Single ``-f`` skips nested
-    checkouts ("Skipping repository"), double ``-ff`` removes them.
+    We write an anchored rule (``/.agentica/worktrees/``) to
+    ``<repo>/.git/info/exclude`` instead of ``.gitignore`` or
+    ``<parent>/.gitignore``:
+    - It touches nothing tracked in the repository.
+    - Tools that walk parent ``.gitignore`` files across worktree boundaries
+      (``rg --no-require-git``, IDE searchers) are not blinded by a ``*`` inside
+      ``<parent>/.gitignore`` or an unanchored ``.gitignore`` entry when a
+      caller explicitly searches inside the worktree.
+    - Any legacy ``# Created by agentica`` ``<parent>/.gitignore`` marker is
+      removed so existing checkouts heal automatically.
     """
     try:
-        # realpath both sides: /tmp is a symlink to /private/tmp on macOS, and a
-        # string comparison would then decide the root is outside the repo.
         resolved_parent = Path(os.path.realpath(parent))
-        resolved_repo = os.path.realpath(repo_root)
-        inside = resolved_repo in (
-            str(resolved_parent), *(str(p) for p in resolved_parent.parents)
-        )
-        if not inside:
+        resolved_repo = Path(os.path.realpath(repo_root))
+        try:
+            rel = resolved_parent.relative_to(resolved_repo)
+        except ValueError:
             return
-        marker = parent / ".gitignore"
-        if not marker.exists():
-            marker.write_text("# Created by agentica: worktrees live here, git ignores them.\n*\n")
-    except OSError:
-        # Not worth failing a worktree over; the user can add the ignore line.
-        logger.debug("could not write %s/.gitignore", parent, exc_info=True)
+        if not rel.parts:
+            return
 
+        marker = parent / ".gitignore"
+        if marker.is_file():
+            try:
+                if marker.read_text(encoding="utf-8", errors="ignore").startswith(
+                    "# Created by agentica:"
+                ):
+                    marker.unlink()
+            except OSError:
+                pass
+
+        git_dir = resolved_repo / ".git"
+        if not git_dir.is_dir():
+            return
+        exclude = git_dir / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        rule = f"/{rel.as_posix().strip('/')}/"
+        existing = (
+            exclude.read_text(encoding="utf-8", errors="ignore")
+            if exclude.is_file()
+            else ""
+        )
+        lines = {line.strip() for line in existing.splitlines()}
+        if rule in lines or rule.lstrip("/") in lines or rule.rstrip("/") in lines:
+            return
+        prefix = "" if not existing or existing.endswith("\n") else "\n"
+        header = (
+            "# Created by agentica: worktrees live here, git ignores them.\n"
+            if "# Created by agentica:" not in existing
+            else ""
+        )
+        exclude.write_text(f"{existing}{prefix}{header}{rule}\n", encoding="utf-8")
+    except OSError:
+        logger.debug("could not update .git/info/exclude for %s", parent, exc_info=True)
 
 
 def ensure(
@@ -708,7 +739,9 @@ def ensure(
     if existing is not None:
         # Reuse: also re-link, so a file added to LINKED_PATHS since creation
         # (or removed by hand) reappears.
-        linked = link_ignored(main_root(cwd), existing.path, link)
+        main = main_root(cwd)
+        _self_ignore(Path(existing.path).parent, main)
+        linked = link_ignored(main, existing.path, link)
         return Worktree(**{**existing.__dict__, "linked": tuple(linked)})
 
     path = worktree_path(cwd, name)

@@ -38,7 +38,7 @@ class TestCreateDoesNotMoveTheSession:
     def test_create_returns_the_path_and_leaves_work_dir(self, repo):
         binder, cfg = _binder(repo)
         out = binder.create("docs")
-        assert str(repo / ".agentica/worktrees" / "docs") in out
+        assert str(repo / ".worktrees" / "docs") in out
         assert "stayed in" in out
         assert cfg["work_dir"] == str(repo)
 
@@ -46,7 +46,7 @@ class TestCreateDoesNotMoveTheSession:
         binder, _ = _binder(repo)
         with pytest.raises(WorktreeError, match="main checkout"):
             binder.create("main")
-        assert not Path(repo, ".agentica/worktrees/main").exists()
+        assert not Path(repo, ".worktrees/main").exists()
 
 
 class TestMergeAndRemoveByName:

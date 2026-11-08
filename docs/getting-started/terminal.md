@@ -142,7 +142,7 @@ settings:
 | `--profile` | — | 本次会话使用 `~/.agentica/config.yaml` 中的指定 profile |
 | `--model_provider` / `--model_name` | `zhipuai` / `glm-4.7-flash` | 直接指定提供商与模型名 |
 | `--work_dir` | 当前目录 | 文件读写与命令执行的基准目录 |
-| `--worktree <名称>` | — | 启动在独立的 `.agentica/worktrees/<名称>` 分支目录中 |
+| `--worktree <名称>` | — | 启动在独立的 `.worktrees/<名称>` 分支目录中 |
 | `--permissions` | `auto` | 初始权限档位：`ask` / `auto` / `allow-all` |
 | `--sandbox` | `off` | 设为 `workspace-write` 开启系统级沙箱 |
 | `--compact-token-limit` | — | 设置当前会话的上下文压缩工作上限 |

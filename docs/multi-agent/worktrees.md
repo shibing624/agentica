@@ -35,7 +35,7 @@ agentica-52 [peer=52d79d86]
 
 ```text
 > /worktree                        # 查看当前仓库的所有 worktree
-> /worktree new auth-refactor      # 新建 .agentica/worktrees/auth-refactor 目录与 wt/auth-refactor 分支
+> /worktree new auth-refactor      # 新建 .worktrees/auth-refactor 目录与 wt/auth-refactor 分支
 > /worktree merge auth-refactor    # 将 wt/auth-refactor 合回本地主分支，并自动删除该 worktree 目录
 > /worktree remove auth-refactor   # 直接删除该 worktree 目录（未合入的提交仍保留在分支上）
 ```
@@ -48,15 +48,15 @@ agentica-52 [peer=52d79d86]
 agentica --worktree auth-refactor
 ```
 
-- 启动后自动创建并进入 `<仓库>/.agentica/worktrees/auth-refactor`（分支名为 `wt/auth-refactor`）。
+- 启动后自动创建并进入 `<仓库>/.worktrees/auth-refactor`（分支名为 `wt/auth-refactor`）。
 - 退出该终端时：如果这个 worktree 里没有任何未提交改动或独有提交，会自动清理目录；如果有你的改动或新提交，会自动保留在磁盘上。
 
 ---
 
 ## 三、目录位置与 `.env` 自动共享
 
-默认情况下，所有任务树都放在仓库内的 `.agentica/worktrees/<任务名>` 下，并自动写入 `.agentica/worktrees/.gitignore`（`*`），因此：
-- 不会弄脏主仓库的 `git status`，也不会修改你仓库里原有的 `.gitignore`。
+默认情况下，所有任务树都放在仓库内的 `.worktrees/<任务名>` 下，并自动将 `/.worktrees/` 写入主仓库的 `.git/info/exclude`，因此：
+- 不会弄脏主仓库的 `git status` / `git add -A`，也不会修改你仓库里受版本控制的 `.gitignore`，同时保证从主仓库或直接针对某个 worktree 调用 `grep` / `glob` 时不会被父级 `.gitignore` 误屏蔽。
 - 主仓库里的 `.env` 文件会自动以软链接（symlink）方式链进新 worktree，不需要再手动拷一遍 API Key。
 
 如果你想把 worktree 放到仓库外面，或者需要额外软链其他未入库文件（如 `.env.local`），可以在 `~/.agentica/config.yaml` 中配置：
@@ -75,5 +75,5 @@ settings:
 
 - **`/worktree merge` 提示拒绝合并怎么办？**
   为了防止冲掉未保存的工作，合并前要求**任务 worktree 内所有改动已 commit**，且**主目录当前在主分支上、工作区干净**。先把未提交的修改提交或 stash 后再执行 `/worktree merge` 即可。
-- **在主目录用 `glob` / `grep` 会搜到 `.agentica/worktrees/` 里的重复文件吗？**
-  不会。从主目录搜索时会自动跳过所有子 worktree 目录；只有把 `path` 明确指向某个 worktree 时才会搜那棵树。
+- **在主目录用 `glob` / `grep` 会搜到 `.worktrees/` 里的重复文件吗？**
+  不会。从主目录搜索时会自动跳过所有子 worktree 目录；只有把 `path` 明确指向某个 worktree（或 `.worktrees` 目录）时才会搜那棵树。

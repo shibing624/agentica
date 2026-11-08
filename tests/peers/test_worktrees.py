@@ -45,7 +45,7 @@ class TestLayout:
         monkeypatch.setattr(worktrees, "main_root", lambda _cwd: str(repo))
         monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
         assert worktrees.worktree_path(str(repo), "docs") == str(
-            repo / ".agentica/worktrees" / "docs"
+            repo / ".worktrees" / "docs"
         )
 
     def test_sibling_is_opt_in(self, tmp_path, monkeypatch):
@@ -107,12 +107,26 @@ def repo(clone_git_repo, tmp_path, monkeypatch):
 
 
 class TestLifecycle:
-    def test_ensure_lands_under_agentica_worktrees(self, repo):
+    def test_ensure_lands_under_worktrees(self, repo):
         wt = ensure(str(repo), "docs")
-        assert Path(wt.path) == repo / ".agentica/worktrees" / "docs"
-        assert (repo / ".agentica/worktrees" / ".gitignore").read_text().strip().endswith("*")
+        assert Path(wt.path) == repo / ".worktrees" / "docs"
+        assert not (repo / ".worktrees" / ".gitignore").exists()
+        assert "/.worktrees/" in (repo / ".git" / "info" / "exclude").read_text()
+        assert _git_output(repo, "status", "--porcelain") == ""
         assert wt.branch_short == "wt/docs"
         assert (Path(wt.path) / "a.py").is_file()
+
+    def test_ensure_migrates_legacy_parent_gitignore_to_info_exclude(self, repo):
+        parent = repo / ".worktrees"
+        parent.mkdir(parents=True, exist_ok=True)
+        marker = parent / ".gitignore"
+        marker.write_text("# Created by agentica: worktrees live here, git ignores them.\n*\n")
+
+        ensure(str(repo), "docs")
+
+        assert not marker.exists()
+        assert "/.worktrees/" in (repo / ".git" / "info" / "exclude").read_text()
+        assert _git_output(repo, "status", "--porcelain") == ""
 
     def test_ensure_reuses_an_in_progress_worktree(self, repo):
         first = ensure(str(repo), "docs")
@@ -316,7 +330,7 @@ class TestDeletedWorkingDirectory:
 
         rescued = ensure(wt.path, "rescue")
 
-        assert Path(rescued.path) == repo / ".agentica/worktrees" / "rescue"
+        assert Path(rescued.path) == repo / ".worktrees" / "rescue"
         assert Path(rescued.path).is_dir()
 
 

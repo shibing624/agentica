@@ -459,7 +459,7 @@ def parse_args():
         default=None,
         help=(
             "Start this process inside a per-task git worktree "
-            "(.agentica/worktrees/<name>, branch wt/<name>). Created on first "
+            "(.worktrees/<name>, branch wt/<name>). Created on first "
             "use. Mid-session worktrees do not move this process — pass "
             "work_dir= on file/execute calls instead."
         ),

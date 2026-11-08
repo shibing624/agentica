@@ -417,10 +417,12 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 
 /* scroll to bottom button — positioned in chat-wrap, stays fixed visually */
 .chat-wrap{flex:1;min-height:0;position:relative;overflow:hidden;display:flex;flex-direction:column}
-.scroll-bottom-btn{position:absolute;left:50%;bottom:calc(var(--composer-height) + 12px);transform:translateX(-50%);width:28px;height:28px;border-radius:50%;border:var(--hair) solid var(--border);background:var(--bg);color:var(--fg);cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.14);z-index:50;transition:all var(--t)}
-.scroll-bottom-btn:hover{background:var(--bg3);color:var(--fg);box-shadow:var(--elev-pop)}
+.scroll-bottom-btn{position:absolute;right:max(24px,calc((100% - var(--chat-content-w)) / 2));bottom:calc(var(--composer-height) + 16px);width:34px;height:34px;padding:0;border:0;border-radius:100px;background:var(--bg);color:var(--fg);cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 0 0 .5px var(--border),0 3px 8px 0 rgba(0,0,0,.03),0 0 16px 0 rgba(0,0,0,.02);z-index:50;transition:background var(--t),box-shadow var(--t)}
+[data-theme="dark"] .scroll-bottom-btn{background:#232325;box-shadow:0 0 0 .5px var(--border),0 3px 8px 0 rgba(0,0,0,.24),0 0 16px 0 rgba(0,0,0,.16)}
+.scroll-bottom-btn:hover{background:var(--bg2)}
+[data-theme="dark"] .scroll-bottom-btn:hover{background:var(--bg3)}
 .scroll-bottom-btn.visible{display:flex}
-.scroll-bottom-btn svg{width:12px;height:12px}
+.scroll-bottom-btn svg{width:14px;height:14px}
 
 /* Codex-style conversation query navigator:
    - Extremely narrow gutter rail on the left, does not affect main chat area.

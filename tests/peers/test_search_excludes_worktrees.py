@@ -127,3 +127,53 @@ class TestUnstubbedNestedSelfExclude:
 
         out = asyncio.run(_tool(repo).glob("**/*.py", path=wt.path))
         assert "only_in_tree.py" in out
+
+    def test_grep_and_glob_with_worktree_path_and_container(
+        self, clone_git_repo, tmp_path, monkeypatch
+    ):
+        from agentica.peers import worktrees
+        from agentica.peers.worktrees import ensure
+
+        monkeypatch.setattr(worktrees, "_configured_root", lambda: worktrees.DEFAULT_ROOT)
+        repo = clone_git_repo(tmp_path / "repo")
+        wt = ensure(str(repo), "feat")
+        docs = Path(wt.path) / "docs"
+        docs.mkdir()
+        (docs / "guide.md").write_text("peer_bridge_token = 1\n")
+
+        tool = _tool(repo)
+        # Main repo search excludes the nested worktree copy (both glob and grep).
+        assert "peer_bridge_token" in asyncio.run(
+            tool.grep("peer_bridge_token", path=".worktrees/feat/docs")
+        )
+        assert asyncio.run(tool.grep("peer_bridge_token", path=".")) == (
+            "No matches found for 'peer_bridge_token'"
+        )
+
+        grep_out = asyncio.run(
+            tool.grep("peer_bridge_token", path=".worktrees/feat/docs")
+        )
+        assert grep_out == ".worktrees/feat/docs/guide.md:1:peer_bridge_token = 1"
+
+        glob_out = asyncio.run(
+            tool.glob("*.md", path=".worktrees/feat/docs")
+        )
+        assert "guide.md" in glob_out
+
+        # Searching the container directory itself searches the worktrees inside it.
+        container_grep = asyncio.run(tool.grep("peer_bridge_token", path=".worktrees"))
+        assert ".worktrees/feat/docs/guide.md:1:peer_bridge_token = 1" in container_grep
+
+        container_glob = asyncio.run(tool.glob("**/*.md", path=".worktrees"))
+        assert "guide.md" in container_glob
+
+        # Globbing with an explicit worktree prefix in pattern also works.
+        pattern_glob = asyncio.run(tool.glob(".worktrees/feat/docs/*.md"))
+        assert "guide.md" in pattern_glob
+
+        # Reading a file with both work_dir and the repo-relative worktree prefix
+        # deduplicates the prefix instead of doubling it.
+        read_out = asyncio.run(
+            tool.read_file(".worktrees/feat/docs/guide.md", work_dir=".worktrees/feat")
+        )
+        assert "peer_bridge_token = 1" in read_out

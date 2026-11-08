@@ -429,14 +429,14 @@ export function ChatPage() {
             onLeaveFollow={() => followRef.current.leave()}
           />
           {showJump && (
-            <button type="button" className="scroll-bottom-btn visible" title={S.chat.jumpLatest}
+            <button type="button" className="scroll-bottom-btn visible" title={S.chat.jumpLatest} aria-label={S.chat.jumpLatest}
                     onClick={() => {
                       const el = msgsRef.current;
                       followRef.current.resume();
                       if (el) stickToBottom(el, followRef.current);
                       setShowJump(false);
                     }}>
-              <IconArrowDown />
+              <IconChevronDown />
             </button>
           )}
           <div className="input-area" ref={inputAreaRef}>
