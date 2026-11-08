@@ -149,7 +149,6 @@ TOOL_REGISTRY = {
     "wikipedia": ("wikipedia", "WikipediaTool", "Search", "Search and read Wikipedia articles"),
     "zhipu_web_search": ("zhipu_web_search", "ZhipuWebSearchTool", "Search", "Web search via ZhipuAI"),
     # Web/Network Tools
-    "browser": ("browser", "BrowserTool", "Web", "Headless browser for web automation"),
     "jina": ("jina", "JinaTool", "Web", "Web content extraction via Jina Reader"),
     "newspaper": ("newspaper", "NewspaperTool", "Web", "Article extraction from news URLs"),
     "url_crawler": ("url_crawler", "UrlCrawlerTool", "Web", "Recursive URL crawling"),

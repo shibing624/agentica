@@ -255,8 +255,9 @@ async function fetchTurnPageCompat(
   id: string,
   turns: number,
   before?: number,
+  includeTurn?: number,
 ): Promise<{ ok: boolean; data?: api.TraceEventsPage | null }> {
-  const res = await api.fetchTraceTurnPage(id, turns, before);
+  const res = await api.fetchTraceTurnPage(id, turns, before, includeTurn);
   if (!res.ok || !res.data?.events) return res;
   if (typeof res.data.has_more === "boolean") return res;
   // Running gateway predates `?turns=`: it returned the first 200 raw rows from
@@ -304,8 +305,10 @@ export async function hydrateSession(id: string, force = false) {
   }
 }
 
-/** Prepend one older page of turns above the currently loaded window. */
-export async function loadOlderMessages(id: string): Promise<boolean> {
+/** Prepend one older page of turns above the currently loaded window.
+ *  `includeTurn`: reach back far enough, in this one read, to take in that turn
+ *  (a search hit); a gateway that predates it just returns the usual page. */
+export async function loadOlderMessages(id: string, includeTurn?: number): Promise<boolean> {
   const sess = getState().sessions[id];
   if (!sess || !sess.hasOlder || sess.loadingOlder) return false;
   const before = sess.olderCursor;
@@ -317,7 +320,7 @@ export async function loadOlderMessages(id: string): Promise<boolean> {
   const generation = hydrateGenerations[id] || 0;
   sess.loadingOlder = true;
   bump();
-  const { ok, data } = await fetchTurnPageCompat(id, CHAT_PAGE_TURNS, before);
+  const { ok, data } = await fetchTurnPageCompat(id, CHAT_PAGE_TURNS, before, includeTurn);
   const cur = getState().sessions[id];
   if (!cur || (hydrateGenerations[id] || 0) !== generation) return false;
   cur.loadingOlder = false;
@@ -731,7 +734,9 @@ export async function openSessionAtTurn(
   while (guard++ < 35) {
     const sess = getState().sessions[id];
     if (!sess || (sess.olderTurns || 0) < turn || !sess.hasOlder) break;
-    const loaded = await loadOlderMessages(id);
+    // One read that reaches the turn; the loop only repeats against a gateway
+    // too old to honour it, which pages back six turns at a time.
+    const loaded = await loadOlderMessages(id, turn);
     if (!loaded) break;
   }
   setState({

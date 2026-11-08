@@ -64,7 +64,6 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 03 | [default_tools.py](tools/03_default_tools.py) | 内置工具概览（天气、execute、Jina） | `WeatherTool`, `BuiltinExecuteTool`, `JinaTool` |
 | 04 | [code_execution.py](tools/04_code_execution.py) | 代码执行工具 | `BuiltinExecuteTool`, `CodeTool` |
 | 05 | [file_operations.py](tools/05_file_operations.py) | 文件操作工具 | `BuiltinFileTool`, `BuiltinExecuteTool` |
-| 06 | [browser.py](tools/06_browser.py) | 浏览器工具 | `BrowserTool` |
 | 07 | [parallel_tools.py](tools/07_parallel_tools.py) | 多工具并行执行 | `asyncio.gather()`, 并行 vs 串行对比 |
 | 08 | [concurrency_safe_tools.py](tools/08_concurrency_safe_tools.py) | 并发安全分流：读工具并行、写工具串行 | `concurrency_safe`, sibling-error 模式 |
 | 09 | [cost_tracker.py](tools/09_cost_tracker.py) | 成本追踪：Token 用量 + USD 成本 | `CostTracker`, `RunResponse.cost_summary` |

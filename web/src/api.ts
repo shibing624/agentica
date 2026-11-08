@@ -194,9 +194,10 @@ export type TraceEventsPage = {
 };
 export const fetchTraceEvents = (sessionId: string, offset = 0, limit = 200) =>
   request<TraceEventsPage>(`/api/sessions/${sessionId}/trace/events?offset=${offset}&limit=${limit}`);
-export const fetchTraceTurnPage = (sessionId: string, turns: number, before?: number) =>
+export const fetchTraceTurnPage = (sessionId: string, turns: number, before?: number, includeTurn?: number) =>
   request<TraceEventsPage>(
-    `/api/sessions/${sessionId}/trace/events?turns=${turns}${before != null ? `&before=${before}` : ""}`,
+    `/api/sessions/${sessionId}/trace/events?turns=${turns}${before != null ? `&before=${before}` : ""}`
+      + (includeTurn != null ? `&include_turn=${includeTurn}` : ""),
   );
 
 export function workspaceContentUrl(root: string, path: string, download = false) {

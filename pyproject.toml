@@ -118,10 +118,7 @@ ocr            = ["pytesseract>=0.3"]
 image-analysis = []
 video-analysis = []
 
-# 浏览器自动化 / 爬虫
-browser = ["playwright>=1.40"]
-# Note: bs4 / lxml / markdownify / requests / puremagic / tqdm 已在核心默认装
-# crawl extras 保留为占位（未来可加 trafilatura / readability 等高级解析能力）
+# 网页抓取（bs4 / lxml / markdownify / requests / puremagic / tqdm 已在核心默认装）
 crawl   = []
 
 # 代码 / 数据
@@ -158,10 +155,6 @@ tools-media = [
     "agentica[ocr]",
     "agentica[image-analysis]",
     "agentica[video-analysis]",
-]
-tools-browser = [
-    "agentica[browser]",
-    "agentica[crawl]",
 ]
 tools-extra = [
     "agentica[tools-search]",
@@ -241,7 +234,6 @@ full = [
     "agentica[vectordbs]",
     "agentica[storage]",
     "agentica[tools-extra]",
-    "agentica[tools-browser]",
     "agentica[tools-media]",
     "agentica[gateway]",
     "agentica[tracing]",

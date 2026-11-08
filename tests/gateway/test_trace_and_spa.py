@@ -111,6 +111,35 @@ def test_analysis_can_leave_the_call_lists_out_for_the_chat_footer(client_and_sv
     assert page["rounds"][0]["calls"]
 
 
+def test_events_route_passes_include_turn_through(tmp_path):
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
+
+    log = SessionLog(session_id="long", base_dir=str(tmp_path))
+    for i in range(1, 31):
+        log.append("user", f"q{i}")
+        log.append("assistant", f"a{i}")
+    svc = MagicMock()
+    svc._ensure_initialized = AsyncMock()
+    svc.session_log_for = MagicMock(side_effect=lambda sid, owner=None: SessionLog(session_id=sid, base_dir=str(tmp_path)))
+    svc.list_sessions = MagicMock(return_value=[])
+
+    def turns(page):
+        return [e["content"] for e in page["events"] if e["type"] == "user"]
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        original = deps.agent_service
+        deps.agent_service = svc
+        try:
+            plain = client.get("/api/sessions/long/trace/events", params={"turns": 6}).json()
+            assert turns(plain)[0] == "q25"
+            deep = client.get("/api/sessions/long/trace/events", params={"turns": 6, "include_turn": 4}).json()
+            assert turns(deep)[0] == "q3" and turns(deep)[-1] == "q30" and deep["older_turns"] == 2
+            assert client.get("/api/sessions/long/trace/events", params={"turns": 6, "include_turn": 0}).status_code == 422
+        finally:
+            deps.agent_service = original
+
+
 def test_session_search_can_be_scoped_to_one_session_with_a_higher_cap(tmp_path):
     from agentica_gateway.main import app
     from agentica_gateway import deps

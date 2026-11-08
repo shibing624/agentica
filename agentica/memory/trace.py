@@ -600,6 +600,7 @@ def chat_turn_page(
     entries: Iterable[Dict[str, Any]],
     turns: int,
     before: Optional[int] = None,
+    include_turn: Optional[int] = None,
 ) -> Dict[str, Any]:
     """One turn-aligned backwards page of conversation rows for the chat view.
 
@@ -607,6 +608,12 @@ def chat_turn_page(
     and cuts at the ``turns``-th non-automated ``user`` row from ``before``
     (or the end), keeping an immediately preceding ``compact_boundary`` attached
     to the ``<context_window>`` user row that follows it.
+
+    ``include_turn`` (1-based, counted from the start of the log the way
+    ``older_turns`` is) reaches back further when the page would stop short of
+    it: the page then starts one turn before that turn, for context. A caller
+    jumping to an old turn (a search hit) gets it in one read instead of paging
+    back ``turns`` at a time, each page costing a scan of the whole file.
     """
     chat_entries = [
         e for e in entries
@@ -621,12 +628,17 @@ def chat_turn_page(
         and not _is_steering_user(chat_entries[i])
         and not _is_window_preamble_only(chat_entries[i])
     ]
-    if len(turn_starts) <= turns:
+    # How many turns before `end` the page keeps: at least `turns`, and enough
+    # to take in `include_turn` plus the turn before it.
+    keep = turns
+    if include_turn is not None and include_turn >= 1:
+        keep = max(keep, len(turn_starts) - max(0, include_turn - 2))
+    if len(turn_starts) <= keep:
         start = 0
         older_turns = 0
     else:
-        start = turn_starts[-turns]
-        older_turns = len(turn_starts) - turns
+        start = turn_starts[-keep]
+        older_turns = len(turn_starts) - keep
         while start > 0 and (
             chat_entries[start - 1].get("type") == "compact_boundary"
             or _is_window_preamble_only(chat_entries[start - 1])

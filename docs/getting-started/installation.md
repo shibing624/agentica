@@ -89,10 +89,6 @@ cd web && npm ci && npm run build        # Web UI → web/dist，网关直接读
 产品安装用 extras（见上）。开发 / 当库用时再按需加：
 
 ```bash
-# 浏览器工具
-uv add playwright
-playwright install chromium
-
 # RAG / 向量数据库
 uv add lancedb                  # LanceDb（推荐本地向量存储）
 uv add qdrant-client            # QdrantVectorDb

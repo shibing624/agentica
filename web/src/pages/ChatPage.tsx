@@ -835,10 +835,16 @@ function SearchJump({ sessionId, msgCount, areaRef, onLeaveFollow }: {
   useEffect(() => {
     const root = areaRef.current;
     if (!root) return;
-    let applying = false;
+    let obs: MutationObserver | null = null;
+    let frame = 0;
+    const observe = () => obs?.observe(root, { childList: true, subtree: true });
     const run = (shouldScroll: boolean) => {
-      if (applying) return;
-      applying = true;
+      // Highlighting rewrites text nodes under the very list it watches. A flag
+      // set around the rewrite does not help: observer callbacks run as a
+      // microtask, after the flag is already cleared, so each rewrite looked
+      // like a fresh change and queued the next, forever. Stop watching while
+      // we write and drop what the write itself queued.
+      obs?.disconnect();
       try {
         const mark = applyChatSearchHighlights(root, activeQuery, target?.turn, target?.role);
         if (shouldScroll && target) {
@@ -850,28 +856,37 @@ function SearchJump({ sessionId, msgCount, areaRef, onLeaveFollow }: {
             || root.querySelector<HTMLElement>(`.m[data-turn="${target.turn}"]`);
           const scrollTarget = (mark && msgEl?.contains(mark)) ? mark : msgEl;
           if (scrollTarget) {
-            scrollTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Smooth only for a short hop. Across a long transcript the animation
+            // is cancelled by the first layout change on the way (late Markdown,
+            // images), stranding the view at the bottom, far from the hit.
+            const area = root.getBoundingClientRect();
+            const far = Math.abs(scrollTarget.getBoundingClientRect().top - area.top) > area.height * 3;
+            scrollTarget.scrollIntoView({ behavior: far ? "auto" : "smooth", block: "center" });
             if (mark && msgEl?.contains(mark)) lastScrolledSeq.current = target.seq;
           }
         }
       } finally {
-        applying = false;
+        obs?.takeRecords();
+        observe();
       }
     };
     const needScroll = Boolean(target && target.seq !== lastScrolledSeq.current);
     run(needScroll);
     if (!activeQuery) return;
-    const obs = new MutationObserver((mutations) => {
-      if (applying) return;
-      const relevant = mutations.some((m) =>
-        [...m.addedNodes, ...m.removedNodes].some(
-          (n) => !(n instanceof HTMLElement && n.hasAttribute("data-chat-search-mark")),
-        ),
-      );
-      if (relevant) run(Boolean(target && target.seq !== lastScrolledSeq.current));
+    obs = new MutationObserver(() => {
+      // Messages arrived or were paged in: highlight them, once per frame however
+      // many mutations a render produced.
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        run(Boolean(target && target.seq !== lastScrolledSeq.current));
+      });
     });
-    obs.observe(root, { childList: true, subtree: true });
-    return () => obs.disconnect();
+    observe();
+    return () => {
+      obs?.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [activeQuery, target?.seq, target?.turn, target?.role, msgCount, sessionId]);
   return null;
 }

@@ -17,7 +17,7 @@ from agentica.skills.skill import Skill
 from agentica.skills.skill_loader import SkillLoader
 from agentica.skills.skill_registry import SkillRegistry
 
-BUNDLED = ("agentica", "cron", "long-running-jobs", "multi-agent", "worktree")
+BUNDLED = ("agentica", "browser", "cron", "long-running-jobs", "multi-agent", "worktree")
 
 
 class TestBundledSkillsShip(unittest.TestCase):
@@ -91,6 +91,7 @@ class TestSkillRegistrationLogging(unittest.TestCase):
             registry.register(loader.load_skill(skill_md, "bundled"))
         cmds = registry.auto_commands()
         self.assertEqual(cmds["/agentica"].name, "agentica")
+        self.assertEqual(cmds["/browser"].name, "browser")
         self.assertEqual(cmds["/cron"].name, "cron")
         self.assertEqual(cmds["/multi-agent"].name, "multi-agent")
         self.assertEqual(cmds["/worktree"].name, "worktree")
@@ -170,6 +171,7 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
                 loader.home_dir = Path(tmp)
                 registry = loader.load_all(SkillRegistry())
         self.assertIsNone(registry.get("agentica"))
+        self.assertIsNone(registry.get("browser"))
         self.assertIsNone(registry.get("cron"))
         self.assertIsNone(registry.get("multi-agent"))
         self.assertIsNone(registry.get("worktree"))
@@ -240,6 +242,7 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
                 tool = SkillTool(auto_load=True)
                 tool.initialize()
         self.assertIsNone(tool.registry.get("agentica"))
+        self.assertIsNone(tool.registry.get("browser"))
         self.assertIsNone(tool.registry.get("cron"))
         self.assertIsNone(tool.registry.get("multi-agent"))
         self.assertIsNone(tool.registry.get("worktree"))
@@ -325,6 +328,15 @@ class TestBundledSkillContent(unittest.TestCase):
         self.assertIn("git worktree add", body)
         self.assertIn("worktree(action=\"new\")", body)
         self.assertIn("list_agents", body)
+
+    def test_the_browser_skill_routes_clean_vs_logged_in_and_guards_daemon(self):
+        body = self._body("browser")
+        for driver in ("agent-browser", "lightpanda", "bsk", "playwright-cli"):
+            self.assertIn(driver, body)
+        self.assertIn("snapshot -i", body)
+        self.assertIn("BSK_AUTO_START=0", body)
+        self.assertIn("bsk daemon start --foreground", body)
+        self.assertIn("bsk session stop", body)
 
 
 if __name__ == "__main__":

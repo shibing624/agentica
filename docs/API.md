@@ -248,7 +248,6 @@ uv add "agentica[tools-search]"      # DDG + Wikipedia + Serper + Exa + Bocha
 uv add "agentica[tools-research]"    # arxiv + wikipedia + newspaper + dblp
 uv add "agentica[tools-finance]"     # yfinance
 uv add "agentica[tools-media]"       # dalle + cogview + cogvideo + ocr + image/video analysis
-uv add "agentica[tools-browser]"     # browser + crawl
 ```
 
 ---

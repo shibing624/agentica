@@ -893,3 +893,55 @@ def test_window_preamble_with_relayed_mention_is_not_classified_as_steering_or_r
     assert page["events"][0]["type"] == "compact_boundary"
     assert page["events"][1]["content"] == preamble
     assert page["events"][2]["content"] == "second turn after compact"
+
+
+class TestChatTurnPageIncludeTurn:
+    """A search hit deep in a long log is reached in one page, not N/6 of them."""
+
+    N = 40
+
+    def _entries(self):
+        out = []
+        for i in range(1, self.N + 1):
+            out.append(_e(f"2026-01-01T00:{i:02d}:00.000Z", type="user", content=f"q{i}"))
+            out.append(_e(f"2026-01-01T00:{i:02d}:01.000Z", type="event", name="request_begin"))
+            out.append(_e(f"2026-01-01T00:{i:02d}:02.000Z", type="assistant", content=f"a{i}"))
+        return out
+
+    @staticmethod
+    def _user_turns(page):
+        return [int(e["content"][1:]) for e in page["events"] if e["type"] == "user"]
+
+    def test_without_it_the_page_is_the_last_few_turns(self):
+        from agentica.memory.trace import chat_turn_page
+        page = chat_turn_page(self._entries(), 6)
+        assert self._user_turns(page) == list(range(35, 41)) and page["older_turns"] == 34
+
+    def test_one_read_reaches_the_turn_with_one_turn_of_context(self):
+        from agentica.memory.trace import chat_turn_page
+        page = chat_turn_page(self._entries(), 6, include_turn=10)
+        turns = self._user_turns(page)
+        assert turns[0] == 9 and turns[-1] == 40, "from the turn before the hit through the end"
+        # What the web client checks to stop paging: the hit is no longer "older".
+        assert page["older_turns"] < 10 and page["older_turns"] == 8
+        assert page["has_more"] is True and page["next_before"] > 0
+
+    def test_first_turn_reaches_the_start_of_the_log(self):
+        from agentica.memory.trace import chat_turn_page
+        for t in (1, 2):
+            page = chat_turn_page(self._entries(), 6, include_turn=t)
+            assert self._user_turns(page)[0] == 1 and page["older_turns"] == 0 and page["has_more"] is False
+
+    def test_a_turn_already_in_the_window_changes_nothing(self):
+        from agentica.memory.trace import chat_turn_page
+        plain = chat_turn_page(self._entries(), 6)
+        assert chat_turn_page(self._entries(), 6, include_turn=38) == plain
+        assert chat_turn_page(self._entries(), 6, include_turn=999) == plain  # beyond the log
+
+    def test_pages_from_a_cursor_only_reach_back_from_that_cursor(self):
+        from agentica.memory.trace import chat_turn_page
+        first = chat_turn_page(self._entries(), 6)
+        page = chat_turn_page(self._entries(), 6, before=first["next_before"], include_turn=3)
+        turns = self._user_turns(page)
+        assert turns[0] == 2 and turns[-1] == 34, "stops where the loaded window begins"
+        assert page["older_turns"] == 1

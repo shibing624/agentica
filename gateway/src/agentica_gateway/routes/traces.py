@@ -22,13 +22,17 @@ async def trace_events(
     limit: int = Query(200, ge=1, le=1000),
     turns: Optional[int] = Query(None, ge=1, le=200),
     before: Optional[int] = Query(None, ge=0),
+    include_turn: Optional[int] = Query(None, ge=1),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
+    """``include_turn``: with ``turns``, reach back far enough that this turn is in the page."""
     log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
     if turns is not None:
-        page = await asyncio.to_thread(chat_turn_page, log.iter_raw_entries(), turns, before)
+        page = await asyncio.to_thread(
+            chat_turn_page, log.iter_raw_entries(), turns, before, include_turn,
+        )
         return {"session_id": session_id, **page}
     entries = list(log.iter_raw_entries())
     window = entries[offset:offset + limit]

@@ -475,7 +475,6 @@ agent = Agent(tools=[DuckDuckGoTool()])
 ```python
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 from agentica.tools.jina_tool import JinaTool          # Jina Reader API
-from agentica.tools.browser_tool import BrowserTool    # playwright 浏览器自动化
 
 agent = Agent(tools=[UrlCrawlerTool()])
 ```
