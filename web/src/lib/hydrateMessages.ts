@@ -63,7 +63,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
           card = { role: "assistant", content: "", ts: tsOf(e), compact: {} };
           msgs.push(card);
         }
-        Object.assign(card.compact!, { notes: pre.notes, notesPath: pre.notesPath });
+        Object.assign(card.compact!, { notes: pre.notes, notesPath: pre.notesPath || card.compact!.notesPath || "" });
         // Logs older than the boundary's `trigger`: an idle /compact folds no
         // question behind its preamble; an auto cut keeps the pending one.
         if (pendingTrigger === "" && !pre.rest) insertCompactCommand(msgs, card);
@@ -118,7 +118,13 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     if (type === "compact_boundary") {
       closeAssistant();
       const trigger = typeof e.trigger === "string" ? e.trigger : "";
-      const card: ChatMsg = { role: "assistant", content: "", ts: tsOf(e), compact: trigger === "auto" ? { auto: true } : {} };
+      const notesPath = typeof e.notes_path === "string" ? e.notes_path : "";
+      const card: ChatMsg = {
+        role: "assistant",
+        content: "",
+        ts: tsOf(e),
+        compact: { ...(trigger === "auto" ? { auto: true } : {}), ...(notesPath ? { notesPath } : {}) },
+      };
       msgs.push(card);
       // The user's `/compact` is not a logged row; the boundary says it was one.
       if (trigger === "manual") insertCompactCommand(msgs, card);
@@ -253,14 +259,13 @@ export function splitWindowPreamble(content: string): { notes: string; notesPath
   const m =
     content.match(/<session_notes(?:\s+path="([^"]*)")?>\n([\s\S]*?)\n<\/session_notes>(?=\n|$)/)
     || content.match(/<session_notes(?:\s+path="([^"]*)")?>([\s\S]*?)<\/session_notes>/);
-  const fallbackPath = content.match(/whenever the window rolls over:\s*([^\s<]+)\s*(?=\n|<\/context_window>)/)?.[1] || "";
   let rest = content.trimStart();
   while (rest.startsWith(WINDOW_OPEN)) {
     const peeled = peelOneWindowLayer(rest);
     if (peeled === rest) break;
     rest = peeled;
   }
-  return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || fallbackPath, rest };
+  return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || "", rest };
 }
 
 export function isPureWindowPreamble(e: Record<string, unknown>): boolean {

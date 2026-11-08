@@ -67,3 +67,11 @@ test("home-relative ~/.agentica session notes resolve against their own parent d
     [notes],
   );
 });
+
+test("bare absolute paths are extracted regardless of their top-level directory", () => {
+  assert.deepEqual(
+    FP.extractFilePaths("见 /data/runs/out.json 和 /mnt/x/report.md，以及 ~/a/b.py。"),
+    ["/data/runs/out.json", "/mnt/x/report.md", "~/a/b.py"],
+  );
+  assert.deepEqual(FP.extractFilePaths("ratio 1/2 and a/b"), []);
+});

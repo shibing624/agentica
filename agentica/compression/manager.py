@@ -242,6 +242,7 @@ class CompressionManager:
                     covered_prefix_hash=covered_hash,
                     window_id=self.window_id,
                     trigger=trigger,
+                    notes_path=notes_path,
                 )
                 tail = [m for m in messages if m.role != "system"]
                 slog.append_post_compact_messages(tail)

@@ -155,7 +155,9 @@ export function extractFilePaths(markdown: string): string[] {
   for (const m of markdown.matchAll(/`([^`\n]+)`/g)) {
     add(m[1]!);
   }
-  for (const m of markdown.matchAll(/(?:^|[\s(（"'“‘])((?:~\/|\/Users\/|\/home\/|\/tmp\/|\/var\/|\/etc\/|\/opt\/)[^\s`"'”’<>()（）]+)/gm)) {
+  // Any bare `~/…` or `/…/…` token; whether it exists is decided by
+  // /api/workspace/stat, not by guessing from its prefix.
+  for (const m of markdown.matchAll(/(?:^|[\s(（"'“‘，。；：、])(~?\/[^\s/`"'”’<>()（），。；：！？、][^\s`"'”’<>()（），。；：！？、]*\/[^\s`"'”’<>()（），。；：！？、]+)/gm)) {
     add(m[1]!);
   }
   return out;

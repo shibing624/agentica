@@ -520,6 +520,7 @@ class SessionLog:
         covered_prefix_hash: Optional[str] = None,
         window_id: Optional[int] = None,
         trigger: str = "auto",
+        notes_path: Optional[str] = None,
     ) -> str:
         """Mark a compaction boundary. Breaks the UUID chain (parent_uuid=null).
 
@@ -536,6 +537,10 @@ class SessionLog:
         ``"auto"`` for threshold / reactive cuts. The command itself is not a
         logged user row, so a transcript rebuilt from the log (Web refresh)
         reads this to show the ``/compact`` the user typed.
+
+        ``notes_path`` is the session notes file the new window starts from,
+        so a replayed compact card can link it even when the preamble carries
+        no ``<session_notes>`` (empty notes file).
         """
         entry_uuid = str(uuid4())
         self._append({
@@ -550,6 +555,7 @@ class SessionLog:
             "summary": summary,
             "window_id": window_id,
             "trigger": trigger,
+            "notes_path": notes_path,
             "lineage_key": self.lineage_key(model),
             "model": model,
             "covered_prefix_hash": covered_prefix_hash,

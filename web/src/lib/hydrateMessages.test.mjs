@@ -360,3 +360,15 @@ test("window preamble mentioning __RELAYED__ or closing tags in notes/dropped_sp
   assert.match(msgs[3].compact.notes, /__RELAYED__/);
   assert.equal(msgs[3].compact.notesPath, "/tmp/s.notes.md");
 });
+
+test("compact card takes notes_path from the boundary row when the preamble carries no <session_notes>", () => {
+  const bare = "<context_window>\nCurrent context window 2.\nYou have 1000 tokens left in this context window.\n</context_window>";
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "hi" },
+    { type: "compact_boundary", trigger: "manual", notes_path: "~/.agentica/projects/p/s1.notes.md" },
+    { type: "user", content: bare },
+  ]);
+  const card = msgs.find((m) => m.compact);
+  assert.equal(card.compact.notesPath, "~/.agentica/projects/p/s1.notes.md");
+  assert.equal(card.compact.notes, "");
+});

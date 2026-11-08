@@ -548,6 +548,14 @@ class TestCompactBoundary:
         assert "<context_window>" in joined
         assert "new question" in joined
 
+    def test_compact_boundary_records_notes_path(self, tmp_dir):
+        log = SessionLog("compact-notes", base_dir=tmp_dir)
+        log.append_compact_boundary("", window_id=1, trigger="manual", notes_path="/x/s.notes.md")
+        with open(log.path, "r", encoding="utf-8") as f:
+            boundary = [json.loads(line) for line in f][0]
+        assert boundary["type"] == "compact_boundary"
+        assert boundary["notes_path"] == "/x/s.notes.md"
+
     def test_multiple_compact_boundaries(self, tmp_dir):
         """Only the LAST boundary should be used for resume."""
         log = SessionLog("compact2", base_dir=tmp_dir)
