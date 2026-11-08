@@ -1200,6 +1200,7 @@ class ImBotController:
             self._agent_service.session_log_for(session_id, owner=uid).set_source(
                 state.channel.value
             )
+            live_turn.bump_pulse(uid)
 
         started = time.monotonic()
         done_event = asyncio.Event()
@@ -1280,6 +1281,7 @@ class ImBotController:
             done_event.set()
             ack_task.cancel()
             watch_task.cancel()
+            live_turn.bump_pulse(self._user_id())
 
         elapsed = time.monotonic() - started
         stop_reason = result.get("stopReason")
@@ -1397,11 +1399,29 @@ class ImBotController:
 
         self._agent_service.set_session_ask_callback(session_id, _ask_callback, owner=uid)
 
-        turn = live_turn.start(session_id, owner=uid)
+        turn = live_turn.start(session_id, owner=uid, user_message=text)
         sub_q = turn.subscribe()
         done_event = asyncio.Event()
         started = time.monotonic()
         short = _short_dir(work_dir)
+
+        def _on_content(delta: str) -> None:
+            turn.publish({"event": "content", "data": delta})
+
+        def _on_tool_call(name: str, args: dict, tool_call_id: str = "") -> None:
+            turn.publish({
+                "event": "tool_call",
+                "data": {"name": name, "args": args, "tool_call_id": tool_call_id},
+            })
+
+        def _on_tool_result(name: str, res_str: str, extra: Optional[dict] = None) -> None:
+            data = {"name": name, "result": res_str}
+            if extra:
+                data.update(extra)
+            turn.publish({"event": "tool_result", "data": data})
+
+        def _on_thinking(delta: str) -> None:
+            turn.publish({"event": "thinking", "data": delta})
 
         async def _ack_if_slow() -> None:
             try:
@@ -1456,14 +1476,27 @@ class ImBotController:
         ack_task = asyncio.create_task(_ack_if_slow())
         watch_task = asyncio.create_task(_watch_turn_events())
         try:
-            result = await self._agent_service.chat(
-                message=text,
-                session_id=session_id,
-                user_id=uid,
-                owner=uid,
-                media=media or None,
-            )
-            turn.finish("completed")
+            if hasattr(self._agent_service, "chat_stream"):
+                result = await self._agent_service.chat_stream(
+                    message=text,
+                    session_id=session_id,
+                    user_id=uid,
+                    owner=uid,
+                    on_content=_on_content,
+                    on_tool_call=_on_tool_call,
+                    on_tool_result=_on_tool_result,
+                    on_thinking=_on_thinking,
+                    media=media or None,
+                    include_usage=False,
+                )
+            else:
+                result = await self._agent_service.chat(
+                    message=text,
+                    session_id=session_id,
+                    user_id=uid,
+                    owner=uid,
+                    media=media or None,
+                )
         except Exception as exc:
             turn.finish("failed")
             await self._reply(state, f"❌ 执行出错：{exc}")
@@ -1480,12 +1513,28 @@ class ImBotController:
             notes = "\n".join(result.media_notes)
             reply = f"{notes}\n\n{reply}" if reply else notes
 
+        # Send the IM text reply FIRST, before finishing the LiveTurn or pushing files,
+        # so the phone receives the answer at the exact moment generation completes.
         if reply:
             header = ""
             if state.verbose or elapsed >= 10.0 or (result.tool_calls and result.tool_calls >= 2):
                 tools_part = f" · {result.tool_calls} tools" if result.tool_calls else ""
                 header = f"[{short} · {_fmt_elapsed(elapsed)}{tools_part}]\n"
             await self._reply(state, f"{header}{reply}")
+
+        turn.publish({
+            "event": "done",
+            "data": {
+                "session_id": session_id,
+                "tool_calls": result.tool_calls,
+                "tools_used": result.tools_used,
+                "response_time": round(elapsed, 2),
+                "turn_usage": result.turn_usage,
+            },
+        })
+        turn.finish("completed")
+
+        if reply:
             await self._push_deliverable_files(state, result.content or "", work_dir)
 
     async def _push_deliverable_files(

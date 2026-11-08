@@ -52,11 +52,12 @@ def _event_chars(ev: dict) -> int:
 class LiveTurn:
     """One background run plus a seq-numbered event buffer for reconnect."""
 
-    def __init__(self, session_id: str, owner: str, kind: str = "chat"):
+    def __init__(self, session_id: str, owner: str, kind: str = "chat", user_message: str = ""):
         self.run_id = uuid.uuid4().hex[:16]
         self.session_id = session_id
         self.owner = owner
         self.kind = kind
+        self.user_message = user_message
         self.status = "starting"
         self.seq = 0
         self.events: list[dict] = []
@@ -68,13 +69,16 @@ class LiveTurn:
         self.approvals = ApprovalRegistry()
 
     def public(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "run_id": self.run_id,
             "session_id": self.session_id,
             "status": self.status,
             "kind": self.kind,
             "seq": self.seq,
         }
+        if self.user_message:
+            out["user_message"] = self.user_message
+        return out
 
     def publish(self, item: Dict[str, Any]) -> None:
         if self.status == "starting":
@@ -124,6 +128,7 @@ class LiveTurn:
         self.status = status
         self.done = True
         self.finished_at = time.monotonic()
+        bump_pulse(self.owner)
         for q in list(self._subs):
             try:
                 q.put_nowait(None)
@@ -159,6 +164,24 @@ class LiveTurn:
 
 _by_run: Dict[str, LiveTurn] = {}
 _by_session: Dict[_SessionKey, str] = {}
+_pulse_ver: Dict[str, int] = {}
+
+
+def bump_pulse(owner: str) -> int:
+    """Increment the per-owner activity counter so open Web/Desktop tabs know to sync."""
+    v = _pulse_ver.get(owner, 0) + 1
+    _pulse_ver[owner] = v
+    return v
+
+
+def pulse(owner: str) -> Dict[str, Any]:
+    """Zero-I/O in-memory snapshot of session activity for ``owner``."""
+    gc()
+    active_ids = [t.session_id for t in _by_run.values() if t.owner == owner and not t.done]
+    return {
+        "ver": _pulse_ver.get(owner, 0),
+        "active": active_ids,
+    }
 
 
 def _skey(session_id: str, owner: str) -> _SessionKey:
@@ -219,7 +242,7 @@ def iter_owner(owner: str) -> list[LiveTurn]:
     return [t for t in _by_run.values() if t.owner == owner]
 
 
-def start(session_id: str, owner: str, kind: str = "chat") -> LiveTurn:
+def start(session_id: str, owner: str, kind: str = "chat", user_message: str = "") -> LiveTurn:
     gc()
     key = _skey(session_id, owner)
     old_rid = _by_session.get(key)
@@ -227,9 +250,10 @@ def start(session_id: str, owner: str, kind: str = "chat") -> LiveTurn:
         old = _by_run.get(old_rid)
         if old is not None and old.done:
             _drop_run(old_rid)
-    turn = LiveTurn(session_id, owner, kind)
+    turn = LiveTurn(session_id, owner, kind, user_message=user_message)
     _by_run[turn.run_id] = turn
     _by_session[key] = turn.run_id
+    bump_pulse(owner)
     return turn
 
 
@@ -256,6 +280,7 @@ def reset() -> None:
     """Test helper: drop every live turn."""
     _by_run.clear()
     _by_session.clear()
+    _pulse_ver.clear()
 
 
 def owned(turn: LiveTurn, owner: str) -> bool:

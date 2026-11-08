@@ -527,6 +527,12 @@ async def cancel_chat(
 
 # ============== Sessions ==============
 
+@router.get("/api/sessions/pulse")
+async def sessions_pulse(request: Request):
+    """Zero-I/O in-memory pulse for detecting remote (IM / other tab) session activity."""
+    return live_turn.pulse(_account(request))
+
+
 @router.get("/api/sessions")
 async def list_sessions(
     request: Request,

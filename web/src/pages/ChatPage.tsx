@@ -1916,6 +1916,24 @@ async function resumeLiveStream(sessId: string) {
     bump();
     return;
   }
+  if (run.user_message) {
+    let lastUser: ChatMsg | undefined;
+    for (let i = sess.msgs.length - 1; i >= 0; i--) {
+      if (sess.msgs[i].role === "user" && !sess.msgs[i].automated) {
+        lastUser = sess.msgs[i];
+        break;
+      }
+    }
+    if (!lastUser || lastUser.content.trim() !== run.user_message.trim()) {
+      sess.msgs.push({
+        role: "user",
+        content: run.user_message,
+        ts: Date.now(),
+        files: [],
+        previews: [],
+      });
+    }
+  }
   const aiMsg = takeLiveAssistant(sess);
   appendThink(aiMsg, "");
   const abortCtrl = new AbortController();

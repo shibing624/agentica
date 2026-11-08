@@ -170,11 +170,40 @@ export async function syncFromServer(force = false) {
   await loadSessions();
   const id = getState().curSess;
   const sess = id ? getState().sessions[id] : null;
-  if (!id || !sess || sessionIsLive(id) || !sess.sizeBytes) return;
-  if (sess.hydratedSize !== sess.sizeBytes) await hydrateSession(id, true);
+  if (!id || !sess || sessionIsLive(id)) return;
+  if (sess.sizeBytes && sess.hydratedSize !== sess.sizeBytes) {
+    await hydrateSession(id, true);
+  }
   const now = getState().sessions[id];
   if (getState().curSess === id && now?.running && !sessionIsLive(id)) {
     setState({ pendingResume: id });
+  }
+}
+
+let lastPulseVer: number | null = null;
+let pulseInFlight = false;
+
+/** Zero-I/O in-memory pulse check: triggers a catalog/session sync only when
+ *  a remote run (e.g. WeChat/Feishu IM or another tab) starts or finishes. */
+export async function pollSessionsPulse() {
+  if (pulseInFlight) return;
+  pulseInFlight = true;
+  try {
+    const { ok, data } = await api.fetchSessionsPulse();
+    if (!ok || !data || typeof data.ver !== "number") return;
+    if (lastPulseVer === null) {
+      lastPulseVer = data.ver;
+      if (Array.isArray(data.active) && data.active.length > 0) {
+        await syncFromServer(true);
+      }
+      return;
+    }
+    if (data.ver !== lastPulseVer) {
+      lastPulseVer = data.ver;
+      await syncFromServer(true);
+    }
+  } finally {
+    pulseInFlight = false;
   }
 }
 

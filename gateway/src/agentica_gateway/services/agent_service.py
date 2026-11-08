@@ -1516,6 +1516,7 @@ class AgentService:
         on_thinking: Optional[Callable[[str], Any]] = None,
         owner: Optional[str] = None,
         media: Optional[List["InboundMedia"]] = None,
+        include_usage: bool = True,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks.
 
@@ -1552,7 +1553,7 @@ class AgentService:
             return await self._chat_stream_impl(
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
-                owner, media,
+                owner, media, include_usage=include_usage,
             )
 
     async def _chat_stream_impl(
@@ -1567,6 +1568,8 @@ class AgentService:
         on_thinking: Optional[Callable[[str], Any]],
         owner: Optional[str],
         media: Optional[List["InboundMedia"]],
+        *,
+        include_usage: bool = True,
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
@@ -1617,6 +1620,11 @@ class AgentService:
                 )
 
             self._schedule_title(session_id, owner, message, full_content)
+            usage = (
+                await usage_payload(agent, model_provider=self._session_provider(session_id, owner))
+                if include_usage
+                else None
+            )
             return ChatResult(
                 content=full_content.strip(),
                 tool_calls=tool_calls,
@@ -1626,7 +1634,7 @@ class AgentService:
                 reasoning=reasoning_content,
                 metrics=extract_metrics(agent),
                 media_notes=media_notes,
-                usage=await usage_payload(agent, model_provider=self._session_provider(session_id, owner)),
+                usage=usage,
                 turn_usage=turn_usage_payload(agent),
             )
 

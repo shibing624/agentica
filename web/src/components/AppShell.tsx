@@ -9,7 +9,7 @@ import {
 import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
 import { primeSettings, SettingsModal } from "../panels/SettingsModal";
-import { loadSessions, newChat, switchTo, syncFromServer } from "../sessions";
+import { loadSessions, newChat, pollSessionsPulse, switchTo, syncFromServer } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
@@ -133,9 +133,13 @@ export function AppShell({
   // `/api/sessions/{id}/run` status in `SessionTree`.
   useEffect(() => {
     const sync = () => { if (document.visibilityState === "visible") void syncFromServer(); };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void pollSessionsPulse();
+    }, 2000);
     window.addEventListener("focus", sync);
     document.addEventListener("visibilitychange", sync);
     return () => {
+      window.clearInterval(timer);
       window.removeEventListener("focus", sync);
       document.removeEventListener("visibilitychange", sync);
     };

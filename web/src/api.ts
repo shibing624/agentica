@@ -259,9 +259,12 @@ export function runEvents(runId: string, after = 0, signal?: AbortSignal) {
 }
 
 export const fetchActiveRun = (sessionId: string) =>
-  request<{ run: { run_id: string; session_id: string; status: string; kind: string; seq: number } | null }>(
+  request<{ run: { run_id: string; session_id: string; status: string; kind: string; seq: number; user_message?: string } | null }>(
     `/api/chat/runs/active?session_id=${encodeURIComponent(sessionId)}`,
   );
+
+export const fetchSessionsPulse = () =>
+  request<{ ver: number; active: string[] }>("/api/sessions/pulse");
 
 export const cancelRunApi = (runId: string) =>
   postJson<{ status: string; cancelled: boolean; run_id?: string }>(

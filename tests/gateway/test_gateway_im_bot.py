@@ -647,3 +647,82 @@ class TestImBotControllerFlows:
         assert hook_res["decision"] == "allow"
         assert hook_res["request_id"] == "req-hook-77"
 
+    @pytest.mark.asyncio
+    async def test_im_turn_streams_to_live_turn_and_bumps_pulse(self, tmp_path):
+        """IM turns stream events into LiveTurn and bump /api/sessions/pulse for real-time Web sync."""
+        from agentica_gateway.services import live_turn
+
+        live_turn.reset()
+        proj = tmp_path / "proj_stream"
+        proj.mkdir()
+        ch = FakeChannel()
+        cm = FakeChannelManager(ch)
+        svc = FakeAgentService(default_work_dir=str(proj))
+
+        mid_turn_pulse = {}
+        mid_turn_public = {}
+
+        async def _fake_chat_stream(
+            message,
+            session_id,
+            user_id="default",
+            owner=None,
+            on_content=None,
+            on_tool_call=None,
+            on_tool_result=None,
+            on_thinking=None,
+            media=None,
+            include_usage=True,
+        ):
+            assert include_usage is False
+            svc.chat_calls.append((session_id, svc.get_session_work_dir(session_id, owner), message))
+            mid_turn_pulse.update(live_turn.pulse("default"))
+            active = live_turn.active(session_id, "default")
+            assert active is not None
+            mid_turn_public.update(active.public())
+            if on_thinking:
+                on_thinking("先思考一下")
+            if on_tool_call:
+                on_tool_call("apply_patch", {"file": "a.py"}, "tc-1")
+            if on_tool_result:
+                on_tool_result("apply_patch", "patched", {"files": ["a.py"]})
+            if on_content:
+                on_content("已改好 a.py")
+            return ChatResult(content="已改好 a.py", tool_calls=1, session_id=session_id)
+
+        svc.chat_stream = _fake_chat_stream  # type: ignore[attr-defined]
+        bot = ImBotController(
+            channel_manager=cm,
+            agent_service=svc,
+            state_file=tmp_path / "im_state.json",
+        )
+
+        v0 = live_turn.pulse("default")["ver"]
+        await bot.handle(_msg("帮我改一下 a.py"))
+        state = bot.state_for(_msg("noop"))
+        task = bot._turn_tasks.get(state.session_id)
+        if task:
+            await task
+
+        # 1. Mid-turn pulse had incremented ver and listed the session as active with user_message
+        assert mid_turn_pulse["ver"] == v0 + 1
+        assert state.session_id in mid_turn_pulse["active"]
+        assert mid_turn_public["user_message"] == "帮我改一下 a.py"
+
+        # 2. LiveTurn recorded thinking, tool_call, tool_result, content, and done events for Web SSE
+        finished_turn = live_turn.get(state.session_id, "default")
+        assert finished_turn is not None
+        event_names = [ev["event"] for ev in finished_turn.events]
+        assert "thinking" in event_names
+        assert "tool_call" in event_names
+        assert "tool_result" in event_names
+        assert "content" in event_names
+        assert "done" in event_names
+
+        # 3. Post-turn pulse incremented ver again and cleared active
+        after_pulse = live_turn.pulse("default")
+        assert after_pulse["ver"] == v0 + 2
+        assert after_pulse["active"] == []
+        assert "已改好 a.py" in ch.sent[-1][1]
+
+
