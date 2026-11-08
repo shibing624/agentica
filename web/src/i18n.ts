@@ -421,6 +421,17 @@ const en = {
     skillSourceShow: "View original text",
     skillSourceHide: "Hide original text",
     skillLoadFailed: "Could not load this skill",
+    sourceLabels: {
+      cli: "CLI",
+      wechat: "WeChat",
+      wecom: "WeCom",
+      feishu: "Feishu",
+      telegram: "TG",
+      dingtalk: "DingTalk",
+      qq: "QQ",
+      discord: "Discord",
+      slack: "Slack",
+    } as Record<string, string>,
   },
 
   dir: {
@@ -1266,6 +1277,17 @@ const zh: Strings = {
     skillSourceShow: "查看原文",
     skillSourceHide: "收起原文",
     skillLoadFailed: "无法加载该技能",
+    sourceLabels: {
+      cli: "CLI",
+      wechat: "微信",
+      wecom: "企微",
+      feishu: "飞书",
+      telegram: "TG",
+      dingtalk: "钉钉",
+      qq: "QQ",
+      discord: "Discord",
+      slack: "Slack",
+    } as Record<string, string>,
     showLess: "收起",
   },
 

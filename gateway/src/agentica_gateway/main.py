@@ -816,6 +816,10 @@ async def _process_channel_batch(messages: list, session_id: str) -> None:
         mode = settings_routes.approval_mode_pref(user_id)
         if mode:
             deps.agent_service.set_session_approval_mode(session_id, mode, owner=user_id)
+        if hasattr(deps.agent_service, "session_log_for"):
+            log = deps.agent_service.session_log_for(session_id, owner=user_id)
+            if hasattr(log, "set_source"):
+                log.set_source(last.channel.value)
         text = "\n\n".join(parts)
         if not text:
             kind = media[0].kind

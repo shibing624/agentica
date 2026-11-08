@@ -1,5 +1,5 @@
 import { statWorkspaceFiles } from "../api";
-import { isAbsOrHomePath, splitExternalTarget } from "./file-path";
+import { isAbsOrHomePath, splitExternalTarget } from "./filePath";
 
 /** Coalesce MessageFilesCard stats: many messages mount in one tick and
  *  would each POST the same workspace. One flush per root per ~32ms. */

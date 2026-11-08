@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
 import { agoStr, lastQueryTs, sessionSideStatus } from "../lib/format";
-import { collapseSessionRows, sessionMatches, type SessionContentHit } from "../lib/sessionRows";
+import { collapseSessionRows, sessionMatches, sessionSourceBadge, type SessionContentHit } from "../lib/sessionRows";
 import {
   archiveSession, deleteSession, forkSession, loadSessions, newChatInDir, openSessionAtTurn,
   pinSession, renameSession, searchAllSessionsContent, switchTo, syncSessionStatus,
@@ -245,6 +245,7 @@ export function SessionTree() {
               const side = sessionSideStatus({
                 id, curSess: s.curSess, unread: session.unread, running: session.running,
               });
+              const sourceBadge = sessionSourceBadge(session.source, S.chat.sourceLabels);
               const hits = q ? contentHits[id] : undefined;
               // The session being read lists every match so the next one is a
               // click away; the others show a few and expand on request.
@@ -276,7 +277,9 @@ export function SessionTree() {
                       </span>
                     )}
                   </div>
-                  {editingSession !== id && session.source === "cli" && <span className="s-source">CLI</span>}
+                  {editingSession !== id && sourceBadge && (
+                    <span className={"s-source" + (sourceBadge.isIm ? " im" : "")}>{sourceBadge.label}</span>
+                  )}
                   {editingSession === id ? null : side === "busy" ? (
                     <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>
                   ) : side === "unread" ? (

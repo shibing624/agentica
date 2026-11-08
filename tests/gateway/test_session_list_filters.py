@@ -46,14 +46,21 @@ def dirs(tmp_path):
 class TestListFilters:
     def test_cli_listed_only_when_asked_and_sdk_never(self, svc, dirs):
         _session("web-1", dirs["proj"], source="gateway")
+        _session("wx-1", dirs["proj"], source="wechat")
+        _session("fs-1", dirs["proj"], source="feishu")
+        _session("agent:main:wecom:chat99", dirs["proj"])
         _session("cli-1", dirs["proj"], source="cli")
         _session("old-1", dirs["proj"])  # no source: legacy
         _session("sdk-1", dirs["proj"], source="sdk")
 
-        shown = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", include_cli=False)}
-        assert shown == {"web-1"}
+        rows = {r["session_id"]: r for r in svc.list_sessions(owner="default", scope="all", include_cli=False)}
+        assert set(rows) == {"web-1", "wx-1", "fs-1", "agent:main:wecom:chat99"}
+        assert rows["wx-1"]["source"] == "wechat"
+        assert rows["fs-1"]["source"] == "feishu"
+        assert rows["agent:main:wecom:chat99"]["source"] == "wecom"
+
         with_cli = {r["session_id"] for r in svc.list_sessions(owner="default", scope="all", include_cli=True)}
-        assert with_cli == {"web-1", "cli-1"}
+        assert with_cli == {"web-1", "wx-1", "fs-1", "agent:main:wecom:chat99", "cli-1"}
 
     def test_only_empty_temp_residue_is_hidden(self, svc, dirs):
         _session("real", dirs["proj"], source="gateway")

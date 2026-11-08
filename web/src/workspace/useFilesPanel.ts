@@ -7,7 +7,7 @@ import {
   nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, terminalKey, upsertTab, writeSessionPanel,
   type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
-import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/file-path";
+import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/filePath";
 import type { FileEdits } from "../lib/fileDiff";
 import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth } from "./panelWidth";
 

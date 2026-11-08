@@ -141,6 +141,30 @@ _AGENT_BUILD_TIMEOUT_S = 30
 # chat session log. See AgentService.run_cron().
 CRON_SESSION_PREFIX = "scheduled_"
 
+# IM channel values stored in SessionLog sidecar ``source`` so Web and Desktop
+# list IM conversations alongside web chats and badge them by channel
+# (WeChat / Feishu / WeCom / Telegram / DingTalk / QQ / Discord / Slack).
+IM_SESSION_SOURCES = frozenset({
+    "wechat",
+    "feishu",
+    "wecom",
+    "telegram",
+    "dingtalk",
+    "qq",
+    "discord",
+    "slack",
+})
+
+
+def _infer_im_source_from_session_id(session_id: str) -> Optional[str]:
+    """Extract the channel slug from legacy ``agent:<id>:<channel>:<chat_id>`` ids."""
+    if not session_id or not session_id.startswith("agent:"):
+        return None
+    parts = session_id.split(":", 3)
+    if len(parts) >= 3 and parts[2] in IM_SESSION_SOURCES:
+        return parts[2]
+    return None
+
 _TITLE_PROMPT = (
     "Name this conversation for a sidebar list. Reply with ONLY the title: "
     "at most 8 words (or 16 CJK characters), in the user's language, no quotes, "
@@ -1707,20 +1731,26 @@ class AgentService:
                 or live_turn.active(sid, owner=uid) is not None
             )
             source = entry.get("source")
+            im_from_sid = _infer_im_source_from_session_id(sid)
             if not source:
                 # A CLI flag is authoritative. Otherwise an old Web session
                 # (written before `source` existed) only has `last_read_at` to
                 # say the gateway showed it; dropping that hint would hide the
                 # user's own web history after an upgrade with no way back.
-                if entry.get("cli"):
+                if im_from_sid:
+                    source = im_from_sid
+                elif entry.get("cli"):
                     source = "cli"
                 elif entry.get("last_read_at"):
                     source = "gateway"
                 else:
                     source = "legacy"
+            elif source == "gateway" and im_from_sid:
+                source = im_from_sid
+            is_gateway_or_im = source == "gateway" or source in IM_SESSION_SOURCES
             archived = bool(entry.get("archived"))
             pinned = bool(entry.get("pinned"))
-            if not running and not (source == "gateway" or (include_cli and source == "cli")):
+            if not running and not (is_gateway_or_im or (include_cli and source == "cli")):
                 continue
             if (
                 not running
@@ -1735,7 +1765,7 @@ class AgentService:
                 continue
             if (
                 scope == "recent"
-                and source != "gateway"
+                and not is_gateway_or_im
                 and not running
                 and not archived
                 and not pinned
@@ -1769,6 +1799,11 @@ class AgentService:
         for turn in live_turn.iter_owner(uid):
             if turn.session_id.startswith(CRON_SESSION_PREFIX) or turn.session_id in seen:
                 continue
+            live_source = (
+                self.session_log_for(turn.session_id, owner=uid).get_source()
+                or _infer_im_source_from_session_id(turn.session_id)
+                or "gateway"
+            )
             out.append({
                 "session_id": turn.session_id,
                 "name": "Chat",
@@ -1782,7 +1817,7 @@ class AgentService:
                 "archived": False,
                 "work_dir": self.get_session_work_dir(turn.session_id, owner=uid),
                 "running": not turn.done,
-                "source": "gateway",
+                "source": live_source,
             })
         out.sort(key=lambda row: str(row.get("first_timestamp") or ""), reverse=True)
         return out

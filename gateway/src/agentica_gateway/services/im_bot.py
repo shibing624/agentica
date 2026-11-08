@@ -301,6 +301,19 @@ _APPROVAL_LABELS = {
     "deny_prefix": "拒绝同类 (Deny similar)",
 }
 
+_SOURCE_LABELS = {
+    "cli": "CLI",
+    "wechat": "微信",
+    "wecom": "企微",
+    "feishu": "飞书",
+    "telegram": "TG",
+    "dingtalk": "钉钉",
+    "qq": "QQ",
+    "discord": "Discord",
+    "slack": "Slack",
+    "gateway": "Web",
+}
+
 
 class ImBotController:
     """Session-bound IM controller for local Agentica workspaces and CLI terminals."""
@@ -425,8 +438,9 @@ class ImBotController:
         if self._agent_service is not None:
             self._agent_service.set_session_work_dir(session_id, real_dir, owner=uid)
             log = self._agent_service.session_log_for(session_id, owner=uid)
-            if not log.get_source():
-                log.set_source("gateway")
+            cur_source = log.get_source()
+            if not cur_source or cur_source == "gateway":
+                log.set_source(state.channel.value)
         self._save_states()
 
     def find_live_cli_peer(self, session_id: str) -> Optional[PeerInfo]:
@@ -640,6 +654,7 @@ class ImBotController:
                         "work_dir": peer.cwd or work_dir,
                         "title": peer.task or self._session_title(peer.cwd or work_dir, peer.session_id),
                         "stamp": "终端在线",
+                        "source": "cli",
                         "live_peer": peer,
                     })
 
@@ -653,11 +668,13 @@ class ImBotController:
             peer = live_map.get(sid)
             title = entry.get("name") or self._session_title(work_dir, sid)
             stamp = local_turn_stamp(entry.get("last_timestamp") or entry.get("mtime"))
+            src = str(entry.get("source") or ("cli" if entry.get("cli") else ""))
             items.append({
                 "session_id": sid,
                 "work_dir": entry.get("work_dir") or work_dir,
                 "title": title,
                 "stamp": stamp,
+                "source": src,
                 "live_peer": peer,
             })
 
@@ -670,6 +687,7 @@ class ImBotController:
                     "work_dir": peer.cwd or work_dir,
                     "title": f"[{_short_dir(peer.cwd)}] {peer.task or self._session_title(peer.cwd or work_dir, peer.session_id)}",
                     "stamp": "其他终端在线",
+                    "source": "cli",
                     "live_peer": peer,
                 })
 
@@ -695,11 +713,13 @@ class ImBotController:
             seen_ids.add(sid)
             raw_title = entry.get("name") or self._session_title(p_dir, sid)
             stamp = local_turn_stamp(entry.get("last_timestamp") or entry.get("mtime"))
+            src = str(entry.get("source") or ("cli" if entry.get("cli") else ""))
             items.append({
                 "session_id": sid,
                 "work_dir": p_dir,
                 "title": f"[{_short_dir(p_dir)}] {raw_title}",
                 "stamp": stamp,
+                "source": src,
                 "live_peer": live_map.get(sid),
             })
         return items
@@ -719,6 +739,8 @@ class ImBotController:
         for idx, item in enumerate(page_items, 1):
             sid = item["session_id"]
             cur = " [当前]" if sid == state.session_id else ""
+            src_label = _SOURCE_LABELS.get(str(item.get("source") or ""))
+            src_tag = f" [{src_label}]" if src_label else ""
             peer: Optional[PeerInfo] = item.get("live_peer")
             if peer is not None:
                 badge = "⏳终端运行中" if peer.busy else f"🟢终端:{peer.name}"
@@ -727,7 +749,7 @@ class ImBotController:
             else:
                 badge = item.get("stamp") or ""
             badge_str = f" ({badge})" if badge else ""
-            lines.append(f"  {idx}. {item['title']}{cur}{badge_str} [{sid[:6]}]")
+            lines.append(f"  {idx}. {item['title']}{src_tag}{cur}{badge_str} [{sid[:6]}]")
         if has_more:
             lines.append("  0. 下一页")
         state.set_pending(
@@ -1172,6 +1194,13 @@ class ImBotController:
             await self._drain_session_queue(session_id, q)
             return
 
+        if self._agent_service is not None:
+            uid = self._user_id()
+            self._agent_service.set_session_work_dir(session_id, work_dir, owner=uid)
+            self._agent_service.session_log_for(session_id, owner=uid).set_source(
+                state.channel.value
+            )
+
         started = time.monotonic()
         done_event = asyncio.Event()
         short = _short_dir(work_dir)
@@ -1320,6 +1349,9 @@ class ImBotController:
             return
         uid = self._user_id()
         self._agent_service.set_session_work_dir(session_id, work_dir, owner=uid)
+        self._agent_service.session_log_for(session_id, owner=uid).set_source(
+            state.channel.value
+        )
 
         from ..routes import settings as settings_routes
 

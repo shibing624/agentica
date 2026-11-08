@@ -3,7 +3,7 @@ import {
   FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
 import { useStrings } from "../i18n";
-import { isAbsOrHomePath } from "../lib/file-path";
+import { isAbsOrHomePath } from "../lib/filePath";
 import { baseName, type PanelTab } from "../lib/panelTabs";
 import { DiffView } from "./DiffView";
 import { SkillPane } from "./SkillPane";

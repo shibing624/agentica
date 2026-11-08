@@ -15,7 +15,7 @@ import { CodeFrame, MarkdownCode } from "../components/CodeFrame";
 import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
-import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget } from "../lib/file-path";
+import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget } from "../lib/filePath";
 import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";

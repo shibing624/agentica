@@ -6,7 +6,7 @@ import { fileEditsOf, type FileEdit } from "../lib/fileEdits";
 import { fileDiffsOf, type FileEdits } from "../lib/fileDiff";
 import {
   extractFilePaths, extractToolPaths, isAbsOrHomePath, normalizeMentionedPath, toWorkspaceRelative,
-} from "../lib/file-path";
+} from "../lib/filePath";
 import { statWorkspaceFilesBatched } from "../lib/workspaceStat";
 import { showToast } from "../store";
 

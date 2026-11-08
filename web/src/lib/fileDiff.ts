@@ -4,7 +4,7 @@
  * per file and laid out the way dsh's FileDiff draws them. Pure, so the line
  * numbering and pairing rules are testable without React.
  */
-import { toWorkspaceRelative } from "./file-path";
+import { toWorkspaceRelative } from "./filePath";
 
 export type DiffHunk = {
   oldStart: number; oldLines: number; newStart: number; newLines: number;

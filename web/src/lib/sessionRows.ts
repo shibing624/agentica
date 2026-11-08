@@ -15,8 +15,48 @@ export type SessionRow = {
     preview?: string;
     running?: boolean;
     pinned?: boolean;
+    source?: string;
   };
 };
+
+const IM_SOURCES = new Set([
+  "wechat",
+  "wecom",
+  "feishu",
+  "telegram",
+  "dingtalk",
+  "qq",
+  "discord",
+  "slack",
+]);
+
+const DEFAULT_SOURCE_LABELS: Record<string, string> = {
+  cli: "CLI",
+  wechat: "微信",
+  wecom: "企微",
+  feishu: "飞书",
+  telegram: "TG",
+  dingtalk: "钉钉",
+  qq: "QQ",
+  discord: "Discord",
+  slack: "Slack",
+};
+
+/** Resolve the sidebar source badge for a session (CLI or IM channel); null for plain Web/Desktop chats. */
+export function sessionSourceBadge(
+  source?: string,
+  labels: Record<string, string> = DEFAULT_SOURCE_LABELS,
+): { key: string; label: string; isIm: boolean } | null {
+  const key = (source || "").trim().toLowerCase();
+  if (!key || key === "gateway" || key === "web" || key === "legacy") return null;
+  if (key === "cli") {
+    return { key, label: labels.cli || "CLI", isIm: false };
+  }
+  if (IM_SOURCES.has(key)) {
+    return { key, label: labels[key] || DEFAULT_SOURCE_LABELS[key] || key.toUpperCase(), isIm: true };
+  }
+  return null;
+}
 
 export function sessionMatches(
   row: SessionRow,
@@ -27,8 +67,14 @@ export function sessionMatches(
   const q = query.trim().toLocaleLowerCase();
   if (!q) return true;
   if (contentHits && contentHits.length > 0) return true;
-  return [row.session.title, row.session.preview || "", projectName]
-    .some((value) => value.toLocaleLowerCase().includes(q));
+  const badge = sessionSourceBadge(row.session.source);
+  return [
+    row.session.title,
+    row.session.preview || "",
+    projectName,
+    row.session.source || "",
+    badge ? badge.label : "",
+  ].some((value) => value.toLocaleLowerCase().includes(q));
 }
 
 function snippetAround(text: string, needle: string, before = 24, after = 56): string {

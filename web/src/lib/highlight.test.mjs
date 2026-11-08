@@ -11,7 +11,7 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const H = await vite.ssrLoadModule("/src/lib/highlight.ts");
-const FP = await vite.ssrLoadModule("/src/lib/file-path.ts");
+const FP = await vite.ssrLoadModule("/src/lib/filePath.ts");
 after(() => vite.close());
 
 test("python fences tagged python3 / py3 are highlighted as python", () => {

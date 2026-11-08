@@ -434,6 +434,8 @@ class TestImBotControllerFlows:
         assert len(ch.files) == 1
         assert ch.files[0][1] == "result.png"
         assert ch.files[0][3] == "image/png"
+        # Session source is stamped with the IM channel ("wechat") for Web/Desktop sync
+        assert log_b.get_source() == "wechat"
 
     @pytest.mark.asyncio
     async def test_gateway_turn_approval_resolved_via_card_link(self, tmp_path, monkeypatch):

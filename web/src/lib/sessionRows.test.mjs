@@ -11,7 +11,7 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const {
-  collapseSessionRows, findQueryRanges, searchEventsConversation, searchMsgsConversation, sessionMatches,
+  collapseSessionRows, findQueryRanges, searchEventsConversation, searchMsgsConversation, sessionMatches, sessionSourceBadge,
 } = await vite.ssrLoadModule("/src/lib/sessionRows.ts");
 after(() => vite.close());
 
@@ -91,3 +91,18 @@ test("findQueryRanges locates all case-insensitive keyword occurrences for in-pa
   );
   assert.deepEqual(findQueryRanges("nothing here", ""), []);
 });
+
+test("sessionSourceBadge distinguishes CLI and IM channels while keeping plain gateway chats unbadged", () => {
+  assert.equal(sessionSourceBadge("gateway"), null);
+  assert.equal(sessionSourceBadge("web"), null);
+  assert.equal(sessionSourceBadge("legacy"), null);
+  assert.deepEqual(sessionSourceBadge("cli"), { key: "cli", label: "CLI", isIm: false });
+  assert.deepEqual(sessionSourceBadge("wechat"), { key: "wechat", label: "微信", isIm: true });
+  assert.deepEqual(sessionSourceBadge("feishu"), { key: "feishu", label: "飞书", isIm: true });
+  assert.deepEqual(sessionSourceBadge("wecom", { wecom: "WeCom" }), { key: "wecom", label: "WeCom", isIm: true });
+
+  const wxRow = { id: "wx-1", session: { title: "周报整理", source: "wechat" } };
+  assert.equal(sessionMatches(wxRow, "agentica", "微信"), true);
+  assert.equal(sessionMatches(wxRow, "agentica", "wechat"), true);
+});
+
