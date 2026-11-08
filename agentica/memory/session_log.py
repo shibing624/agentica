@@ -25,8 +25,9 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Union, runtime_checkable
@@ -53,6 +54,16 @@ class _ToDict(Protocol):
 
 # Large file optimization threshold (5MB, same as CC's SKIP_PRECOMPACT_THRESHOLD)
 _LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
+
+# Full trace analyses (bodies included) of recently read logs, newest last.
+# Opening a call, stepping through the list with the arrow keys and searching
+# each used to scan the whole file again: ~0.1 s for a 6 MB log, ~0.85 s for an
+# 87 MB one, all of it holding the GIL against everything else the gateway
+# serves. Keyed by (path, mtime, size), so a log that grows is read afresh.
+_ANALYSIS_CACHE_MAX_ENTRIES = 3
+_ANALYSIS_CACHE_MAX_BYTES = 192 * 1024 * 1024  # of source logs, a proxy for memory held
+_analysis_cache: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
+_analysis_cache_lock = threading.Lock()
 
 
 def _drop_consumed_window_preamble(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2180,16 +2191,64 @@ class SessionLog:
     # Utilities
     # ------------------------------------------------------------------
 
-    def analyze(self, *, lite: bool = False) -> Dict[str, Any]:
+    def _full_analysis(self) -> Dict[str, Any]:
+        """The full analysis (bodies included) of the file as it is now.
+
+        Shared between callers and across requests: **read it, never modify
+        it.** Concurrent callers wait for one scan instead of each running
+        their own.
+        """
+        from agentica.memory.trace import analyze_entries
+
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return analyze_entries(self.iter_raw_entries())
+        key = (str(self.path), stat.st_mtime_ns, stat.st_size)
+        with _analysis_cache_lock:
+            hit = _analysis_cache.get(key)
+            if hit is not None:
+                _analysis_cache.move_to_end(key)
+                return hit
+            analysis = analyze_entries(self.iter_raw_entries())
+            if stat.st_size <= _ANALYSIS_CACHE_MAX_BYTES:
+                for old in [k for k in _analysis_cache if k[0] == key[0]]:
+                    del _analysis_cache[old]  # an earlier version of this same log
+                _analysis_cache[key] = analysis
+                while len(_analysis_cache) > 1 and (
+                    len(_analysis_cache) > _ANALYSIS_CACHE_MAX_ENTRIES
+                    or sum(k[2] for k in _analysis_cache) > _ANALYSIS_CACHE_MAX_BYTES
+                ):
+                    _analysis_cache.popitem(last=False)
+            return analysis
+
+    def trace_call_body(self, index: int) -> Optional[Dict[str, Any]]:
+        """Body of the call at log line ``index`` (arguments, result, thinking, reply), or None."""
+        from agentica.memory.trace import call_body_in
+
+        return call_body_in(self._full_analysis(), index)
+
+    def trace_search(self, query: str, limit: int = 500) -> List[int]:
+        """Log-line indices of the calls whose text contains ``query``."""
+        from agentica.memory.trace import search_calls_in
+
+        return search_calls_in(self._full_analysis(), query, limit)
+
+    def analyze(self, *, lite: bool = False, calls: bool = True) -> Dict[str, Any]:
         """Read-time Trace analysis over this JSONL (same payload as Web ``/traces``).
 
         Does not write. Empty or missing files still return a valid analysis
         dict with ``hasTimeline=False``. ``lite`` leaves the bodies out (see
-        :func:`agentica.memory.trace.analyze_entries`).
+        :func:`agentica.memory.trace.analyze_entries`) and is served from the
+        shared scan of the file; ``calls=False`` (with ``lite``) also leaves out
+        each round's call list, for a reader that only needs the round totals.
         """
-        from agentica.memory.trace import analyze_entries
+        from agentica.memory.trace import analyze_entries, lite_view
 
-        analysis = analyze_entries(self.iter_raw_entries(), lite=lite)
+        if lite:
+            analysis = lite_view(self._full_analysis(), calls=calls)
+        else:
+            analysis = analyze_entries(self.iter_raw_entries())
         analysis["session_id"] = self.session_id
         analysis["meta"]["cwd"] = self._cwd
         analysis["meta"]["gitBranch"] = self._git_branch

@@ -23,6 +23,9 @@ type Group = {
   sessions: { id: string; session: Session }[];
 };
 
+/** Matches listed under a session before "N more". */
+const HITS_PREVIEW = 3;
+
 export function SessionTree() {
   const s = useAppState();
   const S = useStrings();
@@ -38,8 +41,11 @@ export function SessionTree() {
   const [rowMenu, setRowMenu] = useState<{ id: string; anchor: DOMRect } | null>(null);
   const [contentHits, setContentHits] = useState<Record<string, SessionContentHit[]>>({});
   const [searchingContent, setSearchingContent] = useState(false);
+  // Sessions whose hit list is shown in full instead of the first few.
+  const [allHits, setAllHits] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    setAllHits({});
     if (!q) {
       setContentHits({});
       setSearchingContent(false);
@@ -48,7 +54,7 @@ export function SessionTree() {
     setSearchingContent(true);
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => {
-      void searchAllSessionsContent(q, ctrl.signal).then((res) => {
+      void searchAllSessionsContent(q, ctrl.signal, s.curSess).then((res) => {
         if (ctrl.signal.aborted) return;
         setContentHits(res);
         setSearchingContent(false);
@@ -58,7 +64,7 @@ export function SessionTree() {
       window.clearTimeout(timer);
       ctrl.abort();
     };
-  }, [q, s.sessionScope]);
+  }, [q, s.sessionScope, s.curSess]);
 
   const labels = useMemo(() => {
     const m: Record<string, string> = {};
@@ -239,6 +245,10 @@ export function SessionTree() {
                 id, curSess: s.curSess, unread: session.unread, running: session.running,
               });
               const hits = q ? contentHits[id] : undefined;
+              // The session being read lists every match so the next one is a
+              // click away; the others show a few and expand on request.
+              const showAll = !!allHits[id] || id === s.curSess;
+              const shown = hits ? (showAll ? hits : hits.slice(0, HITS_PREVIEW)) : [];
               return (
                 <div key={id} className="s-item-block">
                 <div
@@ -302,7 +312,7 @@ export function SessionTree() {
                 </div>
                 {hits && hits.length > 0 && (
                   <div className="s-hits">
-                    {hits.slice(0, 3).map((hit, idx) => (
+                    {shown.map((hit, idx) => (
                       <button
                         key={`${hit.turn}:${hit.role}:${idx}`}
                         type="button"
@@ -316,13 +326,13 @@ export function SessionTree() {
                         <span className="s-hit-text">{highlightSnippet(hit.snippet, q)}</span>
                       </button>
                     ))}
-                    {hits.length > 3 && (
+                    {!showAll && hits.length > HITS_PREVIEW && (
                       <button
                         type="button"
                         className="s-hit-more"
-                        onClick={(e) => { e.stopPropagation(); pickHit(id, hits[3]); }}
+                        onClick={(e) => { e.stopPropagation(); setAllHits((v) => ({ ...v, [id]: true })); }}
                       >
-                        {S.chat.searchMoreHits(hits.length - 3)}
+                        {S.chat.searchMoreHits(hits.length - HITS_PREVIEW)}
                       </button>
                     )}
                   </div>

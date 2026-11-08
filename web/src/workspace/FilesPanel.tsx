@@ -6,11 +6,15 @@ import { useStrings } from "../i18n";
 import { baseName, type PanelTab } from "../lib/panelTabs";
 import { DiffView } from "./DiffView";
 import { SkillPane } from "./SkillPane";
-import { FilePreview, WorkspaceBrowser } from "./WorkspaceBrowser";
 import type { FilesPanelState } from "./useFilesPanel";
 
 // xterm.js is ~300 kB; nobody who never opens a terminal downloads it.
 const TerminalView = lazy(() => import("./TerminalView").then((m) => ({ default: m.TerminalView })));
+// The browser renders Markdown with raw HTML and KaTeX (~600 kB with their
+// parsers). Importing it statically made every page load fetch that before the
+// panel was ever opened, which defeated the lazy ChatMarkdown in the chat.
+const WorkspaceBrowser = lazy(() => import("./WorkspaceBrowser").then((m) => ({ default: m.WorkspaceBrowser })));
+const FilePreview = lazy(() => import("./WorkspaceBrowser").then((m) => ({ default: m.FilePreview })));
 
 function TabLabel({ tab }: { tab: PanelTab }) {
   const S = useStrings();
@@ -177,11 +181,17 @@ export function FilesPanel({
             return (
               <div key={tab.key} className="files-panel-body" hidden={!active} role="tabpanel">
                 {tab.kind === "files" && (root
-                  ? <WorkspaceBrowser root={root} active={panel.open && active} onOpenFile={panel.browsePath} />
+                  ? (
+                    <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
+                      <WorkspaceBrowser root={root} active={panel.open && active} onOpenFile={panel.browsePath} />
+                    </Suspense>
+                  )
                   : <p className="ws-muted">{S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
                 {tab.kind === "file" && (root || tab.path.startsWith("/")) && (
-                  <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />
+                  <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
+                    <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />
+                  </Suspense>
                 )}
                 {tab.kind === "review" && root && (
                   <DiffView root={root} turn={tab.turn} files={tab.files} path={tab.path}

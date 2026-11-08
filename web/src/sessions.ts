@@ -397,7 +397,7 @@ export async function syncSessionRoundStats(id: string) {
   // New Chat has a client id and no jsonl yet; the analysis route 404s.
   const existing = getState().sessions[id];
   if (!existing || (!existing.sizeBytes && !existing.msgs.some((m) => m.role === "assistant"))) return;
-  const { ok, data } = await api.fetchTraceAnalysis(id);
+  const { ok, data } = await api.fetchTraceRounds(id);
   if (!ok || !data?.rounds) return;
   const sess = getState().sessions[id];
   if (!sess) return;
@@ -629,6 +629,9 @@ export function deleteSession(id: string) {
 
 const rawEventsCache = new Map<string, { size: number; events: any[] }>();
 
+/** Matches returned for the session being read (the rest return a handful). */
+const FOCUS_SESSION_HITS = 100;
+
 /**
  * Search user queries and assistant answers across all visible sessions.
  * Uses `/api/sessions/search` when available, and falls back to client-side
@@ -637,16 +640,26 @@ const rawEventsCache = new Map<string, { size: number; events: any[] }>();
 export async function searchAllSessionsContent(
   query: string,
   signal?: AbortSignal,
+  /** The session being read: it is searched again for every match (the others
+   *  keep a handful), so the next hit is always a click away. */
+  focusSessionId?: string | null,
 ): Promise<Record<string, SessionContentHit[]>> {
   const q = query.trim();
   if (!q) return {};
   const st = getState();
   const out: Record<string, SessionContentHit[]> = {};
 
-  const { ok, data } = await api.searchSessionsApi(q, st.sessionScope, signal);
+  const [{ ok, data }, focused] = await Promise.all([
+    api.searchSessionsApi(q, st.sessionScope, signal),
+    focusSessionId
+      ? api.searchSessionsApi(q, st.sessionScope, signal, { sessionId: focusSessionId, perSession: FOCUS_SESSION_HITS })
+      : Promise.resolve(null),
+  ]);
   if (signal?.aborted) return {};
   if (ok && data?.results && typeof data.results === "object") {
     Object.assign(out, data.results);
+    const full = focused?.ok ? focused.data?.results?.[focusSessionId!] : undefined;
+    if (full?.length) out[focusSessionId!] = full;
   } else {
     // Client-side fallback when the gateway process has not been restarted yet.
     const entries = Object.entries(st.sessions).filter(([, s]) => !s.archived);

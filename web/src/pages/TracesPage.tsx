@@ -151,12 +151,17 @@ export function TracesPage() {
   useEffect(() => {
     if (!sessionId) { setAnalysis(null); setErrStatus(0); return; }
     setLoading(true);
+    // Leaving for another session before this one answers must not let the late
+    // reply overwrite the page (or clear its loading state) for the new one.
+    let current = true;
     void api.fetchTraceAnalysis(sessionId).then(({ ok, status, data }) => {
+      if (!current) return;
       setLoading(false);
       if (ok) { setAnalysis(data as Analysis); setErrStatus(0); return; }
       setAnalysis(null);
       setErrStatus(status || 500);
     });
+    return () => { current = false; };
   }, [sessionId]);
 
   if (!sessionId) return <Navigate to="/chat" replace />;
@@ -837,14 +842,19 @@ function CallDetail({ sessionId, c, round, roundName, onOpenCall }: {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (bodyCache.has(key)) return;
-    let live = true;
-    void api.fetchTraceCallBody(sessionId, c.index).then(({ ok, data }) => {
-      if (!live) return;
-      if (!ok || !data) { setFailed(true); return; }
-      bodyCache.set(key, data as Body);
-      setBody(data as Body);
-    });
-    return () => { live = false; };
+    // Stepping through the list with the arrow keys moves the selection faster
+    // than a body arrives. Wait for it to settle, and drop a request the user
+    // has already moved past, so the server only reads the ones that are looked at.
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => {
+      void api.fetchTraceCallBody(sessionId, c.index, ctrl.signal).then(({ ok, data }) => {
+        if (ctrl.signal.aborted) return;
+        if (!ok || !data) { setFailed(true); return; }
+        bodyCache.set(key, data as Body);
+        setBody(data as Body);
+      });
+    }, 120);
+    return () => { window.clearTimeout(timer); ctrl.abort(); };
   }, [key, sessionId, c.index]);
 
   const tabs: Array<[string, string]> = c.kind === "tool"

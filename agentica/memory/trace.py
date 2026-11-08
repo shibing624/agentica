@@ -436,17 +436,44 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
     return out
 
 
-def call_body(entries: Iterable[Dict[str, Any]], index: int) -> Optional[Dict[str, Any]]:
-    """The body of the call that starts at log line ``index``, or None."""
-    for r in analyze_entries(entries)["rounds"]:
+def lite_view(analysis: Dict[str, Any], *, calls: bool = True) -> Dict[str, Any]:
+    """The ``lite`` form of a full analysis, as a copy; ``analysis`` is untouched.
+
+    What ``analyze_entries(..., lite=True)`` returns, derived from a result that
+    is already in hand, so a caller that keeps the full analysis (bodies and
+    all) can serve both the page and its per-call lookups from one scan.
+    ``calls=False`` also drops every round's call list: the numbers a footer
+    needs (time, tokens, cost) are on the round itself.
+    """
+    out = {
+        k: v for k, v in analysis.items()
+        if k not in ("requests", "tasks", "modelSegments", "toolSpans", "otherSpans", "usageTrend", "messageTask")
+    }
+    # The caller stamps session fields onto meta; do not write through to the original.
+    out["meta"] = dict(analysis["meta"])
+    rounds = []
+    for r in analysis["rounds"]:
+        slim = {k: v for k, v in r.items() if k != "entries"}
+        if calls:
+            slim["calls"] = [{k: v for k, v in c.items() if k != "body"} for c in r["calls"]]
+        else:
+            slim.pop("calls", None)
+        rounds.append(slim)
+    out["rounds"] = rounds
+    return out
+
+
+def call_body_in(analysis: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
+    """The body of the call at log line ``index`` in a full ``analysis``, or None."""
+    for r in analysis["rounds"]:
         for c in r["calls"]:
             if c["index"] == index:
                 return c["body"]
     return None
 
 
-def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500) -> List[int]:
-    """Indices of calls whose text contains ``query`` (case-insensitive).
+def search_calls_in(analysis: Dict[str, Any], query: str, limit: int = 500) -> List[int]:
+    """Indices of calls in a full ``analysis`` whose text contains ``query`` (case-insensitive).
 
     Searches what the page can show for a call: its summary, tool name,
     result line and every body field (arguments, result, thinking, reply).
@@ -455,7 +482,7 @@ def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500
     if not needle:
         return []
     hits: List[int] = []
-    for r in analyze_entries(entries)["rounds"]:
+    for r in analysis["rounds"]:
         for c in r["calls"]:
             texts = [c.get("summary"), c.get("toolName"), c.get("resultSummary")]
             texts.extend(v for v in c["body"].values() if isinstance(v, str))
@@ -464,6 +491,16 @@ def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500
                 if len(hits) >= limit:
                     return hits
     return hits
+
+
+def call_body(entries: Iterable[Dict[str, Any]], index: int) -> Optional[Dict[str, Any]]:
+    """The body of the call that starts at log line ``index``, or None."""
+    return call_body_in(analyze_entries(entries), index)
+
+
+def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500) -> List[int]:
+    """Indices of calls whose text contains ``query`` (case-insensitive)."""
+    return search_calls_in(analyze_entries(entries), query, limit)
 
 
 def _strip_window_preamble(content: str) -> str:

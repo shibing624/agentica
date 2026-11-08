@@ -560,6 +560,93 @@ class TestRoundView:
         assert search_calls(self._turn(), "   ") == []
 
 
+class TestAnalysisCache:
+    """One scan of an unchanged log serves the page, each call body and search."""
+
+    def _log(self, tmp_path, n=3):
+        log = SessionLog(session_id="cached", base_dir=str(tmp_path))
+        log.append("user", "count the files")
+        for i in range(n):
+            log.append_event("request_begin")
+            log.append_event("tool_call", tool_call_id=f"c{i}", tool_name="execute", stop_reason="completed",
+                             arguments=json.dumps({"command": f"ls {i}"}))
+            log.append_event("request_end", status="completed")
+            log.append("tool", f"out-{i}", tool_call_id=f"c{i}")
+        log.append("assistant", "done")
+        return log
+
+    def _count_scans(self, monkeypatch):
+        import agentica.memory.trace as trace
+        real = trace.analyze_entries
+        calls = []
+
+        def counting(*a, **kw):
+            calls.append(1)
+            return real(*a, **kw)
+
+        monkeypatch.setattr(trace, "analyze_entries", counting)
+        return calls
+
+    def test_lookups_after_the_first_do_not_rescan_the_file(self, tmp_path, monkeypatch):
+        from agentica.memory import session_log as sl
+        sl._analysis_cache.clear()
+        log = self._log(tmp_path)
+        scans = self._count_scans(monkeypatch)
+        lite = log.analyze(lite=True)
+        indices = [c["index"] for r in lite["rounds"] for c in r["calls"] if c["kind"] == "tool"]
+        assert len(indices) == 3
+        for i in indices:
+            assert log.trace_call_body(i)["result"].startswith("out-")
+        assert log.trace_search("out-1") != []
+        assert len(scans) == 1
+
+    def test_a_log_that_grew_is_read_again(self, tmp_path, monkeypatch):
+        from agentica.memory import session_log as sl
+        sl._analysis_cache.clear()
+        log = self._log(tmp_path, n=1)
+        scans = self._count_scans(monkeypatch)
+        assert log.analyze(lite=True)["totals"]["toolCalls"] == 1
+        log.append_event("request_begin")
+        log.append_event("tool_call", tool_call_id="late", tool_name="execute", stop_reason="completed")
+        log.append_event("request_end", status="completed")
+        log.append("tool", "out-late", tool_call_id="late")
+        assert log.analyze(lite=True)["totals"]["toolCalls"] == 2
+        assert len(scans) == 2
+
+    def test_stamping_session_fields_does_not_leak_into_the_cache(self, tmp_path):
+        from agentica.memory import session_log as sl
+        sl._analysis_cache.clear()
+        log = self._log(tmp_path)
+        first = log.analyze(lite=True)
+        first["meta"]["cwd"] = "/changed"
+        first["rounds"][0]["calls"].clear()
+        again = log.analyze(lite=True)
+        assert again["meta"]["cwd"] != "/changed"
+        assert again["rounds"][0]["calls"], "the cached analysis must not be mutated by a caller"
+        assert log.trace_call_body(next(c["index"] for c in again["rounds"][0]["calls"] if c["kind"] == "tool"))
+
+    def test_lite_matches_the_direct_lite_scan_and_can_leave_calls_out(self, tmp_path):
+        from agentica.memory import session_log as sl
+        sl._analysis_cache.clear()
+        log = self._log(tmp_path)
+        direct = analyze_entries(log.iter_raw_entries(), lite=True)
+        served = log.analyze(lite=True)
+        assert served["rounds"] == direct["rounds"]
+        assert served["totals"] == direct["totals"]
+        assert set(direct) - set(served) == set()
+        slim = log.analyze(lite=True, calls=False)
+        assert all("calls" not in r for r in slim["rounds"])
+        assert slim["rounds"][0]["tokens"] == direct["rounds"][0]["tokens"]
+
+    def test_cache_is_bounded(self, tmp_path):
+        from agentica.memory import session_log as sl
+        sl._analysis_cache.clear()
+        for k in range(sl._ANALYSIS_CACHE_MAX_ENTRIES + 3):
+            SessionLog(session_id=f"s{k}", base_dir=str(tmp_path)).append("user", f"q{k}")
+            SessionLog(session_id=f"s{k}", base_dir=str(tmp_path)).analyze(lite=True)
+        assert len(sl._analysis_cache) <= sl._ANALYSIS_CACHE_MAX_ENTRIES
+
+
 def test_interrupt_compensation_tool_call_stays_off_the_lane():
     entries = [
         _e("2026-01-01T00:00:00.000Z", type="user", content="do"),

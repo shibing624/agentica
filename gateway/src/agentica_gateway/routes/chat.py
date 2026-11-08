@@ -557,9 +557,16 @@ async def search_sessions(
     q: str = Query("", max_length=200),
     scope: str = Query("recent", pattern="^(recent|all)$"),
     recent_days: int = Query(30, ge=1, le=365),
+    session_id: Optional[str] = Query(None, max_length=200),
+    per_session: int = Query(8, ge=1, le=200),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """Search user queries and assistant answers across sessions."""
+    """Search user queries and assistant answers across sessions.
+
+    ``session_id`` limits it to one session (the one being read, to step through
+    every match without scanning the rest); ``per_session`` raises the cap on
+    matches returned for each.
+    """
     needle = q.strip()
     if not needle:
         return {"results": {}}
@@ -567,21 +574,20 @@ async def search_sessions(
     include_cli = show_cli_sessions_pref(account)
 
     def _scan() -> dict:
-        rows = svc.list_sessions(
-            owner=account, scope=scope, recent_days=recent_days,
-            include_cli=include_cli, hide_temp_dirs=True,
-        )
+        if session_id:
+            sids = [session_id]
+        else:
+            rows = svc.list_sessions(
+                owner=account, scope=scope, recent_days=recent_days,
+                include_cli=include_cli, hide_temp_dirs=True,
+            )
+            sids = [r["session_id"] for r in rows if r.get("session_id") and not r.get("archived")]
         out: dict = {}
-        for row in rows:
-            if row.get("archived"):
-                continue
-            sid = row.get("session_id")
-            if not sid:
-                continue
+        for sid in sids:
             log = svc.session_log_for(sid, owner=account)
             if not log.path.exists():
                 continue
-            hits = search_conversation(log.iter_raw_entries(), needle)
+            hits = search_conversation(log.iter_raw_entries(), needle, max_hits=per_session)
             if hits:
                 out[sid] = hits
         return out

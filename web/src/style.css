@@ -1878,13 +1878,9 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .s-hit-more{border:none;background:none;color:var(--fg3);font:inherit;font-size:11px;text-align:left;padding:2px 6px;cursor:pointer}
 .s-hit-more:hover{color:var(--fg)}
 
-.chat-find-bar{display:flex;align-items:center;gap:6px;padding:6px 14px;border-bottom:var(--hair) solid var(--border);background:var(--bg2);color:var(--fg2);font-size:12px;flex-shrink:0;z-index:20}
-.chat-find-bar svg{width:13px;height:13px;flex-shrink:0;color:var(--fg3)}
-.chat-find-input{flex:1;max-width:260px;min-width:100px;height:24px;border:var(--hair) solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:12px;padding:0 8px;outline:none}
-.chat-find-input:focus{border-color:var(--fg3)}
-.chat-find-count{font-family:var(--mono);font-size:11px;color:var(--fg3);margin-left:auto;white-space:nowrap}
-.chat-find-btn{width:24px;height:24px;border:var(--hair) solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg2);font:inherit;font-size:12px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
-.chat-find-btn:hover:not(:disabled){background:var(--bg3);color:var(--fg)}
-.chat-find-btn:disabled{opacity:.4;cursor:default}
+.crash{max-width:420px;margin:18vh auto 0;padding:0 24px;display:flex;flex-direction:column;align-items:flex-start;gap:10px;color:var(--fg)}
+.crash h2{margin:0;font-size:16px;font-weight:600}
+.crash p{margin:0;font-size:13px;color:var(--fg2)}
+.crash code{display:block;max-width:100%;padding:8px 10px;border-radius:8px;background:var(--bg2);color:var(--fg3);font:11.5px/1.5 var(--mono);word-break:break-word}
 .m.search-focus .bubble,.m.search-focus .ai-content{outline:2px solid var(--accent,#2563eb);outline-offset:4px;border-radius:10px;transition:outline-color .25s ease}
 .git-dialog{min-width:0}

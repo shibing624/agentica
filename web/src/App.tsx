@@ -8,6 +8,7 @@ import { AssistantPage } from "./pages/AssistantPage";
 const TracesPage = lazy(() => import("./pages/TracesPage").then((m) => ({ default: m.TracesPage })));
 const UsersPage = lazy(() => import("./pages/UsersPage").then((m) => ({ default: m.UsersPage })));
 import { AppLayout } from "./components/AppShell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ConfirmDialog, Toast } from "./components/Feedback";
 import { applyLang } from "./i18n";
 import { applyTheme, getState } from "./store";
@@ -37,19 +38,21 @@ export function App() {
   return (
     <BrowserRouter>
       <AuthGate />
-      <Suspense fallback={null}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route element={<AppLayout />}>
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/traces" element={<TracesPage />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/assistant" element={<AssistantPage />} />
-          </Route>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Routes>
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route element={<AppLayout />}>
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/traces" element={<TracesPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/assistant" element={<AssistantPage />} />
+            </Route>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
       <Toast />
       <ConfirmDialog />
     </BrowserRouter>

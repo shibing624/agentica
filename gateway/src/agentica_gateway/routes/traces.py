@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
-from agentica.memory.trace import call_body, chat_turn_page, search_calls
+from agentica.memory.trace import chat_turn_page
 
 from .. import deps
 from ..services.agent_service import AgentService
@@ -46,13 +46,19 @@ async def trace_analysis(
     session_id: str,
     request: Request,
     lite: bool = Query(False),
+    calls: bool = Query(True),
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """``lite``: no bodies — the page loads each one with ``/trace/calls/{index}``."""
+    """``lite``: no bodies — the page loads each one with ``/trace/calls/{index}``.
+
+    ``calls=false`` (with ``lite``) also leaves out every round's call list: the
+    chat page only stamps each reply's footer from the round totals, and the
+    list is most of the payload on a long session (10 MB of 13k calls).
+    """
     log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
-    return await asyncio.to_thread(log.analyze, lite=lite)
+    return await asyncio.to_thread(log.analyze, lite=lite, calls=calls)
 
 
 @router.get("/api/sessions/{session_id}/trace/calls/{index}")
@@ -66,7 +72,7 @@ async def trace_call_body(
     log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
-    body = await asyncio.to_thread(call_body, log.iter_raw_entries(), index)
+    body = await asyncio.to_thread(log.trace_call_body, index)
     if body is None:
         raise HTTPException(status_code=404, detail="Call not found")
     return body
@@ -83,7 +89,7 @@ async def trace_search(
     log = svc.session_log_for(session_id, owner=request.state.principal.user_id)
     if not log.path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"indices": await asyncio.to_thread(search_calls, log.iter_raw_entries(), q)}
+    return {"indices": await asyncio.to_thread(log.trace_search, q)}
 
 
 @router.get("/api/sessions/{session_id}/export")

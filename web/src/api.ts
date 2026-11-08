@@ -79,9 +79,15 @@ export type SessionContentHit = {
   role: "user" | "assistant";
   snippet: string;
 };
-export const searchSessionsApi = (q: string, scope: "recent" | "all" = "recent", signal?: AbortSignal) =>
+export const searchSessionsApi = (
+  q: string,
+  scope: "recent" | "all" = "recent",
+  signal?: AbortSignal,
+  only?: { sessionId: string; perSession: number },
+) =>
   request<{ results: Record<string, SessionContentHit[]> }>(
-    `/api/sessions/search?q=${encodeURIComponent(q)}&scope=${scope}`,
+    `/api/sessions/search?q=${encodeURIComponent(q)}&scope=${scope}`
+      + (only ? `&session_id=${encodeURIComponent(only.sessionId)}&per_session=${only.perSession}` : ""),
     { signal },
   );
 export const deleteSessionApi = (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" });
@@ -167,8 +173,12 @@ export const updateProfileApi = (name: string, body: unknown) => putJson(`/api/p
 export const deleteProfileApi = (name: string) => request(`/api/profile/${encodeURIComponent(name)}`, { method: "DELETE" });
 /** Lite: rounds, calls and numbers, no bodies (`fetchTraceCallBody` loads one). */
 export const fetchTraceAnalysis = (sessionId: string) => request(`/api/sessions/${sessionId}/trace/analysis?lite=true`);
-export const fetchTraceCallBody = (sessionId: string, index: number) =>
-  request(`/api/sessions/${sessionId}/trace/calls/${index}`);
+/** Round totals only (time, tokens, cost): what a reply's footer needs. The call
+ *  lists are most of the payload on a long session and the chat never shows them. */
+export const fetchTraceRounds = (sessionId: string) =>
+  request(`/api/sessions/${sessionId}/trace/analysis?lite=true&calls=false`);
+export const fetchTraceCallBody = (sessionId: string, index: number, signal?: AbortSignal) =>
+  request(`/api/sessions/${sessionId}/trace/calls/${index}`, { signal });
 export const searchTraceCalls = (sessionId: string, q: string, signal?: AbortSignal) =>
   request<{ indices: number[] }>(`/api/sessions/${sessionId}/trace/search?q=${encodeURIComponent(q)}`, { signal });
 export const fetchSessionUsage = (sessionId: string) => request(`/api/sessions/${sessionId}/usage`);

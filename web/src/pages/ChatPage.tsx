@@ -20,8 +20,7 @@ import {
 } from "../lib/format";
 import { primeSettings } from "../panels/SettingsModal";
 import { applyPendingModel, loadSessionModel, pickSessionModel } from "../sessionModel";
-import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, openSessionAtTurn, pushPendingName, rateMessage, renameSession, searchAllSessionsContent, syncSessionRoundStats } from "../sessions";
-import { searchMsgsConversation, type SessionContentHit } from "../lib/sessionRows";
+import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconChat, IconBook, IconAsk, IconAuto, IconSidebarRight,
@@ -358,10 +357,9 @@ export function ChatPage() {
           </div>
         </div>
         <div className="chat-wrap" ref={chatWrapRef}>
-          <ChatSearchBar
+          <SearchJump
             sessionId={s.curSess}
-            msgs={cur?.msgs || []}
-            olderTurns={cur?.olderTurns || 0}
+            msgCount={cur?.msgs.length || 0}
             areaRef={msgsRef}
             onLeaveFollow={() => followRef.current.leave()}
           />
@@ -819,51 +817,17 @@ function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, show
   );
 }
 
-function ChatSearchBar({ sessionId, msgs, olderTurns, areaRef, onLeaveFollow }: {
+/** Scrolls the chat to the turn a sidebar search hit points at. It draws
+ *  nothing: finding text is the workspace search box's job now, and this is
+ *  only the half that has to live next to the message list. */
+function SearchJump({ sessionId, msgCount, areaRef, onLeaveFollow }: {
   sessionId: string | null;
-  msgs: ChatMsg[];
-  olderTurns: number;
+  msgCount: number;
   areaRef: RefObject<HTMLDivElement | null>;
   onLeaveFollow: () => void;
 }) {
   const s = useAppState();
-  const S = useStrings();
   const target = s.chatSearchTarget?.sessionId === sessionId ? s.chatSearchTarget : null;
-  const activeQuery = (s.sidebarSearch.trim() || target?.query || "").trim();
-  const [remoteHits, setRemoteHits] = useState<SessionContentHit[]>([]);
-
-  useEffect(() => {
-    if (!sessionId || !activeQuery || olderTurns <= 0) {
-      setRemoteHits([]);
-      return;
-    }
-    const ctrl = new AbortController();
-    void searchAllSessionsContent(activeQuery, ctrl.signal).then((all) => {
-      if (ctrl.signal.aborted) return;
-      setRemoteHits(all[sessionId] || []);
-    });
-    return () => ctrl.abort();
-  }, [sessionId, activeQuery, olderTurns]);
-
-  const hits = useMemo(() => {
-    if (!activeQuery) return [];
-    const local = searchMsgsConversation(msgs, olderTurns, activeQuery, 100);
-    if (!remoteHits.length) return local;
-    const byKey = new Map<string, SessionContentHit>();
-    for (const h of remoteHits) byKey.set(`${h.turn}:${h.role}`, h);
-    for (const h of local) byKey.set(`${h.turn}:${h.role}`, h);
-    return [...byKey.values()].sort((a, b) => a.turn - b.turn || (a.role === "user" ? -1 : 1));
-  }, [msgs, olderTurns, activeQuery, remoteHits]);
-
-  const curIdx = useMemo(() => {
-    if (!hits.length) return -1;
-    if (target) {
-      const idx = hits.findIndex((h: SessionContentHit) => h.turn === target.turn && (!target.role || h.role === target.role));
-      if (idx >= 0) return idx;
-    }
-    return 0;
-  }, [hits, target]);
-
   useEffect(() => {
     if (!target || !areaRef.current) return;
     onLeaveFollow();
@@ -875,50 +839,8 @@ function ChatSearchBar({ sessionId, msgs, olderTurns, areaRef, onLeaveFollow }: 
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [target?.seq, target?.turn, target?.role, msgs.length]);
-
-  if (!sessionId || !activeQuery || (!hits.length && !s.sidebarSearch.trim())) return null;
-
-  const step = (delta: number) => {
-    if (!hits.length) return;
-    const nextIdx = (Math.max(0, curIdx) + delta + hits.length) % hits.length;
-    const next = hits[nextIdx];
-    if (next) void openSessionAtTurn(sessionId, next.turn, activeQuery, next.role);
-  };
-
-  const currentHit = curIdx >= 0 ? hits[curIdx] : null;
-  return (
-    <div className="chat-find-bar" role="region" aria-label={S.chat.searchInChatPlaceholder}>
-      <IconSearch />
-      <input
-        type="search"
-        className="chat-find-input"
-        value={s.sidebarSearch || activeQuery}
-        placeholder={S.chat.searchInChatPlaceholder}
-        onChange={(e) => setState({ sidebarSearch: e.target.value })}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            step(e.shiftKey ? -1 : 1);
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            setState({ sidebarSearch: "", chatSearchTarget: null });
-          }
-        }}
-      />
-      <span className="chat-find-count">
-        {currentHit ? S.chat.searchTurnIndicator(curIdx + 1, hits.length, currentHit.turn) : "0 / 0"}
-      </span>
-      <button type="button" className="chat-find-btn" disabled={!hits.length} title={S.chat.searchPrev}
-              onClick={() => step(-1)}>↑</button>
-      <button type="button" className="chat-find-btn" disabled={!hits.length} title={S.chat.searchNext}
-              onClick={() => step(1)}>↓</button>
-      <button type="button" className="chat-find-btn" title={S.common.close}
-              onClick={() => setState({ sidebarSearch: "", chatSearchTarget: null })}>
-        <IconClose />
-      </button>
-    </div>
-  );
+  }, [target?.seq, target?.turn, target?.role, msgCount]);
+  return null;
 }
 
 /** `compact · compacted N -> M messages`; opens to the rendered notes. */

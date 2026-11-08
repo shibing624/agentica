@@ -99,6 +99,47 @@ def test_trace_lite_analysis_and_call_body(client_and_svc):
     assert client.get("/api/sessions/sess1/trace/search", params={"q": "nope"}).json()["indices"] == []
 
 
+def test_analysis_can_leave_the_call_lists_out_for_the_chat_footer(client_and_svc):
+    client, _ = client_and_svc
+    slim = client.get("/api/sessions/sess1/trace/analysis?lite=true&calls=false").json()
+    assert all("calls" not in r and "entries" not in r for r in slim["rounds"])
+    # What a reply's footer is stamped from is still there.
+    assert slim["rounds"][0]["tokens"]["prompt"] == 10 and "durationMs" in slim["rounds"][0]
+    assert slim["totals"]["rounds"] == 1 and slim["session_id"] == "sess1"
+    # The default keeps the call lists: the Trace page reads them.
+    page = client.get("/api/sessions/sess1/trace/analysis?lite=true").json()
+    assert page["rounds"][0]["calls"]
+
+
+def test_session_search_can_be_scoped_to_one_session_with_a_higher_cap(tmp_path):
+    from agentica_gateway.main import app
+    from agentica_gateway import deps
+
+    for sid in ("a", "b"):
+        log = SessionLog(session_id=sid, base_dir=str(tmp_path))
+        for i in range(12):
+            log.append("user", f"needle question {i}")
+            log.append("assistant", f"needle answer {i}")
+    svc = MagicMock()
+    svc._ensure_initialized = AsyncMock()
+    svc.session_log_for = MagicMock(side_effect=lambda sid, owner=None: SessionLog(session_id=sid, base_dir=str(tmp_path)))
+    svc.list_sessions = MagicMock(return_value=[{"session_id": "a"}, {"session_id": "b", "archived": True}])
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        original = deps.agent_service
+        deps.agent_service = svc
+        try:
+            everywhere = client.get("/api/sessions/search", params={"q": "needle"}).json()["results"]
+            # Archived sessions are not searched; the rest keep the small default cap.
+            assert set(everywhere) == {"a"} and len(everywhere["a"]) == 8
+            one = client.get("/api/sessions/search", params={"q": "needle", "session_id": "b", "per_session": 100}).json()["results"]
+            # Naming a session searches exactly that one, and lifts the cap.
+            assert set(one) == {"b"} and len(one["b"]) == 24
+            assert svc.session_log_for.call_args_list[-1].args[0] == "b"
+        finally:
+            deps.agent_service = original
+
+
 def test_trace_header_uses_session_work_dir_not_stamped_process_cwd(tmp_path, monkeypatch):
     """A session in /Temp with no git must not show git:main …/Codes/agentica."""
     from agentica_gateway.main import app
