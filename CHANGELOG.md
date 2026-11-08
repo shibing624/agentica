@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **修复 Web / Desktop 下 `~/.agentica/...`（如 `/compact` 生成的 `<session>.notes.md`）在右侧边栏无法显示内容、路径显示不全、无法打开文件的问题**：① **根因**：`/compact` 接口返回的 `notes_path` 将家目录缩写为 `~/.agentica/projects/.../<id>.notes.md`，而前端 `FilePreview`、`FilesPanel`、`MessageFilesCard` 与 `toWorkspaceRelative` 原来只认 `"/"` 开头为绝对路径、把 `"~/..."` 当成了当前项目 `root` 下的相对路径，导致请求变成 `root=/Users/.../agentica&path=~/.agentica/...`（404 报「该类型不支持预览」）且传给 `/api/open` 的路径被拼成 `"/Users/.../agentica/~/.agentica/..."`（404 打不开文件）。② **修复**：新增 `isAbsOrHomePath`、`splitExternalTarget` 与 `normalizeMentionedPath`（`web/src/lib/file-path.ts`），对 `~/...` 和 `/...` 统一以其自身父目录作为 `targetRoot` 调用 `/api/workspace/content` 与 `/api/workspace/stat`，并将原路径直接传给 `/api/open`；同时将 `CompactCard` 与预览栏头部的长路径改为「目录可收缩省略 + 文件名完整保留」两段式展示，支持从正文裸路径提取 `~/...` / `/Users/...` 文件到消息底部文件卡片。
 - **Web / Desktop 将「能力扩展（Plugins）」「账号管理（Users）」等独立弹层/路由统一收归至「设置」弹窗标签页**：侧栏与左下角账户菜单点击能力扩展、账号管理、个人助理、定时任务等均直接打开 `SettingsModal` 对应标签页，移除重复的独立 `PluginsPanel` 遮罩层与顶层 `/users`、`/assistant` 切换，弹窗内表单与反馈提示样式统一对齐。
 - **重构 Gateway IM 远控架构：移除 IM 层的 `PeerBridge` / `GatewayAgentPeers`，新增会话级遥控器 `ImBotController` 与免 JS 签名卡片页 `/c/<token>`**（借鉴 OpenBitFun `remote_connect/bot/` 与 `agent-autoloop` `card-page`）：
   - **删除 `gateway/services/peer_bridge.py` 与 `gateway/services/agent_peers.py`**（底层 `agentica/peers/` 保留给纯 CLI 多终端间协作）：旧设计将微信消息作为 peer 信箱投递，依赖对端模型主动调用 `send_message` 才能回传结果（漏调即失联），且只能寻址当前开着的终端进程、与网关自身 Agent 割裂。

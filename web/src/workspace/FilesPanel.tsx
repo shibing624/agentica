@@ -3,6 +3,7 @@ import {
   FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
 import { useStrings } from "../i18n";
+import { isAbsOrHomePath } from "../lib/file-path";
 import { baseName, type PanelTab } from "../lib/panelTabs";
 import { DiffView } from "./DiffView";
 import { SkillPane } from "./SkillPane";
@@ -195,7 +196,7 @@ export function FilesPanel({
                   )
                   : <p className="ws-muted">{S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
-                {tab.kind === "file" && (root || tab.path.startsWith("/")) && (
+                {tab.kind === "file" && (root || isAbsOrHomePath(tab.path)) && (
                   <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
                     <FilePreview
                       root={root}

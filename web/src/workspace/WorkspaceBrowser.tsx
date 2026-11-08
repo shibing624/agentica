@@ -15,7 +15,7 @@ import { CodeFrame, MarkdownCode } from "../components/CodeFrame";
 import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
-import { classifyPreviewTarget, joinWorkspacePath } from "../lib/file-path";
+import { classifyPreviewTarget, joinWorkspacePath, splitExternalTarget } from "../lib/file-path";
 import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
@@ -37,13 +37,15 @@ function dirOf(filePath: string): string {
 }
 
 function resolveRelative(baseDir: string, ref: string): string {
+  const trimmed = ref.trim();
+  if (trimmed === "~" || trimmed.startsWith("~/")) return trimmed;
   const out = ref.startsWith("/") || baseDir === "" ? [] : baseDir.split("/");
   for (const seg of ref.split("/")) {
     if (seg === "" || seg === ".") continue;
     if (seg === "..") out.pop();
     else out.push(seg);
   }
-  return out.join("/");
+  return (ref.startsWith("/") ? "/" : "") + out.join("/");
 }
 
 /**
@@ -104,9 +106,7 @@ export function FilePreview({
   const [mode, setMode] = useState<ViewMode>("markdown");
   const [refreshing, setRefreshing] = useState(false);
   const seq = useRef(0);
-  const isAbs = filePath.startsWith("/");
-  const targetRoot = isAbs ? (dirOf(filePath) || "/") : root;
-  const targetRel = isAbs ? filePath.slice(filePath.lastIndexOf("/") + 1) : filePath;
+  const { targetRoot, targetRel, absPath: resolvedAbsPath, isExternal } = splitExternalTarget(filePath, root);
 
   /** `keepMode` is a refresh: same file, same view. */
   const load = useCallback(async (keepMode: boolean) => {
@@ -147,7 +147,7 @@ export function FilePreview({
 
   const src = api.workspaceContentUrl(targetRoot, targetRel);
   const dl = api.workspaceContentUrl(targetRoot, targetRel, true);
-  const absPath = isAbs ? preview.path : (root.replace(/\/+$/, "") + "/" + preview.path);
+  const absPath = isExternal ? preview.path : resolvedAbsPath;
   const hasText = preview.content !== undefined;
   const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
     : preview.kind === "html" ? ["web", "code", "text"]
@@ -159,11 +159,17 @@ export function FilePreview({
     setRefreshing(true);
     void load(true).finally(() => setRefreshing(false));
   };
+  const slashIdx = preview.path.lastIndexOf("/");
+  const pathDir = slashIdx >= 0 ? preview.path.slice(0, slashIdx + 1) : "";
+  const pathFile = slashIdx >= 0 ? preview.path.slice(slashIdx + 1) : preview.path;
   return (
     <div className="ws-browser">
       <div className="ws-preview-bar">
         <FileTypeIcon path={preview.name} size={15} className="ws-preview-type-icon" />
-        <span className="ws-preview-name" title={preview.path}>{preview.path}</span>
+        <span className="ws-preview-name" title={preview.path}>
+          {pathDir && <span className="ws-preview-dir">{pathDir}</span>}
+          <span className="ws-preview-base">{pathFile}</span>
+        </span>
         <PreviewActions
           modes={modes}
           mode={view ?? "code"}

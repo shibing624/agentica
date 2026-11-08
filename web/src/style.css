@@ -1479,7 +1479,9 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-preview-type-icon{width:15px;height:15px;flex-shrink:0}
 .ws-back{border:none;background:transparent;color:var(--fg2);font-size:12px;cursor:pointer;padding:4px 6px;border-radius:6px;flex-shrink:0;white-space:nowrap}
 .ws-back:hover{background:var(--bg3);color:var(--fg)}
-.ws-preview-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:12px;font-weight:600}
+.ws-preview-name{display:flex;align-items:baseline;flex:1;min-width:0;overflow:hidden;white-space:nowrap;font-family:var(--mono);font-size:12px}
+.ws-preview-dir{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;color:var(--fg3);font-weight:400}
+.ws-preview-base{flex-shrink:0;color:var(--fg);font-weight:600}
 /* Preview toolbar: view menu, refresh, download, open-with split button. */
 .pv-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
 .pv-menu-wrap{position:relative}
@@ -1678,8 +1680,11 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .compact-kind{font-family:var(--mono);color:var(--fg)}
 .compact-sep{color:var(--fg3)}
 .compact-path-wrap{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:1;min-width:0;margin-left:12px}
-.compact-path{min-width:0;max-width:100%;border:none;background:transparent;padding:2px 4px;border-radius:4px;text-align:right;direction:rtl;font-family:var(--mono);font-size:11px;color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.compact-path{display:inline-flex;align-items:baseline;min-width:0;max-width:100%;border:none;background:transparent;padding:2px 4px;border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--fg3);overflow:hidden;white-space:nowrap;cursor:pointer}
+.compact-path-dir{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;color:var(--fg3)}
+.compact-path-name{flex-shrink:0;color:var(--fg2);font-weight:500}
 .compact-path:hover{color:var(--accent);text-decoration:underline;background:var(--hover)}
+.compact-path:hover .compact-path-dir,.compact-path:hover .compact-path-name{color:var(--accent)}
 .compact-path-copy{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border:none;background:transparent;padding:3px;border-radius:4px;color:var(--fg3);cursor:pointer}
 .compact-path-copy svg{width:12px;height:12px}
 .compact-path-copy:hover{color:var(--fg);background:var(--hover)}

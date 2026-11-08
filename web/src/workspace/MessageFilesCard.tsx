@@ -5,7 +5,7 @@ import { IconChevronDown, IconExternal, IconFileCode, IconFinder } from "../icon
 import { fileEditsOf, type FileEdit } from "../lib/fileEdits";
 import { fileDiffsOf, type FileEdits } from "../lib/fileDiff";
 import {
-  extractFilePaths, extractToolPaths, toWorkspaceRelative,
+  extractFilePaths, extractToolPaths, isAbsOrHomePath, normalizeMentionedPath, toWorkspaceRelative,
 } from "../lib/file-path";
 import { statWorkspaceFilesBatched } from "../lib/workspaceStat";
 import { showToast } from "../store";
@@ -27,6 +27,7 @@ function PathLabel({ path }: { path: string }) {
 }
 
 function absPath(workspace: string, rel: string) {
+  if (isAbsOrHomePath(rel)) return rel;
   return workspace.replace(/\/+$/, "") + "/" + rel;
 }
 
@@ -71,7 +72,7 @@ export function MessageFilesCard({
     const out: string[] = [];
     const seen = new Set<string>();
     for (const item of raw) {
-      const rel = toWorkspaceRelative(item, workspace);
+      const rel = normalizeMentionedPath(item, workspace);
       if (rel === null || seen.has(rel)) continue;
       seen.add(rel);
       out.push(rel);

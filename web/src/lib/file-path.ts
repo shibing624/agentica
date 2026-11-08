@@ -88,6 +88,45 @@ const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX_PATH_LEN = 512;
 const FILE_ARG_KEYS = ["file_path", "path", "target_file", "file"];
 
+/** True when `path` is an absolute path (`/a/b`) or a home-relative path (`~` / `~/a/b`). */
+export function isAbsOrHomePath(path: string): boolean {
+  const s = path.trim();
+  return s.startsWith("/") || s === "~" || s.startsWith("~/");
+}
+
+/**
+ * Resolve `filePath` into `{ targetRoot, targetRel, absPath, isExternal }` for
+ * `/api/workspace/content` and `/api/open`. Both `/abs/path` and `~/.agentica/...`
+ * resolve against their own parent directory instead of the project `root`.
+ */
+export function splitExternalTarget(filePath: string, workspaceRoot: string): {
+  targetRoot: string;
+  targetRel: string;
+  absPath: string;
+  isExternal: boolean;
+} {
+  const trimmed = filePath.trim();
+  const isExternal = isAbsOrHomePath(trimmed);
+  if (isExternal) {
+    const slash = trimmed.lastIndexOf("/");
+    const parent = slash > 0 ? trimmed.slice(0, slash) : (trimmed.startsWith("/") ? "/" : "~");
+    const name = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+    return {
+      targetRoot: parent,
+      targetRel: name,
+      absPath: trimmed,
+      isExternal: true,
+    };
+  }
+  const rootClean = workspaceRoot.replace(/\/+$/, "");
+  return {
+    targetRoot: workspaceRoot,
+    targetRel: trimmed,
+    absPath: rootClean ? `${rootClean}/${trimmed}` : trimmed,
+    isExternal: false,
+  };
+}
+
 export function isFilePathLike(text: string): boolean {
   const s = text.trim();
   if (s.length === 0 || s.length > 200) return false;
@@ -107,11 +146,17 @@ export function joinWorkspacePath(base: string, name: string): string {
 export function extractFilePaths(markdown: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const m of markdown.matchAll(/`([^`\n]+)`/g)) {
-    const text = m[1]!.trim();
-    if (!isFilePathLike(text) || seen.has(text)) continue;
+  const add = (raw: string) => {
+    const text = raw.trim().replace(/[),.;:!?，。；：！？]+$/, "");
+    if (!isFilePathLike(text) || seen.has(text)) return;
     seen.add(text);
     out.push(text);
+  };
+  for (const m of markdown.matchAll(/`([^`\n]+)`/g)) {
+    add(m[1]!);
+  }
+  for (const m of markdown.matchAll(/(?:^|[\s(（"'“‘])((?:~\/|\/Users\/|\/home\/|\/tmp\/|\/var\/|\/etc\/|\/opt\/)[^\s`"'”’<>()（）]+)/gm)) {
+    add(m[1]!);
   }
   return out;
 }
@@ -156,4 +201,27 @@ export function toWorkspaceRelative(path: string, workspace: string | null): str
     stack.push(seg);
   }
   return stack.length > 0 ? stack.join("/") : null;
+}
+
+/**
+ * Like `toWorkspaceRelative`, but keeps external `~/...` and `/...` file paths
+ * intact (instead of returning `null`) when they have no `..` traversal, so
+ * built-in files under `~/.agentica/...` appear in `MessageFilesCard` and open
+ * in the side panel.
+ */
+export function normalizeMentionedPath(path: string, workspace: string | null): string | null {
+  const rel = toWorkspaceRelative(path, workspace);
+  if (rel !== null) return rel;
+  const s = path.trim();
+  if (s.length === 0 || s.length > MAX_PATH_LEN || !isAbsOrHomePath(s)) return null;
+  const isHome = s === "~" || s.startsWith("~/");
+  const body = isHome ? s.slice(1) : s;
+  const stack: string[] = [];
+  for (const seg of body.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") return null;
+    stack.push(seg);
+  }
+  if (stack.length === 0) return null;
+  return isHome ? `~/${stack.join("/")}` : `/${stack.join("/")}`;
 }

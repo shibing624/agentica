@@ -253,13 +253,14 @@ export function splitWindowPreamble(content: string): { notes: string; notesPath
   const m =
     content.match(/<session_notes(?:\s+path="([^"]*)")?>\n([\s\S]*?)\n<\/session_notes>(?=\n|$)/)
     || content.match(/<session_notes(?:\s+path="([^"]*)")?>([\s\S]*?)<\/session_notes>/);
+  const fallbackPath = content.match(/whenever the window rolls over:\s*([^\s<]+)\s*(?=\n|<\/context_window>)/)?.[1] || "";
   let rest = content.trimStart();
   while (rest.startsWith(WINDOW_OPEN)) {
     const peeled = peelOneWindowLayer(rest);
     if (peeled === rest) break;
     rest = peeled;
   }
-  return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || "", rest };
+  return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || fallbackPath, rest };
 }
 
 export function isPureWindowPreamble(e: Record<string, unknown>): boolean {

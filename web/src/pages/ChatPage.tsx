@@ -923,7 +923,14 @@ function CompactCard({ c, onOpenFile }: { c: NonNullable<ChatMsg["compact"]>; on
               title={c.notesPath}
               onClick={() => (onOpenFile ? onOpenFile(c.notesPath!) : setOpen(!open))}
             >
-              <bdi>{c.notesPath}</bdi>
+              {c.notesPath.includes("/") ? (
+                <>
+                  <span className="compact-path-dir">{c.notesPath.slice(0, c.notesPath.lastIndexOf("/") + 1)}</span>
+                  <span className="compact-path-name">{c.notesPath.slice(c.notesPath.lastIndexOf("/") + 1)}</span>
+                </>
+              ) : (
+                <span className="compact-path-name">{c.notesPath}</span>
+              )}
             </button>
             <button
               type="button"

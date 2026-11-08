@@ -7,6 +7,7 @@ import {
   nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, terminalKey, upsertTab, writeSessionPanel,
   type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
+import { isAbsOrHomePath, toWorkspaceRelative } from "../lib/file-path";
 import type { FileEdits } from "../lib/fileDiff";
 import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth } from "./panelWidth";
 
@@ -210,9 +211,10 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   }, [updateRecord]);
 
   const revealInFilesTab = useCallback((path: string) => {
-    const norm = path.replace(/\/+$/, "");
+    const rel = isAbsOrHomePath(path) ? (toWorkspaceRelative(path, workspace) || "") : path;
+    const norm = rel.replace(/\/+$/, "");
     const slash = norm.lastIndexOf("/");
-    const parentDir = slash >= 0 && !norm.startsWith("/") ? norm.slice(0, slash) : "";
+    const parentDir = slash >= 0 && !isAbsOrHomePath(norm) ? norm.slice(0, slash) : "";
     updateRecord((rec) => ({
       ...rec,
       open: true,
@@ -220,7 +222,7 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
       dirPath: parentDir,
       preferredActive: undefined,
     }));
-  }, [updateRecord]);
+  }, [updateRecord, workspace]);
 
   const openSkill = useCallback((name: string) => {
     updateRecord((rec) => {

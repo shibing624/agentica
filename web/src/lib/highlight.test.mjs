@@ -52,3 +52,18 @@ test("unknown extensions and dotless files default to plain-text preview while k
   assert.equal(FP.classifyPreviewTarget("index.html"), "html");
   assert.equal(FP.classifyPreviewTarget("README.md"), "md");
 });
+
+test("home-relative ~/.agentica session notes resolve against their own parent directory and extract from bare text", () => {
+  const notes = "~/.agentica/projects/default/-Users-xuming-Documents-Codes-agentica-2037c358/s_25vv1np1mw6iz4iy.notes.md";
+  const target = FP.splitExternalTarget(notes, "/Users/xuming/Documents/Codes/agentica");
+  assert.equal(target.isExternal, true);
+  assert.equal(target.targetRoot, "~/.agentica/projects/default/-Users-xuming-Documents-Codes-agentica-2037c358");
+  assert.equal(target.targetRel, "s_25vv1np1mw6iz4iy.notes.md");
+  assert.equal(target.absPath, notes);
+  assert.equal(FP.classifyPreviewTarget(notes), "md");
+  assert.equal(FP.normalizeMentionedPath(notes, "/Users/xuming/Documents/Codes/agentica"), notes);
+  assert.deepEqual(
+    FP.extractFilePaths(`${notes} 在web下侧边栏无法显示内容`),
+    [notes],
+  );
+});
