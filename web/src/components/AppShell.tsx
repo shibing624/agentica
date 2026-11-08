@@ -8,7 +8,6 @@ import {
 } from "../data";
 import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
-import { PluginsPanel } from "../panels/PluginsPanel";
 import { primeSettings, SettingsModal } from "../panels/SettingsModal";
 import { loadSessions, newChat, switchTo, syncFromServer } from "../sessions";
 import {
@@ -42,14 +41,9 @@ import { SessionTree } from "./SessionTree";
  */
 export function AppLayout() {
   const { pathname } = useLocation();
-  const S = useStrings();
   const active = pathname.startsWith("/traces")
     ? "traces"
-    : pathname.startsWith("/users")
-      ? "users"
-      : pathname.startsWith("/assistant")
-        ? "assistant"
-        : "chat";
+    : "chat";
   return (
     <AppShell
       active={active}
@@ -63,7 +57,7 @@ export function AppLayout() {
 export function AppShell({
   active, list, children,
 }: {
-  active: "chat" | "traces" | "users" | "assistant";
+  active: "chat" | "traces";
   list?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -205,7 +199,7 @@ export function AppShell({
             <span className="nav-label">{S.nav.cron}</span>
             {s.cronJobs.length ? <span className="nav-badge">{s.cronJobs.length}</span> : null}
           </button>
-          <button className="side-nav-item" onClick={() => { setState({ pluginsPanelOpen: true }); void loadPlugins(); }}
+          <button className="side-nav-item" onClick={() => void primeSettings("plugins")}
                   title={S.nav.plugins}>
             <span className="nav-icon"><IconPlug /></span>
             <span className="nav-label">{S.nav.plugins}</span>
@@ -254,19 +248,19 @@ export function AppShell({
               )}
             </div>
             {([["settings", S.nav.generalSettings, <IconGear key="g" />, "settings"],
-               ["assistant", S.nav.assistant, <IconChat key="asst" />, "assistant"],
-               ["memory", S.nav.memory, <IconDatabase key="m" />, "memory"],
                ["profiles", S.nav.profile, <IconProfiles key="p" />, "profiles"],
-               ["users", S.nav.users, <IconUser key="u" />, "users"],
+               ["memory", S.nav.memory, <IconDatabase key="m" />, "memory"],
+               ["plugins", S.nav.plugins, <IconPlug key="pl" />, "plugins"],
+               ["assistant", S.nav.assistant, <IconChat key="asst" />, "assistant"],
                ["cron", S.nav.cron, <IconClock key="c" />, "cron"],
+               ["users", S.nav.users, <IconUser key="u" />, "users"],
                ["archived", S.nav.archivedSessions, <IconArchive key="a" />, "archived"]] as const)
               .filter(([, , , tab]) => tab !== "users" || s.accountRole === "admin")
               .map(([key, label, icon, tab]) => (
                 <button key={key} className="account-action"
                         onClick={() => {
                           setState({ accountPanelOpen: false });
-                          if (tab === "users") nav("/users");
-                          else void primeSettings(tab);
+                          void primeSettings(tab);
                         }}>
                   {icon}<span>{label}</span>
                 </button>
@@ -345,7 +339,6 @@ export function AppShell({
       {s.dirModal.open && <DirModal />}
       {s.workspaceAdd.open && <AddWorkspaceDialog />}
       {s.settingsModal.open && <SettingsModal />}
-      {s.pluginsPanelOpen && <PluginsPanel />}
       <ChangePasswordDialog />
     </>
   );

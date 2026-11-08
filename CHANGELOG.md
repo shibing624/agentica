@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / Desktop 将「能力扩展（Plugins）」「账号管理（Users）」等独立弹层/路由统一收归至「设置」弹窗标签页**：侧栏与左下角账户菜单点击能力扩展、账号管理、个人助理、定时任务等均直接打开 `SettingsModal` 对应标签页，移除重复的独立 `PluginsPanel` 遮罩层与顶层 `/users`、`/assistant` 切换，弹窗内表单与反馈提示样式统一对齐。
 - **重构 Gateway IM 远控架构：移除 IM 层的 `PeerBridge` / `GatewayAgentPeers`，新增会话级遥控器 `ImBotController` 与免 JS 签名卡片页 `/c/<token>`**（借鉴 OpenBitFun `remote_connect/bot/` 与 `agent-autoloop` `card-page`）：
   - **删除 `gateway/services/peer_bridge.py` 与 `gateway/services/agent_peers.py`**（底层 `agentica/peers/` 保留给纯 CLI 多终端间协作）：旧设计将微信消息作为 peer 信箱投递，依赖对端模型主动调用 `send_message` 才能回传结果（漏调即失联），且只能寻址当前开着的终端进程、与网关自身 Agent 割裂。
   - **IM 会话直接绑定本机 `(work_dir, session_id)` 并共享 `SessionLog`**（`gateway/services/im_bot.py`）：支持 `/menu`（`菜单`/`0`）、`/resume`（`恢复`，列出当前项目历史会话与在线 CLI 终端，回复数字 `1..N` 挂载，`0` 翻页）、`/new [prompt]`（`新建`）、`/switch`（`切换` 工作区目录）、`/model`（切换模型 Profile）、`/status`（`状态`）、`/cancel`（`取消`/`停止`）、`/verbose` 与 `/concise`，支持全角数字 `１..９` 与标点后缀归一化；无待决菜单时纯数字作为普通对话发送。

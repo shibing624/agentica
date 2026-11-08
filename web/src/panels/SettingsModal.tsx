@@ -2,38 +2,38 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import * as api from "../api";
 import {
-  loadAuthStatus, loadCronJobs, loadDirHistory, loadProfiles, loadProviders,
-  loadStatus,
+  loadAuthStatus, loadCronJobs, loadDirHistory, loadPlugins, loadProfiles,
+  loadProviders, loadStatus, loadUsers,
 } from "../data";
 import { openPasswordDialog } from "../components/ChangePasswordDialog";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import {
   IconArchive, IconChat, IconChevronRight, IconClock, IconClose, IconCopy, IconDatabase,
-  IconExpand, IconGear, IconProfiles, DefaultAvatar,
+  IconExpand, IconGear, IconPlug, IconProfiles, IconUser, DefaultAvatar,
 } from "../icons";
 import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession, loadSessions } from "../sessions";
 import {
-  askConfirm, emptyProfileForm, getState, saveSessions, setState, setTheme,
-  showToast, useAppState, type ProfileForm,
+  askConfirm, emptyCronForm, emptyMcpForm, emptyProfileForm, emptySkillForm,
+  getState, saveSessions, setState, setTheme, showToast, useAppState, type ProfileForm,
 } from "../store";
 import { CronPanel } from "./CronPanel";
+import { PluginsPanel } from "./PluginsPanel";
 import { AssistantPanel } from "../pages/AssistantPage";
+import { UsersPanel } from "../pages/UsersPage";
 
-/** Tab ids are stable (they are stored in `settingsTab`); only the label moves.
- *
- *  Account management is a page (`/users`), not a tab: this modal configures
- *  the machine (theme, models, working directory) plus this account's cron
- *  jobs and archived chats. Web URL and IM connectors are the 个人助理 tab
- *  (same panel as `/assistant`).
- */
-const TABS: Array<[string, (S: Strings) => string, () => ReactNode]> = [
+type SettingsTabRow = [id: string, label: (S: Strings) => string, icon: () => ReactNode, adminOnly?: boolean];
+
+/** All settings and administration panels live inside this unified modal. */
+const TABS: SettingsTabRow[] = [
   ["settings", (S) => S.settings.tabGeneral, () => <IconGear />],
   ["profiles", (S) => S.nav.profile, () => <IconProfiles />],
   ["memory", (S) => S.nav.memory, () => <IconDatabase />],
+  ["plugins", (S) => S.nav.plugins, () => <IconPlug />],
   ["assistant", (S) => S.nav.assistant, () => <IconChat />],
   ["cron", (S) => S.settings.tabCron, () => <IconClock />],
+  ["users", (S) => S.nav.users, () => <IconUser />, true],
   ["archived", (S) => S.settings.tabArchived, () => <IconArchive />],
 ];
 
@@ -218,10 +218,23 @@ async function logout() {
 export function SettingsModal() {
   const s = useAppState();
   const S = useStrings();
+  const [createUserOpen, setCreateUserOpen] = useState(false);
   const archived = Object.entries(s.sessions).filter(([, sess]) => sess.archived);
-  const close = () => setState({ settingsModal: { open: false }, profileForm: null, cronForm: null });
+  const visibleTabs = TABS.filter(([, , , adminOnly]) => !adminOnly || s.accountRole === "admin");
+  const activeTab = visibleTabs.some(([id]) => id === s.settingsTab) ? s.settingsTab : visibleTabs[0][0];
+  const close = () => setState({
+    settingsModal: { open: false },
+    profileForm: null,
+    cronForm: null,
+    skillForm: null,
+    mcpForm: null,
+  });
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (getState().confirm.open || getState().passwordDialog.open || document.querySelector(".dlg-overlay.open")) return;
+      close();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
@@ -230,8 +243,8 @@ export function SettingsModal() {
       <div className="settings-modal two-pane" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <nav className="settings-nav" aria-label={S.settings.title}>
           <div className="settings-nav-title">{S.settings.title}</div>
-          {TABS.map(([id, label, icon]) => (
-            <button key={id} className={"settings-nav-item" + (s.settingsTab === id ? " active" : "")}
+          {visibleTabs.map(([id, label, icon]) => (
+            <button key={id} className={"settings-nav-item" + (activeTab === id ? " active" : "")}
                     onClick={() => setState({ settingsTab: id })}>
               <span className="nav-icon">{icon()}</span>
               <span>{label(S)}</span>
@@ -241,21 +254,46 @@ export function SettingsModal() {
         </nav>
         <div className="settings-main">
         <div className="settings-head">
-          <h3>{TABS.find((t) => t[0] === s.settingsTab)?.[1](S) || S.settings.title}</h3>
+          <h3>{visibleTabs.find((t) => t[0] === activeTab)?.[1](S) || S.settings.title}</h3>
           <div className="settings-head-actions">
-            {s.settingsTab === "profiles" && (
+            {activeTab === "profiles" && (
               <button className="settings-new-btn" onClick={() => setState({ profileForm: emptyProfileForm() })}>{S.common.newItem}</button>
+            )}
+            {activeTab === "plugins" && (
+              <>
+                <button className="dp-btn" onClick={() => void loadPlugins()}>{S.common.refresh}</button>
+                {s.pluginsTab === "skills" && (
+                  <button className="settings-new-btn" onClick={() => setState({ skillForm: emptySkillForm() })}>{S.plugins.newSkill}</button>
+                )}
+                {s.pluginsTab === "mcp" && (
+                  <button className="settings-new-btn" onClick={() => setState({ mcpForm: emptyMcpForm() })}>{S.plugins.addServer}</button>
+                )}
+              </>
+            )}
+            {activeTab === "cron" && (
+              <>
+                <span className="panel-count">{S.cron.jobCount(s.cronJobs.length)}</span>
+                <button className="dp-btn" onClick={() => void loadCronJobs()}>{S.common.refresh}</button>
+                <button className="settings-new-btn" onClick={() => setState({ cronForm: emptyCronForm() })}>{S.cron.newJob}</button>
+              </>
+            )}
+            {activeTab === "users" && s.accountRole === "admin" && (
+              <button className="settings-new-btn" onClick={() => setCreateUserOpen(true)}>{S.users.add}</button>
             )}
             <button className="ib" onClick={close} title={S.common.close}><IconClose /></button>
           </div>
         </div>
         <div className="settings-body">
-          {s.settingsTab === "settings" && <GeneralTab />}
-          {s.settingsTab === "assistant" && <div className="asst-body"><AssistantPanel /></div>}
-          {s.settingsTab === "memory" && <MemoryTab />}
-          {s.settingsTab === "profiles" && <ProfilesTab />}
-          {s.settingsTab === "cron" && <CronPanel />}
-          {s.settingsTab === "archived" && (
+          {activeTab === "settings" && <GeneralTab />}
+          {activeTab === "assistant" && <div className="asst-body"><AssistantPanel /></div>}
+          {activeTab === "memory" && <MemoryTab />}
+          {activeTab === "profiles" && <ProfilesTab />}
+          {activeTab === "plugins" && <PluginsPanel />}
+          {activeTab === "cron" && <CronPanel />}
+          {activeTab === "users" && (
+            <UsersPanel createOpen={createUserOpen} onCloseCreate={() => setCreateUserOpen(false)} />
+          )}
+          {activeTab === "archived" && (
             <div className="settings-list">
               {!archived.length && <div className="settings-empty">{S.settings.noArchived}</div>}
               {archived.map(([id, sess]) => (
@@ -706,7 +744,10 @@ function ProfileForm() {
 export async function primeSettings(tab: string) {
   setState({ settingsModal: { open: true }, settingsTab: tab });
   await Promise.all([
-    loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(),
+    loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(), loadPlugins(),
     loadAuthStatus(),
   ]);
+  if (getState().accountRole === "admin") {
+    await loadUsers();
+  }
 }

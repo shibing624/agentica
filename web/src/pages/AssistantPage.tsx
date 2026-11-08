@@ -22,7 +22,7 @@ type ChannelsPayload = {
 };
 type QrState = { id: string; png: string; expiresAt: number };
 
-/** Web URL + IM how-to. Used by the settings tab and the `/assistant` page. */
+/** Web URL + IM how-to, rendered inside the Settings modal's "Assistant" tab. */
 export function AssistantPanel() {
   const S = useStrings();
   const [data, setData] = useState<ChannelsPayload | null>(null);
@@ -88,20 +88,6 @@ export function AssistantPanel() {
         />
       )}
     </>
-  );
-}
-
-export function AssistantPage() {
-  const S = useStrings();
-  return (
-    <div className="main">
-      <div className="topbar">
-        <h3 className="page-title">{S.assistant.title}</h3>
-      </div>
-      <div className="page-body asst-body">
-        <AssistantPanel />
-      </div>
-    </div>
   );
 }
 

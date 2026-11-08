@@ -3,15 +3,22 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from
 import { setUnauthorizedHandler } from "./api";
 import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
-import { AssistantPage } from "./pages/AssistantPage";
-
 const TracesPage = lazy(() => import("./pages/TracesPage").then((m) => ({ default: m.TracesPage })));
-const UsersPage = lazy(() => import("./pages/UsersPage").then((m) => ({ default: m.UsersPage })));
 import { AppLayout } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ConfirmDialog, Toast } from "./components/Feedback";
 import { applyLang } from "./i18n";
+import { primeSettings } from "./panels/SettingsModal";
 import { applyTheme, getState } from "./store";
+
+/** Legacy standalone routes (`/users`, `/assistant`, `/plugins`) open their
+ *  matching tab inside the unified Settings modal over the chat workspace. */
+function SettingsRoute({ tab }: { tab: string }) {
+  useEffect(() => {
+    void primeSettings(tab);
+  }, [tab]);
+  return <Navigate to="/chat" replace />;
+}
 
 /** Any 401 means the same thing — the session expired, or the gateway was
  *  restarted without one — and the same answer: the login page, remembering
@@ -45,8 +52,9 @@ export function App() {
             <Route element={<AppLayout />}>
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/traces" element={<TracesPage />} />
-              <Route path="/users" element={<UsersPage />} />
-              <Route path="/assistant" element={<AssistantPage />} />
+              <Route path="/users" element={<SettingsRoute tab="users" />} />
+              <Route path="/assistant" element={<SettingsRoute tab="assistant" />} />
+              <Route path="/plugins" element={<SettingsRoute tab="plugins" />} />
             </Route>
             <Route path="/login" element={<LoginPage />} />
             <Route path="*" element={<Navigate to="/chat" replace />} />

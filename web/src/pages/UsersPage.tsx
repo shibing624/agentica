@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router";
 import * as api from "../api";
 import { Dialog, Field } from "../components/Dialog";
 import { openPasswordDialog } from "../components/ChangePasswordDialog";
@@ -8,16 +7,16 @@ import { getStrings, useStrings } from "../i18n";
 import { USERNAME_PATTERN, normalizeUsername } from "../lib/username";
 import { askConfirm, showToast, useAppState } from "../store";
 
-/** Account table on the right of the same shell as chat.
-
- *  It used to live as a tab inside the settings modal, which made a
- *  machine-wide dialog own a per-account table, and packed create / reset /
- *  delete into one cramped block. The left sidebar does not change: leaving
- *  this page for a conversation is the usual next move, so the tree stays. */
-export function UsersPage() {
+/** Account management table rendered inside the Settings modal's "Users" tab. */
+export function UsersPanel({
+  createOpen,
+  onCloseCreate,
+}: {
+  createOpen: boolean;
+  onCloseCreate: () => void;
+}) {
   const s = useAppState();
   const S = useStrings();
-  const [createOpen, setCreateOpen] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -26,61 +25,51 @@ export function UsersPage() {
   useEffect(() => { if (ready && s.accountRole === "admin") void loadUsers(); }, [ready, s.accountRole]);
 
   if (!ready) {
-    return (
-      <div className="main"><div className="page-body"><p className="muted">{S.common.loading}</p></div></div>
-    );
+    return <p className="muted">{S.common.loading}</p>;
   }
-  if (s.accountRole !== "admin") return <Navigate to="/chat" replace />;
+  if (s.accountRole !== "admin") return null;
 
   return (
     <>
-      <div className="main">
-        <div className="topbar">
-          <h3 className="page-title">{S.users.title}</h3>
-          <button className="settings-new-btn" onClick={() => setCreateOpen(true)}>{S.users.add}</button>
-        </div>
-        <div className="page-body">
-          <div className="users-table-wrap">
-            <table className="users-table">
-              <thead>
-                <tr>
-                  <th>{S.users.username}</th>
-                  <th>{S.users.role}</th>
-                  <th>{S.users.created}</th>
-                  <th className="num">{S.users.actions}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!s.users.length && (
-                  <tr><td colSpan={4} className="users-empty">{S.common.loading}</td></tr>
-                )}
-                {s.users.map((u) => (
-                  <tr key={u.user_id} className={u.user_id === s.accountId ? "is-you" : ""}>
-                    <td>
-                      <span className="users-id">{u.user_id}</span>
-                      {u.password_is_initial && <span className="users-badge">{S.users.initialFlag}</span>}
-                      {u.user_id === s.accountId && <span className="users-badge you">{S.users.you}</span>}
-                    </td>
-                    <td><span className="users-badge">{u.is_admin ? S.users.roleAdmin : S.users.roleUser}</span></td>
-                    <td className="muted">{formatWhen(u.created_at)}</td>
-                    <td className="num">
-                      <button className="cron-act" onClick={() => openPasswordDialog(u.user_id)}>
-                        {S.users.changePassword}
-                      </button>
-                      {u.user_id !== s.accountId && (
-                        <button className="cron-act danger" onClick={() => removeUser(u.user_id)}>
-                          {S.common.delete}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="users-table-wrap">
+        <table className="users-table">
+          <thead>
+            <tr>
+              <th>{S.users.username}</th>
+              <th>{S.users.role}</th>
+              <th>{S.users.created}</th>
+              <th className="num">{S.users.actions}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!s.users.length && (
+              <tr><td colSpan={4} className="users-empty">{S.common.loading}</td></tr>
+            )}
+            {s.users.map((u) => (
+              <tr key={u.user_id} className={u.user_id === s.accountId ? "is-you" : ""}>
+                <td>
+                  <span className="users-id">{u.user_id}</span>
+                  {u.password_is_initial && <span className="users-badge">{S.users.initialFlag}</span>}
+                  {u.user_id === s.accountId && <span className="users-badge you">{S.users.you}</span>}
+                </td>
+                <td><span className="users-badge">{u.is_admin ? S.users.roleAdmin : S.users.roleUser}</span></td>
+                <td className="muted">{formatWhen(u.created_at)}</td>
+                <td className="num">
+                  <button className="cron-act" onClick={() => openPasswordDialog(u.user_id)}>
+                    {S.users.changePassword}
+                  </button>
+                  {u.user_id !== s.accountId && (
+                    <button className="cron-act danger" onClick={() => removeUser(u.user_id)}>
+                      {S.common.delete}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      {createOpen && <CreateUserDialog onClose={() => setCreateOpen(false)} />}
+      {createOpen && <CreateUserDialog onClose={onCloseCreate} />}
     </>
   );
 }

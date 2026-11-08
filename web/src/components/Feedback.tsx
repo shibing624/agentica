@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useStrings } from "../i18n";
 import { closeConfirm, useAppState } from "../store";
 
@@ -12,6 +13,17 @@ export function Toast() {
 export function ConfirmDialog() {
   const s = useAppState();
   const S = useStrings();
+  useEffect(() => {
+    if (!s.confirm.open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        closeConfirm();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [s.confirm.open]);
   if (!s.confirm.open) return null;
   const run = () => {
     const fn = s.confirm.onOk;

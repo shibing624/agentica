@@ -3,7 +3,7 @@ import { loadPlugins } from "../data";
 import { getStrings, useStrings, type Strings } from "../i18n";
 import { IconClose } from "../icons";
 import {
-  askConfirm, emptyMcpForm, emptySkillForm, getState, setState, showToast,
+  askConfirm, getState, setState, showToast,
   useAppState, type McpForm, type SkillForm,
 } from "../store";
 
@@ -125,112 +125,97 @@ export function PluginsPanel() {
   const servers = (s.pluginsData.mcpServers || []).filter(match);
 
   return (
-    <div className="plugins-overlay open" onClick={() => setState({ pluginsPanelOpen: false })}>
-      <div className="plugins-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="plugins-head">
-          <h3>{S.plugins.title}</h3>
-          <div className="settings-head-actions">
-            <button className="dp-btn" onClick={() => void loadPlugins()}>{S.common.refresh}</button>
-            {s.pluginsTab === "skills" && (
-              <button className="dp-btn primary" onClick={() => setState({ skillForm: emptySkillForm() })}>{S.plugins.newSkill}</button>
-            )}
-            {s.pluginsTab === "mcp" && (
-              <button className="dp-btn primary" onClick={() => setState({ mcpForm: emptyMcpForm() })}>{S.plugins.addServer}</button>
-            )}
-            <button className="ib" onClick={() => setState({ pluginsPanelOpen: false })}><IconClose /></button>
-          </div>
-        </div>
-        <div className="plugins-tabs">
-          {TABS.map(([id, label]) => (
-            <button
-              key={id}
-              className={"plugins-tab" + (s.pluginsTab === id ? " active" : "")}
-              onClick={() => setState({ pluginsTab: id })}
-            >
-              {label(S)}
-              <span className="plugin-badge">
-                {id === "skills" ? skills.length : id === "tools" ? tools.length : servers.length}
-              </span>
-            </button>
-          ))}
-          <input
-            className="plugins-search"
-            placeholder={S.plugins.searchPlaceholder}
-            value={s.pluginsSearch}
-            onChange={(e) => setState({ pluginsSearch: e.target.value })}
-          />
-        </div>
-        <div className="plugins-body">
-          {s.pluginsTab === "skills" && (
-            <>
-              {s.skillForm && <SkillFormView />}
-              <div className="plugin-list">
-                {!skills.length && <div className="settings-empty">{S.plugins.noSkills}</div>}
-                {skills.map((t: any) => (
-                  <div key={t.name} className="plugin-row">
-                    <div className="plugin-row-main">
-                      <div className="plugin-row-title">
-                        {t.name}
-                        {t.trigger && <code className="plugin-trigger">{t.trigger}</code>}
-                        <span className="plugin-loc">{t.location}</span>
-                      </div>
-                      <div className="plugin-row-desc">{t.description}</div>
-                    </div>
-                    <div className="plugin-row-actions">
-                      {t.editable ? (
-                        <>
-                          <button className="cron-act" onClick={() => void editSkill(t.name)}>{S.common.edit}</button>
-                          <button className="cron-act danger" onClick={() => removeSkill(t.name)}>{S.common.delete}</button>
-                        </>
-                      ) : <span className="plugin-readonly">{S.plugins.builtin}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {s.pluginsTab === "tools" && (
+    <div className="plugins-panel">
+      <div className="plugins-tabs">
+        {TABS.map(([id, label]) => (
+          <button
+            key={id}
+            className={"plugins-tab" + (s.pluginsTab === id ? " active" : "")}
+            onClick={() => setState({ pluginsTab: id })}
+          >
+            {label(S)}
+            <span className="plugin-badge">
+              {id === "skills" ? skills.length : id === "tools" ? tools.length : servers.length}
+            </span>
+          </button>
+        ))}
+        <input
+          className="plugins-search"
+          placeholder={S.plugins.searchPlaceholder}
+          value={s.pluginsSearch}
+          onChange={(e) => setState({ pluginsSearch: e.target.value })}
+        />
+      </div>
+      <div className="plugins-body">
+        {s.pluginsTab === "skills" && (
+          <>
+            {s.skillForm && <SkillFormView />}
             <div className="plugin-list">
-              {!tools.length && <div className="settings-empty">{S.plugins.noTools}</div>}
-              {tools.map((t: any) => (
+              {!skills.length && <div className="settings-empty">{S.plugins.noSkills}</div>}
+              {skills.map((t: any) => (
                 <div key={t.name} className="plugin-row">
                   <div className="plugin-row-main">
                     <div className="plugin-row-title">
                       {t.name}
-                      {t.tool_group && <span className="plugin-loc">{t.tool_group}</span>}
-                      {t.is_read_only && <span className="plugin-loc ro">{S.plugins.readOnly}</span>}
+                      {t.trigger && <code className="plugin-trigger">{t.trigger}</code>}
+                      <span className="plugin-loc">{t.location}</span>
                     </div>
                     <div className="plugin-row-desc">{t.description}</div>
+                  </div>
+                  <div className="plugin-row-actions">
+                    {t.editable ? (
+                      <>
+                        <button className="cron-act" onClick={() => void editSkill(t.name)}>{S.common.edit}</button>
+                        <button className="cron-act danger" onClick={() => removeSkill(t.name)}>{S.common.delete}</button>
+                      </>
+                    ) : <span className="plugin-readonly">{S.plugins.builtin}</span>}
                   </div>
                 </div>
               ))}
             </div>
-          )}
+          </>
+        )}
 
-          {s.pluginsTab === "mcp" && (
-            <>
-              {s.mcpForm && <McpFormView />}
-              <div className="plugin-list">
-                {!servers.length && <div className="settings-empty">{S.plugins.noServers}</div>}
-                {servers.map((t: any) => (
-                  <div key={t.name} className="plugin-row">
-                    <div className="plugin-row-main">
-                      <div className="plugin-row-title">{t.name}<span className="plugin-loc">{t.type}</span></div>
-                      <div className="plugin-row-desc">
-                        {t.command ? `${t.command} ${(t.args || []).join(" ")}` : t.url}
-                        {(t.env_keys || []).length ? ` · env: ${(t.env_keys || []).join(", ")}` : ""}
-                      </div>
-                    </div>
-                    <div className="plugin-row-actions">
-                      <button className="cron-act danger" onClick={() => removeMcp(t.name)}>{S.common.remove}</button>
+        {s.pluginsTab === "tools" && (
+          <div className="plugin-list">
+            {!tools.length && <div className="settings-empty">{S.plugins.noTools}</div>}
+            {tools.map((t: any) => (
+              <div key={t.name} className="plugin-row">
+                <div className="plugin-row-main">
+                  <div className="plugin-row-title">
+                    {t.name}
+                    {t.tool_group && <span className="plugin-loc">{t.tool_group}</span>}
+                    {t.is_read_only && <span className="plugin-loc ro">{S.plugins.readOnly}</span>}
+                  </div>
+                  <div className="plugin-row-desc">{t.description}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {s.pluginsTab === "mcp" && (
+          <>
+            {s.mcpForm && <McpFormView />}
+            <div className="plugin-list">
+              {!servers.length && <div className="settings-empty">{S.plugins.noServers}</div>}
+              {servers.map((t: any) => (
+                <div key={t.name} className="plugin-row">
+                  <div className="plugin-row-main">
+                    <div className="plugin-row-title">{t.name}<span className="plugin-loc">{t.type}</span></div>
+                    <div className="plugin-row-desc">
+                      {t.command ? `${t.command} ${(t.args || []).join(" ")}` : t.url}
+                      {(t.env_keys || []).length ? ` · env: ${(t.env_keys || []).join(", ")}` : ""}
                     </div>
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+                  <div className="plugin-row-actions">
+                    <button className="cron-act danger" onClick={() => removeMcp(t.name)}>{S.common.remove}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

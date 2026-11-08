@@ -3,7 +3,7 @@ import { loadCronJobs } from "../data";
 import { getStrings, useStrings } from "../i18n";
 import { IconClose } from "../icons";
 import {
-  askConfirm, emptyCronForm, getState, setState, showToast, useAppState,
+  askConfirm, getState, setState, showToast, useAppState,
   type CronForm,
 } from "../store";
 
@@ -126,14 +126,6 @@ export function CronPanel() {
   const S = useStrings();
   return (
     <div className="cron-panel">
-      <div className="panel-bar">
-        <span className="panel-count">{S.cron.jobCount(s.cronJobs.length)}</span>
-        <div className="panel-bar-actions">
-          <button className="dp-btn" onClick={() => void loadCronJobs()}>{S.common.refresh}</button>
-          <button className="dp-btn primary" onClick={() => setState({ cronForm: emptyCronForm() })}>{S.cron.newJob}</button>
-        </div>
-      </div>
-
       {s.cronForm && <CronFormView />}
 
       <div className="settings-list">

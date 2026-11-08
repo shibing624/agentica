@@ -233,7 +233,6 @@ export type AppState = {
   dirBrowse: { open: boolean; path: string; parent: string | null; dirs: { name: string; path: string }[] };
   pendingNewChatDir: string;
   accountPanelOpen: boolean;
-  pluginsPanelOpen: boolean;
   pluginsTab: string;
   pluginsSearch: string;
   pluginsData: { tools: any[]; skills: any[]; mcpServers: any[] };
@@ -369,7 +368,6 @@ const state: AppState = {
   dirBrowse: { open: false, path: "", parent: null, dirs: [] },
   pendingNewChatDir: "",
   accountPanelOpen: false,
-  pluginsPanelOpen: false,
   pluginsTab: "skills",
   pluginsSearch: "",
   pluginsData: { tools: [], skills: [], mcpServers: [] },
