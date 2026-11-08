@@ -10,13 +10,13 @@ import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
 import { PluginsPanel } from "../panels/PluginsPanel";
 import { primeSettings, SettingsModal } from "../panels/SettingsModal";
-import { loadSessions, newChat, syncFromServer } from "../sessions";
+import { loadSessions, newChat, switchTo, syncFromServer } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
   IconChat, IconDatabase, IconFolderPlus, IconDownload, IconSpinner, DefaultAvatar,
 } from "../icons";
-import { clampSidebarWidth, setState, useAppState, type Session } from "../store";
+import { clampSidebarWidth, getState, setState, useAppState, type Session } from "../store";
 import { openAddWorkspace } from "../workspaces";
 import { AddWorkspaceDialog } from "./AddWorkspaceDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
@@ -78,9 +78,60 @@ export function AppShell({
       await Promise.all([loadStatus(), loadAuthStatus(), loadUpdateCheck()]);
       await loadPrefs();
       await loadSessions();
+      const params = new URLSearchParams(window.location.search);
+      const targetSess = params.get("session");
+      if (params.get("new") === "1") {
+        newChat();
+        nav("/chat", { replace: true });
+      } else if (targetSess && getState().sessions[targetSess]) {
+        switchTo(targetSess);
+        nav("/chat", { replace: true });
+      }
       await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs()]);
     })();
   }, []);
+
+  // Desktop Dock menu actions arrive as a DOM event when the window is already
+  // open so switching sessions or starting a new chat does not reload the SPA.
+  useEffect(() => {
+    const onDesktopNav = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ action?: string; sessionId?: string }>).detail;
+      if (!detail) return;
+      if (detail.action === "new-chat") {
+        nav("/chat");
+        newChat();
+      } else if (detail.action === "session" && detail.sessionId) {
+        const sid = detail.sessionId;
+        nav("/chat");
+        if (getState().sessions[sid]) {
+          switchTo(sid);
+        } else {
+          void loadSessions().then(() => {
+            if (getState().sessions[sid]) switchTo(sid);
+          });
+        }
+      }
+    };
+    window.addEventListener("agentica:desktop-nav", onDesktopNav);
+    return () => window.removeEventListener("agentica:desktop-nav", onDesktopNav);
+  }, [nav]);
+
+  // Keep the window / tab title and <html> session dataset in sync with the
+  // active conversation so browser tabs, the macOS Window list, and the
+  // Desktop Dock menu all reflect what is currently open.
+  const curSess = s.curSess ? s.sessions[s.curSess] : null;
+  useEffect(() => {
+    const title = curSess?.title?.trim() || "";
+    const prefix = curSess?.running ? "● " : "";
+    document.title = title ? `${prefix}${title} — Agentica` : "Agentica";
+    const root = document.documentElement;
+    if (s.curSess) root.dataset.sessionId = s.curSess;
+    else delete root.dataset.sessionId;
+    if (title) root.dataset.sessionTitle = title;
+    else delete root.dataset.sessionTitle;
+    if (curSess?.running) root.dataset.sessionRunning = "1";
+    else delete root.dataset.sessionRunning;
+  }, [s.curSess, curSess?.title, curSess?.running]);
 
   // Another client (browser tab, desktop window, CLI) may have run a turn.
   // Sync on window focus / tab visibility rather than polling `/api/sessions`

@@ -28,6 +28,7 @@ const { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, sess
 const { GatewayProcess } = require("./gateway");
 const { bootstrapBlockedPage, resolveExistingCommand } = require("./runtime");
 const { installCommand } = require("./cli-shim");
+const { buildDockMenuTemplate } = require("./dock-menu");
 const { startUpdates } = require("./updater");
 const { keepVisiblePosition, readWindowState, writeWindowState } = require("./window-state");
 const {
@@ -120,7 +121,13 @@ function createWindow() {
   };
   win.on("enter-full-screen", markFullScreen);
   win.on("leave-full-screen", markFullScreen);
-  win.webContents.on("did-finish-load", markFullScreen);
+  win.webContents.on("did-finish-load", () => {
+    markFullScreen();
+    void refreshDockMenu(true);
+  });
+  win.webContents.on("page-title-updated", () => void refreshDockMenu(true));
+  win.on("focus", () => void refreshDockMenu(true));
+  win.on("blur", () => void refreshDockMenu(false));
   win.on("close", () => {
     try {
       writeWindowState(stateFile, { ...win.getNormalBounds(), maximized: win.isMaximized() });
@@ -130,6 +137,7 @@ function createWindow() {
   });
   win.on("closed", () => {
     win = null;
+    void refreshDockMenu(false);
   });
 
   // Only this instance's own origin is the app. Everything else — including
@@ -217,6 +225,7 @@ async function startGatewayAndWindow() {
 
   if (win === null) createWindow();
   await win.loadURL(`${record.url}/chat`);
+  void refreshDockMenu(true);
 }
 
 /**
@@ -388,6 +397,112 @@ function installDockIcon() {
   app.dock.setIcon(icon);
 }
 
+let cachedRecentSessions = [];
+let lastDockFetchAt = 0;
+let lastRendererLang = "";
+
+function focusOrCreateWindow(targetUrl = null) {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    return { win, created: false };
+  }
+  if (origin !== null) {
+    const w = createWindow();
+    void w.loadURL(targetUrl || `${origin}/chat`);
+    return { win: w, created: true };
+  }
+  return { win: null, created: false };
+}
+
+function openFromDock(detail) {
+  const query = detail.action === "new-chat"
+    ? "?new=1"
+    : detail.sessionId
+      ? `?session=${encodeURIComponent(detail.sessionId)}`
+      : "";
+  const { win: w, created } = focusOrCreateWindow(origin ? `${origin}/chat${query}` : null);
+  if (w && !created) {
+    void w.webContents
+      .executeJavaScript(
+        `window.dispatchEvent(new CustomEvent("agentica:desktop-nav", { detail: ${JSON.stringify(detail)} }))`,
+      )
+      .catch(() => {});
+  }
+}
+
+async function readRendererSession() {
+  if (!win || win.isDestroyed()) return null;
+  if (!isAppUrl(win.webContents.getURL(), origin)) return null;
+  try {
+    const state = await win.webContents.executeJavaScript(
+      `({
+        lang: document.documentElement.lang || "",
+        id: document.documentElement.dataset.sessionId || "",
+        title: document.documentElement.dataset.sessionTitle || "",
+        running: document.documentElement.dataset.sessionRunning === "1"
+      })`,
+    );
+    if (state && state.lang) lastRendererLang = state.lang;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchRecentSessions(force = false) {
+  if (!origin) return cachedRecentSessions;
+  if (!force && Date.now() - lastDockFetchAt < 3000) return cachedRecentSessions;
+  const headers = {};
+  try {
+    const cookies = await session.defaultSession.cookies.get({ url: origin, name: "agentica_session" });
+    if (cookies && cookies.length && cookies[0].value) {
+      headers.cookie = `agentica_session=${cookies[0].value}`;
+    }
+  } catch {
+    /* ignore cookie lookup errors */
+  }
+  if (!headers.cookie && gateway && gateway.record && gateway.record.token) {
+    headers.authorization = `Bearer ${gateway.record.token}`;
+  }
+  try {
+    const resp = await fetch(`${origin}/api/sessions?scope=recent`, {
+      headers,
+      signal: AbortSignal.timeout(2000),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && Array.isArray(data.sessions)) {
+        cachedRecentSessions = data.sessions;
+        lastDockFetchAt = Date.now();
+      }
+    }
+  } catch {
+    /* gateway busy or restarting; keep last known list */
+  }
+  return cachedRecentSessions;
+}
+
+async function refreshDockMenu(forceFetch = false) {
+  if (process.platform !== "darwin" || !app.dock || quitting) return;
+  const [current, recent] = await Promise.all([
+    readRendererSession(),
+    fetchRecentSessions(forceFetch),
+  ]);
+  if (quitting) return;
+  const lang = (current && current.lang) || lastRendererLang || app.getLocale() || "zh";
+  const template = buildDockMenuTemplate({
+    current,
+    recent,
+    lang,
+    onNewChat: () => openFromDock({ action: "new-chat" }),
+    onSelectSession: (sessionId) => openFromDock({ action: "session", sessionId }),
+    onFocusCurrent: () => focusOrCreateWindow(),
+  });
+  app.dock.setMenu(Menu.buildFromTemplate(template));
+}
+
 // A second launch must reach the window that already exists, not start a
 // second gateway against the same ~/.agentica.
 if (!app.requestSingleInstanceLock()) {
@@ -403,6 +518,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     installMenu();
     installDockIcon();
+    void refreshDockMenu(false);
     return boot();
   });
 

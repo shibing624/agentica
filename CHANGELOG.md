@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Desktop（macOS Dock 右键菜单）显示当前打开的会话标题与最近运行会话**：右键点击 Dock 图标可直接「新建对话」、查看「当前打开：<会话标题>」，并列出最近运行的会话（运行中的会话带 `●` 置顶，当前会话带 `✓` 勾选，附带所属工作区目录名），点击任一条即唤醒窗口并切到该会话（窗口已关闭时也会重新打开并定位到所选会话）；同时 Web 与 Desktop 的窗口/标签页标题实时同步当前会话标题与运行状态。
 - **Worktree 默认目录改为 `<repo>/.worktrees/<name>`，改用 `.git/info/exclude` 排除，并修复 `grep` / `glob` / `read_file` 对 worktree 的路径与搜索问题**：
   - **默认目录改为 `.worktrees/<name>`**（`agentica/peers/worktrees.py` `DEFAULT_ROOT = ".worktrees"`）：替换原先嵌在噪声目录 `.agentica` 下的 `.agentica/worktrees/<name>`，层级更短，也不会与 `_NOISE_DIRS` 中的 `.agentica` 冲突。
   - **用 `<repo>/.git/info/exclude` 代替 `.gitignore` 与 `<parent>/.gitignore`（`*`）**：把 `.worktrees/` 写进主仓库 `.gitignore` 或在父目录写 `*` 的 `.gitignore` 会导致向上遍历 `.gitignore` 的搜索工具（如 `rg --no-require-git`、Cursor `Grep`/`Glob`、VS Code 搜索）把整个 worktree 当作被忽略目录拦截；而不忽略又会在主仓库 `git status` / `git add -A` 时把 worktree 当成子模块 gitlink 提交。现在 `_self_ignore` 与 `nested_worktrees` 自动将锚定规则（如 `/.worktrees/`）写入共享的 `.git/info/exclude`（并自动清理旧版遗留的 `<parent>/.gitignore`），主仓库 `git status` / `git add -A` 保持干净、不改动受版本控制的 `.gitignore`，同时 worktree 内外的 Git 历史与搜索工具全部正常工作。

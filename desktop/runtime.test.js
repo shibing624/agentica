@@ -22,6 +22,11 @@ const {
 } = require("./window-state");
 
 const { shimText, withPathEntry } = require("./cli-shim");
+const {
+  buildDockMenuTemplate,
+  formatSessionLabel,
+  selectRecentSessions,
+} = require("./dock-menu");
 const { TARGETS, parseTargets, sitePackages } = require("./scripts/prepare-runtime");
 
 const KEYS = [
@@ -219,3 +224,60 @@ test("bundled runtime requirements pin both wheels of one build", () => {
   // Feishu ships in the app, as it did in agentica[gateway] before the split.
   assert.match(reqs[1], /^agentica-gateway\[feishu\] @ file:\/\/.*agentica_gateway-1\.5\.1-/);
 });
+
+test("dock menu sorts running sessions first, then newest, and drops archived", () => {
+  const rows = [
+    { session_id: "old", name: "Older chat", last_timestamp: "2026-11-01T10:00:00Z", work_dir: "/Users/me/proj-a" },
+    { session_id: "arch", name: "Archived chat", last_timestamp: "2026-11-08T12:00:00Z", archived: true },
+    { session_id: "new", name: "Newer chat", last_timestamp: "2026-11-05T10:00:00Z", work_dir: "/Users/me/proj-b" },
+    { session_id: "run", name: "Running task", last_timestamp: "2026-11-02T10:00:00Z", running: true, work_dir: "/Users/me/agentica" },
+  ];
+  const picked = selectRecentSessions(rows, 8);
+  assert.deepEqual(picked.map((r) => r.session_id), ["run", "new", "old"]);
+  assert.equal(formatSessionLabel(picked[0]), "● Running task — agentica");
+});
+
+test("dock menu template shows current title, recent sessions with checkmark, and triggers callbacks", () => {
+  const actions = [];
+  const recent = [
+    { session_id: "s1", name: "Stale server name", last_timestamp: "2026-11-08T10:00:00Z", work_dir: "/Users/me/agentica" },
+    { session_id: "s2", name: "Fix search highlight", last_timestamp: "2026-11-07T10:00:00Z", running: true, work_dir: "/Users/me/web" },
+  ];
+  const tpl = buildDockMenuTemplate({
+    current: { id: "s1", title: "Live renamed title", running: false },
+    recent,
+    lang: "zh-CN",
+    onNewChat: () => actions.push("new"),
+    onSelectSession: (id) => actions.push(`select:${id}`),
+  });
+
+  assert.equal(tpl[0].label, "新建对话");
+  tpl[0].click();
+  assert.equal(tpl[2].label, "当前打开：Live renamed title");
+  tpl[2].click();
+  assert.equal(tpl[4].label, "最近运行");
+  assert.equal(tpl[4].enabled, false);
+
+  // Running session s2 sorts first; current session s1 is checked and uses live title
+  assert.equal(tpl[5].label, "● Fix search highlight — web");
+  assert.equal(tpl[5].checked, false);
+  assert.equal(tpl[6].label, "Live renamed title — agentica");
+  assert.equal(tpl[6].checked, true);
+  tpl[5].click();
+
+  assert.deepEqual(actions, ["new", "select:s1", "select:s2"]);
+});
+
+test("dock menu template falls back cleanly when no session is open or recent list is empty", () => {
+  const tpl = buildDockMenuTemplate({ current: null, recent: [], lang: "en" });
+  assert.deepEqual(
+    tpl.map((item) => ({ label: item.label, type: item.type, enabled: item.enabled })),
+    [
+      { label: "New Chat", type: undefined, enabled: undefined },
+      { label: undefined, type: "separator", enabled: undefined },
+      { label: "Recent Sessions", type: undefined, enabled: false },
+      { label: "No Recent Sessions", type: undefined, enabled: false },
+    ],
+  );
+});
+
