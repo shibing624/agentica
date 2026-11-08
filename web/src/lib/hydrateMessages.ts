@@ -40,17 +40,8 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     const explicitTs = rawTsOf(e);
     if (type === "user") {
       let content = String(e.content || "");
-      if (e.automated !== true && isSteerUserEvent(e, content)) {
-        const clean = splitImageMarkers(cleanSteerContent(content)).text;
-        if (!clean) continue;
-        if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
-        if (explicitTs > turnEndTs) turnEndTs = explicitTs;
-        assistant = ensureAssistant(msgs, assistant, tsOf(e));
-        pushSteer(assistant, clean, tsOf(e));
-        continue;
-      }
-      closeAssistant();
       if (e.automated === true) {
+        closeAssistant();
         msgs.push({
           role: "user",
           automated: true,
@@ -62,6 +53,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       }
       const pre = splitWindowPreamble(content);
       if (pre) {
+        closeAssistant();
         // A new window's preamble is chrome, not something the user said: it
         // becomes the compact card (with the notes it started from), and only
         // a question folded in behind it stays a user bubble.
@@ -80,6 +72,16 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         if (!pre.rest) continue;
         content = pre.rest;
       }
+      if (isSteerUserEvent(e, content)) {
+        const clean = splitImageMarkers(cleanSteerContent(content)).text;
+        if (!clean) continue;
+        if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
+        if (explicitTs > turnEndTs) turnEndTs = explicitTs;
+        assistant = ensureAssistant(msgs, assistant, tsOf(e));
+        pushSteer(assistant, clean, tsOf(e));
+        continue;
+      }
+      closeAssistant();
       const attached = splitImageMarkers(content);
       content = attached.text;
       const skill = parseSkillTurn(content);
@@ -132,18 +134,22 @@ export const STEER_GUIDANCE_PREFIX = "[User guidance received while you were wor
 const FOLDED_STEER_RE = /(?:^|\n\n)\[User guidance received while you were working\]\n([\s\S]*?)(?=(?:\n\n\[User guidance received while you were working\]\n)|$)/g;
 
 export function isSteerUserEvent(e: Record<string, unknown>, content = String(e.content || "")): boolean {
+  if (content.trimStart().startsWith(WINDOW_OPEN)) return false;
   if (e.steer === true) return true;
-  if (content.includes("__RELAYED__")) return true;
+  if (content.startsWith("__RELAYED__")) return true;
   if (content.startsWith(STEER_GUIDANCE_PREFIX)) return true;
   return false;
 }
 
 export function cleanSteerContent(raw: string): string {
-  let text = raw.replace(/__RELAYED__/g, "").trim();
-  if (text.startsWith(STEER_GUIDANCE_PREFIX)) {
-    text = text.slice(STEER_GUIDANCE_PREFIX.length).replace(/^\n+/, "").trim();
+  let text = raw.trimStart();
+  if (text.startsWith("__RELAYED__")) {
+    text = text.slice("__RELAYED__".length).trimStart();
   }
-  return text;
+  if (text.startsWith(STEER_GUIDANCE_PREFIX)) {
+    text = text.slice(STEER_GUIDANCE_PREFIX.length).replace(/^\n+/, "");
+  }
+  return text.trim();
 }
 
 function splitFoldedSteer(result: string): { toolResult: string; steers: string[] } {
@@ -182,8 +188,59 @@ function insertCompactCommand(msgs: ChatMsg[], card: ChatMsg) {
 }
 
 const WINDOW_OPEN = "<context_window>";
-const WINDOW_CLOSERS = ["</context_window>", "</session_notes>", "</dropped_span>"];
 const WINDOW_CONTINUATION = "New context window started. Continue from session notes and search_session.";
+
+function peelOneWindowLayer(input: string): string {
+  let s = input.trimStart();
+  if (!s.startsWith(WINDOW_OPEN)) return input;
+
+  const cwClose = s.indexOf("</context_window>");
+  if (cwClose < 0) return input;
+  s = s.slice(cwClose + "</context_window>".length).trimStart();
+
+  if (s.startsWith("<session_notes")) {
+    const dsAt = s.indexOf("\n</session_notes>\n\n<dropped_span>\n");
+    const contAt = s.indexOf(`\n</session_notes>\n\n${WINDOW_CONTINUATION}`);
+    const nextCwAt = s.indexOf("\n</session_notes>\n\n<context_window>");
+    let endAt = -1;
+    if (dsAt >= 0) endAt = dsAt + "\n</session_notes>".length;
+    else if (contAt >= 0) endAt = contAt + "\n</session_notes>".length;
+    else if (nextCwAt >= 0) endAt = nextCwAt + "\n</session_notes>".length;
+    else {
+      const lineIdx = s.lastIndexOf("\n</session_notes>");
+      if (lineIdx >= 0) endAt = lineIdx + "\n</session_notes>".length;
+      else {
+        const plain = s.indexOf("</session_notes>");
+        if (plain >= 0) endAt = plain + "</session_notes>".length;
+      }
+    }
+    if (endAt >= 0) s = s.slice(endAt).trimStart();
+  }
+
+  if (s.startsWith("<dropped_span>")) {
+    const contMarker = `\n</dropped_span>\n\n${WINDOW_CONTINUATION}`;
+    const contAt = s.lastIndexOf(contMarker);
+    const nextCwMarker = "\n</dropped_span>\n\n<context_window>";
+    const nextCwAt = s.indexOf(nextCwMarker);
+    if (contAt >= 0) {
+      s = s.slice(contAt + contMarker.length).trimStart();
+    } else if (nextCwAt >= 0) {
+      s = s.slice(nextCwAt + "\n</dropped_span>".length).trimStart();
+    } else {
+      const lineIdx = s.lastIndexOf("\n</dropped_span>");
+      if (lineIdx >= 0) s = s.slice(lineIdx + "\n</dropped_span>".length).trimStart();
+      else {
+        const plain = s.indexOf("</dropped_span>");
+        if (plain >= 0) s = s.slice(plain + "</dropped_span>".length).trimStart();
+      }
+    }
+  }
+
+  if (s.startsWith(WINDOW_CONTINUATION)) {
+    s = s.slice(WINDOW_CONTINUATION.length).trimStart();
+  }
+  return s;
+}
 
 /**
  * Split a new-context-window preamble off a logged user row, the way
@@ -193,21 +250,22 @@ const WINDOW_CONTINUATION = "New context window started. Continue from session n
  */
 export function splitWindowPreamble(content: string): { notes: string; notesPath: string; rest: string } | null {
   if (!content.trimStart().startsWith(WINDOW_OPEN)) return null;
-  const m = content.match(/<session_notes(?:\s+path="([^"]*)")?>([\s\S]*?)<\/session_notes>/);
-  let rest = content;
-  while (rest.trimStart().startsWith(WINDOW_OPEN)) {
-    let peeled = rest;
-    for (const closer of WINDOW_CLOSERS) {
-      const i = peeled.indexOf(closer);
-      if (i >= 0) peeled = peeled.slice(i + closer.length);
-    }
-    const at = peeled.indexOf(WINDOW_CONTINUATION);
-    if (at >= 0) peeled = peeled.slice(at + WINDOW_CONTINUATION.length);
-    peeled = peeled.trimStart();
+  const m =
+    content.match(/<session_notes(?:\s+path="([^"]*)")?>\n([\s\S]*?)\n<\/session_notes>(?=\n|$)/)
+    || content.match(/<session_notes(?:\s+path="([^"]*)")?>([\s\S]*?)<\/session_notes>/);
+  let rest = content.trimStart();
+  while (rest.startsWith(WINDOW_OPEN)) {
+    const peeled = peelOneWindowLayer(rest);
     if (peeled === rest) break;
     rest = peeled;
   }
   return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || "", rest };
+}
+
+export function isPureWindowPreamble(e: Record<string, unknown>): boolean {
+  if (e.type !== "user" || e.automated === true || e.steer === true) return false;
+  const pre = splitWindowPreamble(String(e.content || ""));
+  return Boolean(pre && !pre.rest);
 }
 
 function uuidOf(e: Record<string, unknown>): string {
@@ -405,12 +463,33 @@ export type ClientSteerAnchor = {
 const STEER_CACHE_KEY = "ag_steers_v1";
 const STEER_CACHE_MAX_SESSIONS = 40;
 
+function isValidSteerText(text: unknown): text is string {
+  return typeof text === "string" && Boolean(text.trim()) && !text.trimStart().startsWith(WINDOW_OPEN);
+}
+
 function readSteerStore(): Record<string, ClientSteerAnchor[]> {
   if (typeof localStorage === "undefined") return {};
   try {
     const raw = localStorage.getItem(STEER_CACHE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" ? parsed : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    const store = parsed as Record<string, ClientSteerAnchor[]>;
+    let dirty = false;
+    for (const [k, list] of Object.entries(store)) {
+      if (!Array.isArray(list)) {
+        delete store[k];
+        dirty = true;
+        continue;
+      }
+      const filtered = list.filter((item) => item && isValidSteerText(item.text));
+      if (filtered.length !== list.length) {
+        if (filtered.length) store[k] = filtered;
+        else delete store[k];
+        dirty = true;
+      }
+    }
+    if (dirty) writeSteerStore(store);
+    return store;
   } catch {
     return {};
   }
@@ -442,7 +521,7 @@ export function rememberSteersFromMsgs(sessionId: string, msgs: ChatMsg[], older
       let lastToolId: string | undefined;
       for (const p of m.parts) {
         if (p.kind === "tool" && p.toolCallId) lastToolId = p.toolCallId;
-        else if (p.kind === "steer" && p.text) {
+        else if (p.kind === "steer" && isValidSteerText(p.text)) {
           found.push({
             text: p.text,
             ts: p.ts || m.ts || Date.now(),
@@ -509,7 +588,7 @@ export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns
   const list = readSteerStore()[sessionId];
   if (!list?.length) return msgs;
   for (const item of list) {
-    if (!item.text) continue;
+    if (!isValidSteerText(item.text)) continue;
     // Already hydrated from JSONL?
     const alreadyPresent = msgs.some(
       (m) =>

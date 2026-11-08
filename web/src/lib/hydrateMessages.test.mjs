@@ -324,3 +324,39 @@ test("mid-turn user steer rows and folded tool steers hydrate as steer parts ins
   const tc2 = parts(msgs[1]).find((p) => p.kind === "tool" && p.toolCallId === "tc2");
   assert.equal(tc2.result, "line 1");
 });
+
+test("window preamble mentioning __RELAYED__ or closing tags in notes/dropped_span stays hidden inside compact card", () => {
+  const preambleWithMarkers = [
+    "<context_window>\nCurrent context window 1.\nYou have 512000 tokens left in this context window.\n</context_window>",
+    '<session_notes path="/tmp/s.notes.md">\n- Parsed `steer: true`, `__RELAYED__`, and `</session_notes>` in `[User guidance received while you were working]`\n</session_notes>',
+    '<dropped_span>\nconst WINDOW_CLOSERS = ["</context_window>", "</session_notes>", "</dropped_span>"];\nconst WINDOW_CONTINUATION = "New context window started. Continue from session notes and search_session.";\n</dropped_span>',
+    "New context window started. Continue from session notes and search_session.",
+  ].join("\n\n");
+
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "first question" },
+    { type: "assistant", content: "first answer" },
+    { type: "compact_boundary", trigger: "manual", timestamp: "2026-11-08T05:00:00.000Z" },
+    { type: "user", content: preambleWithMarkers, timestamp: "2026-11-08T05:00:01.000Z" },
+    { type: "user", content: "next question after compact", timestamp: "2026-11-08T05:01:00.000Z" },
+    { type: "assistant", content: "next answer", timestamp: "2026-11-08T05:01:05.000Z" },
+  ]);
+
+  assert.deepEqual(view(msgs), [
+    "user:first question",
+    "assistant:first answer",
+    "user:/compact",
+    "card",
+    "user:next question after compact",
+    "assistant:next answer",
+  ]);
+  // No steer chip or user bubble may leak `<context_window>`
+  for (const m of msgs) {
+    assert.equal(String(m.content || "").includes("<context_window>"), false);
+    for (const p of parts(m)) {
+      assert.equal(String(p.text || "").includes("<context_window>"), false);
+    }
+  }
+  assert.match(msgs[3].compact.notes, /__RELAYED__/);
+  assert.equal(msgs[3].compact.notesPath, "/tmp/s.notes.md");
+});

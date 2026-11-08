@@ -8,6 +8,7 @@ Extracted from AgentService to keep model creation logic independently testable
 and to reduce AgentService's responsibility count.
 """
 import asyncio
+import dataclasses
 from typing import Any, List, Optional
 
 from agentica.utils.log import logger
@@ -27,6 +28,13 @@ def create_model(
     reasoning: str = "",
     reasoning_effort: str = "",
     thinking: str = "",
+    enable_cache_control: Optional[bool] = None,
+    cache_control_messages: Optional[int] = None,
+    cache_control_session_header: Optional[str] = None,
+    cache_keepalive: Optional[int] = None,
+    extra_body: Optional[dict[str, Any]] = None,
+    extra_headers: Optional[dict[str, Any]] = None,
+    default_headers: Optional[dict[str, Any]] = None,
 ) -> Any:
     """Instantiate the configured LLM model.
 
@@ -95,6 +103,17 @@ def create_model(
             params["extra_body"] = {"thinking": {"type": thinking}}
         logger.info(f"Model thinking mode: {thinking} (provider={model_provider})")
 
+    if model_provider in _ANTHROPIC_PROVIDERS:
+        if default_headers:
+            params["default_headers"] = dict(default_headers)
+    else:
+        if extra_body:
+            merged_body = dict(params.get("extra_body") or {})
+            merged_body.update(extra_body)
+            params["extra_body"] = merged_body
+        if extra_headers:
+            params["extra_headers"] = dict(extra_headers)
+
     # Reasoning effort — any string the endpoint accepts. Anthropic-family
     # skips it (uses thinking budget instead); DeepSeek/OpenAI/o-series
     # take it as a top-level field; other OpenAI-compatible providers get
@@ -123,6 +142,16 @@ def create_model(
         model = OpenAIResponses(**params)
     else:
         model = create_provider(model_provider, **params)
+
+    fields = type(model).__dataclass_fields__ if dataclasses.is_dataclass(model) else {}
+    if enable_cache_control is not None and "enable_cache_control" in fields:
+        model.enable_cache_control = enable_cache_control
+    if effective_wire_api == "chat_completions" and cache_control_messages is not None and "cache_control_messages" in fields:
+        model.cache_control_messages = cache_control_messages
+    if cache_control_session_header and "cache_control_session_header" in fields:
+        model.cache_control_session_header = cache_control_session_header
+    if effective_wire_api == "chat_completions" and cache_keepalive is not None and "cache_keepalive" in fields:
+        model.cache_keepalive = cache_keepalive
 
     # context_window is NOT an API param — set on the instance for budget /
     # compression / status display. Overrides the catalog auto-detected value.

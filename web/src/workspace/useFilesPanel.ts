@@ -3,13 +3,15 @@ import * as api from "../api";
 import { useAppState, showToast } from "../store";
 import { useStrings } from "../i18n";
 import {
-  activateTab, adoptTerminals, closeTab, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialTabs, nextTerminalOrdinal,
-  openTab, replaceTab, skillKey, terminalKey, upsertTab, type PanelTab, type TabsState,
+  activateTab, adoptTerminals, closeTab, fileKey, reviewKey, FILES_TAB, GUIDE_TAB, initialSessionPanel,
+  nextTerminalOrdinal, openTab, readSessionPanel, replaceTab, skillKey, terminalKey, upsertTab, writeSessionPanel,
+  type PanelTab, type SessionPanelRecord, type TabsState,
 } from "../lib/panelTabs";
 import type { FileEdits } from "../lib/fileDiff";
 import { clampWidth, PANEL_MAX_RATIO, PANEL_MIN, preferredWidth, resolvedWidth } from "./panelWidth";
 
 export type FilesPanelState = {
+  sessionKey: string;
   open: boolean;
   setOpen: (open: boolean) => void;
   width: number;
@@ -23,8 +25,13 @@ export type FilesPanelState = {
   active: string;
   activate: (key: string) => void;
   close: (key: string) => void;
+  /** Current directory path in the `files` tab for this session. */
+  dirPath: string;
+  setDirPath: (dirPath: string) => void;
   /** Open a workspace file in its own tab (or focus the tab it already has). */
   browsePath: (path: string) => void;
+  /** Reveal `path`'s parent directory in the `files` tab. */
+  revealInFilesTab: (path: string) => void;
   /** Open an installed skill's SKILL.md in a tab. */
   openSkill: (name: string) => void;
   /** Review round `turn`'s edits with `path` on screen (one tab per round). */
@@ -67,30 +74,76 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   const S = useStrings();
   const viewport = useViewportWidth();
   const sidebar = s.sidebarCollapsed ? 0 : s.sidebarWidth;
-  const [open, setOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [saved, setSaved] = useState(readSaved);
   const width = resolvedWidth(preferredWidth(saved, viewport), viewport, sidebar);
   const canTerminal = s.accountRole === "admin";
 
-  // Tabs belong to a session: switching chats swaps the set, and coming back
-  // restores what was open there. Terminals keep running on the gateway either way.
-  const bySession = useRef(new Map<string, TabsState>());
+  // Panel state (open + opened file history tabs + active tab + directory path)
+  // belongs to each session (dsh's `dsh.sidebar-right.v1.<sessionId>`):
+  // switching sessions swaps the whole record synchronously during render, and
+  // localStorage preserves each session's opened file tabs across reloads.
+  const bySession = useRef(new Map<string, SessionPanelRecord>());
   const sessionKey = sessionId || "";
-  const [state, setTabs] = useState<TabsState>(initialTabs);
+  const loadForSession = useCallback((key: string, prevKey?: string): SessionPanelRecord => {
+    const cached = bySession.current.get(key);
+    if (cached) return cached;
+    const persisted = readSessionPanel(key);
+    if (persisted) {
+      bySession.current.set(key, persisted);
+      return persisted;
+    }
+    // A new chat draft (`""`) that just got its first sessionId inherits any
+    // tabs/open state the user opened before sending the first message.
+    if (prevKey === "" && key) {
+      const draft = bySession.current.get("");
+      if (draft && (draft.open || draft.tabs.length > 1 || draft.dirPath)) {
+        bySession.current.set("", initialSessionPanel());
+        bySession.current.set(key, draft);
+        writeSessionPanel(key, draft);
+        return draft;
+      }
+    }
+    const fresh = initialSessionPanel();
+    bySession.current.set(key, fresh);
+    return fresh;
+  }, []);
+
+  const [renderedKey, setRenderedKey] = useState(sessionKey);
+  const [state, setRecord] = useState<SessionPanelRecord>(() => loadForSession(sessionKey));
+  if (renderedKey !== sessionKey) {
+    const nextRecord = loadForSession(sessionKey, renderedKey);
+    setRenderedKey(sessionKey);
+    setRecord(nextRecord);
+    if (!nextRecord.open && fullscreen) setFullscreen(false);
+  }
   const stateRef = useRef(state);
   stateRef.current = state;
-  const update = useCallback((fn: (st: TabsState) => TabsState) => {
-    setTabs((st) => {
-      const next = fn(st);
+  const updateRecord = useCallback((fn: (rec: SessionPanelRecord) => SessionPanelRecord) => {
+    setRecord((rec) => {
+      const next = fn(rec);
       bySession.current.set(sessionKey, next);
+      writeSessionPanel(sessionKey, next);
       return next;
     });
   }, [sessionKey]);
 
-  useEffect(() => {
-    setTabs(bySession.current.get(sessionKey) ?? initialTabs());
-  }, [sessionKey]);
+  const update = useCallback((fn: (st: TabsState) => TabsState) => {
+    updateRecord((rec) => {
+      const nextTabs = fn({ tabs: rec.tabs, active: rec.active });
+      return { ...rec, tabs: nextTabs.tabs, active: nextTabs.active, preferredActive: undefined };
+    });
+  }, [updateRecord]);
+
+  const open = state.open;
+  const setOpen = useCallback((nextOpen: boolean) => {
+    updateRecord((rec) => ({ ...rec, open: nextOpen }));
+  }, [updateRecord]);
+
+  const dirPath = state.dirPath;
+  const setDirPath = useCallback((nextDir: string) => {
+    updateRecord((rec) => (rec.dirPath === nextDir ? rec : { ...rec, dirPath: nextDir }));
+  }, [updateRecord]);
 
   // After a reload the tab list is gone but the shells are not.
   useEffect(() => {
@@ -102,10 +155,18 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
         .filter((t) => t.session_id === sessionKey && !t.exited)
         .sort((a, b) => a.created_at - b.created_at)
         .map((t) => t.id);
-      if (mine.length) update((st) => adoptTerminals(st, mine));
+      if (mine.length) {
+        updateRecord((rec) => {
+          const adopted = adoptTerminals({ tabs: rec.tabs, active: rec.active }, mine);
+          const restoreTerm = rec.preferredActive && adopted.tabs.some((t) => t.key === rec.preferredActive)
+            ? rec.preferredActive
+            : adopted.active;
+          return { ...rec, tabs: adopted.tabs, active: restoreTerm, preferredActive: undefined };
+        });
+      }
     });
     return () => { cancelled = true; };
-  }, [canTerminal, sessionKey, update]);
+  }, [canTerminal, sessionKey, updateRecord]);
 
   // Closing leaves fullscreen: the next open is the normal column again.
   useEffect(() => { if (!open) setFullscreen(false); }, [open]);
@@ -142,19 +203,38 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   }, [width]);
 
   const browsePath = useCallback((path: string) => {
-    setOpen(true);
-    update((st) => openTab(st, { key: fileKey(path), kind: "file", path }));
-  }, [update]);
+    updateRecord((rec) => {
+      const next = openTab({ tabs: rec.tabs, active: rec.active }, { key: fileKey(path), kind: "file", path });
+      return { ...rec, open: true, tabs: next.tabs, active: next.active, preferredActive: undefined };
+    });
+  }, [updateRecord]);
+
+  const revealInFilesTab = useCallback((path: string) => {
+    const norm = path.replace(/\/+$/, "");
+    const slash = norm.lastIndexOf("/");
+    const parentDir = slash >= 0 && !norm.startsWith("/") ? norm.slice(0, slash) : "";
+    updateRecord((rec) => ({
+      ...rec,
+      open: true,
+      active: FILES_TAB.key,
+      dirPath: parentDir,
+      preferredActive: undefined,
+    }));
+  }, [updateRecord]);
 
   const openSkill = useCallback((name: string) => {
-    setOpen(true);
-    update((st) => openTab(st, { key: skillKey(name), kind: "skill", name }));
-  }, [update]);
+    updateRecord((rec) => {
+      const next = openTab({ tabs: rec.tabs, active: rec.active }, { key: skillKey(name), kind: "skill", name });
+      return { ...rec, open: true, tabs: next.tabs, active: next.active, preferredActive: undefined };
+    });
+  }, [updateRecord]);
 
   const openReview = useCallback((turn: number, files: FileEdits[], path: string) => {
-    setOpen(true);
-    update((st) => upsertTab(st, { key: reviewKey(turn), kind: "review", turn, files, path }));
-  }, [update]);
+    updateRecord((rec) => {
+      const next = upsertTab({ tabs: rec.tabs, active: rec.active }, { key: reviewKey(turn), kind: "review", turn, files, path });
+      return { ...rec, open: true, tabs: next.tabs, active: next.active, preferredActive: undefined };
+    });
+  }, [updateRecord]);
 
   const selectReviewFile = useCallback((key: string, path: string) => {
     update((st) => ({ ...st, tabs: st.tabs.map((t) => (t.key === key && t.kind === "review" ? { ...t, path } : t)) }));
@@ -170,9 +250,11 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   }, [update]);
 
   const openGuide = useCallback(() => {
-    setOpen(true);
-    update((st) => openTab(st, GUIDE_TAB));
-  }, [update]);
+    updateRecord((rec) => {
+      const next = openTab({ tabs: rec.tabs, active: rec.active }, GUIDE_TAB);
+      return { ...rec, open: true, tabs: next.tabs, active: next.active, preferredActive: undefined };
+    });
+  }, [updateRecord]);
 
   const pickFiles = useCallback(() => update((st) => replaceTab(st, GUIDE_TAB.key, FILES_TAB)), [update]);
 
@@ -188,8 +270,10 @@ export function useFilesPanel(sessionId: string | null, workspace: string): File
   const terminalGone = useCallback((id: string) => update((st) => closeTab(st, terminalKey(id))), [update]);
 
   return {
+    sessionKey,
     open, setOpen, width, startResize, resetWidth, fullscreen, setFullscreen,
     tabs: state.tabs, active: state.active, activate, close,
-    browsePath, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
+    dirPath, setDirPath,
+    browsePath, revealInFilesTab, openSkill, openReview, selectReviewFile, openGuide, pickFiles, canTerminal, pickTerminal, terminalGone,
   };
 }

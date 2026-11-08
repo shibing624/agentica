@@ -199,8 +199,20 @@ class DeepAgent(Agent):
         approve: Optional[Callable] = None,
     ):
         if model is None:
-            from agentica.model.defaults import create_default_model
-            model = create_default_model()
+            from agentica.model.defaults import create_default_model, create_profile_model_bundle
+            bundle = create_profile_model_bundle(session_profile, work_dir=work_dir) if session_profile else None
+            if bundle is not None:
+                model = bundle["model"]
+                if auxiliary_model is None and bundle["auxiliary_model"] is not None:
+                    auxiliary_model = bundle["auxiliary_model"]
+                if task_model is None and bundle["auxiliary_model"] is not None:
+                    task_model = bundle["auxiliary_model"]
+                if fallback_models is None and bundle["fallback_models"]:
+                    fallback_models = bundle["fallback_models"]
+                if max_api_retry == 1 and bundle["max_api_retry"]:
+                    max_api_retry = bundle["max_api_retry"]
+            else:
+                model = create_default_model()
 
         # Default auxiliary_model — reuse the main model so the whole stack
         # runs on a single API key. Pass a different model explicitly to

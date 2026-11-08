@@ -3,7 +3,7 @@
 Default model resolution for callers that did not pass an explicit model.
 """
 from os import getenv
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from agentica.model.base import Model
 
@@ -124,3 +124,63 @@ def create_default_model() -> Model:
         "No default LLM provider is configured. Pass model=... explicitly or set "
         f"one of: {', '.join(env_names)}."
     )
+
+
+def create_profile_model_bundle(
+    profile_name: Optional[str] = None,
+    work_dir: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build ``model``, ``auxiliary_model``, ``fallback_models``, ``max_api_retry``,
+    and ``compact_token_limit`` from a ``config.yaml`` profile using the same
+    factory rules as the CLI (including ``enable_cache_control``,
+    ``cache_control_messages``, ``cache_control_session_header``,
+    ``cache_keepalive``, ``extra_body``, ``extra_headers``, ``default_headers``).
+    """
+    from agentica.cli.runtime import (
+        _build_fallback_models,
+        _build_sibling_model,
+        _resolve_compact_token_limit,
+        get_model,
+    )
+    from agentica.cli.setup import resolve_named_profile_config
+    from agentica.config.profiles import get_profile, resolve_active_profile_name
+
+    name = profile_name
+    if not name:
+        name, _ = resolve_active_profile_name(work_dir=work_dir)
+    if not name or not get_profile(name):
+        return None
+    cfg = resolve_named_profile_config(name)
+    if not cfg.get("model_provider") or not cfg.get("model_name"):
+        return None
+    model = get_model(
+        model_provider=cfg["model_provider"],
+        model_name=cfg["model_name"],
+        base_url=cfg.get("base_url"),
+        api_key=cfg.get("api_key"),
+        wire_api=cfg.get("wire_api"),
+        max_tokens=cfg.get("max_tokens"),
+        temperature=cfg.get("temperature"),
+        reasoning_effort=cfg.get("reasoning_effort"),
+        reasoning=cfg.get("reasoning"),
+        top_p=cfg.get("top_p"),
+        context_window=cfg.get("context_window"),
+        enable_cache_control=cfg.get("enable_cache_control"),
+        cache_control_messages=cfg.get("cache_control_messages"),
+        cache_control_session_header=cfg.get("cache_control_session_header"),
+        cache_keepalive=cfg.get("cache_keepalive"),
+        extra_body=cfg.get("extra_body"),
+        extra_headers=cfg.get("extra_headers"),
+        default_headers=cfg.get("default_headers"),
+    )
+    auxiliary_model = _build_sibling_model(cfg, "auxiliary")
+    fallback_models: List[Model] = _build_fallback_models(cfg)
+    max_api_retry = cfg.get("max_api_retry")
+    return {
+        "profile_name": name,
+        "model": model,
+        "auxiliary_model": auxiliary_model,
+        "fallback_models": fallback_models,
+        "max_api_retry": int(max_api_retry) if max_api_retry is not None else 2,
+        "compact_token_limit": _resolve_compact_token_limit(cfg),
+    }

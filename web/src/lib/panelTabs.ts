@@ -18,12 +18,28 @@ export type PanelTab =
 
 export type TabsState = { tabs: PanelTab[]; active: string };
 
+export type SessionPanelRecord = {
+  tabs: PanelTab[];
+  active: string;
+  open: boolean;
+  dirPath: string;
+  /** When a reloaded session's active tab was a terminal (`term:...`), remember
+   *  it so `adoptTerminals` restores focus once the live shell list arrives. */
+  preferredActive?: string;
+};
+
+export const PANEL_STORAGE_PREFIX = "ag_panel_v1:";
+
 export const FILES_TAB: PanelTab = { key: "files", kind: "files" };
 /** One start page per panel: "+" focuses it when it is already open. */
 export const GUIDE_TAB: PanelTab = { key: "guide", kind: "guide" };
 
 export function initialTabs(): TabsState {
   return { tabs: [FILES_TAB], active: FILES_TAB.key };
+}
+
+export function initialSessionPanel(): SessionPanelRecord {
+  return { tabs: [FILES_TAB], active: FILES_TAB.key, open: false, dirPath: "" };
 }
 
 export const fileKey = (path: string) => `file:${path}`;
@@ -98,6 +114,102 @@ export function adoptTerminals(state: TabsState, ids: string[]): TabsState {
     next = { tabs: [...next.tabs, tab], active: next.active };
   }
   return next;
+}
+
+/**
+ * Serialize one session's right-panel state for `localStorage` (mirrors dsh's
+ * `writeSidebarLayout(sessionId, ...)`). Transient `guide` and `terminal` tabs
+ * are excluded from storage — live terminals are re-adopted from the gateway.
+ */
+export function serializeSessionPanel(record: SessionPanelRecord): string {
+  const tabs = record.tabs.filter((t) => t.kind !== "terminal" && t.kind !== "guide");
+  const active = record.active === GUIDE_TAB.key ? FILES_TAB.key : record.active;
+  return JSON.stringify({
+    open: Boolean(record.open),
+    active,
+    dirPath: record.dirPath || "",
+    tabs: tabs.length ? tabs : [FILES_TAB],
+  });
+}
+
+/**
+ * Parse and validate one session's saved right-panel state from `localStorage`
+ * (mirrors dsh's `readSidebarLayout(sessionId)`).
+ */
+export function restoreSessionPanel(raw: string | null | undefined): SessionPanelRecord | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const seen = new Set<string>([FILES_TAB.key]);
+    const tabs: PanelTab[] = [FILES_TAB];
+    if (Array.isArray(parsed.tabs)) {
+      for (const item of parsed.tabs) {
+        if (!item || typeof item !== "object" || typeof item.kind !== "string") continue;
+        if (item.kind === "file" && typeof item.path === "string" && item.path) {
+          const key = fileKey(item.path);
+          if (!seen.has(key)) {
+            seen.add(key);
+            tabs.push({ key, kind: "file", path: item.path });
+          }
+        } else if (item.kind === "skill" && typeof item.name === "string" && item.name) {
+          const key = skillKey(item.name);
+          if (!seen.has(key)) {
+            seen.add(key);
+            tabs.push({ key, kind: "skill", name: item.name });
+          }
+        } else if (
+          item.kind === "review" &&
+          typeof item.turn === "number" &&
+          Array.isArray(item.files) &&
+          typeof item.path === "string"
+        ) {
+          const key = reviewKey(item.turn);
+          if (!seen.has(key)) {
+            seen.add(key);
+            tabs.push({ key, kind: "review", turn: item.turn, files: item.files, path: item.path });
+          }
+        }
+      }
+    }
+    const rawActive = typeof parsed.active === "string" ? parsed.active : FILES_TAB.key;
+    const hasActive = tabs.some((t) => t.key === rawActive);
+    const preferredActive = !hasActive && rawActive.startsWith("term:") ? rawActive : undefined;
+    return {
+      tabs,
+      active: hasActive ? rawActive : FILES_TAB.key,
+      open: Boolean(parsed.open),
+      dirPath: typeof parsed.dirPath === "string" ? parsed.dirPath : "",
+      ...(preferredActive ? { preferredActive } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readSessionPanel(
+  sessionKey: string,
+  storage: Pick<Storage, "getItem"> | null = typeof localStorage !== "undefined" ? localStorage : null,
+): SessionPanelRecord | null {
+  if (!sessionKey || !storage) return null;
+  try {
+    return restoreSessionPanel(storage.getItem(PANEL_STORAGE_PREFIX + sessionKey));
+  } catch {
+    return null;
+  }
+}
+
+export function writeSessionPanel(
+  sessionKey: string,
+  record: SessionPanelRecord,
+  storage: Pick<Storage, "setItem"> | null = typeof localStorage !== "undefined" ? localStorage : null,
+): void {
+  if (!sessionKey || !storage) return;
+  try {
+    storage.setItem(PANEL_STORAGE_PREFIX + sessionKey, serializeSessionPanel(record));
+  } catch {
+    /* Storage quota or private mode: in-memory state still works for this window. */
+  }
 }
 
 /** Tab label for a file: its basename. */

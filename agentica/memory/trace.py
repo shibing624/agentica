@@ -48,20 +48,33 @@ def _ms_between(start: str, end: str) -> Optional[int]:
 def _is_steering_user(entry: Dict[str, Any]) -> bool:
     if entry.get("type") != "user":
         return False
+    content = entry.get("content") or ""
+    if isinstance(content, str) and content.lstrip().startswith("<context_window>"):
+        return False
     if entry.get("steer") is True:
         return True
-    content = entry.get("content") or ""
     return isinstance(content, str) and (
-        RELAYED_MARKER in content
+        content.startswith(RELAYED_MARKER)
         or content.startswith(STEER_GUIDANCE_PREFIX)
     )
 
 
 def _clean_steering_text(raw: str) -> str:
-    text = raw.replace(RELAYED_MARKER, "").strip()
+    text = raw.lstrip()
+    if text.startswith(RELAYED_MARKER):
+        text = text[len(RELAYED_MARKER):].lstrip()
     if text.startswith(STEER_GUIDANCE_PREFIX):
-        text = text[len(STEER_GUIDANCE_PREFIX):].lstrip("\n").strip()
-    return text
+        text = text[len(STEER_GUIDANCE_PREFIX):].lstrip("\n")
+    return text.strip()
+
+
+def _is_window_preamble_only(entry: Dict[str, Any]) -> bool:
+    if entry.get("type") != "user" or entry.get("automated") or entry.get("steer") is True:
+        return False
+    content = entry.get("content") or ""
+    if not isinstance(content, str) or not content.lstrip().startswith("<context_window>"):
+        return False
+    return not _strip_window_preamble(content.lstrip()).strip()
 
 
 def _empty_tokens() -> Dict[str, int]:
@@ -222,7 +235,8 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
         if is_steering:
             continuation = True
 
-        starts_user_turn = entry_type == "user" and not is_steering
+        is_preamble_only = _is_window_preamble_only(entry)
+        starts_user_turn = entry_type == "user" and not is_steering and not is_preamble_only
         if starts_user_turn:
             if pending_from is None:
                 pending_from = mi
@@ -504,15 +518,18 @@ def search_calls(entries: Iterable[Dict[str, Any]], query: str, limit: int = 500
 
 
 def _strip_window_preamble(content: str) -> str:
-    if not content.startswith("<context_window>"):
+    stripped = content.lstrip()
+    if not stripped.startswith("<context_window>"):
         return content
-    for marker in ("\n</dropped_span>\n", "\n</session_notes>\n", "\n</context_window>\n"):
-        at = content.find(marker)
+    for marker in ("\n</dropped_span>", "\n</session_notes>", "\n</context_window>", "</context_window>"):
+        at = stripped.rfind(marker)
         if at >= 0:
-            rest = content[at + len(marker):].lstrip("\n")
+            rest = stripped[at + len(marker):].lstrip()
             if rest.startswith("New context window started"):
                 nl = rest.find("\n")
-                rest = rest[nl + 1:].lstrip("\n") if nl >= 0 else ""
+                rest = rest[nl + 1:].lstrip() if nl >= 0 else ""
+                if rest.startswith("</context_window>"):
+                    rest = rest[len("</context_window>"):].lstrip()
             return rest
     return ""
 
@@ -602,6 +619,7 @@ def chat_turn_page(
         if chat_entries[i].get("type") == "user"
         and not chat_entries[i].get("automated")
         and not _is_steering_user(chat_entries[i])
+        and not _is_window_preamble_only(chat_entries[i])
     ]
     if len(turn_starts) <= turns:
         start = 0
@@ -609,7 +627,10 @@ def chat_turn_page(
     else:
         start = turn_starts[-turns]
         older_turns = len(turn_starts) - turns
-        if start > 0 and chat_entries[start - 1].get("type") == "compact_boundary":
+        while start > 0 and (
+            chat_entries[start - 1].get("type") == "compact_boundary"
+            or _is_window_preamble_only(chat_entries[start - 1])
+        ):
             start -= 1
     return {
         "offset": start,
@@ -866,11 +887,17 @@ def _entry_row(
             # A background command's / subagent's report or a peer message:
             # it opens a round, but nobody typed it.
             row["kind"] = "automated"
+        elif _is_window_preamble_only(entry):
+            row["kind"] = "compact_boundary"
         else:
             is_steer = _is_steering_user(entry)
             row["kind"] = "steering" if is_steer else "user"
             if is_steer and isinstance(content, str):
                 content = _clean_steering_text(content)
+            elif isinstance(content, str) and content.lstrip().startswith("<context_window>"):
+                stripped = _strip_window_preamble(content).strip()
+                if stripped:
+                    content = stripped
         row["summary"] = _clip(content, SUMMARY_CHAR_CAP)
         row["detail"] = _detail(content)
         return row

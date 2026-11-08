@@ -74,6 +74,15 @@ class ProfileFields:
     compact_token_limit: int = 0
     temperature: float = 0.0
     top_p: float = 0.0
+    enable_cache_control: Optional[bool] = None
+    cache_control_messages: Optional[int] = None
+    cache_control_session_header: str = ""
+    cache_keepalive: Optional[int] = None
+    max_api_retry: Optional[int] = None
+    extra_body: Optional[dict] = None
+    extra_headers: Optional[dict] = None
+    default_headers: Optional[dict] = None
+    fallback_models: Optional[list] = None
     auxiliary_model: Optional[dict] = None
     env: Optional[dict] = None
 
@@ -82,6 +91,8 @@ PROFILE_FIELD_NAMES = tuple(f.name for f in fields(ProfileFields))
 TUNING_FIELD_NAMES = (
     "wire_api", "reasoning", "reasoning_effort", "max_tokens",
     "temperature", "top_p", "context_window", "compact_token_limit",
+    "enable_cache_control", "cache_control_messages",
+    "cache_control_session_header", "cache_keepalive", "max_api_retry",
 )
 
 
@@ -418,6 +429,12 @@ def _profile_summary(name: str, profile: dict) -> dict:
         if value:
             label = "effort" if field_name == "reasoning_effort" else field_name
             tuning.append(f"{label}={value}")
+    if isinstance(profile.get("default_headers"), dict) and profile["default_headers"]:
+        tuning.append("default_headers")
+    if isinstance(profile.get("extra_headers"), dict) and profile["extra_headers"]:
+        tuning.append("extra_headers")
+    if isinstance(profile.get("fallback_models"), list) and profile["fallback_models"]:
+        tuning.append(f"fallbacks={len(profile['fallback_models'])}")
     return {
         "name": name,
         "model_provider": profile.get("model_provider", ""),
@@ -496,6 +513,10 @@ async def get_profile_detail(name: str):
         "api_key_masked": _mask_key(p.get("api_key", "")),
         "has_api_key": bool(p.get("api_key")),
         **{field_name: p.get(field_name) for field_name in TUNING_FIELD_NAMES},
+        "extra_body": p.get("extra_body"),
+        "extra_headers": p.get("extra_headers"),
+        "default_headers": p.get("default_headers"),
+        "fallback_models": _mask_config_tree(p.get("fallback_models")) if p.get("fallback_models") else None,
         "auxiliary_model": (
             {
                 "model_provider": aux.get("model_provider", ""),
@@ -504,6 +525,8 @@ async def get_profile_detail(name: str):
                 "wire_api": aux.get("wire_api", ""),
                 "reasoning": aux.get("reasoning", ""),
                 "reasoning_effort": aux.get("reasoning_effort", ""),
+                "extra_body": aux.get("extra_body"),
+                "extra_headers": aux.get("extra_headers"),
                 "has_api_key": bool(aux.get("api_key")),
                 "api_key_masked": _mask_key(aux.get("api_key", "")),
             }
@@ -552,7 +575,18 @@ async def update_profile(
     # Merge: keep existing fields the user left empty (esp. api_key).
     merged = dict(existing)
     for k, v in _profile_body_to_dict(body).items():
+        if k == "auxiliary_model" and isinstance(v, dict) and isinstance(existing.get("auxiliary_model"), dict):
+            merged_aux = dict(existing["auxiliary_model"])
+            for ak, av in v.items():
+                if av is not None and av != "":
+                    merged_aux[ak] = av
+            merged[k] = merged_aux
+            continue
         merged[k] = v
+    if body.enable_cache_control is False:
+        merged.pop("enable_cache_control", None)
+    if body.cache_control_session_header == "":
+        merged.pop("cache_control_session_header", None)
     upsert_profile(name, merged, make_active=False)
     return {"status": "ok", "name": name}
 

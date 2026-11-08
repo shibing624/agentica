@@ -18,7 +18,7 @@ import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { classifyPreviewTarget, joinWorkspacePath } from "../lib/file-path";
 import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
-import { IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
+import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
 
 const EXTERNAL_REF_RE = /^[a-z][a-z0-9+.-]*:/i;
@@ -92,11 +92,12 @@ const MD_REMARK = [...GFM_PLUGINS, remarkMath];
 const MD_REHYPE = [rehypeRaw, rehypeKatex];
 
 export function FilePreview({
-  root, path: filePath, onOpenFile,
+  root, path: filePath, onOpenFile, onRevealInTree,
 }: {
   root: string;
   path: string;
   onOpenFile: (path: string) => void;
+  onRevealInTree?: (path: string) => void;
 }) {
   const S = useStrings();
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -161,6 +162,7 @@ export function FilePreview({
   return (
     <div className="ws-browser">
       <div className="ws-preview-bar">
+        <FileTypeIcon path={preview.name} size={15} className="ws-preview-type-icon" />
         <span className="ws-preview-name" title={preview.path}>{preview.path}</span>
         <PreviewActions
           modes={modes}
@@ -171,6 +173,7 @@ export function FilePreview({
           absPath={absPath}
           downloadHref={dl}
           downloadName={preview.name}
+          onBackToTree={onRevealInTree ? () => onRevealInTree(filePath) : undefined}
         />
       </div>
       <div className={"ws-preview-body" + (view === "code" ? " source" : "")}>
@@ -199,14 +202,21 @@ export function FilePreview({
 
 /** The panel's fixed first tab: the directory list. A file opens in a tab of its own. */
 export function WorkspaceBrowser({
-  root, active, onOpenFile,
+  root, active, dirPath, onDirPathChange, onOpenFile,
 }: {
   root: string;
   active?: boolean;
+  dirPath?: string;
+  onDirPathChange?: (dirPath: string) => void;
   onOpenFile: (path: string) => void;
 }) {
   const S = useStrings();
-  const [path, setPath] = useState("");
+  const [localPath, setLocalPath] = useState(dirPath ?? "");
+  const path = dirPath !== undefined ? dirPath : localPath;
+  const setPath = useCallback((next: string) => {
+    setLocalPath(next);
+    onDirPathChange?.(next);
+  }, [onDirPathChange]);
   const [data, setData] = useState<{ base: string; entries: Entry[] } | null>(null);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -274,7 +284,10 @@ export function WorkspaceBrowser({
   return (
     <div className="ws-browser">
       <div className="ws-toolbar">
-        <button type="button" className="ws-crumb" onClick={() => setPath("")}>{S.files.root}</button>
+        <button type="button" className="ws-crumb ws-crumb-root" onClick={() => setPath("")}>
+          <FileTypeIcon kind="folder" size={14} />
+          <span>{S.files.root}</span>
+        </button>
         {crumbs.map((seg, i) => (
           <span key={i} className="ws-crumb-wrap">
             <span className="ws-sep">/</span>
@@ -305,7 +318,9 @@ export function WorkspaceBrowser({
                   <li key={entry.name}>
                     <button type="button" className="ws-row" disabled={busy} title={entry.name}
                             onClick={() => { if (entry.kind === "dir") setPath(target); else onOpenFile(target); }}>
-                      <span className="ws-row-icon">{entry.kind === "dir" ? <IconFolder /> : <span className="ws-file-dot" />}</span>
+                      <span className="ws-row-icon">
+                        {entry.kind === "dir" ? <FileTypeIcon kind="folder" size={16} /> : <FileTypeIcon path={entry.name} size={16} />}
+                      </span>
                       <span className="ws-row-name">{entry.name}</span>
                       <span className="ws-row-meta">{entry.kind === "file" ? fmtFileSize(entry.sizeBytes) : ""}</span>
                       <span className="ws-row-meta">{entry.mtime ? formatDateTime(entry.mtime) : ""}</span>

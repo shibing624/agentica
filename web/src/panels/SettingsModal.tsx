@@ -64,6 +64,8 @@ async function editProfile(name: string) {
       compact_token_limit: d.compact_token_limit ? String(d.compact_token_limit) : "",
       temperature: d.temperature != null ? String(d.temperature) : "",
       top_p: d.top_p != null ? String(d.top_p) : "",
+      enable_cache_control: Boolean(d.enable_cache_control),
+      cache_control_session_header: d.cache_control_session_header || "",
       aux_provider: aux.model_provider || "",
       aux_model: aux.model_name || "",
       aux_base_url: aux.base_url || "",
@@ -102,6 +104,8 @@ async function saveProfile() {
     compact_token_limit: parseInt(f.compact_token_limit, 10) || undefined,
     temperature: f.temperature.trim() ? parseFloat(f.temperature) : undefined,
     top_p: f.top_p.trim() ? parseFloat(f.top_p) : undefined,
+    enable_cache_control: f.enable_cache_control,
+    cache_control_session_header: f.cache_control_session_header.trim(),
     auxiliary_model: aux,
     env: Object.keys(env).length ? env : undefined,
   };
@@ -657,6 +661,13 @@ function ProfileForm() {
       <div className="pf-row">
         <input className="pf-input" type="number" step="0.1" placeholder="temperature" value={f.temperature} onChange={(e) => patch({ temperature: e.target.value })} />
         <input className="pf-input" type="number" step="0.05" placeholder="top_p" value={f.top_p} onChange={(e) => patch({ top_p: e.target.value })} />
+      </div>
+      <div className="pf-row">
+        <label className="pf-check">
+          <input type="checkbox" checked={f.enable_cache_control} onChange={(e) => patch({ enable_cache_control: e.target.checked })} />
+          <span>{S.settings.enableCacheControl}</span>
+        </label>
+        <input className="pf-input" placeholder={S.settings.cacheSessionHeader} value={f.cache_control_session_header} onChange={(e) => patch({ cache_control_session_header: e.target.value })} />
       </div>
       <div className="pf-section">{S.settings.auxModel}</div>
       <input className="pf-input" placeholder="aux provider" value={f.aux_provider} onChange={(e) => patch({ aux_provider: e.target.value })} />

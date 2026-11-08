@@ -1,7 +1,9 @@
 import * as api from "./api";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
-import { eventsToChatMsgs, isSteerUserEvent, mergeClientSteers, rememberSteersFromMsgs } from "./lib/hydrateMessages";
+import {
+  eventsToChatMsgs, isPureWindowPreamble, isSteerUserEvent, mergeClientSteers, rememberSteersFromMsgs,
+} from "./lib/hydrateMessages";
 import { emptyChatIds } from "./lib/sessionDrafts";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import {
@@ -201,7 +203,7 @@ function sliceTurnPageClient(all: any[], turns: number, before?: number): api.Tr
   const turnStarts: number[] = [];
   for (let i = 0; i < end; i++) {
     const e = chatEntries[i];
-    if (e.type === "user" && !e.automated && !isSteerUserEvent(e)) {
+    if (e.type === "user" && !e.automated && !isSteerUserEvent(e) && !isPureWindowPreamble(e)) {
       turnStarts.push(i);
     }
   }
@@ -210,7 +212,12 @@ function sliceTurnPageClient(all: any[], turns: number, before?: number): api.Tr
   if (turnStarts.length > turns) {
     start = turnStarts[turnStarts.length - turns];
     olderTurns = turnStarts.length - turns;
-    if (start > 0 && chatEntries[start - 1]?.type === "compact_boundary") start -= 1;
+    while (
+      start > 0
+      && (chatEntries[start - 1]?.type === "compact_boundary" || isPureWindowPreamble(chatEntries[start - 1]))
+    ) {
+      start -= 1;
+    }
   }
   return {
     session_id: "",

@@ -185,22 +185,37 @@ _EDITABLE_PROFILE_FIELDS = {
     "model_provider", "model_name", "base_url", "api_key",
     "wire_api", "max_tokens", "temperature", "reasoning", "reasoning_effort", "top_p", "context_window",
     "compact_token_limit",
-    "extra_body", "extra_headers",
+    "enable_cache_control", "cache_control_messages", "cache_control_session_header", "cache_keepalive",
+    "max_api_retry",
+    "extra_body", "extra_headers", "default_headers",
 }
 
 # Values that are numeric on the model side; coerced from string input.
-_NUMERIC_FIELDS = {"max_tokens", "context_window", "compact_token_limit"}
+_NUMERIC_FIELDS = {
+    "max_tokens", "context_window", "compact_token_limit",
+    "cache_control_messages", "cache_keepalive", "max_api_retry",
+}
 _FLOAT_FIELDS = {"temperature", "top_p"}
+_BOOL_FIELDS = {"enable_cache_control"}
 # Raw passthrough dicts for endpoints whose tuning knobs don't map to a
 # standard OpenAI param (e.g. Hunyuan's taiji gateway wants reasoning_effort
 # inside extra_body.chat_template_kwargs). Set via a JSON object string.
-_JSON_FIELDS = {"extra_body", "extra_headers"}
+_JSON_FIELDS = {"extra_body", "extra_headers", "default_headers"}
 
 
 def _coerce_profile_value(field: str, value: str) -> Any:
     """Coerce a string CLI/tool input into the right type for a profile field."""
+    if isinstance(value, bool):
+        return value
     if value == "" or value.lower() in ("none", "null"):
         return None
+    if field in _BOOL_FIELDS:
+        low = value.strip().lower()
+        if low in ("true", "1", "yes", "on"):
+            return True
+        if low in ("false", "0", "no", "off"):
+            return False
+        raise ValueError(f"{field} must be true or false, got {value!r}.")
     if field in _NUMERIC_FIELDS:
         return int(value)
     if field in _FLOAT_FIELDS:

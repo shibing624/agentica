@@ -40,6 +40,7 @@ import {
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
+import { applyChatSearchHighlights } from "../lib/sessionRows";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import type { FileEdits } from "../lib/fileDiff";
@@ -828,18 +829,50 @@ function SearchJump({ sessionId, msgCount, areaRef, onLeaveFollow }: {
 }) {
   const s = useAppState();
   const target = s.chatSearchTarget?.sessionId === sessionId ? s.chatSearchTarget : null;
+  const activeQuery = s.sidebarSearch.trim() || (target?.query.trim() ?? "");
+  const lastScrolledSeq = useRef<number>(0);
+
   useEffect(() => {
-    if (!target || !areaRef.current) return;
-    onLeaveFollow();
-    const sel = target.role
-      ? `.m[data-turn="${target.turn}"][data-role="${target.role}"]`
-      : `.m[data-turn="${target.turn}"]`;
-    const el = areaRef.current.querySelector<HTMLElement>(sel)
-      || areaRef.current.querySelector<HTMLElement>(`.m[data-turn="${target.turn}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [target?.seq, target?.turn, target?.role, msgCount]);
+    const root = areaRef.current;
+    if (!root) return;
+    let applying = false;
+    const run = (shouldScroll: boolean) => {
+      if (applying) return;
+      applying = true;
+      try {
+        const mark = applyChatSearchHighlights(root, activeQuery, target?.turn, target?.role);
+        if (shouldScroll && target) {
+          onLeaveFollow();
+          const sel = target.role
+            ? `.m[data-turn="${target.turn}"][data-role="${target.role}"]`
+            : `.m[data-turn="${target.turn}"]`;
+          const msgEl = root.querySelector<HTMLElement>(sel)
+            || root.querySelector<HTMLElement>(`.m[data-turn="${target.turn}"]`);
+          const scrollTarget = (mark && msgEl?.contains(mark)) ? mark : msgEl;
+          if (scrollTarget) {
+            scrollTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (mark && msgEl?.contains(mark)) lastScrolledSeq.current = target.seq;
+          }
+        }
+      } finally {
+        applying = false;
+      }
+    };
+    const needScroll = Boolean(target && target.seq !== lastScrolledSeq.current);
+    run(needScroll);
+    if (!activeQuery) return;
+    const obs = new MutationObserver((mutations) => {
+      if (applying) return;
+      const relevant = mutations.some((m) =>
+        [...m.addedNodes, ...m.removedNodes].some(
+          (n) => !(n instanceof HTMLElement && n.hasAttribute("data-chat-search-mark")),
+        ),
+      );
+      if (relevant) run(Boolean(target && target.seq !== lastScrolledSeq.current));
+    });
+    obs.observe(root, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, [activeQuery, target?.seq, target?.turn, target?.role, msgCount, sessionId]);
   return null;
 }
 

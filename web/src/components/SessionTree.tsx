@@ -49,6 +49,7 @@ export function SessionTree() {
     if (!q) {
       setContentHits({});
       setSearchingContent(false);
+      if (getState().chatSearchTarget) setState({ chatSearchTarget: null });
       return;
     }
     setSearchingContent(true);

@@ -11,7 +11,7 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const {
-  collapseSessionRows, searchEventsConversation, searchMsgsConversation, sessionMatches,
+  collapseSessionRows, findQueryRanges, searchEventsConversation, searchMsgsConversation, sessionMatches,
 } = await vite.ssrLoadModule("/src/lib/sessionRows.ts");
 after(() => vite.close());
 
@@ -82,4 +82,12 @@ test("conversation search matches both user queries and assistant answers with t
   assert.equal(msgHits.length, 1);
   assert.equal(msgHits[0].turn, 2);
   assert.equal(msgHits[0].role, "assistant");
+});
+
+test("findQueryRanges locates all case-insensitive keyword occurrences for in-page highlighting", () => {
+  assert.deepEqual(
+    findQueryRanges("Use GPU4 on gpu4.local with SGLang", "gpu4"),
+    [[4, 8], [12, 16]],
+  );
+  assert.deepEqual(findQueryRanges("nothing here", ""), []);
 });

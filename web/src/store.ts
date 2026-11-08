@@ -122,6 +122,8 @@ export type ProfileForm = {
   compact_token_limit: string;
   temperature: string;
   top_p: string;
+  enable_cache_control: boolean;
+  cache_control_session_header: string;
   aux_provider: string;
   aux_model: string;
   aux_base_url: string;
@@ -282,6 +284,7 @@ export function emptyProfileForm(): ProfileForm {
   return {
     name: "", editing: false, model_provider: "", model_name: "", base_url: "", api_key: "",
     reasoning_effort: "", max_tokens: "", context_window: "", compact_token_limit: "", temperature: "", top_p: "",
+    enable_cache_control: false, cache_control_session_header: "",
     aux_provider: "", aux_model: "", aux_base_url: "", aux_api_key: "",
     envRows: [],
   };

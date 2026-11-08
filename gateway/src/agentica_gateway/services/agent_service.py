@@ -30,7 +30,7 @@ from agentica.compression.new_window import notes_path_for
 from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
-from agentica.agent.config import ToolConfig, WorkspaceMemoryConfig
+from agentica.agent.config import ExperienceConfig, ToolConfig, WorkspaceMemoryConfig
 from agentica.cron.scheduler import scheduled_job_guidance
 from agentica.run.display import RunDisplayEventKind, classify_run_response
 from agentica.run.response import AgentCancelledError
@@ -92,6 +92,13 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
     aux_provider = aux.get("model_provider") or provider
     same = aux_provider == provider
     aux_wire_api = aux.get("wire_api") or ""
+    raw_fallbacks = profile.get("fallback_models")
+    fallbacks: List[Dict[str, Any]] = []
+    if isinstance(raw_fallbacks, list):
+        for fb in raw_fallbacks:
+            if isinstance(fb, dict) and fb.get("model_provider") and fb.get("model_name"):
+                fallbacks.append(dict(fb))
+    max_api_retry = profile.get("max_api_retry")
     return {
         "profile": name,
         "model_provider": provider,
@@ -105,6 +112,15 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
         "temperature": float(profile.get("temperature") or 0),
         "top_p": float(profile.get("top_p") or 0),
         "context_window": int(profile.get("context_window") or 0),
+        "enable_cache_control": profile.get("enable_cache_control"),
+        "cache_control_messages": profile.get("cache_control_messages"),
+        "cache_control_session_header": profile.get("cache_control_session_header") or "",
+        "cache_keepalive": profile.get("cache_keepalive"),
+        "extra_body": dict(profile["extra_body"]) if isinstance(profile.get("extra_body"), dict) else None,
+        "extra_headers": dict(profile["extra_headers"]) if isinstance(profile.get("extra_headers"), dict) else None,
+        "default_headers": dict(profile["default_headers"]) if isinstance(profile.get("default_headers"), dict) else None,
+        "fallback_models": fallbacks,
+        "max_api_retry": int(max_api_retry) if max_api_retry is not None else 2,
         "auxiliary_model_provider": aux_provider if aux.get("model_name") else "",
         "auxiliary_model_name": aux.get("model_name") or "",
         "auxiliary_base_url": aux.get("base_url") or (base_url if same else ""),
@@ -112,6 +128,8 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
         "auxiliary_wire_api": aux_wire_api,
         "auxiliary_reasoning": aux.get("reasoning") or "",
         "auxiliary_reasoning_effort": "" if aux_wire_api == "responses" else (aux.get("reasoning_effort") or ""),
+        "auxiliary_extra_body": dict(aux["extra_body"]) if isinstance(aux.get("extra_body"), dict) else None,
+        "auxiliary_extra_headers": dict(aux["extra_headers"]) if isinstance(aux.get("extra_headers"), dict) else None,
     }
 
 # Timeout in seconds for building a new Agent instance (guards against SDK hangs)
@@ -490,8 +508,23 @@ class AgentService:
     def _default_model_config(self) -> Dict[str, Any]:
         """The gateway default (``settings``): config.yaml's active profile, or
         the env vars when no profile is configured."""
+        active_name = get_active_profile_name()
+        active = get_profile(active_name) if active_name else {}
+        aux = active.get("auxiliary_model") if isinstance(active.get("auxiliary_model"), dict) else {}
+        matches_active = (
+            bool(active)
+            and active.get("model_provider") == self.model_provider
+            and active.get("model_name") == self.model_name
+        )
+        raw_fallbacks = active.get("fallback_models") if matches_active else None
+        fallbacks: List[Dict[str, Any]] = []
+        if isinstance(raw_fallbacks, list):
+            for fb in raw_fallbacks:
+                if isinstance(fb, dict) and fb.get("model_provider") and fb.get("model_name"):
+                    fallbacks.append(dict(fb))
+        max_api_retry = active.get("max_api_retry") if matches_active else None
         return {
-            "profile": get_active_profile_name(),
+            "profile": active_name,
             "model_provider": self.model_provider,
             "model_name": self.model_name,
             "base_url": self.model_base_url,
@@ -503,6 +536,15 @@ class AgentService:
             "temperature": self.temperature,
             "top_p": self.top_p,
             "context_window": self.context_window,
+            "enable_cache_control": active.get("enable_cache_control") if matches_active else None,
+            "cache_control_messages": active.get("cache_control_messages") if matches_active else None,
+            "cache_control_session_header": (active.get("cache_control_session_header") or "") if matches_active else "",
+            "cache_keepalive": active.get("cache_keepalive") if matches_active else None,
+            "extra_body": (dict(active["extra_body"]) if isinstance(active.get("extra_body"), dict) else None) if matches_active else None,
+            "extra_headers": (dict(active["extra_headers"]) if isinstance(active.get("extra_headers"), dict) else None) if matches_active else None,
+            "default_headers": (dict(active["default_headers"]) if isinstance(active.get("default_headers"), dict) else None) if matches_active else None,
+            "fallback_models": fallbacks,
+            "max_api_retry": int(max_api_retry) if max_api_retry is not None else 2,
             "auxiliary_model_provider": self.auxiliary_model_provider,
             "auxiliary_model_name": self.auxiliary_model_name,
             "auxiliary_base_url": self.auxiliary_base_url,
@@ -510,6 +552,8 @@ class AgentService:
             "auxiliary_wire_api": self.auxiliary_wire_api,
             "auxiliary_reasoning": self.auxiliary_reasoning,
             "auxiliary_reasoning_effort": self.auxiliary_reasoning_effort,
+            "auxiliary_extra_body": (dict(aux["extra_body"]) if isinstance(aux.get("extra_body"), dict) else None) if matches_active else None,
+            "auxiliary_extra_headers": (dict(aux["extra_headers"]) if isinstance(aux.get("extra_headers"), dict) else None) if matches_active else None,
         }
 
     def _session_profile(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
@@ -584,10 +628,43 @@ class AgentService:
             base_url=cfg[f"{prefix}_base_url"] or None,
             api_key=cfg[f"{prefix}_api_key"] or None,
             wire_api=cfg[f"{prefix}_wire_api"],
+            max_tokens=cfg.get("max_tokens") or 0,
+            temperature=cfg.get("temperature") or 0.0,
+            top_p=cfg.get("top_p") or 0.0,
+            context_window=cfg.get("context_window") or 0,
             reasoning=cfg[f"{prefix}_reasoning"],
             reasoning_effort=cfg[f"{prefix}_reasoning_effort"],
             thinking=settings.model_thinking,
+            enable_cache_control=cfg.get("enable_cache_control"),
+            cache_control_messages=cfg.get("cache_control_messages"),
+            cache_control_session_header=cfg.get("cache_control_session_header") or None,
+            cache_keepalive=cfg.get("cache_keepalive"),
+            extra_body=cfg.get(f"{prefix}_extra_body"),
+            extra_headers=cfg.get(f"{prefix}_extra_headers"),
         )
+
+    @staticmethod
+    def _fallback_models(cfg: Dict[str, Any]) -> List[Any]:
+        """Build fallback Model instances from resolved profile fallback entries."""
+        models: List[Any] = []
+        for fb in cfg.get("fallback_models") or []:
+            if not isinstance(fb, dict) or not fb.get("model_provider") or not fb.get("model_name"):
+                continue
+            models.append(
+                create_model(
+                    fb["model_provider"],
+                    fb["model_name"],
+                    base_url=fb.get("base_url") or None,
+                    api_key=fb.get("api_key") or None,
+                    wire_api=fb.get("wire_api") or "",
+                    reasoning=fb.get("reasoning") or "",
+                    reasoning_effort="" if fb.get("wire_api") == "responses" else (fb.get("reasoning_effort") or ""),
+                    extra_body=fb.get("extra_body") if isinstance(fb.get("extra_body"), dict) else None,
+                    extra_headers=fb.get("extra_headers") if isinstance(fb.get("extra_headers"), dict) else None,
+                    default_headers=fb.get("default_headers") if isinstance(fb.get("default_headers"), dict) else None,
+                )
+            )
+        return models
 
     def _build_sibling_model(self, prefix: str) -> Optional[Any]:
         return self._sibling_model(self._default_model_config(), prefix)
@@ -678,9 +755,12 @@ class AgentService:
         project's, else the gateway default.
         """
         if session_id.startswith(CRON_SESSION_PREFIX) and self.auxiliary_model_name:
+            cfg = self._default_model_config()
             model = self._build_sibling_model("auxiliary")
             auxiliary_model = None
             task_model = None
+            fallback_models: List[Any] = []
+            max_api_retry = 1
         else:
             cfg = self.session_model_config(session_id, owner)
             model = create_model(
@@ -696,11 +776,20 @@ class AgentService:
                 reasoning=cfg["reasoning"],
                 reasoning_effort=cfg["reasoning_effort"],
                 thinking="enabled",
+                enable_cache_control=cfg.get("enable_cache_control"),
+                cache_control_messages=cfg.get("cache_control_messages"),
+                cache_control_session_header=cfg.get("cache_control_session_header") or None,
+                cache_keepalive=cfg.get("cache_keepalive"),
+                extra_body=cfg.get("extra_body"),
+                extra_headers=cfg.get("extra_headers"),
+                default_headers=cfg.get("default_headers"),
             )
             auxiliary_model = self._sibling_model(cfg, "auxiliary")
             # The auxiliary model also serves as the task subagent model (CLI
             # unified them — no separate task_model config anymore).
             task_model = auxiliary_model
+            fallback_models = self._fallback_models(cfg)
+            max_api_retry = int(cfg.get("max_api_retry") or 2)
         # Per-session project dir (set via routes/chat.py::_apply_session_work_dir
         # from the frontend's session.dir) takes precedence — falls back to the
         # global settings.base_dir only when the session has none set.
@@ -755,6 +844,9 @@ class AgentService:
             model=model,
             auxiliary_model=auxiliary_model,
             task_model=task_model,
+            session_profile=cfg.get("profile") or None,
+            fallback_models=fallback_models,
+            max_api_retry=max_api_retry,
             description=(
                 "You are DeepAgent, an AI coding agent served over the Agentica "
                 "gateway (web UI and chat channels). You help users with software "
@@ -791,6 +883,13 @@ class AgentService:
                 recall_sessions=True,
                 track_intents=True,
                 max_memory_entries=5,
+            ),
+            experience_config=ExperienceConfig(
+                capture_tool_errors=True,
+                capture_user_corrections=True,
+                capture_success_patterns=False,
+                judge_every_n_turns=10,
+                judge_min_seconds_between=60,
             ),
         )
 

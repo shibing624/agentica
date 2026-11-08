@@ -161,3 +161,88 @@ export function collapseSessionRows<T extends SessionRow>(
   });
   return { visible, hiddenCount: rows.length - visible.length };
 }
+
+/** Case-insensitive `[start, end)` match ranges of `query` inside `text`. */
+export function findQueryRanges(text: string, query: string): Array<[number, number]> {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle || !text) return [];
+  const hay = text.toLocaleLowerCase();
+  const ranges: Array<[number, number]> = [];
+  let pos = 0;
+  while (pos <= hay.length - needle.length) {
+    const at = hay.indexOf(needle, pos);
+    if (at < 0) break;
+    ranges.push([at, at + needle.length]);
+    pos = at + needle.length;
+  }
+  return ranges;
+}
+
+/**
+ * Highlight `query` matches inside settled `.m .bub` message bodies in `root`.
+ * Restores any previous `<mark data-chat-search-mark>` wrappers first so React's
+ * text nodes stay normalized, then wraps matching spans and returns the first
+ * active mark in the focused turn/role (or the first mark overall).
+ */
+export function applyChatSearchHighlights(
+  root: HTMLElement,
+  query: string,
+  focusTurn?: number,
+  focusRole?: "user" | "assistant",
+): HTMLElement | null {
+  const doc = root.ownerDocument;
+  const existing = root.querySelectorAll("mark[data-chat-search-mark]");
+  const touchedParents = new Set<Node>();
+  for (const mark of existing) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    parent.replaceChild(doc.createTextNode(mark.textContent || ""), mark);
+    touchedParents.add(parent);
+  }
+  for (const parent of touchedParents) parent.normalize();
+
+  const needle = query.trim();
+  if (!needle) return null;
+
+  let firstActiveMark: HTMLElement | null = null;
+  let firstAnyMark: HTMLElement | null = null;
+  const msgEls = root.querySelectorAll<HTMLElement>(".m:not(.streaming)[data-turn]");
+  for (const msgEl of msgEls) {
+    const turn = Number(msgEl.dataset.turn || 0);
+    const role = msgEl.dataset.role as "user" | "assistant" | undefined;
+    const isFocusMsg = focusTurn != null && turn === focusTurn && (!focusRole || role === focusRole);
+    const bubbles = msgEl.querySelectorAll<HTMLElement>(".bub");
+    for (const bub of bubbles) {
+      const walker = doc.createTreeWalker(bub, NodeFilter.SHOW_TEXT);
+      const textNodes: Text[] = [];
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const el = n.parentElement;
+        if (!el || el.closest(".code-frame-bar, .line-num, button, script, style")) continue;
+        if (n.nodeValue && findQueryRanges(n.nodeValue, needle).length > 0) {
+          textNodes.push(n as Text);
+        }
+      }
+      for (const textNode of textNodes) {
+        const raw = textNode.nodeValue || "";
+        const ranges = findQueryRanges(raw, needle);
+        if (!ranges.length || !textNode.parentNode) continue;
+        const frag = doc.createDocumentFragment();
+        let cursor = 0;
+        for (const [start, end] of ranges) {
+          if (start > cursor) frag.appendChild(doc.createTextNode(raw.slice(cursor, start)));
+          const mark = doc.createElement("mark");
+          mark.className = isFocusMsg ? "chat-hit-mark active" : "chat-hit-mark";
+          mark.setAttribute("data-chat-search-mark", "1");
+          mark.textContent = raw.slice(start, end);
+          frag.appendChild(mark);
+          if (!firstAnyMark) firstAnyMark = mark;
+          if (isFocusMsg && !firstActiveMark) firstActiveMark = mark;
+          cursor = end;
+        }
+        if (cursor < raw.length) frag.appendChild(doc.createTextNode(raw.slice(cursor)));
+        textNode.parentNode.replaceChild(frag, textNode);
+      }
+    }
+  }
+  return firstActiveMark || firstAnyMark;
+}

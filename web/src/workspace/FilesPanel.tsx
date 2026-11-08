@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
 import {
-  IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFolder, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal,
+  FileTypeIcon, IconClose, IconCompass, IconDiff, IconExitFullscreen, IconFullscreen, IconPlus, IconSidebarRight, IconTerminal,
 } from "../icons";
 import { useStrings } from "../i18n";
 import { baseName, type PanelTab } from "../lib/panelTabs";
@@ -18,11 +18,11 @@ const FilePreview = lazy(() => import("./WorkspaceBrowser").then((m) => ({ defau
 
 function TabLabel({ tab }: { tab: PanelTab }) {
   const S = useStrings();
-  if (tab.kind === "files") return <>{S.files.title}</>;
+  if (tab.kind === "files") return <><FileTypeIcon kind="folder" size={15} />{S.files.title}</>;
   if (tab.kind === "guide") return <><IconCompass />{S.files.guideTitle}</>;
-  if (tab.kind === "file") return <>{baseName(tab.path)}</>;
+  if (tab.kind === "file") return <><FileTypeIcon path={tab.path} size={15} />{baseName(tab.path)}</>;
   if (tab.kind === "review") return <><IconDiff />{S.files.reviewTitle(tab.turn)}</>;
-  if (tab.kind === "skill") return <>/{tab.name}</>;
+  if (tab.kind === "skill") return <><FileTypeIcon kind="markdown" size={15} />/{tab.name}</>;
   return <><IconTerminal />{S.terminal.title(tab.ordinal)}</>;
 }
 
@@ -87,7 +87,7 @@ function useTabStrip(active: string, tabs: PanelTab[]) {
 function GuidePage({ panel }: { panel: FilesPanelState }) {
   const S = useStrings();
   const cards = [
-    { id: "files", icon: <IconFolder />, title: S.files.guideFiles, desc: S.files.guideFilesDesc, pick: panel.pickFiles },
+    { id: "files", icon: <FileTypeIcon kind="folder" size={22} />, title: S.files.guideFiles, desc: S.files.guideFilesDesc, pick: panel.pickFiles },
     ...(panel.canTerminal
       ? [{ id: "terminal", icon: <IconTerminal />, title: S.terminal.newTerminal, desc: S.terminal.guideDesc, pick: panel.pickTerminal }]
       : []),
@@ -178,19 +178,31 @@ export function FilesPanel({
               refetch a file or drop a terminal's screen. */}
           {panel.tabs.map((tab) => {
             const active = tab.key === panel.active;
+            const scopedKey = `${panel.sessionKey}:${tab.key}`;
             return (
-              <div key={tab.key} className="files-panel-body" hidden={!active} role="tabpanel">
+              <div key={scopedKey} className="files-panel-body" hidden={!active} role="tabpanel">
                 {tab.kind === "files" && (root
                   ? (
                     <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
-                      <WorkspaceBrowser root={root} active={panel.open && active} onOpenFile={panel.browsePath} />
+                      <WorkspaceBrowser
+                        root={root}
+                        active={panel.open && active}
+                        dirPath={panel.dirPath}
+                        onDirPathChange={panel.setDirPath}
+                        onOpenFile={panel.browsePath}
+                      />
                     </Suspense>
                   )
                   : <p className="ws-muted">{S.files.noRoot}</p>)}
                 {tab.kind === "guide" && <GuidePage panel={panel} />}
                 {tab.kind === "file" && (root || tab.path.startsWith("/")) && (
                   <Suspense fallback={<p className="ws-muted">{S.common.loading}</p>}>
-                    <FilePreview root={root} path={tab.path} onOpenFile={panel.browsePath} />
+                    <FilePreview
+                      root={root}
+                      path={tab.path}
+                      onOpenFile={panel.browsePath}
+                      onRevealInTree={panel.revealInFilesTab}
+                    />
                   </Suspense>
                 )}
                 {tab.kind === "review" && root && (

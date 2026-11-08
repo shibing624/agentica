@@ -1,5 +1,3 @@
-import { languageFromFilename } from "./highlight";
-
 /**
  * Whether inline code in a message looks like a file path (penguin's heuristic).
  * No whitespace, no URL scheme, ends with a known extension.
@@ -19,6 +17,12 @@ export const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "
 export const HTML_EXTS = new Set(["html", "htm"]);
 export const MD_EXTS = new Set(["md", "markdown", "mdx"]);
 const CODE_TEXT_EXTS = new Set([
+  "py", "pyi", "pyw", "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts",
+  "json", "jsonc", "jsonl", "ndjson", "ipynb", "yaml", "yml", "toml",
+  "sh", "bash", "zsh", "fish", "css", "scss", "sass", "less", "xml", "vue",
+  "rs", "go", "java", "kt", "kts", "swift", "c", "h", "cpp", "hpp", "cc", "cxx", "hh", "hxx",
+  "cs", "rb", "php", "sql", "ini", "conf", "cfg", "properties", "env", "gitignore",
+  "diff", "patch", "tex", "latex", "sty", "cls", "bib", "mk", "makefile", "dockerfile",
   "csv", "tsv", "log", "rst", "adoc", "lua", "r", "jl", "dart", "scala",
   "clj", "cljs", "edn", "erl", "hrl", "ex", "exs", "hs", "fs", "fsi", "fsx",
   "pl", "pm", "v", "sv", "svh", "graphql", "gql", "proto", "tf", "tfvars",
@@ -69,7 +73,14 @@ export function classifyPreviewTarget(name: string): PreviewTargetKind {
   if (HTML_EXTS.has(ext)) return "html";
   if (MD_EXTS.has(ext)) return "md";
   if (UNVIEWABLE_BINARY_EXTS.has(ext)) return "unsupported";
-  if (languageFromFilename(base) || CODE_TEXT_EXTS.has(ext)) return "code";
+  if (
+    lower === "dockerfile" || lower.startsWith("dockerfile.") ||
+    lower === "makefile" || lower === "gnumakefile" || lower === "cmakelists.txt" ||
+    (dot === 0 && CODE_TEXT_EXTS.has(lower.slice(1))) ||
+    CODE_TEXT_EXTS.has(ext)
+  ) {
+    return "code";
+  }
   return "text";
 }
 

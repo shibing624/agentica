@@ -48,8 +48,10 @@ Actions:
                                    explicitly — see below). Editable keys: model_provider, model_name, base_url, api_key,
                                    wire_api, max_tokens, temperature, reasoning,
                                    reasoning_effort, top_p, context_window, compact_token_limit,
-                                   extra_body, extra_headers (value must be a JSON object string
-                                   for these two, e.g. '{{"chat_template_kwargs": {{"reasoning_effort": "high"}}}}').
+                                   enable_cache_control, cache_control_messages,
+                                   cache_control_session_header, cache_keepalive, max_api_retry,
+                                   extra_body, extra_headers, default_headers (value must be a JSON object string
+                                   for these three, e.g. '{{"chat_template_kwargs": {{"reasoning_effort": "high"}}}}').
 - action='set_env'              -> set a .env variable. Requires key + value.
                                    Pass value='-' to delete the variable.
 - action='check_upgrade'        -> report current vs latest PyPI version (no install).

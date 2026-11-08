@@ -29,6 +29,18 @@ PROFILES = {
             "auxiliary_model": {"model_name": "deepseek-lite"},
         },
         "proj": {"model_provider": "openai", "model_name": "gpt-4o-mini"},
+        "cached_proxy": {
+            "model_provider": "openai",
+            "model_name": "claude-opus-5-5",
+            "base_url": "http://proxy.example/v1",
+            "api_key": "k-proxy",
+            "enable_cache_control": True,
+            "cache_control_messages": 2,
+            "cache_control_session_header": "X-Session-Id",
+            "cache_keepalive": 180,
+            "extra_body": {"thinking_enabled": True},
+            "extra_headers": {"X-Route": "sticky"},
+        },
     },
 }
 
@@ -120,6 +132,39 @@ def test_a_pick_rebuilds_only_that_chats_agent(svc, monkeypatch):
     assert built == ["a", "b", "a"]
 
 
+def test_gateway_forwards_profile_cache_control_and_headers_to_model(svc):
+    from agentica_gateway.services.model_factory import create_model
+
+    asyncio.run(svc.set_session_profile("a", "cached_proxy"))
+    cfg = svc.session_model_config("a")
+    assert cfg["enable_cache_control"] is True
+    assert cfg["cache_control_messages"] == 2
+    assert cfg["cache_control_session_header"] == "X-Session-Id"
+    assert cfg["cache_keepalive"] == 180
+    assert cfg["extra_body"] == {"thinking_enabled": True}
+    assert cfg["extra_headers"] == {"X-Route": "sticky"}
+
+    model = create_model(
+        cfg["model_provider"],
+        cfg["model_name"],
+        base_url=cfg["base_url"],
+        api_key=cfg["api_key"],
+        thinking="enabled",
+        enable_cache_control=cfg["enable_cache_control"],
+        cache_control_messages=cfg["cache_control_messages"],
+        cache_control_session_header=cfg["cache_control_session_header"],
+        cache_keepalive=cfg["cache_keepalive"],
+        extra_body=cfg["extra_body"],
+        extra_headers=cfg["extra_headers"],
+    )
+    assert model.enable_cache_control is True
+    assert model.cache_control_messages == 2
+    assert model.cache_control_session_header == "X-Session-Id"
+    assert model.cache_keepalive == 180
+    assert model.extra_headers == {"X-Route": "sticky"}
+    assert model.extra_body["thinking_enabled"] is True
+
+
 def test_build_agent_creates_the_main_model_from_the_session_profile(svc, monkeypatch):
     calls = _built(svc, monkeypatch)
     asyncio.run(svc.set_session_profile("a", "fast"))
@@ -178,3 +223,80 @@ def test_session_model_routes(svc, monkeypatch):
     assert client.get("/api/sessions/b/model").json()["source"] == "default"
 
     assert client.post("/api/sessions/a/model", json={"profile": "nope"}).status_code == 404
+
+
+def test_sdk_gateway_and_self_manage_inherit_cli_cache_and_resilience_fields(svc, tmp_path, monkeypatch):
+    from agentica.cli import self_manage as sm
+    from agentica.config.profiles import get_profile, upsert_profile
+    from agentica.model.defaults import create_profile_model_bundle
+
+    upsert_profile(
+        "full_cached",
+        {
+            "model_provider": "openai",
+            "model_name": "claude-opus-5-5",
+            "base_url": "https://proxy.example.com/v1",
+            "api_key": "k-cached",
+            "enable_cache_control": True,
+            "cache_control_messages": 3,
+            "cache_control_session_header": "X-Session-Id",
+            "cache_keepalive": 120,
+            "max_api_retry": 3,
+            "compact_token_limit": 400000,
+            "auxiliary_model": {
+                "model_provider": "openai",
+                "model_name": "fast-aux",
+                "base_url": "https://proxy.example.com/v1",
+                "api_key": "k-aux",
+                "extra_body": {"thinking_enabled": False},
+            },
+            "fallback_models": [
+                {
+                    "model_provider": "openai",
+                    "model_name": "gpt-fallback",
+                    "base_url": "https://proxy.example.com/v1",
+                    "api_key": "k-fb",
+                    "wire_api": "responses",
+                    "reasoning": "high",
+                    "extra_headers": {"X-Fallback": "1"},
+                }
+            ],
+        },
+        make_active=False,
+    )
+
+    # 1) self_manage supports tuning prompt-cache fields on stored profiles
+    sm.set_profile_field("cache_control_messages", "2", profile_name="full_cached", allow_active=False)
+    assert get_profile("full_cached")["cache_control_messages"] == 2
+
+    # 2) SDK profile bundle inherits full prompt-caching, auxiliary extra_body, and fallback chain
+    bundle = create_profile_model_bundle("full_cached")
+    assert bundle is not None
+    assert bundle["model"].enable_cache_control is True
+    assert bundle["model"].cache_control_messages == 2
+    assert bundle["model"].cache_control_session_header == "X-Session-Id"
+    assert bundle["auxiliary_model"].extra_body == {"thinking_enabled": False}
+    assert len(bundle["fallback_models"]) == 1
+    assert bundle["fallback_models"][0].id == "gpt-fallback"
+    assert bundle["max_api_retry"] == 3
+    assert bundle["compact_token_limit"] == 400000
+
+    # 3) Gateway _build_agent wires auxiliary extra_body, fallback_models, max_api_retry, and ExperienceConfig
+    asyncio.run(svc.set_session_profile("a", "full_cached"))
+    captured = {}
+    monkeypatch.setattr(
+        svc_mod,
+        "DeepAgent",
+        lambda **kw: captured.update(kw) or SimpleNamespace(**{**kw, "tools": [], "_session_log": None}),
+    )
+    svc._workspace = None
+    svc._build_agent("a")
+    assert captured["model"].enable_cache_control is True
+    assert captured["model"].cache_control_session_header == "X-Session-Id"
+    assert captured["auxiliary_model"].extra_body == {"thinking_enabled": False}
+    assert len(captured["fallback_models"]) == 1
+    assert captured["fallback_models"][0].id == "gpt-fallback"
+    assert captured["max_api_retry"] == 3
+    assert captured["session_profile"] == "full_cached"
+    assert captured["experience_config"].capture_success_patterns is False
+    assert captured["experience_config"].judge_every_n_turns == 10

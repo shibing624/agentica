@@ -108,3 +108,42 @@ test("a round's review tab is reused: picking another of its files swaps it in p
   assert.equal(st.active, "review:3");
   assert.equal(st.tabs[1].path, "b.py");
 });
+
+test("each session persists its own opened file tabs, active tab, open state, and directory path", () => {
+  const store = new Map();
+  const storage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => { store.set(k, v); },
+  };
+  let s1 = T.initialTabs();
+  s1 = T.openTab(s1, file("src/main.tex"));
+  s1 = T.openTab(s1, file("README.md"));
+  s1 = T.openTab(s1, T.GUIDE_TAB);
+  s1 = T.openTab(s1, term("t1", 1));
+  s1 = T.activateTab(s1, "file:src/main.tex");
+
+  let s2 = T.initialTabs();
+  s2 = T.openTab(s2, file("notes.txt"));
+
+  T.writeSessionPanel("sess_1", { ...s1, open: true, dirPath: "src/sub" }, storage);
+  T.writeSessionPanel("sess_2", { ...s2, open: false, dirPath: "docs" }, storage);
+
+  const r1 = T.readSessionPanel("sess_1", storage);
+  const r2 = T.readSessionPanel("sess_2", storage);
+  assert.equal(r1.open, true);
+  assert.equal(r1.dirPath, "src/sub");
+  assert.equal(r1.active, "file:src/main.tex");
+  // Transient guide and terminal tabs are stripped on save; file history is kept per session.
+  assert.deepEqual(r1.tabs.map((t) => t.key), ["files", "file:src/main.tex", "file:README.md"]);
+
+  assert.equal(r2.open, false);
+  assert.equal(r2.dirPath, "docs");
+  assert.equal(r2.active, "file:notes.txt");
+  assert.deepEqual(r2.tabs.map((t) => t.key), ["files", "file:notes.txt"]);
+
+  // When a terminal tab was active before reload, preferredActive remembers it until adoptTerminals runs.
+  T.writeSessionPanel("sess_term", { ...s1, active: "term:t1", open: true, dirPath: "" }, storage);
+  const rt = T.readSessionPanel("sess_term", storage);
+  assert.equal(rt.active, "files");
+  assert.equal(rt.preferredActive, "term:t1");
+});

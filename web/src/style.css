@@ -166,19 +166,19 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .search-clear{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:none;background:none;color:var(--fg3);cursor:pointer;border-radius:4px}
 .search-clear:hover{color:var(--fg);background:var(--hover)}
 .search-clear svg{width:10px;height:10px}
-.s-list{flex:1;overflow-y:auto;padding:0 8px 10px;scrollbar-width:thin;scrollbar-color:transparent transparent}
+.s-list{flex:1;overflow-x:hidden;overflow-y:auto;scrollbar-gutter:stable;padding:0 8px 10px;scrollbar-width:thin;scrollbar-color:transparent transparent}
 .s-list:hover{scrollbar-color:var(--scroll) transparent}
 .s-list::-webkit-scrollbar{width:4px}
 .s-list::-webkit-scrollbar-thumb{background:transparent;border-radius:2px}
 .s-list:hover::-webkit-scrollbar-thumb{background:var(--scroll)}
 .s-list:hover::-webkit-scrollbar-thumb:hover{background:var(--scroll-hover)}
 .p-group{margin-bottom:2px}
-.p-head{display:flex;align-items:center;gap:2px;height:34px;padding:0 4px 0 2px;border-radius:10px;color:var(--fg);position:relative}
+.p-head{display:flex;align-items:center;gap:2px;height:34px;min-height:34px;padding:0 4px 0 2px;box-sizing:border-box;border-radius:10px;color:var(--fg);position:relative}
 .p-head:hover,.p-head.menu-open{background:var(--hover)}
 .p-caret{width:20px;height:24px;border:none;background:transparent;color:var(--fg3);cursor:pointer;border-radius:5px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .p-caret svg{width:11px;height:11px;transition:transform var(--t)}
 .p-caret.open svg{transform:rotate(90deg)}
-.p-main{min-width:0;flex:1;cursor:pointer;border:none;background:transparent;color:inherit;text-align:left;padding:4px 0}
+.p-main{min-width:0;flex:1;height:100%;display:flex;align-items:center;cursor:pointer;border:none;background:transparent;color:inherit;text-align:left;padding:0}
 .p-title{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:550;color:var(--fg)}
 .p-icon{flex-shrink:0;width:15px;height:15px;display:flex;align-items:center;justify-content:center;color:var(--fg2)}
 .p-icon svg{width:15px;height:15px}
@@ -199,12 +199,12 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .p-menu-item.danger:hover{background:rgba(220,38,38,.08)}
 .p-rename-input{flex:1;min-width:0;height:26px;margin:0 4px 0 2px;border:1px solid var(--fg3);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;padding:2px 7px;outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
 .s-hint{padding:3px 8px 6px 28px;font-size:12px;color:var(--fg3)}
-.s-item{padding:6px 8px 6px 28px;border-radius:10px;cursor:pointer;transition:background var(--t),box-shadow var(--t),opacity var(--t);margin-bottom:1px;position:relative;display:flex;align-items:center;gap:8px}
+.s-item{height:34px;min-height:34px;padding:0 8px 0 28px;box-sizing:border-box;border-radius:10px;cursor:pointer;transition:background var(--t),box-shadow var(--t),opacity var(--t);margin-bottom:1px;position:relative;display:flex;align-items:center;gap:8px;outline:none}
 .s-item:hover{background:var(--hover)}
 .s-item.active{background:var(--hover2)}
 .s-item.archived{opacity:.62}
 .s-main{min-width:0;flex:1}
-.s-item .ti{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:450}
+.s-item .ti{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;line-height:20px;font-weight:450}
 /* In-flow so the title ellipsizes before the idle label. No fill — a
    background here becomes a dark chip on the selected row. Hover hides
    the label (keeps its width) and shows the action buttons over it.
@@ -233,7 +233,6 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .session-scope-row button:hover,.session-error button:hover,.s-more:hover{background:var(--bg3);color:var(--fg)}
 .session-scope-row button:disabled{opacity:.45;cursor:default}
 .session-error{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:4px 6px 8px;padding:7px 8px;border:1px solid rgba(220,38,38,.2);border-radius:8px;color:#dc2626;font-size:11px}
-.s-item{min-height:34px;outline:none}
 .s-item:focus-visible{box-shadow:inset 0 0 0 2px var(--fg3)}
 .s-source{flex-shrink:0;color:var(--fg3);font:9px/1 var(--mono);letter-spacing:.04em}
 .s-more{display:block;width:calc(100% - 28px);margin:2px 0 6px 28px;text-align:left;color:var(--fg3)}
@@ -1383,6 +1382,17 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .pt-tab.active{color:var(--fg);background:var(--bg3)}
 .pt-title{display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;line-height:1.4;flex:1 1 auto}
 .pt-title svg{width:13px;height:13px;flex-shrink:0}
+.pt-title svg.ft-icon{width:15px;height:15px}
+/* dsh FileTypeIcon palette (`@deepseek-ai/dsh-client-ui-primitives/FileTypeIcon.module.css`) */
+.ft-icon{flex-shrink:0;display:inline-block;vertical-align:middle}
+.ft-folder{color:#f59e0b}
+.ft-code,.ft-html,.ft-markdown{color:#4d6bfe}
+.ft-word{color:#3b82f6}
+.ft-excel{color:#22c55e}
+.ft-pdf{color:#dc2626}
+.ft-ppt{color:#f59e0b}
+.ft-image,.ft-video{color:#8b76f6}
+.ft-other{color:#94a3b8}
 /* The close button sits over the title's last 18px: reserve them, so a short
    title is never faded, and fade only what overflows into them. */
 .pt-tab:not(.fixed) .pt-title{padding-right:18px}
@@ -1417,6 +1427,8 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-browser{flex:1;min-height:0;display:flex;flex-direction:column}
 .ws-toolbar{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;height:38px;padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
 .ws-crumb{border:none;background:transparent;color:var(--fg2);font-size:12px;padding:2px 6px;border-radius:6px;cursor:pointer;max-width:8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-crumb-root{display:inline-flex;align-items:center;gap:4px}
+.ws-crumb-root svg.ft-icon{width:14px;height:14px}
 .ws-crumb:hover{background:var(--bg3);color:var(--fg)}
 .ws-crumb-wrap{display:inline-flex;align-items:center;gap:2px;min-width:0}
 .ws-sep{color:var(--fg3);font-size:11px}
@@ -1460,6 +1472,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .ws-muted,.ws-err{padding:14px 12px;font-size:13px;color:var(--fg3)}
 .ws-err{color:#c62828}
 .ws-preview-bar{display:flex;align-items:center;gap:6px;height:38px;padding:0 8px 0 12px;border-bottom:var(--hair) solid var(--border);flex-shrink:0;min-width:0;box-sizing:border-box}
+.ws-preview-type-icon{width:15px;height:15px;flex-shrink:0}
 .ws-back{border:none;background:transparent;color:var(--fg2);font-size:12px;cursor:pointer;padding:4px 6px;border-radius:6px;flex-shrink:0;white-space:nowrap}
 .ws-back:hover{background:var(--bg3);color:var(--fg)}
 .ws-preview-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:12px;font-weight:600}
@@ -1882,5 +1895,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .crash h2{margin:0;font-size:16px;font-weight:600}
 .crash p{margin:0;font-size:13px;color:var(--fg2)}
 .crash code{display:block;max-width:100%;padding:8px 10px;border-radius:8px;background:var(--bg2);color:var(--fg3);font:11.5px/1.5 var(--mono);word-break:break-word}
-.m.search-focus .bubble,.m.search-focus .ai-content{outline:2px solid var(--accent,#2563eb);outline-offset:4px;border-radius:10px;transition:outline-color .25s ease}
+.m.search-focus .bub{outline:1.5px solid rgba(234,179,8,.55);outline-offset:3px;border-radius:10px;transition:outline-color .25s ease}
+mark.chat-hit-mark{background:rgba(234,179,8,.28);color:inherit;border-radius:3px;padding:0 2px}
+mark.chat-hit-mark.active{background:rgba(245,158,11,.52);color:inherit;box-shadow:0 0 0 1px rgba(245,158,11,.65);border-radius:3px;padding:0 2px}
 .git-dialog{min-width:0}

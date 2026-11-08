@@ -857,3 +857,39 @@ def test_search_conversation_matches_queries_and_answers_with_turn_numbers():
     assert len(q_hits) == 1 and q_hits[0]["turn"] == 1 and q_hits[0]["role"] == "user"
     a_hits = search_conversation(entries, "28.8.205.124")
     assert len(a_hits) == 1 and a_hits[0]["turn"] == 2 and a_hits[0]["role"] == "assistant"
+
+
+def test_window_preamble_with_relayed_mention_is_not_classified_as_steering_or_round_title():
+    from agentica.memory.trace import chat_turn_page
+
+    preamble = (
+        "<context_window>\nCurrent context window 1.\n</context_window>\n\n"
+        '<session_notes path="/tmp/s.notes.md">\n- Handled `__RELAYED__` and `steer: true`\n</session_notes>\n\n'
+        "<dropped_span>\n- assistant: fixed\n</dropped_span>\n\n"
+        "New context window started. Continue from session notes and search_session."
+    )
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="first turn"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="text"),
+        _e("2026-01-01T00:00:03.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:03.100Z", type="assistant", content="first reply"),
+        _e("2026-01-01T00:00:04.000Z", type="compact_boundary", trigger="manual", summary=""),
+        _e("2026-01-01T00:00:04.100Z", type="user", content=preamble),
+        _e("2026-01-01T00:00:05.000Z", type="user", content="second turn after compact"),
+        _e("2026-01-01T00:00:06.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:07.000Z", type="event", name="text"),
+        _e("2026-01-01T00:00:08.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:08.100Z", type="assistant", content="second reply"),
+    ]
+    out = analyze_entries(entries)
+    non_compact = [r for r in out["rounds"] if not r.get("compaction")]
+    assert [r["title"] for r in non_compact] == ["first turn", "second turn after compact"]
+    for r in out["rounds"]:
+        assert not any(c["kind"] == "steering" for c in r["calls"])
+
+    page = chat_turn_page(entries, turns=1)
+    assert page["older_turns"] == 1
+    assert page["events"][0]["type"] == "compact_boundary"
+    assert page["events"][1]["content"] == preamble
+    assert page["events"][2]["content"] == "second turn after compact"

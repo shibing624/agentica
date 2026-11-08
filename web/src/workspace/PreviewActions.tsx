@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
-import { IconChevronDown, IconCopy, IconDownload, IconEditorApp, IconExternal, IconFinder, IconRefresh, IconTick } from "../icons";
+import { IconChevronDown, IconCopy, IconDownload, IconEditorApp, IconExternal, IconFinder, IconFolder, IconRefresh, IconTick } from "../icons";
 import { showToast } from "../store";
 
 export type ViewMode = "markdown" | "web" | "code" | "text";
@@ -28,7 +28,7 @@ function useDismiss(open: boolean, close: () => void) {
 }
 
 export function PreviewActions({
-  modes, mode, onMode, onRefresh, refreshing, absPath, downloadHref, downloadName,
+  modes, mode, onMode, onRefresh, refreshing, absPath, downloadHref, downloadName, onBackToTree,
 }: {
   modes: ViewMode[];
   mode: ViewMode;
@@ -39,6 +39,8 @@ export function PreviewActions({
   absPath?: string;
   downloadHref?: string;
   downloadName?: string;
+  /** Switch to the `files` tab at this file's directory (dsh's navigator toggle). */
+  onBackToTree?: () => void;
 }) {
   const S = useStrings();
   const P = S.files;
@@ -120,6 +122,12 @@ export function PreviewActions({
             </div>
           )}
         </div>
+      )}
+      {onBackToTree && (
+        <button type="button" className="pv-icon" title={P.backToFiles} aria-label={P.backToFiles}
+                onClick={onBackToTree}>
+          <IconFolder />
+        </button>
       )}
     </div>
   );
