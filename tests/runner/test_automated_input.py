@@ -146,3 +146,48 @@ def test_parked_automated_steer_keeps_its_provenance():
         SteerItem("typed"),
         SteerItem("job report", True, (), True),
     ]
+
+
+def test_mid_run_steer_persists_to_session_log_and_roundtrips_cleanly(tmp_path):
+    import json
+    from agentica.memory.session_log import SessionLog, assert_trajectory_equivalent
+
+    slog = SessionLog("s_steer_test", base_dir=str(tmp_path))
+    slog.begin_turn()
+    agent = Agent()
+    agent._session_log = slog
+
+    user_msg = Message(role="user", content="initial task")
+    Runner._persist_turn_user_message(agent, "initial task", [user_msg])
+
+    asst_tc = Message(
+        role="assistant",
+        content="",
+        tool_calls=[{"id": "tc1", "type": "function", "function": {"name": "grep", "arguments": "{}"}}],
+    )
+    tool_msg = Message(role="tool", tool_call_id="tc1", tool_name="grep", content="hit 1")
+    turn_msgs = [asst_tc, tool_msg]
+
+    # Simulate in-turn flush of round 1 before steer arrives
+    Runner._flush_turn_tool_rounds(agent, "initial task", [user_msg], turn_msgs)
+
+    # User steers before round 2
+    agent._begin_steer_window()
+    agent.steer("优化展示效果")
+    messages_for_model = [user_msg, *turn_msgs]
+    Runner._inject_steering(messages_for_model, agent)
+    agent._end_steer_window()
+
+    final_asst = Message(role="assistant", content="done")
+    slog.append("assistant", "done")
+
+    rows = [json.loads(line) for line in slog.path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    steer_rows = [r for r in rows if r.get("type") == "user" and r.get("steer") is True]
+    assert len(steer_rows) == 1
+    assert steer_rows[0]["content"] == "优化展示效果"
+
+    # Resume folds the steer back into the preceding tool result and keeps trajectory equivalence
+    loaded = slog.load()
+    tool_loaded = next(m for m in loaded if m["role"] == "tool")
+    assert "[User guidance received while you were working]\n优化展示效果" in tool_loaded["content"]
+    assert assert_trajectory_equivalent(loaded, [*messages_for_model, final_asst]) is None

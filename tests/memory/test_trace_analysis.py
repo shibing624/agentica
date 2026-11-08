@@ -272,6 +272,27 @@ def test_steering_user_does_not_start_a_new_task():
     assert len([t for t in out["tasks"] if not t.get("compaction")]) == 1
 
 
+def test_explicit_steer_flag_stays_in_round_and_renders_clean_steering_row():
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="do"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="tool_call", tool_call_id="c1", tool_name="read_file"),
+        _e("2026-01-01T00:00:03.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:03.500Z", type="tool", tool_call_id="c1", tool_name="read_file", content="ok"),
+        _e("2026-01-01T00:00:04.000Z", type="user", steer=True, content="优化展示效果"),
+        _e("2026-01-01T00:00:05.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:06.000Z", type="event", name="text"),
+        _e("2026-01-01T00:00:07.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:07.100Z", type="assistant", content="done"),
+    ]
+    out = analyze_entries(entries)
+    rounds = [r for r in out["rounds"] if not r.get("compaction")]
+    assert len(rounds) == 1
+    steer_calls = [c for c in rounds[0]["calls"] if c["kind"] == "steering"]
+    assert len(steer_calls) == 1
+    assert steer_calls[0]["summary"] == "优化展示效果"
+
+
 def test_old_session_without_events_has_no_timeline():
     entries = [
         _e("2026-01-01T00:00:00.000Z", type="user", content="hi"),

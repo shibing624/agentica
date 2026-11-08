@@ -405,6 +405,19 @@ class PersistMixin:
                         msg,
                         fallback_is_error=bool(_block.get("is_error", False)),
                     )
+            for _steer in msg._steered_items:
+                _steer_id = _steer.get("id")
+                if _steer_id and _steer_id in session_log._turn_written_tool_call_ids:
+                    continue
+                if _steer_id:
+                    session_log._turn_written_tool_call_ids.add(_steer_id)
+                _steer_meta: Dict[str, Any] = {
+                    "steer": True,
+                    "timestamp": _steer.get("timestamp") or iso_timestamp(),
+                }
+                if _steer.get("automated"):
+                    _steer_meta["automated"] = True
+                session_log.append("user", _steer.get("text", ""), **_steer_meta)
 
     @staticmethod
     def _strip_tool_artifacts(msgs: List[Message], *, drop_system: bool = False) -> List[Message]:

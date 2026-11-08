@@ -1,3 +1,5 @@
+import { cleanSteerContent, isSteerUserEvent } from "./hydrateMessages";
+
 export const COLLAPSED_SESSION_LIMIT = 5;
 
 export type SessionContentHit = {
@@ -56,7 +58,7 @@ function stripWindowPreamble(content: string): string {
 
 /** Search user queries and assistant answers inside a hydrated `msgs` list. */
 export function searchMsgsConversation(
-  msgs: Array<{ role: string; content: string; steer?: boolean; automated?: boolean; compact?: unknown }>,
+  msgs: Array<{ role: string; content: string; steer?: boolean; automated?: boolean; compact?: unknown; parts?: Array<{ kind: string; text?: string }> }>,
   olderTurns: number,
   query: string,
   maxHits = 12,
@@ -79,6 +81,15 @@ export function searchMsgsConversation(
         hits.push({ turn: Math.max(1, turn), role: "user", snippet: snippetAround(clean, needle) });
       }
     } else if (m.role === "assistant") {
+      for (const p of m.parts || []) {
+        if (p.kind !== "steer" || !p.text) continue;
+        const cleanSteer = p.text.trim();
+        const uKey = `${Math.max(1, turn)}:user`;
+        if (cleanSteer && !seen.has(uKey) && cleanSteer.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle)) {
+          seen.add(uKey);
+          hits.push({ turn: Math.max(1, turn), role: "user", snippet: snippetAround(cleanSteer, needle) });
+        }
+      }
       const clean = (m.content || "").trim();
       if (!clean) continue;
       const key = `${Math.max(1, turn)}:assistant`;
@@ -106,14 +117,15 @@ export function searchEventsConversation(events: unknown[], query: string, maxHi
     if (type === "user") {
       if (e.automated === true) continue;
       const content = String(e.content || "");
-      const isSteer = content.includes("__RELAYED__");
+      const isSteer = isSteerUserEvent(e, content);
       let clean = "";
       if (!isSteer) {
         clean = stripWindowPreamble(content).trim();
         if (!clean) continue;
         turn += 1;
       } else {
-        clean = content.replace(/__RELAYED__/g, "").trim();
+        clean = cleanSteerContent(content);
+        if (!clean) continue;
       }
       const key = `${Math.max(1, turn)}:user`;
       if (!seen.has(key) && clean.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle)) {

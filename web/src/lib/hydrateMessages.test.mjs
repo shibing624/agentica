@@ -267,3 +267,60 @@ test("prepending turn-aligned pages matches hydrating the full transcript at onc
     whole.map((m) => [m.role, m.content, m.uuid, m.compact]),
   );
 });
+
+test("mid-turn user steer rows and folded tool steers hydrate as steer parts inside the assistant turn", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "fix the bug", timestamp: "2026-11-08T04:16:00.000Z" },
+    {
+      type: "assistant",
+      content: "",
+      timestamp: "2026-11-08T04:16:05.000Z",
+      tool_calls: [{ id: "tc1", type: "function", function: { name: "grep", arguments: '{"pattern":"steer"}' } }],
+    },
+    {
+      type: "tool",
+      tool_call_id: "tc1",
+      tool_name: "grep",
+      content: "web/src/api.ts:280",
+      timestamp: "2026-11-08T04:16:06.000Z",
+    },
+    {
+      type: "user",
+      steer: true,
+      content: "优化展示效果",
+      timestamp: "2026-11-08T04:16:07.000Z",
+    },
+    {
+      type: "assistant",
+      content: "",
+      timestamp: "2026-11-08T04:16:10.000Z",
+      tool_calls: [{ id: "tc2", type: "function", function: { name: "read_file", arguments: '{"file_path":"a.ts"}' } }],
+    },
+    {
+      type: "tool",
+      tool_call_id: "tc2",
+      tool_name: "read_file",
+      content: "line 1\n\n[User guidance received while you were working]\n前面输入的效果是ok的。",
+      timestamp: "2026-11-08T04:16:12.000Z",
+    },
+    { type: "assistant", content: "all fixed", timestamp: "2026-11-08T04:16:15.000Z" },
+  ]);
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[0].role, "user");
+  assert.equal(msgs[0].content, "fix the bug");
+  assert.equal(msgs[1].role, "assistant");
+  assert.equal(msgs[1].content, "all fixed");
+  assert.deepEqual(
+    parts(msgs[1]).map((p) => [p.kind, p.kind === "tool" ? p.name : p.text]),
+    [
+      ["tool", "grep"],
+      ["steer", "优化展示效果"],
+      ["tool", "read_file"],
+      ["steer", "前面输入的效果是ok的。"],
+      ["text", "all fixed"],
+    ],
+  );
+  // Folded steer text is stripped from the tool result itself
+  const tc2 = parts(msgs[1]).find((p) => p.kind === "tool" && p.toolCallId === "tc2");
+  assert.equal(tc2.result, "line 1");
+});

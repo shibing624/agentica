@@ -8,10 +8,12 @@ from typing import (
     List,
     TYPE_CHECKING,
 )
+from uuid import uuid4
 
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
+from agentica.memory.session_log import iso_timestamp
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -45,8 +47,10 @@ class SteerMixin:
         drained = agent._drain_steer()
         if not drained:
             return
+        now_ts = iso_timestamp()
         parts = []
         images: list = []
+        steer_records = []
         for item in drained:
             if item.text and item.automated:
                 # Carries its own header saying who sent it; it is not the user.
@@ -57,6 +61,13 @@ class SteerMixin:
                 )
             elif item.images:
                 parts.append("[User attached image(s) while you were working]")
+            if item.text:
+                steer_records.append({
+                    "id": f"steer:{uuid4()}",
+                    "text": item.text,
+                    "automated": bool(item.automated),
+                    "timestamp": now_ts,
+                })
             images.extend(item.images)
         marker = "\n\n".join(parts)
         automated = all(item.automated for item in drained)
@@ -67,11 +78,15 @@ class SteerMixin:
             injected = Message(role="user", content=marker, images=list(images))
             injected._injected = True
             injected.automated = automated
+            injected._steered_items = steer_records
             messages.append(injected)
+            target = injected
             logger.debug("Injected steering guidance with %s image(s)", len(images))
         elif last is not None and last.role == "tool":
             existing = last.content.rstrip() if isinstance(last.content, str) else ""
             last.content = f"{existing}\n\n{marker}" if existing else marker
+            last._steered_items = [*last._steered_items, *steer_records]
+            target = last
             logger.debug("Folded steering guidance into the latest tool result")
         else:
             # Appended, so it lands *after* a round that already ran. Marked so
@@ -83,8 +98,36 @@ class SteerMixin:
             injected = Message(role="user", content=marker)
             injected._injected = True
             injected.automated = automated
+            injected._steered_items = steer_records
             messages.append(injected)
+            target = injected
             logger.debug("Injected steering guidance as a user message")
+
+        session_log = agent._session_log
+        if session_log is not None and session_log._turn_user_uuid is not None and steer_records:
+            can_flush_now = (
+                target.role == "tool"
+                and bool(target.tool_call_id)
+                and target.tool_call_id in session_log._turn_written_tool_call_ids
+            ) or (
+                target.role != "tool"
+                and not any(
+                    m.role == "tool"
+                    and m.tool_call_id
+                    and m.tool_call_id not in session_log._turn_written_tool_call_ids
+                    for m in messages
+                )
+            )
+            if can_flush_now:
+                for rec in steer_records:
+                    rec_id = rec["id"]
+                    if rec_id in session_log._turn_written_tool_call_ids:
+                        continue
+                    session_log._turn_written_tool_call_ids.add(rec_id)
+                    meta = {"steer": True, "timestamp": rec["timestamp"]}
+                    if rec["automated"]:
+                        meta["automated"] = True
+                    session_log.append("user", rec["text"], **meta)
 
     @staticmethod
     def _inject_peer_messages(messages: List[Message], agent: "Agent") -> None:

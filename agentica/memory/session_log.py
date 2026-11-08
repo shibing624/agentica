@@ -1154,6 +1154,25 @@ class SessionLog:
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
         for entry in entries[start_from:]:
             entry_type = entry.get("type", "")
+            if entry_type == "user" and entry.get("steer") is True:
+                raw_text = str(entry.get("content", "") or "").strip()
+                if not raw_text:
+                    continue
+                if entry.get("automated"):
+                    marker = raw_text
+                elif raw_text.startswith("[User guidance received while you were working]\n"):
+                    marker = raw_text
+                else:
+                    marker = f"[User guidance received while you were working]\n{raw_text}"
+                if messages and messages[-1].get("role") == "tool":
+                    existing = str(messages[-1].get("content") or "").rstrip()
+                    messages[-1]["content"] = f"{existing}\n\n{marker}" if existing else marker
+                else:
+                    steered_msg: Dict[str, Any] = {"role": "user", "content": marker}
+                    if entry.get("automated") is not None:
+                        steered_msg["automated"] = entry["automated"]
+                    messages.append(steered_msg)
+                continue
             if entry_type in ("user", "assistant", "system", "tool"):
                 msg = {
                     "role": entry_type,
@@ -1204,7 +1223,7 @@ class SessionLog:
     def first_user_message(self) -> str:
         """Text of the first ``user`` row, or ``""``."""
         for e in self._iter_entries():
-            if e.get("type") == "user" and isinstance(e.get("content"), str):
+            if e.get("type") == "user" and not e.get("steer") and isinstance(e.get("content"), str):
                 return e["content"].strip()
         return ""
 
@@ -1221,13 +1240,22 @@ class SessionLog:
         count = 0
         seen = False
         found = False
+        last_role: Optional[str] = None
         for entry in self._iter_entries():
             entry_type = entry.get("type", "")
             if entry_type == "compact_boundary":
                 count = 0
+                last_role = None
                 continue
             if seen and entry_type in ("user", "assistant", "system", "tool"):
-                count += 1
+                if entry_type == "user" and entry.get("steer") is True and last_role == "tool":
+                    pass
+                else:
+                    count += 1
+                    last_role = entry_type
+            elif entry_type in ("user", "assistant", "system", "tool"):
+                if not (entry_type == "user" and entry.get("steer") is True and last_role == "tool"):
+                    last_role = entry_type
             if entry.get("uuid") == since_uuid:
                 seen = True
                 found = True
@@ -1372,7 +1400,7 @@ class SessionLog:
             stats["entries"] += 1
             if entry_type == "compact_boundary":
                 stats["compactions"] += 1
-            elif entry_type == "user":
+            elif entry_type == "user" and not entry.get("steer"):
                 stats["turns"] += 1
             elif entry_type == "assistant":
                 stats["assistant_messages"] += 1
@@ -1616,6 +1644,8 @@ class SessionLog:
                     except Exception:
                         continue
                     if entry.get("type") != "user":
+                        continue
+                    if entry.get("steer") is True:
                         continue
                     # Another agent's message or a job report: not a request
                     # the person made, so not what the picker should show.
@@ -2110,7 +2140,7 @@ class SessionLog:
                 continue
             try:
                 entry = json.loads(line)
-                if entry.get("type") == "user":
+                if entry.get("type") == "user" and not entry.get("steer"):
                     content = entry.get("content", "")
                     user_msgs.append({
                         "uuid": entry.get("uuid", ""),

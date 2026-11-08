@@ -1080,6 +1080,13 @@ class LoopMixin:
                         # Safety: cancellation
                         agent._check_cancelled()
 
+                        # The question goes on disk before the request (or any
+                        # mid-run steering) it caused. Idempotent per turn; the
+                        # end-of-turn write backfills a turn that never reached
+                        # an LLM call.
+                        if messages is None:
+                            self._persist_turn_user_message(agent, message, user_messages)
+
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
                         self._inject_steering(messages_for_model, agent)
@@ -1108,13 +1115,6 @@ class LoopMixin:
                         )
                         content_at_call_start = model_response.content
                         reasoning_at_call_start = model_response.reasoning_content
-                        # The question goes on disk before the request it caused.
-                        # Idempotent per turn; the end-of-turn write backfills a
-                        # turn that never reached an LLM call. Writing it later
-                        # left every lifecycle event of the turn sitting ahead of
-                        # its own prompt, which reads back as the previous turn's.
-                        if messages is None:
-                            self._persist_turn_user_message(agent, message, user_messages)
                         self._trace_session_prelude(agent, messages_for_model)
                         # Same-turn re-issue for mid-stream drops. tool_history /
                         # prompt_too_long still restart the outer turn (they
@@ -1495,6 +1495,9 @@ class LoopMixin:
                                     agent.run_response.model = loop_state.last_used_model_id
                             break
 
+                        if messages is None:
+                            self._persist_turn_user_message(agent, message, user_messages)
+
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
                         self._inject_steering(messages_for_model, agent)
@@ -1514,8 +1517,6 @@ class LoopMixin:
                         )
 
                         call_start = len(messages_for_model)
-                        if messages is None:
-                            self._persist_turn_user_message(agent, message, user_messages)
                         self._trace_session_prelude(agent, messages_for_model)
                         self._trace_event(agent, "request_begin")
                         _trace_status = "failed"

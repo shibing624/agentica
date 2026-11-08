@@ -8,10 +8,10 @@ import {
   toolCategory, toolResultPreview, type Category,
 } from "../lib/workActivity";
 import {
-  IconAlert, IconBook, IconBrain, IconChevronDown, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
+  IconAlert, IconBook, IconBrain, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
   IconExternal, IconSpinner, IconTerminal, IconUser, IconUsers,
 } from "../icons";
-import { getState, type ApprovalDecision, type ApprovalRequest } from "../store";
+import { getState, showToast, type ApprovalDecision, type ApprovalRequest } from "../store";
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
 import { HIGHLIGHT_LIMIT } from "../lib/highlight";
@@ -566,20 +566,25 @@ export function ApprovalCard({
 export function SteerChip({ text, ts, onOpenSkill }: { text: string; ts?: number; onOpenSkill: (name: string) => void }) {
   const S = useStrings();
   const skill = parseSkillTurn(text, invocableSkills(getState().pluginsData.skills || []));
+  const copy = () => {
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));
+  };
   return (
     <div className="steer-chip">
-      <div className="steer-chip-box">
-        <div className="steer-chip-row">
-          <IconUser />
-          <p className="steer-chip-text">
-            <span className="steer-chip-label">{S.chat.userSteering}</span>
-            {skill ? <SkillTurn name={skill.name} args={skill.args} source={text} onOpen={onOpenSkill} /> : text}
-          </p>
-        </div>
+      <div className="steer-chip-bub">
+        {skill ? <SkillTurn name={skill.name} args={skill.args} source={text} onOpen={onOpenSkill} /> : text}
       </div>
-      {ts != null && (
-        <span className="steer-chip-meta">{S.chat.msgStamp(ts)}</span>
-      )}
+      <div className="steer-chip-footer">
+        {text && (
+          <button type="button" className="msg-act" title={S.common.copy} aria-label={S.common.copy} onClick={copy}>
+            <IconCopy />
+          </button>
+        )}
+        {ts != null && (
+          <span className="steer-chip-meta">{S.chat.msgStamp(ts)}</span>
+        )}
+      </div>
     </div>
   );
 }

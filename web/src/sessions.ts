@@ -1,7 +1,7 @@
 import * as api from "./api";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
-import { eventsToChatMsgs } from "./lib/hydrateMessages";
+import { eventsToChatMsgs, isSteerUserEvent, mergeClientSteers, rememberSteersFromMsgs } from "./lib/hydrateMessages";
 import { emptyChatIds } from "./lib/sessionDrafts";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import {
@@ -201,7 +201,7 @@ function sliceTurnPageClient(all: any[], turns: number, before?: number): api.Tr
   const turnStarts: number[] = [];
   for (let i = 0; i < end; i++) {
     const e = chatEntries[i];
-    if (e.type === "user" && !e.automated && !String(e.content || "").includes("__RELAYED__")) {
+    if (e.type === "user" && !e.automated && !isSteerUserEvent(e)) {
       turnStarts.push(i);
     }
   }
@@ -266,6 +266,9 @@ export async function hydrateSession(id: string, force = false) {
   if (sessionIsLive(id)) return;
   const existing = getState().sessions[id];
   if (!force && existing?.msgs.length && existing.hydratedSize === existing.sizeBytes) return;
+  if (existing?.msgs.length) {
+    rememberSteersFromMsgs(id, existing.msgs, existing.olderTurns || 0);
+  }
   const generation = (hydrateGenerations[id] || 0) + 1;
   hydrateGenerations[id] = generation;
   const turns = existing && existing.hasOlder === false
@@ -275,10 +278,14 @@ export async function hydrateSession(id: string, force = false) {
   if (!ok || !data?.events || hydrateGenerations[id] !== generation) return;
   const sess = getState().sessions[id];
   if (!sess || sessionIsLive(id)) return;
-  sess.msgs = eventsToChatMsgs(data.events);
+  if (sess.msgs.length) {
+    rememberSteersFromMsgs(id, sess.msgs, sess.olderTurns || 0);
+  }
+  const olderTurns = data.older_turns ?? 0;
+  sess.msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
   sess.hasOlder = !!data.has_more;
   sess.olderCursor = data.next_before ?? 0;
-  sess.olderTurns = data.older_turns ?? 0;
+  sess.olderTurns = olderTurns;
   sess.loadingOlder = false;
   sess.hydratedSize = sess.sizeBytes;
   sess.lastTs = lastQueryTs(sess);
@@ -312,10 +319,11 @@ export async function loadOlderMessages(id: string): Promise<boolean> {
     return false;
   }
   const older = eventsToChatMsgs(data.events);
-  cur.msgs = [...older, ...cur.msgs];
+  const olderTurns = data.older_turns ?? 0;
+  cur.msgs = mergeClientSteers(id, [...older, ...cur.msgs], olderTurns);
   cur.hasOlder = !!data.has_more;
   cur.olderCursor = data.next_before ?? 0;
-  cur.olderTurns = data.older_turns ?? 0;
+  cur.olderTurns = olderTurns;
   bump();
   if (older.length) {
     void syncSessionRoundStats(id);

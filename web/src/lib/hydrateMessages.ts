@@ -39,8 +39,17 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
     const type = String(e.type || "");
     const explicitTs = rawTsOf(e);
     if (type === "user") {
-      closeAssistant();
       let content = String(e.content || "");
+      if (e.automated !== true && isSteerUserEvent(e, content)) {
+        const clean = splitImageMarkers(cleanSteerContent(content)).text;
+        if (!clean) continue;
+        if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
+        if (explicitTs > turnEndTs) turnEndTs = explicitTs;
+        assistant = ensureAssistant(msgs, assistant, tsOf(e));
+        pushSteer(assistant, clean, tsOf(e));
+        continue;
+      }
+      closeAssistant();
       if (e.automated === true) {
         msgs.push({
           role: "user",
@@ -119,6 +128,36 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
 }
 
 const IMAGE_MARK_RE = /(?:^|\n\n)\[图片: ([0-9a-f]{64}\.(?:png|jpg|gif|webp))\]/g;
+export const STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]";
+const FOLDED_STEER_RE = /(?:^|\n\n)\[User guidance received while you were working\]\n([\s\S]*?)(?=(?:\n\n\[User guidance received while you were working\]\n)|$)/g;
+
+export function isSteerUserEvent(e: Record<string, unknown>, content = String(e.content || "")): boolean {
+  if (e.steer === true) return true;
+  if (content.includes("__RELAYED__")) return true;
+  if (content.startsWith(STEER_GUIDANCE_PREFIX)) return true;
+  return false;
+}
+
+export function cleanSteerContent(raw: string): string {
+  let text = raw.replace(/__RELAYED__/g, "").trim();
+  if (text.startsWith(STEER_GUIDANCE_PREFIX)) {
+    text = text.slice(STEER_GUIDANCE_PREFIX.length).replace(/^\n+/, "").trim();
+  }
+  return text;
+}
+
+function splitFoldedSteer(result: string): { toolResult: string; steers: string[] } {
+  if (!result.includes(STEER_GUIDANCE_PREFIX)) return { toolResult: result, steers: [] };
+  const steers: string[] = [];
+  let cut = -1;
+  for (const m of result.matchAll(FOLDED_STEER_RE)) {
+    if (cut < 0) cut = m.index ?? 0;
+    const text = (m[1] || "").trim();
+    if (text) steers.push(text);
+  }
+  if (cut < 0) return { toolResult: result, steers: [] };
+  return { toolResult: result.slice(0, cut).replace(/\s+$/, ""), steers };
+}
 
 /**
  * A web turn with pictures is logged as `text` + `[图片: <file>]` markers
@@ -254,6 +293,8 @@ function applyToolResult(m: ChatMsg, e: Record<string, unknown>) {
   const name = String(e.tool_name || "");
   const ts = tsOf(e);
   let result = typeof e.content === "string" ? e.content : String(e.content ?? "");
+  const folded = splitFoldedSteer(result);
+  result = folded.toolResult;
   if (e.is_error || e.tool_call_error) {
     result = result.startsWith("Error: ") ? result : `Error: ${result}`;
   }
@@ -274,6 +315,9 @@ function applyToolResult(m: ChatMsg, e: Record<string, unknown>) {
     step.result = result;
     if (diff) step.diff = diff;
     if (step.t0 != null) step.ms = Math.max(0, ts - step.t0);
+  }
+  for (const steeredText of folded.steers) {
+    pushSteer(m, steeredText, ts);
   }
 }
 
@@ -341,4 +385,169 @@ function pushText(m: ChatMsg, text: string) {
   const last = parts[parts.length - 1];
   if (last?.kind === "text") last.text += text;
   else parts.push({ kind: "text", text });
+}
+
+function pushSteer(m: ChatMsg, text: string, ts: number) {
+  freezeOpenThink(m, ts);
+  const parts = (m.parts ||= []);
+  const last = parts[parts.length - 1];
+  if (last?.kind === "steer" && last.text === text) return;
+  parts.push({ kind: "steer", text, ts });
+}
+
+export type ClientSteerAnchor = {
+  text: string;
+  ts: number;
+  afterToolCallId?: string;
+  turnIdx: number;
+};
+
+const STEER_CACHE_KEY = "ag_steers_v1";
+const STEER_CACHE_MAX_SESSIONS = 40;
+
+function readSteerStore(): Record<string, ClientSteerAnchor[]> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(STEER_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSteerStore(store: Record<string, ClientSteerAnchor[]>) {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const keys = Object.keys(store);
+    if (keys.length > STEER_CACHE_MAX_SESSIONS) {
+      for (const k of keys.slice(0, keys.length - STEER_CACHE_MAX_SESSIONS)) delete store[k];
+    }
+    localStorage.setItem(STEER_CACHE_KEY, JSON.stringify(store));
+  } catch { /* quota */ }
+}
+
+/** Harvest any in-memory `steer` parts from `msgs` before hydration replaces them. */
+export function rememberSteersFromMsgs(sessionId: string, msgs: ChatMsg[], olderTurns = 0) {
+  if (!sessionId || !msgs?.length) return;
+  const found: ClientSteerAnchor[] = [];
+  let turnIdx = olderTurns || 0;
+  for (const m of msgs) {
+    if (m.compact) continue;
+    if (m.role === "user" && !m.steer && !m.automated) {
+      turnIdx += 1;
+      continue;
+    }
+    if (m.role === "assistant" && m.parts?.length) {
+      let lastToolId: string | undefined;
+      for (const p of m.parts) {
+        if (p.kind === "tool" && p.toolCallId) lastToolId = p.toolCallId;
+        else if (p.kind === "steer" && p.text) {
+          found.push({
+            text: p.text,
+            ts: p.ts || m.ts || Date.now(),
+            afterToolCallId: lastToolId,
+            turnIdx: Math.max(1, turnIdx),
+          });
+        }
+      }
+    }
+  }
+  if (!found.length) return;
+  const store = readSteerStore();
+  const existing = store[sessionId] || [];
+  let changed = false;
+  for (const item of found) {
+    const dup = existing.some(
+      (x) => x.text === item.text && (x.afterToolCallId === item.afterToolCallId || x.turnIdx === item.turnIdx),
+    );
+    if (!dup) {
+      existing.push(item);
+      changed = true;
+    }
+  }
+  if (changed) {
+    store[sessionId] = existing;
+    writeSteerStore(store);
+  }
+}
+
+/** Remove late steers that were popped back to the next-turn queue at run end. */
+export function removeUndeliveredSteers(sessionId: string, aiMsg: ChatMsg, lateTexts: string[]) {
+  if (!lateTexts.length) return;
+  const parts = aiMsg.parts || [];
+  for (let i = lateTexts.length - 1; i >= 0; i--) {
+    const t = lateTexts[i];
+    for (let j = parts.length - 1; j >= 0; j--) {
+      const p = parts[j];
+      if (p.kind === "steer" && p.text === t) {
+        parts.splice(j, 1);
+        break;
+      }
+    }
+  }
+  if (!sessionId) return;
+  const store = readSteerStore();
+  const list = store[sessionId];
+  if (!list?.length) return;
+  let changed = false;
+  for (const t of lateTexts) {
+    for (let j = list.length - 1; j >= 0; j--) {
+      if (list[j].text === t) {
+        list.splice(j, 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (changed) writeSteerStore(store);
+}
+
+/** Re-attach client-recorded steers when hydrating from a gateway that predates `steer: true` JSONL rows. */
+export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns = 0): ChatMsg[] {
+  if (!sessionId || !msgs.length) return msgs;
+  const list = readSteerStore()[sessionId];
+  if (!list?.length) return msgs;
+  for (const item of list) {
+    if (!item.text) continue;
+    // Already hydrated from JSONL?
+    const alreadyPresent = msgs.some(
+      (m) =>
+        (m.role === "user" && m.steer && m.content === item.text)
+        || (m.role === "assistant" && m.parts?.some((p) => p.kind === "steer" && p.text === item.text)),
+    );
+    if (alreadyPresent) continue;
+    if (item.afterToolCallId) {
+      let inserted = false;
+      for (const m of msgs) {
+        if (m.role !== "assistant" || !m.parts?.length) continue;
+        const idx = m.parts.findIndex((p) => p.kind === "tool" && p.toolCallId === item.afterToolCallId);
+        if (idx >= 0) {
+          let insertAt = idx + 1;
+          while (insertAt < m.parts.length && m.parts[insertAt].kind === "steer") insertAt++;
+          m.parts.splice(insertAt, 0, { kind: "steer", text: item.text, ts: item.ts });
+          inserted = true;
+          break;
+        }
+      }
+      if (inserted) continue;
+    }
+    if (item.turnIdx > olderTurns) {
+      let turn = olderTurns;
+      for (let i = 0; i < msgs.length; i++) {
+        const m = msgs[i];
+        if (m.role === "user" && !m.steer && !m.automated && !m.compact) {
+          turn += 1;
+          if (turn === item.turnIdx) {
+            const next = msgs[i + 1];
+            if (next && next.role === "assistant" && !next.compact) {
+              (next.parts ||= []).unshift({ kind: "steer", text: item.text, ts: item.ts });
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+  return msgs;
 }

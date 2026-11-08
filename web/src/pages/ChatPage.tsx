@@ -34,6 +34,7 @@ import {
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip, syncSessionUsage } from "../components/ContextUsageTip";
+import { rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
   appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts,
   partsOf, settleWork, unfinishedToolCallId, workSummary,
@@ -1024,16 +1025,18 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
   }
   if (!live) settleWork(m);
   const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
-  const hasWork = Boolean(segs?.some((seg) => seg.type === "work"));
+  const workSegCount = segs ? segs.filter((seg) => seg.type === "work").length : 0;
+  const hasWork = workSegCount > 0;
+  const hasSteer = Boolean(segs?.some((seg) => seg.type === "single" && seg.part.kind === "steer"));
   const hasPendingApproval = Boolean(
     pendingToolCallId && segs?.some(
       (seg) => seg.type === "work" && seg.items.some((p) => p.kind === "tool" && p.toolCallId === pendingToolCallId),
     ),
   );
-  const [processOpen, setProcessOpen] = useState(() => Boolean(m.aborted || m.error || hasPendingApproval));
+  const [processOpen, setProcessOpen] = useState(() => Boolean(m.aborted || m.error || hasPendingApproval || hasSteer));
   useEffect(() => {
-    if (hasPendingApproval || m.aborted || m.error) setProcessOpen(true);
-  }, [hasPendingApproval, m.aborted, m.error]);
+    if (hasPendingApproval || m.aborted || m.error || hasSteer) setProcessOpen(true);
+  }, [hasPendingApproval, m.aborted, m.error, hasSteer]);
   const rawDur = m.durationMs ?? ((m.durationSec || 0) * 1000);
   const workDur = segs
     ? segs.reduce((acc, seg) => (seg.type === "work" ? acc + workSummary(seg.items, Date.now(), false).ms : acc), 0)
@@ -1080,7 +1083,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
                 isLast={isLast}
                 live={!!live}
                 pendingToolCallId={pendingToolCallId}
-                defaultOpen={showTurnProcess && processOpen}
+                defaultOpen={showTurnProcess && processOpen && !hasSteer && workSegCount === 1}
               />
             );
           }
@@ -1322,9 +1325,13 @@ function enqueueMessage(sessId: string, text: string, files: File[], opts?: { at
   if (!opts?.silent && !opts?.atFront) showToast(getStrings().chat.queuedToast);
 }
 
-async function requeueLateSteer(sessId: string) {
+async function requeueLateSteer(sessId: string, aiMsg?: ChatMsg) {
   const parked = await api.takeSteerApi(sessId);
   const late = (parked.ok && parked.data?.messages) ? parked.data.messages : [];
+  if (late.length && aiMsg) {
+    removeUndeliveredSteers(sessId, aiMsg, late);
+    bump();
+  }
   for (let i = late.length - 1; i >= 0; i--) {
     enqueueMessage(sessId, late[i], [], { atFront: true, silent: true });
   }
@@ -1528,13 +1535,14 @@ function QueueInlineEditor({
 
 function appendSteerBubble(sessId: string, text: string) {
   const live = getState().streams[sessId]?.aiMsg;
+  const sess = getState().sessions[sessId];
   if (live) {
     appendSteerPart(live, text);
+    if (sess) rememberSteersFromMsgs(sessId, sess.msgs, sess.olderTurns || 0);
     saveSessions();
     bump();
     return;
   }
-  const sess = getState().sessions[sessId];
   if (!sess) return;
   sess.msgs.push({ role: "user", content: text, ts: Date.now(), steer: true });
   saveSessions();
@@ -1846,7 +1854,10 @@ async function finishLive(sessId: string, aiMsg: ChatMsg, t0: number, disconnect
   if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - t0) / 1000;
   delete getState().streams[sessId];
   const sess = getState().sessions[sessId];
-  if (sess) sess.running = false;
+  if (sess) {
+    sess.running = false;
+    rememberSteersFromMsgs(sessId, sess.msgs, sess.olderTurns || 0);
+  }
   if (getState().curSess !== sessId) {
     if (sess) sess.unread = true;
   } else {
@@ -1855,7 +1866,7 @@ async function finishLive(sessId: string, aiMsg: ChatMsg, t0: number, disconnect
   saveSessions();
   bump();
   if (disconnected || pageUnloading) return;
-  await requeueLateSteer(sessId);
+  await requeueLateSteer(sessId, aiMsg);
   await drainQueue(sessId);
 }
 

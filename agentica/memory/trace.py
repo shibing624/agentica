@@ -19,6 +19,7 @@ from agentica.utils.tokens import count_text_tokens
 
 
 RELAYED_MARKER = "__RELAYED__"
+STEER_GUIDANCE_PREFIX = "[User guidance received while you were working]"
 _CHAT_ENTRY_TYPES = frozenset({"user", "assistant", "tool", "tool_audit", "compact_boundary"})
 
 # One expandable body is a display payload, not an archive: the file keeps the
@@ -47,8 +48,20 @@ def _ms_between(start: str, end: str) -> Optional[int]:
 def _is_steering_user(entry: Dict[str, Any]) -> bool:
     if entry.get("type") != "user":
         return False
+    if entry.get("steer") is True:
+        return True
     content = entry.get("content") or ""
-    return isinstance(content, str) and RELAYED_MARKER in content
+    return isinstance(content, str) and (
+        RELAYED_MARKER in content
+        or content.startswith(STEER_GUIDANCE_PREFIX)
+    )
+
+
+def _clean_steering_text(raw: str) -> str:
+    text = raw.replace(RELAYED_MARKER, "").strip()
+    if text.startswith(STEER_GUIDANCE_PREFIX):
+        text = text[len(STEER_GUIDANCE_PREFIX):].lstrip("\n").strip()
+    return text
 
 
 def _empty_tokens() -> Dict[str, int]:
@@ -505,7 +518,7 @@ def search_conversation(
                     continue
                 turn += 1
             else:
-                clean = raw.replace(RELAYED_MARKER, "").strip()
+                clean = _clean_steering_text(raw)
             if needle in " ".join(clean.lower().split()) and (turn, "user") not in seen_turn_role:
                 seen_turn_role.add((turn, "user"))
                 hits.append({
@@ -817,7 +830,10 @@ def _entry_row(
             # it opens a round, but nobody typed it.
             row["kind"] = "automated"
         else:
-            row["kind"] = "steering" if _is_steering_user(entry) else "user"
+            is_steer = _is_steering_user(entry)
+            row["kind"] = "steering" if is_steer else "user"
+            if is_steer and isinstance(content, str):
+                content = _clean_steering_text(content)
         row["summary"] = _clip(content, SUMMARY_CHAR_CAP)
         row["detail"] = _detail(content)
         return row

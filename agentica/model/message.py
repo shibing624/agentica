@@ -158,6 +158,7 @@ class Message(BaseModel):
     # evidence, so ``live_tool_round_start`` must look past it rather than treat
     # it as the start of a fresh history.
     _injected: bool = False
+    _steered_items: List[Dict[str, Any]] = []
 
     # Set on the user message a tool emits to carry images to the model (see
     # ``media.multimodal_tool_result``). It rides alongside the tool results of
