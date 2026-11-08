@@ -15,34 +15,22 @@ import { CodeFrame, MarkdownCode } from "../components/CodeFrame";
 import { useStrings } from "../i18n";
 import { fmtFileSize, formatDateTime } from "../lib/format";
 import { languageFromFilename, HIGHLIGHT_LIMIT } from "../lib/highlight";
-import { joinWorkspacePath } from "../lib/file-path";
+import { classifyPreviewTarget, joinWorkspacePath } from "../lib/file-path";
 import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
 import { IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
 
-const TEXT_EXTS = new Set([
-  "txt", "md", "json", "js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "sh", "bash",
-  "yaml", "yml", "toml", "css", "html", "htm", "csv", "log", "xml", "ini", "conf",
-  "rs", "go", "java", "c", "h", "cpp", "hpp", "sql", "rb", "php", "gitignore", "env",
-]);
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
-const HTML_EXTS = new Set(["html", "htm"]);
 const EXTERNAL_REF_RE = /^[a-z][a-z0-9+.-]*:/i;
 
 type Entry = { name: string; kind: "dir" | "file"; sizeBytes: number; mtime?: string };
 type Preview = {
   path: string;
   name: string;
-  kind: "text" | "md" | "image" | "html" | "pdf" | "unsupported";
+  kind: "code" | "text" | "md" | "image" | "html" | "pdf" | "unsupported";
   content?: string;
   truncated?: boolean;
 };
-
-function extOf(name: string): string {
-  const i = name.lastIndexOf(".");
-  return i >= 0 ? name.slice(i + 1).toLowerCase() : name.toLowerCase();
-}
 
 function dirOf(filePath: string): string {
   return filePath.includes("/") ? filePath.slice(0, filePath.lastIndexOf("/")) : "";
@@ -122,28 +110,31 @@ export function FilePreview({
   /** `keepMode` is a refresh: same file, same view. */
   const load = useCallback(async (keepMode: boolean) => {
     const name = filePath.includes("/") ? filePath.slice(filePath.lastIndexOf("/") + 1) : filePath;
-    const ext = extOf(name);
+    const targetKind = classifyPreviewTarget(name);
     const nonce = ++seq.current;
     const present = (p: Preview) => { if (nonce === seq.current) setPreview(p); };
-    if (IMAGE_EXTS.has(ext)) { present({ path: filePath, name, kind: "image" }); return; }
-    if (ext === "pdf") { present({ path: filePath, name, kind: "pdf" }); return; }
-    const isHtml = HTML_EXTS.has(ext);
-    const isMd = ext === "md";
-    if (!isHtml && !TEXT_EXTS.has(ext)) {
-      present({ path: filePath, name, kind: "unsupported" });
-      return;
-    }
+    if (targetKind === "image") { present({ path: filePath, name, kind: "image" }); return; }
+    if (targetKind === "pdf") { present({ path: filePath, name, kind: "pdf" }); return; }
+    if (targetKind === "unsupported") { present({ path: filePath, name, kind: "unsupported" }); return; }
     const { ok, data } = await api.fetchWorkspacePreview(targetRoot, targetRel);
     if (nonce !== seq.current) return;
     if (!ok || !data) { present({ path: filePath, name, kind: "unsupported" }); return; }
     const content = data.content || "";
     if (!keepMode) {
-      setMode(isMd ? (content.length > HIGHLIGHT_LIMIT ? "code" : "markdown") : isHtml ? "web" : "code");
+      setMode(
+        targetKind === "md"
+          ? (content.length > HIGHLIGHT_LIMIT ? "code" : "markdown")
+          : targetKind === "html"
+            ? "web"
+            : targetKind === "code"
+              ? "code"
+              : "text",
+      );
     }
     present({
       path: filePath,
       name,
-      kind: isHtml ? "html" : isMd ? "md" : "text",
+      kind: targetKind,
       content,
       truncated: !!data.truncated,
     });
@@ -159,7 +150,8 @@ export function FilePreview({
   const hasText = preview.content !== undefined;
   const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
     : preview.kind === "html" ? ["web", "code", "text"]
-    : preview.kind === "text" ? ["code", "text"]
+    : preview.kind === "code" ? ["code", "text"]
+    : preview.kind === "text" ? ["text", "code"]
     : [];
   const view: ViewMode | null = modes.includes(mode) ? mode : (modes[0] ?? null);
   const refresh = () => {

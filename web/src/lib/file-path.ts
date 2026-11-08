@@ -1,3 +1,5 @@
+import { languageFromFilename } from "./highlight";
+
 /**
  * Whether inline code in a message looks like a file path (penguin's heuristic).
  * No whitespace, no URL scheme, ends with a known extension.
@@ -7,7 +9,69 @@ const KNOWN_EXTENSIONS = new Set([
   "yaml", "yml", "toml", "css", "html", "htm", "csv", "log", "xml", "ini", "conf",
   "rs", "go", "java", "c", "h", "cpp", "hpp", "sql", "rb", "php",
   "png", "jpg", "jpeg", "gif", "webp", "svg", "pdf",
+  "tex", "latex", "bib", "sty", "cls", "rst", "adoc", "mdx",
+  "jsonl", "ndjson", "jsonc", "ipynb", "mts", "cts", "pyi", "pyw",
+  "kt", "kts", "swift", "scss", "less", "vue", "svelte", "diff", "patch",
+  "mk", "cfg", "properties", "tsv",
 ]);
+
+export const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
+export const HTML_EXTS = new Set(["html", "htm"]);
+export const MD_EXTS = new Set(["md", "markdown", "mdx"]);
+const CODE_TEXT_EXTS = new Set([
+  "csv", "tsv", "log", "rst", "adoc", "lua", "r", "jl", "dart", "scala",
+  "clj", "cljs", "edn", "erl", "hrl", "ex", "exs", "hs", "fs", "fsi", "fsx",
+  "pl", "pm", "v", "sv", "svh", "graphql", "gql", "proto", "tf", "tfvars",
+  "hcl", "nix", "svelte", "cmake", "gradle", "groovy", "bat", "cmd", "ps1",
+]);
+
+/**
+ * Known binary container suffixes without a text representation (mirrors dsh's
+ * `UNVIEWABLE_BINARY_EXTENSIONS`). Any suffix not listed here falls back to a
+ * NUL-checked plain-text preview so `.tex` and unknown extensions open instead
+ * of dead-ending on "unsupported".
+ */
+export const UNVIEWABLE_BINARY_EXTS = new Set([
+  // video
+  "mp4", "mov", "avi", "mkv", "webm", "flv", "wmv", "m4v",
+  // audio
+  "mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "opus",
+  // archives
+  "zip", "gz", "tgz", "bz2", "xz", "zst", "7z", "rar", "tar", "jar", "whl",
+  // office documents
+  "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "pages", "numbers",
+  // executables and compiled objects
+  "exe", "dll", "so", "dylib", "bin", "o", "a", "class", "pyc", "pyo", "pyd", "wasm",
+  // fonts
+  "ttf", "otf", "woff", "woff2", "eot",
+  // disk images and databases
+  "dmg", "iso", "img", "sqlite", "sqlite3", "db",
+  // design documents, unsupported raster formats, and binary tensor/data blobs
+  "psd", "ai", "sketch", "tiff", "tif", "heic", "heif", "avif",
+  "npy", "npz", "pt", "pth", "ckpt", "safetensors", "onnx", "parquet", "feather", "arrow", "pkl", "pickle",
+]);
+
+export type PreviewTargetKind = "image" | "pdf" | "html" | "md" | "code" | "text" | "unsupported";
+
+/**
+ * Classify how the side-panel preview should open `name`:
+ * - known code/markup suffixes (including `.tex`, `.bib`, `.sty`, `.cls`) -> `"code"` (Code view + Plain text option)
+ * - `.txt` and unknown or dotless filenames -> `"text"` (Plain text default + Code option)
+ * - known binary containers -> `"unsupported"`
+ */
+export function classifyPreviewTarget(name: string): PreviewTargetKind {
+  const base = name.includes("/") ? name.slice(name.lastIndexOf("/") + 1) : name;
+  const lower = base.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  const ext = dot > 0 ? lower.slice(dot + 1) : "";
+  if (IMAGE_EXTS.has(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  if (HTML_EXTS.has(ext)) return "html";
+  if (MD_EXTS.has(ext)) return "md";
+  if (UNVIEWABLE_BINARY_EXTS.has(ext)) return "unsupported";
+  if (languageFromFilename(base) || CODE_TEXT_EXTS.has(ext)) return "code";
+  return "text";
+}
 
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const MAX_PATH_LEN = 512;

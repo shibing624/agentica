@@ -11,6 +11,7 @@ import java from "highlight.js/lib/languages/java";
 import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
 import kotlin from "highlight.js/lib/languages/kotlin";
+import latex from "highlight.js/lib/languages/latex";
 import makefile from "highlight.js/lib/languages/makefile";
 import markdown from "highlight.js/lib/languages/markdown";
 import php from "highlight.js/lib/languages/php";
@@ -36,6 +37,7 @@ hljs.registerLanguage("java", java);
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("json", json);
 hljs.registerLanguage("kotlin", kotlin);
+hljs.registerLanguage("latex", latex);
 hljs.registerLanguage("makefile", makefile);
 hljs.registerLanguage("markdown", markdown);
 hljs.registerLanguage("php", php);
@@ -52,9 +54,12 @@ hljs.registerLanguage("yaml", yaml);
 
 const ALIAS: Record<string, string> = {
   md: "markdown",
+  mdx: "markdown",
   py: "python",
   python3: "python",
   py3: "python",
+  pyi: "python",
+  pyw: "python",
   yml: "yaml",
   js: "javascript",
   mjs: "javascript",
@@ -62,29 +67,50 @@ const ALIAS: Record<string, string> = {
   jsx: "javascript",
   ts: "typescript",
   tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  jsonc: "json",
+  jsonl: "json",
+  ndjson: "json",
+  ipynb: "json",
   htm: "xml",
   html: "xml",
   vue: "xml",
   svg: "xml",
   sh: "bash",
   zsh: "bash",
+  fish: "bash",
   rs: "rust",
   h: "c",
   hpp: "cpp",
   cc: "cpp",
   cxx: "cpp",
+  hh: "cpp",
+  hxx: "cpp",
   rb: "ruby",
   kt: "kotlin",
   kts: "kotlin",
   conf: "ini",
+  cfg: "ini",
+  properties: "ini",
   env: "ini",
+  gitignore: "ini",
   patch: "diff",
+  tex: "latex",
+  sty: "latex",
+  cls: "latex",
+  bib: "latex",
+  bibtex: "latex",
+  mk: "makefile",
 };
 
 const EXT_LANG: Record<string, string> = {
   md: "markdown",
   markdown: "markdown",
+  mdx: "markdown",
   py: "python",
+  pyi: "python",
+  pyw: "python",
   yaml: "yaml",
   yml: "yaml",
   toml: "toml",
@@ -95,7 +121,13 @@ const EXT_LANG: Record<string, string> = {
   jsx: "javascript",
   ts: "typescript",
   tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
   json: "json",
+  jsonc: "json",
+  jsonl: "json",
+  ndjson: "json",
+  ipynb: "json",
   css: "css",
   scss: "scss",
   html: "xml",
@@ -106,6 +138,7 @@ const EXT_LANG: Record<string, string> = {
   sh: "bash",
   bash: "bash",
   zsh: "bash",
+  fish: "bash",
   rs: "rust",
   go: "go",
   c: "c",
@@ -114,17 +147,29 @@ const EXT_LANG: Record<string, string> = {
   hpp: "cpp",
   cc: "cpp",
   cxx: "cpp",
+  hh: "cpp",
+  hxx: "cpp",
   sql: "sql",
   rb: "ruby",
   php: "php",
   ini: "ini",
   conf: "ini",
+  cfg: "ini",
+  properties: "ini",
   env: "ini",
+  gitignore: "ini",
   kt: "kotlin",
   kts: "kotlin",
   swift: "swift",
   diff: "diff",
   patch: "diff",
+  tex: "latex",
+  latex: "latex",
+  sty: "latex",
+  cls: "latex",
+  bib: "latex",
+  mk: "makefile",
+  makefile: "makefile",
 };
 
 // The workspace preview serves up to 256 KB; a core module (runner/loop.py is
@@ -143,8 +188,7 @@ export function resolveLanguage(name: string): string {
   if (!raw) return "";
   if (raw === "dockerfile" || raw.startsWith("dockerfile.")) return "dockerfile";
   if (raw === "makefile" || raw === "gnumakefile") return "makefile";
-  const aliased = ALIAS[raw];
-  if (aliased) return aliased;
+  if (Object.hasOwn(ALIAS, raw)) return ALIAS[raw]!;
   if (hljs.getLanguage(raw)) return raw;
   return "";
 }
@@ -155,8 +199,10 @@ export function languageFromFilename(name: string): string {
   if (lower === "dockerfile" || lower.startsWith("dockerfile.")) return "dockerfile";
   if (lower === "makefile" || lower === "gnumakefile") return "makefile";
   const i = lower.lastIndexOf(".");
-  const ext = i >= 0 ? lower.slice(i + 1) : lower;
-  return EXT_LANG[ext] || resolveLanguage(ext);
+  if (i < 0) return "";
+  const ext = lower.slice(i + 1);
+  if (Object.hasOwn(EXT_LANG, ext)) return EXT_LANG[ext]!;
+  return resolveLanguage(ext);
 }
 
 export function highlightToHtml(code: string, language?: string, highlight = true): string {

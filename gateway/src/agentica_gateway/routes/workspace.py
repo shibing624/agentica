@@ -72,7 +72,11 @@ async def workspace_content(
     if preview:
         if not is_text_ext(name):
             raise HTTPException(status_code=415, detail="not a text file")
-        text, truncated = read_preview_text(target)
+        try:
+            text, truncated = read_preview_text(target)
+        except WorkspacePathError as e:
+            _raise(e)
+            return
         return {"name": name, "content": text, "truncated": truncated, "limit": TEXT_PREVIEW_BYTES}
     size = target.stat().st_size
     if size > MAX_READ_BYTES and not download:

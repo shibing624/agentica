@@ -7,6 +7,7 @@ symlink escapes are both refused.
 """
 from __future__ import annotations
 
+import codecs
 from pathlib import Path
 # 256 KiB preview cap; 50 MiB hard ceiling for a full inline read.
 TEXT_PREVIEW_BYTES = 256 * 1024
@@ -30,6 +31,10 @@ CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".csv": "text/plain; charset=utf-8",
     ".log": "text/plain; charset=utf-8",
+    ".tex": "text/plain; charset=utf-8",
+    ".sty": "text/plain; charset=utf-8",
+    ".cls": "text/plain; charset=utf-8",
+    ".bib": "text/plain; charset=utf-8",
     ".svg": "image/svg+xml",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -42,6 +47,22 @@ CONTENT_TYPES = {
 # Same-origin HTML/SVG would execute in the browser; inline preview falls back
 # to text/plain so the SPA can still show source.
 SCRIPTABLE = {".html", ".htm", ".svg"}
+
+# Known binary container suffixes (aligned with dsh's UNVIEWABLE_BINARY_EXTENSIONS
+# plus raster/PDF formats that use dedicated non-text viewers). Unknown suffixes
+# stay out of this set and fall back to a NUL-checked text read.
+BINARY_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".pdf",
+    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v",
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus",
+    ".zip", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".rar", ".tar", ".jar", ".whl",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".pages", ".numbers",
+    ".exe", ".dll", ".so", ".dylib", ".bin", ".o", ".a", ".class", ".pyc", ".pyo", ".pyd", ".wasm",
+    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    ".dmg", ".iso", ".img", ".sqlite", ".sqlite3", ".db",
+    ".psd", ".ai", ".sketch", ".tiff", ".tif", ".heic", ".heif", ".avif",
+    ".npy", ".npz", ".pt", ".pth", ".ckpt", ".safetensors", ".onnx", ".parquet", ".feather", ".arrow", ".pkl", ".pickle",
+}
 
 
 class WorkspacePathError(Exception):
@@ -114,10 +135,9 @@ def content_type_for(name: str, *, inline: bool) -> str:
 
 def is_text_ext(name: str) -> bool:
     ext = Path(name).suffix.lower()
-    if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".gz", ".tar"}:
+    if ext in BINARY_EXTS:
         return False
-    ctype = CONTENT_TYPES.get(ext, "text/plain; charset=utf-8")
-    return ctype.startswith("text/") or ctype in {"application/json", "image/svg+xml"}
+    return True
 
 
 def list_entries(root: str, rel: str) -> list[dict]:
@@ -174,9 +194,22 @@ def stat_existing(root: str, paths: list[str]) -> list[str]:
 
 
 def read_preview_text(path: Path, *, limit: int = TEXT_PREVIEW_BYTES) -> tuple[str, bool]:
-    """First ``limit`` bytes only — do not slurp a multi-megabyte file then slice."""
+    """First ``limit`` bytes only — do not slurp a multi-megabyte file then slice.
+
+    Refuses binary files (NUL bytes outside a BOM-marked UTF-16 stream) with
+    HTTP 415 so unknown extensions can safely try a plain-text preview without
+    dumping decoded binary garbage into the panel.
+    """
     size = path.stat().st_size
     with path.open("rb") as f:
         data = f.read(limit)
     truncated = size > len(data)
-    return data.decode("utf-8", errors="replace"), truncated
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = codecs.getincrementaldecoder("utf-16")("replace").decode(data, final=not truncated)
+        if "\x00" in text:
+            raise WorkspacePathError(415, "not a text file")
+        return text, truncated
+    if b"\x00" in data:
+        raise WorkspacePathError(415, "not a text file")
+    text = codecs.getincrementaldecoder("utf-8")("replace").decode(data, final=not truncated)
+    return text, truncated

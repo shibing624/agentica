@@ -47,6 +47,7 @@ class Settings:
     upload_max_size_mb: int = 50
     upload_allowed_extensions: str = (
         ".txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.yaml,.yml,.toml,.csv,"
+        ".tex,.bib,.sty,.cls,.sh,.html,.htm,.css,.xml,.sql,.rs,.go,.java,.c,.h,.cpp,.hpp,.log,.jsonl,"
         ".pdf,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.tar,.gz"
     )
 

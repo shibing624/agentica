@@ -59,6 +59,32 @@ def test_preview_reads_only_the_first_256kib(tmp_path):
     assert text.encode("utf-8") == b"x" * TEXT_PREVIEW_BYTES
 
 
+def test_preview_supports_tex_and_unknown_text_files_but_refuses_binary_nul_bytes(client):
+    c, tmp_path = client
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n")
+    (root / "custom.unknown_ext").write_text("plain text in an unknown extension\n")
+    (root / "LICENSE").write_text("MIT License\n")
+    (root / "utf16.foo").write_bytes("中文文本\n".encode("utf-16"))
+    (root / "blob.unknown_ext").write_bytes(b"\x7fELF\x02\x01\x01\x00binary\x00payload")
+    (root / "archive.zip").write_bytes(b"PK\x03\x04")
+
+    for rel, expected in [
+        ("main.tex", "\\documentclass{article}"),
+        ("custom.unknown_ext", "plain text in an unknown extension"),
+        ("LICENSE", "MIT License"),
+        ("utf16.foo", "中文文本"),
+    ]:
+        res = c.get("/api/workspace/content", params={"root": str(root), "path": rel, "preview": 1})
+        assert res.status_code == 200, (rel, res.text)
+        assert expected in res.json()["content"]
+
+    for bin_rel in ["blob.unknown_ext", "archive.zip"]:
+        res = c.get("/api/workspace/content", params={"root": str(root), "path": bin_rel, "preview": 1})
+        assert res.status_code == 415, (bin_rel, res.text)
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("GATEWAY_AUTH", "false")
