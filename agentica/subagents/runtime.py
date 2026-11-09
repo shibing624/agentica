@@ -620,6 +620,7 @@ class SubagentRegistry:
         tool_call_limit_override: Optional[int] = None,
         system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
+        model_tier_override: Optional[Literal["auxiliary", "main"]] = None,
     ) -> Dict[str, Any]:
         """Spawn an isolated subagent and run it to completion.
 
@@ -697,8 +698,13 @@ class SubagentRegistry:
         # hard ceilings: long-running investigations may raise budgets freely.
         if any(v is not None for v in (
             timeout_override, max_turns_override,
-            tool_call_limit_override, system_prompt_override,
+            tool_call_limit_override, system_prompt_override, model_tier_override,
         )):
+            tier_val: Literal["auxiliary", "main"] = (
+                model_tier_override
+                if model_tier_override in ("auxiliary", "main")
+                else config.model_tier
+            )
             config = dataclasses.replace(
                 config,
                 timeout=timeout_override if timeout_override is not None else config.timeout,
@@ -714,6 +720,7 @@ class SubagentRegistry:
                     system_prompt_override if system_prompt_override is not None
                     else config.system_prompt
                 ),
+                model_tier=tier_val,
             )
 
         # Resume support: pull the previous run's partial output and stitch it
@@ -772,6 +779,9 @@ class SubagentRegistry:
                 "agent_type": config.type,
                 "content": "",
             }
+
+        from agentica.model.defaults import model_display_label
+        resolved_model_label = model_display_label(source_model) or str(source_model.id or "")
 
         run_id = str(uuid.uuid4())
         run = SubagentRun(
@@ -903,6 +913,8 @@ class SubagentRegistry:
                 "error": f"Subagent timed out after {config.timeout} seconds",
                 "agent_type": config.type,
                 "subagent_name": config.name,
+                "model": resolved_model_label,
+                "model_tier": config.model_tier,
                 "run_id": run_id,
                 "content": content_out,
                 "tool_calls_summary": partial_tools,
@@ -956,6 +968,8 @@ class SubagentRegistry:
                     "error": f"Subagent timed out after {config.timeout} seconds",
                     "agent_type": config.type,
                     "subagent_name": config.name,
+                    "model": resolved_model_label,
+                    "model_tier": config.model_tier,
                     "run_id": run_id,
                     "content": content_out,
                     "tool_calls_summary": partial_tools,
@@ -1004,6 +1018,8 @@ class SubagentRegistry:
                 "error": str(e),
                 "agent_type": config.type,
                 "subagent_name": config.name,
+                "model": resolved_model_label,
+                "model_tier": config.model_tier,
                 "run_id": run_id,
                 "content": partial_content,
                 "tool_calls_summary": partial_tools,
@@ -1069,6 +1085,8 @@ class SubagentRegistry:
                 "content": final_content,
                 "agent_type": config.type,
                 "subagent_name": config.name,
+                "model": resolved_model_label,
+                "model_tier": config.model_tier,
                 "run_id": run_id,
                 "tool_calls_summary": tool_calls_summary,
                 "tool_count": len(tool_calls_summary),
@@ -1101,6 +1119,8 @@ class SubagentRegistry:
             "content": final_content,
             "agent_type": config.type,
             "subagent_name": config.name,
+            "model": resolved_model_label,
+            "model_tier": config.model_tier,
             "run_id": run_id,
             "tool_calls_summary": stream_result["tool_calls_summary"],
             "tool_count": len(stream_result["tool_calls_summary"]),

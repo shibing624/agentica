@@ -1923,6 +1923,7 @@ class LoopMixin:
                         loop_state.input_message_ids,
                         marker=f"[Run failed: {_err}]",
                         finish_reason="error",
+                        error=_err,
                     )
                 raise
             finally:

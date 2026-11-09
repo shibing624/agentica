@@ -326,7 +326,17 @@ function applyAssistant(m: ChatMsg, e: Record<string, unknown>) {
   const ts = tsOf(e);
   const reasoning = reasoningOf(e);
   if (reasoning) pushThink(m, reasoning, ts);
-  const content = typeof e.content === "string" ? e.content : "";
+  // A cancelled / failed turn persists the model-facing marker in ``content``
+  // and the user-visible part in ``partial_content``.
+  const ended = e.finish_reason === "cancelled" || e.finish_reason === "error";
+  const hasPartial = ended && typeof e.partial_content === "string";
+  const content = hasPartial
+    ? (e.partial_content as string)
+    : typeof e.content === "string" ? e.content : "";
+  if (hasPartial) {
+    if (e.finish_reason === "cancelled") m.aborted = true;
+    else if (typeof e.error === "string" && e.error) m.error = e.error;
+  }
   if (content) {
     freezeOpenThink(m, ts);
     pushText(m, content);

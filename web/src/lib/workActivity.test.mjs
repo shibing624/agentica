@@ -118,3 +118,18 @@ test("toolResultPreview keeps execute output for inline arrow display and copy/p
   assert.equal(A.toolResultPreview("read_file", "line 1\nline 2"), "");
   assert.equal(A.toolResultPreview("apply_patch", "patched", true), "");
 });
+
+test("parseTaskResult extracts model and modelTier for trace and chat cards", () => {
+  const parsed = A.parseTaskResult(JSON.stringify({
+    success: true,
+    subagent_type: "code",
+    subagent_name: "Code Agent",
+    model: "openai/claude-opus-5-5",
+    model_tier: "main",
+    result: "done",
+    execution_time: 3.4,
+    tool_count: 2,
+  }));
+  assert.equal(parsed?.model, "openai/claude-opus-5-5");
+  assert.equal(parsed?.modelTier, "main");
+});

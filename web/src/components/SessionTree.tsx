@@ -15,6 +15,7 @@ import {
   getState, normDir, projectIdForDir, projectNameForDir, setState, showToast, useAppState, type Session,
 } from "../store";
 import { deleteWorkspace, renameWorkspace } from "../workspaces";
+import { isImeKey } from "../lib/ime";
 
 type Group = {
   id: string;
@@ -43,6 +44,10 @@ export function SessionTree() {
   const [searchingContent, setSearchingContent] = useState(false);
   // Sessions whose hit list is shown in full instead of the first few.
   const [allHits, setAllHits] = useState<Record<string, boolean>>({});
+  // Read at request time: opening a hit switches the chat, and re-running the
+  // search for that would blank the list the user is clicking through.
+  const focusSessRef = useRef(s.curSess);
+  focusSessRef.current = s.curSess;
 
   useEffect(() => {
     setAllHits({});
@@ -55,7 +60,7 @@ export function SessionTree() {
     setSearchingContent(true);
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => {
-      void searchAllSessionsContent(q, ctrl.signal, s.curSess).then((res) => {
+      void searchAllSessionsContent(q, ctrl.signal, focusSessRef.current).then((res) => {
         if (ctrl.signal.aborted) return;
         setContentHits(res);
         setSearchingContent(false);
@@ -65,7 +70,7 @@ export function SessionTree() {
       window.clearTimeout(timer);
       ctrl.abort();
     };
-  }, [q, s.sessionScope, s.curSess]);
+  }, [q, s.sessionScope]);
 
   const labels = useMemo(() => {
     const m: Record<string, string> = {};
@@ -197,7 +202,7 @@ export function SessionTree() {
                        onChange={(e) => setRenameText(e.target.value)}
                        onBlur={() => commitRename(g)}
                        onKeyDown={(e) => {
-                         if (e.nativeEvent.isComposing) return;
+                         if (isImeKey(e.nativeEvent)) return;
                          if (e.key === "Enter") { e.preventDefault(); commitRename(g); }
                          if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
                        }} />
@@ -467,7 +472,7 @@ export function RenameInput({ initial, className, onDone }: {
            onBlur={() => finish(text)}
            onKeyDown={(e) => {
              e.stopPropagation();
-             if (e.nativeEvent.isComposing) return;
+             if (isImeKey(e.nativeEvent)) return;
              if (e.key === "Enter") { e.preventDefault(); finish(text); }
              if (e.key === "Escape") { e.preventDefault(); finish(null); }
            }} />

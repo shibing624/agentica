@@ -281,6 +281,11 @@ class TestTaskModelLabel:
         tool = self._tool_with_models()
         assert tool.model_label_for({"subagent_type": "explore"}) == "openai/aux-model"
 
+    def test_explicit_model_tier_override_selects_main_or_auxiliary_model(self):
+        tool = self._tool_with_models()
+        assert tool.model_label_for({"subagent_type": "explore", "model_tier": "main"}) == "openai/main-model"
+        assert tool.model_label_for({"subagent_type": "explore", "model_tier": "auxiliary"}) == "openai/aux-model"
+
     def test_a_main_tier_type_names_the_parents_own_model(self):
         from agentica.subagents import register_custom_subagent, unregister_custom_subagent
 

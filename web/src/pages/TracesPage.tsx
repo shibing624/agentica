@@ -36,12 +36,14 @@ type Call = {
   toolCalls?: number;
   toolName?: string;
   toolCallId?: string;
+  toolModel?: string;
+  toolModelTier?: string;
   isError?: boolean;
   decision?: string;
   resultSummary?: string;
 };
 
-type TaskFields = Partial<TaskResult> & { description?: string; subagentType?: string };
+type TaskFields = Partial<TaskResult> & { description?: string; subagentType?: string; model?: string; modelTier?: string };
 
 type ModelToolCall = {
   index: number;
@@ -50,6 +52,8 @@ type ModelToolCall = {
   summary: string;
   args?: string;
   resultSummary?: string;
+  toolModel?: string;
+  toolModelTier?: string;
   isError?: boolean;
   durationMs?: number | null;
 };
@@ -767,6 +771,14 @@ function ToolCallSummary({ c, className = "tr-row-sum" }: { c: Call; className?:
   );
 }
 
+function formatToolModelBadge(model?: string, tier?: string) {
+  if (!model && !tier) return "";
+  const short = model && model.includes("/") ? model.slice(model.indexOf("/") + 1) : (model || "");
+  const tierLabel = tier === "main" ? "main" : tier === "auxiliary" ? "aux" : "";
+  if (tierLabel && short) return `${tierLabel} · ${short}`;
+  return short || tierLabel;
+}
+
 function CallRow({ c, toolsCollapsed, onToggleTools }: { c: Call; toolsCollapsed?: boolean; onToggleTools?: () => void }) {
   const S = useStrings();
   if (c.kind === "model") {
@@ -791,9 +803,15 @@ function CallRow({ c, toolsCollapsed, onToggleTools }: { c: Call; toolsCollapsed
     );
   }
   if (c.kind === "tool") {
+    const modelBadge = formatToolModelBadge(c.toolModel, c.toolModelTier);
     return (
       <>
         <span className={"tr-tag k-tool" + (c.isError ? " err" : "")} title={c.toolName}>{c.toolName || "tool"}</span>
+        {modelBadge && (
+          <span className={"tr-tool-model" + (c.toolModelTier === "main" ? " main" : "")} title={c.toolModel || c.toolModelTier}>
+            {modelBadge}
+          </span>
+        )}
         <ToolCallSummary c={c} className="tr-row-sum" />
         {!!c.waitMs && <span className="tr-row-tok">⏸ {fmtDurationMs(c.waitMs)}</span>}
         <span className="tr-row-ms">{c.durationMs != null ? fmtDurationMs(c.durationMs) : ""}</span>
@@ -825,6 +843,8 @@ function deriveModelToolCalls(round: Round, modelCall: Call, fromBody?: ModelToo
         toolName: item.toolName || "tool",
         summary: item.summary,
         resultSummary: item.resultSummary,
+        toolModel: item.toolModel,
+        toolModelTier: item.toolModelTier,
         isError: item.isError,
         durationMs: item.durationMs,
       });
@@ -928,6 +948,7 @@ function AssistantOverview({ body, modelTools, onOpenCall }: {
             const args = tc.toolName && tc.summary.startsWith(tc.toolName + " ")
               ? tc.summary.slice(tc.toolName.length + 1)
               : tc.summary;
+            const modelBadge = formatToolModelBadge(tc.toolModel, tc.toolModelTier);
             return (
               <li key={tc.toolCallId || tc.index}>
                 <button
@@ -941,6 +962,11 @@ function AssistantOverview({ body, modelTools, onOpenCall }: {
                           stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                   <span className="tr-assistant-tool-name">{tc.toolName}</span>
+                  {modelBadge && (
+                    <span className={"tr-tool-model" + (tc.toolModelTier === "main" ? " main" : "")} title={tc.toolModel || tc.toolModelTier}>
+                      {modelBadge}
+                    </span>
+                  )}
                   <span className="tr-assistant-tool-args">{args}</span>
                   {tc.resultSummary && (
                     <span className="tr-assistant-tool-res">
@@ -969,6 +995,8 @@ function BodyView({ c, body, tab, modelTools, onOpenCall }: {
   if (c.kind === "tool" && c.toolName === "task") {
     if (tab === "result" && body.taskResult) {
       return <TaskCard brief={body.taskCall?.description || ""} subagentType={body.taskCall?.subagentType}
+                       model={body.taskResult.model || body.taskCall?.model || c.toolModel}
+                       modelTier={body.taskResult.modelTier || body.taskCall?.modelTier || c.toolModelTier}
                        result={taskResultOf(body.taskResult)} />;
     }
   }
@@ -995,6 +1023,9 @@ function Facts({ c }: { c: Call }) {
   if (c.ts) rows.push([S.traces.dStarted, new Date(c.ts).toLocaleTimeString()]);
   if (c.durationMs != null) rows.push([S.traces.dDuration, fmtDurationMs(c.durationMs)]);
   if (c.waitMs) rows.push([S.traces.dWait, fmtDurationMs(c.waitMs)]);
+  if (c.kind === "tool" && (c.toolModel || c.toolModelTier)) {
+    rows.push([S.traces.dModel, c.toolModelTier && c.toolModel ? `${c.toolModel} (${c.toolModelTier})` : (c.toolModel || c.toolModelTier!)]);
+  }
   if (c.kind === "tool" && c.decision) rows.push([S.traces.dDecision, c.decision]);
   if (c.kind === "model") {
     if (c.status) rows.push([S.traces.dStatus, c.status]);
@@ -1032,6 +1063,8 @@ function taskResultOf(t: TaskFields): TaskResult {
     status: t.status || (t.success ? "completed" : "error"),
     subagentName: t.subagentName || "",
     subagentType: t.subagentType || "",
+    model: t.model,
+    modelTier: t.modelTier,
     executionMs: t.executionMs,
     toolCount: t.toolCount || 0,
     steps: t.steps || [],

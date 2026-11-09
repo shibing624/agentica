@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { IconClose } from "../icons";
 
 /** A labelled overlay. ConfirmDialog stays for destructive yes/no; this one
@@ -23,8 +23,11 @@ export function Dialog({
     return () => document.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
+  const downOnBackdrop = useRef(false);
   return (
-    <div className="dlg-overlay open" onClick={onClose}>
+    <div className="dlg-overlay open"
+         onMouseDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
+         onClick={(e) => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); }}>
       <div className={"dlg" + (wide ? " wide" : "")} onClick={(e) => e.stopPropagation()}>
         <div className="dlg-head">
           <h3>{title}</h3>

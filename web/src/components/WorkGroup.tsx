@@ -314,6 +314,8 @@ function ToolDetail({
     return (
       <div className="wr-body">
         <TaskCard brief={String(args.description ?? "")} subagentType={String(args.subagent_type ?? "")}
+                  model={args.model ? String(args.model) : undefined}
+                  modelTier={args.model_tier ? String(args.model_tier) : undefined}
                   result={result} running={running} elapsedMs={duration} />
         {!result && resultText && !running && <pre className="step-pre out">{resultText}</pre>}
       </div>

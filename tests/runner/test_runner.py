@@ -181,6 +181,43 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         self.assertIn("2 + 2 = ", resumed_history[-1].content)
         self.assertIn("[User interrupted the response]", resumed_history[-1].content)
 
+    def test_interrupted_turn_log_row_separates_marker_from_display(self):
+        """The log row keeps the marker for the model and the partial for UIs."""
+        import tempfile
+        from agentica.memory.session_log import SessionLog
+
+        agent = _make_agent()
+        with tempfile.TemporaryDirectory() as tmp:
+            agent._session_log = SessionLog("s-int", base_dir=tmp)
+            user_msg = Message(role="user", content="q")
+            for marker, reason, err in (
+                ("[User interrupted the response]", "cancelled", ""),
+                ("[Run failed: boom]", "error", "boom"),
+            ):
+                agent._runner._persist_incomplete_turn(
+                    agent,
+                    message="q",
+                    messages=None,
+                    user_messages=[user_msg],
+                    system_message=None,
+                    messages_for_model=[user_msg, Message(role="assistant", content="half")],
+                    num_input_messages=1,
+                    model_response=ModelResponse(content="half"),
+                    loop_state=LoopState(),
+                    input_message_ids={id(user_msg)},
+                    marker=marker,
+                    finish_reason=reason,
+                    error=err,
+                )
+            rows = [e for e in agent._session_log.iter_raw_entries() if e.get("type") == "assistant"]
+            self.assertEqual([r["finish_reason"] for r in rows], ["cancelled", "error"])
+            self.assertEqual([r["partial_content"] for r in rows], ["half", "half"])
+            self.assertEqual(rows[0]["content"], "half\n\n[User interrupted the response]")
+            self.assertNotIn("error", rows[0])
+            self.assertEqual(rows[1]["error"], "boom")
+            replay = [m for m in agent._session_log.derive_messages() if m["role"] == "assistant"]
+            self.assertIn("[User interrupted the response]", replay[0]["content"])
+
     def test_interrupted_claude_tool_round_keeps_tool_use_blocks(self):
         """Ctrl+C after a Claude tool result must not overwrite the assistant
         tool_use message with the interruption marker.

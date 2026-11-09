@@ -4,6 +4,7 @@ import { useStrings } from "../i18n";
 import { IconChevronDown, IconFolder } from "../icons";
 import { projectNameForDir, saveSessions, setState, showToast, useAppState } from "../store";
 import { shortenPath } from "../lib/format";
+import { isImeKey } from "../lib/ime";
 
 /**
  * Working-directory chip on a brand-new chat. Existing conversations keep
@@ -115,7 +116,7 @@ export function ComposerDir() {
               onChange={(e) => setPathDraft(e.target.value)}
               onBlur={commitPathEdit}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                if (e.key === "Enter" && !isImeKey(e.nativeEvent)) {
                   e.preventDefault();
                   commitPathEdit();
                 } else if (e.key === "Escape") {

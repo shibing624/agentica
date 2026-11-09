@@ -104,9 +104,22 @@ export function finishThink(m: ChatMsg, now = Date.now()) {
 /** Close leftover think/tool timers after the turn is no longer live.
  *  Omit `now` for historical cards so a trailing slice does not become 45h. */
 export function settleWork(m: ChatMsg, now?: number): boolean {
+  // The placeholder think opened at send time stays empty when the turn is
+  // stopped (or fails) before the model says anything; once the turn is
+  // over it is a "Thought" group with nothing in it.
+  const dropEmpty = <T extends TimedItem & { text?: string }>(items: T[] | undefined) => {
+    if (!items) return false;
+    const kept = items.filter((p) => !(isThinkItem(p) && !(p.text || "").trim()));
+    if (kept.length === items.length) return false;
+    items.splice(0, items.length, ...kept);
+    return true;
+  };
+  const droppedParts = dropEmpty(m.parts as any);
+  const droppedSteps = dropEmpty(m.steps as any);
+  const dropped = droppedParts || droppedSteps;
   const thinks = freezeOpenThinks(m, now);
   const tools = freezeOpenTools(m, now);
-  return thinks || tools;
+  return dropped || thinks || tools;
 }
 
 export function appendThink(m: ChatMsg, delta: string) {

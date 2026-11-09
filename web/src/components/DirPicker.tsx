@@ -6,6 +6,7 @@ import { useStrings } from "../i18n";
 import { IconClose, IconFolder } from "../icons";
 import { shortenPath } from "../lib/format";
 import { getState, setState, showToast, useAppState } from "../store";
+import { isImeKey } from "../lib/ime";
 
 /**
  * Absolute-path picker: type it, reuse a recent one, or walk the filesystem the
@@ -58,7 +59,7 @@ export function DirPicker({
           spellCheck={false}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !isImeKey(e.nativeEvent)) {
               e.preventDefault();
               onCommit?.(value);
             }

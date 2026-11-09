@@ -80,3 +80,21 @@ test("appendThink after a frozen slice opens a new think", () => {
   assert.equal(m.parts[1].text, " more");
   assert.equal(m.parts[1].ms, undefined);
 });
+
+test("settleWork drops the empty placeholder think of a turn stopped before any output", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendThink(m, "");
+  assert.equal(m.parts.length, 1);
+  assert.equal(settleWork(m), true);
+  assert.deepEqual(m.parts, []);
+  assert.deepEqual(m.steps, []);
+});
+
+test("settleWork keeps a think that has text", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendThink(m, "planning the change");
+  settleWork(m);
+  assert.equal(m.parts.length, 1);
+  assert.equal(m.parts[0].text, "planning the change");
+  assert.equal(m.steps.length, 1);
+});

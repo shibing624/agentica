@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **`task` 子智能体支持 `model_tier` 选择（`auxiliary` / `main`），并在轨迹页与任务卡片中展示实际运行的模型名**：① `BuiltinTaskTool.task` 与 `SubagentRegistry.spawn` 新增 `model_tier` 覆盖参数（`"auxiliary"` 默认使用辅助模型，复杂任务可传 `"main"` 使用父级主模型），并将实际解析出的 `model`（`provider/model_id`）与 `model_tier` 写入 `tool_call` 事件与 `task` 结果 JSON（旧日志自动根据会话 `meta` 与 Profile 的 `auxiliary_model` 回退解析）。② 轨迹页（`TracesPage.tsx`）的调用列表行、模型调用概览工具列表、详情属性栏（`Facts`）以及共用的 `TaskCard` 均展示 `aux · <model>` / `main · <model>` 徽章（主模型与辅助模型不同配色区分）。
 - **`compact_boundary` 日志行新增 `notes_path` 字段，Web 回放的压缩卡片从该字段取笔记路径**：去掉前端从 `<context_window>` 英文提示文案里正则抠路径的回退（后端文案一改就会静默失效）；笔记为空、前言不带 `<session_notes>` 时卡片仍能链接到 `<session>.notes.md`。消息正文裸路径提取不再写死 `/Users/`、`/home/`、`/tmp/` 等前缀白名单，任意 `~/…` 或 `/…/…` 形式的路径都提取，是否存在交给 `/api/workspace/stat` 判定，并把全角标点视为分隔符。
 - **修复 Web / Desktop 下 `~/.agentica/...`（如 `/compact` 生成的 `<session>.notes.md`）在右侧边栏无法显示内容、路径显示不全、无法打开文件的问题**：① **根因**：`/compact` 接口返回的 `notes_path` 将家目录缩写为 `~/.agentica/projects/.../<id>.notes.md`，而前端 `FilePreview`、`FilesPanel`、`MessageFilesCard` 与 `toWorkspaceRelative` 原来只认 `"/"` 开头为绝对路径、把 `"~/..."` 当成了当前项目 `root` 下的相对路径，导致请求变成 `root=/Users/.../agentica&path=~/.agentica/...`（404 报「该类型不支持预览」）且传给 `/api/open` 的路径被拼成 `"/Users/.../agentica/~/.agentica/..."`（404 打不开文件）。② **修复**：新增 `isAbsOrHomePath`、`splitExternalTarget` 与 `normalizeMentionedPath`（`web/src/lib/file-path.ts`），对 `~/...` 和 `/...` 统一以其自身父目录作为 `targetRoot` 调用 `/api/workspace/content` 与 `/api/workspace/stat`，并将原路径直接传给 `/api/open`；同时将 `CompactCard` 与预览栏头部的长路径改为「目录可收缩省略 + 文件名完整保留」两段式展示，支持从正文裸路径提取 `~/...` / `/Users/...` 文件到消息底部文件卡片。
 - **Web / Desktop 将「能力扩展（Plugins）」「账号管理（Users）」等独立弹层/路由统一收归至「设置」弹窗标签页**：侧栏与左下角账户菜单点击能力扩展、账号管理、个人助理、定时任务等均直接打开 `SettingsModal` 对应标签页，移除重复的独立 `PluginsPanel` 遮罩层与顶层 `/users`、`/assistant` 切换，弹窗内表单与反馈提示样式统一对齐。
@@ -78,6 +79,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README 改为纯用户视角**。去掉安装包内置运行时说明、`uv tool` 子命令细节、环境变量与配置片段、Docker 命令以及 SDK 代码块，全部移入对应 `docs/` 页面；首页聚焦 Desktop、CLI、Web/IM 与 SDK 四种使用方式的下载和文档入口。
 
 #### fixes
+- **Web / Desktop 前端一轮集中修复（浏览器实测 + 代码审查）**：
+  - 切换会话再切回时滚动位置不对：每个会话单独记住 `{scrollTop, 是否吸底}`；离开时在底部的会话切回仍在底部，停在历史中间的回到原处。原因是两个 `useLayoutEffect` 顺序反了，先用上一个会话的「不吸底」状态跳过了滚底，`ResizeObserver` 也没有在内容撑高时跟随。
+  - 已停止的回合刷新后显示 `[User interrupted the response]`，失败回合显示 `[Run failed: …]`：这是写给模型的标记。日志的 assistant 行新增 `partial_content`（展示用）和 `error` 字段，前端按 `finish_reason` 渲染「已停止」/错误状态，不再展示标记；旧日志行没有这些字段，显示不变。停止后残留的空「思考」块在回合结束时清掉。
+  - 中文输入法：组字时按 Enter 会直接发送或选中补全项。输入框、斜杠菜单、模型/技能选择器、侧栏重命名与搜索、目录选择器统一跳过 IME 组字中的 Enter。
+  - 发送后紧接着再按一次 Enter（输入框已空）会把刚开始的回合停掉：发送后 1.5 秒内的空 Enter 不再触发停止。
+  - 模型下拉 / 设置弹窗里的搜索框按 Esc 直接关闭整个下拉或弹窗：现在第一次 Esc 清空搜索词，第二次才关闭；设置里未保存的表单（如新建技能）按 Esc 不会被一并关掉；嵌套对话框的遮罩点击不再穿透关闭底层设置弹窗。
+  - 正在拉取会话列表时删除或归档会话，旧的响应回来后会让它重新出现：合并服务端列表时保留本次请求发出后的本地删除/归档。
+  - 刷新/重连时两次 `resumeLiveStream` 并发进入，会出现重复的用户气泡和两路流：加同步的进行中标记。
+  - 审批卡片切到下一条审批时沿用上一条的输入状态：按 `toolCallId` 重建。
+  - 侧栏全文搜索点击命中项后结果列表被清空并重新加载：搜索不再依赖当前会话。
+  - 直接访问或刷新 `/plugins` 返回 404：网关把 `/plugins` 也交给前端路由。
+  - 轨迹页详情区的复制按钮压住正文首行。
+  - 关闭设置弹窗后再打开，定时任务按钮仍是「处理中」。
 - **后台任务和子智能体的回报不再显示成用户的提问**。CLI 里 `execute` 后台命令结束、`delegate` 子会话交回结果、其他会话发来消息时，回报会作为新的一轮交给 agent。Web / Desktop 原来把这一轮画成右侧的用户气泡，和用户真正的提问混在一起，minimap 也给它一个刻度，侧栏的「最后提问时间」也按它算。日志里这类行本来就带 `automated: true`（2026-10-18 起写入），现在按这个标记处理：显示为助手一侧的一行灰色「自动回报」提示，只露出回报的第一行（如 `Background terminal #4 (term_4) failed: exit -15 after 35s`），点击展开全文；不进 minimap，不参与「最后提问时间」。轨迹页里这类行的类型是「自动回报」，由它开启的轮次标为「第 N 轮 · 自动回报」，轨迹分析每轮新增 `automated` 字段。2026-10-18 之前写入的日志没有这个标记，仍按用户消息显示，不靠文本内容去猜。
 - 侧栏收起后左上角的「新建对话」图标从铅笔改为加号。
 - **任务清单在任务完成后仍显示转圈**。聊天记录里的 `write_todos` 是写入那一刻的快照，其中的 `in_progress` 项一直用旋转图标显示。现在只有输入框上方的任务面板在回合运行中才转圈，其他地方的进行中项显示为静止的蓝色圆圈。

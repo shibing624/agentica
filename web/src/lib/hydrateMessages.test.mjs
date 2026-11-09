@@ -53,6 +53,34 @@ test("plain user/assistant text still hydrates as two bubbles", () => {
   assert.equal(parts(msgs[1]).some((p) => p.kind === "tool"), false);
 });
 
+test("a stopped or failed turn shows its partial answer, not the model-facing marker", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "q1", timestamp: "2026-08-28T01:00:00.000Z" },
+    {
+      type: "assistant",
+      content: "half\n\n[User interrupted the response]",
+      partial_content: "half",
+      finish_reason: "cancelled",
+      timestamp: "2026-08-28T01:00:02.000Z",
+    },
+    { type: "user", content: "q2", timestamp: "2026-08-28T01:01:00.000Z" },
+    {
+      type: "assistant",
+      content: "[Run failed: boom]",
+      partial_content: "",
+      finish_reason: "error",
+      error: "boom",
+      timestamp: "2026-08-28T01:01:02.000Z",
+    },
+  ]);
+  assert.equal(msgs.length, 4);
+  assert.equal(msgs[1].content, "half");
+  assert.equal(msgs[1].aborted, true);
+  assert.equal(msgs[3].content, "");
+  assert.equal(msgs[3].error, "boom");
+  assert.equal(msgs[3].aborted, undefined);
+});
+
 test("one user turn folds tool_calls + tool rows into the assistant work group", () => {
   const msgs = eventsToChatMsgs([
     { type: "user", content: "where is persist?", timestamp: "2026-08-28T01:00:00.000Z" },

@@ -36,6 +36,7 @@ export type StreamFollow = {
 export function createStreamFollow(): StreamFollow {
   let stick = true;
   let lastTop: number | null = null;
+  let lastHeight: number | null = null;
   let touchY: number | null = null;
   return {
     get stick() { return stick; },
@@ -51,12 +52,15 @@ export function createStreamFollow(): StreamFollow {
     scrolled(m) {
       const dist = m.scrollHeight - m.scrollTop - m.clientHeight;
       const prev = lastTop;
+      const prevHeight = lastHeight;
       lastTop = m.scrollTop;
+      lastHeight = m.scrollHeight;
       if (prev === null) {
-        stick = dist < 80;
+        if (dist < 80) stick = true;
         return;
       }
-      if (m.scrollTop < prev && dist > 1) {
+      const sameHeight = prevHeight === null || m.scrollHeight === prevHeight;
+      if (sameHeight && m.scrollTop < prev && dist > 1) {
         stick = false;
         return;
       }
@@ -65,6 +69,7 @@ export function createStreamFollow(): StreamFollow {
     resume() {
       stick = true;
       lastTop = null;
+      lastHeight = null;
     },
     leave() { stick = false; },
   };
@@ -77,6 +82,7 @@ export type ScrollContainer = {
 };
 
 export function stickToBottom(el: ScrollContainer, follow: StreamFollow): void {
+  follow.resume();
   el.scrollTop = el.scrollHeight;
   follow.scrolled({
     scrollTop: el.scrollTop,

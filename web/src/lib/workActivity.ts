@@ -111,6 +111,8 @@ export type TaskResult = {
   status: string;
   subagentName: string;
   subagentType: string;
+  model?: string;
+  modelTier?: string;
   executionMs?: number;
   toolCount: number;
   steps: Array<{ name: string; info: string }>;
@@ -135,6 +137,8 @@ export function parseTaskResult(text: string | undefined): TaskResult | null {
     status: String(data.status || (data.success ? "completed" : "error")),
     subagentName: String(data.subagent_name || data.subagent_type || ""),
     subagentType: String(data.subagent_type || ""),
+    model: data.model ? String(data.model) : undefined,
+    modelTier: data.model_tier ? String(data.model_tier) : undefined,
     executionMs: typeof data.execution_time === "number" ? Math.round(data.execution_time * 1000) : undefined,
     toolCount: Number(data.tool_count || steps.length) || 0,
     steps,

@@ -45,8 +45,13 @@ import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import type { FileEdits } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
+import { isImeKey } from "../lib/ime";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
+/** Start fetching the previous page this far before the reader reaches the top. */
+const OLDER_PREFETCH_PX = 800;
+/** How long a spliced-in page may keep growing before the reader's position is let go. */
+const PAGING_HOLD_MS = 1500;
 const msgKeys = new WeakMap<ChatMsg, number>();
 let nextMsgKey = 1;
 function keyOfMsg(m: ChatMsg): string | number {
@@ -73,10 +78,19 @@ export function ChatPage() {
   const hadGoalCompose = useRef(false);
   const goalBudgetSnapshot = useRef("");
   const msgsRef = useRef<HTMLDivElement>(null);
+  const msgsInnerRef = useRef<HTMLDivElement>(null);
   const chatWrapRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(createStreamFollow());
+  const sessionScrollRef = useRef<Map<string, { scrollTop: number; stick: boolean }>>(new Map());
+  const activeSessRef = useRef<{ id: string | null; hasMsgs: boolean }>({ id: null, hasMsgs: false });
+  const prevStreamingRef = useRef(false);
   const pagingAnchorRef = useRef<{ node: HTMLElement; top: number; head: ChatMsg | undefined } | null>(null);
+  // After a page is spliced in above the viewport its messages keep growing for a
+  // moment (lazy markdown, round stats). `.chat` has overflow-anchor:none, so hold
+  // the reader's message in place until that settles or they scroll themselves.
+  const pagingHoldRef = useRef<{ node: HTMLElement; top: number; until: number } | null>(null);
+  const olderFailedRef = useRef(new Set<string>());
   const [showJump, setShowJump] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -170,18 +184,20 @@ export function ChatPage() {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // A layer that owns focus handles its own Escape first (the model
+      // search clears its query before closing); this only closes the rest.
+      if (e.defaultPrevented) return;
       e.preventDefault();
-      e.stopPropagation();
       if (plusOpen || getState().composerPicker) requestAnimationFrame(() => taRef.current?.focus());
       setCtxOpen(false);
       setPlusOpen(false);
       setState({ modelDDOpen: false, approvalMenuOpen: false, composerPicker: null });
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("keydown", onKey);
     };
   }, [s.modelDDOpen, s.approvalMenuOpen, ctxOpen, plusOpen, s.composerPicker]);
   useEffect(() => {
@@ -196,8 +212,12 @@ export function ChatPage() {
   useEffect(() => {
     if (!pendingReq) return;
     const onKey = (e: KeyboardEvent) => {
-      if (s.modelDDOpen || s.approvalMenuOpen || s.composerPicker) return;
-      if (e.isComposing || e.keyCode === 229) return;
+      if (s.modelDDOpen || s.approvalMenuOpen || s.composerPicker || plusOpen || ctxOpen) return;
+      if (isImeKey(e)) return;
+      // Typing somewhere else on the page (sidebar search, a dialog field)
+      // must not decide a tool call; the composer itself is disabled here.
+      const t = e.target as HTMLElement | null;
+      if (t && t !== document.body && t.closest("input, textarea, select, [contenteditable='true'], .dlg-overlay, .settings-overlay")) return;
       const action = approvalKeyAction(e.key, { shiftKey: e.shiftKey });
       if (!action) return;
       e.preventDefault();
@@ -206,7 +226,7 @@ export function ChatPage() {
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, s.composerPicker]);
+  }, [pendingReq?.toolCallId, s.modelDDOpen, s.approvalMenuOpen, s.composerPicker, plusOpen, ctxOpen]);
   useEffect(() => {
     const onHide = () => { pageUnloading = true; };
     const onShow = () => { pageUnloading = false; };
@@ -238,19 +258,15 @@ export function ChatPage() {
     }
   }, [s.curSess, streaming]);
 
-  useLayoutEffect(() => {
-    const anchor = pagingAnchorRef.current;
+  const saveCurrentSessionScroll = () => {
     const el = msgsRef.current;
-    if (anchor && el && el.contains(anchor.node) && cur?.msgs[0] !== anchor.head) {
-      pagingAnchorRef.current = null;
-      const nowTop = anchor.node.getBoundingClientRect().top - el.getBoundingClientRect().top;
-      el.scrollTop += nowTop - anchor.top;
-      syncJump();
-      return;
-    }
-    if (!el || !followRef.current.stick) return;
-    stickToBottom(el, followRef.current);
-  });
+    const active = activeSessRef.current;
+    if (!el || !active.id || !active.hasMsgs) return;
+    sessionScrollRef.current.set(active.id, {
+      scrollTop: el.scrollTop,
+      stick: followRef.current.stick,
+    });
+  };
 
   const syncJump = () => {
     const el = msgsRef.current;
@@ -262,6 +278,120 @@ export function ChatPage() {
         !!(cur && cur.msgs.length),
     );
   };
+
+  /** Reading near the top pulls the previous page in, no button. A reader at the
+   *  bottom (or a transcript too short to scroll) keeps the bottom pinned while it
+   *  grows; one scrolled up keeps the first visible message where it was. */
+  const maybeLoadOlder = (fromScroll = false) => {
+    const el = msgsRef.current;
+    const id = activeSessRef.current.id;
+    const sess = id ? getState().sessions[id] : undefined;
+    if (!el || !id || !sess || !sess.msgs.length || !sess.hasOlder || sess.loadingOlder) return;
+    // A failed page is retried only when the reader scrolls again, not on every render.
+    if (fromScroll) olderFailedRef.current.delete(id);
+    else if (olderFailedRef.current.has(id)) return;
+    if (pagingAnchorRef.current || el.scrollTop > OLDER_PREFETCH_PX) return;
+    if (!followRef.current.stick) {
+      const first = el.querySelector<HTMLElement>(".m");
+      if (first) {
+        pagingAnchorRef.current = {
+          node: first,
+          top: first.getBoundingClientRect().top - el.getBoundingClientRect().top,
+          head: sess.msgs[0],
+        };
+      }
+    }
+    void loadOlderMessages(id).then((loaded) => {
+      if (loaded) return;
+      pagingAnchorRef.current = null;
+      if (getState().sessions[id]?.hasOlder) olderFailedRef.current.add(id);
+    });
+  };
+
+  useLayoutEffect(() => {
+    const el = msgsRef.current;
+    const hasMsgs = !!(cur && cur.msgs.length);
+    const prev = activeSessRef.current;
+    const switched = prev.id !== s.curSess;
+    const justHydrated = !switched && !prev.hasMsgs && hasMsgs;
+    const startedStreaming = !switched && !prevStreamingRef.current && streaming;
+    activeSessRef.current = { id: s.curSess, hasMsgs };
+    prevStreamingRef.current = streaming;
+
+    if (switched) {
+      pagingAnchorRef.current = null;
+    }
+    if (startedStreaming) {
+      followRef.current.resume();
+    }
+
+    if (switched || justHydrated) {
+      const saved = s.curSess ? sessionScrollRef.current.get(s.curSess) : undefined;
+      if (!saved || saved.stick) {
+        followRef.current.resume();
+        if (el) stickToBottom(el, followRef.current);
+        if (hasMsgs) saveCurrentSessionScroll();
+        syncJump();
+        queueMicrotask(maybeLoadOlder);
+        return;
+      }
+      if (el && hasMsgs) {
+        el.scrollTop = saved.scrollTop;
+        followRef.current.scrolled({
+          scrollTop: el.scrollTop,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+        });
+      }
+      followRef.current.leave();
+      syncJump();
+      queueMicrotask(maybeLoadOlder);
+      return;
+    }
+
+    const anchor = pagingAnchorRef.current;
+    if (anchor && el && el.contains(anchor.node) && cur?.msgs[0] !== anchor.head) {
+      pagingAnchorRef.current = null;
+      const nowTop = anchor.node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      el.scrollTop += nowTop - anchor.top;
+      pagingHoldRef.current = { node: anchor.node, top: anchor.top, until: Date.now() + PAGING_HOLD_MS };
+      saveCurrentSessionScroll();
+      syncJump();
+      queueMicrotask(maybeLoadOlder);
+      return;
+    }
+    if (!el || !followRef.current.stick) {
+      queueMicrotask(maybeLoadOlder);
+      return;
+    }
+    stickToBottom(el, followRef.current);
+    if (hasMsgs) saveCurrentSessionScroll();
+    syncJump();
+    queueMicrotask(maybeLoadOlder);
+  });
+
+  useEffect(() => {
+    const inner = msgsInnerRef.current;
+    const el = msgsRef.current;
+    if (!inner || !el) return;
+    const ro = new ResizeObserver(() => {
+      const hold = pagingHoldRef.current;
+      if (hold) {
+        if (Date.now() < hold.until && el.contains(hold.node)) {
+          const nowTop = hold.node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+          if (nowTop !== hold.top) el.scrollTop += nowTop - hold.top;
+          return;
+        }
+        pagingHoldRef.current = null;
+      }
+      if (pagingAnchorRef.current || !followRef.current.stick) return;
+      stickToBottom(el, followRef.current);
+      saveCurrentSessionScroll();
+      syncJump();
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const ta = taRef.current;
@@ -289,11 +419,6 @@ export function ChatPage() {
   const ctxPct = Math.min(100, Math.round((occupancy / windowSize) * 100));
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
   const files = useFilesPanel(s.curSess, workspace);
-  useLayoutEffect(() => {
-    pagingAnchorRef.current = null;
-    followRef.current.resume();
-    setShowJump(false);
-  }, [s.curSess]);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
   // Each chat runs on its own model; a new-chat screen shows the project's
   // default (or the one picked there) until the chat exists.
@@ -362,24 +487,26 @@ export function ChatPage() {
             sessionId={s.curSess}
             msgCount={cur?.msgs.length || 0}
             areaRef={msgsRef}
-            onLeaveFollow={() => followRef.current.leave()}
+            onLeaveFollow={() => { followRef.current.leave(); saveCurrentSessionScroll(); }}
           />
           <div className="chat" id="chatArea" ref={msgsRef}
-            onWheel={(e) => { followRef.current.wheel(e.deltaY); syncJump(); }}
-            onTouchStart={(e) => followRef.current.touchStart(e.touches[0]?.clientY ?? 0)}
-            onTouchMove={(e) => { followRef.current.touchMove(e.touches[0]?.clientY ?? 0); syncJump(); }}
+            onWheel={(e) => { pagingHoldRef.current = null; followRef.current.wheel(e.deltaY); saveCurrentSessionScroll(); syncJump(); }}
+            onTouchStart={(e) => { pagingHoldRef.current = null; followRef.current.touchStart(e.touches[0]?.clientY ?? 0); }}
+            onTouchMove={(e) => { followRef.current.touchMove(e.touches[0]?.clientY ?? 0); saveCurrentSessionScroll(); syncJump(); }}
             onTouchEnd={() => followRef.current.touchEnd()}
             onScroll={() => {
               const el = msgsRef.current;
-              if (!el) return;
+              if (!el || activeSessRef.current.id !== s.curSess) return;
               followRef.current.scrolled({
                 scrollTop: el.scrollTop,
                 scrollHeight: el.scrollHeight,
                 clientHeight: el.clientHeight,
               });
+              saveCurrentSessionScroll();
               syncJump();
+              maybeLoadOlder(true);
             }}>
-            <div className="msgs">
+            <div className="msgs" ref={msgsInnerRef}>
               {!cur || !cur.msgs.length ? (
                 <div className="welcome welcome-new">
                   <Logo className="w-icon-img" />
@@ -389,27 +516,8 @@ export function ChatPage() {
               ) : (
                 <>
                   {cur.hasOlder && (
-                    <div className="chat-older">
-                      <button
-                        type="button"
-                        disabled={!!cur.loadingOlder}
-                        onClick={() => {
-                          if (!s.curSess) return;
-                          followRef.current.leave();
-                          const el = msgsRef.current;
-                          const first = el?.querySelector<HTMLElement>(".m");
-                          if (el && first) {
-                            pagingAnchorRef.current = {
-                              node: first,
-                              top: first.getBoundingClientRect().top - el.getBoundingClientRect().top,
-                              head: cur.msgs[0],
-                            };
-                          }
-                          void loadOlderMessages(s.curSess);
-                        }}
-                      >
-                        {cur.loadingOlder ? S.common.loading : S.chat.loadOlder}
-                      </button>
+                    <div className="chat-older" aria-live="polite">
+                      {cur.loadingOlder && <><IconSpinner /><span>{S.common.loading}</span></>}
                     </div>
                   )}
                   {cur.msgs.map((m, i) => (
@@ -426,7 +534,7 @@ export function ChatPage() {
           <ChatNav
             msgs={cur?.msgs || []}
             areaRef={msgsRef}
-            onLeaveFollow={() => followRef.current.leave()}
+            onLeaveFollow={() => { followRef.current.leave(); saveCurrentSessionScroll(); }}
           />
           {showJump && (
             <button type="button" className="scroll-bottom-btn visible" title={S.chat.jumpLatest} aria-label={S.chat.jumpLatest}
@@ -434,6 +542,7 @@ export function ChatPage() {
                       const el = msgsRef.current;
                       followRef.current.resume();
                       if (el) stickToBottom(el, followRef.current);
+                      saveCurrentSessionScroll();
                       setShowJump(false);
                     }}>
               <IconChevronDown />
@@ -442,6 +551,7 @@ export function ChatPage() {
           <div className="input-area" ref={inputAreaRef}>
           {pendingReq && (
             <ApprovalCard
+              key={pendingReq.toolCallId}
               req={pendingReq}
               queueIndex={0}
               queueTotal={pendingApprovals.length}
@@ -613,6 +723,7 @@ export function ChatPage() {
                 if (overSkillToken(e.clientX, e.clientY)) files.openSkill(skillToken.name);
               }}
               onKeyDown={(e) => {
+                if (isImeKey(e.nativeEvent)) return;
                 if (slashOpen && slashItems.length && !compacting) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
@@ -640,7 +751,7 @@ export function ChatPage() {
                   void stopGen();
                   return;
                 }
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   if (compacting) {
                     showToast(S.chat.compactWait);
@@ -1099,6 +1210,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           onOpenFile={onOpenFile}
           onOpenDiff={(files, path) => onOpenReview(turn, files, path)}
           live={!!live}
+          role={m.role}
         />
         {m.aborted && <div className="msg-note">{S.chat.aborted}</div>}
         {m.error && (
@@ -1500,7 +1612,7 @@ function QueueInlineEditor({
           onCancel();
           return;
         }
-        if (e.nativeEvent.isComposing || (e.nativeEvent as any).keyCode === 229) return;
+        if (isImeKey(e.nativeEvent)) return;
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           onSave();
@@ -1559,12 +1671,19 @@ function ensureSession(): string | null {
   return getState().curSess;
 }
 
+/** When the composer last handed text off. Empty Enter stops a running turn,
+ *  so a key-repeat or double press right after sending must not land as
+ *  "stop" on the turn it just started. */
+let lastSubmitAt = 0;
+const STOP_GRACE_MS = 600;
+
 async function submit() {
   const st = getState();
   if (st.curSess && st.streams[st.curSess]?.pendingApprovals?.[0]) return;
   const text = st.inputText.trim();
   const files = st.pendingFiles.slice();
   const S = getStrings();
+  if (text || files.length) lastSubmitAt = Date.now();
 
   if (st.goalCompose) {
     const budget = parseTokenBudget(st.goalCompose.budgetText);
@@ -1593,7 +1712,7 @@ async function submit() {
 
   if (!text && !files.length) {
     const sessId = st.curSess;
-    if (sessId && isBusy(sessId) && !isCompacting(sessId)) {
+    if (sessId && isBusy(sessId) && !isCompacting(sessId) && Date.now() - lastSubmitAt > STOP_GRACE_MS) {
       await stopGen();
     }
     return;
@@ -1900,11 +2019,26 @@ async function watchRun(
   return true;
 }
 
+/** Sessions a resume is already attaching to. switchTo and syncFromServer
+ *  can both ask for one; without this both pass the `streams` check before
+ *  either has awaited the active run, and the turn gets two streams. */
+const resuming = new Set<string>();
+
 async function resumeLiveStream(sessId: string) {
-  if (getState().streams[sessId]) return;
+  if (getState().streams[sessId] || resuming.has(sessId)) return;
+  resuming.add(sessId);
+  try {
+    await attachLiveStream(sessId);
+  } finally {
+    resuming.delete(sessId);
+  }
+}
+
+async function attachLiveStream(sessId: string) {
   const sess = getState().sessions[sessId];
   if (!sess) return;
   const { ok, data } = await api.fetchActiveRun(sessId);
+  if (getState().streams[sessId]) return;
   const run = (ok && data?.run) ? data.run : null;
   if (!run) {
     if (sess) sess.running = false;

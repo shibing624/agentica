@@ -766,7 +766,13 @@ def _task_call_fields(raw_args: Any) -> Optional[Dict[str, Any]]:
         "description": str(args.get("description") or ""),
         "subagentType": str(args.get("subagent_type") or "explore"),
     }
-    for src, dst in (("timeout", "timeout"), ("max_turns", "maxTurns"), ("resume_from_run_id", "resumeFrom")):
+    for src, dst in (
+        ("timeout", "timeout"),
+        ("max_turns", "maxTurns"),
+        ("resume_from_run_id", "resumeFrom"),
+        ("model_tier", "modelTier"),
+        ("model", "model"),
+    ):
         if args.get(src) not in (None, ""):
             out[dst] = args[src]
     return out
@@ -804,7 +810,49 @@ def _task_result_fields(content: Any) -> Optional[Dict[str, Any]]:
         out["executionMs"] = int(round(data["execution_time"] * 1000))
     if data.get("run_id"):
         out["runId"] = str(data["run_id"])
+    if data.get("model"):
+        out["model"] = str(data["model"])
+    if data.get("model_tier"):
+        out["modelTier"] = str(data["model_tier"])
     return out
+
+
+def _resolve_legacy_task_model(
+    subagent_type: str,
+    explicit_tier: str,
+    meta: Optional[Dict[str, Any]],
+) -> Tuple[str, str]:
+    """Resolve ``(model_label, model_tier)`` for a ``task`` row when older logs did not record ``model``."""
+    from agentica.subagents import get_subagent_config
+
+    cfg = get_subagent_config(subagent_type or "explore")
+    tier = (
+        explicit_tier
+        if explicit_tier in ("auxiliary", "main")
+        else (cfg.model_tier if cfg is not None else "auxiliary")
+    )
+    meta_dict = meta or {}
+    main_model = str(meta_dict.get("model") or "").strip()
+    main_provider = str(meta_dict.get("provider") or "").strip().lower()
+    if not main_model:
+        return "", tier
+    main_label = f"{main_provider}/{main_model}" if main_provider and "/" not in main_model else main_model
+    if tier == "main":
+        return main_label, "main"
+    try:
+        from agentica.config.profiles import get_profiles
+
+        for prof in get_profiles().values():
+            if not isinstance(prof, dict) or prof.get("model_name") != main_model:
+                continue
+            aux = prof.get("auxiliary_model")
+            if isinstance(aux, dict) and aux.get("model_name"):
+                aux_name = str(aux["model_name"]).strip()
+                aux_prov = str(aux.get("model_provider") or prof.get("model_provider") or "").strip().lower()
+                return (f"{aux_prov}/{aux_name}" if aux_prov and "/" not in aux_name else aux_name), "auxiliary"
+    except Exception:
+        pass
+    return main_label, tier
 
 
 def _entry_row(
@@ -813,6 +861,7 @@ def _entry_row(
     paired: Dict[int, int],
     consumed: set,
     args_by_id: Dict[str, Tuple[str, str]],
+    meta: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     entry = messages[mi]
     entry_type = entry.get("type", "")
@@ -876,11 +925,23 @@ def _entry_row(
             tool_name, raw_args = args_by_id.get(call_id, ("", ""))
             row["toolName"] = entry.get("tool_name") or tool_name
             row["toolCallId"] = call_id
+            if isinstance(entry.get("model"), str) and entry["model"].strip():
+                row["toolModel"] = entry["model"].strip()
             row["summary"] = f"{row['toolName']} {_clip(raw_args, SUMMARY_CHAR_CAP)}".strip()
             row["detail"] = _detail(_pretty_json(raw_args)) if raw_args else ""
             if row["toolName"] == "task":
                 task = _task_call_fields(raw_args)
                 if task is not None:
+                    fallback_model, fallback_tier = _resolve_legacy_task_model(
+                        str(task.get("subagentType") or "explore"),
+                        str(task.get("modelTier") or "").strip().lower(),
+                        meta,
+                    )
+                    resolved_model = row.get("toolModel") or str(task.get("model") or "") or fallback_model
+                    if resolved_model:
+                        row["toolModel"] = resolved_model
+                    if fallback_tier:
+                        row["toolModelTier"] = fallback_tier
                     row["task"] = task
                     if task["description"]:
                         row["summary"] = f"task {_clip(task['description'], SUMMARY_CHAR_CAP)}"
@@ -938,6 +999,19 @@ def _entry_row(
         if row["toolName"] == "task":
             task = _task_result_fields(content)
             if task is not None:
+                fallback_model, fallback_tier = _resolve_legacy_task_model(
+                    str(task.get("subagentType") or "explore"),
+                    str(task.get("modelTier") or "").strip().lower(),
+                    meta,
+                )
+                if not task.get("model") and fallback_model:
+                    task["model"] = fallback_model
+                if not task.get("modelTier") and fallback_tier:
+                    task["modelTier"] = fallback_tier
+                if task.get("model"):
+                    row["toolModel"] = task["model"]
+                if task.get("modelTier"):
+                    row["toolModelTier"] = task["modelTier"]
                 row["task"] = task
                 head = task["subagentName"] or "task"
                 body = task["error"] if not task["success"] and task["error"] else task["result"]
@@ -1021,7 +1095,7 @@ def _build_rounds(
         consumed = set(paired.values())
         entries: List[Dict[str, Any]] = []
         for mi in indices:
-            row = _entry_row(messages, mi, paired, consumed, args_by_id)
+            row = _entry_row(messages, mi, paired, consumed, args_by_id, meta)
             if row is not None:
                 entries.append(row)
 
@@ -1136,6 +1210,10 @@ def _round_calls(
             }
             if e.get("task"):
                 row["body"]["taskCall"] = e["task"]
+            if e.get("toolModel"):
+                row["toolModel"] = e["toolModel"]
+            if e.get("toolModelTier"):
+                row["toolModelTier"] = e["toolModelTier"]
             if model is not None:
                 model["toolCalls"] += 1
                 tc_ref = {
@@ -1148,6 +1226,10 @@ def _round_calls(
                     "isError": False,
                     "durationMs": None,
                 }
+                if row.get("toolModel"):
+                    tc_ref["toolModel"] = row["toolModel"]
+                if row.get("toolModelTier"):
+                    tc_ref["toolModelTier"] = row["toolModelTier"]
                 model["body"]["toolCalls"].append(tc_ref)
                 if call_id:
                     tc_refs[call_id] = tc_ref
@@ -1177,6 +1259,10 @@ def _round_calls(
             row["body"]["result"] = e["detail"]
             if e.get("task"):
                 row["body"]["taskResult"] = e["task"]
+            if e.get("toolModel"):
+                row["toolModel"] = e["toolModel"]
+            if e.get("toolModelTier"):
+                row["toolModelTier"] = e["toolModelTier"]
             if e.get("durationMs") is not None:
                 row["durationMs"] = e["durationMs"]
             elif row["startTs"] and row["endTs"]:
@@ -1186,6 +1272,10 @@ def _round_calls(
                 tc_ref["resultSummary"] = e["summary"]
                 tc_ref["isError"] = bool(e.get("isError"))
                 tc_ref["durationMs"] = row["durationMs"]
+                if row.get("toolModel"):
+                    tc_ref["toolModel"] = row["toolModel"]
+                if row.get("toolModelTier"):
+                    tc_ref["toolModelTier"] = row["toolModelTier"]
             continue
         # user / steering / system_prompt / assistant (pre-event logs) /
         # compact_boundary / goal: a row of their own, body as is.

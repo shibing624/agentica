@@ -448,10 +448,12 @@ async def post_card_hook(request: Request) -> JSONResponse:
 @app.get("/users/{full_path:path}", response_class=HTMLResponse)
 @app.get("/assistant", response_class=HTMLResponse)
 @app.get("/assistant/{full_path:path}", response_class=HTMLResponse)
+@app.get("/plugins", response_class=HTMLResponse)
+@app.get("/plugins/{full_path:path}", response_class=HTMLResponse)
 @app.get("/login", response_class=HTMLResponse)
 async def web_spa(full_path: str = ""):
     """Serve the SPA shell. Client router owns /chat, /traces, /users,
-    /assistant and /login.
+    /assistant, /plugins and /login.
 
     ``/login`` is outside the token gate (see ``auth._OPEN_PATHS``) — it is the
     one page a signed-out browser must be able to load.

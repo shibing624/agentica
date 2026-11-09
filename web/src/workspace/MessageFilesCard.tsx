@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
-import { IconChevronDown, IconExternal, IconFileCode, IconFinder } from "../icons";
+import { FileTypeIcon, IconChevronDown, IconExternal, IconFileCode, IconFinder } from "../icons";
 import { fileEditsOf, type FileEdit } from "../lib/fileEdits";
 import { fileDiffsOf, type FileEdits } from "../lib/fileDiff";
 import {
@@ -38,7 +38,7 @@ function absPath(workspace: string, rel: string) {
  * file with the OS default app or show it in its folder.
  */
 export function MessageFilesCard({
-  text, steps, uploaded, workspace, onOpenFile, onOpenDiff, live,
+  text, steps, uploaded, workspace, onOpenFile, onOpenDiff, live, role,
 }: {
   text: string;
   steps?: Array<Record<string, any>>;
@@ -48,6 +48,7 @@ export function MessageFilesCard({
   /** Open this round's review tab on `path`; `files` is every file the round changed. */
   onOpenDiff: (files: FileEdits[], path: string) => void;
   live?: boolean;
+  role?: "user" | "assistant";
 }) {
   const S = useStrings();
   const edits = useMemo(() => {
@@ -119,6 +120,7 @@ export function MessageFilesCard({
       <button type="button" className="mfc-path"
               title={`${absPath(workspace, rel)}\n${diff ? S.chat.openDiff : S.chat.openPreview}`}
               onClick={() => (diff ? onOpenDiff(reviewFiles, rel) : onOpenFile(rel))}>
+        <FileTypeIcon path={rel} size={15} />
         <PathLabel path={rel} />
       </button>
       <span className="mfc-actions">
@@ -148,10 +150,13 @@ export function MessageFilesCard({
   // The round's whole edit volume, so the header says how big the turn was.
   const added = edited.reduce((n, e) => n + e.added, 0);
   const removed = edited.reduce((n, e) => n + e.removed, 0);
+  const mentionedTitle = role === "user"
+    ? S.chat.filesMentionedQuery(mentioned.length)
+    : S.chat.filesMentioned(mentioned.length);
   const headText = (
     <span className="mfc-head-text">
       <span className="mfc-title">
-        {edited.length ? S.chat.filesEdited(edited.length) : S.chat.filesMentioned(mentioned.length)}
+        {edited.length ? S.chat.filesEdited(edited.length) : mentionedTitle}
       </span>
       <span className="mfc-sub">
         {edited.length > 0 && (
@@ -183,7 +188,7 @@ export function MessageFilesCard({
       <div className="mfc-body">
         {editedVisible.map((e) => row(e.path, e))}
         {edited.length > 0 && mentionedVisible.length > 0 && (
-          <div className="mfc-section">{S.chat.filesMentioned(mentioned.length)}</div>
+          <div className="mfc-section">{mentionedTitle}</div>
         )}
         {mentionedVisible.map((p) => row(p))}
         {foldable && (

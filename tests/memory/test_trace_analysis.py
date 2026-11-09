@@ -408,6 +408,59 @@ class TestRoundView:
         assert task["result"].startswith("xxx")
         assert out["summary"].startswith("Explore Agent · completed · ")
 
+    def test_task_rows_surface_resolved_model_and_tier_in_calls_and_body(self):
+        result = {
+            "success": True,
+            "subagent_type": "code",
+            "subagent_name": "Code Agent",
+            "model": "openai/claude-opus-5-5",
+            "model_tier": "main",
+            "result": "analyzed module",
+            "execution_time": 4.2,
+            "tool_count": 1,
+            "tool_calls_summary": [{"name": "read_file", "info": "a.py"}],
+        }
+        entries = [
+            _e("2026-01-01T00:00:00.100Z", type="user", content="trace module"),
+            _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+            _e(
+                "2026-01-01T00:00:02.000Z",
+                type="event",
+                name="tool_call",
+                tool_call_id="t1",
+                tool_name="task",
+                model="openai/claude-opus-5-5",
+            ),
+            _e("2026-01-01T00:00:02.100Z", type="event", name="request_end", status="completed"),
+            _e(
+                "2026-01-01T00:00:02.200Z",
+                type="assistant",
+                content="",
+                tool_calls=[
+                    {
+                        "id": "t1",
+                        "type": "function",
+                        "function": {
+                            "name": "task",
+                            "arguments": json.dumps(
+                                {"description": "Trace deep module", "subagent_type": "code", "model_tier": "main"}
+                            ),
+                        },
+                    }
+                ],
+            ),
+            _e("2026-01-01T00:00:06.200Z", type="tool", tool_call_id="t1", tool_name="task", content=json.dumps(result)),
+        ]
+        rd = analyze_entries(entries)["rounds"][0]
+        tool_call_row = next(c for c in rd["calls"] if c["kind"] == "tool")
+        assert tool_call_row["toolModel"] == "openai/claude-opus-5-5"
+        assert tool_call_row["toolModelTier"] == "main"
+        assert tool_call_row["body"]["taskResult"]["model"] == "openai/claude-opus-5-5"
+        assert tool_call_row["body"]["taskResult"]["modelTier"] == "main"
+        model_call_row = next(c for c in rd["calls"] if c["kind"] == "model")
+        assert model_call_row["body"]["toolCalls"][0]["toolModel"] == "openai/claude-opus-5-5"
+        assert model_call_row["body"]["toolCalls"][0]["toolModelTier"] == "main"
+
     def test_failed_task_result_shows_its_error(self):
         entries = [
             _e("2026-01-01T00:00:00.100Z", type="user", content="go"),

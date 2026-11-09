@@ -501,10 +501,9 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 /* ===== CHAT ===== */
 .chat{flex:1;min-height:0;overflow-y:auto;padding:0 20px;overflow-anchor:none;scrollbar-gutter:stable}
 .msgs{margin:0 auto;padding:24px;max-width:var(--chat-content-w)}
-.chat-older{display:flex;justify-content:center;margin-bottom:12px}
-.chat-older button{border:none;border-radius:var(--radius-sm);padding:4px 12px;font-size:12px;color:var(--fg2);background:var(--bg3);cursor:pointer;transition:background var(--t),color var(--t)}
-.chat-older button:hover:not(:disabled){background:var(--hover2);color:var(--fg)}
-.chat-older button:disabled{cursor:default;opacity:.6}
+/* Fixed height whether or not a page is in flight, so the spinner never shifts the transcript. */
+.chat-older{display:flex;align-items:center;justify-content:center;gap:6px;height:28px;margin-bottom:8px;font-size:12px;color:var(--fg3)}
+.chat-older svg{width:13px;height:13px}
 .markdown-fallback{white-space:pre-wrap}
 .m{margin-bottom:12px;animation:fu .2s ease}
 .m.streaming{animation:none}
@@ -1590,7 +1589,10 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .mfc-section{padding:8px 16px 2px;font-size:11px;color:var(--fg3)}
 .mfc-row{display:flex;align-items:center;gap:10px;padding:0 10px 0 6px}
 .mfc-row:hover{background:var(--bg3)}
-.mfc-path{flex:1;min-width:0;display:flex;align-items:center;border:none;background:transparent;color:var(--fg);padding:8px 10px;cursor:pointer;text-align:left}
+.mfc-path{flex:1;min-width:0;display:flex;align-items:center;gap:8px;border:none;background:transparent;color:var(--fg);padding:8px 10px;cursor:pointer;text-align:left}
+.files-path{display:inline-flex;align-items:baseline;min-width:0;max-width:100%;font-family:var(--mono);font-size:12.5px}
+.files-path-dir{color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1}
+.files-path-name{color:var(--fg);font-weight:500;white-space:nowrap;flex-shrink:0}
 .mfc-diff{display:inline-flex;gap:6px;font-family:var(--mono);font-size:12px;flex-shrink:0}
 .mfc-diff .add{color:#1a7f37}
 .mfc-diff .del{color:#cf222e}
@@ -1782,6 +1784,10 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .task-status.err{background:rgba(220,38,38,.12);color:#b91c1c}
 .task-status.run{background:rgba(37,99,235,.12);color:#1d4ed8}
 .task-agent{color:var(--fg);font-weight:600}
+.task-model,.tr-tool-model{display:inline-flex;align-items:center;padding:1px 6px;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:500;background:rgba(59,130,246,.1);color:#2563eb;border:var(--hair) solid rgba(59,130,246,.22);flex-shrink:0;white-space:nowrap}
+.task-model.main,.tr-tool-model.main{background:rgba(139,92,246,.12);color:#7c3aed;border-color:rgba(139,92,246,.28)}
+[data-theme="dark"] .task-model,[data-theme="dark"] .tr-tool-model{color:#60a5fa;background:rgba(59,130,246,.15)}
+[data-theme="dark"] .task-model.main,[data-theme="dark"] .tr-tool-model.main{color:#c084fc;background:rgba(139,92,246,.18)}
 .task-num{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums}
 .task-run{font-family:var(--mono);font-size:11px;opacity:.8}
 .task-sec>summary{cursor:pointer;list-style:none;color:var(--fg2);font-size:12px;user-select:none}

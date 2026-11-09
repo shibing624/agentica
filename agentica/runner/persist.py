@@ -732,6 +732,7 @@ class PersistMixin:
         *,
         marker: str,
         finish_reason: str,
+        error: str = "",
     ) -> None:
         """Preserve a turn that ended early instead of discarding it.
 
@@ -829,6 +830,11 @@ class PersistMixin:
             self._persist_assistant_tool_calls(agent)
             _assistant_meta = PersistMixin._provider_replay_meta(last_asst) if last_asst is not None else {}
             _assistant_meta["finish_reason"] = finish_reason
+            # ``content`` must keep the marker (the model reads it to know the
+            # turn stopped); UIs render ``partial_content`` + ``finish_reason``.
+            _assistant_meta["partial_content"] = partial
+            if error:
+                _assistant_meta["error"] = error
             agent._session_log.append("assistant", persisted, **_assistant_meta)
 
     @staticmethod
@@ -926,7 +932,24 @@ class PersistMixin:
             call_id, name = PersistMixin._tool_call_id_and_name(tc)
             if not call_id:
                 continue
-            marks.append((now, "tool_call", {"tool_call_id": call_id, "tool_name": name}))
+            payload: Dict[str, Any] = {"tool_call_id": call_id, "tool_name": name}
+            if name in ("task", "delegate"):
+                fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                raw_args = fn.get("arguments")
+                parsed_args: Optional[dict] = None
+                if isinstance(raw_args, dict):
+                    parsed_args = raw_args
+                elif isinstance(raw_args, str) and raw_args.strip():
+                    try:
+                        val = json.loads(raw_args)
+                        if isinstance(val, dict):
+                            parsed_args = val
+                    except (ValueError, TypeError):
+                        parsed_args = None
+                tool_model = agent.describe_tool_model(name, parsed_args)
+                if tool_model:
+                    payload["model"] = tool_model
+            marks.append((now, "tool_call", payload))
 
         marks.sort(key=lambda m: m[0])
         for at, name, payload in marks:

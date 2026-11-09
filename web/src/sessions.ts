@@ -27,6 +27,15 @@ export const CHAT_PAGE_TURNS = 6;
 /** Minimum interval between passive focus/visibility catalog syncs. */
 const FOCUS_SYNC_COOLDOWN_MS = 5000;
 let lastCatalogLoadAt = 0;
+/** Sessions the user deleted or (un)archived here. A catalog request already
+ *  in flight when that happened answers with the old row, which must not put
+ *  a deleted chat back or undo an archive. Entries expire once a catalog
+ *  that started after the change has landed. */
+const localEdits = new Map<string, { at: number; deleted?: boolean; archived?: boolean }>();
+
+function noteLocalEdit(id: string, edit: { deleted?: boolean; archived?: boolean }) {
+  localEdits.set(id, { at: Date.now(), ...edit });
+}
 
 export function loadSessions(scope: "recent" | "all" = getState().sessionScope): Promise<void> {
   if (catalogFlight?.scope === scope) return catalogFlight.promise;
@@ -34,6 +43,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
   const controller = new AbortController();
   catalogAbort = controller;
   const generation = ++catalogGeneration;
+  const startedAt = Date.now();
   const promise = (async () => {
     const cur = getState();
     const showSpinner = cur.sessionScope !== scope || Object.keys(cur.sessions).length === 0;
@@ -53,6 +63,8 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
     const st = getState();
     for (const sv of data.sessions) {
       const id = sv.session_id;
+      const edit = localEdits.get(id);
+      if (edit?.deleted) continue;
       const lc = local[id] || {};
       const mem = st.sessions[id];
       const dir = sv.work_dir || st.serverDir || "";
@@ -70,7 +82,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         costUsd: mem?.costUsd || lc.costUsd || 0,
         dir,
         projectId: projectIdForDir(dir),
-        archived: !!sv.archived,
+        archived: edit && edit.archived !== undefined ? edit.archived : !!sv.archived,
         pinned: !!sv.pinned,
         running: sessionIsLive(id) || !!sv.running,
         unread: !!sv.unread,
@@ -86,7 +98,12 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
       };
       merged[id] = mem ? Object.assign(mem, next) : next;
     }
-    if (st.curSess && !merged[st.curSess] && st.sessions[st.curSess]) {
+    // The write itself is fire-and-forget, so give it a few seconds to reach
+    // the server before trusting a catalog over the local edit.
+    for (const [id, edit] of localEdits) {
+      if (startedAt - edit.at > 3000) localEdits.delete(id);
+    }
+    if (st.curSess && !merged[st.curSess] && st.sessions[st.curSess] && !localEdits.get(st.curSess)?.deleted) {
       merged[st.curSess] = st.sessions[st.curSess];
     }
     setState({ sessions: merged, sessionScope: scope, sessionsLoading: false, sessionsError: "" });
@@ -351,8 +368,14 @@ export async function loadOlderMessages(id: string, includeTurn?: number): Promi
   bump();
   const { ok, data } = await fetchTurnPageCompat(id, CHAT_PAGE_TURNS, before, includeTurn);
   const cur = getState().sessions[id];
-  if (!cur || (hydrateGenerations[id] || 0) !== generation) return false;
+  if (!cur) return false;
   cur.loadingOlder = false;
+  // A re-read of the tail replaced the window meanwhile; this page was cut
+  // against the old cursor, so drop it rather than splice it in twice.
+  if ((hydrateGenerations[id] || 0) !== generation) {
+    bump();
+    return false;
+  }
   if (!ok || !data?.events) {
     bump();
     return false;
@@ -596,6 +619,7 @@ export function archiveSession(id: string) {
   const st = getState();
   if (!st.sessions[id]) return;
   st.sessions[id].archived = true;
+  noteLocalEdit(id, { archived: true });
   saveSessions();
   void api.archiveSessionApi(id);
   if (st.curSess === id) {
@@ -638,6 +662,7 @@ export function unarchiveSession(id: string) {
   const sess = getState().sessions[id];
   if (!sess) return;
   sess.archived = false;
+  noteLocalEdit(id, { archived: false });
   saveSessions();
   void api.unarchiveSessionApi(id);
   bump();
@@ -654,6 +679,7 @@ export function deleteSession(id: string) {
     onOk: async () => {
       const st = getState();
       delete st.sessions[id];
+      noteLocalEdit(id, { deleted: true });
       if (st.curSess === id) {
         st.curSess = null;
         writeLastSessionId(null);

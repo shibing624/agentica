@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as api from "../api";
 import {
@@ -231,15 +231,28 @@ export function SettingsModal() {
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       if (getState().confirm.open || getState().passwordDialog.open || document.querySelector(".dlg-overlay.open")) return;
+      // An open editor (skill, MCP, cron, profile) would be thrown away with
+      // no way back; Escape from inside it does not close the whole modal.
+      const st = getState();
+      const editing = st.skillForm || st.mcpForm || st.cronForm || st.profileForm;
+      const t = e.target as HTMLElement | null;
+      if (editing && t?.closest?.("input, textarea, select")) return;
       close();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  useEffect(() => { setCreateUserOpen(false); }, [activeTab]);
+  // Close on a click that both starts and ends on the backdrop. Dragging a
+  // text selection out of a field ends on the backdrop too, and used to
+  // close the modal and drop the form.
+  const downOnBackdrop = useRef(false);
   return (
-    <div className="settings-overlay open" onClick={close}>
+    <div className="settings-overlay open"
+         onMouseDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
+         onClick={(e) => { if (downOnBackdrop.current && e.target === e.currentTarget) close(); }}>
       <div className="settings-modal two-pane" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <nav className="settings-nav" aria-label={S.settings.title}>
           <div className="settings-nav-title">{S.settings.title}</div>
@@ -742,7 +755,7 @@ function ProfileForm() {
 /** Loaded lazily so the settings modal always opens with current server state
  *  rather than whatever the chat page fetched at boot. */
 export async function primeSettings(tab: string) {
-  setState({ settingsModal: { open: true }, settingsTab: tab });
+  setState({ settingsModal: { open: true }, settingsTab: tab, cronBusy: "" });
   await Promise.all([
     loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(), loadPlugins(),
     loadAuthStatus(),

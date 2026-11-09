@@ -5,6 +5,7 @@ import {
   IconBook, IconCompact, IconDownload, IconModel, IconPaperclip, IconQueue, IconShield, IconTarget,
 } from "../icons";
 import { filterPicker, type CommandId, type MenuGroup, type MenuItem, type PickerGroup } from "../lib/composerCommands";
+import { isImeKey } from "../lib/ime";
 export type { PickerGroup, PickerOption } from "../lib/composerCommands";
 
 export function slashQuery(text: string): string | null {
@@ -175,7 +176,7 @@ export function ComposerPicker({
   }, [active]);
   const cur = Math.min(active, Math.max(0, flat.length - 1));
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.nativeEvent.isComposing) return;
+    if (isImeKey(e.nativeEvent)) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (flat.length) setActive((cur + (e.key === "ArrowDown" ? 1 : -1) + flat.length) % flat.length);

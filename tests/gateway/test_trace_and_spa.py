@@ -209,7 +209,7 @@ def test_trace_header_uses_session_work_dir_not_stamped_process_cwd(tmp_path, mo
 
 def test_chat_and_traces_serve_html(client_and_svc):
     client, _ = client_and_svc
-    for path in ("/chat", "/traces", "/users", "/assistant"):
+    for path in ("/chat", "/traces", "/users", "/assistant", "/plugins"):
         resp = client.get(path)
         assert resp.status_code in (200, 503)
         assert "text/html" in resp.headers["content-type"]

@@ -153,9 +153,10 @@ class BuiltinTaskTool(Tool):
         config = get_subagent_config(agent_type)
         # An unknown type is refused by spawn() anyway; label the tier it would
         # have resolved to so the call line does not go blank with the error.
-        tier = getattr(config, "model_tier", "auxiliary")
+        explicit_tier = str(args.get("model_tier") or "").strip().lower()
+        tier = explicit_tier if explicit_tier in ("auxiliary", "main") else (config.model_tier if config is not None else "auxiliary")
         if tier == "main":
-            return model_display_label(getattr(self._parent_agent, "model", None))
+            return model_display_label(self._parent_agent.model if self._parent_agent is not None else None)
         auxiliary = self._auxiliary_model
         if auxiliary is None and self._parent_agent is not None:
             auxiliary = self._parent_agent.resolve_auxiliary_model("task")
@@ -187,6 +188,7 @@ class BuiltinTaskTool(Tool):
         max_turns: Optional[int] = None,
         system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
+        model_tier: Optional[str] = None,
     ) -> str:
         """Spawn a subagent. See the "task Tool" section for when this applies.
 
@@ -199,6 +201,8 @@ class BuiltinTaskTool(Tool):
             max_turns: Per-call ReAct turn budget override.
             system_prompt_override: Replacement system prompt for this call.
             resume_from_run_id: ``run_id`` of a prior partial run to resume.
+            model_tier: Optional ``"auxiliary"`` (default) or ``"main"`` (use
+                the parent main model for complex tasks).
         """
         if self._parent_agent is None:
             return json.dumps({
@@ -208,6 +212,11 @@ class BuiltinTaskTool(Tool):
 
         from agentica.subagents import SubagentRegistry
 
+        tier_override = (
+            model_tier.strip().lower()
+            if isinstance(model_tier, str) and model_tier.strip().lower() in ("auxiliary", "main")
+            else None
+        )
         async with self._free_slot():
             result = await SubagentRegistry().spawn(
                 parent_agent=self._parent_agent,
@@ -218,6 +227,7 @@ class BuiltinTaskTool(Tool):
                 max_turns_override=max_turns,
                 system_prompt_override=system_prompt_override,
                 resume_from_run_id=resume_from_run_id,
+                model_tier_override=tier_override,  # type: ignore[arg-type]
             )
 
         status = result.get("status", "error")
@@ -234,6 +244,8 @@ class BuiltinTaskTool(Tool):
                 "success": True,
                 "subagent_type": result["agent_type"],
                 "subagent_name": result.get("subagent_name", result["agent_type"]),
+                "model": result.get("model", ""),
+                "model_tier": result.get("model_tier", ""),
                 "result": result["content"],
                 "tool_calls_summary": result.get("tool_calls_summary", []),
                 "execution_time": result.get("execution_time", 0.0),
@@ -249,6 +261,8 @@ class BuiltinTaskTool(Tool):
                 "error": result.get("error", f"Subagent stopped due to {status}."),
                 "subagent_type": result.get("agent_type", subagent_type),
                 "subagent_name": result.get("subagent_name", subagent_type),
+                "model": result.get("model", ""),
+                "model_tier": result.get("model_tier", ""),
                 "result": result.get("content", ""),
                 "tool_calls_summary": result.get("tool_calls_summary", []),
                 "tool_count": result.get("tool_count", 0),
@@ -267,6 +281,8 @@ class BuiltinTaskTool(Tool):
             "status": status,
             "error": result.get("error", "Subagent failed without an error message."),
             "subagent_type": result.get("agent_type", subagent_type),
+            "model": result.get("model", ""),
+            "model_tier": result.get("model_tier", ""),
             "run_id": result.get("run_id"),
             "next_action": result.get("next_action"),
             "description": description[:300],

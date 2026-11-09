@@ -9,10 +9,12 @@ const ChatMarkdown = lazy(() => import("./ChatMarkdown").then((m) => ({ default:
 /** A subagent run (`task` tool): status line, brief, the steps it took, its report.
  *  Chat rows and Trace entries render the same card. */
 export function TaskCard({
-  brief, subagentType, result, running = false, elapsedMs,
+  brief, subagentType, model: callModel, modelTier: callTier, result, running = false, elapsedMs,
 }: {
   brief: string;
   subagentType?: string;
+  model?: string;
+  modelTier?: string;
   result: TaskResult | null;
   running?: boolean;
   elapsedMs?: number;
@@ -21,12 +23,19 @@ export function TaskCard({
   const status = running ? "running" : result ? result.status : "";
   const tone = running ? "run" : !result ? "" : result.success ? "ok" : result.status === "error" ? "err" : "warn";
   const ms = result?.executionMs ?? elapsedMs;
+  const model = result?.model || callModel || "";
+  const tier = result?.modelTier || callTier || "";
   return (
     <div className="task-card">
       <div className="task-meta">
         {status && <span className={"task-status " + tone}>{S.chat.taskStatus(status)}</span>}
         {(result?.subagentName || subagentType) && (
           <span className="task-agent">{result?.subagentName || subagentType}</span>
+        )}
+        {(model || tier) && (
+          <span className={"task-model" + (tier === "main" ? " main" : "")} title={model || tier}>
+            {tier && model ? `${tier === "main" ? "main" : "aux"} · ${model}` : (model || tier)}
+          </span>
         )}
         {ms != null && ms > 0 && <span className="task-num">{fmtDurationMs(ms)}</span>}
         {!!result?.toolCount && <span className="task-num">{S.chat.taskMeta(result.toolCount)}</span>}
