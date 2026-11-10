@@ -33,6 +33,7 @@ from agentica_gateway.card_page import (
 from agentica_gateway.channels.base import Channel, ChannelType, Message
 from agentica_gateway.main import app
 from agentica_gateway.services.agent_service import ChatResult
+from agentica_gateway.services import im_bot as im_bot_mod
 from agentica_gateway.services.im_bot import (
     ImBotController,
     normalize_im_command_text,
@@ -397,6 +398,12 @@ class TestImBotControllerFlows:
         await bot.handle(_msg("３"))
         assert "选择要控制的项目工作区" in ch.sent[-1][1]
         assert "proj_b" in ch.sent[-1][1]
+        # Every choice is a single line carrying its full path: an indented
+        # continuation line under "N." gets folded into the next list item by
+        # WeChat's Markdown and glued to the next project's name.
+        picker_lines = ch.sent[-1][1].splitlines()[1:]
+        assert picker_lines and all(line.lstrip()[0].isdigit() for line in picker_lines)
+        assert any(line.endswith(f"· {proj_b.resolve()}") for line in picker_lines)
 
         # Find which index proj_b is in the workspace picker
         state = bot.state_for(_msg("noop"))
@@ -450,6 +457,7 @@ class TestImBotControllerFlows:
         svc = FakeAgentService(default_work_dir=str(proj))
         reg = CardRegistry(secret_provider=lambda: "card-sec")
         monkeypatch.setattr(deps, "card_registry", reg)
+        monkeypatch.setenv("AGENTICA_PUBLIC_URL", "http://192.168.1.20:8881")
         bot = ImBotController(
             channel_manager=cm,
             agent_service=svc,
@@ -488,7 +496,7 @@ class TestImBotControllerFlows:
 
         assert state.pending is not None
         card_token = state.pending.card_token
-        assert f"/c/{card_token}" in ch.sent[-1][1]
+        assert f"http://192.168.1.20:8881/c/{card_token}" in ch.sent[-1][1]
 
         # User clicks "允许一次 (Allow)" (choice=0) on the mobile webview /c/<token>
         client = TestClient(app)
@@ -504,6 +512,48 @@ class TestImBotControllerFlows:
         if task:
             await task
         assert "approval=allow" in ch.sent[-1][1]
+
+    @pytest.mark.asyncio
+    async def test_loopback_gateway_sends_no_card_link_the_phone_cannot_open(self, tmp_path, monkeypatch):
+        """A 127.0.0.1 link opens the phone itself; offer numbered replies only."""
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        ch = FakeChannel()
+        svc = FakeAgentService(default_work_dir=str(proj))
+        monkeypatch.delenv("AGENTICA_PUBLIC_URL", raising=False)
+        monkeypatch.delenv("PUBLIC_URL", raising=False)
+        monkeypatch.setattr(im_bot_mod.settings, "host", "127.0.0.1")
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch), agent_service=svc,
+            state_file=tmp_path / "im_state.json",
+        )
+        state = bot.state_for(_msg("noop"))
+        await bot._publish_interaction(
+            state, interaction_kind="approval", title="允许执行 execute？", text="$ git push",
+            options=["允许一次 (Allow)", "拒绝 (Deny)"], values=["allow", "deny"],
+            session_id=state.session_id, request_id="tc-1", resolve_fn=lambda _v: True,
+        )
+        sent = ch.sent[-1][1]
+        assert "/c/" not in sent
+        assert "1. 允许一次 (Allow)" in sent and "回复数字" in sent
+        await bot.handle(_msg("/status"))
+        assert "卡片链接：未启用" in ch.sent[-1][1]
+
+    @pytest.mark.asyncio
+    async def test_help_and_status_show_the_session_model(self, tmp_path):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        ch = FakeChannel()
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch),
+            agent_service=FakeAgentService(default_work_dir=str(proj)),
+            state_file=tmp_path / "im_state.json",
+        )
+        await bot.handle(_msg("/help"))
+        assert "模型：openai/gpt-4o (profile: default)" in ch.sent[-1][1]
+        assert "/switch" in ch.sent[-1][1] and "self_manage" in ch.sent[-1][1]
+        await bot.handle(_msg("/status"))
+        assert "模型：openai/gpt-4o" in ch.sent[-1][1]
 
     @pytest.mark.asyncio
     async def test_live_cli_attach_turn_and_interaction_bridge(self, tmp_path):

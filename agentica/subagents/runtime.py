@@ -1358,6 +1358,7 @@ def get_available_subagent_types() -> List[Dict[str, Any]]:
             "name": config.name,
             "description": config.description,
             "model_tier": config.model_tier,
+            "timeout": config.timeout,
             "source": config.source,
             "path": config.path,
         })

@@ -42,7 +42,7 @@ from agentica.peers import PeerInfo, list_live_peers
 from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout
 from agentica.utils.log import logger
 
-from ..card_page import CardItem, CardRegistry, gateway_public_url
+from ..card_page import CardItem, CardRegistry, gateway_public_url, phone_card_base_url
 from ..channels.base import Channel, ChannelType, Message
 from ..config import settings
 from . import chat_images, live_turn
@@ -281,7 +281,8 @@ IM_COMMANDS: List[Tuple[str, str, str, str]] = [
     ("/new", "新建", "在当前目录新建会话", "start a new session in the bound directory"),
     ("/switch", "切换", "切换本机项目工作区", "bind this chat to another project directory"),
     ("/model", "", "切换当前会话模型", "pick the config.yaml profile this session runs on"),
-    ("/status", "状态", "查看当前绑定会话与执行状态", "show the bound directory, session and run state"),
+    ("/status", "状态", "查看当前目录、会话、模型、审批模式与执行状态",
+     "show the bound directory, session, model, approval mode and run state"),
     ("/cancel", "取消", "中止当前正在运行的任务", "stop the running turn"),
     ("/verbose", "详细", "汇报附带工具统计与思考摘要", "replies include tool stats and reasoning"),
     ("/concise", "简洁", "只汇报最终结论与产物文件", "replies carry only the final answer and files"),
@@ -294,6 +295,7 @@ HELP_TEXT = (
         f"  {cmd}{f' ({alias})' if alias else ''}  {desc}\n" for cmd, alias, desc, _ in IM_COMMANDS
     )
     + "\n直接发送任何文字即为向当前绑定会话下发任务；出现编号菜单或审批时直接回复数字即可。"
+    + "\n也可以直接问助手「你是什么模型」「改下配置」「装个 skill」「检查更新」，它会用 self_manage 处理。"
 )
 
 MENU_COMMANDS = [
@@ -510,7 +512,7 @@ class ImBotController:
         if cmd.kind == "menu":
             return self._render_menu(state)
         if cmd.kind == "help":
-            return HELP_TEXT
+            return HELP_TEXT + "\n\n" + self._render_model_line(state)
         if cmd.kind == "status":
             return self._render_status(state)
         if cmd.kind == "verbose":
@@ -597,15 +599,30 @@ class ImBotController:
         uid = self._user_id()
         banner = self._render_bound_banner(state, prefix="📊 当前会话状态")
         lines = [banner]
-        if self._agent_service is not None:
-            cfg = self._agent_service.session_model_config(state.session_id, owner=uid)
-            prof = cfg.get("profile") or "default"
-            lines.append(f"  模型：{cfg.get('model_provider')}/{cfg.get('model_name')} (profile: {prof})")
+        model_line = self._render_model_line(state)
+        if model_line:
+            lines.append(f"  {model_line}")
         log = SessionLog(session_id=state.session_id, work_dir=state.work_dir, user_id=uid)
         if log.path.is_file():
             lines.append(f"  日志：{format_file_size(log.path.stat().st_size)}")
+        from ..routes import settings as settings_routes
+
+        mode = settings_routes.approval_mode_pref(uid) or "auto"
+        lines.append(f"  审批：{mode}" + ("（从不询问，不会出现审批卡片）" if mode == "allow-all" else ""))
+        if phone_card_base_url(settings.host, settings.port) is None:
+            lines.append("  卡片链接：未启用（网关只监听本机；设置 AGENTICA_PUBLIC_URL 后手机可点开）")
         lines.append(f"  汇报：{'详细 (/verbose)' if state.verbose else '简洁 (/concise)'}")
         return "\n".join(lines)
+
+    def _render_model_line(self, state: ImChatState) -> str:
+        if self._agent_service is None:
+            return ""
+        cfg = self._agent_service.session_model_config(state.session_id, owner=self._user_id())
+        prof = cfg.get("profile") or "default"
+        line = f"模型：{cfg.get('model_provider')}/{cfg.get('model_name')} (profile: {prof})"
+        if cfg.get("auxiliary_model_name"):
+            line += f"，子代理/辅助：{cfg.get('auxiliary_model_name')}"
+        return line
 
     def _list_workspace_choices(self, current_dir: str) -> List[str]:
         seen = set()
@@ -641,7 +658,10 @@ class ImBotController:
             cur = " [当前]" if os.path.realpath(path) == os.path.realpath(state.work_dir) else ""
             peer = live_by_dir.get(os.path.realpath(path))
             live_tag = f" 🟢终端:{peer.name}" if peer else ""
-            lines.append(f"  {idx}. {_short_dir(path)}{cur}{live_tag}\n     {path}")
+            # One line per choice. WeChat renders Markdown: an indented second
+            # line under "N." is folded into the neighbouring list item, which
+            # printed each path glued to the next project's name.
+            lines.append(f"  {idx}. {_short_dir(path)}{cur}{live_tag} · {path}")
         state.set_pending(PendingAction(kind="workspace", options=choices))
         return "\n".join(lines)
 
@@ -918,11 +938,14 @@ class ImBotController:
             lines.append("")
             for idx, opt_label in enumerate(options, 1):
                 lines.append(f"  {idx}. {opt_label}")
-        lines.append(f"\n👉 一键处理：{self._card_url(card)}")
-        if interaction_kind == "approval":
-            lines.append("（可直接点链接，或在此回复数字 1..N / y 允许 / n 拒绝）")
-        else:
-            lines.append("（可直接点链接，或在此回复数字 1..N / 直接输入文字回答）")
+        base = phone_card_base_url(settings.host, settings.port)
+        if base is not None:
+            lines.append(f"\n👉 一键处理：{base}/c/{card.token}")
+        reply_hint = (
+            "回复数字 1..N / y 允许 / n 拒绝" if interaction_kind == "approval"
+            else "回复数字 1..N / 直接输入文字回答"
+        )
+        lines.append(f"（可直接点链接，或在此{reply_hint}）" if base is not None else f"（在此{reply_hint}）")
         await self._reply(state, "\n".join(lines))
         return card
 

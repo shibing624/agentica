@@ -1131,11 +1131,13 @@ def test_task_system_prompt_exposes_model_tier_per_type():
     from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
     prompt = BuiltinTaskTool().get_system_prompt()
-    assert "| Type | Name | Model | Description |" in prompt
+    assert "| Type | Name | Model | Timeout | Description |" in prompt
     explore_row = next(line for line in prompt.splitlines() if line.startswith("| `explore`"))
     # The tier labels must be the literal ``model_tier`` values: users copy them
     # into ``model_tier:`` frontmatter, where anything else is silently rejected.
     assert "| auxiliary |" in explore_row
+    # The agent can only raise a timeout it knows about.
+    assert "| 1800s |" in explore_row
     assert "| `review`" not in prompt
 
 

@@ -260,8 +260,11 @@ session's transcript, so the user may switch between them mid-conversation.
 
 Its `this_session` block is the authoritative answer to "which model / profile
 are you", "what is this session's id", "where is the transcript / log / work
-dir". Call it rather than inferring from the prompt or from config.yaml's
-active profile (a session can run on a different profile than the default).
+dir", and "which client is the user on" (`channel`: `wechat`, `feishu` … for
+an IM chat, null for web / desktop / CLI). Call it rather than inferring from
+the prompt or from config.yaml's active profile (a session can run on a
+different profile than the default). When the user is on an IM channel and
+asks what you can do or how to control you, answer with the IM commands below.
 
 - `self_manage(action="show")` — this session + config.yaml profiles, settings
   (including whether the cron scheduler daemon is enabled) and .env (masked)

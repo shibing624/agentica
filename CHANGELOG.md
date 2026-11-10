@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **主智能体能看到每种子智能体的超时并按需调大**：`task` 工具的系统提示表格新增 `Timeout` 列（`explore` / `code` / `research` 默认 1800s），并说明范围大的调查应在调用时直接传更大的 `timeout`，而不是等超时后再续跑。
+- **IM `/switch` 列表路径错位修复**：每个工作区原来分两行（名称 + 缩进路径），微信会按 Markdown 把缩进的那行并进相邻列表项，路径和下一个项目名粘在一起。现在每项一行：`N. 名称 · 完整路径`。
+- **IM 不再发手机打不开的卡片链接**：网关只监听本机且没设置 `AGENTICA_PUBLIC_URL` 时，`127.0.0.1` 链接在手机上指向手机自己，审批/提问只给编号回复；`/status` 会提示卡片链接未启用，同时显示审批模式（`allow-all` 永远不会出现审批卡片）。
+- **IM `/help` 和 `/status` 显示当前会话模型与辅助模型；`self_manage show` 的 `this_session` 新增 `channel`**，助手能知道用户在哪个 IM 上，被问到「能做什么」时按 IM 命令回答。
 - **子智能体在硬超时前被要求收尾，不再超时后只交回工具名**：`explore` / `code` / `research` 默认 `timeout: 1800` 不变；`SubagentRegistry.spawn` 在超时前 `min(300s, 20%)` 通过 `steer(automated=True)` 告诉子智能体停止调用工具、按已有证据给出结论（`agentica/subagents/runtime.py` `wrap_up_delay` / `_wrap_up_after`）。此前子智能体一直读文件直到 `wait_for` 取消，结果只有工具调用摘要、没有任何结论。
 - **Web / Desktop 记住每个会话最后停留的页面与位置**：切回会话、Dock 打开会话、重新打开应用时，回到上次的页面（聊天或轨迹页），聊天滚动位置按距底部的距离恢复，轨迹页恢复选中的调用和列表滚动位置（`web/src/lib/sessionView.ts`，按账号存于 `localStorage` 的 `ag_view:<account>`，最多 200 个会话）。启动和切换会话、记录还没加载时显示「加载中」，不再先闪出空的新对话欢迎页。从聊天里的调用链接进入轨迹页时，侧栏当前会话也随之切换。
 - **崩溃后补写的收尾记录不再显示在聊天里**：`seal_incomplete_turn` 写入的 `[Session ended before the assistant replied]` 是给模型回放用的标记，现在和已停止的回合一样带 `partial_content=""`，前端按 `finish_reason="interrupted"` 将该回合显示为「已停止」，旧日志也适用。

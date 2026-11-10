@@ -60,6 +60,10 @@ class BuiltinTaskTool(Tool):
 
     - Independent tasks in one message run in parallel, three at a time.
     - Once delegated, do not duplicate that work yourself.
+    - Each type has a default wall-clock `timeout` (column above). A broad
+      investigation (many modules, a long review) can need more: pass a larger
+      `timeout` (seconds) up front rather than resuming. Shortly before the
+      limit the subagent is told to stop and report what it has.
     - On `partial=true`, synthesize the partial output; if it holds no
       findings, finish the work yourself. Resume at most once, with the SAME
       `description` plus `resume_from_run_id`.""")
@@ -111,14 +115,15 @@ class BuiltinTaskTool(Tool):
         from agentica.subagents import get_available_subagent_types
 
         lines = [
-            "| Type | Name | Model | Description |",
-            "|------|------|-------|-------------|",
+            "| Type | Name | Model | Timeout | Description |",
+            "|------|------|-------|---------|-------------|",
         ]
         for st in get_available_subagent_types():
             desc_first_line = st["description"].split("\n")[0]
             desc = desc_first_line[:60] + ("..." if len(desc_first_line) > 60 else "")
+            timeout = f"{st['timeout']}s" if st["timeout"] else "none"
             lines.append(
-                f"| `{st['type']}` | {st['name']} | {st['model_tier']} | {desc} |"
+                f"| `{st['type']}` | {st['name']} | {st['model_tier']} | {timeout} | {desc} |"
             )
         return "\n".join(lines)
 
@@ -197,7 +202,8 @@ class BuiltinTaskTool(Tool):
                 colleague who has no prior context.
             subagent_type: One of the type ids listed in that section
                 (default ``explore``).
-            timeout: Per-call timeout override (seconds).
+            timeout: Wall-clock limit in seconds for this call; defaults to
+                the type's timeout in the table. Raise it for broad work.
             max_turns: Per-call ReAct turn budget override.
             system_prompt_override: Replacement system prompt for this call.
             resume_from_run_id: ``run_id`` of a prior partial run to resume.

@@ -356,3 +356,16 @@ def gateway_public_url(host: str = "127.0.0.1", port: int = 8881) -> str:
         elif shown_host in ("127.0.0.1", "localhost"):
             shown_host = "127.0.0.1"
     return f"http://{shown_host}:{port}"
+
+
+def phone_card_base_url(host: str, port: int) -> Optional[str]:
+    """Base URL for card links a phone can open, or None when there is none.
+
+    A gateway bound to loopback without ``AGENTICA_PUBLIC_URL`` can only offer
+    ``http://127.0.0.1:…``, which on the phone points at the phone itself.
+    """
+    base = gateway_public_url(host, port)
+    hostname = base.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
+    if hostname in ("127.0.0.1", "localhost", "[::1]", "::1"):
+        return None
+    return base

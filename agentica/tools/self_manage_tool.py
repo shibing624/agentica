@@ -87,6 +87,9 @@ def _session_snapshot(agent: Any) -> Dict[str, Any]:
         "workspace": str(agent.workspace.path) if agent.workspace is not None else None,
         "profile": agent.session_profile,
         "model": {"provider": model.provider, "id": model.id, "base_url": model.base_url} if model else None,
+        # The client this turn came through ("wechat", "feishu" …); None = web,
+        # CLI or SDK. Decides which command list applies to the user.
+        "channel": agent._run_channel,
         "runtime_log": agentica.config.AGENTICA_LOG_FILE or None,
     }
 
