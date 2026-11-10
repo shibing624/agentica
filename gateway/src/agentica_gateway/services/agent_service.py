@@ -1104,12 +1104,15 @@ class AgentService:
         session_id: str,
         source: RunSource,
         *,
+        channel: Optional[str] = None,
         stream_intermediate_steps: bool = False,
     ) -> RunConfig:
         # Tool permission enforcement lives on the Agent itself now
         # (tool_config.permission_mode + sandbox_config, kept in sync with
         # the session's approval mode by set_session_approval_mode above).
-        return RunConfig(stream_intermediate_steps=stream_intermediate_steps, source=source)
+        return RunConfig(
+            stream_intermediate_steps=stream_intermediate_steps, source=source, channel=channel,
+        )
 
 
     # ============== Public API ==============
@@ -1227,6 +1230,7 @@ class AgentService:
         source: RunSource = RunSource.gateway,
         media: Optional[List["InboundMedia"]] = None,
         owner: Optional[str] = None,
+        channel: Optional[str] = None,
     ) -> ChatResult:
         """Send a message and return the full response (non-streaming).
 
@@ -1244,6 +1248,8 @@ class AgentService:
                 the channel. Images attach to the run when the base model can
                 see them; audio/video attach when the base is Gemini. Anything
                 else is described/transcribed by ``settings.media_model``.
+            channel: The IM channel this turn came from (``"wechat"`` …);
+                recorded as the session's latest entry point. None = web.
 
         Returns:
             ChatResult with content, tool_calls, metrics
@@ -1275,7 +1281,7 @@ class AgentService:
 
                 response = await agent.run(
                     self.expand_skill_invocation(message),
-                    config=self._run_config_for_session(session_id, source),
+                    config=self._run_config_for_session(session_id, source, channel=channel),
                     images=run_images,
                     audio=run_audio,
                 )
@@ -1517,6 +1523,7 @@ class AgentService:
         owner: Optional[str] = None,
         media: Optional[List["InboundMedia"]] = None,
         include_usage: bool = True,
+        channel: Optional[str] = None,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks.
 
@@ -1535,6 +1542,7 @@ class AgentService:
             on_tool_result: Called when a tool call completes (name, result, extra)
             on_thinking: Called with each reasoning delta
             media: Pasted/attached images from the web UI (same routing as IM).
+            channel: The IM channel this turn came from; None = web.
 
         Returns:
             ChatResult with accumulated content + metrics
@@ -1553,7 +1561,7 @@ class AgentService:
             return await self._chat_stream_impl(
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
-                owner, media, include_usage=include_usage,
+                owner, media, include_usage=include_usage, channel=channel,
             )
 
     async def _chat_stream_impl(
@@ -1570,6 +1578,7 @@ class AgentService:
         media: Optional[List["InboundMedia"]],
         *,
         include_usage: bool = True,
+        channel: Optional[str] = None,
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
@@ -1595,6 +1604,7 @@ class AgentService:
                 config=self._run_config_for_session(
                     session_id,
                     source,
+                    channel=channel,
                     stream_intermediate_steps=True,
                 ),
                 images=run_images,
@@ -1753,9 +1763,16 @@ class AgentService:
                     source = "gateway"
                 else:
                     source = "legacy"
-            elif source == "gateway" and im_from_sid:
-                source = im_from_sid
-            is_gateway_or_im = source == "gateway" or source in IM_SESSION_SOURCES
+            # ``source`` is where the latest turn came in, ``origin`` where the
+            # session started. A conversation begun in WeChat and continued in
+            # the CLI is still one the gateway owns, so either one counts.
+            # An ``agent:<id>:<channel>:<chat>`` id was minted by that channel,
+            # which settles where it started even for sidecars written before
+            # ``origin`` existed.
+            origin = im_from_sid or entry.get("origin") or source
+            is_gateway_or_im = any(
+                s == "gateway" or s in IM_SESSION_SOURCES for s in (source, origin)
+            )
             archived = bool(entry.get("archived"))
             pinned = bool(entry.get("pinned"))
             if not running and not (is_gateway_or_im or (include_cli and source == "cli")):
@@ -1802,6 +1819,7 @@ class AgentService:
                 "work_dir": entry.get("work_dir") or project_work_dir,
                 "running": running,
                 "source": source,
+                "origin": origin,
             })
         seen = {row["session_id"] for row in out}
         for turn in live_turn.iter_owner(uid):

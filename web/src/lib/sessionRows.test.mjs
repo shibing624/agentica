@@ -11,7 +11,7 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const {
-  collapseSessionRows, findQueryRanges, searchEventsConversation, searchMsgsConversation, sessionMatches, sessionSourceBadge,
+  collapseSessionRows, findQueryRanges, searchEventsConversation, searchMsgsConversation, sessionMatches, sessionSourceBadge, sessionSourceTitle,
 } = await vite.ssrLoadModule("/src/lib/sessionRows.ts");
 after(() => vite.close());
 
@@ -106,3 +106,10 @@ test("sessionSourceBadge distinguishes CLI and IM channels while keeping plain g
   assert.equal(sessionMatches(wxRow, "agentica", "wechat"), true);
 });
 
+test("sessionSourceTitle names the latest entry point and, when different, where it started", () => {
+  const labels = { wechat: "微信", cli: "CLI", gateway: "Web" };
+  const S = { latestVia: "最近一轮来自 {0}", startedVia: "由 {0} 发起" };
+  assert.equal(sessionSourceTitle("cli", "wechat", labels, S), "最近一轮来自 CLI · 由 微信 发起");
+  assert.equal(sessionSourceTitle("wechat", "wechat", labels, S), "最近一轮来自 微信");
+  assert.equal(sessionSourceTitle("gateway", "", labels, S), "最近一轮来自 Web");
+});

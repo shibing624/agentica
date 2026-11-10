@@ -81,6 +81,22 @@ class TestSessionLogBasic:
         log.set_source("gateway")
         assert SessionLog._session_entry(log.path, None)["source"] == "gateway"
 
+    def test_source_follows_latest_turn_and_origin_keeps_the_first(self, tmp_dir):
+        log = SessionLog("s-origin", base_dir=tmp_dir)
+        log.append("user", "hello")
+        log.set_source("wechat")
+        log.set_source("gateway")
+        log.set_source("cli")
+        entry = SessionLog._session_entry(log.path, None)
+        assert (entry["source"], entry["origin"]) == ("cli", "wechat")
+
+    def test_origin_backfills_from_a_sidecar_written_before_it_existed(self, tmp_dir):
+        log = SessionLog("s-legacy", base_dir=tmp_dir)
+        log.append("user", "hello")
+        log._write_meta({"source": "feishu"})
+        log.set_source("gateway")
+        assert (log.get_source(), log.get_origin()) == ("gateway", "feishu")
+
     def test_load_empty_log(self, tmp_dir):
         log = SessionLog("empty", base_dir=tmp_dir)
         assert log.load() == []
@@ -1594,6 +1610,10 @@ class TestInTurnPersistence:
         derived = sealed.derive_messages()
         assert [m["role"] for m in derived] == ["user", "assistant", "tool", "assistant"]
         assert "[Session ended before the assistant replied]" in derived[-1]["content"]
+        # The UI-facing half of the row: nothing was said, so nothing to show.
+        seal_row = json.loads(sealed.path.read_text(encoding="utf-8").splitlines()[-1])
+        assert seal_row["finish_reason"] == "interrupted"
+        assert seal_row["partial_content"] == ""
         # Idempotent: a sealed log needs no second seal.
         assert sealed.seal_incomplete_turn() is None
         # The uuid chain stays intact across the sealing append.

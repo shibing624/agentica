@@ -326,16 +326,22 @@ function applyAssistant(m: ChatMsg, e: Record<string, unknown>) {
   const ts = tsOf(e);
   const reasoning = reasoningOf(e);
   if (reasoning) pushThink(m, reasoning, ts);
-  // A cancelled / failed turn persists the model-facing marker in ``content``
-  // and the user-visible part in ``partial_content``.
-  const ended = e.finish_reason === "cancelled" || e.finish_reason === "error";
-  const hasPartial = ended && typeof e.partial_content === "string";
+  // A cancelled / failed / sealed-after-crash turn persists the model-facing
+  // marker in ``content`` and the user-visible part in ``partial_content``.
+  // A sealed row's ``content`` is only the marker, so older rows written
+  // without ``partial_content`` still show nothing.
+  const sealed = e.finish_reason === "interrupted";
+  const ended = sealed || e.finish_reason === "cancelled" || e.finish_reason === "error";
+  const hasPartial = ended && (sealed || typeof e.partial_content === "string");
   const content = hasPartial
-    ? (e.partial_content as string)
+    ? (typeof e.partial_content === "string" ? e.partial_content : "")
     : typeof e.content === "string" ? e.content : "";
   if (hasPartial) {
-    if (e.finish_reason === "cancelled") m.aborted = true;
-    else if (typeof e.error === "string" && e.error) m.error = e.error;
+    if (e.finish_reason === "error") {
+      if (typeof e.error === "string" && e.error) m.error = e.error;
+    } else {
+      m.aborted = true;
+    }
   }
   if (content) {
     freezeOpenThink(m, ts);

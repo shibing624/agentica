@@ -10,7 +10,7 @@ import asyncio
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 
@@ -43,6 +43,7 @@ from agentica_gateway.services.im_files import (
     extract_output_file_references,
     format_file_size,
 )
+from agentica.cli.approvals import approval_decision_from_key
 
 
 class FakeChannel(Channel):
@@ -116,6 +117,7 @@ class FakeAgentService:
         self.steered: List[Tuple[str, str]] = []
         self.undelivered_steer: Dict[str, List[str]] = {}
         self.chat_calls: List[Tuple[str, str, str]] = []
+        self.chat_channels: List[Optional[str]] = []
         self.chat_handler = None
         self.default_work_dir = default_work_dir
 
@@ -176,9 +178,11 @@ class FakeAgentService:
         user_id: str = "default",
         owner=None,
         media=None,
+        channel=None,
     ) -> ChatResult:
         wd = self.get_session_work_dir(session_id, owner)
         self.chat_calls.append((session_id, wd, message))
+        self.chat_channels.append(channel)
         if self.chat_handler is not None:
             return await self.chat_handler(message, session_id, wd)
         return ChatResult(
@@ -434,8 +438,8 @@ class TestImBotControllerFlows:
         assert len(ch.files) == 1
         assert ch.files[0][1] == "result.png"
         assert ch.files[0][3] == "image/png"
-        # Session source is stamped with the IM channel ("wechat") for Web/Desktop sync
-        assert log_b.get_source() == "wechat"
+        # The turn is recorded under the channel it came in through.
+        assert svc.chat_channels[-1] == "wechat"
 
     @pytest.mark.asyncio
     async def test_gateway_turn_approval_resolved_via_card_link(self, tmp_path, monkeypatch):
@@ -599,7 +603,9 @@ class TestImBotControllerFlows:
                 await task
 
             assert injected == ["开始构建发布"]
-            assert answered_inter == [("1", "req-cli-ask-1")]
+            # A question's answer is free text handed to the model, so picking
+            # "1" in IM must send the option's text, not the literal "1".
+            assert answered_inter == [("main (推荐)", "req-cli-ask-1")]
             assert "已在终端完成(开始构建发布)" in ch.sent[-1][1]
             # AgentService.chat was NOT called because the live CLI handled the turn!
             assert svc.chat_calls == []
@@ -673,8 +679,10 @@ class TestImBotControllerFlows:
             on_thinking=None,
             media=None,
             include_usage=True,
+            channel=None,
         ):
             assert include_usage is False
+            assert channel == "wechat"
             svc.chat_calls.append((session_id, svc.get_session_work_dir(session_id, owner), message))
             mid_turn_pulse.update(live_turn.pulse("default"))
             active = live_turn.active(session_id, "default")
@@ -724,5 +732,111 @@ class TestImBotControllerFlows:
         assert after_pulse["ver"] == v0 + 2
         assert after_pulse["active"] == []
         assert "已改好 a.py" in ch.sent[-1][1]
+
+    @pytest.mark.asyncio
+    async def test_cli_approval_answer_is_translated_to_an_accepted_key(self, tmp_path):
+        """An approval forwarded from a live CLI must answer in a form that CLI accepts.
+
+        The card and the numbered menu answer in decision keys ("allow"/"deny").
+        The terminal's ``session/answer`` only understands a letter or a 1-based
+        index, so handing it the key name gets ``accepted: false`` and the
+        approval silently stays open (the CLI keeps waiting, IM says "已处理").
+        """
+        proj = tmp_path / "cli_approval"
+        proj.mkdir()
+
+        running = [False]
+        pending_inter: List[dict] = [None]  # type: ignore[list-item]
+        answered: List[Tuple[str, str]] = []
+        accepted_results: List[bool] = []
+
+        peer_session = peers.PeerSession(
+            name="cli-approval-01",
+            cwd=str(proj),
+            session_id="cli-approval-sess-1",
+        )
+        peer_session.publish()
+
+        def _inject(text: str) -> str:
+            def _sim_cli_run():
+                import time as _t
+                _t.sleep(0.03)
+                running[0] = True
+                _t.sleep(0.05)
+                pending_inter[0] = {
+                    "requestId": "req-cli-approval-1",
+                    "kind": "approval",
+                    "prompt": "允许执行 rm -rf build/ ？",
+                    # What ``_pending_interaction_snapshot`` publishes: the
+                    # visible decisions in allow → allow_prefix → deny order.
+                    "options": ["allow", "allow_prefix", "deny"],
+                }
+                deadline = _t.monotonic() + 5.0
+                while pending_inter[0] is not None and _t.monotonic() < deadline:
+                    _t.sleep(0.03)
+                running[0] = False
+
+            import threading
+            threading.Thread(target=_sim_cli_run, daemon=True).start()
+            return "queued"
+
+        def _answer_inter(ans: str, req_id):
+            # Mirror the CLI: it parses the answer against its own option list.
+            decision = approval_decision_from_key(ans, ["allow", "allow_prefix", "deny"])
+            answered.append((ans, req_id or ""))
+            accepted_results.append(decision is not None)
+            if decision is None:
+                return False
+            pending_inter[0] = None
+            return True
+
+        server = AttachServer(
+            peer_session.peer_id,
+            inject=_inject,
+            is_running=lambda: running[0],
+            session_id=lambda: "cli-approval-sess-1",
+            answer_interaction=_answer_inter,
+            grace=5.0,
+            snapshot=lambda: {
+                "cwd": str(proj),
+                "busy": running[0],
+                "pendingInteraction": pending_inter[0],
+            },
+        )
+        assert server.start()
+        peer_session.publish(attach_socket=str(server.path))
+
+        try:
+            ch = FakeChannel()
+            bot = ImBotController(
+                channel_manager=FakeChannelManager(ch),
+                agent_service=FakeAgentService(default_work_dir=str(proj)),
+                state_file=tmp_path / "im_state.json",
+            )
+            await bot.handle(_msg("开始构建"))
+            state = bot.state_for(_msg("noop"))
+
+            for _ in range(80):
+                if state.has_active_pending() and state.pending.kind == "interaction":
+                    break
+                await asyncio.sleep(0.05)
+            assert state.pending is not None
+
+            # Deny is option 3 in the card/menu the user sees.
+            await bot.handle(_msg("3"))
+            task = bot._turn_tasks.get("cli-approval-sess-1")
+            if task:
+                await task
+
+            assert answered, "the CLI never received an answer"
+            assert accepted_results == [True], (
+                f"CLI rejected the IM answer {answered!r}; it must be a letter or a "
+                "1-based index among the options it published"
+            )
+            # Option 3 is 'deny' — the ordered list the CLI published decides.
+            assert approval_decision_from_key(answered[0][0], ["allow", "allow_prefix", "deny"]) == "deny"
+        finally:
+            server.stop()
+            peer_session.unpublish()
 
 

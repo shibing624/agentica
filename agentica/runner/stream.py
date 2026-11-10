@@ -214,6 +214,7 @@ class StreamMixin:
 
         self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_automated_input = config.automated_input
+        self.agent._run_channel = config.channel
         self.agent._run_max_api_retry = self._resolve_max_api_retry(
             self.agent,
             config,
@@ -306,6 +307,7 @@ class StreamMixin:
 
         self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_automated_input = config.automated_input
+        self.agent._run_channel = config.channel
         self.agent._run_max_api_retry = self._resolve_max_api_retry(
             self.agent,
             config,

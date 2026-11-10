@@ -81,6 +81,32 @@ test("a stopped or failed turn shows its partial answer, not the model-facing ma
   assert.equal(msgs[3].aborted, undefined);
 });
 
+test("a turn sealed after a crash shows as stopped, not the seal marker", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "q1", timestamp: "2026-08-28T01:00:00.000Z" },
+    {
+      type: "assistant",
+      content: "[Session ended before the assistant replied]",
+      partial_content: "",
+      finish_reason: "interrupted",
+      timestamp: "2026-08-28T01:00:02.000Z",
+    },
+    { type: "user", content: "q2", timestamp: "2026-08-28T01:01:00.000Z" },
+    {
+      // Rows sealed before ``partial_content`` existed.
+      type: "assistant",
+      content: "[Session ended before the assistant replied]",
+      finish_reason: "interrupted",
+      timestamp: "2026-08-28T01:01:02.000Z",
+    },
+  ]);
+  assert.equal(msgs.length, 4);
+  assert.equal(msgs[1].content, "");
+  assert.equal(msgs[1].aborted, true);
+  assert.equal(msgs[3].content, "");
+  assert.equal(msgs[3].aborted, true);
+});
+
 test("one user turn folds tool_calls + tool rows into the assistant work group", () => {
   const msgs = eventsToChatMsgs([
     { type: "user", content: "where is persist?", timestamp: "2026-08-28T01:00:00.000Z" },

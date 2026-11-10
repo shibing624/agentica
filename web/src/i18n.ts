@@ -431,7 +431,10 @@ const en = {
       qq: "QQ",
       discord: "Discord",
       slack: "Slack",
+      gateway: "Web",
     } as Record<string, string>,
+    latestVia: "Last message via {0}",
+    startedVia: "started in {0}",
   },
 
   dir: {
@@ -1288,7 +1291,10 @@ const zh: Strings = {
       qq: "QQ",
       discord: "Discord",
       slack: "Slack",
+      gateway: "Web",
     } as Record<string, string>,
+    latestVia: "最近一轮来自 {0}",
+    startedVia: "由 {0} 发起",
     showLess: "收起",
   },
 

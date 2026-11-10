@@ -12,8 +12,9 @@ release, or self-upgrade via pip.
 Secrets are masked on read. Edits to config.yaml preserve comments; .env edits
 preserve other lines and take effect in-process immediately.
 """
-from typing import Optional
+from typing import Any, Dict, Optional
 
+import agentica.config
 from agentica.tools.base import Tool
 from agentica.tools.decorators import tool
 from agentica.tools.helpers import tool_result, tool_error
@@ -41,8 +42,9 @@ def _build_description(restart_hint: str) -> str:
     return f"""Inspect and modify agentica's own runtime configuration, or upgrade itself.
 
 Actions:
-- action='show'                 -> return current config.yaml profiles + settings (cron scheduler
-                                   enabled/interval, etc.) + .env vars (secrets masked)
+- action='show'                 -> this session (id, transcript file, work dir, model, profile,
+                                   runtime log file) + config.yaml profiles + settings (cron
+                                   scheduler enabled/interval, etc.) + .env vars (secrets masked)
 - action='set_config'           -> edit a config.yaml profile field.
                                    Requires key + value + 'profile' (name it
                                    explicitly — see below). Editable keys: model_provider, model_name, base_url, api_key,
@@ -74,6 +76,21 @@ AGENTS.md. See the agentica skill for where that file is and how to edit it."""
 _SELF_MANAGE_DESCRIPTION = _build_description(DEFAULT_RESTART_HINT)
 
 
+def _session_snapshot(agent: Any) -> Dict[str, Any]:
+    """Where this conversation lives and what it runs on, read off the agent."""
+    log = agent.session_log
+    model = agent.model
+    return {
+        "session_id": agent.session_id,
+        "session_log": str(log.path) if log is not None else None,
+        "work_dir": agent.work_dir,
+        "workspace": str(agent.workspace.path) if agent.workspace is not None else None,
+        "profile": agent.session_profile,
+        "model": {"provider": model.provider, "id": model.id, "base_url": model.base_url} if model else None,
+        "runtime_log": agentica.config.AGENTICA_LOG_FILE or None,
+    }
+
+
 def _do_self_manage(
     action: str,
     key: Optional[str] = None,
@@ -81,6 +98,7 @@ def _do_self_manage(
     profile: Optional[str] = None,
     confirm: bool = False,
     restart_hint: str = DEFAULT_RESTART_HINT,
+    agent: Any = None,
 ) -> str:
     """Pure business implementation of the self_manage tool.
 
@@ -93,6 +111,8 @@ def _do_self_manage(
 
     if action == "show":
         return tool_result(
+            # None when called outside an agent (the bare function in a script).
+            this_session=_session_snapshot(agent) if agent is not None else None,
             config=sm.read_config_summary(),
             env=sm.read_dotenv(),
             config_path=sm.config_file_path(),
@@ -231,8 +251,11 @@ class SelfManageTool(Tool):
         value: Optional[str] = None,
         profile: Optional[str] = None,
         confirm: bool = False,
+        agent: Any = None,
     ) -> str:
-        return _do_self_manage(action, key, value, profile, confirm, restart_hint=self._restart_hint)
+        return _do_self_manage(
+            action, key, value, profile, confirm, restart_hint=self._restart_hint, agent=agent,
+        )
 
     def __repr__(self) -> str:
         return "SelfManageTool()"

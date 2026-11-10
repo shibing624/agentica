@@ -392,6 +392,58 @@ def test_spawn_timeout_preserves_partial_content_and_tool_calls():
     assert result["tool_calls_summary"][0]["name"] == "read_file"
 
 
+class _AnswersWhenSteeredAgent(RecordingAgent):
+    """Keeps working until steered, then answers from what it has."""
+
+    steered: list = []
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._wake = asyncio.Event()
+
+    def steer(self, guidance="", *, automated=False, **_):
+        _AnswersWhenSteeredAgent.steered.append((guidance, automated))
+        self._wake.set()
+        return True
+
+    async def run_stream(self, task, config=None):
+        await self._wake.wait()
+        yield SimpleNamespace(event="RunResponse", content="findings: a.py:3", tools=None)
+
+
+def test_wrap_up_delay_leaves_room_before_the_hard_timeout():
+    from agentica.subagents.runtime import wrap_up_delay
+
+    assert wrap_up_delay(1800) == 1500
+    assert wrap_up_delay(100) == 80
+
+
+def test_spawn_steers_child_to_answer_before_timeout():
+    """Bug: a child that never stops reading hit the hard timeout and returned
+    only tool names; it must be told to wrap up while there is time left."""
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["wrapper"] = SubagentConfig(
+        type="wrapper", name="wrapper", description="w", system_prompt="s",
+        timeout=1,
+    )
+    _AnswersWhenSteeredAgent.steered = []
+    parent = _make_parent_agent()
+
+    with patch("agentica.agent.Agent", _AnswersWhenSteeredAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(parent_agent=parent, task="explore", agent_type="wrapper")
+        )
+
+    assert result["status"] == "completed"
+    assert result["content"] == "findings: a.py:3"
+    assert len(_AnswersWhenSteeredAgent.steered) == 1
+    guidance, automated = _AnswersWhenSteeredAgent.steered[0]
+    assert automated is True
+    assert "Do not call any more tools" in guidance
+
+
 class _MaxTurnsBreakAgent(RecordingAgent):
     """Simulates Runner reaching max_turns: returns content + break_reason set."""
 

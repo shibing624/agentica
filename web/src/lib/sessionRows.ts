@@ -16,6 +16,7 @@ export type SessionRow = {
     running?: boolean;
     pinned?: boolean;
     source?: string;
+    origin?: string;
   };
 };
 
@@ -56,6 +57,25 @@ export function sessionSourceBadge(
     return { key, label: labels[key] || DEFAULT_SOURCE_LABELS[key] || key.toUpperCase(), isIm: true };
   }
   return null;
+}
+
+/**
+ * Hover text for the badge. `source` is where the latest turn came in,
+ * `origin` where the session was started; the second half only appears when
+ * they differ (a WeChat conversation picked up in the CLI).
+ */
+export function sessionSourceTitle(
+  source: string | undefined,
+  origin: string | undefined,
+  labels: Record<string, string>,
+  S: { latestVia: string; startedVia: string },
+): string {
+  const name = (key: string) => labels[key] || DEFAULT_SOURCE_LABELS[key] || key;
+  const latest = (source || "").trim().toLowerCase();
+  const first = (origin || "").trim().toLowerCase();
+  const parts = latest ? [S.latestVia.replace("{0}", name(latest))] : [];
+  if (first && first !== latest) parts.push(S.startedVia.replace("{0}", name(first)));
+  return parts.join(" · ");
 }
 
 export function sessionMatches(

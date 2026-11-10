@@ -1349,6 +1349,9 @@ class SessionLog:
             "assistant",
             "[Session ended before the assistant replied]",
             finish_reason="interrupted",
+            # Same split as a cancelled turn: ``content`` is the model-facing
+            # marker, ``partial_content`` is what a UI shows (nothing was said).
+            partial_content="",
         )
         logger.warning(
             "SessionLog %s ended mid-turn (last entry type=%s); sealed it so the "
@@ -1508,6 +1511,7 @@ class SessionLog:
             "last_read_at": cls._meta_last_read_at(meta),
             "cli": cls._meta_cli(meta),
             "source": cls._meta_source(meta),
+            "origin": cls._meta_origin(meta),
         }
 
     @classmethod
@@ -1783,17 +1787,35 @@ class SessionLog:
         return value.strip() if isinstance(value, str) and value.strip() else None
 
     def get_source(self) -> Optional[str]:
-        """Return the entry point that created this session, if recorded."""
+        """Return the entry point of this session's latest turn, if recorded."""
         return self._meta_source(self._read_meta(self.meta_path))
 
     def set_source(self, source: str) -> None:
-        """Persist the entry point that created this session."""
+        """Record the entry point of the latest turn.
+
+        The first value ever recorded is also kept as ``origin`` (where the
+        session was started) and never rewritten: a conversation started on
+        WeChat and continued on the web is "latest: web, started: wechat".
+        """
         normalized = source.strip()
         if not normalized:
             raise ValueError("session source must be a non-empty string")
-        if self._meta_source(self._read_meta(self.meta_path)) == normalized:
+        meta = self._read_meta(self.meta_path)
+        if self._meta_source(meta) == normalized and self._meta_origin(meta):
             return
-        self._write_meta({"source": normalized})
+        updates: Dict[str, Any] = {"source": normalized}
+        if not self._meta_origin(meta):
+            updates["origin"] = self._meta_source(meta) or normalized
+        self._write_meta(updates)
+
+    @staticmethod
+    def _meta_origin(data: Dict[str, Any]) -> Optional[str]:
+        value = data.get("origin")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def get_origin(self) -> Optional[str]:
+        """Return the entry point this session was started from, if recorded."""
+        return self._meta_origin(self._read_meta(self.meta_path))
 
     FEEDBACK_RATINGS = ("up", "down")
     FEEDBACK_COMMENT_MAX = 4000

@@ -278,6 +278,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # Per-run: this turn's message came from software, not a person. Set by
     # Runner from RunConfig.automated_input; stamped on the user message.
     _run_automated_input: bool = field(default=False, init=False, repr=False)
+    # Per-run: the client this turn came through (RunConfig.channel), written
+    # to the session sidecar as its latest entry point.
+    _run_channel: Optional[str] = field(default=None, init=False, repr=False)
+    # The config.yaml profile this agent's model was built from, when one was
+    # (set by DeepAgent). Reported by self_manage so the agent can say which
+    # model it runs without guessing from config.yaml's active profile.
+    session_profile: Optional[str] = field(default=None, init=False, repr=False)
     # Per-run Runner-level API call attempts. Set by Runner from RunConfig.
     _run_max_api_retry: int = field(default=1, init=False, repr=False)
     # Max LLM loop turns. None = unlimited (main agent default).
@@ -656,6 +663,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._run_fallback_models = []
         self._run_fallback_on_break = False
         self._run_automated_input = False
+        self._run_channel = None
         self._run_max_api_retry = 1
         self.todos = []
         self._tool_policy_prompts: List[str] = []

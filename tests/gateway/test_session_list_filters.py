@@ -116,6 +116,20 @@ class TestSystemTempPath:
         assert is_system_temp_path(str(tmp_path / "elsewhere"))
 
 
+class TestSourceAndOrigin:
+    def test_im_session_continued_in_the_cli_stays_listed_with_both_entry_points(self, svc, dirs):
+        log = _session("wx-then-cli", dirs["proj"])
+        log.set_source("wechat")
+        log.set_source("cli")
+        rows = {r["session_id"]: r for r in svc.list_sessions(owner="default", scope="all", include_cli=False)}
+        assert (rows["wx-then-cli"]["source"], rows["wx-then-cli"]["origin"]) == ("cli", "wechat")
+
+    def test_channel_minted_id_is_its_origin_even_after_a_web_turn(self, svc, dirs):
+        log = _session("agent:main:feishu:chat7", dirs["proj"], source="gateway")
+        row = {r["session_id"]: r for r in svc.list_sessions(owner="default", scope="all")}["agent:main:feishu:chat7"]
+        assert (row["source"], row["origin"]) == ("gateway", "feishu")
+
+
 class TestForkAndFeedback:
     def test_fork_at_an_entry_copies_up_to_it_and_lists_as_web(self, svc, dirs):
         log = _session("orig", dirs["proj"], source="cli", users=("first", "second"))

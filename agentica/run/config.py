@@ -65,6 +65,11 @@ class RunConfig:
     max_api_retry: Optional[int] = None
     # Explicit provenance for this run. Product entry points should set this.
     source: RunSource = RunSource.sdk
+    # The concrete client the turn came in through when ``source`` is too
+    # coarse to tell (a gateway turn may come from the web page or an IM
+    # channel such as "wechat"). Recorded as the session's latest entry point;
+    # None means ``source`` itself.
+    channel: Optional[str] = None
     # The message was written by software, not a person (another agent
     # session, a background job's report). Recorded on the user turn so
     # human-facing transcripts can leave it out.

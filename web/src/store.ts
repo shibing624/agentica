@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import * as api from "./api";
 import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
+import { createViewStore } from "./lib/sessionView";
 
 /** Ordered stream of one assistant turn (text interleaves with tool groups). */
 export type MsgPart =
@@ -93,6 +94,8 @@ export type Session = {
   /** Server says a run is in flight (refresh can reattach). */
   running?: boolean;
   source?: string;
+  /** Where the session was started; `source` is where the latest turn came in. */
+  origin?: string;
   preview?: string;
   userCount?: number;
   sizeBytes?: number;
@@ -165,6 +168,9 @@ export type AppState = {
    *  right and never recomputes. */
   rev: number;
   curSess: string | null;
+  /** Until the first session catalog lands, the last open chat is unknown:
+   *  showing the new-chat screen then would flash before it is restored. */
+  booting: boolean;
   sessions: Record<string, Session>;
   streams: Record<string, {
     abortCtrl: AbortController;
@@ -323,6 +329,7 @@ const listeners = new Set<() => void>();
 const state: AppState = {
   rev: 0,
   curSess: null,
+  booting: true,
   sessions: {},
   streams: {},
   goalRuns: {},
@@ -469,6 +476,9 @@ export function readSessionCache(): Record<string, Partial<SessionStats>> {
 export function readLastSessionId(): string | null {
   return localStorage.getItem("ag_a:" + accountCachePrefix()) || localStorage.getItem("ag_a");
 }
+
+/** Last page and position per session, so reopening one returns there. */
+export const sessionViews = createViewStore(localStorage, () => "ag_view:" + accountCachePrefix());
 
 export function writeLastSessionId(id: string | null, persist = true) {
   const key = "ag_a:" + accountCachePrefix();

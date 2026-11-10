@@ -34,7 +34,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from agentica.agent.approvals import ApprovalDecision, PendingApproval
 from agentica.cli.approvals import (
     approval_decision_from_key,
-    format_approval_prompt,
     visible_approval_decisions,
 )
 from agentica.config.profiles import get_active_profile_name, get_profiles
@@ -272,17 +271,29 @@ def _read_attach_token(peer: PeerInfo) -> Optional[str]:
         return None
 
 
+# The IM command set, rendered both as the user's /help and as the agent's
+# instructions (model_factory) so the two cannot disagree.
+# (command, Chinese alias, what it does, what it does — for the agent)
+IM_COMMANDS: List[Tuple[str, str, str, str]] = [
+    ("/menu", "菜单", "打开快捷控制菜单", "numbered control menu"),
+    ("/resume", "恢复", "查看并切换会话（含正在运行的终端）",
+     "list this project's sessions and live CLI terminals, attach this chat to one"),
+    ("/new", "新建", "在当前目录新建会话", "start a new session in the bound directory"),
+    ("/switch", "切换", "切换本机项目工作区", "bind this chat to another project directory"),
+    ("/model", "", "切换当前会话模型", "pick the config.yaml profile this session runs on"),
+    ("/status", "状态", "查看当前绑定会话与执行状态", "show the bound directory, session and run state"),
+    ("/cancel", "取消", "中止当前正在运行的任务", "stop the running turn"),
+    ("/verbose", "详细", "汇报附带工具统计与思考摘要", "replies include tool stats and reasoning"),
+    ("/concise", "简洁", "只汇报最终结论与产物文件", "replies carry only the final answer and files"),
+    ("/help", "帮助", "显示本帮助", "this list"),
+]
+
 HELP_TEXT = (
     "📱 Agentica 远控菜单命令：\n"
-    "  /menu (菜单)    打开快捷控制菜单\n"
-    "  /resume (恢复)  查看并切换会话（含正在运行的终端）\n"
-    "  /new (新建)     在当前目录新建会话\n"
-    "  /switch (切换)  切换本机项目工作区\n"
-    "  /model          切换当前会话模型\n"
-    "  /status (状态)  查看当前绑定会话与执行状态\n"
-    "  /cancel (取消)  中止当前正在运行的任务\n"
-    "  /verbose / /concise  切换详细/简洁汇报\n\n"
-    "直接发送任何文字即为向当前绑定会话下发任务；出现编号菜单或审批时直接回复数字即可。"
+    + "".join(
+        f"  {cmd}{f' ({alias})' if alias else ''}  {desc}\n" for cmd, alias, desc, _ in IM_COMMANDS
+    )
+    + "\n直接发送任何文字即为向当前绑定会话下发任务；出现编号菜单或审批时直接回复数字即可。"
 )
 
 MENU_COMMANDS = [
@@ -437,10 +448,6 @@ class ImBotController:
         uid = self._user_id()
         if self._agent_service is not None:
             self._agent_service.set_session_work_dir(session_id, real_dir, owner=uid)
-            log = self._agent_service.session_log_for(session_id, owner=uid)
-            cur_source = log.get_source()
-            if not cur_source or cur_source == "gateway":
-                log.set_source(state.channel.value)
         self._save_states()
 
     def find_live_cli_peer(self, session_id: str) -> Optional[PeerInfo]:
@@ -1197,9 +1204,6 @@ class ImBotController:
         if self._agent_service is not None:
             uid = self._user_id()
             self._agent_service.set_session_work_dir(session_id, work_dir, owner=uid)
-            self._agent_service.session_log_for(session_id, owner=uid).set_source(
-                state.channel.value
-            )
             live_turn.bump_pulse(uid)
 
         started = time.monotonic()
@@ -1241,10 +1245,23 @@ class ImBotController:
                     title = "终端请求工具执行权限"
                 else:
                     labels = raw_opts
-                    values = [str(i) for i in range(1, len(raw_opts) + 1)]
+                    # A question's answer is free text: the CLI hands whatever it
+                    # gets straight to the model. The number is only how the
+                    # terminal/IM lists the options, so a pick must resolve to
+                    # that option's text — sending "2" would answer the model
+                    # with the string "2" instead of the choice it names.
+                    values = raw_opts
                     title = str(pi.get("prompt") or "终端正在等待你的输入")
 
                 def _resolve_cli(ans: str, rid: str = req_id) -> bool:
+                    # The IM side answers in decision keys ("allow"/"deny"/…,
+                    # what the card and the y/n letters map to). The terminal's
+                    # ``session/answer`` takes either a letter or a 1-based index
+                    # among the *visible* options it published — the same order
+                    # this snapshot lists them in — so translate instead of
+                    # handing it a name it answers ``accepted: false`` to.
+                    if ikind == "approval" and ans in raw_opts:
+                        ans = str(raw_opts.index(ans) + 1)
                     try:
                         c = _AttachRpcClient(peer.attach_socket, token, timeout=5.0)
                         r = c.call("session/answer", {"answer": ans, "requestId": rid})
@@ -1281,6 +1298,12 @@ class ImBotController:
             done_event.set()
             ack_task.cancel()
             watch_task.cancel()
+            if self._agent_service is not None:
+                # The CLI records its own turns as "cli"; this one was typed in
+                # the IM channel, so that stays the latest entry point.
+                self._agent_service.session_log_for(session_id, owner=self._user_id()).set_source(
+                    state.channel.value
+                )
             live_turn.bump_pulse(self._user_id())
 
         elapsed = time.monotonic() - started
@@ -1351,9 +1374,6 @@ class ImBotController:
             return
         uid = self._user_id()
         self._agent_service.set_session_work_dir(session_id, work_dir, owner=uid)
-        self._agent_service.session_log_for(session_id, owner=uid).set_source(
-            state.channel.value
-        )
 
         from ..routes import settings as settings_routes
 
@@ -1488,6 +1508,7 @@ class ImBotController:
                     on_thinking=_on_thinking,
                     media=media or None,
                     include_usage=False,
+                    channel=state.channel.value,
                 )
             else:
                 result = await self._agent_service.chat(
@@ -1496,6 +1517,7 @@ class ImBotController:
                     user_id=uid,
                     owner=uid,
                     media=media or None,
+                    channel=state.channel.value,
                 )
         except Exception as exc:
             turn.finish("failed")

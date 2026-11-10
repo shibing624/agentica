@@ -504,6 +504,8 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 /* Fixed height whether or not a page is in flight, so the spinner never shifts the transcript. */
 .chat-older{display:flex;align-items:center;justify-content:center;gap:6px;height:28px;margin-bottom:8px;font-size:12px;color:var(--fg3)}
 .chat-older svg{width:13px;height:13px}
+.chat-loading{display:flex;align-items:center;justify-content:center;gap:6px;height:100%;min-height:120px;font-size:12.5px;color:var(--fg3)}
+.chat-loading svg{width:14px;height:14px}
 .markdown-fallback{white-space:pre-wrap}
 .m{margin-bottom:12px;animation:fu .2s ease}
 .m.streaming{animation:none}

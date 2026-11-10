@@ -432,3 +432,4 @@ class DeepAgent(Agent):
             environment_context=environment_context,
             approve=approve,
         )
+        self.session_profile = session_profile

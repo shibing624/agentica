@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { getStrings, useStrings } from "../i18n";
 import { agoStr, lastQueryTs, sessionSideStatus } from "../lib/format";
-import { collapseSessionRows, sessionMatches, sessionSourceBadge, type SessionContentHit } from "../lib/sessionRows";
+import { collapseSessionRows, sessionMatches, sessionSourceBadge, sessionSourceTitle, type SessionContentHit } from "../lib/sessionRows";
 import {
   archiveSession, deleteSession, forkSession, loadSessions, newChatInDir, openSessionAtTurn,
-  pinSession, renameSession, searchAllSessionsContent, switchTo, syncSessionStatus,
+  pinSession, renameSession, searchAllSessionsContent, sessionPath, switchTo, syncSessionStatus,
 } from "../sessions";
 import {
   IconArchive, IconChevronRight, IconCopyOutline, IconFolder, IconFork, IconMore, IconPencil, IconPin, IconPlus,
@@ -31,7 +31,7 @@ export function SessionTree() {
   const s = useAppState();
   const S = useStrings();
   const nav = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const q = s.sidebarSearch.trim();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -145,6 +145,10 @@ export function SessionTree() {
       void openSessionAtTurn(id, firstHit.turn, q, firstHit.role);
     } else {
       switchTo(id);
+      // Back to the page this session was left on (chat or its trace).
+      const path = sessionPath(id);
+      if (pathname + search !== path) nav(path);
+      return;
     }
     if (pathname !== "/chat") nav("/chat");
   };
@@ -283,7 +287,10 @@ export function SessionTree() {
                     )}
                   </div>
                   {editingSession !== id && sourceBadge && (
-                    <span className={"s-source" + (sourceBadge.isIm ? " im" : "")}>{sourceBadge.label}</span>
+                    <span className={"s-source" + (sourceBadge.isIm ? " im" : "")}
+                          title={sessionSourceTitle(session.source, session.origin, S.chat.sourceLabels, S.chat)}>
+                      {sourceBadge.label}
+                    </span>
                   )}
                   {editingSession === id ? null : side === "busy" ? (
                     <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>

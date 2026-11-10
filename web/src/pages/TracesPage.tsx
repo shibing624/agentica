@@ -4,7 +4,7 @@ import * as api from "../api";
 import { useStrings, type Strings } from "../i18n";
 import { fmtCost, fmtDurationMs, fmtFileSize, fmtN, fmtTps } from "../lib/format";
 import { IconChat, IconCopy, IconSearch } from "../icons";
-import { showToast, useAppState } from "../store";
+import { getState, sessionViews, showToast, useAppState } from "../store";
 import { switchTo } from "../sessions";
 import { TaskCard } from "../components/TaskCard";
 import type { TaskResult } from "../lib/workActivity";
@@ -152,6 +152,15 @@ export function TracesPage() {
   const [errStatus, setErrStatus] = useState(0);
   const [loading, setLoading] = useState(false);
 
+  // The trace is this session's current page: picking the session again (or
+  // reopening the app) comes back here. Following a call link from the chat
+  // also makes it the session the sidebar shows as open.
+  useEffect(() => {
+    if (!sessionId) return;
+    sessionViews.update(sessionId, { page: "traces" });
+    if (getState().curSess !== sessionId && getState().sessions[sessionId]) switchTo(sessionId);
+  }, [sessionId]);
+
   useEffect(() => {
     if (!sessionId) { setAnalysis(null); setErrStatus(0); return; }
     setLoading(true);
@@ -209,11 +218,14 @@ export function TracesPage() {
 function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
   const S = useStrings();
   const t = a.totals;
+  // An explicit call from the chat wins; otherwise the call the user had
+  // selected when they last left this trace.
+  const saved = useMemo(() => sessionViews.get(a.session_id)?.trace, [a.session_id]);
   const focusInit = useMemo(() => {
-    if (!focusCall) return null;
+    if (!focusCall) return saved?.call ?? null;
     for (const r of a.rounds) for (const c of r.calls) if (c.toolCallId === focusCall) return c.index;
     return null;
-  }, [a, focusCall]);
+  }, [a, focusCall, saved]);
   const [showDuration, setShowDuration] = useState(a.hasTimeline);
   // -1 = all rounds. Scopes both the top duration timeline and the call table.
   const [scope, setScope] = useState(-1);
@@ -375,6 +387,7 @@ function TraceDetail({ a, focusCall }: { a: Analysis; focusCall: string }) {
         roundFilter={scope}
         focus={focus}
         onOpenCall={openCall}
+        initialScrollTop={focusCall ? undefined : saved?.scrollTop}
         hits={query.trim() && !hits.loading ? hits.indices : null}
         collapsedRounds={collapsedRounds}
         onToggleRound={toggleRound}
@@ -587,11 +600,12 @@ const ROW_H = 30;
 const OVERSCAN = 12;
 
 function CallsView({
-  a, roundFilter, focus, onOpenCall, hits,
+  a, roundFilter, focus, onOpenCall, initialScrollTop, hits,
   collapsedRounds, onToggleRound, collapsedAssistants, onToggleAssistant,
 }: {
   a: Analysis; roundFilter: number;
-  focus: number | null; onOpenCall: (index: number) => void; hits: Set<number> | null;
+  focus: number | null; onOpenCall: (index: number) => void;
+  initialScrollTop?: number; hits: Set<number> | null;
   collapsedRounds: Set<number>; onToggleRound: (round: number) => void;
   collapsedAssistants: Set<number>; onToggleAssistant: (modelIndex: number) => void;
 }) {
@@ -627,6 +641,10 @@ function CallsView({
   const [sel, setSel] = useState(initial);
   useEffect(() => { setSel(initial); }, [initial]);
   const picked = sel >= 0 && rows[sel]?.type === "call" ? (rows[sel] as Extract<Row, { type: "call" }>) : null;
+  const pickedIndex = picked?.call.index;
+  useEffect(() => {
+    if (pickedIndex != null) sessionViews.update(a.session_id, { trace: { call: pickedIndex } });
+  }, [a.session_id, pickedIndex]);
 
   const move = (delta: number) => {
     let i = sel;
@@ -641,6 +659,8 @@ function CallsView({
           <VirtualList
             rows={rows}
             selected={sel}
+            initialScrollTop={initialScrollTop}
+            onScrolled={(top) => sessionViews.update(a.session_id, { trace: { scrollTop: top } })}
             onSelect={setSel}
             onToggleRound={onToggleRound}
             onMove={move}
@@ -677,9 +697,11 @@ function CallsView({
 
 /** Fixed-height rows, only the visible window in the DOM: a long session has
  *  thousands of calls, and drawing them all is what made the page crawl. */
-function VirtualList({ rows, selected, onSelect, onToggleRound, onMove, render }: {
+function VirtualList({ rows, selected, initialScrollTop, onScrolled, onSelect, onToggleRound, onMove, render }: {
   rows: Row[];
   selected: number;
+  initialScrollTop?: number;
+  onScrolled: (top: number) => void;
   onSelect: (i: number) => void;
   onToggleRound: (round: number) => void;
   onMove: (delta: number) => void;
@@ -688,6 +710,7 @@ function VirtualList({ rows, selected, onSelect, onToggleRound, onMove, render }
   const ref = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
   const [height, setHeight] = useState(600);
+  const restoredRef = useRef(false);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -697,9 +720,20 @@ function VirtualList({ rows, selected, onSelect, onToggleRound, onMove, render }
     return () => ro.disconnect();
   }, []);
   // Keep the selection in view (a focus call from the chat, or arrow keys).
+  // On first paint a saved scroll position wins: it is where the reader was,
+  // and the restored selection is already inside it.
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || selected < 0) return;
+    if (!el) return;
+    if (!restoredRef.current) {
+      restoredRef.current = true;
+      if (initialScrollTop != null) {
+        el.scrollTop = initialScrollTop;
+        setTop(el.scrollTop);
+        return;
+      }
+    }
+    if (selected < 0) return;
     const y = selected * ROW_H;
     if (y < el.scrollTop) el.scrollTop = Math.max(0, y - ROW_H * 3);
     else if (y + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = y - el.clientHeight + ROW_H * 4;
@@ -719,7 +753,7 @@ function VirtualList({ rows, selected, onSelect, onToggleRound, onMove, render }
   }
   return (
     <div ref={ref} className="tr-list" tabIndex={0}
-         onScroll={(e) => setTop(e.currentTarget.scrollTop)}
+         onScroll={(e) => { setTop(e.currentTarget.scrollTop); onScrolled(e.currentTarget.scrollTop); }}
          onKeyDown={(e) => {
            if (e.key === "ArrowDown") { e.preventDefault(); onMove(1); }
            if (e.key === "ArrowUp") { e.preventDefault(); onMove(-1); }

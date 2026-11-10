@@ -193,6 +193,29 @@ class TestSelfManageTool(unittest.TestCase):
         self.assertIn("current_version", out)
         self.assertIn("config_path", out)
 
+    def test_show_reports_the_calling_session(self):
+        from agentica import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.tools.base import FunctionCall
+        import asyncio
+        agent = Agent(
+            model=OpenAIChat(id="gpt-test", base_url="http://127.0.0.1:9/v1", api_key="k"),
+            tools=[self.SelfManageTool()], session_id="sess-xyz", work_dir=self._tmp,
+            session_base_dir=self._tmp,
+        )
+        agent.session_profile = "hy4"
+        agent.update_model()
+        fc = FunctionCall(function=agent.model.functions["self_manage"], arguments={"action": "show"})
+        asyncio.run(fc.execute())
+        this = json.loads(fc.result)["this_session"]
+        self.assertEqual(this["session_id"], "sess-xyz")
+        self.assertEqual(this["session_log"], str(agent.session_log.path))
+        self.assertEqual(this["work_dir"], self._tmp)
+        self.assertEqual(this["profile"], "hy4")
+        self.assertEqual(this["model"]["id"], "gpt-test")
+        self.assertEqual(this["model"]["base_url"], "http://127.0.0.1:9/v1")
+        self.assertNotIn("agent", agent.model.functions["self_manage"].to_dict()["parameters"]["properties"])
+
     def test_set_env_and_mask(self):
         out = json.loads(self.self_manage(action="set_env", key="X_KEY", value="v"))
         self.assertTrue(out["success"])

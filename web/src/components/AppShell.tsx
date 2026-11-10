@@ -9,13 +9,13 @@ import {
 import { useStrings } from "../i18n";
 import { fmtN, fmtTime } from "../lib/format";
 import { primeSettings, SettingsModal } from "../panels/SettingsModal";
-import { loadSessions, newChat, pollSessionsPulse, switchTo, syncFromServer } from "../sessions";
+import { loadSessions, newChat, pollSessionsPulse, sessionPath, switchTo, syncFromServer } from "../sessions";
 import {
   Logo, IconPlus, IconSearch, IconClose, IconClock, IconPlug,
   IconSidebar, IconArchive, IconGear, IconProfiles, IconUser, IconLogout,
   IconChat, IconDatabase, IconFolderPlus, IconDownload, IconSpinner, DefaultAvatar,
 } from "../icons";
-import { clampSidebarWidth, getState, setState, useAppState, type Session } from "../store";
+import { clampSidebarWidth, getState, sessionViews, setState, useAppState, type Session } from "../store";
 import { openAddWorkspace } from "../workspaces";
 import { AddWorkspaceDialog } from "./AddWorkspaceDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
@@ -69,17 +69,30 @@ export function AppShell({
   // one loaded (a deep link to /traces is a cold start too).
   useEffect(() => {
     void (async () => {
-      await Promise.all([loadStatus(), loadAuthStatus(), loadUpdateCheck()]);
-      await loadPrefs();
-      await loadSessions();
-      const params = new URLSearchParams(window.location.search);
-      const targetSess = params.get("session");
-      if (params.get("new") === "1") {
-        newChat();
-        nav("/chat", { replace: true });
-      } else if (targetSess && getState().sessions[targetSess]) {
-        switchTo(targetSess);
-        nav("/chat", { replace: true });
+      try {
+        await Promise.all([loadStatus(), loadAuthStatus(), loadUpdateCheck()]);
+        await loadPrefs();
+        await loadSessions();
+        const params = new URLSearchParams(window.location.search);
+        const targetSess = params.get("session");
+        if (params.get("new") === "1") {
+          newChat();
+          nav("/chat", { replace: true });
+        } else if (targetSess && getState().sessions[targetSess]) {
+          switchTo(targetSess);
+          nav(sessionPath(targetSess), { replace: true });
+        } else {
+          // The last open chat was restored by loadSessions; if it was left on
+          // its trace, reopen the trace (the desktop app always loads /chat).
+          const restored = getState().curSess;
+          if (restored && window.location.pathname === "/chat" && sessionPath(restored) !== "/chat") {
+            nav(sessionPath(restored), { replace: true });
+          }
+        }
+      } finally {
+        // After the redirect: the chat page records "left on chat" only once
+        // booting is over, so it cannot overwrite the trace it is leaving for.
+        setState({ booting: false });
       }
       await Promise.all([loadProfiles(), loadPlugins(), loadCronJobs()]);
     })();
@@ -96,12 +109,15 @@ export function AppShell({
         newChat();
       } else if (detail.action === "session" && detail.sessionId) {
         const sid = detail.sessionId;
-        nav("/chat");
         if (getState().sessions[sid]) {
           switchTo(sid);
+          nav(sessionPath(sid));
         } else {
+          nav("/chat");
           void loadSessions().then(() => {
-            if (getState().sessions[sid]) switchTo(sid);
+            if (!getState().sessions[sid]) return;
+            switchTo(sid);
+            nav(sessionPath(sid));
           });
         }
       }
@@ -133,15 +149,19 @@ export function AppShell({
   // `/api/sessions/{id}/run` status in `SessionTree`.
   useEffect(() => {
     const sync = () => { if (document.visibilityState === "visible") void syncFromServer(); };
+    // Positions are written on a short timer; a closing window must not lose the last one.
+    const flushViews = () => sessionViews.flush();
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void pollSessionsPulse();
     }, 2000);
     window.addEventListener("focus", sync);
     document.addEventListener("visibilitychange", sync);
+    window.addEventListener("pagehide", flushViews);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", sync);
       document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("pagehide", flushViews);
     };
   }, []);
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
 import { fmtCost, fmtN, fmtSpan } from "../lib/format";
-import { bump, getState, saveSessions, type Session } from "../store";
+import { bump, getState, saveSessions, useAppState, type Session } from "../store";
 
 export type UsageSection = {
   label: string;
@@ -44,7 +44,20 @@ export type SessionUsage = {
   stats?: SessionStats;
 };
 
+/** Last full `/usage` answer per session, so the popover opens on it instead
+ *  of waiting for a request that scans the whole session log. */
+const usageCache = new Map<string, SessionUsage>();
+const inflight = new Map<string, Promise<SessionUsage | null>>();
+
+export function cachedSessionUsage(sessionId: string | null): SessionUsage | undefined {
+  return sessionId ? usageCache.get(sessionId) : undefined;
+}
+
 export function applySessionUsage(sessionId: string, usage: SessionUsage) {
+  // A turn's `done` usage is measured from the live Agent and has no log
+  // stats; keep the last ones until the next full read replaces them.
+  const prev = usageCache.get(sessionId);
+  usageCache.set(sessionId, { ...usage, stats: usage.stats ?? prev?.stats });
   const sess = getState().sessions[sessionId];
   if (sess) {
     if (usage.context_tokens > 0 || !sess.contextTokens) {
@@ -62,13 +75,27 @@ export function applySessionUsage(sessionId: string, usage: SessionUsage) {
   bump();
 }
 
+function fetchUsage(sessionId: string): Promise<SessionUsage | null> {
+  const running = inflight.get(sessionId);
+  if (running) return running;
+  const p = api.fetchSessionUsage(sessionId).then(({ ok, data }) => {
+    if (!ok || !data) return null;
+    applySessionUsage(sessionId, data as SessionUsage);
+    return data as SessionUsage;
+  }).finally(() => inflight.delete(sessionId));
+  inflight.set(sessionId, p);
+  return p;
+}
+
 export async function syncSessionUsage(sessionId: string): Promise<SessionUsage | null> {
   const sess = getState().sessions[sessionId];
   if (!sess || (!sess.sizeBytes && !sess.msgs.length && !sess.running)) return null;
-  const { ok, data } = await api.fetchSessionUsage(sessionId);
-  if (!ok || !data) return null;
-  applySessionUsage(sessionId, data as SessionUsage);
-  return data as SessionUsage;
+  return fetchUsage(sessionId);
+}
+
+/** Warm the cache before the popover opens (hover / focus on the ring). */
+export function prefetchSessionUsage(sessionId: string | null) {
+  if (sessionId && !usageCache.has(sessionId)) void syncSessionUsage(sessionId);
 }
 
 export function ContextUsageTip({ sessionId, fallback }: {
@@ -76,23 +103,20 @@ export function ContextUsageTip({ sessionId, fallback }: {
   fallback: Session | null;
 }) {
   const S = useStrings();
-  const [usage, setUsage] = useState<SessionUsage | null>(null);
-  const [loading, setLoading] = useState(!!sessionId);
+  useAppState();
+  const usage = cachedSessionUsage(sessionId) ?? null;
+  const [loading, setLoading] = useState(!!sessionId && !usage);
 
+  // Open on the cached answer; refresh it in the background.
   useEffect(() => {
     if (!sessionId) {
       setLoading(false);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    void api.fetchSessionUsage(sessionId).then(({ ok, data }) => {
-      if (cancelled) return;
-      setLoading(false);
-      if (ok && data) {
-        setUsage(data as SessionUsage);
-        applySessionUsage(sessionId, data as SessionUsage);
-      }
+    setLoading(!usageCache.has(sessionId));
+    void fetchUsage(sessionId).then(() => {
+      if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
   }, [sessionId]);
@@ -176,7 +200,7 @@ export function ContextUsageTip({ sessionId, fallback }: {
             {stats.cost_usd != null && <><dt>{S.chat.ctxCost}</dt><dd>~{fmtCost(stats.cost_usd)}</dd></>}
           </dl>
         </>
-      ) : (
+      ) : loading && !usage ? null : (
         <>
           <div className="ctx-tip-title">{S.chat.ctxSessionUsage}</div>
           <dl className="ctx-details">

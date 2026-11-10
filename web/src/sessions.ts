@@ -8,7 +8,7 @@ import { emptyChatIds } from "./lib/sessionDrafts";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import {
   askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
-  saveSessions, setState, showToast, writeLastSessionId,
+  saveSessions, sessionViews, setState, showToast, writeLastSessionId,
   type ChatMsg, type Session,
 } from "./store";
 
@@ -87,6 +87,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         running: sessionIsLive(id) || !!sv.running,
         unread: !!sv.unread,
         source: sv.source || "legacy",
+        origin: sv.origin || "",
         preview: sv.preview || "",
         userCount: sv.user_count || 0,
         sizeBytes: Number(sv.size_bytes) || 0,
@@ -139,6 +140,19 @@ export function switchTo(id: string) {
       setState({ pendingResume: id });
     }
   })();
+}
+
+/** The page this session was last left on: its trace, or the chat. */
+export function sessionPath(id: string): string {
+  return sessionViews.get(id)?.page === "traces"
+    ? `/traces?sessionId=${encodeURIComponent(id)}`
+    : "/chat";
+}
+
+/** A server session whose transcript has not been read yet: the chat pane
+ *  shows a loading state, not the empty new-chat screen. */
+export function sessionHydrating(sess: Session | null | undefined): boolean {
+  return !!sess && !sess.msgs.length && !!sess.sizeBytes && sess.hydratedSize !== sess.sizeBytes;
 }
 
 export function markSessionRead(id: string) {

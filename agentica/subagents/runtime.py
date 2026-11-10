@@ -44,6 +44,23 @@ if TYPE_CHECKING:
     from agentica.model.base import Model
 
 
+# Before the hard timeout the child is told to stop and report. A subagent that
+# keeps reading until ``wait_for`` cancels it hands back tool names and no
+# findings: up to 30 minutes of work the parent cannot use.
+_WRAP_UP_LEAD_SECONDS = 300
+_WRAP_UP_LEAD_FRACTION = 0.2
+_WRAP_UP_MESSAGE = (
+    "[Time budget almost spent] This subagent run will be stopped soon. "
+    "Do not call any more tools. Write your final answer now from the evidence "
+    "you already have: findings with path:line, plus what you could not verify."
+)
+
+
+def wrap_up_delay(timeout: float) -> float:
+    """Seconds after start at which the child is told to wrap up."""
+    return timeout - min(_WRAP_UP_LEAD_SECONDS, timeout * _WRAP_UP_LEAD_FRACTION)
+
+
 @dataclass
 class SubagentConfig:
     """Runtime configuration loaded from an agent definition."""
@@ -456,6 +473,17 @@ class SubagentRegistry:
             if hasattr(cloned, attr):
                 setattr(cloned, attr, None)
         return cloned
+
+    @staticmethod
+    async def _wrap_up_after(child: "Agent", delay: float) -> None:
+        """Steer the child into its final answer once ``delay`` seconds pass.
+
+        Steering is drained before the child's next inference, so a child in
+        the middle of a tool call finishes it first and then reads this.
+        """
+        await asyncio.sleep(delay)
+        if child.steer(_WRAP_UP_MESSAGE, automated=True):
+            logger.info("Subagent %s: wrap-up requested after %ss", child.name, round(delay))
 
     async def _run_child_streaming(
         self,
@@ -873,6 +901,7 @@ class SubagentRegistry:
         # and is silently discarded on interrupt — which is exactly why users
         # were seeing "task failed with no content" for long-running subagents.
         partial_sink: Dict[str, Any] = {"content": "", "tool_calls_summary": []}
+        wrap_up_task: Optional[asyncio.Task] = None
         try:
             run_coro = self._run_child_streaming(
                 parent_agent,
@@ -884,6 +913,9 @@ class SubagentRegistry:
                 tool_call_limit=config.tool_call_limit,
             )
             if config.timeout > 0:
+                wrap_up_task = asyncio.create_task(
+                    self._wrap_up_after(child, wrap_up_delay(config.timeout))
+                )
                 stream_result = await asyncio.wait_for(run_coro, timeout=config.timeout)
             else:
                 stream_result = await run_coro
@@ -1040,6 +1072,9 @@ class SubagentRegistry:
                     )
                 ),
             }
+        finally:
+            if wrap_up_task is not None:
+                wrap_up_task.cancel()
 
         elapsed = round(time.time() - start_time, 3)
         raw_content = stream_result["content"]

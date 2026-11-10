@@ -20,7 +20,7 @@ import {
 } from "../lib/format";
 import { primeSettings } from "../panels/SettingsModal";
 import { applyPendingModel, loadSessionModel, pickSessionModel } from "../sessionModel";
-import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, syncSessionRoundStats } from "../sessions";
+import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, sessionHydrating, syncSessionRoundStats } from "../sessions";
 import { loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconChat, IconBook, IconAsk, IconAuto, IconSidebarRight,
@@ -29,10 +29,10 @@ import {
   IconCheck, IconTrash, IconQueue, IconSearch,
 } from "../icons";
 import {
-  bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, setState,
+  bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, sessionViews, setState,
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
-import { applySessionUsage, ContextUsageTip, syncSessionUsage } from "../components/ContextUsageTip";
+import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUsage } from "../components/ContextUsageTip";
 import { rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
   appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts,
@@ -82,7 +82,6 @@ export function ChatPage() {
   const chatWrapRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(createStreamFollow());
-  const sessionScrollRef = useRef<Map<string, { scrollTop: number; stick: boolean }>>(new Map());
   const activeSessRef = useRef<{ id: string | null; hasMsgs: boolean }>({ id: null, hasMsgs: false });
   const prevStreamingRef = useRef(false);
   const pagingAnchorRef = useRef<{ node: HTMLElement; top: number; head: ChatMsg | undefined } | null>(null);
@@ -262,9 +261,11 @@ export function ChatPage() {
     const el = msgsRef.current;
     const active = activeSessRef.current;
     if (!el || !active.id || !active.hasMsgs) return;
-    sessionScrollRef.current.set(active.id, {
-      scrollTop: el.scrollTop,
-      stick: followRef.current.stick,
+    sessionViews.update(active.id, {
+      chat: {
+        fromBottom: Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop),
+        stick: followRef.current.stick,
+      },
     });
   };
 
@@ -326,7 +327,7 @@ export function ChatPage() {
     }
 
     if (switched || justHydrated) {
-      const saved = s.curSess ? sessionScrollRef.current.get(s.curSess) : undefined;
+      const saved = s.curSess ? sessionViews.get(s.curSess)?.chat : undefined;
       if (!saved || saved.stick) {
         followRef.current.resume();
         if (el) stickToBottom(el, followRef.current);
@@ -336,7 +337,7 @@ export function ChatPage() {
         return;
       }
       if (el && hasMsgs) {
-        el.scrollTop = saved.scrollTop;
+        el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - saved.fromBottom);
         followRef.current.scrolled({
           scrollTop: el.scrollTop,
           scrollHeight: el.scrollHeight,
@@ -420,6 +421,13 @@ export function ChatPage() {
   const workspace = cur?.dir || s.pendingNewChatDir || s.serverDir || "";
   const files = useFilesPanel(s.curSess, workspace);
   useEffect(() => { setCtxOpen(false); setTitleEditing(false); }, [s.curSess]);
+  // This page is where the session was left; reopening it comes back here.
+  useEffect(() => {
+    if (s.curSess && !s.booting) sessionViews.update(s.curSess, { page: "chat" });
+  }, [s.curSess, s.booting]);
+  // Neither the catalog nor this transcript has arrived yet: a placeholder,
+  // not the new-chat screen, or opening a chat flashes "Agentica / welcome".
+  const loadingChat = s.booting || sessionHydrating(cur);
   // Each chat runs on its own model; a new-chat screen shows the project's
   // default (or the one picked there) until the chat exists.
   useEffect(() => { void loadSessionModel(s.curSess); }, [s.curSess]);
@@ -442,7 +450,7 @@ export function ChatPage() {
 
   return (
     <>
-      <div className={"main" + (!cur || !cur.msgs.length ? " chat-empty" : "")}>
+      <div className={"main" + ((!cur || !cur.msgs.length) && !loadingChat ? " chat-empty" : "")}>
         <div className="topbar chat-topbar">
           <div className="topbar-row">
             <div className="tb-l">
@@ -457,7 +465,7 @@ export function ChatPage() {
                 ) : (
                   <span className="tb-chat-title" title={cur ? S.chat.dblclickRename : undefined}
                         onDoubleClick={() => { if (cur) setTitleEditing(true); }}>
-                    {cur?.title || S.chat.newConversation}
+                    {cur?.title || (loadingChat ? "" : S.chat.newConversation)}
                   </span>
                 )}
               </div>
@@ -507,7 +515,9 @@ export function ChatPage() {
               maybeLoadOlder(true);
             }}>
             <div className="msgs" ref={msgsInnerRef}>
-              {!cur || !cur.msgs.length ? (
+              {(!cur || !cur.msgs.length) && loadingChat ? (
+                <div className="chat-loading" aria-live="polite"><IconSpinner /><span>{S.common.loading}</span></div>
+              ) : !cur || !cur.msgs.length ? (
                 <div className="welcome welcome-new">
                   <Logo className="w-icon-img" />
                   <h2>Agentica</h2>
@@ -822,6 +832,8 @@ export function ChatPage() {
                 <div className="ctx-wrap" ref={ctxWrapRef}>
                   <button type="button" className={"foot-btn input-ctx" + (ctxOpen ? " on" : "")}
                           title={ctxOpen ? undefined : S.chat.ctxUsage} aria-haspopup="dialog" aria-expanded={ctxOpen}
+                          onPointerEnter={() => prefetchSessionUsage(s.curSess)}
+                          onFocus={() => prefetchSessionUsage(s.curSess)}
                           onClick={() => setCtxOpen((v) => !v)}>
                     <span className="ctx-ring" style={{ ["--pct" as any]: ctxPct + "%" }} />
                     {ctxPct}%

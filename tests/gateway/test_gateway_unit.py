@@ -317,6 +317,40 @@ class TestAgentServiceStreamToolDispatch:
             ("grep", ""),
         ]
 
+    def test_streamed_turn_passes_the_im_channel_down(self, tmp_path):
+        """``channel`` must reach the run config, not die at the call boundary.
+
+        ``chat_stream`` takes it, but the run config is built inside the locked
+        impl, so dropping it on the way through raised ``NameError: channel``
+        for *every* streamed turn — the whole reply became "Error: ...".
+        """
+        from agentica_gateway.services.agent_service import AgentService
+
+        seen = {}
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        agent = MagicMock()
+
+        async def fake_run_stream(*args, **kwargs):
+            seen["config"] = kwargs.get("config")
+            if False:  # empty async generator
+                yield None
+
+        agent.run_stream = fake_run_stream
+        svc._get_agent = AsyncMock(return_value=agent)
+
+        with patch(
+            "agentica_gateway.services.agent_service.usage_payload",
+            AsyncMock(return_value=None),
+        ):
+            result = asyncio.run(svc.chat_stream(
+                "go", session_id="s1", user_id="u1", channel="wechat",
+            ))
+
+        assert not result.content.startswith("Error:"), result.content
+        assert seen["config"].channel == "wechat"
+
     def test_write_file_completed_carries_unified_diff(self):
         from agentica_gateway.services.agent_service import dispatch_stream_chunk
         from agentica.run.response import RunEvent, RunResponse, ToolCallInfo

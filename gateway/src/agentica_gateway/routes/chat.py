@@ -959,11 +959,10 @@ async def _apply_session_work_dir(
 
 def _touch_session_log(svc: AgentService, session_id: str, owner: str) -> None:
     """Create an empty jsonl so the sidebar can list a run before the first append."""
-    from ..services.agent_service import IM_SESSION_SOURCES
-
     log = svc.session_log_for(session_id, owner=owner)
-    if log.get_source() not in IM_SESSION_SOURCES:
-        log.set_source("gateway")
+    # This turn comes in through the web: it is now the session's latest entry
+    # point, even for a conversation started in an IM channel.
+    log.set_source("gateway")
     path = log.path
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
