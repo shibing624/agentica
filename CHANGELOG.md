@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / Desktop 支持会话后台进程管理（对齐 CLI `/ps` 与 `/stop`）与电子表格（`.xlsx` / `.xls` / `.csv` / `.tsv`）多 Sheet 预览**：① Gateway 为每个会话挂载 `BackgroundProcessRegistry` 并新增 `GET /api/sessions/{id}/background`、`/background/{job_id}/output` 与 `POST /background/{job_id}/stop`；Web 输入框旁新增后台任务指示器与弹层（`BackgroundJobs.tsx`），可实时查看运行中的后台命令输出并一键停止。② 右侧工作区文件预览新增电子表格视图（`SheetView.tsx`、`spreadsheet.ts`），支持 Excel 多工作表切换、行列渲染与 CSV/TSV 表格 / 纯文本视图切换。
+- **新增 `CosPublishTool`（`publish_markdown` / `publish_html` / `publish_file`）：上传到腾讯云 COS 返回公网链接**（`agentica/tools/cos_tool.py`，`pip install agentica[cos]`）。环境变量 `COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_REGION` / `COS_BUCKET` 齐全时 `DeepAgent` 自动挂载（CLI 与网关都可用）。2024 年后创建的存储桶在默认域名 `*.myqcloud.com` 上一律强制下载（`Content-Disposition: attachment`），网页要在浏览器里打开必须配自定义域名 `COS_PUBLIC_BASE_URL`；未配置时工具结果会提示这一点。自定义域名只映射桶内某个目录时（如 `https://cdn/public/` 对应 `<bucket>/public/`），用 `COS_KEY_PREFIX` 指定该目录。
+- **IM 长回答由 agent 自己决定是否转网页**：`publish_markdown` 把 Markdown 渲染成适配手机的网页（表格、代码块、深色模式）并返回链接，由 agent 判断哪些内容放网页、哪些直接发文本。回合来自 IM 渠道时，系统提示的易变段（缓存标记之后）会说明本轮回复以聊天消息送达，Markdown 表格和标题会显示成原始字符。COS 未配置时不挂载这个工具，agent 看不到。
 - **主智能体能看到每种子智能体的超时并按需调大**：`task` 工具的系统提示表格新增 `Timeout` 列（`explore` / `code` / `research` 默认 1800s），并说明范围大的调查应在调用时直接传更大的 `timeout`，而不是等超时后再续跑。
 - **IM `/switch` 列表路径错位修复**：每个工作区原来分两行（名称 + 缩进路径），微信会按 Markdown 把缩进的那行并进相邻列表项，路径和下一个项目名粘在一起。现在每项一行：`N. 名称 · 完整路径`。
 - **IM 不再发手机打不开的卡片链接**：网关只监听本机且没设置 `AGENTICA_PUBLIC_URL` 时，`127.0.0.1` 链接在手机上指向手机自己，审批/提问只给编号回复；`/status` 会提示卡片链接未启用，同时显示审批模式（`allow-all` 永远不会出现审批卡片）。

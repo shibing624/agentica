@@ -20,6 +20,7 @@ import { GFM_PLUGINS } from "../lib/markdownPlugins";
 import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
+import { SheetView } from "./SheetView";
 
 const EXTERNAL_REF_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -27,7 +28,7 @@ type Entry = { name: string; kind: "dir" | "file"; sizeBytes: number; mtime?: st
 type Preview = {
   path: string;
   name: string;
-  kind: "code" | "text" | "md" | "image" | "html" | "pdf" | "unsupported";
+  kind: "code" | "text" | "md" | "table" | "workbook" | "image" | "html" | "pdf" | "unsupported";
   content?: string;
   truncated?: boolean;
 };
@@ -105,6 +106,8 @@ export function FilePreview({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [mode, setMode] = useState<ViewMode>("markdown");
   const [refreshing, setRefreshing] = useState(false);
+  // Workbooks fetch their own bytes; a refresh remounts the table to refetch.
+  const [refreshKey, setRefreshKey] = useState(0);
   const seq = useRef(0);
   const { targetRoot, targetRel, absPath: resolvedAbsPath, isExternal } = splitExternalTarget(filePath, root);
 
@@ -116,6 +119,7 @@ export function FilePreview({
     const present = (p: Preview) => { if (nonce === seq.current) setPreview(p); };
     if (targetKind === "image") { present({ path: filePath, name, kind: "image" }); return; }
     if (targetKind === "pdf") { present({ path: filePath, name, kind: "pdf" }); return; }
+    if (targetKind === "workbook") { present({ path: filePath, name, kind: "workbook" }); return; }
     if (targetKind === "unsupported") { present({ path: filePath, name, kind: "unsupported" }); return; }
     const { ok, data } = await api.fetchWorkspacePreview(targetRoot, targetRel);
     if (nonce !== seq.current) return;
@@ -127,6 +131,8 @@ export function FilePreview({
           ? (content.length > HIGHLIGHT_LIMIT ? "code" : "markdown")
           : targetKind === "html"
             ? "web"
+            : targetKind === "table"
+              ? "table"
             : targetKind === "code"
               ? "code"
               : "text",
@@ -151,12 +157,14 @@ export function FilePreview({
   const hasText = preview.content !== undefined;
   const modes: ViewMode[] = preview.kind === "md" ? ["markdown", "code", "text"]
     : preview.kind === "html" ? ["web", "code", "text"]
+    : preview.kind === "table" ? ["table", "code", "text"]
     : preview.kind === "code" ? ["code", "text"]
     : preview.kind === "text" ? ["text", "code"]
     : [];
   const view: ViewMode | null = modes.includes(mode) ? mode : (modes[0] ?? null);
   const refresh = () => {
     setRefreshing(true);
+    setRefreshKey((k) => k + 1);
     void load(true).finally(() => setRefreshing(false));
   };
   const slashIdx = preview.path.lastIndexOf("/");
@@ -182,9 +190,14 @@ export function FilePreview({
           onBackToTree={onRevealInTree ? () => onRevealInTree(filePath) : undefined}
         />
       </div>
-      <div className={"ws-preview-body" + (view === "code" ? " source" : "")}>
+      <div className={"ws-preview-body" + (view === "code" ? " source" : "")
+        + (view === "table" || preview.kind === "workbook" ? " sheet" : "")}>
         {preview.kind === "image" && <img src={src} alt={preview.name} />}
         {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
+        {preview.kind === "workbook" && <SheetView key={refreshKey} name={preview.name} src={src} />}
+        {view === "table" && hasText && (
+          <SheetView name={preview.name} text={preview.content} truncated={preview.truncated} />
+        )}
         {view === "web" && hasText && (
           <iframe srcDoc={preview.content} title={preview.name} sandbox="allow-scripts" />
         )}

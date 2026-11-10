@@ -300,3 +300,21 @@ def test_sdk_gateway_and_self_manage_inherit_cli_cache_and_resilience_fields(svc
     assert captured["session_profile"] == "full_cached"
     assert captured["experience_config"].capture_success_patterns is False
     assert captured["experience_config"].judge_every_n_turns == 10
+
+
+def test_a_rebuilt_agent_keeps_the_chats_background_commands(svc, monkeypatch):
+    """A model switch rebuilds the agent; its running commands must stay
+    listable and stoppable, so the registry belongs to the chat, not the agent."""
+    _built(svc, monkeypatch)
+    monkeypatch.setattr(
+        svc_mod, "DeepAgent",
+        lambda **kw: SimpleNamespace(**{**kw, "tools": [], "_session_log": None}),
+    )
+    svc._workspace = None
+    first = svc._build_agent("a").background_process_registry
+    asyncio.run(svc.set_session_profile("a", "fast"))
+    second = svc._build_agent("a").background_process_registry
+
+    assert first is not None and second is first
+    assert svc._build_agent("b").background_process_registry is not first
+    assert svc._build_agent("scheduled_job1").background_process_registry is None

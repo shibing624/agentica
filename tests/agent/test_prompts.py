@@ -597,3 +597,15 @@ class TestKnowledgeRetrievalDoesNotBlockTheLoop:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.asyncio
+async def test_im_channel_note_is_per_run_and_below_cache_marker():
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER
+
+    agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
+    assert "IM channel" not in (await agent.get_system_message()).content
+    agent._run_channel = "wechat"
+    content = (await agent.get_system_message()).content
+    stable, volatile = content.split(VOLATILE_SYSTEM_MARKER, 1)
+    assert "`wechat` IM channel" in volatile and "IM channel" not in stable

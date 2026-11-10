@@ -45,6 +45,7 @@ dependencies = [
     "python-frontmatter>=1.0",    # workspace: AGENTS.md / MEMORY.md / skills 解析
     "prompt-toolkit>=3.0",        # cli: 交互式终端
     "rich>=13.0",                 # cli: 终端渲染（workspace 也用）
+    "markdown-it-py>=2.2",        # Markdown → HTML（cos_tool.publish_markdown；rich 也依赖它）
     # ── DeepAgent 默认内置工具的依赖（CLI 开箱即用）──
     "beautifulsoup4>=4.12",       # BaiduSearchTool / UrlCrawlerTool 解析 HTML
     "lxml>=4.9",                  # bs4 高性能后端
@@ -130,6 +131,7 @@ e2b     = ["e2b_code_interpreter>=1.0"]  # 远端代码沙箱（E2BExecuteTool�
 resend   = ["resend>=0.7"]
 volc-tts = []
 weather  = ["requests>=2.31"]
+cos      = ["cos-python-sdk-v5>=1.9"]  # CosPublishTool：上传到腾讯云 COS 得公网链接
 
 # ═══════════════════════════════════════════════════════════
 # Tools 超级组合（参照 agno tools/storage/vectordbs）

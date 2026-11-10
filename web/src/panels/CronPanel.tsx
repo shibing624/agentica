@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import * as api from "../api";
 import { loadCronJobs } from "../data";
 import { getStrings, useStrings } from "../i18n";
@@ -126,13 +127,15 @@ export function CronPanel() {
   const S = useStrings();
   return (
     <div className="cron-panel">
-      {s.cronForm && <CronFormView />}
+      {s.cronForm && !s.cronForm.id && <CronFormView />}
 
       <div className="settings-list">
         {!s.cronJobs.length && <div className="settings-empty">{S.cron.noJobs}</div>}
         {s.cronJobs.map((j: any) => {
           const paused = j.status === "paused" || j.enabled === false;
           const runsOpen = s.cronRunsOpen.includes(j.id);
+          // Editing replaces the card in place: one job, one view at a time.
+          if (s.cronForm?.id === j.id) return <CronFormView key={j.id} />;
           return (
             <div className="cron-item" key={j.id}>
               <div className="cron-item-head">
@@ -183,35 +186,63 @@ export function CronPanel() {
   );
 }
 
+function Field({ label, hint, aside, children }: {
+  label: string; hint?: string; aside?: ReactNode; children: ReactNode;
+}) {
+  return (
+    <div className="pf-field">
+      <div className="pf-label-row">
+        <span className="pf-label">{label}</span>
+        {aside}
+      </div>
+      {children}
+      {hint && <div className="pf-hint">{hint}</div>}
+    </div>
+  );
+}
+
 function CronFormView() {
   const s = useAppState();
   const S = useStrings();
   const f = s.cronForm!;
+  const close = () => setState({ cronForm: null });
   return (
     <div className="settings-form cron-form">
       <h4>{f.id ? S.cron.editJob : S.cron.newJobTitle}</h4>
-      <input className="pf-input" placeholder={S.cron.namePlaceholder} value={f.name} onChange={(e) => patch({ name: e.target.value })} />
-      <div className="cron-prompt-wrap">
+      <Field label={S.cron.nameLabel}>
+        <input className="pf-input" placeholder={S.cron.namePlaceholder} value={f.name} onChange={(e) => patch({ name: e.target.value })} />
+      </Field>
+      <Field
+        label={S.cron.promptLabel}
+        aside={(
+          <button className="cron-act" disabled={s.cronBusy === "polish"} onClick={() => void polish()}>
+            {s.cronBusy === "polish" ? S.cron.polishing : S.cron.polish}
+          </button>
+        )}
+      >
         <textarea
-          className="pf-input pf-textarea"
-          rows={4}
+          className="pf-input pf-textarea cron-prompt-input"
+          rows={6}
           placeholder={S.cron.promptPlaceholder}
           value={f.prompt}
           onChange={(e) => patch({ prompt: e.target.value })}
         />
-        <button className="cron-act" disabled={s.cronBusy === "polish"} onClick={() => void polish()}>
-          {s.cronBusy === "polish" ? S.cron.polishing : S.cron.polish}
-        </button>
-      </div>
-      <input
-        className="pf-input"
-        placeholder={S.cron.schedulePlaceholder}
-        value={f.schedule}
-        onChange={(e) => patch({ schedule: e.target.value })}
-      />
+      </Field>
+      <Field label={S.cron.scheduleLabel} hint={S.cron.scheduleHint}>
+        <input
+          className="pf-input mono"
+          placeholder={S.cron.schedulePlaceholder}
+          value={f.schedule}
+          onChange={(e) => patch({ schedule: e.target.value })}
+        />
+      </Field>
       <div className="pf-row">
-        <input className="pf-input" type="number" placeholder={S.cron.timeoutPlaceholder} value={f.timeout_seconds} onChange={(e) => patch({ timeout_seconds: e.target.value })} />
-        <input className="pf-input" type="number" placeholder={S.cron.retriesPlaceholder} value={f.max_retries} onChange={(e) => patch({ max_retries: e.target.value })} />
+        <Field label={S.cron.timeoutLabel} hint={S.cron.timeoutHint}>
+          <input className="pf-input" type="number" min={0} placeholder="0" value={f.timeout_seconds} onChange={(e) => patch({ timeout_seconds: e.target.value })} />
+        </Field>
+        <Field label={S.cron.retriesLabel} hint={S.cron.retriesHint}>
+          <input className="pf-input" type="number" min={0} placeholder="0" value={f.max_retries} onChange={(e) => patch({ max_retries: e.target.value })} />
+        </Field>
       </div>
       {!f.id && (
         <label className="pf-check">
@@ -220,10 +251,10 @@ function CronFormView() {
         </label>
       )}
       <div className="pf-actions">
-        <button className="dp-btn" onClick={() => setState({ cronForm: null })}>{S.common.cancel}</button>
+        <button className="dp-btn" onClick={close}>{S.common.cancel}</button>
         <button className="dp-btn primary" onClick={() => void save()}>{f.id ? S.common.save : S.common.create}</button>
       </div>
-      <button className="pf-close" onClick={() => setState({ cronForm: null })}><IconClose /></button>
+      <button className="pf-close" onClick={close} title={S.common.close}><IconClose /></button>
     </div>
   );
 }

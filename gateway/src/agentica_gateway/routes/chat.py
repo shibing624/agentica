@@ -775,6 +775,42 @@ async def set_session_model(
     return _session_model_payload(svc, session_id, account)
 
 
+@router.get("/api/sessions/{session_id}/background")
+async def list_background_jobs(
+    session_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """This chat's detached commands and delegated workers (the CLI's ``/ps``)."""
+    return {"jobs": svc.list_background_jobs(session_id, owner=_account(request))}
+
+
+@router.get("/api/sessions/{session_id}/background/{job_id}/output")
+async def background_job_output(
+    session_id: str,
+    job_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    job = svc.background_job_output(session_id, job_id, owner=_account(request))
+    if job is None:
+        raise HTTPException(status_code=404, detail="Background job not found")
+    return job
+
+
+@router.post("/api/sessions/{session_id}/background/{job_id}/stop")
+async def stop_background_job(
+    session_id: str,
+    job_id: str,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    job = await svc.stop_background_job(session_id, job_id, owner=_account(request))
+    if job is None:
+        raise HTTPException(status_code=404, detail="Background job not found")
+    return job
+
+
 @router.post("/api/sessions/{session_id}/read")
 async def mark_session_read(
     session_id: str,

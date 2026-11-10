@@ -41,6 +41,7 @@ import {
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { applyChatSearchHighlights } from "../lib/sessionRows";
+import { BackgroundJobs } from "../components/BackgroundJobs";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import type { FileEdits } from "../lib/fileDiff";
@@ -471,6 +472,7 @@ export function ChatPage() {
               </div>
             </div>
             <div className="tb-r">
+              {s.curSess && <BackgroundJobs key={s.curSess} sessionId={s.curSess} streaming={streaming} />}
               {/* dsh: the way in only shows while the panel is closed; the open
                   panel carries its own collapse button in its head. */}
               {!files.open && (
@@ -855,7 +857,6 @@ export function ChatPage() {
                       shownProvider={shownProvider}
                       shownModel={shownModel}
                       shownEffort={shownEffort}
-                      thisChat={!!(pendingProfile || chatModel?.source === "session")}
                     />
                   )}
                 </div>
@@ -876,8 +877,8 @@ export function ChatPage() {
   );
 }
 
-function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, shownEffort, thisChat }: {
-  profiles: any[]; shownProfile: string; shownProvider: string; shownModel: string; shownEffort: string; thisChat: boolean;
+function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, shownEffort }: {
+  profiles: any[]; shownProfile: string; shownProvider: string; shownModel: string; shownEffort: string;
 }) {
   const S = useStrings();
   const [query, setQuery] = useState("");
@@ -898,7 +899,6 @@ function ModelDropdown({ profiles, shownProfile, shownProvider, shownModel, show
         <div className="dd-config-row"><span>Profile</span><strong>{shownProfile}</strong></div>
         <div className="dd-config-row"><span>{S.chat.model}</span><strong>{shownProvider}/{shownModel}</strong></div>
         {shownEffort && <div className="dd-config-row"><span>effort</span><strong>{shownEffort}</strong></div>}
-        <div className="dd-config-note">{thisChat ? S.chat.modelThisChat : S.chat.modelProjectDefault}</div>
       </div>
       <div className="dd-section">{S.chat.switchProfile}</div>
       {profiles.length > 0 && (

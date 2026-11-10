@@ -105,6 +105,17 @@ export const setSessionModelApi = (id: string, profile: string, workDir: string)
   postJson<SessionModel>(`/api/sessions/${encodeURIComponent(id)}/model${workDirQuery(workDir)}`, { profile });
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
+export type BackgroundJob = {
+  id: string; num: number; kind: string; label: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  exit_code: number | null; started_at_ms: number; finished_at_ms: number | null;
+};
+export const fetchBackgroundJobs = (id: string) =>
+  request<{ jobs: BackgroundJob[] }>(`/api/sessions/${id}/background`);
+export const fetchBackgroundJobOutput = (id: string, jobId: string) =>
+  request<BackgroundJob & { output: string; log_path: string }>(`/api/sessions/${id}/background/${jobId}/output`);
+export const stopBackgroundJobApi = (id: string, jobId: string) =>
+  request<BackgroundJob>(`/api/sessions/${id}/background/${jobId}/stop`, { method: "POST" });
 export const markSessionReadApi = (id: string) => request(`/api/sessions/${id}/read`, { method: "POST" });
 export const forkSessionApi = (id: string, at_uuid?: string) =>
   postJson<{ session_id: string }>(`/api/sessions/${id}/fork`, { at_uuid: at_uuid || null });

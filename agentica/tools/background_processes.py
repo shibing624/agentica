@@ -85,6 +85,7 @@ class BackgroundProcess:
     kind: str = "command"
     label: str = ""
     stop_requested: bool = False
+    finished_at: Optional[float] = None
     # Set by the watcher thread once the process is reaped. Callers that need to
     # block until the command is done wait on this instead of racing the watcher
     # for the same waitpid.
@@ -104,7 +105,7 @@ class BackgroundProcess:
 
     @property
     def elapsed(self) -> str:
-        return _format_elapsed(time.time() - self.started_at)
+        return _format_elapsed((self.finished_at or time.time()) - self.started_at)
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,7 @@ class BackgroundProcessRegistry:
                 label=item.label,
                 stop_requested=item.stop_requested,
             )
+        item.finished_at = completed_at
         item.finished.set()
         self._completed.put(event)
 

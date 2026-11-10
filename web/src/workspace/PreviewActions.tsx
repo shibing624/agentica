@@ -9,9 +9,9 @@ import { useStrings } from "../i18n";
 import { IconChevronDown, IconCopy, IconDownload, IconEditorApp, IconExternal, IconFinder, IconFolder, IconRefresh, IconTick } from "../icons";
 import { showToast } from "../store";
 
-export type ViewMode = "markdown" | "web" | "code" | "text";
+export type ViewMode = "markdown" | "web" | "table" | "code" | "text";
 
-function useDismiss(open: boolean, close: () => void) {
+export function useDismiss(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -48,7 +48,7 @@ export function PreviewActions({
   const [openMenu, setOpenMenu] = useState(false);
   const modeRef = useDismiss(modeOpen, () => setModeOpen(false));
   const openRef = useDismiss(openMenu, () => setOpenMenu(false));
-  const label = (m: ViewMode) => ({ markdown: P.viewMarkdown, web: P.viewWeb, code: P.viewCode, text: P.viewText })[m];
+  const label = (m: ViewMode) => ({ markdown: P.viewMarkdown, web: P.viewWeb, table: P.viewTable, code: P.viewCode, text: P.viewText })[m];
 
   const open = (app: "editor" | "finder" | "reveal") => {
     setOpenMenu(false);

@@ -290,6 +290,11 @@ class DeepAgent(Agent):
         if tools:
             all_tools.extend(tools)
 
+        # Public share links: on whenever COS credentials are in the environment.
+        from agentica.tools.cos_tool import CosPublishTool, cos_configured
+        if cos_configured() and not any(isinstance(t, CosPublishTool) for t in all_tools):
+            all_tools.append(CosPublishTool())
+
         # Delegate runs a task in a whole other agentica CLI process. It needs
         # the session's process registry (that is how the worker is tracked,
         # waited on and reported), so callers without one — the plain SDK

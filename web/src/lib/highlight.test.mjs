@@ -44,13 +44,15 @@ test("unknown extensions and dotless files default to plain-text preview while k
   }
   assert.equal(H.languageFromFilename("foo.constructor"), "");
   assert.equal(H.resolveLanguage("constructor"), "");
-  for (const bin of ["archive.zip", "video.mp4", "weights.safetensors", "module.pyc", "sheet.xlsx"]) {
+  for (const bin of ["archive.zip", "video.mp4", "weights.safetensors", "module.pyc", "slides.pptx"]) {
     assert.equal(FP.classifyPreviewTarget(bin), "unsupported", bin);
   }
   assert.equal(FP.classifyPreviewTarget("figure.png"), "image");
   assert.equal(FP.classifyPreviewTarget("paper.pdf"), "pdf");
   assert.equal(FP.classifyPreviewTarget("index.html"), "html");
   assert.equal(FP.classifyPreviewTarget("README.md"), "md");
+  for (const name of ["data.csv", "DATA.TSV", "rows.psv"]) assert.equal(FP.classifyPreviewTarget(name), "table", name);
+  for (const name of ["sheet.xlsx", "legacy.xls", "calc.ods"]) assert.equal(FP.classifyPreviewTarget(name), "workbook", name);
 });
 
 test("home-relative ~/.agentica session notes resolve against their own parent directory and extract from bare text", () => {

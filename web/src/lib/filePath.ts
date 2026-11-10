@@ -1,3 +1,5 @@
+import { DELIMITED_EXTS, WORKBOOK_EXTS } from "./spreadsheet";
+
 /**
  * Whether inline code in a message looks like a file path (penguin's heuristic).
  * No whitespace, no URL scheme, ends with a known extension.
@@ -10,7 +12,7 @@ const KNOWN_EXTENSIONS = new Set([
   "tex", "latex", "bib", "sty", "cls", "rst", "adoc", "mdx",
   "jsonl", "ndjson", "jsonc", "ipynb", "mts", "cts", "pyi", "pyw",
   "kt", "kts", "swift", "scss", "less", "vue", "svelte", "diff", "patch",
-  "mk", "cfg", "properties", "tsv",
+  "mk", "cfg", "properties", "tsv", "xlsx", "xls", "ods",
 ]);
 
 export const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
@@ -42,8 +44,8 @@ export const UNVIEWABLE_BINARY_EXTS = new Set([
   "mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "opus",
   // archives
   "zip", "gz", "tgz", "bz2", "xz", "zst", "7z", "rar", "tar", "jar", "whl",
-  // office documents
-  "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "pages", "numbers",
+  // office documents (spreadsheets other than Numbers open in the table view)
+  "doc", "docx", "ppt", "pptx", "odt", "odp", "pages", "numbers",
   // executables and compiled objects
   "exe", "dll", "so", "dylib", "bin", "o", "a", "class", "pyc", "pyo", "pyd", "wasm",
   // fonts
@@ -55,12 +57,14 @@ export const UNVIEWABLE_BINARY_EXTS = new Set([
   "npy", "npz", "pt", "pth", "ckpt", "safetensors", "onnx", "parquet", "feather", "arrow", "pkl", "pickle",
 ]);
 
-export type PreviewTargetKind = "image" | "pdf" | "html" | "md" | "code" | "text" | "unsupported";
+export type PreviewTargetKind = "image" | "pdf" | "html" | "md" | "table" | "workbook" | "code" | "text" | "unsupported";
 
 /**
  * Classify how the side-panel preview should open `name`:
  * - known code/markup suffixes (including `.tex`, `.bib`, `.sty`, `.cls`) -> `"code"` (Code view + Plain text option)
  * - `.txt` and unknown or dotless filenames -> `"text"` (Plain text default + Code option)
+ * - CSV / TSV -> `"table"` (Table view + Code / Plain text options)
+ * - XLSX / XLS / ODS workbooks -> `"workbook"` (Table view only)
  * - known binary containers -> `"unsupported"`
  */
 export function classifyPreviewTarget(name: string): PreviewTargetKind {
@@ -72,6 +76,8 @@ export function classifyPreviewTarget(name: string): PreviewTargetKind {
   if (ext === "pdf") return "pdf";
   if (HTML_EXTS.has(ext)) return "html";
   if (MD_EXTS.has(ext)) return "md";
+  if (DELIMITED_EXTS.has(ext)) return "table";
+  if (WORKBOOK_EXTS.has(ext)) return "workbook";
   if (UNVIEWABLE_BINARY_EXTS.has(ext)) return "unsupported";
   if (
     lower === "dockerfile" || lower.startsWith("dockerfile.") ||

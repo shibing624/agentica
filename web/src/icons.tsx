@@ -136,6 +136,13 @@ export const IconCheck = () => (
     <path d="M5.3 8.15l1.85 1.85 3.6-3.7" />
   </S>
 );
+export const IconLayers = () => (
+  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 2.5 14 5.7 8 8.9 2 5.7 8 2.5Z" />
+    <path d="M2.6 8.6 8 11.5l5.4-2.9" />
+    <path d="M2.6 11 8 13.9 13.4 11" />
+  </S>
+);
 export const IconSpinner = () => (
   <S className="icon-spin" strokeWidth="1.6" strokeLinecap="round">
     <circle cx="8" cy="8" r="5.4" opacity="0.25" />

@@ -273,6 +273,13 @@ export function SessionTree() {
                          pick(id);
                        }
                      }}>
+                  {/* dsh's leading status slot: running spinner / unread dot
+                      sit before the title; the time stays on the right. */}
+                  {editingSession !== id && side !== "idle" && (
+                    <span className={"s-lead " + side} title={side === "busy" ? S.chat.sessionBusy : S.chat.sessionUnread}>
+                      {side === "busy" && <IconSpinner />}
+                    </span>
+                  )}
                   <div className="s-main">
                     {editingSession === id ? (
                       <RenameInput className="s-rename-input" initial={session.title}
@@ -292,11 +299,7 @@ export function SessionTree() {
                       {sourceBadge.label}
                     </span>
                   )}
-                  {editingSession === id ? null : side === "busy" ? (
-                    <span className="mt busy" title={S.chat.sessionBusy}><IconSpinner /></span>
-                  ) : side === "unread" ? (
-                    <span className="mt unread" title={S.chat.sessionUnread} />
-                  ) : (
+                  {editingSession !== id && (
                     <span className="mt">{agoStr(lastQueryTs(session), S.chat)}</span>
                   )}
                   {editingSession !== id && session.pinned && (

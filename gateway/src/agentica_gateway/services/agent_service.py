@@ -49,6 +49,11 @@ from agentica.config.profiles import (
 )
 from agentica.memory.session_log import SessionLog, iso_timestamp, is_session_unread
 from agentica.skills import get_skill_registry, load_system_skills
+from agentica.tools.background_processes import (
+    BackgroundProcess,
+    BackgroundProcessRegistry,
+    read_log_tail,
+)
 from agentica.compression.manager import (
     compact_token_limit_of,
     parse_compact_token_limit,
@@ -437,6 +442,9 @@ class AgentService:
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._session_ask_callbacks: Dict[str, Callable] = {}
+        # Per session, outside the agent: a model switch or LRU eviction
+        # rebuilds the agent, and its running commands must stay reachable.
+        self._session_background: Dict[str, BackgroundProcessRegistry] = {}
 
     # ============== Model config (single source of truth: `settings`) ==============
     # These proxy directly to the gateway's global `settings` singleton instead
@@ -876,6 +884,14 @@ class AgentService:
             # is intentionally OFF: the gateway is headless (web/chat channels)
             # with no stdin, so the tool would block on a bare input() call.
             include_ask_user_question=False,
+            # Scheduled runs have nobody to see or stop a detached command.
+            background_process_registry=(
+                None if session_id.startswith(CRON_SESSION_PREFIX)
+                else self._session_background.setdefault(
+                    self._sk(session_id, owner),
+                    BackgroundProcessRegistry(user_id=self._owner(owner)),
+                )
+            ),
             permission_mode=permission_mode,
             tool_config=ToolConfig(
                 auto_load_mcp=True,
@@ -1934,6 +1950,10 @@ class AgentService:
         self._session_approval_modes.pop(key, None)
         self._session_grants.pop(key, None)
         self._session_ask_callbacks.pop(key, None)
+        background = self._session_background.pop(key, None)
+        if background is not None:
+            # stop() can take seconds on a command that ignores SIGTERM.
+            threading.Thread(target=background.stop, daemon=True).start()
         self._session_locks.pop(key, None)
         self._stale_agents.discard(key)
         log_existed = False
@@ -1951,6 +1971,67 @@ class AgentService:
             logger.warning(f"Failed to remove SessionLog for {session_id}: {e}")
         logger.debug(f"Session deleted: {session_id}")
         return removed or log_existed
+
+    # ============== Background commands (the Web's /ps and /stop) ==============
+
+    @staticmethod
+    def _background_job_view(item: BackgroundProcess) -> Dict[str, Any]:
+        if not item.finished.is_set():
+            status = "running"
+        elif item.stop_requested:
+            status = "stopped"
+        else:
+            status = "completed" if item.returncode == 0 else "failed"
+        return {
+            "id": item.id,
+            "num": item.num,
+            "kind": item.kind,
+            # A delegated worker's command line is `agentica --query <whole task>`.
+            "label": item.label if item.kind == "delegate" else item.command,
+            "status": status,
+            "exit_code": item.returncode,
+            "started_at_ms": int(item.started_at * 1000),
+            "finished_at_ms": int(item.finished_at * 1000) if item.finished_at else None,
+        }
+
+    def _background_job(
+        self, session_id: str, job_id: str, owner: Optional[str],
+    ) -> Optional[BackgroundProcess]:
+        registry = self._session_background.get(self._sk(session_id, owner))
+        return registry.get(job_id) if registry is not None else None
+
+    def list_background_jobs(self, session_id: str, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+        registry = self._session_background.get(self._sk(session_id, owner))
+        if registry is None:
+            return []
+        return [self._background_job_view(item) for item in registry.list(include_finished=True)]
+
+    def background_job_output(
+        self, session_id: str, job_id: str, owner: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        item = self._background_job(session_id, job_id, owner)
+        if item is None:
+            return None
+        return {
+            **self._background_job_view(item),
+            "output": read_log_tail(item.log_path, max_lines=400, max_chars=20000),
+            "log_path": item.log_path,
+        }
+
+    async def stop_background_job(
+        self, session_id: str, job_id: str, owner: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        item = self._background_job(session_id, job_id, owner)
+        if item is None:
+            return None
+        registry = self._session_background[self._sk(session_id, owner)]
+        # By the resolved id: stop() reads "all" as every command in the session.
+        await asyncio.to_thread(registry.stop, item.id)
+        return self._background_job_view(item)
+
+    def stop_all_background_jobs(self) -> None:
+        for registry in list(self._session_background.values()):
+            registry.stop()
 
     def fork_session(self, session_id: str, at_uuid: Optional[str] = None, owner: Optional[str] = None) -> str:
         """Copy a session up to ``at_uuid`` (inclusive) into a new one; return its id.

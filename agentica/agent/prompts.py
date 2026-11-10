@@ -531,6 +531,14 @@ class PromptsMixin:
         if self.response_model is not None and not self.use_structured_outputs:
             lines.append("\n" + self.get_json_output_prompt())
 
+        # Per run, so below the cache marker: the same session is reached from
+        # the web page, the CLI and IM channels turn by turn.
+        if self._run_channel:
+            lines.append(
+                f"\nThis turn came in over the `{self._run_channel}` IM channel: your reply is "
+                "delivered as chat messages, which show Markdown tables and headings as raw text."
+            )
+
         # Datetime at the very end — day precision for prefix-cache friendliness
         # Mirrors CC's getLocalISODate(): only YYYY-MM-DD, no time component.
         if pc.add_datetime_to_instructions:
