@@ -88,6 +88,7 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
         archived: edit && edit.archived !== undefined ? edit.archived : !!sv.archived,
         pinned: !!sv.pinned,
         running: sessionIsLive(id) || !!sv.running,
+        backgroundJobs: Number(sv.background_jobs) || 0,
         unread: !!sv.unread,
         source: sv.source || "legacy",
         origin: sv.origin || "",
@@ -110,7 +111,13 @@ export function loadSessions(scope: "recent" | "all" = getState().sessionScope):
     if (st.curSess && !merged[st.curSess] && st.sessions[st.curSess] && !localEdits.get(st.curSess)?.deleted) {
       merged[st.curSess] = st.sessions[st.curSess];
     }
-    setState({ sessions: merged, sessionScope: scope, sessionsLoading: false, sessionsError: "" });
+    setState({
+      sessions: merged,
+      sessionScope: scope,
+      sessionsLoading: false,
+      sessionsError: "",
+      pulseSeq: getState().pulseSeq + 1,
+    });
     saveSessions();
     const last = readLastSessionId();
     // Restore the last open chat on start-up only: on a later refresh this

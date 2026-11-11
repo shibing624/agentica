@@ -8,8 +8,8 @@ import {
   pinSession, renameSession, searchAllSessionsContent, sessionPath, switchTo, syncSessionStatus,
 } from "../sessions";
 import {
-  IconArchive, IconChevronRight, IconCopyOutline, IconFolder, IconFork, IconMore, IconPencil, IconPin, IconPlus,
-  IconClock, IconSpinner, IconTrash,
+  IconArchive, IconChevronRight, IconClock, IconCopyOutline, IconFolder, IconFork, IconLayers, IconMore, IconPencil,
+  IconPin, IconPlus, IconSpinner, IconTrash,
 } from "../icons";
 import {
   getState, normDir, projectIdForDir, projectNameForDir, setState, showToast, useAppState, type Session,
@@ -300,6 +300,12 @@ export function SessionTree() {
                   </div>
                   {editingSession !== id && automatedSessions.has(id) && (
                     <span className="s-auto-mark" title={S.automation.sessionMark}><IconClock /></span>
+                  )}
+                  {editingSession !== id && !session.running && (session.backgroundJobs || 0) > 0 && (
+                    <span className="s-bg-badge" title={S.chat.bgRunningCount(session.backgroundJobs!)}>
+                      <IconLayers />
+                      <span>{session.backgroundJobs}</span>
+                    </span>
                   )}
                   {editingSession !== id && sourceBadge && (
                     <span className={"s-source" + (sourceBadge.isIm ? " im" : "")}

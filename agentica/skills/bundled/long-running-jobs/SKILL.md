@@ -27,7 +27,14 @@ execute(command="while [ ! -f train.exit ]; do tmux has-session -t train 2>/dev/
 ```
 
 The same watcher fits any job you did not start here (a job queue, a remote
-run): loop on whatever condition marks it done.
+run): loop on whatever condition marks it done, printing one short progress line
+each tick so `/ps` (CLI / IM) and the Web/Desktop background-jobs popover show
+live progress:
+
+```
+execute(command="ssh gpu 'cd /work/exp && nohup bash -c \"python train.py > run.log 2>&1; echo \\$? > run.exit\" >/dev/null 2>&1 &'", description="Launch training on remote GPU")
+execute(command="while true; do st=$(ssh gpu 'if [ -f /work/exp/run.exit ]; then echo DONE:$(cat /work/exp/run.exit); elif pgrep -f train.py >/dev/null; then tail -n 1 /work/exp/run.log; else echo GONE; fi'); case \"$st\" in DONE:*) ssh gpu 'tail -n 20 /work/exp/run.log'; exit \"${st#DONE:}\" ;; GONE) ssh gpu 'tail -n 20 /work/exp/run.log'; exit 2 ;; *) echo \"$st\"; sleep 30 ;; esac; done", description="Watch remote GPU training progress", background=True)
+```
 
 Tell the user the watcher dies with this session while the job keeps running.
 After a restart, read the marker before assuming anything.

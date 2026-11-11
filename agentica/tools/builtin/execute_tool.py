@@ -294,8 +294,12 @@ _BACKGROUND_GUIDANCE = """
   {delivery}
   Never wait inside a turn with ``sleep`` or polling (a 120s+ leading ``sleep``
   is refused), and never detach with a trailing ``&``.
-- A background command is stopped when the session exits. For a job that must
-  outlive the session, load the ``long-running-jobs`` skill first.
+- Whenever you detach a long job with ``nohup`` / ``tmux`` / ``setsid``
+  (locally or over ``ssh`` on a remote machine), start one ``execute(...,
+  background=True)`` watcher in the same turn that polls progress (printing a
+  concise status line each tick) and exits with the job's exit code when done
+  (see the ``long-running-jobs`` skill). Without a ``background=True``
+  watcher, the UI cannot show live progress or report completion.
 """
 
 _DELIVERED = (
@@ -666,6 +670,7 @@ class BuiltinExecuteTool(Tool):
         """
         # `parallel_safe` is read by the executor (via Function.parallel_arg) to
         # decide the schedule before this ever runs; it means nothing here.
+        clean_desc = " ".join((description or "").split())
         del description, parallel_safe
 
         if (
@@ -769,7 +774,7 @@ class BuiltinExecuteTool(Tool):
                     "while the command is still running. Pass the plain command."
                 )
             item = self._background_process_registry.start(
-                command, cwd=cwd, argv=argv, env=env,
+                command, cwd=cwd, argv=argv, env=env, label=clean_desc,
             )
             return (
                 f"Started background command #{item.num} "

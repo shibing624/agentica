@@ -119,6 +119,7 @@ class FakeAgentService:
         self.undelivered_steer: Dict[str, List[str]] = {}
         self.chat_calls: List[Tuple[str, str, str]] = []
         self.chat_channels: List[Optional[str]] = []
+        self.bg_jobs: Dict[str, List[dict]] = {}
         self.chat_handler = None
         self.default_work_dir = default_work_dir
 
@@ -161,7 +162,10 @@ class FakeAgentService:
 
     def cancel_session(self, session_id: str, owner=None) -> bool:
         self.cancelled_sessions.append(session_id)
-        return True
+        if session_id in self.active_sessions:
+            self.active_sessions.discard(session_id)
+            return True
+        return False
 
     def steer_session(self, session_id: str, text: str, owner=None) -> bool:
         if session_id in self.active_sessions:
@@ -171,6 +175,32 @@ class FakeAgentService:
 
     def take_undelivered_steer(self, session_id: str, owner=None) -> List[str]:
         return self.undelivered_steer.pop(session_id, [])
+
+    def list_background_jobs(self, session_id: str, owner=None) -> List[dict]:
+        return list(self.bg_jobs.get(session_id, []))
+
+    def background_job_output(self, session_id: str, job_id: str, owner=None, max_lines: int = 400, max_chars: int = 20000):
+        for j in self.bg_jobs.get(session_id, []):
+            if job_id in {j.get("id"), str(j.get("num")), f"#{j.get('num')}", str(j.get("pid"))}:
+                return {**j, "output": j.get("output", ""), "log_path": j.get("log_path", "")}
+        return None
+
+    async def stop_background_job(self, session_id: str, job_id: str, owner=None):
+        for j in self.bg_jobs.get(session_id, []):
+            if job_id in {j.get("id"), str(j.get("num")), f"#{j.get('num')}", str(j.get("pid"))}:
+                j["status"] = "stopped"
+                j["finished_at_ms"] = j.get("started_at_ms", 0) + 1000
+                return j
+        return None
+
+    async def stop_all_session_background_jobs(self, session_id: str, owner=None) -> List[dict]:
+        stopped = []
+        for j in self.bg_jobs.get(session_id, []):
+            if j.get("status") == "running":
+                j["status"] = "stopped"
+                j["finished_at_ms"] = j.get("started_at_ms", 0) + 1000
+                stopped.append(j)
+        return stopped
 
     async def chat(
         self,
@@ -339,6 +369,11 @@ class TestCommandParsing:
         assert parse_im_command("恢复会话").kind == "resume"
         assert parse_im_command("/cancel").kind == "cancel"
         assert parse_im_command("停止").kind == "cancel"
+        assert parse_im_command("/ps").kind == "ps"
+        assert parse_im_command("后台").kind == "ps"
+        assert parse_im_command("后台任务").kind == "ps"
+        assert parse_im_command("/stop term_1") == im_bot_mod.ImCommand(kind="stop_bg", arg="term_1")
+        assert parse_im_command("/stop all") == im_bot_mod.ImCommand(kind="stop_bg", arg="all")
         assert parse_im_command("/verbose").arg == "on"
         assert parse_im_command("简洁").arg == "off"
 
@@ -892,5 +927,125 @@ class TestImBotControllerFlows:
         finally:
             server.stop()
             peer_session.unpublish()
+
+    @pytest.mark.asyncio
+    async def test_im_ps_status_and_stop_manage_background_jobs_and_live_steps(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGENTICA_HOME", str(tmp_path / "home"))
+        from agentica_gateway.services import live_turn
+
+        live_turn.reset()
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        ch = FakeChannel()
+        svc = FakeAgentService(default_work_dir=str(proj))
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch),
+            agent_service=svc,
+            state_file=tmp_path / "im_state.json",
+        )
+
+        def _m(text: str) -> Message:
+            return Message(
+                channel=ChannelType.WECHAT,
+                channel_id="u1",
+                sender_id="u1",
+                sender_name="User",
+                content=text,
+                message_id="m1",
+            )
+
+        state = bot.state_for(_m("noop"))
+        sid = state.session_id
+        now_ms = 1_794_000_000_000
+        svc.bg_jobs[sid] = [
+            {
+                "id": "term_1",
+                "num": 1,
+                "pid": 43210,
+                "kind": "command",
+                "label": "监控 devcloud 全量挖掘进度",
+                "command": "while ssh 9.134.195.225 ...; done",
+                "status": "running",
+                "exit_code": None,
+                "progress": "users=180/363 probes=312",
+                "started_at_ms": now_ms - 120_000,
+                "finished_at_ms": None,
+                "output": "users=150/363 probes=260\nusers=180/363 probes=312",
+                "log_path": str(proj / "term_1.log"),
+            },
+            {
+                "id": "term_2",
+                "num": 2,
+                "pid": 43100,
+                "kind": "command",
+                "label": "检查小样评测脚本语法",
+                "command": "python3 -m py_compile a_layer.py",
+                "status": "completed",
+                "exit_code": 0,
+                "progress": "",
+                "started_at_ms": now_ms - 300_000,
+                "finished_at_ms": now_ms - 295_000,
+                "output": "syntax ok",
+                "log_path": str(proj / "term_2.log"),
+            },
+        ]
+
+        # 1. /status never falsely says "空闲" while a background job is running,
+        # and also shows active LiveTurn tool step when a turn is in flight.
+        turn = live_turn.start(sid, owner="default", user_message="查一下")
+        turn.publish({
+            "event": "tool_call",
+            "data": {
+                "name": "execute",
+                "args": {"description": "读取远程日志末尾"},
+                "tool_call_id": "tc_live_1",
+            },
+        })
+        svc.active_sessions.add(sid)
+        await bot.handle(_m("状态"))
+        status_text = ch.sent[-1][1]
+        assert "正在执行: execute (读取远程日志末尾)" in status_text
+        assert "监控 devcloud 全量挖掘进度" in status_text
+        assert "users=180/363 probes=312" in status_text
+
+        turn.finish("completed")
+        svc.active_sessions.discard(sid)
+
+        await bot.handle(_m("/status"))
+        idle_turn_status = ch.sent[-1][1]
+        assert "1 个后台任务运行中" in idle_turn_status
+        assert "· 空闲" not in idle_turn_status
+
+        # 2. /cancel when turn is idle does not say "没有正在运行的任务", opens /ps instead
+        await bot.handle(_m("/cancel"))
+        cancel_text = ch.sent[-1][1]
+        assert "有 1 个后台任务正在运行" in cancel_text
+        assert "监控 devcloud 全量挖掘进度" in cancel_text
+
+        # 3. /ps lists running & settled jobs; numeric '1' views live output;
+        # numeric '1' refreshes; numeric '2' stops the job!
+        await bot.handle(_m("后台"))
+        ps_text = ch.sent[-1][1]
+        assert "运行中（1）" in ps_text
+        assert "最近已结束（1）" in ps_text
+        assert "users=180/363 probes=312" in ps_text
+
+        await bot.handle(_m("1"))
+        detail_text = ch.sent[-1][1]
+        assert "── 最新输出 ──" in detail_text
+        assert "users=150/363 probes=260" in detail_text
+        assert "1. 🔄 刷新最新输出" in detail_text
+        assert "2. 🛑 停止该后台任务" in detail_text
+
+        svc.bg_jobs[sid][0]["output"] += "\nusers=220/363 probes=388"
+        await bot.handle(_m("1"))
+        refreshed_text = ch.sent[-1][1]
+        assert "users=220/363 probes=388" in refreshed_text
+
+        await bot.handle(_m("2"))
+        stopped_text = ch.sent[-1][1]
+        assert "已停止后台任务 #1 [term_1]" in stopped_text
+        assert svc.bg_jobs[sid][0]["status"] == "stopped"
+        live_turn.reset()
 
 

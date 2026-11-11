@@ -1065,6 +1065,17 @@ def create_agent(
             session_id = forked.session_id
             agent_config["session_id"] = session_id
 
+    if background_process_registry is not None and enable_session_log:
+        from agentica.memory.session_log import SessionLog as _BgSessionLog
+
+        _bg_log = _BgSessionLog(
+            session_id, base_dir=session_base_dir, work_dir=work_dir, user_id=cli_user_id,
+        )
+        background_process_registry.bind_session(
+            session_id=session_id,
+            records_dir=_bg_log.base_dir / session_id / "background",
+        )
+
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool

@@ -96,6 +96,8 @@ export type Session = {
   unread?: boolean;
   /** Server says a run is in flight (refresh can reattach). */
   running?: boolean;
+  /** Number of running background jobs (`execute(background=True)` / `delegate`). */
+  backgroundJobs?: number;
   source?: string;
   /** Where the session was started; `source` is where the latest turn came in. */
   origin?: string;
@@ -250,6 +252,10 @@ export type AppState = {
   showCliSessions: boolean;
   sessionsLoading: boolean;
   sessionsError: string;
+  /** Monotonic counter incremented when remote pulse / session catalog lands. */
+  pulseSeq: number;
+  /** Cached background jobs per session id for chat rows and header badge. */
+  bgJobsBySession: Record<string, api.BackgroundJob[]>;
   /** Whether a web password exists. Decides what the access-control block
    *  offers ("set" vs "change") and whether logging out is a thing. */
   passwordSet: boolean;
@@ -373,6 +379,8 @@ const state: AppState = {
   showCliSessions: false,
   sessionsLoading: false,
   sessionsError: "",
+  pulseSeq: 0,
+  bgJobsBySession: {},
   passwordSet: false,
   passwordIsInitial: false,
   accountId: "default",

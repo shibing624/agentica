@@ -14,6 +14,7 @@ export type SessionRow = {
     title: string;
     preview?: string;
     running?: boolean;
+    backgroundJobs?: number;
     pinned?: boolean;
     source?: string;
     origin?: string;
@@ -221,7 +222,9 @@ export function collapseSessionRows<T extends SessionRow>(
   if (expanded) return { visible: rows, hiddenCount: 0 };
   let idleCount = 0;
   const visible = rows.filter((row) => {
-    if (row.id === currentId || row.session.running || row.session.pinned) return true;
+    if (row.id === currentId || row.session.running || (row.session.backgroundJobs || 0) > 0 || row.session.pinned) {
+      return true;
+    }
     idleCount += 1;
     return idleCount <= limit;
   });

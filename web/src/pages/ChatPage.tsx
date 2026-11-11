@@ -475,7 +475,14 @@ export function ChatPage() {
             </div>
             <div className="tb-r">
               {s.curSess && cur && cur.msgs.length > 0 && <SessionAutomations sessionId={s.curSess} />}
-              {s.curSess && <BackgroundJobs key={s.curSess} sessionId={s.curSess} streaming={streaming} />}
+              {s.curSess && (
+                <BackgroundJobs
+                  key={s.curSess}
+                  sessionId={s.curSess}
+                  streaming={streaming}
+                  onOpenFile={files.browsePath}
+                />
+              )}
               {/* dsh: the way in only shows while the panel is closed; the open
                   panel carries its own collapse button in its head. */}
               {!files.open && (

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { fmtDurationMs } from "../lib/format";
+import { jobDuration, parseBackgroundStart } from "../lib/backgroundJobs";
 import { normalizeMentionedPath } from "../lib/filePath";
 import { workSummary, type MsgPart } from "../lib/msgParts";
 import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
@@ -281,15 +282,36 @@ function ToolRow({
   const sessionId = getState().curSess;
   const cwd = sessionCwd();
   const isShell = part.name === "execute" || part.name === "bash" || part.name === "shell";
+  const bgStart = isShell && !isError ? parseBackgroundStart(resultText) : null;
+  const bgJob = bgStart && sessionId
+    ? getState().bgJobsBySession[sessionId]?.find((j) => j.id === bgStart.id)
+    : undefined;
+  const bgRunning = bgJob?.status === "running";
   const shellParsed = isShell && !running && part.result != null ? parseShellOutput(resultText, isError) : null;
-  const shellExitFailed = Boolean(shellParsed && shellParsed.exitCode !== null && shellParsed.exitCode !== 0);
+  const shellExitFailed = Boolean(
+    (shellParsed && shellParsed.exitCode !== null && shellParsed.exitCode !== 0)
+    || bgJob?.status === "failed",
+  );
   const rowFailed = isError || shellExitFailed;
   const hasExplicitDesc = isShell && Boolean(firstLine(String(args.description ?? "")));
   const summary = isError ? firstLine(resultText.slice("Error: ".length)) : toolSummary(part, S);
   const cmdPreview = hasExplicitDesc ? formatToolDisplay("execute", args, cwd).replace(/\s+/g, " ").trim() : "";
   const summaryTip = hasExplicitDesc && cmdPreview ? `${summary}\n$ ${cmdPreview}` : summary;
   const showSummary = Boolean(summary) && (!open || !isShell || hasExplicitDesc);
-  const resultPreview = !open && !running && !rowFailed ? toolResultPreview(part.name, resultText, Boolean(stats)) : "";
+  const resultPreview = !open && !running && !rowFailed
+    ? (bgStart
+      ? (bgRunning ? (bgJob?.progress || "") : "")
+      : toolResultPreview(part.name, resultText, Boolean(stats)))
+    : "";
+  const bgBadge = bgJob
+    ? (bgJob.status === "running"
+      ? S.chat.bgInChatRunning(jobDuration(bgJob, Date.now()))
+      : bgJob.status === "completed"
+        ? S.chat.bgInChatDone(jobDuration(bgJob, Date.now()))
+        : bgJob.status === "stopped"
+          ? S.chat.bgInChatStopped
+          : S.chat.bgInChatFailed(bgJob.exit_code))
+    : "";
   const rawFilePath = OPEN_FILE_TOOLS.has(part.name) ? String(args.file_path ?? args.path ?? "").trim() : "";
   const openablePath = !running && !rowFailed && onOpenFile && rawFilePath
     ? normalizeMentionedPath(rawFilePath, cwd || null)
@@ -298,7 +320,7 @@ function ToolRow({
 
   return (
     <div
-      className={"wr wr-tool" + (running ? " running" : "") + (open ? " open" : "") + (rowFailed ? " error" : "")
+      className={"wr wr-tool" + ((running || bgRunning) ? " running" : "") + (open ? " open" : "") + (rowFailed ? " error" : "")
         + (awaitingApproval ? " awaiting-approval" : "")}
       data-tool-call-id={part.toolCallId || undefined}
     >
@@ -306,7 +328,7 @@ function ToolRow({
         <button type="button" className="wr-head" aria-expanded={open}
                 onClick={() => { userToggled.current = true; setOpen((v) => !v); }}>
           <span className="wr-icon">
-            {running ? <IconSpinner /> : isError ? <IconAlert /> : <CategoryIcon cat={cat} />}
+            {(running || bgRunning) ? <IconSpinner /> : isError ? <IconAlert /> : <CategoryIcon cat={cat} />}
             <span className="wr-chev"><IconChevronDown /></span>
           </span>
           <span className={"wr-title" + (running ? " shimmer" : "")} title={part.name}>{title}</span>
@@ -343,7 +365,10 @@ function ToolRow({
               )}
             </>
           )}
-          {!open && !isError && shellExitFailed && shellParsed?.exitCode != null && (
+          {bgBadge && bgJob && (
+            <span className={"wr-bg-pill " + bgJob.status}>{bgBadge}</span>
+          )}
+          {!bgJob && !open && !isError && shellExitFailed && shellParsed?.exitCode != null && (
             <span className="wr-exit">exit {shellParsed.exitCode}</span>
           )}
           {awaitingApproval && <span className="work-awaiting">{S.chat.approvalWaiting}</span>}
@@ -358,13 +383,24 @@ function ToolRow({
           </button>
         )}
       </div>
-      {open && <ToolDetail part={part} args={args} running={running} resultText={resultText} isError={isError} duration={duration} />}
+      {open && (
+        <ToolDetail
+          part={part}
+          args={args}
+          running={running || bgRunning}
+          resultText={resultText}
+          isError={isError}
+          duration={duration}
+          bgLogPath={bgJob?.log_path || bgStart?.logPath}
+          onOpenFile={onOpenFile}
+        />
+      )}
     </div>
   );
 }
 
 function ToolDetail({
-  part, args, running, resultText, isError, duration,
+  part, args, running, resultText, isError, duration, bgLogPath, onOpenFile,
 }: {
   part: Extract<MsgPart, { kind: "tool" }>;
   args: Record<string, unknown>;
@@ -372,6 +408,8 @@ function ToolDetail({
   resultText: string;
   isError: boolean;
   duration: number;
+  bgLogPath?: string;
+  onOpenFile?: (path: string) => void;
 }) {
   if (part.name === "task") {
     const result = parseTaskResult(resultText);
@@ -397,6 +435,8 @@ function ToolDetail({
           resultText={resultText}
           running={running}
           isError={isError}
+          bgLogPath={bgLogPath}
+          onOpenFile={onOpenFile}
         />
       </div>
     );
@@ -430,13 +470,15 @@ function promptCwdLabel(cwd: string): string {
 
 /** deepseek-harness `TerminalBlock` style card for `execute` / `bash` tool calls. */
 function TerminalCard({
-  command, workDir, resultText, running, isError,
+  command, workDir, resultText, running, isError, bgLogPath, onOpenFile,
 }: {
   command: string;
   workDir: string;
   resultText: string;
   running: boolean;
   isError: boolean;
+  bgLogPath?: string;
+  onOpenFile?: (path: string) => void;
 }) {
   const S = useStrings();
   const [copied, setCopied] = useState(false);
@@ -449,6 +491,9 @@ function TerminalCard({
   const empty = !output.trim();
   const showBody = !running || !empty;
   const copyPayload = !empty ? output : command;
+  const openableBgLog = bgLogPath && onOpenFile
+    ? normalizeMentionedPath(bgLogPath, workDir || sessionCwd() || null)
+    : null;
   const onCopy = () => {
     if (!copyPayload) return;
     void navigator.clipboard.writeText(copyPayload).then(() => {
@@ -473,6 +518,11 @@ function TerminalCard({
         </div>
         {!running && exitCode !== null && exitCode !== 0 && (
           <span className="term-exit">exit {exitCode}</span>
+        )}
+        {openableBgLog && onOpenFile && (
+          <button type="button" className="term-copy" title={S.chat.bgOpenLogTip} onClick={() => onOpenFile(openableBgLog)}>
+            {S.chat.bgOpenLog}
+          </button>
         )}
         {copyPayload && (
           <button type="button" className="term-copy" onClick={onCopy}>

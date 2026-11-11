@@ -612,6 +612,8 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
             # A delegated session shows its task instead: its command line is a
             # `python -m agentica.cli.main --query <the whole task>`.
             body = item.label if item.kind == "delegate" else (item.command or "")
+            if item.kind != "delegate" and item.label:
+                con.print(f"      [bold]{item.label}[/bold]")
             for line in body.splitlines() or [""]:
                 con.print(f"      {line}")
             con.print(f"      [dim]log: {item.log_path}[/dim]")

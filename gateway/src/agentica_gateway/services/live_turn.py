@@ -67,10 +67,57 @@ class LiveTurn:
         self.events: list[dict] = []
         self.task: Optional[asyncio.Task] = None
         self.done = False
+        self.started_wall = time.time()
         self.finished_at = 0.0
         self._subs: list[asyncio.Queue] = []
         self._buffer_chars = 0
         self.approvals = ApprovalRegistry()
+
+    def progress_summary(self) -> Dict[str, Any]:
+        """Current live step summary for IM /status and /ps."""
+        tool_calls = 0
+        open_calls: list[Tuple[str, str, dict]] = []
+        last_note = ""
+        for ev in self.events:
+            kind = ev.get("event")
+            data = ev.get("data")
+            if kind == "tool_call" and isinstance(data, dict):
+                tool_calls += 1
+                tc_id = str(data.get("tool_call_id") or "")
+                t_name = str(data.get("name") or "tool")
+                t_args = data.get("args") if isinstance(data.get("args"), dict) else {}
+                open_calls.append((tc_id, t_name, t_args))
+            elif kind == "tool_result" and isinstance(data, dict):
+                tc_id = str(data.get("tool_call_id") or "")
+                if tc_id:
+                    open_calls = [c for c in open_calls if c[0] != tc_id]
+                elif open_calls:
+                    open_calls.pop()
+            elif kind in ("thinking", "content") and isinstance(data, str) and data.strip():
+                lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+                if lines:
+                    last_note = lines[-1][:140]
+
+        active_tool = ""
+        active_detail = ""
+        if open_calls:
+            _, active_tool, args = open_calls[-1]
+            for key in ("description", "file_path", "path", "pattern", "command", "url", "task"):
+                val = args.get(key)
+                if isinstance(val, str) and val.strip():
+                    active_detail = " ".join(val.strip().splitlines()[0].split())[:140]
+                    break
+        elif last_note:
+            active_detail = last_note
+
+        pending = self.approvals.list()
+        return {
+            "elapsed_s": max(0.0, time.time() - self.started_wall),
+            "tool_calls": tool_calls,
+            "active_tool": active_tool,
+            "active_detail": active_detail,
+            "pending_approval": pending[0].name if pending else "",
+        }
 
     def public(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {

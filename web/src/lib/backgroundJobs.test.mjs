@@ -32,3 +32,22 @@ test("a finished job's duration stops at its finish time, a live one follows the
   assert.equal(B.jobDuration(job("b", "running", 0), 185000), "3m 5s");
   assert.equal(B.jobDuration(job("c", "running", 0), 3720000), "1h 2m");
 });
+
+test("visibleJobBadgeCount shows live count when work is running, else settled count", () => {
+  assert.equal(B.visibleJobBadgeCount(2, 5), 2);
+  assert.equal(B.visibleJobBadgeCount(0, 3), 3);
+  assert.equal(B.visibleJobBadgeCount(0, 0), 0);
+});
+
+test("parseBackgroundStart extracts id, num, pid, and log path from execute(background=True) receipt", () => {
+  const parsed = B.parseBackgroundStart(
+    "Started background command #3 (PID 74981, id: term_3).\nLog: /Users/me/.agentica/projects/default/x/background/20261111-term_3.log",
+  );
+  assert.deepEqual(parsed, {
+    num: 3,
+    pid: 74981,
+    id: "term_3",
+    logPath: "/Users/me/.agentica/projects/default/x/background/20261111-term_3.log",
+  });
+  assert.equal(B.parseBackgroundStart("hello world\n[Exit code: 0]"), null);
+});

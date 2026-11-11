@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from agentica.config.profiles import get_profiles
 from agentica.memory.trace import last_completed_round, search_conversation
+from agentica.tools.background_processes import read_activity_stamp_us
 
 from .. import deps
 from ..channels.base import InboundMedia
@@ -582,8 +583,12 @@ async def cancel_chat(
 
 @router.get("/api/sessions/pulse")
 async def sessions_pulse(request: Request):
-    """Zero-I/O in-memory pulse for detecting remote (IM / other tab) session activity."""
-    return live_turn.pulse(_account(request))
+    """Lightweight pulse for detecting remote (IM / CLI / other tab) session & job activity."""
+    account = _account(request)
+    snap = live_turn.pulse(account)
+    stamp = read_activity_stamp_us(account)
+    snap["ver"] = (int(snap["ver"]) + stamp) % 4_000_000_000_000_000
+    return snap
 
 
 @router.get("/api/sessions")

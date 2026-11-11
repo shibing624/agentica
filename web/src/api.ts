@@ -106,9 +106,19 @@ export const setSessionModelApi = (id: string, profile: string, workDir: string)
 export const unarchiveSessionApi = (id: string) => request(`/api/sessions/${id}/unarchive`, { method: "POST" });
 export const renameSessionApi = (id: string, name: string) => postJson(`/api/sessions/${id}/rename`, { name });
 export type BackgroundJob = {
-  id: string; num: number; kind: string; label: string;
+  id: string;
+  num: number;
+  pid?: number;
+  kind: string;
+  label: string;
+  command?: string;
+  cwd?: string;
+  log_path?: string;
+  progress?: string;
   status: "running" | "completed" | "failed" | "stopped";
-  exit_code: number | null; started_at_ms: number; finished_at_ms: number | null;
+  exit_code: number | null;
+  started_at_ms: number;
+  finished_at_ms: number | null;
 };
 export const fetchBackgroundJobs = (id: string) =>
   request<{ jobs: BackgroundJob[] }>(`/api/sessions/${id}/background`);

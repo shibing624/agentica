@@ -16,6 +16,7 @@ Key design decisions:
 import asyncio
 import os
 import queue
+import shutil
 import tempfile
 import threading
 import time
@@ -53,8 +54,13 @@ from agentica.tools.background_processes import (
     BackgroundProcess,
     BackgroundProcessCompleted,
     BackgroundProcessRegistry,
+    background_job_view_from_process,
     background_result_for_agent,
+    count_running_session_jobs,
+    load_session_job_views,
     read_log_tail,
+    stop_all_session_jobs,
+    stop_session_job,
 )
 from agentica.compression.manager import (
     compact_token_limit_of,
@@ -1732,16 +1738,21 @@ class AgentService:
             # An ``agent:<id>:<channel>:<chat>`` id was minted by that channel,
             # which settles where it started even for sidecars written before
             # ``origin`` existed.
+            bg_dir = Path(entry["path"]).parent / sid / "background"
+            bg_running = count_running_session_jobs(
+                bg_dir, self._session_background.get(self._sk(sid, uid)),
+            )
+            has_live_work = running or bg_running > 0
             origin = im_from_sid or entry.get("origin") or source
             is_gateway_or_im = any(
                 s == "gateway" or s in IM_SESSION_SOURCES for s in (source, origin)
             )
             archived = bool(entry.get("archived"))
             pinned = bool(entry.get("pinned"))
-            if not running and not (is_gateway_or_im or (include_cli and source == "cli")):
+            if not has_live_work and not (is_gateway_or_im or (include_cli and source == "cli")):
                 continue
             if (
-                not running
+                not has_live_work
                 and hide_temp_dirs
                 and _hidden_temp(entry.get("work_dir") or project_work_dir)
                 # Only residue. Parsing the log for user turns is cheap here
@@ -1754,7 +1765,7 @@ class AgentService:
             if (
                 scope == "recent"
                 and not is_gateway_or_im
-                and not running
+                and not has_live_work
                 and not archived
                 and not pinned
                 and float(entry.get("mtime") or 0) < cutoff
@@ -1781,6 +1792,7 @@ class AgentService:
                 "pinned": pinned,
                 "work_dir": entry.get("work_dir") or project_work_dir,
                 "running": running,
+                "background_jobs": bg_running,
                 "source": source,
                 "origin": origin,
             })
@@ -1898,9 +1910,14 @@ class AgentService:
         self._session_grants.pop(key, None)
         self._session_ask_callbacks.pop(key, None)
         background = self._session_background.pop(key, None)
-        if background is not None:
+        bg_records_dir = Path(base_dir) / session_id / "background"
+        if background is not None or bg_records_dir.is_dir():
             # stop() can take seconds on a command that ignores SIGTERM.
-            threading.Thread(target=background.stop, daemon=True).start()
+            threading.Thread(
+                target=stop_all_session_jobs,
+                args=(bg_records_dir, background, self._owner(owner)),
+                daemon=True,
+            ).start()
         self._session_locks.pop(key, None)
         self._stale_agents.discard(key)
         log_existed = False
@@ -1914,6 +1931,9 @@ class AgentService:
             meta = log.base_dir / f"{session_id}.meta.json"
             if meta.exists():
                 meta.unlink()
+            session_artifacts = log.base_dir / session_id
+            if session_artifacts.is_dir():
+                shutil.rmtree(session_artifacts, ignore_errors=True)
         except Exception as e:
             logger.warning(f"Failed to remove SessionLog for {session_id}: {e}")
         logger.debug(f"Session deleted: {session_id}")
@@ -1921,13 +1941,22 @@ class AgentService:
 
     # ============== Background commands (the Web's /ps and /stop) ==============
 
+    def _session_bg_records_dir(self, session_id: str, owner: Optional[str]) -> Path:
+        base_dir, _ = self._locate_session(session_id, owner)
+        return Path(base_dir) / session_id / "background"
+
     def _background_registry(self, session_id: str, owner: Optional[str]) -> BackgroundProcessRegistry:
         key = self._sk(session_id, owner)
+        uid = self._owner(owner)
+        records_dir = self._session_bg_records_dir(session_id, owner)
         registry = self._session_background.get(key)
         if registry is None:
             registry = BackgroundProcessRegistry(
-                user_id=self._owner(owner),
+                user_id=uid,
                 delivers_results=self.background_report_handler is not None,
+                session_id=session_id,
+                records_dir=records_dir,
+                on_change=lambda: live_turn.bump_pulse(uid),
             )
             self._session_background[key] = registry
             threading.Thread(
@@ -1936,6 +1965,8 @@ class AgentService:
                 daemon=True,
                 name=f"bg-report-{session_id}",
             ).start()
+        else:
+            registry.bind_session(session_id=session_id, records_dir=records_dir)
         return registry
 
     def _deliver_background_reports(
@@ -1990,58 +2021,58 @@ class AgentService:
 
     @staticmethod
     def _background_job_view(item: BackgroundProcess) -> Dict[str, Any]:
-        if not item.finished.is_set():
-            status = "running"
-        elif item.stop_requested:
-            status = "stopped"
-        else:
-            status = "completed" if item.returncode == 0 else "failed"
-        return {
-            "id": item.id,
-            "num": item.num,
-            "kind": item.kind,
-            # A delegated worker's command line is `agentica --query <whole task>`.
-            "label": item.label if item.kind == "delegate" else item.command,
-            "status": status,
-            "exit_code": item.returncode,
-            "started_at_ms": int(item.started_at * 1000),
-            "finished_at_ms": int(item.finished_at * 1000) if item.finished_at else None,
-        }
-
-    def _background_job(
-        self, session_id: str, job_id: str, owner: Optional[str],
-    ) -> Optional[BackgroundProcess]:
-        registry = self._session_background.get(self._sk(session_id, owner))
-        return registry.get(job_id) if registry is not None else None
+        return background_job_view_from_process(item)
 
     def list_background_jobs(self, session_id: str, owner: Optional[str] = None) -> List[Dict[str, Any]]:
         registry = self._session_background.get(self._sk(session_id, owner))
-        if registry is None:
-            return []
-        return [self._background_job_view(item) for item in registry.list(include_finished=True)]
+        records_dir = self._session_bg_records_dir(session_id, owner)
+        return load_session_job_views(records_dir, registry)
 
     def background_job_output(
         self, session_id: str, job_id: str, owner: Optional[str] = None,
+        max_lines: int = 400, max_chars: int = 20000,
     ) -> Optional[Dict[str, Any]]:
-        item = self._background_job(session_id, job_id, owner)
-        if item is None:
+        target = job_id.strip()
+        if not target or target.lower() in {"all", "*"}:
             return None
+        views = self.list_background_jobs(session_id, owner=owner)
+        matched = next(
+            (
+                v for v in views
+                if target in {v["id"], str(v.get("num")), f"#{v.get('num')}", str(v.get("pid"))}
+            ),
+            None,
+        )
+        if matched is None:
+            return None
+        log_path = str(matched.get("log_path") or "")
         return {
-            **self._background_job_view(item),
-            "output": read_log_tail(item.log_path, max_lines=400, max_chars=20000),
-            "log_path": item.log_path,
+            **matched,
+            "output": read_log_tail(log_path, max_lines=max_lines, max_chars=max_chars) if log_path else "",
+            "log_path": log_path,
         }
 
     async def stop_background_job(
         self, session_id: str, job_id: str, owner: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        item = self._background_job(session_id, job_id, owner)
-        if item is None:
-            return None
-        registry = self._session_background[self._sk(session_id, owner)]
-        # By the resolved id: stop() reads "all" as every command in the session.
-        await asyncio.to_thread(registry.stop, item.id)
-        return self._background_job_view(item)
+        registry = self._session_background.get(self._sk(session_id, owner))
+        records_dir = self._session_bg_records_dir(session_id, owner)
+        uid = self._owner(owner)
+        stopped = await asyncio.to_thread(stop_session_job, records_dir, job_id, registry, uid)
+        if stopped is not None:
+            live_turn.bump_pulse(uid)
+        return stopped
+
+    async def stop_all_session_background_jobs(
+        self, session_id: str, owner: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        registry = self._session_background.get(self._sk(session_id, owner))
+        records_dir = self._session_bg_records_dir(session_id, owner)
+        uid = self._owner(owner)
+        stopped = await asyncio.to_thread(stop_all_session_jobs, records_dir, registry, uid)
+        if stopped:
+            live_turn.bump_pulse(uid)
+        return stopped
 
     def stop_all_background_jobs(self) -> None:
         for registry in list(self._session_background.values()):

@@ -188,6 +188,10 @@ class _FakeService:
     def set_session_approval_mode(self, *a, **k): ...
     def is_session_active(self, *a, **k): return False
     def take_undelivered_steer(self, *a, **k): return []
+    def list_background_jobs(self, *a, **k): return []
+    def background_job_output(self, *a, **k): return None
+    async def stop_background_job(self, *a, **k): return None
+    async def stop_all_session_background_jobs(self, *a, **k): return []
 
     async def chat_stream(self, **kw):
         self.calls.append(kw)

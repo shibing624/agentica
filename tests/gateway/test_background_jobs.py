@@ -121,3 +121,68 @@ def test_deleting_the_chat_stops_its_commands(client):
     assert job.finished.wait(timeout=15)
     assert job.stop_requested is True
     assert c.get(f"/api/sessions/{SESSION}/background").json() == {"jobs": []}
+
+
+def test_cross_process_durable_records_survive_separate_service_and_expose_progress(client):
+    """A job started in IM gateway / CLI is visible with description + live progress
+    and stoppable from Desktop's separate AgentService instance."""
+    c, svc, tmp_path = client
+    from agentica.memory.session_log import SessionLog
+    from agentica.tools.builtin import BuiltinExecuteTool
+    from agentica_gateway.services.agent_service import AgentService
+
+    work_dir = tmp_path / "proj"
+    work_dir.mkdir()
+    sid = "im-bg-sess"
+    svc.set_session_work_dir(sid, str(work_dir))
+    log = svc.session_log_for(sid)
+    log.append("user", "开始跑实验")
+    log.append("assistant", "已在后台启动")
+
+    # Simulate IM gateway starting a background watcher via BuiltinExecuteTool
+    im_reg = svc._background_registry(sid, None)
+    exec_tool = BuiltinExecuteTool(work_dir=str(work_dir), background_process_registry=im_reg)
+    import asyncio
+    receipt = asyncio.run(
+        exec_tool.execute(
+            command=f"{sys.executable} -u -c 'import time; print(\"\\x1b[32mstep 1/4\\x1b[0m\"); print(\"users=180/363 probes=312\"); time.sleep(60)'",
+            description="监控 363 客户挖掘进度",
+            background=True,
+        )
+    )
+    assert "Started background command #1" in receipt
+
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        j = c.get(f"/api/sessions/{sid}/background").json()["jobs"][0]
+        if j.get("progress") == "users=180/363 probes=312":
+            break
+        time.sleep(0.05)
+
+    # A second AgentService (simulating Desktop gateway or post-restart gateway)
+    # has an empty in-memory _session_background dict, yet sees the live job,
+    # its human description, live progress line, session badge count, and output,
+    # and can stop it across processes.
+    desktop_svc = AgentService(workspace_path=str(tmp_path / "ws2"))
+    assert desktop_svc._session_background == {}
+
+    sessions = desktop_svc.list_sessions(scope="all")
+    row = next(r for r in sessions if r["session_id"] == sid)
+    assert row["background_jobs"] == 1
+
+    desktop_jobs = desktop_svc.list_background_jobs(sid)
+    assert len(desktop_jobs) == 1
+    dj = desktop_jobs[0]
+    assert dj["status"] == "running"
+    assert dj["label"] == "监控 363 客户挖掘进度"
+    assert "users=180/363" in dj["command"]
+    assert dj["progress"] == "users=180/363 probes=312"
+
+    out = desktop_svc.background_job_output(sid, "term_1")
+    assert out is not None and "users=180/363 probes=312" in out["output"]
+
+    stopped = asyncio.run(desktop_svc.stop_background_job(sid, "term_1"))
+    assert stopped is not None and stopped["status"] == "stopped"
+    after = desktop_svc.list_background_jobs(sid)[0]
+    assert after["status"] == "stopped"
+    assert desktop_svc.list_sessions(scope="all")[0]["background_jobs"] == 0
