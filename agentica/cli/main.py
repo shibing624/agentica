@@ -27,6 +27,14 @@ def _enable_cli_file_logging() -> str:
 
 
 def main():
+    # `agentica watch` — the watcher for a detached job (see the long-running-jobs
+    # skill). Before anything else: it runs as a background command and must
+    # not set up logging, hooks or a model.
+    if len(sys.argv) > 1 and sys.argv[1] == "watch":
+        from agentica.tools.job_watch import main as watch_main
+
+        sys.exit(watch_main(sys.argv[2:]))
+
     args = parse_args()
 
     # Enable a default file log for the CLI (SDK stays silent by default).

@@ -597,6 +597,9 @@ class ImBotController:
             first = chat_images.strip_markers(preview.get("first_user") or "").strip()
             if first:
                 return " ".join(first.split())[:40]
+            cron_name = str(preview.get("cron_job_name") or "").strip()
+            if cron_name:
+                return cron_name[:48]
         return f"会话 {session_id[:8]}"
 
     def _is_busy(self, session_id: str) -> bool:

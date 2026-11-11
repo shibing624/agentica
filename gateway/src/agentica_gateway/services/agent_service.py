@@ -1745,7 +1745,7 @@ class AgentService:
             has_live_work = running or bg_running > 0
             origin = im_from_sid or entry.get("origin") or source
             is_gateway_or_im = any(
-                s == "gateway" or s in IM_SESSION_SOURCES for s in (source, origin)
+                s in ("gateway", "cron") or s in IM_SESSION_SOURCES for s in (source, origin)
             )
             archived = bool(entry.get("archived"))
             pinned = bool(entry.get("pinned"))
@@ -1760,6 +1760,7 @@ class AgentService:
                 # alternative is losing a real conversation with no UI to
                 # restore it.
                 and not self._session_preview(entry).get("user_count")
+                and not self._session_preview(entry).get("cron_job_name")
             ):
                 continue
             if (
@@ -1773,6 +1774,7 @@ class AgentService:
                 continue
             preview = self._session_preview(entry)
             first_user = chat_images.strip_markers(preview.get("first_user", "") or "")
+            cron_title = str(preview.get("cron_job_name") or "").strip()
             first_ts = entry.get("first_timestamp")
             if not first_ts and entry.get("mtime"):
                 first_ts = iso_timestamp(entry["mtime"])
@@ -1780,8 +1782,12 @@ class AgentService:
             last_read_at = entry.get("last_read_at")
             out.append({
                 "session_id": sid,
-                "name": entry.get("name") or (first_user[:40] if first_user else "Chat"),
-                "preview": first_user,
+                "name": (
+                    entry.get("name")
+                    or (first_user[:40] if first_user else "")
+                    or (cron_title[:60] if cron_title else "Chat")
+                ),
+                "preview": first_user or cron_title,
                 "user_count": preview.get("user_count", 0),
                 "first_timestamp": first_ts,
                 "last_timestamp": last_ts,
@@ -1800,14 +1806,21 @@ class AgentService:
         for turn in live_turn.iter_owner(uid):
             if turn.session_id.startswith(CRON_SESSION_PREFIX) or turn.session_id in seen:
                 continue
+            live_log = self.session_log_for(turn.session_id, owner=uid)
             live_source = (
-                self.session_log_for(turn.session_id, owner=uid).get_source()
+                live_log.get_source()
                 or _infer_im_source_from_session_id(turn.session_id)
                 or "gateway"
             )
+            live_title = (
+                live_log.get_name()
+                or ((turn.cron_job or {}).get("name") or "").strip()[:60]
+                or (chat_images.strip_markers(turn.user_message).strip()[:40] if turn.user_message else "")
+                or "Chat"
+            )
             out.append({
                 "session_id": turn.session_id,
-                "name": "Chat",
+                "name": live_title,
                 "preview": "",
                 "user_count": 0,
                 "first_timestamp": iso_timestamp(),

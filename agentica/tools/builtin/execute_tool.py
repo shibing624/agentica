@@ -294,12 +294,9 @@ _BACKGROUND_GUIDANCE = """
   {delivery}
   Never wait inside a turn with ``sleep`` or polling (a 120s+ leading ``sleep``
   is refused), and never detach with a trailing ``&``.
-- Whenever you detach a long job with ``nohup`` / ``tmux`` / ``setsid``
-  (locally or over ``ssh`` on a remote machine), start one ``execute(...,
-  background=True)`` watcher in the same turn that polls progress (printing a
-  concise status line each tick) and exits with the job's exit code when done
-  (see the ``long-running-jobs`` skill). Without a ``background=True``
-  watcher, the UI cannot show live progress or report completion.
+- A job detached with ``tmux`` / ``nohup`` / ``setsid`` / ``ssh`` reports
+  nothing on its own: in the same turn, track it as the ``long-running-jobs``
+  skill says.
 """
 
 _DELIVERED = (
@@ -932,6 +929,9 @@ class BuiltinExecuteTool(Tool):
     async def wait(self, id: str, timeout: int = _DEFAULT_WAIT_SECONDS) -> str:
         """Blocks until a background command finishes, then reports how it went.
 
+        Only for an id that ``execute(background=True)`` or ``delegate``
+        returned; it cannot wait on a pid, a tmux session or another host (see
+        the ``long-running-jobs`` skill for those).
         Returns the instant the command exits, so a generous timeout costs no
         more than the command itself. Use it when a later step of this turn needs
         the result of something already backgrounded. Whether a finished command

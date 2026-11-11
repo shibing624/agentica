@@ -255,3 +255,81 @@ class TestSchedulerService:
         started, busy = asyncio.run(go())
         assert started["status"] == "queued" and busy["status"] == "busy"
         assert list_task_runs(job.id)[0].session_id == started["session_id"]
+
+    def test_run_now_titles_fresh_session_synchronously_and_preserves_later_user_rename(self, cron_store, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGENTICA_HOME", str(tmp_path / "home"))
+        from agentica.cron.jobs import create_job, get_job
+        from agentica_gateway.services.agent_service import AgentService
+        from agentica_gateway.services.scheduler_service import GatewayCronRunner, GatewayScheduler
+
+        work_dir = tmp_path / "proj"
+        work_dir.mkdir()
+        svc = AgentService(workspace_path=str(tmp_path / "ws"))
+        job = create_job(
+            name="每日 CI 巡检（agentica + memhub）",
+            prompt="运行巡检脚本",
+            schedule="1h",
+            target="new_once",
+            work_dir=str(work_dir),
+            user_id="default",
+        )
+        gate = asyncio.Event()
+        turn = AsyncMock(side_effect=lambda *a, **kw: gate.wait())
+
+        async def go():
+            with patch("agentica_gateway.services.scheduler_service.live_cli_peer", return_value=None), \
+                 patch("agentica_gateway.routes.chat.run_scheduled_turn", turn):
+                sched = GatewayScheduler(GatewayCronRunner(svc))
+                started = sched.run_now(get_job(job.id))
+                sid = started["session_id"]
+                # Before the background task even finishes (right when AutomationsPage
+                # calls GET /api/sessions), the session is already listed with the job title!
+                rows_before = {r["session_id"]: r for r in svc.list_sessions(owner="default", scope="all")}
+                assert rows_before[sid]["name"] == "每日 CI 巡检（agentica + memhub）"
+
+                turn.side_effect = None
+                turn.return_value = _result("ok")
+                gate.set()
+                await asyncio.gather(*sched._runs)
+
+                # User manually renames the new_once conversation; run 2 must keep the user's title.
+                svc.rename_session(sid, "我的 CI 巡检看板", owner="default")
+                second = sched.run_now(get_job(job.id))
+                assert second["session_id"] == sid
+                await asyncio.gather(*sched._runs)
+                rows_after = {r["session_id"]: r for r in svc.list_sessions(owner="default", scope="all")}
+                assert rows_after[sid]["name"] == "我的 CI 巡检看板"
+
+        asyncio.run(go())
+
+    def test_unnamed_historical_and_inflight_cron_sessions_fallback_to_cron_job_name(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AGENTICA_HOME", str(tmp_path / "home"))
+        from agentica.memory.session_log import SessionLog
+        from agentica_gateway.services import live_turn
+        from agentica_gateway.services.agent_service import AgentService
+
+        live_turn.reset()
+        work_dir = tmp_path / "proj"
+        work_dir.mkdir()
+        svc = AgentService(workspace_path=str(tmp_path / "ws"))
+
+        # 1. Historical session created before set_name ran on run_now (no `name` in meta.json)
+        log = SessionLog("hist-cron-1", work_dir=str(work_dir), user_id="default")
+        log.set_source("gateway")
+        log.append(
+            "user",
+            "[Scheduled task “每日 CI 巡检” (j1)]\ncheck ci",
+            automated=True,
+            cron_job={"id": "j1", "name": "每日 CI 巡检"},
+        )
+        log.append("assistant", "[NO_UPDATE]")
+
+        # 2. In-flight LiveTurn whose JSONL has not been written yet
+        inflight = live_turn.start("live-cron-2", owner="default")
+        inflight.cron_job = {"id": "j2", "name": "每小时服务健康检查"}
+        inflight.automated_message = "check health"
+
+        rows = {r["session_id"]: r for r in svc.list_sessions(owner="default", scope="all")}
+        assert rows["hist-cron-1"]["name"] == "每日 CI 巡检"
+        assert rows["live-cron-2"]["name"] == "每小时服务健康检查"
+        live_turn.reset()

@@ -70,7 +70,9 @@ class CliAgentRunner:
 
     async def run(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> CronRunOutput:
         context = context or {}
+        fresh = bool(context["fresh_session"]) if "fresh_session" in context else not context.get("session_id")
         session_id = context.get("session_id") or _new_session_id()
+        job_name = (context.get("job_name") or "").strip()
         peer = live_cli_peer(session_id)
         if peer is not None:
             from agentica.peers import send_message
@@ -93,6 +95,8 @@ class CliAgentRunner:
             work_dir=context.get("work_dir") or None,
             session_id=session_id,
         )
+        if fresh and job_name and agent._session_log is not None and not agent._session_log.get_name():
+            agent._session_log.set_name(job_name[:60])
         response = await agent.run(message=prompt, config=RunConfig(
             source=RunSource.cron, automated_input=True, input_meta=job_turn_meta(context),
         ))

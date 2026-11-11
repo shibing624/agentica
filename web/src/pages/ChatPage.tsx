@@ -2107,6 +2107,9 @@ async function attachLiveStream(sessId: string) {
     return;
   }
   if (run.cron_job && run.automated_message) {
+    if ((!sess.title || sess.title === "Chat") && run.cron_job.name?.trim()) {
+      sess.title = run.cron_job.name.trim();
+    }
     // A scheduled run streaming in: show its card, once, above the reply.
     const last = [...sess.msgs].reverse().find((m) => m.role === "user");
     if (!last?.cronJob || last.content !== run.automated_message) {
@@ -2162,7 +2165,9 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
   sess.msgs.push(userMsg);
   sess.msgs.push(aiMsg);
   st.streams[sessId] = { abortCtrl, aiMsg, preparing: files.length > 0 };
-  if (!sess.named && sess.msgs.filter((m) => m.role === "user").length === 1) sess.title = (text || "Chat").slice(0, 50);
+  if (!sess.named && (!sess.title || sess.title === "Chat") && sess.msgs.filter((m) => m.role === "user" && !m.automated).length === 1) {
+    sess.title = (text || "Chat").slice(0, 50);
+  }
   saveSessions();
   bump();
 

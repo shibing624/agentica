@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import shutil
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -495,10 +496,20 @@ class TestMemoryExtractHooks:
             ),
             auxiliary_task_models={"memory_extract": aux},
         )
+        from agentica.utils import background_loop
+
+        # Hold the background loop so the dispatched flush only starts after
+        # flush_pending_sync: the batch must already be the background task's,
+        # not left in the buffer for flush_pending to extract a second time.
+        async def hold_loop():
+            time.sleep(0.5)
+
+        busy = background_loop.submit(hold_loop())
         with patch.object(OpenAIChat, "response_stream", side_effect=main_stream):
             for _ in agent.run_stream_sync("q" * 300):
                 pass
         agent.flush_pending_sync()
+        busy.result()
 
         assert [c["name"] for c in workspace.list_memory_candidates()] == ["bge_port"]
         # Ran on its own copy, so the turn closing aux's client cannot kill it.
@@ -1016,7 +1027,7 @@ class TestRelevanceScoring:
             workspace.initialize()
             hooks = MemoryExtractHooks(background=False)
             session_key = ("default", "sess-save-archive")
-            hooks._buffers[session_key] = [
+            buf = [
                 (
                     "Remember that our deployment target is Kubernetes cluster prod-ap-east-1 " * 3,
                     "Saved deployment target to memory. " * 4,
@@ -1033,7 +1044,7 @@ class TestRelevanceScoring:
                     ),
                 },
             )()
-            asyncio.run(hooks._flush(agent, workspace, session_key))
+            asyncio.run(hooks._flush(agent, workspace, session_key, buf))
             conv_dir = workspace._get_user_conversations_dir()
             files = list(conv_dir.glob("*.md"))
             assert len(files) == 1

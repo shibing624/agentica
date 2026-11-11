@@ -1652,6 +1652,7 @@ class SessionLog:
         from agentica.memory.session_search import strip_window_preamble
 
         first_user = ""
+        cron_job_name = ""
         user_count = 0
         recent: deque = deque(maxlen=max(1, recent_limit))
         try:
@@ -1671,6 +1672,10 @@ class SessionLog:
                     # Another agent's message or a job report: not a request
                     # the person made, so not what the picker should show.
                     if entry.get("automated") is True:
+                        if not first_user and not cron_job_name:
+                            cj = entry.get("cron_job")
+                            if isinstance(cj, dict) and isinstance(cj.get("name"), str) and cj["name"].strip():
+                                cron_job_name = cj["name"].strip()[:max_chars]
                         continue
                     content = entry.get("content") or ""
                     if not isinstance(content, str):
@@ -1686,11 +1691,14 @@ class SessionLog:
                     recent.append(clipped)
         except Exception:
             pass
-        return {
+        out: Dict[str, Any] = {
             "first_user": first_user,
             "user_count": user_count,
             "recent_users": list(recent),
         }
+        if cron_job_name:
+            out["cron_job_name"] = cron_job_name
+        return out
 
     # ---- sidecar metadata (session name) -----------------------------------
     #

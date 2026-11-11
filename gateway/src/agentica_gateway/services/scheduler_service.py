@@ -45,14 +45,31 @@ class GatewayCronRunner:
         # the turn in the IM chats bound to the conversation, None when none is.
         self._deliver_im = deliver_im
 
+    def prepare_session(self, job: CronJob, session_id: str) -> None:
+        """Create and title a fresh scheduled conversation synchronously before
+        spawning its run, so a client opening ``session_id`` right away finds
+        the session and its job title instead of ``Chat`` or 404."""
+        from ..routes.chat import _touch_session_log
+
+        owner = job.user_id or settings.default_user_id
+        if job.work_dir and Path(job.work_dir).is_dir():
+            self._svc.set_session_work_dir(session_id, job.work_dir, owner)
+        if job.permission_mode:
+            self._svc.set_session_approval_mode(session_id, job.permission_mode, owner)
+        _touch_session_log(self._svc, session_id, owner)
+        log = self._svc.session_log_for(session_id, owner=owner)
+        name = (job.name or "").strip()
+        if name and not log.get_name():
+            log.set_name(name[:60])
+
     async def run(self, prompt: str, context: Optional[dict] = None) -> CronRunOutput:
         from ..routes.chat import run_scheduled_turn
 
         ctx = context or {}
         owner = ctx.get("user_id") or settings.default_user_id
-        fresh = not ctx.get("session_id")
+        fresh = bool(ctx["fresh_session"]) if "fresh_session" in ctx else not ctx.get("session_id")
         session_id = ctx.get("session_id") or str(uuid.uuid4())
-        name = ctx.get("job_name") or ""
+        name = (ctx.get("job_name") or "").strip()
         peer = live_cli_peer(session_id)
         if peer is not None:
             # The terminal owns this conversation's log; a gateway turn would
@@ -70,7 +87,7 @@ class GatewayCronRunner:
         if ctx.get("permission_mode"):
             self._svc.set_session_approval_mode(session_id, ctx["permission_mode"], owner)
         log = self._svc.session_log_for(session_id, owner=owner)
-        if fresh and name:
+        if fresh and name and not log.get_name():
             # A conversation the job starts is named after it. One it was
             # pointed at already belongs to the user and keeps its title.
             log.set_name(name[:60])
@@ -159,7 +176,10 @@ class GatewayScheduler:
         """
         if job.id in self._pending or is_job_running(job.id):
             return {"job_id": job.id, "status": "busy", "error": "A run of this job is already in progress"}
-        session_id = job.delivery_session_id() or str(uuid.uuid4())
+        existing_sid = job.delivery_session_id()
+        session_id = existing_sid or str(uuid.uuid4())
+        if not existing_sid and isinstance(self.runner, GatewayCronRunner):
+            self.runner.prepare_session(job, session_id)
         self._spawn(job, session_id)
         return {"job_id": job.id, "status": "queued", "session_id": session_id}
 

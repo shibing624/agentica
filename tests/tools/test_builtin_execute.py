@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import queue
+import re
 import shlex
 import shutil
 import signal
@@ -378,35 +379,36 @@ class TestBuiltinExecuteTool:
         assert "reported to the user, not to you" in undelivered
         assert "come back to you as a new" not in undelivered
 
-    def test_long_running_jobs_skill_watcher_example_reports_the_job(self, bg_execute_tool, tmp_dir):
-        """A tmux/nohup job has no completion event, so the bundled
-        ``long-running-jobs`` skill teaches a watcher, and the background
-        prose points there. The example is what models copy: it must exit with
-        the job's own code once the marker exists, and fail loudly when the
-        session is gone without one (no tmux server here, so `has-session` fails)."""
+    def test_long_running_jobs_skill_watch_example_reports_the_job(self, bg_execute_tool, tmp_dir):
+        """A tmux/nohup job has no completion event, so the background prose
+        points at the ``long-running-jobs`` skill, whose example models copy.
+        Run as written (with a short interval), it must keep watching while
+        the job runs and end with the job's own exit code."""
         assert "long-running-jobs" in bg_execute_tool.functions["execute"].description
         skill_md = Path(agentica.__file__).parent / "skills" / "bundled" / "long-running-jobs" / "SKILL.md"
-        watcher = next(
-            line.strip()[len('execute(command="'):-len('", background=True)')]
-            for line in skill_md.read_text(encoding="utf-8").splitlines()
-            if line.strip().startswith('execute(command="while [ ! -f train.exit ]')
-        ).replace("-t train ", f"-t agentica-test-{os.getpid()} ")
-        assert f"agentica-test-{os.getpid()}" in watcher
-
-        def run_watcher():
-            return subprocess.run(
-                ["bash", "-c", watcher], cwd=tmp_dir,
-                capture_output=True, text=True, timeout=10,
-            )
-
-        vanished = run_watcher()
-        assert vanished.returncode == 2
-        assert "train gone, no exit file" in vanished.stdout
-
-        with open(os.path.join(tmp_dir, "train.exit"), "w") as fh:
-            fh.write("3\n")
-        finished = run_watcher()
-        assert finished.returncode == 3
+        command = next(
+            m.group(1) for m in re.finditer(r'command="(agentica watch [^"]+)"', skill_md.read_text(encoding="utf-8"))
+        )
+        argv = shlex.split(command)
+        assert argv[:2] == ["agentica", "watch"]
+        cli = [sys.executable, "-c", "import sys; from agentica.cli.main import main; main()"]
+        watcher = subprocess.Popen(
+            [*cli, *argv[1:], "--interval", "0.1"], cwd=tmp_dir,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        try:
+            time.sleep(1.0)
+            assert watcher.poll() is None  # no marker yet: still watching
+            with open(os.path.join(tmp_dir, "train.log"), "w") as fh:
+                fh.write("epoch 9 loss=0.1\n")
+            with open(os.path.join(tmp_dir, "train.exit"), "w") as fh:
+                fh.write("3\n")
+            out, _ = watcher.communicate(timeout=30)
+        finally:
+            if watcher.poll() is None:
+                watcher.kill()
+        assert watcher.returncode == 3
+        assert "loss=0.1" in out
 
     def test_execute_leaves_plain_commands_unflagged(self, execute_tool):
         """`2>&1` contains an ampersand without detaching anything."""

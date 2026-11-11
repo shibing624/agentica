@@ -375,6 +375,10 @@ export async function hydrateSession(id: string, force = false) {
   }
   const olderTurns = data.older_turns ?? 0;
   const msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
+  if (!olderTurns && (!sess.title || sess.title === "Chat")) {
+    const firstCron = msgs.find((m) => m.role === "user" && m.cronJob?.name)?.cronJob?.name?.trim();
+    if (firstCron) sess.title = firstCron;
+  }
   // Look up the files cards' paths before the transcript is shown, so each
   // reply and its card land in one paint. Bounded: a slow stat only brings
   // back the late card, never a blank chat.

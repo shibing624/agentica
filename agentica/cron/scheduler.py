@@ -248,9 +248,11 @@ async def execute_job(
         return {"job_id": job.id, "status": "busy", "error": "A run of this job is already in progress"}
     _running_jobs.add(job.id)
     try:
+        existing_sid = job.delivery_session_id()
         return await _execute_job_once(
             job, agent_runner, verbose,
-            job.delivery_session_id() if session_id is None else session_id,
+            existing_sid if session_id is None else session_id,
+            fresh_session=not existing_sid,
         )
     finally:
         _running_jobs.discard(job.id)
@@ -261,6 +263,8 @@ async def _execute_job_once(
     agent_runner: AgentRunner | None,
     verbose: bool,
     session_id: str,
+    *,
+    fresh_session: bool = False,
 ) -> dict[str, Any]:
     logger.info(f"Executing job {job.id}: {job.name}")
     started_at_ms = now_ms()
@@ -312,6 +316,9 @@ async def _execute_job_once(
             "target": job.target,
             # The conversation to deliver into; "" means start a new one.
             "session_id": session_id,
+            # True when the job itself starts a new conversation (even if the
+            # caller pre-allocated ``session_id`` for immediate UI navigation).
+            "fresh_session": fresh_session or not session_id,
         }
         run_coro = agent_runner.run(prompt=context["message"], context=context)
         if job.timeout_seconds > 0:

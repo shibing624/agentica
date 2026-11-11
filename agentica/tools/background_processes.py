@@ -534,13 +534,34 @@ def background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     status = exit_status(event.returncode)
     if event.kind == "delegate":
         return _delegate_result_for_agent(event, status)
+    tail = read_log_tail(event.log_path, max_lines=20, max_chars=4000)
+    # ``agentica watch`` exits 75 when its checks lose contact, and 124 when the
+    # job has ended but the result check timed out. Both are about the watch,
+    # not an exit code the job itself produced. The log line is the marker;
+    # the process status alone says "failed" for either.
+    watch_note = ""
+    header_status = status
+    if "[lost contact:" in tail:
+        header_status = "lost contact"
+        watch_note = (
+            "The checks lost contact (exit 75). The job's state is unknown and it "
+            "may still be running; do not report the job as failed. Fix the checks "
+            "and watch it again."
+        )
+    elif "result probe timed out" in tail:
+        header_status = "result unknown"
+        watch_note = (
+            "The watched job ended, but the result check timed out, so its exit "
+            "code is unknown. Read the output before deciding whether it succeeded."
+        )
     lines = [
-        f"[Background terminal #{event.num} ({event.id}) {status}: "
+        f"[Background terminal #{event.num} ({event.id}) {header_status}: "
         f"{exit_detail(event.returncode)} after {event.elapsed}]",
         f"Command: {event.command}",
         f"Log: {event.log_path}",
     ]
-    tail = read_log_tail(event.log_path, max_lines=20, max_chars=4000)
+    if watch_note:
+        lines.extend(["", watch_note])
     if tail:
         lines.extend(["", "Output tail:", tail])
     lines.extend(

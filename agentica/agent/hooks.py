@@ -440,29 +440,33 @@ class MemoryExtractHooks(RunHooks):
         after ``on_agent_end``, which used to cancel the extraction before
         its LLM call. ``asyncio.wait_for`` caps a hung HTTP connection.
         """
+        # Take the batch now: if the background task popped it once it got
+        # scheduled, a ``flush_pending`` arriving first would find it still
+        # buffered and extract it a second time on the turn's model.
+        buf = self._buffers.pop(session_key, [])
         if not self._background:
-            await self._flush_with_timeout(agent, workspace, session_key)
+            await self._flush_with_timeout(agent, workspace, session_key, buf)
             return
         future = background_loop.submit(
-            self._flush_with_timeout(agent, workspace, session_key, detach_model=True)
+            self._flush_with_timeout(agent, workspace, session_key, buf, detach_model=True)
         )
         self._pending_tasks.add(future)
         future.add_done_callback(self._pending_tasks.discard)
 
     async def _flush_with_timeout(
         self, agent: Any, workspace: Any, session_key: Tuple[str, str],
-        detach_model: bool = False,
+        buf: List[Tuple[str, str, bool]], detach_model: bool = False,
     ) -> None:
         """Wrap ``_flush`` with a hard wall-clock cap. Errors are swallowed
         with a warning — this is a background best-effort path."""
         try:
             if self._timeout > 0:
                 await asyncio.wait_for(
-                    self._flush(agent, workspace, session_key, detach_model=detach_model),
+                    self._flush(agent, workspace, session_key, buf, detach_model=detach_model),
                     timeout=self._timeout,
                 )
             else:
-                await self._flush(agent, workspace, session_key, detach_model=detach_model)
+                await self._flush(agent, workspace, session_key, buf, detach_model=detach_model)
         except asyncio.TimeoutError:
             logger.warning(
                 "Memory extraction timed out after %.1fs (session=%s); buffer forfeited",
@@ -497,24 +501,24 @@ class MemoryExtractHooks(RunHooks):
         if workspace is None:
             return
         session_key = self._session_key(workspace, agent)
-        if self._buffers.get(session_key):
+        buf = self._buffers.pop(session_key, [])
+        if buf:
             # Force-flush this session's buffer SYNCHRONOUSLY (don't race
             # with a background task on the same buffer — we just popped it).
-            await self._flush_with_timeout(agent, workspace, session_key)
+            await self._flush_with_timeout(agent, workspace, session_key, buf)
         # Snapshot — futures self-remove from the set via done_callback.
         await background_loop.wait_all(list(self._pending_tasks))
 
     async def _flush(
         self, agent: Any, workspace: Any, session_key: Tuple[str, str],
-        detach_model: bool = False,
+        buf: List[Tuple[str, str, bool]], detach_model: bool = False,
     ) -> None:
-        """Drain buffer for ``session_key`` and run one LLM extraction over it.
+        """Run one LLM extraction over ``buf``, a batch already taken from ``session_key``.
 
         ``detach_model``: the flush runs on the background loop, so it uses its
         own copy of the model — the agent's copy holds a client bound to the
         turn's loop, which the Runner closes when the turn ends.
         """
-        buf = self._buffers.pop(session_key, [])
         if not buf:
             return
 
