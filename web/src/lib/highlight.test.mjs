@@ -77,3 +77,38 @@ test("bare absolute paths are extracted regardless of their top-level directory"
   );
   assert.deepEqual(FP.extractFilePaths("ratio 1/2 and a/b"), []);
 });
+
+test("splitHighlightedHtmlLines wraps each line and balances multiline hljs spans across lines", () => {
+  const py = 'def demo():\n    """multi-line\n    docstring"""\n    return {"a": 1}';
+  const rawHtml = H.highlightToHtml(py, "python", true);
+  const { html, lineCount } = H.splitHighlightedHtmlLines(rawHtml);
+  assert.equal(lineCount, 4);
+  const rows = html.split("\n");
+  assert.equal(rows.length, 4);
+  for (const row of rows) {
+    assert.match(row, /^<span class="line">.*<\/span>$/);
+    // Every opened span inside the line must be closed within that same line.
+    const opens = (row.match(/<span\b/g) || []).length;
+    const closes = (row.match(/<\/span>/g) || []).length;
+    assert.equal(opens, closes, row);
+  }
+  // Stripping tags yields the exact original source text (newline-separated, no line numbers).
+  const plain = html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+  assert.equal(plain, py);
+});
+
+test("YAML (.yaml / .yml) and Python (.py) files resolve to highlighted code preview", () => {
+  for (const [name, lang] of [["config.yaml", "yaml"], ["ci.yml", "yaml"], ["app.py", "python"]]) {
+    assert.equal(FP.classifyPreviewTarget(name), "code", name);
+    assert.equal(H.languageFromFilename(name), lang, name);
+  }
+  const yamlHtml = H.highlightToHtml("model:\n  name: gpt-5\n  timeout: 120\n", "yaml", true);
+  const split = H.splitHighlightedHtmlLines(yamlHtml.slice(0, -1));
+  assert.equal(split.lineCount, 3);
+  assert.match(split.html, /hljs-attr/);
+});

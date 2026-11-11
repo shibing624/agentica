@@ -105,6 +105,8 @@ export function FilePreview({
   const S = useStrings();
   const [preview, setPreview] = useState<Preview | null>(null);
   const [mode, setMode] = useState<ViewMode>("markdown");
+  // dsh `TextTabState.wrap`: per-tab line-wrap preference, enabled by default.
+  const [wrap, setWrap] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // Workbooks fetch their own bytes; a refresh remounts the table to refetch.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -162,6 +164,7 @@ export function FilePreview({
     : preview.kind === "text" ? ["text", "code"]
     : [];
   const view: ViewMode | null = modes.includes(mode) ? mode : (modes[0] ?? null);
+  const supportsWrap = view === "code" || view === "text";
   const refresh = () => {
     setRefreshing(true);
     setRefreshKey((k) => k + 1);
@@ -182,6 +185,8 @@ export function FilePreview({
           modes={modes}
           mode={view ?? "code"}
           onMode={setMode}
+          wrap={supportsWrap ? wrap : undefined}
+          onToggleWrap={supportsWrap ? () => setWrap((v) => !v) : undefined}
           onRefresh={refresh}
           refreshing={refreshing}
           absPath={absPath}
@@ -190,7 +195,7 @@ export function FilePreview({
           onBackToTree={onRevealInTree ? () => onRevealInTree(filePath) : undefined}
         />
       </div>
-      <div className={"ws-preview-body" + (view === "code" ? " source" : "")
+      <div className={"ws-preview-body" + (view === "code" || view === "text" ? " source" : "")
         + (view === "table" || preview.kind === "workbook" ? " sheet" : "")}>
         {preview.kind === "image" && <img src={src} alt={preview.name} />}
         {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
@@ -209,9 +214,12 @@ export function FilePreview({
             code={preview.content || ""}
             language={languageFromFilename(preview.name)}
             highlight={(preview.content || "").length <= HIGHLIGHT_LIMIT}
+            lineNumbers
+            wrap={wrap}
+            pane
           />
         )}
-        {view === "text" && <PlainText text={preview.content || ""} />}
+        {view === "text" && <PlainText text={preview.content || ""} wrap={wrap} />}
         {preview.truncated && view && <p className="ws-trunc">{S.files.previewTruncated}</p>}
         {preview.kind === "unsupported" && <p className="ws-muted">{S.files.previewUnsupported}</p>}
       </div>

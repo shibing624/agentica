@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
-import { IconChevronDown, IconExternal, IconFileCode, IconFinder, IconSplit, IconWrap } from "../icons";
+import { IconChevronDown, IconExternal, IconFileCode, IconFinder, IconNowrap, IconSplit, IconWrap } from "../icons";
 import {
   diffCounts, hunkHeader, hunkRows, oneSided, renderedEdits, splitRows, MAX_RENDERED_LINES, type DiffHunk, type FileEdits,
 } from "../lib/fileDiff";
@@ -139,8 +139,8 @@ export function DiffView({
             <IconSplit />
           </button>
           <button type="button" className={"pv-icon" + (wrap ? " on" : "")} aria-pressed={wrap}
-                  title={wrap ? D.diffNoWrap : D.diffWrap} aria-label={D.diffWrap} onClick={toggleWrap}>
-            <IconWrap />
+                  title={wrap ? D.diffNoWrap : D.diffWrap} aria-label={D.wrapAria} onClick={toggleWrap}>
+            {wrap ? <IconNowrap /> : <IconWrap />}
           </button>
           <button type="button" className="pv-icon" title={D.diffOpenFile} aria-label={D.diffOpenFile}
                   onClick={() => onOpenFile(path)}>

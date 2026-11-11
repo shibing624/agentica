@@ -1,12 +1,15 @@
 /**
- * Right side of a preview bar: view-mode menu, refresh, download, and an
- * "open with" split button (text editor; the menu adds the default app and
- * "show in folder"). Shared by the workspace file preview and SKILL.md.
+ * Right side of a preview bar: view-mode menu, line-wrap toggle, refresh,
+ * download, and an "open with" split button (text editor; the menu adds the
+ * default app and "show in folder"). Shared by the workspace file preview and SKILL.md.
  */
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
-import { IconChevronDown, IconCopy, IconDownload, IconEditorApp, IconExternal, IconFinder, IconFolder, IconRefresh, IconTick } from "../icons";
+import {
+  IconChevronDown, IconCopy, IconDownload, IconEditorApp, IconExternal, IconFinder, IconFolder,
+  IconNowrap, IconRefresh, IconTick, IconWrap,
+} from "../icons";
 import { showToast } from "../store";
 
 export type ViewMode = "markdown" | "web" | "table" | "code" | "text";
@@ -28,11 +31,14 @@ export function useDismiss(open: boolean, close: () => void) {
 }
 
 export function PreviewActions({
-  modes, mode, onMode, onRefresh, refreshing, absPath, downloadHref, downloadName, onBackToTree,
+  modes, mode, onMode, wrap, onToggleWrap, onRefresh, refreshing, absPath, downloadHref, downloadName, onBackToTree,
 }: {
   modes: ViewMode[];
   mode: ViewMode;
   onMode: (mode: ViewMode) => void;
+  /** When defined, shows dsh's wrap/nowrap toggle in the preview header. */
+  wrap?: boolean;
+  onToggleWrap?: () => void;
   onRefresh: () => void;
   refreshing?: boolean;
   /** Absolute path on this machine; enables "open with". */
@@ -78,6 +84,18 @@ export function PreviewActions({
             </div>
           )}
         </div>
+      )}
+      {wrap !== undefined && onToggleWrap && (
+        <button
+          type="button"
+          className="pv-icon"
+          aria-pressed={wrap}
+          aria-label={P.wrapAria}
+          title={wrap ? P.diffNoWrap : P.diffWrap}
+          onClick={onToggleWrap}
+        >
+          {wrap ? <IconNowrap /> : <IconWrap />}
+        </button>
       )}
       <button type="button" className={"pv-icon" + (refreshing ? " spinning" : "")} title={P.refresh} aria-label={P.refresh}
               onClick={onRefresh}>
@@ -133,14 +151,25 @@ export function PreviewActions({
   );
 }
 
-/** Wrapped plain text with a copy button; no highlighting, no line numbers. */
-export function PlainText({ text }: { text: string }) {
+/** Plain text in the sidebar preview (dsh `TextBody`: flush on pane background, controllable wrap). */
+export function PlainText({ text, wrap = true }: { text: string; wrap?: boolean }) {
   const S = useStrings();
+  const [copied, setCopied] = useState(false);
   return (
-    <div className="pv-plain">
-      <button type="button" className="pv-plain-copy" title={S.common.copy} aria-label={S.common.copy}
-              onClick={() => { void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied)); }}>
-        <IconCopy />
+    <div className={"pv-plain" + (wrap ? " wrap" : "")} data-code-wrap={wrap}>
+      <button
+        type="button"
+        className="pv-plain-copy"
+        title={copied ? S.common.copied : S.common.copy}
+        aria-label={copied ? S.common.copied : S.common.copy}
+        onClick={() => {
+          void navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1200);
+          });
+        }}
+      >
+        {copied ? <IconTick /> : <IconCopy />}
       </button>
       <pre>{text}</pre>
     </div>

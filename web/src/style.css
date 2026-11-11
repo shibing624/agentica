@@ -741,14 +741,26 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 
 .code-frame{border:var(--hair) solid var(--border);border-radius:var(--radius-md);overflow:hidden;background:var(--code-bg);margin:0;display:flex;flex-direction:column;min-height:0;min-width:0}
 .code-frame-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 0 14px;background:transparent;flex-shrink:0}
-.code-frame-lang{font-size:12px;color:var(--fg3);letter-spacing:.01em}
-.code-frame-copy{border:none;background:transparent;color:var(--fg3);cursor:pointer;display:inline-flex;padding:4px;border-radius:6px}
+.code-frame-lang{font-family:var(--mono);font-size:11px;line-height:18px;color:var(--fg3);letter-spacing:.01em}
+.code-frame-copy{border:none;background:transparent;color:var(--fg3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border-radius:6px}
 .code-frame-copy:hover{color:var(--fg);background:var(--hover)}
-.code-frame-copy svg{width:13px;height:13px}
+.code-frame-copy svg{width:14px;height:14px}
 .code-scroll{position:relative;flex:1;min-height:0;min-width:0;display:flex;flex-direction:column}
-.code-frame-pre,.bub .code-frame-pre{flex:1;min-height:0;margin:0;padding:8px 14px 14px;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55;background:transparent;border:none;border-radius:0;scrollbar-width:none}
+.code-frame-pre,.bub .code-frame-pre{flex:1;min-height:0;margin:0;padding:8px 14px 14px;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;background:transparent;border:none;border-radius:0;scrollbar-width:none}
 .code-frame-pre::-webkit-scrollbar{width:0;height:0;display:none}
 .code-frame-pre code,.bub .code-frame-pre code{font-family:inherit;font-size:inherit;background:transparent;padding:0;white-space:pre;word-break:normal;overflow-wrap:normal}
+.code-frame.wrap .code-frame-pre,.code-frame.wrap .code-frame-pre code{white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere}
+/* dsh `CodeBlock` numbered gutter: CSS counter on `.line` pseudo-elements so copy/paste omits line numbers. */
+.code-frame.numbered{--code-line-ws:pre}
+.code-frame.numbered.wrap{--code-line-ws:pre-wrap}
+.code-frame.numbered .code-frame-pre code{display:block;counter-reset:source-line;white-space:normal}
+.code-frame.numbered .code-frame-pre code > .line{position:relative;display:block;min-height:1lh;padding-inline-start:calc(var(--code-line-no-w, 2ch) + 12px);counter-increment:source-line;white-space:var(--code-line-ws);word-break:normal;overflow-wrap:normal}
+.code-frame.numbered.wrap .code-frame-pre code > .line{overflow-wrap:anywhere}
+.code-frame.numbered .code-frame-pre code > .line::before{position:absolute;inset-inline-start:0;width:var(--code-line-no-w, 2ch);color:var(--fg3);text-align:end;content:counter(source-line);user-select:none;font-variant-numeric:tabular-nums}
+/* dsh `CodeBody`: flush edge-to-edge on the sidebar pane's own background, scrollbar starting under the toolbar. */
+.code-frame.pane{border:none;border-radius:0;background:transparent}
+.code-frame.pane .code-frame-bar{padding:8px 10px 4px 16px}
+.code-frame.pane .code-frame-pre{padding:6px 16px 20px}
 .sb{position:absolute;z-index:2;background:transparent;cursor:pointer;user-select:none}
 .sb-y{top:0;right:0;bottom:0;width:8px}
 .sb-x{left:0;bottom:0;right:0;height:8px}
@@ -1471,14 +1483,16 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .pv-menu-ico{display:inline-flex;width:16px;height:16px;align-items:center;justify-content:center;color:var(--fg2);flex-shrink:0}
 .pv-menu-ico svg{width:15px;height:15px}
 .pv-menu-sep{height:1px;margin:4px 6px;background:var(--border)}
-.pv-plain{position:relative}
-.pv-plain pre{margin:0;padding:10px 36px 10px 12px;border:var(--hair) solid var(--border);border-radius:10px;background:var(--bg2);font:12.5px/1.6 var(--mono);color:var(--fg);white-space:pre-wrap;overflow-wrap:anywhere}
-.pv-plain-copy{position:absolute;top:6px;right:6px;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--fg3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
-.pv-plain-copy:hover{background:var(--bg3);color:var(--fg)}
-.pv-plain-copy svg{width:13px;height:13px}
+.pv-plain{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:transparent}
+.pv-plain pre{flex:1;min-height:0;margin:0;padding:10px 36px 20px 18px;border:none;border-radius:0;background:transparent;font:12.5px/1.6 var(--mono);color:var(--fg);overflow:auto;white-space:pre;word-break:normal;overflow-wrap:normal}
+.pv-plain.wrap pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.pv-plain-copy{position:absolute;top:8px;right:10px;z-index:2;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--fg3);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.pv-plain-copy:hover{background:var(--hover);color:var(--fg)}
+.pv-plain-copy svg{width:14px;height:14px}
 .ws-preview-body{flex:1;min-height:0;overflow:auto;padding:12px}
-.ws-preview-body.source{overflow:hidden;display:flex;flex-direction:column;gap:8px}
+.ws-preview-body.source{padding:0;overflow:hidden;display:flex;flex-direction:column;gap:0}
 .ws-preview-body.source .code-frame{flex:1;min-height:0}
+.ws-preview-body.source .ws-trunc{margin:0;padding:6px 16px 10px;border-top:var(--hair) solid var(--border2);font-size:12px;color:var(--fg3)}
 .ws-preview-body > img{max-width:100%;border-radius:8px;border:var(--hair) solid var(--border)}
 .ws-preview-body iframe{width:100%;min-height:60vh;border:var(--hair) solid var(--border);border-radius:8px;background:#fff}
 /* Document Markdown (file preview, SKILL.md): dsh desktop's reading layout. */

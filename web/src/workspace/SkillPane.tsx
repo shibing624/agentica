@@ -29,6 +29,7 @@ export function SkillPane({ name }: { name: string }) {
   const [doc, setDoc] = useState<SkillDoc | null>(null);
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<ViewMode>("markdown");
+  const [wrap, setWrap] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
@@ -75,6 +76,8 @@ export function SkillPane({ name }: { name: string }) {
       ] as Array<[string, string]>).filter(([, v]) => v)
     : [];
 
+  const supportsWrap = mode === "code" || mode === "text";
+
   return (
     <div className="ws-browser">
       <div className="ws-preview-bar">
@@ -83,12 +86,14 @@ export function SkillPane({ name }: { name: string }) {
           modes={MODES}
           mode={mode}
           onMode={setMode}
+          wrap={supportsWrap ? wrap : undefined}
+          onToggleWrap={supportsWrap ? () => setWrap((v) => !v) : undefined}
           onRefresh={refresh}
           refreshing={refreshing}
           absPath={file || undefined}
         />
       </div>
-      <div className={"ws-preview-body" + (mode === "code" && doc ? " source" : "")}>
+      <div className={"ws-preview-body" + ((mode === "code" || mode === "text") && doc ? " source" : "")}>
         {failed && <p className="ws-muted">{S.chat.skillLoadFailed}</p>}
         {!doc && !failed && <p className="ws-muted">{S.common.loading}</p>}
         {doc && mode === "markdown" && (
@@ -109,9 +114,16 @@ export function SkillPane({ name }: { name: string }) {
           </div>
         )}
         {doc && mode === "code" && (
-          <CodeFrame code={doc.content} language="markdown" highlight={doc.content.length <= HIGHLIGHT_LIMIT} />
+          <CodeFrame
+            code={doc.content}
+            language="markdown"
+            highlight={doc.content.length <= HIGHLIGHT_LIMIT}
+            lineNumbers
+            wrap={wrap}
+            pane
+          />
         )}
-        {doc && mode === "text" && <PlainText text={doc.content} />}
+        {doc && mode === "text" && <PlainText text={doc.content} wrap={wrap} />}
       </div>
     </div>
   );

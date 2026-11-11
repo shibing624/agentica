@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { HIGHLIGHT_LIMIT, highlightToHtml } from "../lib/highlight";
-import { IconCopy } from "../icons";
+import {
+  useCallback, useEffect, useMemo, useRef, useState,
+  type CSSProperties, type MouseEvent, type ReactNode,
+} from "react";
+import { HIGHLIGHT_LIMIT, highlightToHtml, splitHighlightedHtmlLines } from "../lib/highlight";
+import { IconCopy, IconTick } from "../icons";
 import { showToast } from "../store";
 import { useStrings } from "../i18n";
 
@@ -15,7 +18,7 @@ type Bars = {
 
 const MIN_THUMB = 24;
 
-function CodeScroll({ html }: { html: string }) {
+function CodeScroll({ html, wrap }: { html: string; wrap: boolean }) {
   const scroller = useRef<HTMLPreElement>(null);
   const [bars, setBars] = useState<Bars>({ v: false, h: false, top: 0, height: 0, left: 0, width: 0 });
   // One object per html: a fresh `{__html}` makes React rewrite the block's
@@ -26,7 +29,7 @@ function CodeScroll({ html }: { html: string }) {
     const el = scroller.current;
     if (!el) return;
     const v = el.scrollHeight > el.clientHeight + 1;
-    const h = el.scrollWidth > el.clientWidth + 1;
+    const h = !wrap && el.scrollWidth > el.clientWidth + 1;
     const vTrack = el.clientHeight;
     const hTrack = el.clientWidth;
     const vThumb = v ? Math.max(MIN_THUMB, (el.clientHeight / el.scrollHeight) * vTrack) : 0;
@@ -41,11 +44,12 @@ function CodeScroll({ html }: { html: string }) {
       left: h && hRange > 0 ? (el.scrollLeft / hRange) * (hTrack - hThumb) : 0,
       width: hThumb,
     });
-  }, []);
+  }, [wrap]);
 
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    if (wrap && el.scrollLeft !== 0) el.scrollLeft = 0;
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(el);
@@ -56,7 +60,7 @@ function CodeScroll({ html }: { html: string }) {
       ro.disconnect();
       el.removeEventListener("scroll", sync);
     };
-  }, [html, sync]);
+  }, [html, wrap, sync]);
 
   const jump = (axis: "x" | "y", e: MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest(".sb-thumb")) return;
@@ -125,29 +129,65 @@ export function CodeFrame({
   code,
   language,
   highlight = true,
+  lineNumbers = false,
+  wrap = false,
+  pane = false,
 }: {
   code: string;
   language?: string;
   highlight?: boolean;
+  lineNumbers?: boolean;
+  wrap?: boolean;
+  /** Flush edge-to-edge sidebar document preview style (dsh `CodeBody`). */
+  pane?: boolean;
 }) {
   const S = useStrings();
-  const html = useMemo(
-    () => highlightToHtml(code, language, highlight),
-    [code, language, highlight],
-  );
+  const [copied, setCopied] = useState(false);
+  const trimmed = lineNumbers && code.endsWith("\n") ? code.slice(0, -1) : code;
+  const { html, lineCount } = useMemo(() => {
+    const rawHtml = highlightToHtml(trimmed, language, highlight);
+    if (!lineNumbers) return { html: rawHtml, lineCount: 0 };
+    return splitHighlightedHtmlLines(rawHtml);
+  }, [trimmed, language, highlight, lineNumbers]);
+
   const copy = () => {
     if (!code) return;
-    void navigator.clipboard.writeText(code).then(() => showToast(S.common.copied));
+    void navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+      if (!pane) showToast(S.common.copied);
+    });
   };
+
+  const style = lineNumbers
+    ? ({ "--code-line-no-w": `${Math.max(2, String(lineCount).length)}ch` } as CSSProperties)
+    : undefined;
+
   return (
-    <div className="code-frame">
+    <div
+      className={
+        "code-frame"
+        + (lineNumbers ? " numbered" : "")
+        + (wrap ? " wrap" : "")
+        + (pane ? " pane" : "")
+      }
+      data-line-numbers={lineNumbers || undefined}
+      data-code-wrap={wrap}
+      style={style}
+    >
       <div className="code-frame-bar">
         <span className="code-frame-lang">{language || "text"}</span>
-        <button type="button" className="code-frame-copy" title={S.common.copy} onClick={copy}>
-          <IconCopy />
+        <button
+          type="button"
+          className="code-frame-copy"
+          title={copied ? S.common.copied : S.common.copy}
+          aria-label={copied ? S.common.copied : S.common.copy}
+          onClick={copy}
+        >
+          {copied ? <IconTick /> : <IconCopy />}
         </button>
       </div>
-      <CodeScroll html={html} />
+      <CodeScroll html={html} wrap={wrap} />
     </div>
   );
 }

@@ -213,3 +213,37 @@ export function highlightToHtml(code: string, language?: string, highlight = tru
   }
   return escapeHtml(code);
 }
+
+/**
+ * Split highlighted HTML into per-line `<span class="line">…</span>` rows while
+ * balancing any multi-line `<span class="hljs-…">` across line breaks so each
+ * `.line` is a valid block element (dsh `CodeBlock` numbered-gutter layout) and
+ * `\n` stays in the text nodes for exact copy/paste without gutter numbers.
+ */
+export function splitHighlightedHtmlLines(html: string): { html: string; lineCount: number } {
+  const openStack: string[] = [];
+  const rawLines = html.split("\n");
+  const outLines = rawLines.map((rawLine) => {
+    const reopen = openStack.join("");
+    let i = 0;
+    while (i < rawLine.length) {
+      const lt = rawLine.indexOf("<", i);
+      if (lt < 0) break;
+      const gt = rawLine.indexOf(">", lt + 1);
+      if (gt < 0) break;
+      const tag = rawLine.slice(lt, gt + 1);
+      if (tag.startsWith("</")) {
+        openStack.pop();
+      } else if (!tag.endsWith("/>")) {
+        openStack.push(tag);
+      }
+      i = gt + 1;
+    }
+    const closeAll = "</span>".repeat(openStack.length);
+    return `<span class="line">${reopen}${rawLine}${closeAll}</span>`;
+  });
+  return {
+    html: outLines.join("\n"),
+    lineCount: rawLines.length,
+  };
+}

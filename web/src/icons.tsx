@@ -293,9 +293,16 @@ export const IconDiff = () => (
   </S>
 );
 export const IconWrap = () => (
-  <S strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2.5 4h11M2.5 8h9a2 2 0 010 4H8.5M10 10.5L8.5 12l1.5 1.5M2.5 12h3" />
-  </S>
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+    <path d="M11 8c0-1.105-.895-2-2-2H4.5V5H9c1.657 0 3 1.343 3 3s-1.343 3-3 3H6.207l.647.646-.708.708-1.5-1.5a.5.5 0 010-.708l1.5-1.5.708.708L6.207 10H9c1.105 0 2-.895 2-2z" fill="currentColor" />
+    <path d="M2 15H1V1h1v14zM15 15h-1V1h1v14z" fill="currentColor" />
+  </svg>
+);
+export const IconNowrap = () => (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
+    <path d="M2 15H1V1h1v14zM15 15h-1V1h1v14z" fill="currentColor" />
+    <path d="M12.354 7.646a.5.5 0 010 .708l-2.5 2.5-.708-.708L10.793 8.5H3.5v-1h7.293L9.146 5.854l.708-.708 2.5 2.5z" fill="currentColor" />
+  </svg>
 );
 export const IconPaperclip = () => (
   <S strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
