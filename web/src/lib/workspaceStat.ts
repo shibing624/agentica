@@ -10,6 +10,21 @@ type Waiter = {
 };
 
 const buckets = new Map<string, Set<string>>();
+/** Last answer per `root\0path`. A chat re-opened, or a card remounted, draws
+ *  from this at once instead of popping in after a round trip. */
+const known = new Map<string, boolean>();
+const knownKey = (root: string, path: string) => root + "\0" + path;
+
+/** The existing subset of `paths` if every one has been looked up before, else null. */
+export function cachedExisting(root: string, paths: string[]): string[] | null {
+  const out: string[] = [];
+  for (const p of paths) {
+    const hit = known.get(knownKey(root, p));
+    if (hit === undefined) return null;
+    if (hit) out.push(p);
+  }
+  return out;
+}
 const waiters: Waiter[] = [];
 let flushTimer = 0;
 
@@ -52,14 +67,15 @@ async function flush() {
     }),
   );
   for (const w of pending) {
-    w.resolve(
-      w.paths.filter((p) => {
-        if (isAbsOrHomePath(p)) {
-          const { targetRoot, targetRel } = splitExternalTarget(p, w.root);
-          return Boolean(foundByRoot.get(targetRoot)?.has(targetRel));
-        }
-        return Boolean(w.root && foundByRoot.get(w.root)?.has(p));
-      }),
-    );
+    const found = w.paths.filter((p) => {
+      if (isAbsOrHomePath(p)) {
+        const { targetRoot, targetRel } = splitExternalTarget(p, w.root);
+        return Boolean(foundByRoot.get(targetRoot)?.has(targetRel));
+      }
+      return Boolean(w.root && foundByRoot.get(w.root)?.has(p));
+    });
+    const present = new Set(found);
+    for (const p of w.paths) known.set(knownKey(w.root, p), present.has(p));
+    w.resolve(found);
   }
 }

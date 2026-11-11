@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / Desktop 会话恢复与向前翻页时预先批量探测文件卡片路径，消除卡片延迟弹出引起的页面跳动**：新增 `messageFiles.ts` 与 `workspaceStat.cachedExisting` 内存缓存；`hydrateSession` 与 `loadOlderMessages` 在挂载消息前先以 600ms 上限预取 `statWorkspaceFilesBatched`，已探测过的路径在首帧直接命中缓存同步渲染 `MessageFilesCard`，避免回复渲染后再异步撑高布局。
 - **Web / Desktop 支持会话后台进程管理（对齐 CLI `/ps` 与 `/stop`）与电子表格（`.xlsx` / `.xls` / `.csv` / `.tsv`）多 Sheet 预览**：① Gateway 为每个会话挂载 `BackgroundProcessRegistry` 并新增 `GET /api/sessions/{id}/background`、`/background/{job_id}/output` 与 `POST /background/{job_id}/stop`；Web 输入框旁新增后台任务指示器与弹层（`BackgroundJobs.tsx`），可实时查看运行中的后台命令输出并一键停止。② 右侧工作区文件预览新增电子表格视图（`SheetView.tsx`、`spreadsheet.ts`），支持 Excel 多工作表切换、行列渲染与 CSV/TSV 表格 / 纯文本视图切换。
 - **新增 `CosPublishTool`（`publish_markdown` / `publish_html` / `publish_file`）：上传到腾讯云 COS 返回公网链接**（`agentica/tools/cos_tool.py`，`pip install agentica[cos]`）。环境变量 `COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_REGION` / `COS_BUCKET` 齐全时 `DeepAgent` 自动挂载（CLI 与网关都可用）。2024 年后创建的存储桶在默认域名 `*.myqcloud.com` 上一律强制下载（`Content-Disposition: attachment`），网页要在浏览器里打开必须配自定义域名 `COS_PUBLIC_BASE_URL`；未配置时工具结果会提示这一点。自定义域名只映射桶内某个目录时（如 `https://cdn/public/` 对应 `<bucket>/public/`），用 `COS_KEY_PREFIX` 指定该目录。
 - **IM 长回答由 agent 自己决定是否转网页**：`publish_markdown` 把 Markdown 渲染成适配手机的网页（表格、代码块、深色模式）并返回链接，由 agent 判断哪些内容放网页、哪些直接发文本。回合来自 IM 渠道时，系统提示的易变段（缓存标记之后）会说明本轮回复以聊天消息送达，Markdown 表格和标题会显示成原始字符。COS 未配置时不挂载这个工具，agent 看不到。

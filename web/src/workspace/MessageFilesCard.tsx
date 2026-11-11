@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import * as api from "../api";
 import { useStrings } from "../i18n";
 import { FileTypeIcon, IconChevronDown, IconExternal, IconFileCode, IconFinder } from "../icons";
-import { fileEditsOf, type FileEdit } from "../lib/fileEdits";
+import type { FileEdit } from "../lib/fileEdits";
 import { fileDiffsOf, type FileEdits } from "../lib/fileDiff";
-import {
-  extractFilePaths, extractToolPaths, isAbsOrHomePath, normalizeMentionedPath, toWorkspaceRelative,
-} from "../lib/filePath";
-import { statWorkspaceFilesBatched } from "../lib/workspaceStat";
+import { isAbsOrHomePath } from "../lib/filePath";
+import { messageEdits, messageFileCandidates } from "../lib/messageFiles";
+import { cachedExisting, statWorkspaceFilesBatched } from "../lib/workspaceStat";
 import { showToast } from "../store";
 
 const MAX_VISIBLE = 3;
@@ -51,38 +50,20 @@ export function MessageFilesCard({
   role?: "user" | "assistant";
 }) {
   const S = useStrings();
-  const edits = useMemo(() => {
-    const out: FileEdit[] = [];
-    const seen = new Set<string>();
-    for (const e of fileEditsOf(steps)) {
-      const rel = toWorkspaceRelative(e.path, workspace);
-      if (rel === null || seen.has(rel) || e.deleted) continue;
-      seen.add(rel);
-      out.push({ ...e, path: rel });
-    }
-    return out;
-  }, [steps, workspace]);
+  const edits = useMemo(() => messageEdits(steps, workspace), [steps, workspace]);
   const diffs = useMemo(() => fileDiffsOf(steps, workspace), [steps, workspace]);
-  const candidates = useMemo(() => {
-    const raw = [
-      ...edits.map((e) => e.path),
-      ...extractFilePaths(text),
-      ...extractToolPaths(steps),
-      ...(uploaded || []),
-    ];
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const item of raw) {
-      const rel = normalizeMentionedPath(item, workspace);
-      if (rel === null || seen.has(rel)) continue;
-      seen.add(rel);
-      out.push(rel);
-    }
-    return out;
-  }, [edits, text, steps, uploaded, workspace]);
+  const candidates = useMemo(
+    () => messageFileCandidates({ content: text, steps, files: uploaded }, workspace),
+    [text, steps, uploaded, workspace],
+  );
   const sig = candidates.join("\0");
 
-  const [existing, setExisting] = useState<string[]>([]);
+  // Drawn from the last lookup in the same render as the reply, so the card
+  // never appears a beat later and pushes the layout; the effect revalidates.
+  const cached = !live && workspace ? cachedExisting(workspace, candidates) : null;
+  const [fetched, setFetched] = useState<{ sig: string; found: string[] } | null>(null);
+  const existing = fetched?.sig === sig ? fetched.found : (cached ?? []);
+  const setExisting = (found: string[]) => setFetched({ sig, found });
   useEffect(() => {
     // Streaming tokens rewrite `text` every frame; the extracted path set
     // rarely changes, but a new array still retriggered POST /stat. Wait

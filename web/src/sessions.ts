@@ -5,6 +5,8 @@ import {
   eventsToChatMsgs, isPureWindowPreamble, isSteerUserEvent, mergeClientSteers, rememberSteersFromMsgs,
 } from "./lib/hydrateMessages";
 import { emptyChatIds } from "./lib/sessionDrafts";
+import { messageFileCandidates } from "./lib/messageFiles";
+import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import {
   askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
@@ -327,6 +329,18 @@ async function fetchTurnPageCompat(
   return { ok: true, data: { ...sliceTurnPageClient(all, turns, before), session_id: id } };
 }
 
+const FILE_CARD_PREFETCH_MS = 600;
+
+async function prefetchFileCards(msgs: Session["msgs"], workspace: string) {
+  if (!workspace) return;
+  const paths = [...new Set(msgs.flatMap((m) => messageFileCandidates(m, workspace)))];
+  if (!paths.length || cachedExisting(workspace, paths)) return;
+  await Promise.race([
+    statWorkspaceFilesBatched(workspace, paths),
+    new Promise((resolve) => window.setTimeout(resolve, FILE_CARD_PREFETCH_MS)),
+  ]);
+}
+
 /** Replay a session's transcript from the server log so a reload (or another
  *  machine) still shows history localStorage never had — including tool
  *  calls, matching the live web turn. */
@@ -350,7 +364,13 @@ export async function hydrateSession(id: string, force = false) {
     rememberSteersFromMsgs(id, sess.msgs, sess.olderTurns || 0);
   }
   const olderTurns = data.older_turns ?? 0;
-  sess.msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
+  const msgs = mergeClientSteers(id, eventsToChatMsgs(data.events), olderTurns);
+  // Look up the files cards' paths before the transcript is shown, so each
+  // reply and its card land in one paint. Bounded: a slow stat only brings
+  // back the late card, never a blank chat.
+  await prefetchFileCards(msgs, sess.dir);
+  if (hydrateGenerations[id] !== generation || sessionIsLive(id) || getState().sessions[id] !== sess) return;
+  sess.msgs = msgs;
   sess.hasOlder = !!data.has_more;
   sess.olderCursor = data.next_before ?? 0;
   sess.olderTurns = olderTurns;
@@ -395,6 +415,11 @@ export async function loadOlderMessages(id: string, includeTurn?: number): Promi
     return false;
   }
   const older = eventsToChatMsgs(data.events);
+  await prefetchFileCards(older, cur.dir);
+  if ((hydrateGenerations[id] || 0) !== generation || getState().sessions[id] !== cur) {
+    bump();
+    return false;
+  }
   const olderTurns = data.older_turns ?? 0;
   cur.msgs = mergeClientSteers(id, [...older, ...cur.msgs], olderTurns);
   cur.hasOlder = !!data.has_more;
