@@ -284,6 +284,7 @@ class SkillTool(Tool):
         self._custom_skill_dirs = custom_skill_dirs or []
         self._auto_load = auto_load
         self._initialized = False
+        self._init_lock = threading.Lock()
         self._agent = None  # Set by Agent for runtime skill filtering
         self._init_name = name
 
@@ -322,19 +323,18 @@ class SkillTool(Tool):
         self._ensure_initialized()
 
     def _ensure_initialized(self):
-        """Ensure skills are loaded before use."""
+        """Ensure skills are loaded before use (thread-safe for concurrent executor calls)."""
         if self._initialized:
             return
-
-        # Auto-load from standard directories
-        if self._auto_load:
-            self._registry = load_skills()
-        else:
-            self._registry = get_skill_registry()
-
-        self._load_custom_skill_dirs()
-
-        self._initialized = True
+        with self._init_lock:
+            if self._initialized:
+                return
+            if self._auto_load:
+                self._registry = load_skills()
+            else:
+                self._registry = get_skill_registry()
+            self._load_custom_skill_dirs()
+            self._initialized = True
 
     def _load_custom_skill_dirs(self) -> None:
         """Load custom skill directories during first initialization."""
@@ -401,28 +401,29 @@ class SkillTool(Tool):
         if self._registry is None:
             return 0
 
-        loader = SkillLoader()
-        generated_skills = {}
-        for skill_dir in self._custom_skill_dirs:
-            skill_dir_path = Path(skill_dir).resolve()
-            if not skill_dir_path.is_dir():
-                continue
-            for skill_md_path in loader.discover_skills(skill_dir_path):
-                loaded = self._load_generated_skill(loader, skill_md_path)
-                if loaded is not None:
-                    generated_skills[loaded.name] = loaded
+        with self._init_lock:
+            loader = SkillLoader()
+            generated_skills = {}
+            for skill_dir in self._custom_skill_dirs:
+                skill_dir_path = Path(skill_dir).resolve()
+                if not skill_dir_path.is_dir():
+                    continue
+                for skill_md_path in loader.discover_skills(skill_dir_path):
+                    loaded = self._load_generated_skill(loader, skill_md_path)
+                    if loaded is not None:
+                        generated_skills[loaded.name] = loaded
 
-        existing_generated_names = {
-            skill.name for skill in self._registry.list_by_location("generated")
-        }
+            existing_generated_names = {
+                skill.name for skill in self._registry.list_by_location("generated")
+            }
 
-        for skill_name in existing_generated_names:
-            self._registry.remove(skill_name)
+            for skill_name in existing_generated_names:
+                self._registry.remove(skill_name)
 
-        for skill in generated_skills.values():
-            self._registry.register(skill)
+            for skill in generated_skills.values():
+                self._registry.register(skill)
 
-        return len(generated_skills)
+            return len(generated_skills)
 
     @property
     def registry(self) -> SkillRegistry:

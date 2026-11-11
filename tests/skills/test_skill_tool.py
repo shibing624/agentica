@@ -214,6 +214,29 @@ class TestSkillToolIntegration(unittest.TestCase):
         prompt = skill_tool.get_system_prompt()
         self.assertIsNotNone(prompt)
 
+    def test_concurrent_lazy_initialization_loads_skills_once(self):
+        """Concurrent executor calls to list_skills() must initialize the registry only once."""
+        from concurrent.futures import ThreadPoolExecutor
+        import time
+        from unittest.mock import patch
+        from agentica.skills.skill_registry import SkillRegistry
+
+        call_count = [0]
+
+        def _slow_load():
+            call_count[0] += 1
+            time.sleep(0.05)
+            return SkillRegistry()
+
+        skill_tool = SkillTool(auto_load=True)
+        with patch("agentica.tools.skill_tool.load_skills", side_effect=_slow_load):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = [pool.submit(skill_tool.list_skills) for _ in range(4)]
+                for f in futures:
+                    f.result()
+
+        self.assertEqual(call_count[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

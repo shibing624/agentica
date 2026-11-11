@@ -170,7 +170,11 @@ async def test_real_httpx_transport_encodes_special_key_and_retries_5xx(monkeypa
         return httpx.Response(200, request=request)
 
     real_client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
-    monkeypatch.setattr(cos_tool, "_get_http_client", lambda: real_client)
+
+    async def _return_real():
+        return real_client
+
+    monkeypatch.setattr(cos_tool, "_get_http_client", _return_real)
     try:
         out = json.loads(await cos_tool.CosPublishTool().publish_html("<p>native</p>", title="native"))
         assert len(requests_seen) == 2
@@ -203,7 +207,11 @@ async def test_cos_xml_error_code_and_message_are_surfaced(monkeypatch):
     real_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda req: httpx.Response(403, text=xml_err, request=req))
     )
-    monkeypatch.setattr(cos_tool, "_get_http_client", lambda: real_client)
+
+    async def _return_real_403():
+        return real_client
+
+    monkeypatch.setattr(cos_tool, "_get_http_client", _return_real_403)
     try:
         out = json.loads(await cos_tool.CosPublishTool().publish_html("<p>x</p>"))
         assert "HTTP 403 (AccessDenied): Access Denied to bucket." in out["error"]
@@ -244,7 +252,7 @@ async def test_sync_client_runs_off_event_loop_and_async_client_is_awaited(monke
     await cos_tool.CosPublishTool().publish_html("<p>sync</p>")
     done = True
     await ticker_task
-    gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+    gaps = [ticks[i + 1] - ticks[i] for i in range(len(ticks) - 1)]
     assert gaps and max(gaps) < 0.08, f"event loop stalled: max gap {max(gaps):.3f}s"
 
     class _AsyncCos:
@@ -263,3 +271,49 @@ async def test_sync_client_runs_off_event_loop_and_async_client_is_awaited(monke
     out = json.loads(await cos_tool.CosPublishTool().publish_html("<p>async</p>"))
     assert async_fake.called is True
     assert out["url"].startswith("https://async.example.com/")
+
+
+def test_http_client_closes_previous_pool_on_loop_change(monkeypatch):
+    """CLI runs each turn in a fresh asyncio.run(); switching loops must aclose the stale client."""
+    monkeypatch.setattr(cos_tool, "_http_client", None)
+    monkeypatch.setattr(cos_tool, "_http_client_loop", None)
+
+    c1 = asyncio.run(cos_tool._get_http_client())
+    assert not c1.is_closed
+
+    c2 = asyncio.run(cos_tool._get_http_client())
+    assert c2 is not c1
+    assert c1.is_closed is True
+    assert not c2.is_closed
+    asyncio.run(c2.aclose())
+
+
+@pytest.mark.asyncio
+async def test_publish_file_enforces_size_limit(cos, tmp_path, monkeypatch):
+    monkeypatch.setattr(cos_tool, "MAX_PUBLISH_FILE_BYTES", 16)
+    big = tmp_path / "huge.bin"
+    big.write_bytes(b"x" * 32)
+    out = json.loads(await cos_tool.CosPublishTool().publish_file(str(big)))
+    assert "too large to publish" in out["error"]
+    assert cos.puts == []
+
+
+def test_publish_tools_require_approval_in_ask_mode_and_guard_sensitive_paths():
+    from agentica.agent.approvals import SessionGrants, classify
+    from agentica.tools.base import FunctionCall
+
+    tool = cos_tool.CosPublishTool()
+    grants = SessionGrants()
+
+    fc_html = FunctionCall(function=tool.functions["publish_html"], arguments={"html": "<p>hi</p>"})
+    assert classify("ask", fc_html, grants, work_dir="/tmp") == "ask"
+    assert classify("auto", fc_html, grants, work_dir="/tmp") == "allow"
+
+    fc_ssh = FunctionCall(
+        function=tool.functions["publish_file"],
+        arguments={"file_path": "~/.ssh/id_rsa"},
+    )
+    assert classify("ask", fc_ssh, grants, work_dir="/tmp") == "ask"
+    # Sensitive paths must also park in auto mode so secrets cannot be pushed to a public bucket silently.
+    assert classify("auto", fc_ssh, grants, work_dir="/tmp") == "ask"
+

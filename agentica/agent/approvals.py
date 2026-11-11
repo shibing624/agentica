@@ -53,7 +53,8 @@ APPROVAL_TIMED_OUT_RESULT = (
 FILE_TOOLS = frozenset({"read_file", "write_file", "apply_patch", "glob", "grep"})
 WRITE_FILE_TOOLS = frozenset({"write_file", "apply_patch"})
 EXECUTE_TOOLS = frozenset({"execute", "bash", "shell", "run_command"})
-NETWORK_TOOLS = frozenset({"web_search", "fetch_url"})
+PUBLISH_TOOLS = frozenset({"publish_markdown", "publish_html", "publish_file"})
+NETWORK_TOOLS = frozenset({"web_search", "fetch_url", *PUBLISH_TOOLS})
 # Session-local / product builtins Codex Ask would not prompt on as
 # "file writes". Never inspect ``action``. Ask still parks ``write_file`` /
 # ``apply_patch``, mutating ``execute``, and network tools.
@@ -548,7 +549,7 @@ def _default_blocked_commands() -> List[str]:
 
 def _is_hard_unsafe(fc: FunctionCall, *, work_dir: Optional[str]) -> bool:
     name = fc.function.name
-    if name in WRITE_FILE_TOOLS:
+    if name in WRITE_FILE_TOOLS or name == "publish_file":
         paths = call_paths(fc, work_dir=work_dir)
         return bool(paths) and any(_is_sensitive_path(p) for p in paths)
     if name not in EXECUTE_TOOLS:
@@ -626,7 +627,7 @@ def call_paths(fc: FunctionCall, *, work_dir: Optional[str]) -> List[str]:
     args = fc.arguments or {}
     name = fc.function.name
     raw: List[str] = []
-    if name in ("read_file", "write_file"):
+    if name in ("read_file", "write_file", "publish_file"):
         path = args.get("file_path")
         if isinstance(path, str) and path:
             raw.append(path)
@@ -667,6 +668,12 @@ def describe_approval(fc: FunctionCall, *, work_dir: Optional[str] = None) -> Tu
     if name == "fetch_url":
         preview = str(args.get("url") or "")
         return "Allow fetching this URL?", preview
+    if name == "publish_file":
+        preview = "; ".join(call_paths(fc, work_dir=work_dir) or [str(args.get("file_path") or "")])
+        return "Allow publishing this local file to public storage?", preview
+    if name in ("publish_markdown", "publish_html"):
+        preview = str(args.get("title") or "")[:200]
+        return f"Allow publishing this page ({name}) to public storage?", preview
     if name == ACP_PERMISSION_TOOL:
         lines = [f"[{args['kind']}] {args['title']}", *args["paths"]]
         return f"Allow {args['runner']} to do this?", "\n".join(lines)
@@ -1000,4 +1007,7 @@ def _network_key(fc: FunctionCall) -> Optional[str]:
     if fc.function.name == "fetch_url":
         url = args.get("url")
         return url if isinstance(url, str) else None
+    if fc.function.name == "publish_file":
+        fp = args.get("file_path")
+        return _resolve_tool_path(fp, None) if isinstance(fp, str) and fp else None
     return None

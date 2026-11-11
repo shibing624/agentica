@@ -1,9 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useStrings } from "../i18n";
+import { measureUserBubbleFold } from "../lib/userFold";
 import { Dialog } from "./Dialog";
-
-/** Lines a folded user bubble shows. */
-const USER_FOLD_LINES = 9;
 
 /** A user bubble's body, folded to a few lines when it is long (a pasted log or
  *  document). Folding is decided by the rendered height, so it follows the
@@ -19,10 +17,10 @@ export function CollapsibleUserText({ children, forceOpen }: { children: ReactNo
     const el = ref.current;
     if (!el) return;
     const measure = () => {
-      const h = parseFloat(getComputedStyle(el).lineHeight) * USER_FOLD_LINES;
-      setLimit(h);
-      // A little slack so a bubble one line over the limit is not folded to hide just that line.
-      setOverflows(el.scrollHeight > h * 1.3);
+      const cs = getComputedStyle(el);
+      const res = measureUserBubbleFold(el.scrollHeight, cs.lineHeight, cs.fontSize);
+      setLimit(res.limit);
+      setOverflows(res.overflows);
     };
     measure();
     const ro = new ResizeObserver(measure);

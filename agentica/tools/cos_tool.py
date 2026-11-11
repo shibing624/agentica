@@ -42,6 +42,7 @@ from agentica.tools.helpers import tool_error, tool_result
 
 _ENV_KEYS = ("COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET")
 _SUBDIR = "agentica"
+MAX_PUBLISH_FILE_BYTES = 100 * 1024 * 1024
 _client = None
 _http_client: Optional[httpx.AsyncClient] = None
 _http_client_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -93,9 +94,9 @@ def _cos_authorization(
 ) -> str:
     """Build a Tencent Cloud COS XML V5 Authorization header (HMAC-SHA1).
 
-    Matches ``qcloud_cos.cos_auth.CosS3Auth`` byte-for-byte: ``uri_path`` uses
-    the unencoded ``/<key>`` while header values are percent-encoded with
-    ``safe='-_.~'``.
+    Signs ``host`` only (``q-header-list=host``), matching ``CosS3Auth``
+    byte-for-byte on host-only requests: ``uri_path`` uses the unencoded
+    ``/<key>`` while header values are percent-encoded with ``safe='-_.~'``.
     """
     ts = int(now if now is not None else time.time())
     key_time = f"{ts - 60};{ts + 3600}"
@@ -139,8 +140,8 @@ def _format_cos_http_error(resp: httpx.Response) -> str:
     return f"HTTP {resp.status_code}"
 
 
-def _get_http_client() -> httpx.AsyncClient:
-    """Return a loop-scoped shared ``httpx.AsyncClient`` for COS uploads."""
+async def _get_http_client() -> httpx.AsyncClient:
+    """Return a loop-scoped shared ``httpx.AsyncClient``, closing any stale loop's pool."""
     global _http_client, _http_client_loop, _http_client_cls
     loop = asyncio.get_running_loop()
     if (
@@ -149,6 +150,13 @@ def _get_http_client() -> httpx.AsyncClient:
         or _http_client_cls is not httpx.AsyncClient
         or getattr(_http_client, "is_closed", False)
     ):
+        old_client = _http_client
+        _http_client = None
+        if old_client is not None and not getattr(old_client, "is_closed", False):
+            try:
+                await old_client.aclose()
+            except Exception:
+                pass
         _http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
@@ -200,13 +208,11 @@ async def upload(body: bytes, suffix: str, content_type: str) -> str:
         "Content-Type": content_type,
         "Authorization": auth,
     }
-    client = _get_http_client()
-    last_exc: Optional[Exception] = None
+    client = await _get_http_client()
     for attempt in range(2):
         try:
             resp = await client.put(default_url, content=body, headers=headers)
-        except httpx.TransportError as exc:
-            last_exc = exc
+        except httpx.TransportError:
             if attempt == 0:
                 continue
             raise
@@ -325,6 +331,15 @@ class CosPublishTool(Tool):
         path = Path(os.path.expanduser(file_path))
         if not path.is_file():
             return tool_error(f"Not a file: {file_path}")
+        try:
+            file_size = path.stat().st_size
+        except OSError as e:
+            return tool_error(f"Cannot read file {file_path}: {e}")
+        if file_size > MAX_PUBLISH_FILE_BYTES:
+            limit_mb = MAX_PUBLISH_FILE_BYTES // (1024 * 1024)
+            return tool_error(
+                f"File too large to publish ({file_size} bytes > {limit_mb}MB limit): {file_path}"
+            )
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if content_type.startswith("text/"):
             content_type += "; charset=utf-8"
