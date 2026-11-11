@@ -5,6 +5,7 @@ from corrupting each other's state when they share the same logical tool config
 
 All tests mock the OpenAI key — no real LLM calls.
 """
+import asyncio
 import unittest
 
 from agentica.agent import Agent
@@ -191,7 +192,7 @@ class TestSubagentRegistryToolFiltering(unittest.TestCase):
         # Runner does — this is what would silently mutate the parent's state
         # if the entrypoint were still bound to ``parent_todo``.
         sample_todos = [{"content": "child-only", "status": "pending"}]
-        child_todo.functions["write_todos"].entrypoint(todos=sample_todos)
+        asyncio.run(child_todo.functions["write_todos"].entrypoint(todos=sample_todos))
 
         # Side effect landed on the child agent (write_todos may inject ``id``).
         self.assertEqual(len(child_agent.todos), 1)

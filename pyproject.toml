@@ -131,7 +131,7 @@ e2b     = ["e2b_code_interpreter>=1.0"]  # 远端代码沙箱（E2BExecuteTool�
 resend   = ["resend>=0.7"]
 volc-tts = []
 weather  = ["requests>=2.31"]
-cos      = ["cos-python-sdk-v5>=1.9"]  # CosPublishTool：上传到腾讯云 COS 得公网链接
+cos      = []  # CosPublishTool 已内置于核心 httpx 异步实现，无需额外依赖
 
 # ═══════════════════════════════════════════════════════════
 # Tools 超级组合（参照 agno tools/storage/vectordbs）

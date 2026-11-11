@@ -3,7 +3,9 @@
 @author:XuMing(xuming624@qq.com)
 @description: Publish a file or an HTML page to Tencent Cloud COS and return a public link.
 
-Requires ``pip install cos-python-sdk-v5`` and these environment variables:
+Uses native async ``httpx.AsyncClient`` + COS XML V5 HMAC-SHA1 signing (no external
+SDK required at runtime; ``_client`` hook retained for custom/mock clients).
+Requires these environment variables:
 
 - ``COS_SECRET_ID`` / ``COS_SECRET_KEY`` / ``COS_REGION`` / ``COS_BUCKET``
 - ``COS_PUBLIC_BASE_URL`` (optional): the bucket's custom domain, e.g.
@@ -17,13 +19,22 @@ Requires ``pip install cos-python-sdk-v5`` and these environment variables:
 
 The bucket must be public-read: the returned link carries no signature.
 """
+import asyncio
+import hashlib
+import hmac
 import html as html_lib
+import inspect
 import mimetypes
 import os
+import re
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
+import aiofiles
+import httpx
 from markdown_it import MarkdownIt
 
 from agentica.tools.base import Tool
@@ -32,6 +43,12 @@ from agentica.tools.helpers import tool_error, tool_result
 _ENV_KEYS = ("COS_SECRET_ID", "COS_SECRET_KEY", "COS_REGION", "COS_BUCKET")
 _SUBDIR = "agentica"
 _client = None
+_http_client: Optional[httpx.AsyncClient] = None
+_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
+_http_client_cls = None
+
+_XML_CODE_RE = re.compile(r"<Code>([^<]+)</Code>")
+_XML_MSG_RE = re.compile(r"<Message>([^<]+)</Message>")
 
 _PAGE_CSS = (
     "body{margin:0;background:#fff;color:#1f2328;font:16px/1.7 -apple-system,BlinkMacSystemFont,"
@@ -60,31 +77,147 @@ def cos_pages_open_in_browser() -> bool:
     return cos_configured() and bool(os.getenv("COS_PUBLIC_BASE_URL", "").strip())
 
 
-def _cos():
-    global _client
-    if _client is None:
-        from qcloud_cos import CosConfig, CosS3Client
-
-        _client = CosS3Client(CosConfig(
-            Region=os.environ["COS_REGION"],
-            SecretId=os.environ["COS_SECRET_ID"],
-            SecretKey=os.environ["COS_SECRET_KEY"],
-            Scheme="https",
-        ))
-    return _client
+def _encode_cos_path(path: str) -> str:
+    """Percent-encode an object key for URL paths while preserving ``/`` separators."""
+    encoded = quote(path.lstrip("/").encode("utf-8"), safe="/-_.~")
+    return encoded.replace("./", ".%2F")
 
 
-def upload(body: bytes, suffix: str, content_type: str) -> str:
-    """Put ``body`` under a random key and return its public URL."""
+def _cos_authorization(
+    secret_id: str,
+    secret_key: str,
+    method: str,
+    key: str,
+    host: str,
+    now: Optional[int] = None,
+) -> str:
+    """Build a Tencent Cloud COS XML V5 Authorization header (HMAC-SHA1).
+
+    Matches ``qcloud_cos.cos_auth.CosS3Auth`` byte-for-byte: ``uri_path`` uses
+    the unencoded ``/<key>`` while header values are percent-encoded with
+    ``safe='-_.~'``.
+    """
+    ts = int(now if now is not None else time.time())
+    key_time = f"{ts - 60};{ts + 3600}"
+    sign_key = hmac.new(
+        secret_key.encode("utf-8"),
+        key_time.encode("utf-8"),
+        hashlib.sha1,
+    ).hexdigest()
+    uri_path = "/" + key.lstrip("/")
+    encoded_host = quote(host.strip().encode("utf-8"), safe="-_.~")
+    http_string = f"{method.lower()}\n{uri_path}\n\nhost={encoded_host}\n"
+    http_sha1 = hashlib.sha1(http_string.encode("utf-8")).hexdigest()
+    string_to_sign = f"sha1\n{key_time}\n{http_sha1}\n"
+    signature = hmac.new(
+        sign_key.encode("utf-8"),
+        string_to_sign.encode("utf-8"),
+        hashlib.sha1,
+    ).hexdigest()
+    return (
+        f"q-sign-algorithm=sha1"
+        f"&q-ak={secret_id}"
+        f"&q-sign-time={key_time}"
+        f"&q-key-time={key_time}"
+        f"&q-header-list=host"
+        f"&q-url-param-list="
+        f"&q-signature={signature}"
+    )
+
+
+def _format_cos_http_error(resp: httpx.Response) -> str:
+    """Extract ``<Code>`` and ``<Message>`` from a COS XML error response if present."""
+    body = (resp.text or "").strip()
+    code_match = _XML_CODE_RE.search(body)
+    msg_match = _XML_MSG_RE.search(body)
+    if code_match or msg_match:
+        code = code_match.group(1).strip() if code_match else str(resp.status_code)
+        msg = msg_match.group(1).strip() if msg_match else body[:200]
+        return f"HTTP {resp.status_code} ({code}): {msg}"
+    if body:
+        return f"HTTP {resp.status_code}: {body[:300]}"
+    return f"HTTP {resp.status_code}"
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return a loop-scoped shared ``httpx.AsyncClient`` for COS uploads."""
+    global _http_client, _http_client_loop, _http_client_cls
+    loop = asyncio.get_running_loop()
+    if (
+        _http_client is None
+        or _http_client_loop is not loop
+        or _http_client_cls is not httpx.AsyncClient
+        or getattr(_http_client, "is_closed", False)
+    ):
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
+        _http_client_loop = loop
+        _http_client_cls = httpx.AsyncClient
+    return _http_client
+
+
+async def upload(body: bytes, suffix: str, content_type: str) -> str:
+    """Put ``body`` under a random key asynchronously and return its public URL."""
     bucket = os.environ["COS_BUCKET"]
+    region = os.environ["COS_REGION"]
     rel = f"{_SUBDIR}/{uuid.uuid4().hex}{suffix}"
     prefix = os.getenv("COS_KEY_PREFIX", "").strip("/")
     key = f"{prefix}/{rel}" if prefix else rel
-    _cos().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
     base = os.getenv("COS_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    encoded_rel = _encode_cos_path(rel)
+    encoded_key = _encode_cos_path(key)
+
+    if _client is not None:
+        put_fn = _client.put_object
+        if inspect.iscoroutinefunction(put_fn):
+            await put_fn(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+        else:
+            res = await asyncio.to_thread(
+                put_fn, Bucket=bucket, Key=key, Body=body, ContentType=content_type
+            )
+            if inspect.isawaitable(res):
+                await res
+        if base:
+            return f"{base}/{encoded_rel}"
+        url_fn = _client.get_object_url
+        if inspect.iscoroutinefunction(url_fn):
+            return await url_fn(Bucket=bucket, Key=key)
+        url_res = await asyncio.to_thread(url_fn, Bucket=bucket, Key=key)
+        return (await url_res) if inspect.isawaitable(url_res) else url_res
+
+    host = f"{bucket}.cos.{region}.myqcloud.com"
+    default_url = f"https://{host}/{encoded_key}"
+    auth = _cos_authorization(
+        secret_id=os.environ["COS_SECRET_ID"],
+        secret_key=os.environ["COS_SECRET_KEY"],
+        method="PUT",
+        key=key,
+        host=host,
+    )
+    headers = {
+        "Host": host,
+        "Content-Type": content_type,
+        "Authorization": auth,
+    }
+    client = _get_http_client()
+    last_exc: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            resp = await client.put(default_url, content=body, headers=headers)
+        except httpx.TransportError as exc:
+            last_exc = exc
+            if attempt == 0:
+                continue
+            raise
+        if resp.status_code >= 500 and attempt == 0:
+            continue
+        if resp.status_code >= 400:
+            raise RuntimeError(_format_cos_http_error(resp))
+        break
     if base:
-        return f"{base}/{rel}"
-    return _cos().get_object_url(Bucket=bucket, Key=key)
+        return f"{base}/{encoded_rel}"
+    return default_url
 
 
 def markdown_page(markdown: str, title: str) -> str:
@@ -98,9 +231,9 @@ def markdown_page(markdown: str, title: str) -> str:
     )
 
 
-def publish_markdown(markdown: str, title: str) -> str:
+async def publish_markdown(markdown: str, title: str) -> str:
     """Render Markdown to a page, upload it, return the URL."""
-    return upload(markdown_page(markdown, title).encode("utf-8"), ".html", "text/html; charset=utf-8")
+    return await upload(markdown_page(markdown, title).encode("utf-8"), ".html", "text/html; charset=utf-8")
 
 
 class CosPublishTool(Tool):
@@ -122,9 +255,9 @@ class CosPublishTool(Tool):
 
     def __init__(self) -> None:
         super().__init__(name="cos_publish_tool")
-        self.register(self.publish_markdown)
-        self.register(self.publish_html)
-        self.register(self.publish_file)
+        self.register(self.publish_markdown, concurrency_safe=True)
+        self.register(self.publish_html, concurrency_safe=True)
+        self.register(self.publish_file, concurrency_safe=True)
 
     def get_system_prompt(self) -> Optional[str]:
         return self.SYSTEM_PROMPT
@@ -138,7 +271,7 @@ class CosPublishTool(Tool):
             )
         return tool_result(url=url, **extra)
 
-    def publish_markdown(self, markdown: str, title: str) -> str:
+    async def publish_markdown(self, markdown: str, title: str) -> str:
         """Render Markdown into a phone-friendly web page and return its public URL.
 
         Args:
@@ -152,12 +285,12 @@ class CosPublishTool(Tool):
         if not cos_configured():
             return tool_error("COS is not configured (COS_SECRET_ID/COS_SECRET_KEY/COS_REGION/COS_BUCKET).")
         try:
-            url = publish_markdown(markdown, title)
+            url = await publish_markdown(markdown, title)
         except Exception as e:
             return tool_error(f"COS upload failed: {e}")
         return self._result(url, title=title)
 
-    def publish_html(self, html: str, title: str = "") -> str:
+    async def publish_html(self, html: str, title: str = "") -> str:
         """Publish an HTML page and return its public URL.
 
         Args:
@@ -173,12 +306,12 @@ class CosPublishTool(Tool):
         if not cos_configured():
             return tool_error("COS is not configured (COS_SECRET_ID/COS_SECRET_KEY/COS_REGION/COS_BUCKET).")
         try:
-            url = upload(html.encode("utf-8"), ".html", "text/html; charset=utf-8")
+            url = await upload(html.encode("utf-8"), ".html", "text/html; charset=utf-8")
         except Exception as e:
             return tool_error(f"COS upload failed: {e}")
         return self._result(url, title=title)
 
-    def publish_file(self, file_path: str) -> str:
+    async def publish_file(self, file_path: str) -> str:
         """Upload a local file (image, PDF, CSV, HTML …) and return its public URL.
 
         Args:
@@ -196,7 +329,12 @@ class CosPublishTool(Tool):
         if content_type.startswith("text/"):
             content_type += "; charset=utf-8"
         try:
-            url = upload(path.read_bytes(), path.suffix.lower(), content_type)
+            async with aiofiles.open(path, "rb") as fh:
+                data = await fh.read()
+        except OSError as e:
+            return tool_error(f"Cannot read file {file_path}: {e}")
+        try:
+            url = await upload(data, path.suffix.lower(), content_type)
         except Exception as e:
             return tool_error(f"COS upload failed: {e}")
-        return self._result(url, name=path.name, size=path.stat().st_size)
+        return self._result(url, name=path.name, size=len(data))

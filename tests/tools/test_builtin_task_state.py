@@ -19,21 +19,21 @@ def test_task_state_tool_legacy_exports_point_to_canonical_classes():
 
 class TestBuiltinTodoTool:
     def test_write_todos_basic(self, todo_tool):
-        result = todo_tool.write_todos([
+        result = asyncio.run(todo_tool.write_todos([
             {"content": "Task A", "status": "pending"},
             {"content": "Task B", "status": "in_progress"},
-        ])
+        ]))
         assert result == "Todos updated (2 items: 1 in progress, 1 pending)."
         assert len(todo_tool.todos) == 2
 
     def test_write_todos_result_does_not_echo_the_list(self, todo_tool):
         """The model just sent this list; echoing it back is pure context cost,
         and at one update per finished step that cost repeats all session."""
-        result = todo_tool.write_todos([
+        result = asyncio.run(todo_tool.write_todos([
             {"content": "Review the model layer", "status": "completed"},
             {"content": "Review the runner", "status": "in_progress"},
             {"content": "Summarise findings", "status": "pending"},
-        ])
+        ]))
         assert "Review the model layer" not in result
         assert len(result) < 120
 
@@ -49,24 +49,24 @@ class TestBuiltinTodoTool:
 
     def test_write_todos_invalid_status(self, todo_tool):
         with pytest.raises(ValueError):
-            todo_tool.write_todos([{"content": "Bad", "status": "unknown"}])
+            asyncio.run(todo_tool.write_todos([{"content": "Bad", "status": "unknown"}]))
 
     def test_write_todos_missing_content(self, todo_tool):
         with pytest.raises(ValueError):
-            todo_tool.write_todos([{"status": "pending"}])
+            asyncio.run(todo_tool.write_todos([{"status": "pending"}]))
 
     def test_write_todos_none(self, todo_tool):
         with pytest.raises(ValueError):
-            todo_tool.write_todos(None)
+            asyncio.run(todo_tool.write_todos(None))
 
     def test_write_todos_empty_list(self, todo_tool):
         with pytest.raises(ValueError):
-            todo_tool.write_todos([])
+            asyncio.run(todo_tool.write_todos([]))
 
     def test_write_todos_overwrites(self, todo_tool):
         """Writing new todos replaces old ones entirely."""
-        todo_tool.write_todos([{"content": "Old", "status": "pending"}])
-        todo_tool.write_todos([{"content": "New1", "status": "pending"}, {"content": "New2", "status": "pending"}])
+        asyncio.run(todo_tool.write_todos([{"content": "Old", "status": "pending"}]))
+        asyncio.run(todo_tool.write_todos([{"content": "New1", "status": "pending"}, {"content": "New2", "status": "pending"}]))
         assert len(todo_tool.todos) == 2
         contents = [t["content"] for t in todo_tool.todos]
         assert "Old" not in contents
@@ -79,10 +79,10 @@ class TestBuiltinTodoTool:
         mock_agent.todos = []
         tool.set_agent(mock_agent)
 
-        tool.write_todos([
+        asyncio.run(tool.write_todos([
             {"content": "Task X", "status": "pending"},
             {"content": "Task Y", "status": "in_progress"},
-        ])
+        ]))
         # Todos should be stored on mock_agent.todos
         assert len(mock_agent.todos) == 2
         assert mock_agent.todos[0]["content"] == "Task X"
@@ -91,7 +91,7 @@ class TestBuiltinTodoTool:
     def test_standalone_mode_uses_local_todos(self):
         """Without set_agent, todos are stored locally on the tool."""
         tool = BuiltinTodoTool()
-        tool.write_todos([{"content": "Local task", "status": "pending"}])
+        asyncio.run(tool.write_todos([{"content": "Local task", "status": "pending"}]))
         assert len(tool.todos) == 1
         assert tool.todos[0]["content"] == "Local task"
         # _agent should be None
@@ -109,19 +109,19 @@ class TestBuiltinTodoTool:
 
     def test_auto_clear_when_all_completed(self, todo_tool):
         """All-completed todos should auto-clear the list."""
-        result = todo_tool.write_todos([
+        result = asyncio.run(todo_tool.write_todos([
             {"content": "Task A", "status": "completed"},
             {"content": "Task B", "status": "completed"},
-        ])
+        ]))
         assert result == "All 2 todos completed; list cleared."
         assert len(todo_tool.todos) == 0
 
     def test_no_auto_clear_when_not_all_completed(self, todo_tool):
         """Partial completion should NOT clear the list."""
-        result = todo_tool.write_todos([
+        result = asyncio.run(todo_tool.write_todos([
             {"content": "Task A", "status": "completed"},
             {"content": "Task B", "status": "in_progress"},
-        ])
+        ]))
         assert result == "Todos updated (2 items: 1 done, 1 in progress)."
         assert len(todo_tool.todos) == 2
 
@@ -129,9 +129,9 @@ class TestBuiltinTodoTool:
 
     def test_tool_result_message_is_neutral(self, todo_tool):
         """Tool result message confirms the update without nudging re-calls."""
-        result = todo_tool.write_todos([
+        result = asyncio.run(todo_tool.write_todos([
             {"content": "Task A", "status": "pending"},
-        ])
+        ]))
         assert result == "Todos updated (1 items: 1 pending)."
 
 
@@ -374,8 +374,8 @@ class TestAgentAutoWire:
             tools=[BuiltinTodoTool()],
         )
         wired = next(t for t in agent.tools if isinstance(t, BuiltinTodoTool))
-        wired.write_todos([
+        asyncio.run(wired.write_todos([
             {"content": "Test task", "status": "pending"},
-        ])
+        ]))
         assert len(agent.todos) == 1
         assert agent.todos[0]["content"] == "Test task"

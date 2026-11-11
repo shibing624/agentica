@@ -288,8 +288,8 @@ class SkillTool(Tool):
         self._init_name = name
 
         # Register tool functions
-        self.register(self.list_skills, is_read_only=True)
-        self.register(self.get_skill_info, is_read_only=True)
+        self.register(self.list_skills, concurrency_safe=True, is_read_only=True)
+        self.register(self.get_skill_info, concurrency_safe=True, is_read_only=True)
 
     def clone(self) -> "SkillTool":
         """Fresh instance so each agent owns its ``_agent`` slot.

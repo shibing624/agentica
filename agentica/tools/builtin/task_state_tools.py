@@ -79,7 +79,7 @@ class BuiltinTodoTool(Tool):
         else:
             self._todos = value
 
-    def write_todos(self, todos: Optional[List[Dict[str, str]]] = None) -> str:
+    async def write_todos(self, todos: Optional[List[Dict[str, str]]] = None) -> str:
         """Create and update a structured task list for the current session.
 
         Use it when the work has 3+ distinct steps — distinct means separate
