@@ -430,6 +430,8 @@ const en = {
     skillChipTip: "Skill. Click to view its SKILL.md",
     skillSourceShow: "View original text",
     skillSourceHide: "Hide original text",
+    userTextMore: "Show more",
+    userTextLess: "Show less",
     skillLoadFailed: "Could not load this skill",
     sourceLabels: {
       cli: "CLI",
@@ -1313,6 +1315,8 @@ const zh: Strings = {
     skillChipTip: "技能，点击查看 SKILL.md",
     skillSourceShow: "查看原文",
     skillSourceHide: "收起原文",
+    userTextMore: "显示更多",
+    userTextLess: "收起",
     skillLoadFailed: "无法加载该技能",
     sourceLabels: {
       cli: "CLI",

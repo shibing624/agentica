@@ -7,7 +7,7 @@ import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
 import { RenameInput } from "../components/SessionTree";
 import { CommandMenu, ComposerPicker, invocableSkills, slashQuery, type PickerGroup } from "../components/SlashMenu";
 import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
-import { FeedbackDialog, SkillTurn } from "../components/MessageExtras";
+import { CollapsibleUserText, FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
 import { TodoDock } from "../components/TaskCard";
 import { AutomatedNotice } from "../components/AutomatedNotice";
@@ -1211,7 +1211,9 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
               )}
               {skill
                 ? <SkillTurn name={skill.name} args={skill.args} source={m.content} onOpen={onOpenSkill} />
-                : m.content}
+                : m.role === "user"
+                  ? <CollapsibleUserText forceOpen={searchFocused}>{m.content}</CollapsibleUserText>
+                  : m.content}
             </div>
           )
         )}

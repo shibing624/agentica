@@ -521,6 +521,9 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .msg-stack{display:flex;flex-direction:column;max-width:min(760px,88%);align-items:flex-start}
 .m-u .msg-stack{align-items:flex-end}
 .m-u .bub{background:var(--user-bg);color:var(--user-fg);padding:10px 16px;border-radius:20px;max-width:100%;font-size:15px;line-height:1.6;word-break:break-word;white-space:pre-wrap}
+.user-text.folded{overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 3em),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 3em),transparent)}
+.user-fold-toggle{display:block;margin:6px 0 0 auto;border:none;background:transparent;padding:0;color:var(--fg3);font:inherit;font-size:12px;cursor:pointer}
+.user-fold-toggle:hover{color:var(--fg)}
 .m-a .msg-stack{width:100%;max-width:100%}
 .m-meta{font-size:10px;color:var(--fg3);font-family:var(--mono);margin-top:3px}
 .m-u .m-meta{text-align:right}

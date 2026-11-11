@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web 长提问折叠**：用户消息渲染高度超过约 9 行时折叠显示，底部渐隐，可点「显示更多 / 收起」展开或收回；按实际渲染高度判断，跟随气泡宽度和字体变化。聊天搜索定位到这条消息时自动展开。
 - **后台任务结束后主动回报（Web / Desktop / IM，对齐 CLI）**：网关为每个会话的 `BackgroundProcessRegistry` 起回报线程，命令或委派任务结束（用户手动停止的除外）后，等会话空闲把结果作为自动回合交给 agent 给出结论。会话绑定了本网关已连接的 IM 聊天时在 IM 里跑，所有绑定该会话的聊天都收到「🔔 后台任务已结束」和结论；否则作为 Web 实时回合运行，打开的页面自动接上。回报只投递到会话所属账号；会话被终端 CLI 接管时投进终端信箱；会话已删除则作废，不会重建记录；自动回合不用于命名会话。报告正文由 `background_result_for_agent` 生成，CLI 与网关共用（从 `cli/interactive/btw.py` 移到 `agentica/tools/background_processes.py`）。
 - **修复 IM 每条消息收到两条「已启动执行」与两份回答**：同一数据目录下终端网关和 Desktop 拉起的网关同时连接了同一个微信 bot，各自处理同一条消息。现在用系统文件锁（`cache/gateway/im.lock`，持有者 pid 写在 `im.owner`）保证只有一个网关连接 IM；其余网关只提供 Web，每 5 秒重试，原持有者退出后自动接管。`/api/channels` 新增 `im_served_by_pid`，待命网关的个人助理页显示「IM 由本机另一个网关负责」。
 - **Web 输入框发送按钮对齐 dsh**：输入为空（或只有空白）且没有附件时按钮变暗不可点，有内容时恢复亮色。
