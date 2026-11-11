@@ -35,8 +35,9 @@ import {
 import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUsage } from "../components/ContextUsageTip";
 import { rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
-  appendSteerPart, appendText, appendThink, appendTool, finishTool, groupParts,
-  partsOf, settleWork, unfinishedToolCallId, workSummary,
+  allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
+  finalAnswerOf, finishTool, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
+  workSummary,
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
@@ -1134,10 +1135,18 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
       (seg) => seg.type === "work" && seg.items.some((p) => p.kind === "tool" && p.toolCallId === pendingToolCallId),
     ),
   );
-  const [processOpen, setProcessOpen] = useState(() => Boolean(m.aborted || m.error || hasPendingApproval || hasSteer));
+  const st = getState();
+  const searchFocused = !!(
+    st.chatSearchTarget
+    && st.chatSearchTarget.sessionId === sessionId
+    && st.chatSearchTarget.turn === turn
+    && (!st.chatSearchTarget.role || st.chatSearchTarget.role === m.role)
+  );
+  const [processOpen, setProcessOpen] = useState(() => Boolean(m.aborted || m.error || hasSteer || searchFocused));
   useEffect(() => {
-    if (hasPendingApproval || m.aborted || m.error || hasSteer) setProcessOpen(true);
-  }, [hasPendingApproval, m.aborted, m.error, hasSteer]);
+    if (m.aborted || m.error || hasSteer || searchFocused) setProcessOpen(true);
+  }, [m.aborted, m.error, hasSteer, searchFocused]);
+  const effectiveProcessOpen = processOpen || hasPendingApproval;
   const rawDur = m.durationMs ?? ((m.durationSec || 0) * 1000);
   const workDur = segs
     ? segs.reduce((acc, seg) => (seg.type === "work" ? acc + workSummary(seg.items, Date.now(), false).ms : acc), 0)
@@ -1151,13 +1160,11 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
       : turnDurationMs > 0
         ? `${S.chat.turnProcessTook}${fmtRunDuration(turnDurationMs, S.chat.runDurationUnits)}`
         : S.chat.turnProcessWorked;
-  const st = getState();
-  const searchFocused = !!(
-    st.chatSearchTarget
-    && st.chatSearchTarget.sessionId === sessionId
-    && st.chatSearchTarget.turn === turn
-    && (!st.chatSearchTarget.role || st.chatSearchTarget.role === m.role)
-  );
+  const finalAnswer = m.role === "assistant" ? finalAnswerOf(m) : "";
+  const filesCardText = m.role === "assistant" ? finalAnswer : (m.content || "");
+  const copyText = m.role === "assistant"
+    ? ((!effectiveProcessOpen && finalAnswer) ? finalAnswer : allAssistantTextOf(m))
+    : m.content;
   return (
     <div id={"msg-" + idx} data-turn={turn} data-role={m.role}
          className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "") + (searchFocused ? " search-focus" : "")}>
@@ -1165,8 +1172,8 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
         {showTurnProcess && (
           <button
             type="button"
-            className={"turn-process" + (processOpen ? " open" : "")}
-            aria-expanded={processOpen}
+            className={"turn-process" + (effectiveProcessOpen ? " open" : "")}
+            aria-expanded={effectiveProcessOpen}
             onClick={() => setProcessOpen((v) => !v)}
           >
             <span className="turn-process-label">{turnProcessLabel}</span>
@@ -1175,8 +1182,10 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
         )}
         {segs ? segs.map((seg, i) => {
           const isLast = !!live && i === segs.length - 1;
+          if (showTurnProcess && !effectiveProcessOpen && isProcessSegment(segs, i)) {
+            return null;
+          }
           if (seg.type === "work") {
-            if (showTurnProcess && !processOpen) return null;
             return (
               <WorkGroup
                 key={i}
@@ -1184,7 +1193,8 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
                 isLast={isLast}
                 live={!!live}
                 pendingToolCallId={pendingToolCallId}
-                defaultOpen={showTurnProcess && processOpen && !hasSteer && workSegCount === 1}
+                defaultOpen={showTurnProcess && effectiveProcessOpen && !hasSteer}
+                onOpenFile={onOpenFile}
               />
             );
           }
@@ -1218,7 +1228,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
           )
         )}
         <MessageFilesCard
-          text={m.content || ""}
+          text={filesCardText}
           steps={m.steps}
           uploaded={m.files}
           workspace={workspace || null}
@@ -1234,23 +1244,24 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
             {` - ${formatErrorStamp(m.errorTs ?? m.ts)}`}
           </div>
         )}
-        <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx} />
+        <MessageFooter m={m} live={!!live} sessionId={sessionId} idx={idx} copyText={copyText} />
       </div>
     </div>
   );
 }
 
-function MessageFooter({ m, live, sessionId, idx }: {
-  m: ChatMsg; live?: boolean; sessionId: string | null; idx: number;
+function MessageFooter({ m, live, sessionId, idx, copyText }: {
+  m: ChatMsg; live?: boolean; sessionId: string | null; idx: number; copyText?: string;
 }) {
   const S = useStrings();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   if (live) return null;
   const copy = () => {
-    // Always the original message. A rendered skill chip is a view, not the text
-    // the user sent — copying it would silently lose the SKILL.md expansion.
-    const text = m.content;
+    // Always the original message for user turns (a rendered skill chip is a view,
+    // not the text the user sent). For assistant turns, copy the visible final
+    // answer when collapsed, or clean paragraph-joined text when expanded.
+    const text = copyText ?? m.content;
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => showToast(S.common.copied));
   };
@@ -1952,7 +1963,7 @@ async function consumeSse(
         if (evt.data.media_notes?.length) {
           aiMsg.content = (evt.data.media_notes as string[]).join("\n") + (aiMsg.content ? "\n\n" + aiMsg.content : "");
         }
-        if (!aiMsg.content && evt.data.content) appendText(aiMsg, evt.data.content);
+        if (evt.data.content) ensureTrailingFinalAnswer(aiMsg, String(evt.data.content));
       }
     }
   }

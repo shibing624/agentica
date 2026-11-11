@@ -1744,6 +1744,11 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 @keyframes wg-shimmer{from{background-position:120% 0}to{background-position:-100% 0}}
 @media (prefers-reduced-motion:reduce){.shimmer{animation:none;color:var(--fg2);background:none}}
 .wg-body{margin:2px 0 4px 7px;padding-left:13px;border-left:var(--hair) solid var(--border);max-height:min(460px,60vh);overflow-y:auto;scrollbar-gutter:stable}
+.wg-body.wg-flat{margin:0;padding-left:0;border-left:none;max-height:none;overflow:visible;scrollbar-gutter:auto}
+.wr-head.wr-static{cursor:default;pointer-events:none}
+.wr-sum.wr-file-link{flex:0 1 auto;cursor:pointer;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px;transition:color .1s,text-decoration-color .1s}
+.wr-sum.wr-file-link:hover{color:var(--fg);text-decoration-color:currentColor}
+.wr-exit{flex-shrink:0;margin-left:8px;padding:0 6px;border-radius:999px;background:rgba(220,38,38,.12);color:#dc2626;font-family:var(--mono);font-size:11px;line-height:18px}
 .wr-line{position:relative;display:flex;align-items:center;min-width:0}
 .wr-line .wr-head{flex:1}
 .wr-tool.error .wr-head{color:#dc2626}

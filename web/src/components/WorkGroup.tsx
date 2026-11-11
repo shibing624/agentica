@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
 import { fmtDurationMs } from "../lib/format";
+import { normalizeMentionedPath } from "../lib/filePath";
 import { workSummary, type MsgPart } from "../lib/msgParts";
 import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
 import {
-  diffStats, doneTitle, firstLine, groupCategories, parseTaskResult, parseTodos, runningTool, todoProgress,
-  toolCategory, toolResultPreview, type Category,
+  diffStats, doneTitle, firstLine, groupCategories, parseShellOutput, parseTaskResult, parseTodos, runningTool,
+  todoProgress, toolCategory, toolResultPreview, type Category,
 } from "../lib/workActivity";
 import {
   IconAlert, IconBook, IconBrain, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
@@ -76,23 +77,25 @@ function toolSummary(part: Extract<MsgPart, { kind: "tool" }>, S: ReturnType<typ
 
 /**
  * A run of thinking and tool calls between two pieces of answer text
- * (deepseek-harness style). Folded by default — one quiet line saying what it
- * did ("Ran commands and read files") or, while running, what it is doing now.
- * Opens to one 24px row per step; each row opens in place, and a tool row
- * links to the same call on the Trace page.
+ * (deepseek-harness `detailed` style). While the turn is streaming (`live`),
+ * step rows render flat without a group header so every command description
+ * and file read is visible in real time; once settled, historical groups keep
+ * their collapsible summary header ("Ran commands and read files").
  */
 export function WorkGroup({
   items,
-  isLast: _isLast,
+  isLast,
   live = false,
   pendingToolCallId,
   defaultOpen = false,
+  onOpenFile,
 }: {
   items: MsgPart[];
   isLast: boolean;
   live?: boolean;
   pendingToolCallId?: string;
   defaultOpen?: boolean;
+  onOpenFile?: (path: string) => void;
 }) {
   const S = useStrings();
   const { running: unfinished } = workSummary(items, Date.now(), live);
@@ -100,7 +103,7 @@ export function WorkGroup({
   const containsPending = !!pendingToolCallId && items.some(
     (p) => p.kind === "tool" && p.toolCallId === pendingToolCallId,
   );
-  // Folded unless a call in here waits on the user's approval.
+  // Folded in settled history unless opened by turn-process or waiting on approval.
   const [open, setOpen] = useState(defaultOpen || containsPending);
   const userToggled = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -115,10 +118,53 @@ export function WorkGroup({
   }, [defaultOpen]);
 
   useEffect(() => {
-    if (!running) return;
+    if (!live) return;
     const id = window.setInterval(() => tick((n) => n + 1), 250);
     return () => window.clearInterval(id);
-  }, [running]);
+  }, [live]);
+
+  const rows = items.map((p, i) => {
+    if (p.kind === "think") {
+      const streamingThink = p.ms == null && running;
+      if (!streamingThink && !p.text.trim()) return null;
+      return <ThinkRow key={i} part={p} streaming={streamingThink} />;
+    }
+    if (p.kind === "tool") {
+      return (
+        <ToolRow
+          key={p.toolCallId || i}
+          part={p}
+          live={live}
+          awaitingApproval={!!pendingToolCallId && p.toolCallId === pendingToolCallId}
+          onOpenFile={onOpenFile}
+        />
+      );
+    }
+    return null;
+  });
+
+  if (live) {
+    // Between tool batches on CoT-hiding models (Claude / Gemini / GPT-5), all
+    // issued tools have settled while the turn still waits on the next LLM step.
+    const waitingNextStep = isLast && !unfinished && !containsPending;
+    return (
+      <div ref={rootRef} className="wg wg-live">
+        <div className="wg-body wg-flat">
+          {rows}
+          {waitingNextStep && (
+            <div className="wr running wr-live-wait" aria-live="polite">
+              <div className="wr-line">
+                <div className="wr-head wr-static">
+                  <span className="wr-icon"><IconSpinner /></span>
+                  <span className="wr-title shimmer">{thinkLabel(true, S)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   let title: string;
   let summary = "";
@@ -158,22 +204,7 @@ export function WorkGroup({
       </button>
       {open && (
         <div className="wg-body">
-          {items.map((p, i) => {
-            if (p.kind === "think") {
-              return <ThinkRow key={i} part={p} streaming={p.ms == null && running} />;
-            }
-            if (p.kind === "tool") {
-              return (
-                <ToolRow
-                  key={p.toolCallId || i}
-                  part={p}
-                  live={live}
-                  awaitingApproval={!!pendingToolCallId && p.toolCallId === pendingToolCallId}
-                />
-              );
-            }
-            return null;
-          })}
+          {rows}
         </div>
       )}
     </div>
@@ -195,7 +226,7 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
         <button type="button" className="wr-head" aria-expanded={open} disabled={!part.text}
                 onClick={() => setOpen((v) => !v)}>
           <span className="wr-icon">{streaming ? <IconSpinner /> : <IconBrain />}<span className="wr-chev"><IconChevronDown /></span></span>
-          <span className="wr-title">{thinkLabel(streaming, S)}</span>
+          <span className={"wr-title" + (streaming ? " shimmer" : "")}>{thinkLabel(streaming, S)}</span>
           {!open && preview && (
             <>
               <span className="wr-dot" />
@@ -217,15 +248,18 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
 
 /** Local file-read tools: the call line is enough. */
 const HIDE_RESULT_TOOLS = new Set(["read_file", "glob", "grep"]);
+const OPEN_FILE_TOOLS = new Set(["read_file", "write_file", "edit_file", "multi_edit"]);
 
 function ToolRow({
   part,
   live,
   awaitingApproval,
+  onOpenFile,
 }: {
   part: Extract<MsgPart, { kind: "tool" }>;
   live: boolean;
   awaitingApproval: boolean;
+  onOpenFile?: (path: string) => void;
 }) {
   const S = useStrings();
   const nav = useNavigate();
@@ -245,16 +279,26 @@ function ToolRow({
     ? part.ms
     : (running && part.t0 != null ? Date.now() - part.t0 : 0);
   const sessionId = getState().curSess;
+  const cwd = sessionCwd();
   const isShell = part.name === "execute" || part.name === "bash" || part.name === "shell";
+  const shellParsed = isShell && !running && part.result != null ? parseShellOutput(resultText, isError) : null;
+  const shellExitFailed = Boolean(shellParsed && shellParsed.exitCode !== null && shellParsed.exitCode !== 0);
+  const rowFailed = isError || shellExitFailed;
   const hasExplicitDesc = isShell && Boolean(firstLine(String(args.description ?? "")));
   const summary = isError ? firstLine(resultText.slice("Error: ".length)) : toolSummary(part, S);
+  const cmdPreview = hasExplicitDesc ? formatToolDisplay("execute", args, cwd).replace(/\s+/g, " ").trim() : "";
+  const summaryTip = hasExplicitDesc && cmdPreview ? `${summary}\n$ ${cmdPreview}` : summary;
   const showSummary = Boolean(summary) && (!open || !isShell || hasExplicitDesc);
-  const resultPreview = !open && !running && !isError ? toolResultPreview(part.name, resultText, Boolean(stats)) : "";
+  const resultPreview = !open && !running && !rowFailed ? toolResultPreview(part.name, resultText, Boolean(stats)) : "";
+  const rawFilePath = OPEN_FILE_TOOLS.has(part.name) ? String(args.file_path ?? args.path ?? "").trim() : "";
+  const openablePath = !running && !rowFailed && onOpenFile && rawFilePath
+    ? normalizeMentionedPath(rawFilePath, cwd || null)
+    : null;
   const title = S.chat.toolTitle[cat] || part.name;
 
   return (
     <div
-      className={"wr wr-tool" + (running ? " running" : "") + (open ? " open" : "") + (isError ? " error" : "")
+      className={"wr wr-tool" + (running ? " running" : "") + (open ? " open" : "") + (rowFailed ? " error" : "")
         + (awaitingApproval ? " awaiting-approval" : "")}
       data-tool-call-id={part.toolCallId || undefined}
     >
@@ -265,22 +309,42 @@ function ToolRow({
             {running ? <IconSpinner /> : isError ? <IconAlert /> : <CategoryIcon cat={cat} />}
             <span className="wr-chev"><IconChevronDown /></span>
           </span>
-          <span className="wr-title" title={part.name}>{title}</span>
+          <span className={"wr-title" + (running ? " shimmer" : "")} title={part.name}>{title}</span>
           {showSummary && (
             <>
               <span className="wr-dot" />
               {resultPreview ? (
-                <span className="wr-sum has-result" title={`${summary} → ${resultPreview}`}>
+                <span className="wr-sum has-result" title={`${summaryTip} → ${resultPreview}`}>
                   <span className="wr-call-req">{summary}</span>
                   <span className="wr-call-res">
                     <span className="wr-call-arr">{" → "}</span>
                     <span className="wr-call-res-text">{resultPreview}</span>
                   </span>
                 </span>
+              ) : openablePath && onOpenFile ? (
+                <span
+                  role="link"
+                  tabIndex={0}
+                  className="wr-sum wr-file-link"
+                  title={summaryTip}
+                  onClick={(e) => { e.stopPropagation(); onOpenFile(openablePath); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onOpenFile(openablePath);
+                    }
+                  }}
+                >
+                  {summary}
+                </span>
               ) : (
-                <span className="wr-sum" title={summary}>{summary}</span>
+                <span className={"wr-sum" + (running ? " shimmer" : "")} title={summaryTip}>{summary}</span>
               )}
             </>
+          )}
+          {!open && !isError && shellExitFailed && shellParsed?.exitCode != null && (
+            <span className="wr-exit">exit {shellParsed.exitCode}</span>
           )}
           {awaitingApproval && <span className="work-awaiting">{S.chat.approvalWaiting}</span>}
           {stats && (
@@ -364,15 +428,6 @@ function promptCwdLabel(cwd: string): string {
   return seg || "$";
 }
 
-function parseTerminalOutput(raw: string, isError: boolean): { output: string; exitCode: number | null } {
-  const text = isError && raw.startsWith("Error: ") ? raw.slice("Error: ".length) : raw;
-  const m = /\n*\[Exit code:\s*(-?\d+)\]\s*$/i.exec(text);
-  if (m) {
-    return { output: text.slice(0, m.index).replace(/\n$/, ""), exitCode: Number(m[1]) };
-  }
-  return { output: text.replace(/\n$/, ""), exitCode: isError ? 1 : 0 };
-}
-
 /** deepseek-harness `TerminalBlock` style card for `execute` / `bash` tool calls. */
 function TerminalCard({
   command, workDir, resultText, running, isError,
@@ -385,7 +440,7 @@ function TerminalCard({
 }) {
   const S = useStrings();
   const [copied, setCopied] = useState(false);
-  const { output, exitCode } = parseTerminalOutput(resultText, isError);
+  const { output, exitCode } = parseShellOutput(resultText, isError);
   const failed = !running && (isError || (exitCode !== null && exitCode !== 0));
   const stateLabel = S.chat.taskStatus(running ? "running" : failed ? "error" : "completed");
   const cwdLabel = promptCwdLabel(workDir);

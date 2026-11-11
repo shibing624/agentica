@@ -81,6 +81,18 @@ const QUIET_RESULT_TOOLS = new Set([
   "write_todos", "task", "ask_user_question",
 ]);
 
+const SHELL_TOOLS = new Set(["execute", "bash", "shell"]);
+
+/** Parse trailing `[Exit code: N]` marker from shell tool output. */
+export function parseShellOutput(raw: string, isError = false): { output: string; exitCode: number | null } {
+  const text = isError && raw.startsWith("Error: ") ? raw.slice("Error: ".length) : raw;
+  const m = /\n*\[Exit code:\s*(-?\d+)\]\s*$/i.exec(text);
+  if (m) {
+    return { output: text.slice(0, m.index).replace(/\n$/, ""), exitCode: Number(m[1]) };
+  }
+  return { output: text.replace(/\n$/, ""), exitCode: isError ? 1 : 0 };
+}
+
 /**
  * Compact one-line result preview for a settled tool row (`command → output`),
  * capped at 512 chars so CSS ellipsis does the visual clipping while copy/paste
@@ -88,8 +100,9 @@ const QUIET_RESULT_TOOLS = new Set([
  */
 export function toolResultPreview(name: string, resultText: string, hasDiff = false): string {
   if (!resultText || hasDiff || QUIET_RESULT_TOOLS.has(name)) return "";
-  const flat = resultText.replace(/\s+/g, " ").trim();
-  if (!flat) return "";
+  const body = SHELL_TOOLS.has(name) ? parseShellOutput(resultText).output : resultText;
+  const flat = body.replace(/\s+/g, " ").trim();
+  if (!flat || (SHELL_TOOLS.has(name) && flat === "(no output)")) return "";
   return flat.length > 512 ? flat.slice(0, 512) + "…" : flat;
 }
 

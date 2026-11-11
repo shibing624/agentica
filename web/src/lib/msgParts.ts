@@ -37,6 +37,62 @@ export function groupParts(parts: MsgPart[]): PartSeg[] {
   return segs;
 }
 
+/** Index of the last `work` segment, or -1 when the turn has no think/tool work. */
+export function lastWorkSegmentIndex(segs: PartSeg[]): number {
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (segs[i].type === "work") return i;
+  }
+  return -1;
+}
+
+/**
+ * Whether `segs[index]` belongs to the collapsible turn process (`已完成，用时 …`):
+ * every `work` group plus any intermediate assistant `text` emitted before a later
+ * `work` group (e.g. Claude / Gemini / GPT-5 commentary between tool calls while
+ * internal CoT is hidden). User `steer` chips and trailing final-answer text stay out.
+ */
+export function isProcessSegment(segs: PartSeg[], index: number): boolean {
+  const seg = segs[index];
+  if (!seg) return false;
+  if (seg.type === "work") return true;
+  const lastWork = lastWorkSegmentIndex(segs);
+  if (lastWork < 0) return false;
+  return seg.part.kind === "text" && index < lastWork;
+}
+
+/** Visible final-answer text (segments after the last `work` group), or full text when no work ran. */
+export function finalAnswerOf(m: ChatMsg): string {
+  const segs = groupParts(partsOf(m));
+  const lastWork = lastWorkSegmentIndex(segs);
+  if (lastWork < 0) return m.content || "";
+  const trailing: string[] = [];
+  for (let i = lastWork + 1; i < segs.length; i++) {
+    const seg = segs[i];
+    if (seg.type === "single" && seg.part.kind === "text" && seg.part.text.trim()) {
+      trailing.push(seg.part.text);
+    }
+  }
+  return trailing.join("\n\n");
+}
+
+/** All assistant text blocks joined cleanly with paragraph breaks (for Copy when expanded). */
+export function allAssistantTextOf(m: ChatMsg): string {
+  const blocks: string[] = [];
+  for (const p of partsOf(m)) {
+    if (p.kind === "text" && p.text.trim()) blocks.push(p.text);
+  }
+  return blocks.length ? blocks.join("\n\n") : (m.content || "");
+}
+
+/** Append `finalContent` at turn end when intermediate commentary left no trailing answer after tools. */
+export function ensureTrailingFinalAnswer(m: ChatMsg, finalContent: string) {
+  const clean = (finalContent || "").trim();
+  if (!clean || finalAnswerOf(m).trim()) return;
+  const all = allAssistantTextOf(m).trim();
+  if (all && (all === clean || all.endsWith(clean))) return;
+  appendText(m, finalContent);
+}
+
 export function ensureParts(m: ChatMsg): MsgPart[] {
   if (!m.parts) m.parts = [];
   if (!m.steps) m.steps = [];

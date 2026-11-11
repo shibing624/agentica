@@ -52,6 +52,8 @@ class TestBuiltinExecuteTool:
         function.process_entrypoint(strict=False)
 
         assert "passed unchanged" in function.description
+        assert "command" in function.parameters["required"]
+        assert "description" in function.parameters["required"]
 
     def test_background_command_management_tools_not_registered(self, execute_tool):
         assert "list_background_commands" not in execute_tool.functions

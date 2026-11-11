@@ -11,11 +11,22 @@ const vite = await createServer({
   server: { middlewareMode: true },
 });
 const {
+  allAssistantTextOf,
+  appendSteerPart,
+  appendText,
   appendThink,
+  appendTool,
+  ensureTrailingFinalAnswer,
+  finalAnswerOf,
   finishThink,
+  finishTool,
+  groupParts,
+  isProcessSegment,
+  partsOf,
   settleWork,
   workSummary,
 } = await vite.ssrLoadModule("/src/lib/msgParts.ts");
+const { eventsToChatMsgs } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
 after(() => vite.close());
 
 function msg(parts) {
@@ -97,4 +108,104 @@ test("settleWork keeps a think that has text", () => {
   assert.equal(m.parts.length, 1);
   assert.equal(m.parts[0].text, "planning the change");
   assert.equal(m.steps.length, 1);
+});
+
+test("CoT-hiding models: intermediate commentary between tool calls folds with turn process", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendThink(m, "");
+  appendText(m, "我先查看 ChatPage.tsx 的渲染结构。");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "web/src/pages/ChatPage.tsx" }), "c1");
+  finishTool(m, "", undefined, "c1");
+  appendText(m, "接着运行前端单测确认现状。");
+  appendTool(m, "execute", JSON.stringify({ command: "npm test", description: "运行前端单元测试" }), "c2");
+  finishTool(m, "ok\n[Exit code: 0]", undefined, "c2");
+  appendText(m, "已完成全部优化：\n1. 流式平铺命令简述\n2. 折叠隐藏过渡说明");
+  settleWork(m, Date.now());
+
+  const segs = groupParts(partsOf(m));
+  assert.equal(segs.length, 5);
+  assert.deepEqual(
+    segs.map((_, i) => isProcessSegment(segs, i)),
+    [true, true, true, true, false],
+  );
+  assert.equal(finalAnswerOf(m), "已完成全部优化：\n1. 流式平铺命令简述\n2. 折叠隐藏过渡说明");
+  assert.equal(
+    allAssistantTextOf(m),
+    "我先查看 ChatPage.tsx 的渲染结构。\n\n接着运行前端单测确认现状。\n\n已完成全部优化：\n1. 流式平铺命令简述\n2. 折叠隐藏过渡说明",
+  );
+});
+
+test("plain Q&A without work keeps its text outside process folding", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendText(m, "直接给出的最终回答");
+  const segs = groupParts(partsOf(m));
+  assert.equal(segs.length, 1);
+  assert.equal(isProcessSegment(segs, 0), false);
+  assert.equal(finalAnswerOf(m), "直接给出的最终回答");
+});
+
+test("user steer chip stays outside process folding while surrounding commentary folds", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendText(m, "先读文件");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "a.py" }), "c1");
+  finishTool(m, "", undefined, "c1");
+  appendSteerPart(m, "顺便检查 b.py");
+  appendText(m, "收到，一起检查 b.py");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "b.py" }), "c2");
+  finishTool(m, "", undefined, "c2");
+  appendText(m, "两处都检查完毕。");
+
+  const segs = groupParts(partsOf(m));
+  // [text, work, steer, text, work, final text]
+  assert.deepEqual(
+    segs.map((_, i) => isProcessSegment(segs, i)),
+    [true, true, false, true, true, false],
+  );
+  assert.equal(finalAnswerOf(m), "两处都检查完毕。");
+});
+
+test("hydrated JSONL turn folds Claude/GPT-5 intermediate content and keeps final answer", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "排查问题", timestamp: "2026-11-11T06:00:00Z" },
+    {
+      type: "assistant",
+      content: "我先看看目录与配置。",
+      tool_calls: [{ id: "tc1", function: { name: "execute", arguments: JSON.stringify({ command: "ls", description: "列出项目根目录" }) } }],
+      timestamp: "2026-11-11T06:00:02Z",
+    },
+    { type: "tool", tool_call_id: "tc1", tool_name: "execute", content: "web\nagentica\n[Exit code: 0]", timestamp: "2026-11-11T06:00:03Z" },
+    {
+      type: "assistant",
+      content: "再读取 WorkGroup.tsx。",
+      tool_calls: [{ id: "tc2", function: { name: "read_file", arguments: JSON.stringify({ file_path: "web/src/components/WorkGroup.tsx" }) } }],
+      timestamp: "2026-11-11T06:00:05Z",
+    },
+    { type: "tool", tool_call_id: "tc2", tool_name: "read_file", content: "", timestamp: "2026-11-11T06:00:06Z" },
+    {
+      type: "assistant",
+      content: "根因已定位并修复完成。",
+      timestamp: "2026-11-11T06:00:10Z",
+    },
+  ]);
+  assert.equal(msgs.length, 2);
+  const ai = msgs[1];
+  const segs = groupParts(partsOf(ai));
+  assert.deepEqual(
+    segs.map((_, i) => isProcessSegment(segs, i)),
+    [true, true, true, true, false],
+  );
+  assert.equal(finalAnswerOf(ai), "根因已定位并修复完成。");
+});
+
+test("ensureTrailingFinalAnswer appends goal final_answer even when earlier rounds spoke", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendText(m, "第一轮先跑验证脚本。");
+  appendTool(m, "execute", JSON.stringify({ command: "pytest", description: "跑测试" }), "c1");
+  finishTool(m, "passed\n[Exit code: 0]", undefined, "c1");
+  ensureTrailingFinalAnswer(m, "目标已完成：所有测试均通过。");
+  assert.equal(finalAnswerOf(m), "目标已完成：所有测试均通过。");
+
+  // Does not duplicate if trailing answer already exists.
+  ensureTrailingFinalAnswer(m, "不会重复追加");
+  assert.equal(finalAnswerOf(m), "目标已完成：所有测试均通过。");
 });

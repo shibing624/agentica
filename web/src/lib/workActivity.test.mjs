@@ -113,8 +113,11 @@ test("the dock shows the plan only while the turn runs; a finished turn leaves i
 });
 
 test("toolResultPreview keeps execute output for inline arrow display and copy/paste", () => {
-  const out = "d727b86 benchmarks: adapt runner\n1 file changed, 12 insertions(+)";
+  const out = "d727b86 benchmarks: adapt runner\n1 file changed, 12 insertions(+)\n[Exit code: 0]";
   assert.equal(A.toolResultPreview("execute", out), "d727b86 benchmarks: adapt runner 1 file changed, 12 insertions(+)");
+  assert.equal(A.toolResultPreview("execute", "(no output)\n[Exit code: 0]"), "");
+  assert.equal(A.toolResultPreview("execute", "\n[Exit code: 0]"), "");
+  assert.deepEqual(A.parseShellOutput("boom\n[Exit code: 2]"), { output: "boom", exitCode: 2 });
   assert.equal(A.toolResultPreview("read_file", "line 1\nline 2"), "");
   assert.equal(A.toolResultPreview("apply_patch", "patched", true), "");
 });

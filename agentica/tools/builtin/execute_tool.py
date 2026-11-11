@@ -407,6 +407,14 @@ class BuiltinExecuteTool(Tool):
         execute_fn.parameters["properties"]["timeout"]["description"] = (
             f"seconds; default {self._timeout}.{cap_note}"
         )
+        execute_fn.parameters["properties"]["description"]["description"] = (
+            "Concise 5-10 word summary of what this command does "
+            "(in the user's language), shown in the UI."
+        )
+        required = list(execute_fn.parameters.get("required") or [])
+        if "description" not in required:
+            required.append("description")
+            execute_fn.parameters["required"] = required
         if self._background_process_registry is not None:
             execute_fn.description += _BACKGROUND_GUIDANCE.format(
                 delivery=_DELIVERED if self._background_process_registry.delivers_results
