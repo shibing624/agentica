@@ -43,7 +43,6 @@ import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { applyChatSearchHighlights } from "../lib/sessionRows";
 import { BackgroundJobs } from "../components/BackgroundJobs";
-import { SessionAutomations } from "../components/SessionAutomations";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import type { FileEdits } from "../lib/fileDiff";
@@ -474,7 +473,6 @@ export function ChatPage() {
               </div>
             </div>
             <div className="tb-r">
-              {s.curSess && cur && cur.msgs.length > 0 && <SessionAutomations sessionId={s.curSess} />}
               {s.curSess && (
                 <BackgroundJobs
                   key={s.curSess}
@@ -1158,13 +1156,21 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
     if (m.aborted || m.error || hasSteer || searchFocused) setProcessOpen(true);
   }, [m.aborted, m.error, hasSteer, searchFocused]);
   const effectiveProcessOpen = processOpen || hasPendingApproval;
+  // While streaming the process shows unless the reader folds it; settled
+  // turns keep their own default (folded) above.
+  const [liveFolded, setLiveFolded] = useState(false);
+  const liveNow = useLiveClock(!!live && m.role === "assistant");
   const rawDur = m.durationMs ?? ((m.durationSec || 0) * 1000);
   const workDur = segs
     ? segs.reduce((acc, seg) => (seg.type === "work" ? acc + workSummary(seg.items, Date.now(), false).ms : acc), 0)
     : 0;
   const turnDurationMs = rawDur > 0 ? rawDur : workDur;
+  const showLiveProcess = !!live && m.role === "assistant";
   const showTurnProcess = !live && hasWork;
-  const turnProcessLabel = m.aborted
+  const processOpenNow = showLiveProcess ? (!liveFolded || hasPendingApproval) : effectiveProcessOpen;
+  const turnProcessLabel = showLiveProcess
+    ? S.chat.turnProcessRunningFor(fmtRunDuration(liveNow - (m.ts || liveNow), S.chat.runDurationUnits))
+    : m.aborted
     ? S.chat.turnProcessStopped
     : m.error
       ? S.chat.turnProcessFailed
@@ -1180,20 +1186,20 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
     <div id={"msg-" + idx} data-turn={turn} data-role={m.role}
          className={"m " + (m.role === "user" ? "m-u" : "m-a") + (live ? " streaming" : "") + (searchFocused ? " search-focus" : "")}>
       <div className="msg-stack">
-        {showTurnProcess && (
+        {(showTurnProcess || showLiveProcess) && (
           <button
             type="button"
-            className={"turn-process" + (effectiveProcessOpen ? " open" : "")}
-            aria-expanded={effectiveProcessOpen}
-            onClick={() => setProcessOpen((v) => !v)}
+            className={"turn-process" + (processOpenNow ? " open" : "") + (showLiveProcess ? " live" : "")}
+            aria-expanded={processOpenNow}
+            onClick={() => (showLiveProcess ? setLiveFolded((v) => !v) : setProcessOpen((v) => !v))}
           >
-            <span className="turn-process-label">{turnProcessLabel}</span>
+            <span className={"turn-process-label" + (showLiveProcess ? " shimmer" : "")}>{turnProcessLabel}</span>
             <span className="turn-process-chev"><IconChevronDown /></span>
           </button>
         )}
         {segs ? segs.map((seg, i) => {
           const isLast = !!live && i === segs.length - 1;
-          if (showTurnProcess && !effectiveProcessOpen && isProcessSegment(segs, i)) {
+          if ((showTurnProcess || showLiveProcess) && !processOpenNow && isProcessSegment(segs, i)) {
             return null;
           }
           if (seg.type === "work") {
@@ -1213,13 +1219,12 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
             return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} onOpenSkill={onOpenSkill} />;
           }
           const text = seg.part.kind === "text" ? seg.part.text : "";
-          if (!text && !isLast) return null;
+          if (!text) return null;
           return (
             <div className={"bub" + (live && isLast ? " streaming-bub" : "")} key={i}>
               <Suspense fallback={<span className="markdown-fallback">{text}</span>}>
                 <ChatMarkdown text={text} streaming={!!live && isLast} />
               </Suspense>
-              {live && isLast ? <span className="stream-caret" /> : null}
             </div>
           );
         }) : (
@@ -1259,6 +1264,18 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
       </div>
     </div>
   );
+}
+
+/** Wall clock that ticks once a second while `active`, for the live `已处理 …` header. */
+function useLiveClock(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return now;
 }
 
 function MessageFooter({ m, live, sessionId, idx, copyText }: {

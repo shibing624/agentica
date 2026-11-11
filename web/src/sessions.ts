@@ -610,11 +610,11 @@ export function newChat() {
   const drafts = emptyChatIds(st.sessions, dir);
   if (drafts.length) {
     for (const id of drafts.slice(1)) delete st.sessions[id];
-    setState({ pendingNewChatDir: dir, inputText: "" });
+    setState({ pendingNewChatDir: dir });
     switchTo(drafts[0]);
     return;
   }
-  setState({ curSess: null, pendingNewChatDir: dir, inputText: "" });
+  setState({ curSess: null, pendingNewChatDir: dir });
   writeLastSessionId(null);
 }
 

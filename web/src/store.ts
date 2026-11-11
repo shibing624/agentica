@@ -394,7 +394,39 @@ const state: AppState = {
 
 export function getState() { return state; }
 
+/**
+ * Each conversation owns its unsent composer text and attachments. The
+ * composer reads the global `inputText` / `pendingFiles`; whenever the current
+ * conversation changes, the outgoing one's draft is parked and the incoming
+ * one's restored. Hooked into `bump` so every `curSess` assignment is covered.
+ */
+const NO_SESSION = "";
+const composerDrafts = new Map<string, { text: string; files: File[] }>();
+let composerOwner: string = NO_SESSION;
+
+function swapComposerDraft() {
+  const next = state.curSess || NO_SESSION;
+  if (next === composerOwner) return;
+  const prev = composerOwner;
+  composerOwner = next;
+  // Sending from the new-chat screen creates the session mid-submit: the
+  // text typed there belongs to that new session, not to the next blank screen.
+  if (prev === NO_SESSION && !composerDrafts.has(next) && !state.sessions[next]?.msgs.length) {
+    return;
+  }
+  if (state.inputText || state.pendingFiles.length) {
+    composerDrafts.set(prev, { text: state.inputText, files: state.pendingFiles });
+  } else {
+    composerDrafts.delete(prev);
+  }
+  const incoming = composerDrafts.get(next);
+  composerDrafts.delete(next);
+  state.inputText = incoming?.text ?? "";
+  state.pendingFiles = incoming?.files ?? [];
+}
+
 export function bump() {
+  swapComposerDraft();
   state.rev += 1;
   listeners.forEach((l) => l());
 }

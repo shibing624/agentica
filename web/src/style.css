@@ -182,6 +182,8 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .p-title{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:550;color:var(--fg)}
 .p-icon{flex-shrink:0;width:15px;height:15px;display:flex;align-items:center;justify-content:center;color:var(--fg2)}
 .p-icon svg{width:15px;height:15px}
+.p-busy{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:var(--accent)}
+.p-busy svg{width:13px;height:13px;display:block}
 .p-title-text{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .p-tools{display:flex;align-items:center;gap:1px;flex-shrink:0}
 .p-count{font-size:11px;color:var(--fg3);font-weight:500;font-variant-numeric:tabular-nums;padding:0 4px}
@@ -682,7 +684,6 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
    lines up with the full-width thinking card above it */
 .m-a .bub{padding:2px 0;width:100%;max-width:100%;box-sizing:border-box;font-size:15px;line-height:1.75;color:var(--fg);word-break:break-word}
 /* streaming indicator — only the last text bubble, never every prior turn */
-.stream-caret{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--fg2);margin-left:3px;vertical-align:middle;animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
 @keyframes icon-spin{to{transform:rotate(360deg)}}
 .icon-spin{animation:icon-spin .8s linear infinite}
@@ -2151,15 +2152,6 @@ html[data-desktop="mac"] .auto-detail-bar{-webkit-app-region:drag}
 .sched-card-body.open .sched-card-chev{transform:rotate(180deg)}
 
 /* Conversation header: automations that run here. */
-.sess-auto{position:relative;display:inline-flex}
-.sess-auto-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:var(--hair) solid var(--border);border-radius:14px;background:transparent;color:var(--fg2);font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
-.sess-auto-chip:hover,.sess-auto-chip.on{background:var(--hover)}
-.sess-auto-chip svg{width:13px;height:13px}
-.sess-auto-menu{min-width:260px}
-.sess-auto-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--fg3)}
-.sess-auto-dot.active{background:#22c55e}
-.sess-auto-dot.paused{background:#eab308}
-.sess-auto-dot.running{background:var(--accent)}
 /* Sidebar row: an automation delivers into this conversation. */
 .s-auto-mark{display:inline-flex;flex:none;color:var(--fg3)}
 .s-auto-mark svg{width:12px;height:12px}

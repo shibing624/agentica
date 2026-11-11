@@ -217,10 +217,30 @@ function lastLine(text: string): string {
   return lines.length ? lines[lines.length - 1] : "";
 }
 
+/** First line of the latest paragraph that is already closed by a blank line. */
+function latestCompletedParagraphFirstLine(text: string): string {
+  let summary = "";
+  let paragraphStart = 0;
+  const separator = /\r?\n(?:[\t ]*\r?\n)+/g;
+  while (true) {
+    const next = separator.exec(text);
+    const paragraphEnd = next === null ? text.length : next.index + next[0].indexOf("\n");
+    const newline = text.indexOf("\n", paragraphStart);
+    if (newline !== -1 && newline <= paragraphEnd) {
+      const candidate = text.slice(paragraphStart, newline).trim();
+      if (candidate) summary = candidate.replaceAll("**", "");
+    }
+    if (next === null) return summary;
+    paragraphStart = next.index + next[0].length;
+  }
+}
+
 function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" }>; streaming: boolean }) {
   const S = useStrings();
   const [open, setOpen] = useState(false);
-  const preview = streaming ? lastLine(part.text) : firstLine(part.text);
+  // Streaming advances one completed paragraph at a time (dsh `ReasoningRow`),
+  // so the preview never shows a half-written line; settled rows take line one.
+  const preview = streaming ? latestCompletedParagraphFirstLine(part.text) : firstLine(part.text);
   return (
     <div className={"wr" + (streaming ? " running" : "") + (open ? " open" : "")}>
       <div className="wr-line">

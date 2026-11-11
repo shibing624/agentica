@@ -195,6 +195,7 @@ export function SessionTree() {
       )}
       {groups.map((g) => {
         const shut = !!collapsed[g.id];
+        const busyWhileShut = shut && g.sessions.some(({ session }) => session.running);
         const isExpanded = !!expanded[g.id];
         const rows = collapseSessionRows(g.sessions, s.curSess, isExpanded || !!q);
         return (
@@ -222,6 +223,11 @@ export function SessionTree() {
                   <div className="p-title">
                     <span className="p-icon"><IconFolder /></span>
                     <span className="p-title-text">{g.name}</span>
+                    {/* Folded project: a running session inside is invisible, so the
+                        header carries dsh's busy spinner in its place. */}
+                    {busyWhileShut && (
+                      <span className="p-busy" title={S.chat.sessionBusy}><IconSpinner /></span>
+                    )}
                   </div>
                 </button>
               )}
