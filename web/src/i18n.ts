@@ -550,6 +550,7 @@ const en = {
   },
 
   assistant: {
+    imServedElsewhere: (pid: number) => `IM is served by another gateway on this machine (pid ${pid}); scan and manage it there. This one takes over when it exits.`,
     title: "Personal assistant",
     subtitle: "This gateway’s web UI and IM bots are the same agent. Desktop is that web page in a window — copy the URL or connect WeChat / QQ / Feishu from here.",
     webSection: "Web",
@@ -1433,6 +1434,7 @@ const zh: Strings = {
   },
 
   assistant: {
+    imServedElsewhere: (pid: number) => `IM 由本机另一个网关（pid ${pid}）负责，在那里扫码和管理；它退出后这里会自动接管。`,
     title: "个人助理",
     subtitle: "这台 gateway 的网页和 IM 机器人是同一个 agent。桌面版就是把这个网页嵌在窗口里——在这里复制 Web 地址，或接入微信 / QQ / 飞书。",
     webSection: "网页",

@@ -15,6 +15,7 @@ Key design decisions:
 """
 import asyncio
 import os
+import queue
 import tempfile
 import threading
 import time
@@ -22,7 +23,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING
+from typing import Optional, Callable, List, Any, Dict, TYPE_CHECKING, Awaitable
 import inspect
 
 from agentica.compression.manager import apply_idle_compact
@@ -51,7 +52,9 @@ from agentica.memory.session_log import SessionLog, iso_timestamp, is_session_un
 from agentica.skills import get_skill_registry, load_system_skills
 from agentica.tools.background_processes import (
     BackgroundProcess,
+    BackgroundProcessCompleted,
     BackgroundProcessRegistry,
+    background_result_for_agent,
     read_log_tail,
 )
 from agentica.compression.manager import (
@@ -301,6 +304,15 @@ _APPROVAL_MODE_INSTRUCTION = (
 )
 
 
+def _log_report_failure(future) -> None:
+    """A background report that failed is logged, not lost in the loop."""
+    if future.cancelled():
+        return
+    exc = future.exception()
+    if exc is not None:
+        logger.warning(f"Background report was not delivered: {exc!r}")
+
+
 @dataclass
 class ChatResult:
     """Chat response from the agent."""
@@ -445,6 +457,13 @@ class AgentService:
         # Per session, outside the agent: a model switch or LRU eviction
         # rebuilds the agent, and its running commands must stay reachable.
         self._session_background: Dict[str, BackgroundProcessRegistry] = {}
+        # Runs a finished command's report as a new automated turn when the
+        # session is idle (set by main: the IM bot for an IM-bound session,
+        # else a live web turn). Without one the report waits for `wait`.
+        self.background_report_handler: Optional[
+            Callable[[str, str, str], Awaitable[None]]
+        ] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     # ============== Model config (single source of truth: `settings`) ==============
     # These proxy directly to the gateway's global `settings` singleton instead
@@ -727,6 +746,7 @@ class AgentService:
 
     async def _ensure_initialized(self) -> None:
         """Ensure the workspace is initialized (idempotent, Lock-protected)."""
+        self._loop = asyncio.get_running_loop()
         if self._initialized:
             return
         async with self._init_lock:
@@ -887,10 +907,7 @@ class AgentService:
             # Scheduled runs have nobody to see or stop a detached command.
             background_process_registry=(
                 None if session_id.startswith(CRON_SESSION_PREFIX)
-                else self._session_background.setdefault(
-                    self._sk(session_id, owner),
-                    BackgroundProcessRegistry(user_id=self._owner(owner)),
-                )
+                else self._background_registry(session_id, owner)
             ),
             permission_mode=permission_mode,
             tool_config=ToolConfig(
@@ -1122,12 +1139,14 @@ class AgentService:
         *,
         channel: Optional[str] = None,
         stream_intermediate_steps: bool = False,
+        automated: bool = False,
     ) -> RunConfig:
         # Tool permission enforcement lives on the Agent itself now
         # (tool_config.permission_mode + sandbox_config, kept in sync with
         # the session's approval mode by set_session_approval_mode above).
         return RunConfig(
             stream_intermediate_steps=stream_intermediate_steps, source=source, channel=channel,
+            automated_input=automated,
         )
 
 
@@ -1540,6 +1559,7 @@ class AgentService:
         media: Optional[List["InboundMedia"]] = None,
         include_usage: bool = True,
         channel: Optional[str] = None,
+        automated: bool = False,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks.
 
@@ -1578,6 +1598,7 @@ class AgentService:
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
                 owner, media, include_usage=include_usage, channel=channel,
+                automated=automated,
             )
 
     async def _chat_stream_impl(
@@ -1595,6 +1616,7 @@ class AgentService:
         *,
         include_usage: bool = True,
         channel: Optional[str] = None,
+        automated: bool = False,
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
@@ -1622,6 +1644,7 @@ class AgentService:
                     source,
                     channel=channel,
                     stream_intermediate_steps=True,
+                    automated=automated,
                 ),
                 images=run_images,
                 audio=run_audio,
@@ -1645,7 +1668,9 @@ class AgentService:
                     chunk, on_content, on_tool_call, on_tool_result, on_thinking,
                 )
 
-            self._schedule_title(session_id, owner, message, full_content)
+            # A report nobody typed is no name for the chat.
+            if not automated:
+                self._schedule_title(session_id, owner, message, full_content)
             usage = (
                 await usage_payload(agent, model_provider=self._session_provider(session_id, owner))
                 if include_usage
@@ -1973,6 +1998,73 @@ class AgentService:
         return removed or log_existed
 
     # ============== Background commands (the Web's /ps and /stop) ==============
+
+    def _background_registry(self, session_id: str, owner: Optional[str]) -> BackgroundProcessRegistry:
+        key = self._sk(session_id, owner)
+        registry = self._session_background.get(key)
+        if registry is None:
+            registry = BackgroundProcessRegistry(
+                user_id=self._owner(owner),
+                delivers_results=self.background_report_handler is not None,
+            )
+            self._session_background[key] = registry
+            threading.Thread(
+                target=self._deliver_background_reports,
+                args=(registry, session_id, owner),
+                daemon=True,
+                name=f"bg-report-{session_id}",
+            ).start()
+        return registry
+
+    def _deliver_background_reports(
+        self, registry: BackgroundProcessRegistry, session_id: str, owner: Optional[str],
+    ) -> None:
+        """Hand each finished command back to the agent, like the CLI does.
+
+        A user's stop is not news. Ends when the session is deleted (its
+        registry is dropped) — the queue then never fills again.
+        """
+        while self._background_registry_is_current(session_id, owner, registry):
+            try:
+                event = registry.wait_completed(timeout=1.0)
+            except queue.Empty:
+                continue
+            if event.stop_requested:
+                continue
+            loop = self._loop
+            if loop is None or loop.is_closed():
+                return
+            future = asyncio.run_coroutine_threadsafe(
+                self._report_background(session_id, owner, registry, event), loop,
+            )
+            future.add_done_callback(_log_report_failure)
+
+    def _background_registry_is_current(
+        self, session_id: str, owner: Optional[str], registry: BackgroundProcessRegistry,
+    ) -> bool:
+        """False once the session is deleted: its pending reports are void."""
+        return self._session_background.get(self._sk(session_id, owner)) is registry
+
+    async def _report_background(
+        self,
+        session_id: str,
+        owner: Optional[str],
+        registry: BackgroundProcessRegistry,
+        event: BackgroundProcessCompleted,
+    ) -> None:
+        report = background_result_for_agent(event)
+        # A report is its own automated turn once the session is idle. Not a
+        # steer into a running turn: one accepted after the last tool batch is
+        # parked, and the gateway re-queues parked text as the user's words.
+        while self._background_registry_is_current(session_id, owner, registry) and (
+            self.is_session_active(session_id, owner) or live_turn.active(session_id, self._owner(owner))
+        ):
+            await asyncio.sleep(1.0)
+        # Deleting the chat while the report waited must not bring it back.
+        handler = self.background_report_handler
+        if handler is None or not self._background_registry_is_current(session_id, owner, registry):
+            return
+        await handler(session_id, self._owner(owner), report)
 
     @staticmethod
     def _background_job_view(item: BackgroundProcess) -> Dict[str, Any]:

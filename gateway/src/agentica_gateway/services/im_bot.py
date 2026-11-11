@@ -38,7 +38,8 @@ from agentica.cli.approvals import (
 )
 from agentica.config.profiles import get_active_profile_name, get_profiles
 from agentica.memory.session_log import SessionLog, local_turn_stamp
-from agentica.peers import PeerInfo, list_live_peers
+from agentica.peers import PeerInfo, PeerMessageRefused, list_live_peers
+from agentica.peers import send_message as send_peer_message
 from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout
 from agentica.utils.log import logger
 
@@ -144,6 +145,23 @@ class PendingAction:
     card_token: str = ""
     attach_peer: Optional[PeerInfo] = None
     resolve_fn: Optional[Callable[[str], bool]] = None
+
+
+@dataclass
+class QueuedTurn:
+    """One line waiting for a session's IM worker."""
+
+    state: "ImChatState"
+    work_dir: str
+    session_id: str
+    text: str
+    media: List[Any] = field(default_factory=list)
+    # A finished background command's report: a turn of its own, logged as
+    # automated, never merged with what the user typed.
+    automated: bool = False
+    # Other chats bound to the same session that also get the report's answer.
+    also_notify: List["ImChatState"] = field(default_factory=list)
+    from_queue: bool = True
 
 
 @dataclass
@@ -1200,13 +1218,59 @@ class ImBotController:
         if q is None:
             q = asyncio.Queue()
             self._queued_turns[target_session_id] = q
-        await q.put((state, target_work_dir, target_session_id, text, fetched_media))
+        await q.put(QueuedTurn(state, target_work_dir, target_session_id, text, fetched_media))
 
         worker = self._turn_tasks.get(target_session_id)
         if worker is None or worker.done():
             self._turn_tasks[target_session_id] = asyncio.create_task(
                 self._drain_session_queue(target_session_id, q)
             )
+
+    async def deliver_background_report(self, owner: str, session_id: str, report: str) -> bool:
+        """Run a finished background command's report in the IM chats bound to
+        this session, so the phone gets the conclusion without asking.
+
+        False — the caller then runs it on the web — when no connected chat of
+        this gateway is on that session: IM chats belong to the home account,
+        and a gateway that does not serve IM has their bindings but no channel.
+        """
+        if self._agent_service is None or self._channel_manager is None or owner != self._user_id():
+            return False
+        chats = [
+            st for st in self._states.values()
+            if st.session_id == session_id and self._channel_connected(st.channel)
+        ]
+        if not chats:
+            return False
+        peer = self.find_live_cli_peer(session_id)
+        if peer is not None:
+            # The terminal owns this session now; a gateway turn would write
+            # the same log alongside it. Its agent picks the report up instead.
+            await self._hand_report_to_cli(chats, peer, report)
+            return True
+        q = self._queued_turns.setdefault(session_id, asyncio.Queue())
+        await q.put(QueuedTurn(
+            chats[0], chats[0].work_dir, session_id, report, automated=True, also_notify=chats[1:],
+        ))
+        worker = self._turn_tasks.get(session_id)
+        if worker is None or worker.done():
+            self._turn_tasks[session_id] = asyncio.create_task(self._drain_session_queue(session_id, q))
+        return True
+
+    def _channel_connected(self, channel: ChannelType) -> bool:
+        ch = self._channel_manager.get_channel(channel) if self._channel_manager is not None else None
+        return ch is not None and ch.is_connected
+
+    async def _hand_report_to_cli(self, chats: List[ImChatState], peer: PeerInfo, report: str) -> None:
+        try:
+            send_peer_message(
+                peer, text=report, from_name="gateway", from_peer_id="gateway", from_kind="agent",
+            )
+            notice = f"🔔 后台任务已结束，结果已交给终端 [{peer.name}] 继续处理。"
+        except PeerMessageRefused as exc:
+            notice = f"🔔 后台任务已结束，但没能交给终端 [{peer.name}]：{exc}"
+        for st in chats:
+            await self._reply(st, notice)
 
     async def _run_attached_cli_turn(
         self,
@@ -1220,7 +1284,7 @@ class ImBotController:
         if not token or not peer.attach_socket:
             # Fallback to local execution if socket disappeared
             q = self._queued_turns.setdefault(session_id, asyncio.Queue())
-            await q.put((state, work_dir, session_id, text, []))
+            await q.put(QueuedTurn(state, work_dir, session_id, text))
             await self._drain_session_queue(session_id, q)
             return
 
@@ -1348,41 +1412,46 @@ class ImBotController:
 
     async def _drain_session_queue(self, session_id: str, q: asyncio.Queue) -> None:
         uid = self._user_id()
-        carried = None
+        carried: Optional[QueuedTurn] = None
         while True:
             if carried is not None:
-                batch = [carried]
-                carried = None
+                batch, carried = [carried], None
             else:
                 if q.empty():
                     return
                 batch = [await q.get()]
-            while not q.empty():
-                batch.append(q.get_nowait())
+            # Lines the user sent together run as one turn; a background report
+            # is a turn of its own, never folded into what the user wrote.
+            while not batch[0].automated and not q.empty():
+                item = q.get_nowait()
+                if item.automated:
+                    carried = item
+                    break
+                batch.append(item)
 
-            state, work_dir, sid, _, _ = batch[-1]
-            texts = [item[3] for item in batch if item[3]]
-            media = []
+            last = batch[-1]
+            media: List[Any] = []
             for item in batch:
-                media.extend(item[4])
-            merged_text = "\n\n".join(texts)
-
+                media.extend(item.media)
             try:
-                await self._run_gateway_turn(state, work_dir, sid, merged_text, media)
+                await self._run_gateway_turn(
+                    last.state, last.work_dir, last.session_id,
+                    "\n\n".join(item.text for item in batch if item.text), media,
+                    automated=batch[0].automated, also_notify=batch[0].also_notify,
+                )
             finally:
-                for _ in batch:
-                    if _ is not carried:
-                        try:
-                            q.task_done()
-                        except ValueError:
-                            pass
+                for item in batch:
+                    if item.from_queue:
+                        q.task_done()
 
-            if self._agent_service is not None:
-                late = self._agent_service.take_undelivered_steer(sid, owner=uid)
+            if self._agent_service is not None and carried is None:
+                late = self._agent_service.take_undelivered_steer(last.session_id, owner=uid)
                 if late:
-                    carried = (state, work_dir, sid, "\n\n".join(late), [])
+                    carried = QueuedTurn(
+                        last.state, last.work_dir, last.session_id, "\n\n".join(late), from_queue=False,
+                    )
                     continue
-            if q.empty():
+            if carried is None and q.empty():
                 return
 
     async def _run_gateway_turn(
@@ -1392,6 +1461,9 @@ class ImBotController:
         session_id: str,
         text: str,
         media: List[Any],
+        *,
+        automated: bool = False,
+        also_notify: Optional[List[ImChatState]] = None,
     ) -> None:
         if self._agent_service is None:
             return
@@ -1442,7 +1514,7 @@ class ImBotController:
 
         self._agent_service.set_session_ask_callback(session_id, _ask_callback, owner=uid)
 
-        turn = live_turn.start(session_id, owner=uid, user_message=text)
+        turn = live_turn.start(session_id, owner=uid, user_message="" if automated else text)
         sub_q = turn.subscribe()
         done_event = asyncio.Event()
         started = time.monotonic()
@@ -1516,7 +1588,8 @@ class ImBotController:
                         resolve_fn=_resolve_approval,
                     )
 
-        ack_task = asyncio.create_task(_ack_if_slow())
+        # Nobody is waiting on a report they did not send: no "started" ack.
+        ack_task = asyncio.create_task(done_event.wait() if automated else _ack_if_slow())
         watch_task = asyncio.create_task(_watch_turn_events())
         try:
             if hasattr(self._agent_service, "chat_stream"):
@@ -1532,6 +1605,7 @@ class ImBotController:
                     media=media or None,
                     include_usage=False,
                     channel=state.channel.value,
+                    automated=automated,
                 )
             else:
                 result = await self._agent_service.chat(
@@ -1560,12 +1634,16 @@ class ImBotController:
 
         # Send the IM text reply FIRST, before finishing the LiveTurn or pushing files,
         # so the phone receives the answer at the exact moment generation completes.
+        if automated and not reply:
+            # The phone is the reason this turn ran; never leave it silent.
+            reply = "agent 处理完了，但没有给出文字结论，可以发消息追问。"
         if reply:
-            header = ""
+            header = "🔔 后台任务已结束\n" if automated else ""
             if state.verbose or elapsed >= 10.0 or (result.tool_calls and result.tool_calls >= 2):
                 tools_part = f" · {result.tool_calls} tools" if result.tool_calls else ""
-                header = f"[{short} · {_fmt_elapsed(elapsed)}{tools_part}]\n"
-            await self._reply(state, f"{header}{reply}")
+                header += f"[{short} · {_fmt_elapsed(elapsed)}{tools_part}]\n"
+            for target in [state, *(also_notify or [])]:
+                await self._reply(target, f"{header}{reply}")
 
         turn.publish({
             "event": "done",

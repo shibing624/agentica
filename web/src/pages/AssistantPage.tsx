@@ -19,6 +19,8 @@ type ChannelsPayload = {
   listen: { host: string; port: number; loopback: boolean };
   guide_url: string;
   catalog: ChannelRow[];
+  /** Another gateway on this data root serves IM (this one is on standby). */
+  im_served_by_pid?: number | null;
 };
 type QrState = { id: string; png: string; expiresAt: number };
 
@@ -62,8 +64,10 @@ export function AssistantPanel() {
       )}
 
       <div className="asst-section-title">{S.assistant.imSection}</div>
-      <p className="asst-im-hint">{S.assistant.imHint}</p>
-      <div className="asst-list">
+      {data.im_served_by_pid
+        ? <p className="asst-im-hint">{S.assistant.imServedElsewhere(data.im_served_by_pid)}</p>
+        : <p className="asst-im-hint">{S.assistant.imHint}</p>}
+      {!data.im_served_by_pid && <div className="asst-list">
         {im.map((ch) => ch.id === "wechat" ? (
           <WeChatRow
             key={ch.id}
@@ -79,7 +83,7 @@ export function AssistantPanel() {
             onConfigure={() => setOpenId(ch.id)}
           />
         ))}
-      </div>
+      </div>}
       {how && (
         <HowToDialog
           ch={how}

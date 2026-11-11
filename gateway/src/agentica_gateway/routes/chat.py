@@ -330,7 +330,25 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
     svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
     _touch_session_log(svc, session_id, account)
     message, media = _message_and_media(body)
+    return _spawn_live(
+        session_id, _chat_turn(svc, session_id, account, message, media), owner=account, kind="chat",
+    )
 
+
+def start_background_report_run(svc: AgentService, session_id: str, owner: str, report: str) -> None:
+    """Run a finished background command's report as an automated turn.
+
+    Same live run as a typed message, so an open page attaches to it through
+    the activity pulse; the report itself is logged as automated and shows as
+    a notice, not as something the user said.
+    """
+    _spawn_live(
+        session_id, _chat_turn(svc, session_id, owner, report, None, automated=True),
+        owner=owner, kind="chat",
+    )
+
+
+def _chat_turn(svc: AgentService, session_id: str, account: str, message: str, media, automated: bool = False):
     async def run_chat_turn(turn: live_turn.LiveTurn):
         on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
         t0 = time.time()
@@ -344,6 +362,7 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
             on_tool_result=on_tool_result,
             on_thinking=on_thinking,
             media=media,
+            automated=automated,
         )
         elapsed = round(time.time() - t0, 2)
 
@@ -419,7 +438,7 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
             done["media_notes"] = result.media_notes
         turn.publish({"event": "done", "data": done})
 
-    return _spawn_live(session_id, run_chat_turn, owner=account, kind="chat")
+    return run_chat_turn
 
 
 @router.post("/api/chat/stream")

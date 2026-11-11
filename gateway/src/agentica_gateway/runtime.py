@@ -21,6 +21,7 @@ desktop-spawned instance from unpublishing the terminal one on its way out.
 """
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -133,3 +134,49 @@ def unpublish(pid: int) -> None:
         RUNTIME_FILE.unlink()
     except OSError:
         pass
+
+
+IM_LOCK_FILE = Path(AGENTICA_CACHE_DIR) / "gateway" / "im.lock"
+# Who holds it, for the log and the Assistant page. A separate file: on
+# Windows the locked byte of IM_LOCK_FILE itself cannot be read by others.
+IM_OWNER_FILE = Path(AGENTICA_CACHE_DIR) / "gateway" / "im.owner"
+_im_lock_fd: Optional[int] = None
+
+
+def claim_im_channels() -> bool:
+    """Whether this process may connect the IM channels on this data root.
+
+    Every gateway on one root shares the IM credentials (the WeChat token, the
+    bot secrets). Two of them connected at once — a terminal gateway plus the
+    one a desktop shell spawned — each poll the same bot, each run the same
+    inbound message, and the user gets every acknowledgement and answer twice.
+    An OS file lock picks one: held for the life of the process and released
+    by the kernel on any exit, so a crashed owner never blocks the next start.
+    """
+    global _im_lock_fd
+    if _im_lock_fd is not None:
+        return True
+    IM_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(IM_LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    _im_lock_fd = fd
+    IM_OWNER_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    return True
+
+
+def im_lock_holder() -> Optional[int]:
+    """Pid of the gateway serving IM on this data root, if one is alive."""
+    try:
+        pid = int(IM_OWNER_FILE.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        return None
+    return pid if pid and is_pid_alive(pid) else None

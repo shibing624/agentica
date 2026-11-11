@@ -876,7 +876,7 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .act-btn{width:34px;height:34px;border:none;border-radius:999px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background-color 100ms ease,opacity 100ms ease;flex-shrink:0}
 .act-btn.send{background:var(--accent);color:#fff}
 .act-btn.send:hover:not(:disabled){opacity:.85}
-.act-btn.send:disabled{opacity:.4;cursor:not-allowed}
+.act-btn.send:disabled{opacity:.4;cursor:default}
 .act-btn.stop{background:var(--accent);color:#fff}
 .act-btn.stop:hover{opacity:.85}
 .act-btn svg{width:16px;height:16px}

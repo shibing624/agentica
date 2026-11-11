@@ -730,9 +730,11 @@ class TestImBotControllerFlows:
             media=None,
             include_usage=True,
             channel=None,
+            automated=False,
         ):
             assert include_usage is False
             assert channel == "wechat"
+            assert automated is False
             svc.chat_calls.append((session_id, svc.get_session_work_dir(session_id, owner), message))
             mid_turn_pulse.update(live_turn.pulse("default"))
             active = live_turn.active(session_id, "default")

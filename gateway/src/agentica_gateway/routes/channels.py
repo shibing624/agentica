@@ -6,9 +6,11 @@
 Simplified to use the SDK cron module (agentica.cron) instead of the old
 gateway-embedded SchedulerService.
 """
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import deps
+from .. import deps, runtime
 from ..channels.base import ChannelType
 from ..channels.catalog import channel_overview
 from ..channels.wechat import WeChatChannel
@@ -26,12 +28,17 @@ async def list_channels(
 ):
     """Registered channels plus the full web/IM catalog the Personal Assistant page uses."""
     port = request.url.port if request.url.port is not None else settings.port
-    return channel_overview(
+    payload = channel_overview(
         cm,
         host=settings.host,
         port=port,
         web_url=f"{str(request.base_url).rstrip('/')}/chat",
     )
+    # A standby gateway has no channels of its own: say who serves IM rather
+    # than showing every channel as unconfigured.
+    holder = runtime.im_lock_holder()
+    payload["im_served_by_pid"] = holder if holder and holder != os.getpid() else None
+    return payload
 
 
 def _wechat_channel(cm: ChannelManager) -> WeChatChannel:

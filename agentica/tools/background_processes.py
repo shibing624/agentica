@@ -323,3 +323,95 @@ class BackgroundProcessRegistry:
                     pass
             stopped.append(item)
         return stopped
+
+
+# Signals that ask a process to stop (`kill`, `pkill`, Ctrl+C). A command
+# ended by one of these was stopped, it did not fail.
+# SIGKILL is deliberately absent: it is also how the OOM killer ends a job.
+_STOP_SIGNALS = {signal.SIGTERM, signal.SIGINT}
+
+
+def exit_status(returncode: int) -> str:
+    """``finished`` / ``stopped`` / ``failed`` from a Popen return code.
+
+    Popen reports death-by-signal as ``-signum``.
+    """
+    if returncode == 0:
+        return "finished"
+    if returncode < 0 and -returncode in _STOP_SIGNALS:
+        return "stopped"
+    return "failed"
+
+
+def exit_detail(returncode: int) -> str:
+    """``exit 1`` for a normal exit, ``SIGTERM`` for death by signal."""
+    if returncode < 0:
+        try:
+            return signal.Signals(-returncode).name
+        except ValueError:
+            pass
+    return f"exit {returncode}"
+
+
+def background_result_for_agent(event: BackgroundProcessCompleted) -> str:
+    """Render a finished background command as a report for the agent."""
+    status = exit_status(event.returncode)
+    if event.kind == "delegate":
+        return _delegate_result_for_agent(event, status)
+    lines = [
+        f"[Background terminal #{event.num} ({event.id}) {status}: "
+        f"{exit_detail(event.returncode)} after {event.elapsed}]",
+        f"Command: {event.command}",
+        f"Log: {event.log_path}",
+    ]
+    tail = read_log_tail(event.log_path, max_lines=20, max_chars=4000)
+    if tail:
+        lines.extend(["", "Output tail:", tail])
+    lines.extend(
+        [
+            "",
+            "This is an automatic report of a command you started in the background. "
+            "Pick the work back up where that command left off, or report the outcome "
+            "to the user if nothing is left to do.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _delegate_result_for_agent(event: BackgroundProcessCompleted, status: str) -> str:
+    """Render a finished delegated session as a report for the agent that sent it.
+
+    The worker ran with ``--print``, so its stdout is its final answer and not a
+    command log — it gets a much larger slice than a background command's tail,
+    because that answer is the entire deliverable.
+    """
+    answer = read_log_tail(event.log_path, max_lines=120, max_chars=8000)
+    lines = [f'[Delegated task "{event.label}" {status} after {event.elapsed} ({event.id})]']
+    if event.returncode == 0:
+        lines.extend(["", "Its report:", answer or "(the worker produced no output)"])
+        lines.extend(
+            [
+                "",
+                "This is the whole of what that session hands back. Fold it into your "
+                "own work, or report it to the user if nothing is left to do.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"Exit code: {event.returncode}",
+                f"Log: {event.log_path}",
+                "",
+                "Output tail:",
+                answer or "(no output)",
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "The delegated session did not finish its task. Decide whether to do "
+                "the work yourself or tell the user why it failed — do not simply "
+                "delegate the same task again.",
+            ]
+        )
+    return "\n".join(lines)

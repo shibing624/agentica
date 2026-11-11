@@ -164,6 +164,8 @@ async def lifespan(app: FastAPI):
 
     deps.agent_service = agent_svc
 
+    agent_svc.background_report_handler = _background_report_handler(agent_svc)
+
     # Channel manager + message router
     deps.channel_manager = ChannelManager()
     deps.message_router = MessageRouter(default_agent="main")
@@ -196,8 +198,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to enable)")
 
-    # Channels (IM integrations: WeChat / WeCom / Feishu / QQ / ... )
-    await _setup_channels()
+    # Channels (IM integrations: WeChat / WeCom / Feishu / QQ / ... ). One
+    # gateway per data root owns them; a standby takes over when it exits.
+    im_task = None
+    if not await _claim_and_start_im():
+        im_task = asyncio.create_task(_take_over_im_when_free())
 
     deps.card_registry = CardRegistry(secret_provider=auth.get_token)
     deps.im_bot = ImBotController(
@@ -255,12 +260,6 @@ async def lifespan(app: FastAPI):
     if settings.parent_pid:
         parent_task = asyncio.create_task(_exit_with_parent(settings.parent_pid))
 
-    if deps.channel_manager.channels:
-        enabled = ", ".join(c.value for c in deps.channel_manager.channels)
-        logger.info(f"IM channels started — {enabled}")
-    else:
-        logger.info("IM channels — none enabled (configure a channel to enable)")
-
     yield
 
     # Shutdown
@@ -268,6 +267,8 @@ async def lifespan(app: FastAPI):
     runtime.unpublish(os.getpid())
     if parent_task is not None:
         parent_task.cancel()
+    if im_task is not None:
+        im_task.cancel()
     if cron_task is not None:
         cron_task.cancel()
         try:
@@ -520,6 +521,45 @@ app.include_router(ws.router)
 
 
 # ============== Channel setup ==============
+
+IM_TAKEOVER_POLL_S = 5.0
+
+
+def _background_report_handler(agent_svc: AgentService):
+    """Where a finished background command's report runs: the IM chat on its
+    session (the user is on the phone), else a live web run any open page
+    attaches to."""
+
+    async def deliver(session_id: str, owner: str, report: str) -> None:
+        if deps.im_bot is not None and await deps.im_bot.deliver_background_report(owner, session_id, report):
+            return
+        chat.start_background_report_run(agent_svc, session_id, owner, report)
+
+    return deliver
+
+
+async def _claim_and_start_im() -> bool:
+    """Connect IM if this gateway may; see runtime.claim_im_channels."""
+    if not runtime.claim_im_channels():
+        logger.warning(
+            f"IM channels are served by another gateway on this data root "
+            f"(pid {runtime.im_lock_holder()}); this one will take over if it exits"
+        )
+        return False
+    await _setup_channels()
+    if deps.channel_manager.channels:
+        enabled = ", ".join(c.value for c in deps.channel_manager.channels)
+        logger.info(f"IM channels started — {enabled}")
+    return True
+
+
+async def _take_over_im_when_free() -> None:
+    """A standby gateway serves IM once the owner is gone, without a restart."""
+    while not runtime.claim_im_channels():
+        await asyncio.sleep(IM_TAKEOVER_POLL_S)
+    logger.info("IM owner gateway exited; this gateway takes over IM")
+    await _setup_channels()
+
 
 async def _setup_channels() -> None:
     """Instantiate and connect configured channels."""

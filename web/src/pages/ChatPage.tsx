@@ -862,7 +862,8 @@ export function ChatPage() {
                 </div>
                 <button className={"act-btn " + (showStop ? "stop" : "send")}
                         title={showStop ? S.chat.stop : S.chat.send}
-                        disabled={compacting}
+                        // dsh: an empty draft dims the send button; anything to send lights it.
+                        disabled={compacting || (!showStop && !s.inputText.trim() && !s.pendingFiles.length)}
                         onClick={() => showStop ? stopGen() : void submit()}>
                   {showStop ? <IconStop /> : <IconSend />}
                 </button>
