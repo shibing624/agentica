@@ -1,4 +1,5 @@
 import * as api from "./api";
+import { loadCronJobs } from "./data";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
 import {
@@ -200,7 +201,9 @@ export async function syncSessionStatus() {
  */
 export async function syncFromServer(force = false) {
   if (!force && Date.now() - lastCatalogLoadAt < FOCUS_SYNC_COOLDOWN_MS) return;
-  await loadSessions();
+  // A scheduled run starting or finishing moves the pulse too; its job's
+  // "running" and next-run time come with the catalog.
+  await Promise.all([loadSessions(), loadCronJobs()]);
   const id = getState().curSess;
   const sess = id ? getState().sessions[id] : null;
   if (!id || !sess || sessionIsLive(id)) return;

@@ -27,10 +27,12 @@ except ImportError:
 from agentica.cron.jobs import (
     CRON_DIR,
     CronJob,
+    compute_next_run_at_ms,
     get_due_jobs,
     mark_job_run,
     now_ms,
     pause_job,
+    update_job,
 )
 from agentica.cron.types import CronRunOutput, RunStatus
 from agentica.run.context import RunSource
@@ -38,6 +40,16 @@ from agentica.run.context import RunSource
 logger = logging.getLogger(__name__)
 
 LOCK_FILE = CRON_DIR / ".tick.lock"
+
+# Jobs with a run in flight in this process. A run lands in a conversation,
+# and a second run of the same job (a tick while "run now" is going, or a
+# slow run outliving the next tick) would race the first for that turn.
+_running_jobs: set[str] = set()
+
+
+def is_job_running(job_id: str) -> bool:
+    """True while a run of this job is in flight in this process."""
+    return job_id in _running_jobs
 
 
 # ============== Agent Runner Protocol ==============
@@ -73,19 +85,20 @@ def run_usage(response: Any) -> dict[str, Any] | None:
     }
 
 
-def scheduled_job_guidance(job_id: str) -> str:
-    """What a job's agent is told about itself.
+def scheduled_turn_text(job_id: str, name: str, prompt: str) -> str:
+    """The message a scheduled run delivers into its conversation.
 
-    Its prompt was written before the job had an id, so "pause yourself when
-    done" needs the id from here.
+    The first line names the job, which is how a transcript (and the model)
+    tells the turn from something the user typed. The job's prompt was written
+    before it had an id, so "pause yourself when stuck" needs the id from here.
     """
     return (
-        f"# Scheduled job\n\nYou are running unattended as scheduled job `{job_id}`; nobody is "
-        "here to answer or approve. If the task cannot go on without a person (a needed "
-        "permission is denied, a credential or path is missing, the work is outside what "
-        f"the prompt covers), call `cronjob(action='pause', job_id='{job_id}', reason=<one "
-        "line>)` and stop: the user is shown the reason, and the job does not fire again "
-        "until they resume it."
+        f"[Scheduled task \u201c{name}\u201d ({job_id})]\n{prompt}\n\n"
+        "This message was sent by a scheduled task, not typed by the user; nobody may be watching "
+        "to answer or approve. If the task cannot go on without a person (a needed permission is "
+        "denied, a credential or path is missing, the work is outside what it covers), call "
+        f"`cronjob(action='pause', job_id='{job_id}', reason=<one line>)` and stop: the user is "
+        "shown the reason, and the task does not fire again until they resume it."
     )
 
 
@@ -185,16 +198,70 @@ async def tick(
         lock.release()
 
 
+def claim_due_jobs(current_ms: int | None = None) -> list[CronJob]:
+    """Take the due jobs for a host that runs each one as its own task.
+
+    ``tick`` runs due jobs one after another while holding the tick lock. A
+    host that delivers runs into conversations cannot: a run waits for its
+    conversation to be idle, and one busy conversation would hold back every
+    other job. So the claim is made under the lock instead: each due job's
+    next run is moved past now before the lock is released, which is what
+    stops another process's tick from taking the same occurrence. The run's
+    own ``mark_job_run`` sets the real next run when it ends.
+    """
+    lock = _FileLock(LOCK_FILE)
+    if not lock.acquire():
+        return []
+    try:
+        current = current_ms or now_ms()
+        claimed = []
+        for job in get_due_jobs(current):
+            if job.id in _running_jobs:
+                continue
+            update_job(job.id, {"next_run_at_ms": compute_next_run_at_ms(job.schedule, current, current) or 0})
+            claimed.append(job)
+        return claimed
+    finally:
+        lock.release()
+
+
 async def execute_job(
     job: CronJob,
     agent_runner: AgentRunner | None,
     verbose: bool,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Execute a single cron job.
 
     Public: the gateway (a separate distribution) and the CLI both run jobs
     through this, so it is part of the cross-package API.
+
+    A job already running in this process is skipped (status ``"busy"``),
+    without a run record: nothing ran.
+
+    ``session_id`` names the conversation this run is delivered into; by
+    default the job's own (``CronJob.delivery_session_id``), and "" lets the
+    runner start one. A host that must tell the caller where the run will
+    land before it starts picks the id itself and passes it here.
     """
+    if job.id in _running_jobs:
+        return {"job_id": job.id, "status": "busy", "error": "A run of this job is already in progress"}
+    _running_jobs.add(job.id)
+    try:
+        return await _execute_job_once(
+            job, agent_runner, verbose,
+            job.delivery_session_id() if session_id is None else session_id,
+        )
+    finally:
+        _running_jobs.discard(job.id)
+
+
+async def _execute_job_once(
+    job: CronJob,
+    agent_runner: AgentRunner | None,
+    verbose: bool,
+    session_id: str,
+) -> dict[str, Any]:
     logger.info(f"Executing job {job.id}: {job.name}")
     started_at_ms = now_ms()
     attempt = job.retry_count + 1
@@ -240,14 +307,19 @@ async def execute_job(
             "permission_mode": job.permission_mode,
             "work_dir": job.work_dir,
             "run_source": RunSource.cron.value,
+            "job_name": job.name,
+            "message": scheduled_turn_text(job.id, job.name, job.prompt),
+            "target": job.target,
+            # The conversation to deliver into; "" means start a new one.
+            "session_id": session_id,
         }
-        run_coro = agent_runner.run(prompt=job.prompt, context=context)
+        run_coro = agent_runner.run(prompt=context["message"], context=context)
         if job.timeout_seconds > 0:
             output = await asyncio.wait_for(run_coro, timeout=job.timeout_seconds)
         else:
             output = await run_coro
         if isinstance(output, CronRunOutput):
-            result_text, usage = output.content, output.usage
+            result_text, usage, session_id = output.content, output.usage, output.session_id or session_id
         else:
             result_text, usage = output, None
         mark_job_run(
@@ -258,13 +330,14 @@ async def execute_job(
             ended_at_ms=now_ms(),
             attempt=attempt,
             usage=usage,
+            session_id=session_id,
         )
 
         if verbose:
             preview = result_text[:100] + "..." if len(result_text) > 100 else result_text
             print(f"  OK: {preview}")
 
-        return {"job_id": job.id, "status": "ok", "result": result_text, "usage": usage}
+        return {"job_id": job.id, "status": "ok", "result": result_text, "usage": usage, "session_id": session_id}
 
     except asyncio.TimeoutError:
         ended_at_ms = now_ms()

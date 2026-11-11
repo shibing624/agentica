@@ -294,6 +294,21 @@ test("an automated row is a notice, not the user's query", () => {
   assert.match(msgs[2].content, /^\[Background terminal #4/);
 });
 
+test("a scheduled run keeps the automation that sent it", () => {
+  const msgs = eventsToChatMsgs([
+    {
+      type: "user", automated: true, cron_job: { id: "j1", name: "Daily digest" },
+      content: "[Scheduled task “Daily digest” (j1)]\nsummarize", timestamp: "2026-11-06T01:00:00.000Z",
+    },
+    { type: "assistant", content: "here it is", timestamp: "2026-11-06T01:00:05.000Z" },
+    { type: "user", automated: true, content: "[Background terminal #1]", timestamp: "2026-11-06T01:10:00.000Z" },
+  ]);
+  assert.deepEqual(msgs[0].cronJob, { id: "j1", name: "Daily digest" });
+  assert.equal(msgs[0].automated, true);
+  // Other automated turns stay plain notices.
+  assert.equal(msgs[2].cronJob, undefined);
+});
+
 test("prepending turn-aligned pages matches hydrating the full transcript at once", () => {
   const olderPage = [
     { type: "user", content: "q1", uuid: "u1" },

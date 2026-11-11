@@ -150,15 +150,52 @@ export const deleteUserApi = (userId: string) =>
 export const setPasswordApi = (password: string, old_password?: string) =>
   postJson("/api/auth/password", old_password ? { password, old_password } : { password });
 
-export const fetchCronJobs = () => request("/api/scheduler/jobs");
-export const createCronJobApi = (body: unknown) => postJson("/api/scheduler/jobs", body);
-export const updateCronJobApi = (id: string, body: unknown) => putJson(`/api/scheduler/jobs/${id}`, body);
+/** One scheduled job as the gateway reports it (routes/scheduler.py::_job_payload). */
+export type ScheduleSpec =
+  | { kind: "cron"; expression: string; timezone: string }
+  | { kind: "every"; seconds: number }
+  | { kind: "at"; at_ms: number };
+export type AutomationTarget = "session" | "new_once" | "new";
+export type Automation = {
+  id: string; name: string; prompt: string;
+  schedule: string; schedule_expr: string; schedule_spec: ScheduleSpec | { kind: "unknown" }; timezone: string;
+  status: "active" | "paused" | "completed" | "failed"; enabled: boolean;
+  next_run_at_ms: number; last_run_at_ms: number; last_status: string | null; run_count: number;
+  timeout_seconds: number; max_retries: number;
+  permission_mode: string; work_dir: string | null; paused_reason: string;
+  target: AutomationTarget; session_id: string; running: boolean; created_at_ms: number;
+};
+export type AutomationRun = {
+  job_id: string; status: string; started_at_ms: number; ended_at_ms: number;
+  duration_ms: number; result_preview: string | null; result_full: string; error: string | null;
+  session_id: string; usage: Record<string, number> | null;
+};
+/** What "run now" answers: queued (with the conversation it lands in) or busy. */
+export type AutomationRunStart = { status: string; session_id?: string; error?: string };
+export type AutomationWrite = {
+  name?: string; prompt?: string; schedule?: string; timezone?: string;
+  target?: AutomationTarget; session_id?: string; work_dir?: string;
+  timeout_seconds?: number; max_retries?: number;
+};
+
+export const fetchCronJobs = () => request<{ jobs: Automation[]; total: number }>("/api/scheduler/jobs");
+export const fetchSchedulerStatus = () => request<{ enabled: boolean; interval_s: number }>("/api/scheduler/status");
+export const createCronJobApi = (body: AutomationWrite & { validate_run?: boolean }) =>
+  postJson<{ success: boolean; job?: Automation; validation_run?: AutomationRunStart; detail?: string }>(
+    "/api/scheduler/jobs", body);
+export const updateCronJobApi = (id: string, body: AutomationWrite) =>
+  putJson<{ success: boolean; job?: Automation; error?: string; detail?: string }>(`/api/scheduler/jobs/${id}`, body);
 export const deleteCronJobApi = (id: string) => request(`/api/scheduler/jobs/${id}`, { method: "DELETE" });
-export const pauseCronJobApi = (id: string) => request(`/api/scheduler/jobs/${id}/pause`, { method: "POST" });
-export const resumeCronJobApi = (id: string) => request(`/api/scheduler/jobs/${id}/resume`, { method: "POST" });
-export const triggerCronJobApi = (id: string) => request(`/api/scheduler/jobs/${id}/trigger`, { method: "POST" });
-export const fetchCronRuns = (id: string) => request(`/api/scheduler/jobs/${id}/runs`);
-export const polishPromptApi = (draft: string) => postJson("/api/scheduler/polish_prompt", { draft });
+export const pauseCronJobApi = (id: string) => request<{ job: Automation }>(`/api/scheduler/jobs/${id}/pause`, { method: "POST" });
+export const resumeCronJobApi = (id: string) => request<{ job: Automation }>(`/api/scheduler/jobs/${id}/resume`, { method: "POST" });
+export const triggerCronJobApi = (id: string) =>
+  request<{ success: boolean; run: AutomationRunStart; job: Automation; detail?: string }>(`/api/scheduler/jobs/${id}/trigger`, { method: "POST" });
+export const fetchCronRuns = (id: string, limit = 50) =>
+  request<{ runs: AutomationRun[]; total: number }>(`/api/scheduler/jobs/${id}/runs?limit=${limit}`);
+export const setSchedulerEnabledApi = (enabled: boolean) =>
+  putJson<{ enabled: boolean; interval_s: number }>("/api/scheduler/status", { enabled });
+export const clearEndedCronJobsApi = () => postJson<{ deleted: number }>("/api/scheduler/jobs/clear_completed", {});
+export const polishPromptApi = (draft: string) => postJson<{ prompt: string; detail?: string }>("/api/scheduler/polish_prompt", { draft });
 export const fetchTools = () => request("/api/tools");
 export const fetchMcpServers = () => request("/api/mcp/servers");
 export const createMcpServerApi = (body: unknown) => postJson("/api/mcp/servers", body);
@@ -270,7 +307,10 @@ export function runEvents(runId: string, after = 0, signal?: AbortSignal) {
 }
 
 export const fetchActiveRun = (sessionId: string) =>
-  request<{ run: { run_id: string; session_id: string; status: string; kind: string; seq: number; user_message?: string } | null }>(
+  request<{ run: {
+    run_id: string; session_id: string; status: string; kind: string; seq: number; user_message?: string;
+    cron_job?: { id: string; name: string }; automated_message?: string;
+  } | null }>(
     `/api/chat/runs/active?session_id=${encodeURIComponent(sessionId)}`,
   );
 

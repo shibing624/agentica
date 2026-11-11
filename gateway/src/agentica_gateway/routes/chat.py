@@ -348,7 +348,38 @@ def start_background_report_run(svc: AgentService, session_id: str, owner: str, 
     )
 
 
-def _chat_turn(svc: AgentService, session_id: str, account: str, message: str, media, automated: bool = False):
+async def run_scheduled_turn(
+    svc: AgentService, session_id: str, owner: str, prompt: str, input_meta: dict,
+):
+    """Deliver a scheduled job's prompt into a conversation and wait for the answer.
+
+    Same live run as a typed message, so a page that has the conversation open
+    streams it and the sidebar shows it running; logged as automated, with the
+    job named on the turn (``input_meta``). Waits for the conversation to be
+    idle first: a scheduled run is a turn of its own, never a steer into what
+    the user is doing. Returns the run's ``ChatResult``.
+    """
+    while live_turn.active(session_id, owner) is not None or svc.is_session_active(session_id, owner):
+        await asyncio.sleep(1.0)
+    _touch_session_log(svc, session_id, owner)
+    box: dict = {}
+    turn = _spawn_live(
+        session_id,
+        _chat_turn(svc, session_id, owner, prompt, None, automated=True, input_meta=input_meta, result_box=box),
+        owner=owner, kind="chat",
+    )
+    turn.cron_job = input_meta.get("cron_job")
+    turn.automated_message = prompt
+    await turn.task
+    if "result" not in box:
+        raise RuntimeError(f"Scheduled run {turn.status}")
+    return box["result"]
+
+
+def _chat_turn(
+    svc: AgentService, session_id: str, account: str, message: str, media,
+    automated: bool = False, input_meta: Optional[dict] = None, result_box: Optional[dict] = None,
+):
     async def run_chat_turn(turn: live_turn.LiveTurn):
         on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
         t0 = time.time()
@@ -363,7 +394,10 @@ def _chat_turn(svc: AgentService, session_id: str, account: str, message: str, m
             on_thinking=on_thinking,
             media=media,
             automated=automated,
+            input_meta=input_meta,
         )
+        if result_box is not None:
+            result_box["result"] = result
         elapsed = round(time.time() - t0, 2)
 
         raw_metrics = result.metrics or {}

@@ -10,7 +10,7 @@ import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../li
 import { CollapsibleUserText, FeedbackDialog, SkillTurn } from "../components/MessageExtras";
 import { TurnUsagePanel } from "../components/TurnUsagePanel";
 import { TodoDock } from "../components/TaskCard";
-import { AutomatedNotice } from "../components/AutomatedNotice";
+import { AutomatedNotice, ScheduledRunCard } from "../components/AutomatedNotice";
 import { dockTodos } from "../lib/workActivity";
 import { leadingSkillToken, parseSkillTurn } from "../lib/skillInvocation";
 import { getStrings, useStrings } from "../i18n";
@@ -21,7 +21,7 @@ import {
 import { primeSettings } from "../panels/SettingsModal";
 import { applyPendingModel, loadSessionModel, pickSessionModel } from "../sessionModel";
 import { createSession, forkAt, hydrateSession, loadOlderMessages, markSessionRead, pushPendingName, rateMessage, renameSession, sessionHydrating, syncSessionRoundStats } from "../sessions";
-import { loadPlugins } from "../data";
+import { loadCronJobs, loadPlugins } from "../data";
 import {
   Logo, IconPlus, IconClose, IconChat, IconBook, IconAsk, IconAuto, IconSidebarRight,
   IconAllowAll, IconSend, IconStop, IconCopy, IconArrowDown, IconPencil,
@@ -43,6 +43,7 @@ import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { applyChatSearchHighlights } from "../lib/sessionRows";
 import { BackgroundJobs } from "../components/BackgroundJobs";
+import { SessionAutomations } from "../components/SessionAutomations";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import type { FileEdits } from "../lib/fileDiff";
@@ -473,6 +474,7 @@ export function ChatPage() {
               </div>
             </div>
             <div className="tb-r">
+              {s.curSess && cur && cur.msgs.length > 0 && <SessionAutomations sessionId={s.curSess} />}
               {s.curSess && <BackgroundJobs key={s.curSess} sessionId={s.curSess} streaming={streaming} />}
               {/* dsh: the way in only shows while the panel is closed; the open
                   panel carries its own collapse button in its head. */}
@@ -1107,7 +1109,9 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
   if (m.role === "user" && m.automated) {
     return (
       <div id={"msg-" + idx} className="m m-a m-auto">
-        <AutomatedNotice text={m.content} ts={m.ts} />
+        {m.cronJob
+          ? <ScheduledRunCard job={m.cronJob} text={m.content} ts={m.ts} />
+          : <AutomatedNotice text={m.content} ts={m.ts} />}
       </div>
     );
   }
@@ -1823,6 +1827,8 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     return true;
   }
   if (evt.event === "tool_result") {
+    // The agent changed the user's automations: the header chip and sidebar follow.
+    if (evt.data?.name === "cronjob") void loadCronJobs();
     const callId = unfinishedToolCallId(aiMsg, evt.data.tool_call_id);
     // `task`: keep the subagent's JSON payload (the card reads it, as it
     // does from the session log after a refresh) rather than the text recap.
@@ -2076,7 +2082,16 @@ async function attachLiveStream(sessId: string) {
     bump();
     return;
   }
-  if (run.user_message) {
+  if (run.cron_job && run.automated_message) {
+    // A scheduled run streaming in: show its card, once, above the reply.
+    const last = [...sess.msgs].reverse().find((m) => m.role === "user");
+    if (!last?.cronJob || last.content !== run.automated_message) {
+      sess.msgs.push({
+        role: "user", automated: true, content: run.automated_message, ts: Date.now(),
+        cronJob: run.cron_job,
+      });
+    }
+  } else if (run.user_message) {
     let lastUser: ChatMsg | undefined;
     for (let i = sess.msgs.length - 1; i >= 0; i--) {
       if (sess.msgs[i].role === "user" && !sess.msgs[i].automated) {

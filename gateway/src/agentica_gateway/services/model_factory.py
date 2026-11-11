@@ -165,34 +165,30 @@ def create_model(
 
 
 def _gateway_cron_job_runner(job: Any) -> dict:
-    """Execute a cron job immediately and return its ``execute_job`` result.
+    """Start one run of a cron job now; return where it will land.
 
-    Called from ``CronTool``'s sync tool entrypoint, which itself runs in a
-    worker thread (see ``Tool.execute``). Bridges back to the gateway's own
-    asyncio event loop with ``run_coroutine_threadsafe`` instead of spinning
-    up a second loop (``asyncio.run``), so the run shares the same
-    AgentService session locks/state as every other request — no cross-loop
-    hazard.
+    Called from ``CronTool``'s sync tool entrypoint, in a worker thread. The
+    run is handed to the gateway's scheduler on its own loop and not waited
+    for: it is a turn of the job's conversation, which may be the very
+    conversation making this call — waiting would deadlock on it.
     """
     from .. import deps
-    from agentica.cron.scheduler import execute_job
 
-    if deps.cron_runner is None or deps.main_loop is None:
-        return {"job_id": job.id, "status": "failed", "error": "Cron runner not ready"}
-    future = asyncio.run_coroutine_threadsafe(
-        execute_job(job, agent_runner=deps.cron_runner, verbose=False),
-        deps.main_loop,
-    )
-    return future.result()
+    if deps.scheduler is None or deps.main_loop is None:
+        return {"job_id": job.id, "status": "failed", "error": "Scheduler not ready"}
+
+    async def _start() -> dict:
+        return deps.scheduler.run_now(job)
+
+    return asyncio.run_coroutine_threadsafe(_start(), deps.main_loop).result(timeout=10)
 
 
 def get_cron_tools(owner: Optional[str] = None) -> List[Any]:
-    """Load the cron tool, wired for real immediate execution.
+    """Load the cron tool, wired for real immediate runs.
 
     Returns a ``CronTool`` (not the bare ``cronjob`` function) with a
-    ``job_runner`` so ``cronjob(action="run", ...)`` actually executes the
-    job now and returns its result — same as the CLI — instead of just
-    marking it due for the next scheduler tick.
+    ``job_runner`` so ``cronjob(action="run", ...)`` starts the job now in
+    its conversation, instead of just marking it due for the next tick.
 
     ``owner`` is the signed-in account: create/list/edit stay inside that
     account's jobs. The CLI omits it (one user on the machine).
@@ -209,18 +205,17 @@ def get_cron_tools(owner: Optional[str] = None) -> List[Any]:
 def get_cron_instructions() -> str:
     """Return the system prompt instructions for cron job management."""
     return """
-# Cron Job Management
+# Scheduled tasks
 
-You can help users create and manage scheduled tasks. Use the `cronjob` tool:
-
-- `cronjob(action="create", prompt="...", schedule="30 7 * * *")` — Create a cron job
-- `cronjob(action="list")` — List all cron jobs
-- `cronjob(action="pause", job_id="...")` — Pause a job
-- `cronjob(action="resume", job_id="...")` — Resume a paused job
-- `cronjob(action="remove", job_id="...")` — Delete a job
-- `cronjob(action="run", job_id="...")` — Trigger a job immediately
+You can create and manage the user's scheduled tasks with the `cronjob` tool
+(create / list / runs / update / pause / resume / remove / run). Each run is
+delivered as an automatic message into a conversation and answered there,
+where the user can read and follow up. When the user wants the result here,
+use target='session'; for an independent recurring job, the default
+target='new_once' keeps every run in one dedicated conversation.
 
 Schedule formats: cron expression ("30 7 * * *"), interval ("30m", "every 2h"), or ISO datetime.
+The user also manages these on the Automations page (left sidebar).
 """
 
 

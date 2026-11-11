@@ -30,6 +30,7 @@ from agentica.cron.types import (
     TaskRun,
     schedule_from_dict,
     validate_deliver,
+    validate_target,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,10 @@ class CronJob:
     ``paused_reason`` says why the job stopped without a person pausing it:
     the scheduler found its mandate unusable (work_dir gone), or the job
     paused itself because it could not proceed unattended. Resuming clears it.
+
+    ``target`` / ``session_id`` say which conversation a run lands in (see
+    ``JOB_TARGETS``). For ``new_once`` the session id is filled in by the
+    first run; for ``new`` it is the latest run's conversation.
     """
     id: str
     name: str
@@ -87,6 +92,8 @@ class CronJob:
     max_retries: int = 0
     retry_count: int = 0
     retry_delay_ms: int = 60000
+    target: str = "new_once"
+    session_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +119,8 @@ class CronJob:
             "max_retries": self.max_retries,
             "retry_count": self.retry_count,
             "retry_delay_ms": self.retry_delay_ms,
+            "target": self.target,
+            "session_id": self.session_id,
         }
 
     @classmethod
@@ -141,7 +150,13 @@ class CronJob:
             max_retries=data.get("max_retries", 0),
             retry_count=data.get("retry_count", 0),
             retry_delay_ms=data.get("retry_delay_ms", 60000),
+            target=data.get("target", "new_once"),
+            session_id=data.get("session_id", ""),
         )
+
+    def delivery_session_id(self) -> str:
+        """The conversation the next run reuses, or "" for a fresh one."""
+        return "" if self.target == "new" else self.session_id
 
 
 # ============== Schedule Calculation ==============
@@ -477,6 +492,8 @@ def create_job(
     timeout_seconds: float = 0.0,
     max_retries: int = 0,
     retry_delay_ms: int = 60000,
+    target: str = "new_once",
+    session_id: str | None = None,
 ) -> CronJob:
     """Create a new cron job and persist it.
 
@@ -497,11 +514,15 @@ def create_job(
         timeout_seconds: Per-run timeout. 0 disables timeout.
         max_retries: Number of immediate retries before waiting for the next schedule.
         retry_delay_ms: Delay before a retry run.
+        target: Which conversation each run lands in ("session" / "new_once" /
+            "new", see ``JOB_TARGETS``).
+        session_id: The conversation for ``target='session'``.
 
     Returns:
         The created CronJob.
     """
     validate_deliver(deliver)
+    validate_target(target, session_id)
     if permission_mode:
         validate_permission_mode(permission_mode)
     parsed = parse_schedule(schedule)
@@ -533,6 +554,8 @@ def create_job(
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
         retry_delay_ms=retry_delay_ms,
+        target=target,
+        session_id=(session_id or "") if target == "session" else "",
     )
 
     jobs = _load_jobs()
@@ -686,10 +709,13 @@ def mark_job_run(
     ended_at_ms: int | None = None,
     attempt: int | None = None,
     usage: dict[str, Any] | None = None,
+    session_id: str = "",
 ) -> CronJob | None:
     """Mark a job as having been run, update next_run_at.
 
     ``usage`` is the run's token usage (``TaskRun.usage`` keys), when known.
+    ``session_id`` is the conversation the run was delivered to; a
+    ``new_once`` job keeps it for every later run.
     """
     current = ended_at_ms or now_ms()
     job = get_job(job_id)
@@ -716,6 +742,8 @@ def mark_job_run(
         "next_run_at_ms": next_run or 0,
         "retry_count": retry_count,
     }
+    if session_id and job.target != "session":
+        updates["session_id"] = session_id
 
     # One-shot jobs: mark completed — unless the run paused its own job, which
     # must stay paused (with its reason) rather than look finished.
@@ -741,6 +769,7 @@ def mark_job_run(
             error=error,
             error_type=error_type,
             usage=usage,
+            session_id=session_id,
         )
     )
 

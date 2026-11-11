@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import * as api from "./api";
+import type { Automation } from "./api";
 import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
 import { createViewStore } from "./lib/sessionView";
 
@@ -55,6 +56,8 @@ export type ChatMsg = {
    *  report, another session's message. The log marks the row `automated`;
    *  it renders as a notice, not as the user's query. */
   automated?: boolean;
+  /** The automation that delivered this automated turn (log `cron_job`). */
+  cronJob?: { id: string; name: string };
   /** SessionLog row this message ends at (assistant: its last row). Set when
    *  the message comes from the server log; fork and feedback address it. */
   uuid?: string;
@@ -132,16 +135,6 @@ export type ProfileForm = {
   aux_base_url: string;
   aux_api_key: string;
   envRows: { key: string; value: string }[];
-};
-
-export type CronForm = {
-  id: string | null;
-  name: string;
-  prompt: string;
-  schedule: string;
-  timeout_seconds: string;
-  max_retries: string;
-  validate_run: boolean;
 };
 
 export type SkillForm = {
@@ -247,11 +240,8 @@ export type AppState = {
   settingsTab: string;
   settingsModal: { open: boolean };
   profileForm: ProfileForm | null;
-  cronJobs: any[];
-  cronForm: CronForm | null;
-  cronRuns: Record<string, any[]>;
-  cronRunsOpen: string[];
-  cronBusy: string;
+  /** This account's automations, for the sidebar badge and the chat links. */
+  cronJobs: Automation[];
   sidebarSearch: string;
   /** Jump target inside the open chat when the user clicks a search match or steps prev/next. */
   chatSearchTarget: { sessionId: string; query: string; turn: number; role?: "user" | "assistant"; seq: number } | null;
@@ -292,13 +282,6 @@ export function emptyProfileForm(): ProfileForm {
     enable_cache_control: false, cache_control_session_header: "",
     aux_provider: "", aux_model: "", aux_base_url: "", aux_api_key: "",
     envRows: [],
-  };
-}
-
-export function emptyCronForm(): CronForm {
-  return {
-    id: null, name: "", prompt: "", schedule: "",
-    timeout_seconds: "", max_retries: "0", validate_run: true,
   };
 }
 
@@ -384,10 +367,6 @@ const state: AppState = {
   settingsModal: { open: false },
   profileForm: null,
   cronJobs: [],
-  cronForm: null,
-  cronRuns: {},
-  cronRunsOpen: [],
-  cronBusy: "",
   sidebarSearch: "",
   chatSearchTarget: null,
   sessionScope: "recent",

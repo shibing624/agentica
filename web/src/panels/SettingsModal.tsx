@@ -2,23 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as api from "../api";
 import {
-  loadAuthStatus, loadCronJobs, loadDirHistory, loadPlugins, loadProfiles,
+  loadAuthStatus, loadDirHistory, loadPlugins, loadProfiles,
   loadProviders, loadStatus, loadUsers,
 } from "../data";
 import { openPasswordDialog } from "../components/ChangePasswordDialog";
 import { DirPicker } from "../components/DirPicker";
 import { getStrings, LANGS, setLang, useStrings, type Strings } from "../i18n";
 import {
-  IconArchive, IconChat, IconChevronRight, IconClock, IconClose, IconCopy, IconDatabase,
+  IconArchive, IconChat, IconChevronRight, IconClose, IconCopy, IconDatabase,
   IconExpand, IconGear, IconPlug, IconProfiles, IconUser, DefaultAvatar,
 } from "../icons";
 import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession, loadSessions } from "../sessions";
 import {
-  askConfirm, emptyCronForm, emptyMcpForm, emptyProfileForm, emptySkillForm,
+  askConfirm, emptyMcpForm, emptyProfileForm, emptySkillForm,
   getState, saveSessions, setState, setTheme, showToast, useAppState, type ProfileForm,
 } from "../store";
-import { CronPanel } from "./CronPanel";
 import { PluginsPanel } from "./PluginsPanel";
 import { AssistantPanel } from "../pages/AssistantPage";
 import { UsersPanel } from "../pages/UsersPage";
@@ -32,7 +31,6 @@ const TABS: SettingsTabRow[] = [
   ["memory", (S) => S.nav.memory, () => <IconDatabase />],
   ["plugins", (S) => S.nav.plugins, () => <IconPlug />],
   ["assistant", (S) => S.nav.assistant, () => <IconChat />],
-  ["cron", (S) => S.settings.tabCron, () => <IconClock />],
   ["users", (S) => S.nav.users, () => <IconUser />, true],
   ["archived", (S) => S.settings.tabArchived, () => <IconArchive />],
 ];
@@ -225,7 +223,6 @@ export function SettingsModal() {
   const close = () => setState({
     settingsModal: { open: false },
     profileForm: null,
-    cronForm: null,
     skillForm: null,
     mcpForm: null,
   });
@@ -236,7 +233,7 @@ export function SettingsModal() {
       // An open editor (skill, MCP, cron, profile) would be thrown away with
       // no way back; Escape from inside it does not close the whole modal.
       const st = getState();
-      const editing = st.skillForm || st.mcpForm || st.cronForm || st.profileForm;
+      const editing = st.skillForm || st.mcpForm || st.profileForm;
       const t = e.target as HTMLElement | null;
       if (editing && t?.closest?.("input, textarea, select")) return;
       close();
@@ -283,13 +280,6 @@ export function SettingsModal() {
                 )}
               </>
             )}
-            {activeTab === "cron" && (
-              <>
-                <span className="panel-count">{S.cron.jobCount(s.cronJobs.length)}</span>
-                <button className="dp-btn" onClick={() => void loadCronJobs()}>{S.common.refresh}</button>
-                <button className="settings-new-btn" onClick={() => setState({ cronForm: emptyCronForm() })}>{S.cron.newJob}</button>
-              </>
-            )}
             {activeTab === "users" && s.accountRole === "admin" && (
               <button className="settings-new-btn" onClick={() => setCreateUserOpen(true)}>{S.users.add}</button>
             )}
@@ -302,7 +292,6 @@ export function SettingsModal() {
           {activeTab === "memory" && <MemoryTab />}
           {activeTab === "profiles" && <ProfilesTab />}
           {activeTab === "plugins" && <PluginsPanel />}
-          {activeTab === "cron" && <CronPanel />}
           {activeTab === "users" && (
             <UsersPanel createOpen={createUserOpen} onCloseCreate={() => setCreateUserOpen(false)} />
           )}
@@ -755,9 +744,9 @@ function ProfileForm() {
 /** Loaded lazily so the settings modal always opens with current server state
  *  rather than whatever the chat page fetched at boot. */
 export async function primeSettings(tab: string) {
-  setState({ settingsModal: { open: true }, settingsTab: tab, cronBusy: "" });
+  setState({ settingsModal: { open: true }, settingsTab: tab });
   await Promise.all([
-    loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadCronJobs(), loadPlugins(),
+    loadStatus(), loadProfiles(), loadProviders(), loadDirHistory(), loadPlugins(),
     loadAuthStatus(),
   ]);
   if (getState().accountRole === "admin") {

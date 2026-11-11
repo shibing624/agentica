@@ -731,8 +731,10 @@ class TestImBotControllerFlows:
             include_usage=True,
             channel=None,
             automated=False,
+            input_meta=None,
         ):
             assert include_usage is False
+            assert input_meta is None
             assert channel == "wechat"
             assert automated is False
             svc.chat_calls.append((session_id, svc.get_session_work_dir(session_id, owner), message))

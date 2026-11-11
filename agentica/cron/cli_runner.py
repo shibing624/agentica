@@ -5,9 +5,9 @@
 
 Provides:
 - ``CliAgentRunner``: adapts the CLI's agent configuration to the cron
-  ``AgentRunner`` protocol. Each cron job runs on a FRESH agent instance built
-  from the same config, so a scheduled task never pollutes (or is polluted by)
-  the interactive session's conversation state.
+  ``AgentRunner`` protocol. Each run builds a FRESH agent from the same config
+  and delivers the prompt as an automated turn of the job's own conversation
+  (``CronJob.target``), never the interactive session's in-memory agent.
 - ``run_scheduler_loop``: a blocking loop that periodically calls
   ``cron.scheduler.tick``. Designed to run inside a daemon thread (the CLI is
   thread-based, not asyncio-based), where it spins its own event loop. Also
@@ -21,8 +21,33 @@ from typing import Any, Callable, Dict, Optional
 
 from agentica.utils.log import logger
 
-from agentica.cron.scheduler import run_usage, scheduled_job_guidance, tick
+from agentica.cron.scheduler import run_usage, tick
 from agentica.cron.types import CronRunOutput
+from agentica.run.config import RunConfig
+from agentica.run.context import RunSource
+
+
+def job_turn_meta(context: Dict[str, Any]) -> Dict[str, Any]:
+    """What a run records on its ``user`` log entry: which job delivered it.
+
+    Lets a transcript show the turn as the job's, with a link back to it,
+    instead of as something the user typed.
+    """
+    return {"cron_job": {"id": context.get("job_id") or "", "name": context.get("job_name") or ""}}
+
+
+def live_cli_peer(session_id: str):
+    """The live terminal serving ``session_id``, or None.
+
+    A run must not write a conversation's log while a terminal has it open:
+    two writers interleave one JSONL. The terminal gets the prompt instead.
+    """
+    from agentica.peers import list_live_peers
+
+    for peer in list_live_peers():
+        if peer.session_id == session_id:
+            return peer
+    return None
 
 # Keys in a CLI agent_config that name the interactive session's transcript.
 # A cron job built from that config must not inherit them.
@@ -45,6 +70,16 @@ class CliAgentRunner:
 
     async def run(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> CronRunOutput:
         context = context or {}
+        session_id = context.get("session_id") or _new_session_id()
+        peer = live_cli_peer(session_id)
+        if peer is not None:
+            from agentica.peers import send_message
+
+            send_message(peer, text=prompt, from_name="cron", from_peer_id="cron", from_kind="agent")
+            return CronRunOutput(
+                content=f"Handed to the open terminal [{peer.name}] serving this conversation.",
+                session_id=session_id,
+            )
         # Honor a per-job workspace from the cron run context instead of
         # silently dropping it. The scheduler passes a path string (or None);
         # wrap it in a Workspace. None -> the CLI's own default workspace.
@@ -56,13 +91,21 @@ class CliAgentRunner:
             workspace=ws,
             permission_mode=context.get("permission_mode") or None,
             work_dir=context.get("work_dir") or None,
+            session_id=session_id,
         )
-        job_id = context.get("job_id")
-        if job_id:
-            agent.add_session_guidance(scheduled_job_guidance(job_id))
-        response = await agent.run(message=prompt)
+        response = await agent.run(message=prompt, config=RunConfig(
+            source=RunSource.cron, automated_input=True, input_meta=job_turn_meta(context),
+        ))
         # RunResponse.content is the final text; fall back to "" for safety.
-        return CronRunOutput(content=getattr(response, "content", None) or "", usage=run_usage(response))
+        return CronRunOutput(
+            content=getattr(response, "content", None) or "", usage=run_usage(response), session_id=session_id,
+        )
+
+
+def _new_session_id() -> str:
+    from uuid import uuid4
+
+    return str(uuid4())
 
 
 def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
@@ -78,16 +121,18 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
     (cli.config imports tools which may import cron).
 
     The job gets the interactive session's model and tools, not its session.
-    Inheriting ``session_id`` made every tick replay the host's transcript as
-    its own history and append its turns to the host's JSONL: production saw
-    419 monitor turns interleaved into a 9-day session, its search_session
-    drowned in them, and each tick's startup ``seal_incomplete_turn`` stamping
-    "[Session ended before the assistant replied]" over the host's live turn.
-    No session log at all, because a job's history is the cron run log.
+    Inheriting the host's ``session_id`` made every tick replay the host's
+    transcript as its own history and append its turns to the host's JSONL:
+    production saw 419 monitor turns interleaved into a 9-day session, its
+    search_session drowned in them, and each tick's startup
+    ``seal_incomplete_turn`` stamping "[Session ended before the assistant
+    replied]" over the host's live turn. A run writes the conversation the job
+    names (``session_id``), and only when no terminal has it open (see
+    ``live_cli_peer``).
     """
     workspace_default = workspace
 
-    def _factory(workspace=None, permission_mode=None, work_dir=None):
+    def _factory(workspace=None, permission_mode=None, work_dir=None, session_id=None):
         from agentica.cli.runtime import create_agent
         job_config = {
             key: value for key, value in agent_config.items()
@@ -95,6 +140,8 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
         }
         if work_dir is not None:
             job_config["work_dir"] = work_dir
+        if session_id:
+            job_config["session_id"] = session_id
         return create_agent(
             job_config,
             extra_tools=extra_tools or [],
@@ -106,7 +153,7 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
             include_ask_user_question=False,
             # A scheduled job must not recursively kick off further immediate runs.
             enable_cron_immediate_run=False,
-            enable_session_log=False,
+            enable_session_log=bool(session_id),
             permission_mode=permission_mode,
         )
 

@@ -43,7 +43,7 @@ export function AppLayout() {
   const { pathname } = useLocation();
   const active = pathname.startsWith("/traces")
     ? "traces"
-    : "chat";
+    : pathname.startsWith("/automations") ? "automations" : "chat";
   return (
     <AppShell
       active={active}
@@ -57,13 +57,14 @@ export function AppLayout() {
 export function AppShell({
   active, list, children,
 }: {
-  active: "chat" | "traces";
+  active: "chat" | "traces" | "automations";
   list?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const s = useAppState();
   const S = useStrings();
   const nav = useNavigate();
+  const activeAutomations = s.cronJobs.filter((j) => j.status === "active").length;
 
   // Every page needs the same server state, and any of them can be the first
   // one loaded (a deep link to /traces is a cold start too).
@@ -73,7 +74,11 @@ export function AppShell({
         await Promise.all([loadStatus(), loadAuthStatus(), loadUpdateCheck()]);
         await loadPrefs();
         await loadSessions();
-        const params = new URLSearchParams(window.location.search);
+        // `?new=1` / `?session=` are the chat's deep links. The automations
+        // page uses the same names for its own create view and must keep them.
+        const params = new URLSearchParams(
+          window.location.pathname.startsWith("/automations") ? "" : window.location.search,
+        );
         const targetSess = params.get("session");
         if (params.get("new") === "1") {
           newChat();
@@ -218,10 +223,11 @@ export function AppShell({
           <IconPlus /><span className="nav-label">{S.nav.newChat}</span>
         </button>
         <nav className="side-nav" aria-label="Primary">
-          <button className="side-nav-item" onClick={() => void primeSettings("cron")} title={S.nav.cron}>
+          <button className={"side-nav-item" + (active === "automations" ? " active" : "")}
+                  onClick={() => nav("/automations")} title={S.nav.cron}>
             <span className="nav-icon"><IconClock /></span>
             <span className="nav-label">{S.nav.cron}</span>
-            {s.cronJobs.length ? <span className="nav-badge">{s.cronJobs.length}</span> : null}
+            {activeAutomations ? <span className="nav-badge">{activeAutomations}</span> : null}
           </button>
           <button className="side-nav-item" onClick={() => void primeSettings("plugins")}
                   title={S.nav.plugins}>
@@ -276,7 +282,6 @@ export function AppShell({
                ["memory", S.nav.memory, <IconDatabase key="m" />, "memory"],
                ["plugins", S.nav.plugins, <IconPlug key="pl" />, "plugins"],
                ["assistant", S.nav.assistant, <IconChat key="asst" />, "assistant"],
-               ["cron", S.nav.cron, <IconClock key="c" />, "cron"],
                ["users", S.nav.users, <IconUser key="u" />, "users"],
                ["archived", S.nav.archivedSessions, <IconArchive key="a" />, "archived"]] as const)
               .filter(([, , , tab]) => tab !== "users" || s.accountRole === "admin")

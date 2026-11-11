@@ -27,15 +27,17 @@ def tmp_cron_dir(tmp_path):
 
 
 def _caller(mode: str, work_dir: str):
-    return SimpleNamespace(tool_config=SimpleNamespace(permission_mode=mode), work_dir=work_dir)
+    return SimpleNamespace(tool_config=SimpleNamespace(permission_mode=mode), work_dir=work_dir, session_id="sess-1")
 
 
 class _RecordingRunner:
     def __init__(self):
         self.contexts = []
+        self.prompts = []
 
     async def run(self, prompt, context=None):
         self.contexts.append(context)
+        self.prompts.append(prompt)
         return "done"
 
 
@@ -137,52 +139,71 @@ class TestRunUnderMandate:
         legacy = factory()
         assert legacy.tool_config.permission_mode == "allow-all"
 
-    def test_cli_runner_hands_context_mandate_to_factory_and_tells_job_its_id(self):
+    def test_cli_runner_runs_the_job_in_its_conversation_under_the_mandate(self):
+        from agentica.cron.cli_runner import CliAgentRunner
+        from agentica.run.context import RunSource
+
+        seen = {}
+
+        class _Agent:
+            async def run(self, message, config=None):
+                seen["message"], seen["config"] = message, config
+                return SimpleNamespace(content="ok", cost_tracker=None)
+
+        def factory(**kw):
+            seen.update(kw)
+            return _Agent()
+
+        with patch("agentica.cron.cli_runner.live_cli_peer", return_value=None):
+            out = asyncio.run(CliAgentRunner(factory).run("the prompt", {
+                "job_id": "j42", "job_name": "digest", "permission_mode": "ask",
+                "work_dir": "/w", "session_id": "conv-1",
+            }))
+        assert seen["permission_mode"] == "ask" and seen["work_dir"] == "/w"
+        assert seen["session_id"] == "conv-1" and out.session_id == "conv-1"
+        assert seen["message"] == "the prompt"
+        config = seen["config"]
+        assert config.source == RunSource.cron and config.automated_input is True
+        assert config.input_meta == {"cron_job": {"id": "j42", "name": "digest"}}
+
+    def test_cli_runner_starts_a_conversation_when_the_job_has_none(self):
         from agentica.cron.cli_runner import CliAgentRunner
 
         seen = {}
 
         class _Agent:
-            guidance = []
-
-            def add_session_guidance(self, text):
-                self.guidance.append(text)
-
-            async def run(self, message):
+            async def run(self, message, config=None):
                 return SimpleNamespace(content="ok", cost_tracker=None)
-
-        agent = _Agent()
 
         def factory(**kw):
             seen.update(kw)
-            return agent
+            return _Agent()
 
-        asyncio.run(CliAgentRunner(factory).run(
-            "p", {"job_id": "j42", "permission_mode": "ask", "work_dir": "/w"}))
-        assert seen["permission_mode"] == "ask" and seen["work_dir"] == "/w"
-        assert any("j42" in g and "cronjob(action='pause'" in g for g in agent.guidance)
+        with patch("agentica.cron.cli_runner.live_cli_peer", return_value=None):
+            out = asyncio.run(CliAgentRunner(factory).run("p", {"job_id": "j1", "session_id": ""}))
+        assert seen["session_id"] and out.session_id == seen["session_id"]
 
-    def test_gateway_run_cron_applies_the_mandate(self, tmp_path):
-        pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
-        from unittest.mock import AsyncMock, MagicMock
-        from agentica_gateway.services.agent_service import AgentService
+    def test_cli_runner_hands_the_prompt_to_a_terminal_that_has_the_conversation_open(self):
+        from agentica.cron.cli_runner import CliAgentRunner
 
-        svc = AgentService(workspace_path=str(tmp_path))
-        svc._ensure_initialized = AsyncMock()
-        svc._workspace = None
-        agent = MagicMock()
-        agent.run = AsyncMock(return_value=MagicMock(content="done", tools=[]))
-        seen = {}
+        peer = SimpleNamespace(name="term", session_id="conv-1")
+        sent = []
+        with patch("agentica.cron.cli_runner.live_cli_peer", return_value=peer), \
+             patch("agentica.peers.send_message", side_effect=lambda p, **kw: sent.append((p, kw["text"]))):
+            out = asyncio.run(CliAgentRunner(lambda **kw: pytest.fail("must not build an agent")).run(
+                "p", {"job_id": "j1", "session_id": "conv-1"}))
+        assert sent == [(peer, "p")] and out.session_id == "conv-1"
 
-        def build(session_id, owner=None):
-            seen["mode"] = svc.get_session_approval_mode(session_id, owner)
-            seen["dir"] = svc.get_session_work_dir(session_id, owner)
-            return agent
+    def test_scheduler_delivers_a_turn_that_names_the_job(self, tmp_cron_dir):
+        from agentica.cron.jobs import create_job, get_job
+        from agentica.cron.scheduler import execute_job
 
-        svc._build_agent = build
-        asyncio.run(svc.run_cron("x", job_id="j1", user_id="u1",
-                                 permission_mode="ask", work_dir=str(tmp_path)))
-        assert seen == {"mode": "ask", "dir": str(tmp_path)}
+        job = create_job(prompt="summarize", schedule="1h", name="digest")
+        runner = _RecordingRunner()
+        asyncio.run(execute_job(get_job(job.id), runner, verbose=False))
+        message = runner.prompts[0]
+        assert message.startswith(f"[Scheduled task \u201cdigest\u201d ({job.id})]\nsummarize")
+        assert f"cronjob(action='pause', job_id='{job.id}'" in message
 
 
 # ============== Pause instead of retry ==============

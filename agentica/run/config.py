@@ -74,6 +74,10 @@ class RunConfig:
     # session, a background job's report). Recorded on the user turn so
     # human-facing transcripts can leave it out.
     automated_input: bool = False
+    # Extra fields recorded on this turn's ``user`` entry in the session log,
+    # for a structured provenance a transcript reader can act on (e.g. the
+    # scheduled job a turn was delivered by). Not sent to the model.
+    input_meta: Optional[Dict[str, Any]] = None
     # Fallback model chain (cross-provider). Triggered per-call by:
     #   - finish_reason == "content_filter" (provider-side content moderation)
     #   - fallback-only API errors (connection / 502 / 503 / bad gateway)

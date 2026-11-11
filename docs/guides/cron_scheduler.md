@@ -108,28 +108,39 @@ tmux new -s agentica-cron 'agentica cron daemon --interval 60'
 
 ---
 
-## 六、在 Gateway 中使用（HTTP API）
+## 六、在 Web / Desktop 与 Gateway 中使用
+
+### 每次运行都是会话里的一轮
+
+定时任务到点后，把任务内容作为一条**自动消息**投递进一个会话，由该会话的 agent 回答。
+结果就在会话里，可以接着追问；任务的「运行记录」每条都能点「查看会话」跳过去。
+投递到哪个会话由任务的**执行位置**（`target`）决定：
+
+| `target` | 说明 |
+|----------|------|
+| `session` | 固定在一个已有会话（在聊天里让 agent 建任务、要求结果回到这里时，agent 用它指向当前会话；页面上从会话标题栏新建也是它） |
+| `new_once` | 首次运行时新建一个以任务名命名的会话，之后一直沿用（页面新建任务的默认值） |
+| `new` | 每次运行都新建会话 |
+
+会话正在回答时，定时运行会等它空闲后再开始，不会插进用户正在进行的回合。
+会话绑定了 IM 聊天时，这一轮在 IM 里跑，手机收到「⏰ 定时任务」开头的回复；
+会话被终端 CLI 打开时，任务内容投进终端信箱，由终端里的 agent 处理。
+
+### 自动化任务页面
+
+左侧栏「自动化任务」（`/automations`）：按已开启 / 已暂停 / 已结束筛选、搜索；
+右侧详情可直接改名称、内容、运行时间（每天 / 工作日 / 每周 / 每月 / 每 N 分钟 / 每 N 小时 / 仅一次 / 自定义 cron）、
+时区、执行位置与工作区，并查看运行记录；「立即执行」会打开任务所在会话实时显示输出。
+调度器未开启时页面顶部有提示，可一键开启（等同 `settings.cron.enabled: true`，立即生效、无需重启）。
+
+聊天里与任务的联动：
+- 定时运行在会话里显示为「定时任务 · 任务名」卡片，可「打开任务」；
+- 会话标题栏显示「N 个自动化任务」，点开可跳到任务或「新建自动化任务」（默认在当前会话运行）；
+- 侧栏中有任务投递的会话标题旁带时钟标记。
+
+### HTTP API
 
 Gateway 与 CLI **共用同一套任务存储**（`~/.agentica/cron/jobs.json`）和同一个开关。
-只要 `config.yaml` 里 `settings.cron.enabled: true`，`agentica-gateway` 启动后就会
-在后台按 `cron.interval` 轮询到点任务，并通过内置的 `_GatewayAgentRunner` 运行——
-无需再开一个 `agentica cron daemon` 进程。
-
-启动 Gateway 时日志会打印：
-
-```
-Cron scheduler started (60s tick)
-```
-
-未开启时则打印（正常行为）：
-
-```
-Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to enable)
-```
-
-除了在 CLI 里用 `/cron add` 建任务，也可以**直接通过 Gateway 的 HTTP API** 管理任务：
-
-`POST /api/scheduler/jobs`：
 
 ```bash
 curl -X POST http://localhost:8881/api/scheduler/jobs \
@@ -139,39 +150,27 @@ curl -X POST http://localhost:8881/api/scheduler/jobs \
     "schedule": "0 8 * * 1-5",
     "name": "工作日晨报",
     "timezone": "Asia/Shanghai",
-    "timeout_seconds": 120
+    "target": "new_once",
+    "work_dir": "/path/to/project",
+    "validate_run": true
   }'
 ```
 
-带 `validate_run: true` 可在创建后**立即跑一次**验证 prompt / 调度是否可用：
-
-```bash
-curl -X POST http://localhost:8881/api/scheduler/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "ping", "schedule": "*/30 * * * *", "validate_run": true}'
-```
-
-管理接口一览：
+`validate_run: true` 创建后立即在任务会话里跑一次，响应的 `validation_run.session_id` 是这次运行所在的会话。
 
 | Method | Path | 说明 |
 |--------|------|------|
-| GET | `/api/scheduler/jobs` | 列出任务（`include_disabled`, `limit`） |
+| GET / PUT | `/api/scheduler/status` | 调度器开关（`{"enabled": bool}`） |
+| GET | `/api/scheduler/jobs` | 列出本账号任务（含 `schedule_spec`、`target`、`session_id`、`running`） |
 | GET | `/api/scheduler/jobs/{job_id}` | 任务详情 |
 | POST | `/api/scheduler/jobs` | 创建任务 |
-| PUT | `/api/scheduler/jobs/{job_id}` | 更新任务 |
-| DELETE | `/api/scheduler/jobs/{job_id}` | 删除任务 |
+| PUT | `/api/scheduler/jobs/{job_id}` | 更新任务（`schedule` / `timezone` / `target` / `work_dir` 等） |
+| DELETE | `/api/scheduler/jobs/{job_id}` | 删除任务（会话保留） |
+| POST | `/api/scheduler/jobs/clear_completed` | 删除全部已结束任务 |
 | POST | `/api/scheduler/jobs/{job_id}/pause` | 暂停 |
 | POST | `/api/scheduler/jobs/{job_id}/resume` | 恢复 |
-| POST | `/api/scheduler/jobs/{job_id}/trigger` | 手动触发一次 |
-| GET | `/api/scheduler/jobs/{job_id}/runs` | 运行历史 |
-
-请求体字段（`CronJobCreateRequest`）：`prompt`（必填）、`schedule`（必填，三种语法见第三节）、
-`name`、`timezone`（默认 `Asia/Shanghai`）、`deliver`（默认 `local`，预留字段）、
-`timeout_seconds`、`max_retries`、`retry_delay_ms`、`permission_mode`、`validate_run`。
-
-> ⚠️ 关于 `deliver`：当前版本 `deliver` 仅作为任务元数据被持久化，调度器**不会**自动把
-> 运行结果推送到 IM 渠道。查看结果请走 Web UI / API 的运行历史，或让 Agent 在 `prompt`
-> 里自行调用工具（如发消息）。
+| POST | `/api/scheduler/jobs/{job_id}/trigger` | 立即运行一次，不等待结束，返回所在会话；已在运行时 409 |
+| GET | `/api/scheduler/jobs/{job_id}/runs` | 运行记录（每条带 `session_id`） |
 
 ---
 

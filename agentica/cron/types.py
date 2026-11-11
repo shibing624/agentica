@@ -190,6 +190,23 @@ class RunStatus(str, Enum):
     TIMEOUT = "timeout"
 
 
+# Where a job's runs are delivered. Every run is a turn in a conversation, so
+# its result can be read (and followed up on) where it happened:
+# - "session":  an existing conversation (the one the job was created in).
+# - "new_once": a conversation created on the first run and reused after.
+# - "new":      a fresh conversation on every run.
+JOB_TARGETS = ("session", "new_once", "new")
+
+
+def validate_target(target: str, session_id: str | None) -> str:
+    """Return ``target`` if usable with ``session_id``, else raise ValueError."""
+    if target not in JOB_TARGETS:
+        raise ValueError(f"target={target!r} is not one of {', '.join(JOB_TARGETS)}")
+    if target == "session" and not session_id:
+        raise ValueError("target='session' needs the conversation to deliver to (session_id)")
+    return target
+
+
 @dataclass
 class TaskRun:
     """Structured history record for one scheduled task execution."""
@@ -209,6 +226,9 @@ class TaskRun:
     # cost_usd. None for runs from runners that return plain text, and for
     # records written before this field existed.
     usage: dict[str, Any] | None = None
+    # The conversation this run was delivered to. Empty for records written
+    # before runs were delivered into conversations.
+    session_id: str = ""
 
     @property
     def duration_ms(self) -> int:
@@ -229,6 +249,7 @@ class TaskRun:
             "error": self.error,
             "error_type": self.error_type,
             "usage": self.usage,
+            "session_id": self.session_id,
         }
 
     @classmethod
@@ -244,6 +265,7 @@ class TaskRun:
             error=data.get("error", ""),
             error_type=data.get("error_type", ""),
             usage=data.get("usage"),
+            session_id=data.get("session_id", ""),
         )
 
 
@@ -257,6 +279,8 @@ class CronRunOutput:
 
     content: str
     usage: dict[str, Any] | None = None
+    # The conversation the run was delivered to, when the runner put it in one.
+    session_id: str = ""
 
 
 # Delivery targets a job may name. Only "local" exists: the result is written

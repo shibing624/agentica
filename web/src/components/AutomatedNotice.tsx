@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { IconChevronDown, IconTerminal } from "../icons";
+import { useNavigate } from "react-router";
+import { IconChevronDown, IconClock, IconTerminal } from "../icons";
 import { useStrings } from "../i18n";
+import { useAppState } from "../store";
 
 /**
  * A turn no person wrote — a background command's or a delegated subagent's
@@ -28,6 +30,44 @@ export function AutomatedNotice({ text, ts }: { text: string; ts?: number }) {
         {body && <span className="auto-notice-chev"><IconChevronDown /></span>}
       </button>
       {open && body && <pre className="auto-notice-body">{body}</pre>}
+    </div>
+  );
+}
+
+/**
+ * A turn an automation delivered: the job's name and when, with a way to its
+ * detail page. The instruction is the job's own (from the catalog); the raw
+ * delivered message, which also carries the run's standing guidance for the
+ * model, is what folds open when the job is gone.
+ */
+export function ScheduledRunCard({ job, text, ts }: { job: { id: string; name: string }; text: string; ts?: number }) {
+  const S = useStrings();
+  const A = S.automation;
+  const nav = useNavigate();
+  const s = useAppState();
+  const [open, setOpen] = useState(false);
+  const live = s.cronJobs.find((j) => j.id === job.id);
+  const body = live ? live.prompt : text;
+  return (
+    <div className={"sched-card" + (open ? " open" : "")}>
+      <div className="sched-card-head">
+        <span className="sched-card-icon"><IconClock /></span>
+        <span className="sched-card-label">{A.scheduledRun}</span>
+        <span className="sched-card-name" title={job.name}>{live?.name || job.name}</span>
+        {ts != null && <span className="sched-card-ts">{S.chat.msgStamp(ts)}</span>}
+        {live ? (
+          <button type="button" className="sched-card-link" onClick={() => nav(`/automations?task=${encodeURIComponent(job.id)}`)}>
+            {A.openAutomation}
+          </button>
+        ) : (
+          <span className="sched-card-gone">{A.automationGone}</span>
+        )}
+      </div>
+      <button type="button" className={"sched-card-body" + (open ? " open" : "")} aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}>
+        <span>{body}</span>
+        <span className="sched-card-chev"><IconChevronDown /></span>
+      </button>
     </div>
   );
 }

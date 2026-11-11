@@ -317,4 +317,3 @@ def test_a_rebuilt_agent_keeps_the_chats_background_commands(svc, monkeypatch):
 
     assert first is not None and second is first
     assert svc._build_agent("b").background_process_registry is not first
-    assert svc._build_agent("scheduled_job1").background_process_registry is None

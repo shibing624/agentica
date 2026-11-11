@@ -811,197 +811,131 @@ class TestTempDirAndCompactEndpoints:
 
 
 class TestSchedulerEndpoints:
-    """Test /api/scheduler/* — cron job CRUD + actions + run history.
+    """/api/scheduler/* against a real (temporary) cron store.
 
-    cron.jobs functions are mocked so tests never touch ~/.agentica/cron.
+    Runs are not executed here: "run now" is pinned to start in the
+    background and say which conversation it lands in.
     """
 
-    def _fake_job(self, **over):
-        from types import SimpleNamespace
-        base = dict(
-            id="j1", name="test", prompt="do thing", user_id="default",
-            schedule="ignored", status=SimpleNamespace(value="active"),
-            enabled=True, deliver="local", next_run_at_ms=0, last_run_at_ms=0,
-            last_status=None, run_count=0, timeout_seconds=0, max_retries=0,
-            retry_count=0, retry_delay_ms=60000,
-            permission_mode="", work_dir=None, paused_reason="",
-        )
-        base.update(over)
-        return SimpleNamespace(**base)
+    @pytest.fixture
+    def cron_store(self, tmp_path):
+        cron_dir = tmp_path / "cron"
+        with patch("agentica.cron.jobs.CRON_DIR", cron_dir), \
+             patch("agentica.cron.jobs.JOBS_FILE", cron_dir / "jobs.json"), \
+             patch("agentica.cron.jobs.OUTPUT_DIR", cron_dir / "output"), \
+             patch("agentica.cron.jobs.RUNS_FILE", cron_dir / "runs.jsonl"):
+            yield cron_dir
 
-    def _fake_run(self, **over):
-        from types import SimpleNamespace
-        base = dict(task_id="j1", status=SimpleNamespace(value="ok"),
-                    started_at_ms=1, ended_at_ms=2, result="done", error=None,
-                    duration_ms=1, usage={"input_tokens": 100, "output_tokens": 7, "api_calls": 1})
-        base.update(over)
-        return SimpleNamespace(**base)
+    def _create(self, client, **body):
+        payload = {"prompt": "daily report", "schedule": "30 7 * * *", "name": "rep", **body}
+        resp = client.post("/api/scheduler/jobs", json=payload)
+        assert resp.status_code == 200, resp.text
+        return resp.json()["job"]
 
-    def test_list_jobs(self, mock_app):
+    def test_create_lists_with_the_editor_fields(self, mock_app, cron_store):
         client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
-             patch("agentica_gateway.routes.scheduler.schedule_to_human", return_value="daily 7:30"):
-            resp = client.get("/api/scheduler/jobs")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["jobs"][0]["id"] == "j1"
-        assert data["jobs"][0]["schedule"] == "daily 7:30"
+        job = self._create(client, timezone="UTC")
+        jobs = client.get("/api/scheduler/jobs").json()["jobs"]
+        assert [j["id"] for j in jobs] == [job["id"]]
+        assert jobs[0]["schedule_spec"] == {"kind": "cron", "expression": "30 7 * * *", "timezone": "UTC"}
+        assert jobs[0]["target"] == "new_once" and jobs[0]["session_id"] == ""
+        assert jobs[0]["next_run_at_ms"] > 0
 
-    def test_create_job_body(self, mock_app):
+    def test_create_ignores_a_user_id_in_the_body(self, mock_app, cron_store):
         client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.cronjob",
-                   return_value='{"success":true,"job":{"id":"j1"}}') as m:
-            resp = client.post("/api/scheduler/jobs", json={
-                "prompt": "daily report", "schedule": "30 7 * * *", "name": "rep",
-            })
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-        _, kwargs = m.call_args
-        assert kwargs["prompt"] == "daily report"
-        assert kwargs["schedule"] == "30 7 * * *"
-        assert kwargs["name"] == "rep"
-        assert kwargs["user_id"] == "default"
+        job = self._create(client, user_id="kk")
+        assert job["user_id"] == "default"
 
-    def test_a_job_owned_by_someone_else_is_not_found(self, mock_app):
-        """The id of another account's job must 404, not 403 — otherwise the
-        status code confirms it exists."""
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job",
-                   return_value=self._fake_job(user_id="kk")):
-            assert client.get("/api/scheduler/jobs/j1").status_code == 404
-            assert client.post("/api/scheduler/jobs/j1/pause").status_code == 404
-            assert client.delete("/api/scheduler/jobs/j1").status_code == 404
-
-    def test_create_ignores_a_user_id_in_the_body(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.cronjob",
-                   return_value='{"success":true,"job":{"id":"j1"}}') as m:
-            resp = client.post("/api/scheduler/jobs", json={
-                "prompt": "daily report", "schedule": "30 7 * * *", "user_id": "kk",
-            })
-        assert resp.status_code == 200
-        _, kwargs = m.call_args
-        assert kwargs["user_id"] == "default"
-
-    def test_create_job_missing_fields(self, mock_app):
-        client, _ = mock_app
-        resp = client.post("/api/scheduler/jobs", json={"name": "no prompt"})
-        assert resp.status_code == 422  # Pydantic validation
-
-    def test_update_job(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.cronjob",
-                   return_value='{"success":true,"job":{"id":"j1"}}') as m:
-            resp = client.put("/api/scheduler/jobs/j1", json={"schedule": "every 2h"})
-        assert resp.status_code == 200
-        _, kwargs = m.call_args
-        assert kwargs["schedule"] == "every 2h"
-        assert "name" not in kwargs  # exclude_none drops unset fields
-
-    def test_update_job_not_found(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=None):
-            resp = client.put("/api/scheduler/jobs/none", json={"name": "x"})
-        assert resp.status_code == 404
-
-    def test_update_job_empty_body(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()):
-            resp = client.put("/api/scheduler/jobs/j1", json={})
+    def test_target_session_needs_an_existing_conversation_of_the_caller(self, mock_app, cron_store):
+        client, svc = mock_app
+        resp = client.post("/api/scheduler/jobs", json={
+            "prompt": "p", "schedule": "1h", "target": "session", "session_id": "nope",
+        })
         assert resp.status_code == 400
+        svc.session_log_for.return_value.path.exists.return_value = True
+        job = self._create(client, target="session", session_id="chat-1")
+        assert job["target"] == "session" and job["session_id"] == "chat-1"
 
-    def test_delete_job(self, mock_app):
+    def test_work_dir_is_the_directory_created_conversations_use(self, mock_app, cron_store, tmp_path):
         client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.remove_job", return_value=True):
-            resp = client.delete("/api/scheduler/jobs/j1")
+        job = self._create(client, work_dir=str(tmp_path))
+        assert job["work_dir"] == str(tmp_path)
+
+    def test_a_job_owned_by_someone_else_is_not_found(self, mock_app, cron_store):
+        from agentica.cron.jobs import create_job
+        client, _ = mock_app
+        other = create_job(prompt="p", schedule="1h", user_id="kk")
+        assert client.get(f"/api/scheduler/jobs/{other.id}").status_code == 404
+        assert client.post(f"/api/scheduler/jobs/{other.id}/pause").status_code == 404
+        assert client.delete(f"/api/scheduler/jobs/{other.id}").status_code == 404
+        assert client.get("/api/scheduler/jobs").json()["jobs"] == []
+
+    def test_update_reschedules_and_changes_timezone(self, mock_app, cron_store):
+        client, _ = mock_app
+        job = self._create(client)
+        resp = client.put(f"/api/scheduler/jobs/{job['id']}", json={"schedule": "0 9 * * 1-5", "timezone": "UTC"})
+        assert resp.status_code == 200, resp.text
+        spec = resp.json()["job"]["schedule_spec"]
+        assert spec == {"kind": "cron", "expression": "0 9 * * 1-5", "timezone": "UTC"}
+        assert client.put(f"/api/scheduler/jobs/{job['id']}", json={}).status_code == 400
+
+    def test_pause_resume_delete(self, mock_app, cron_store):
+        client, _ = mock_app
+        job = self._create(client)
+        assert client.post(f"/api/scheduler/jobs/{job['id']}/pause").json()["job"]["status"] == "paused"
+        assert client.post(f"/api/scheduler/jobs/{job['id']}/resume").json()["job"]["status"] == "active"
+        assert client.delete(f"/api/scheduler/jobs/{job['id']}").status_code == 200
+        assert client.get("/api/scheduler/jobs").json()["jobs"] == []
+
+    def test_trigger_starts_a_run_and_names_its_conversation(self, mock_app, cron_store):
+        from agentica_gateway import deps
+        client, _ = mock_app
+        job = self._create(client)
+        started = []
+        with patch.object(deps.scheduler, "_spawn", side_effect=lambda j, sid: started.append((j.id, sid))):
+            resp = client.post(f"/api/scheduler/jobs/{job['id']}/trigger")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "deleted"
+        run = resp.json()["run"]
+        assert run["status"] == "queued" and run["session_id"]
+        assert started == [(job["id"], run["session_id"])]
 
-    def test_pause_resume(self, mock_app):
+    def test_trigger_while_running_is_a_conflict(self, mock_app, cron_store):
+        from agentica.cron import scheduler as sched
         client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.pause_job", return_value=self._fake_job()):
-            assert client.post("/api/scheduler/jobs/j1/pause").status_code == 200
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.resume_job", return_value=self._fake_job()):
-            assert client.post("/api/scheduler/jobs/j1/resume").status_code == 200
+        job = self._create(client)
+        sched._running_jobs.add(job["id"])
+        try:
+            assert client.post(f"/api/scheduler/jobs/{job['id']}/trigger").status_code == 409
+        finally:
+            sched._running_jobs.discard(job["id"])
 
-    def test_trigger(self, mock_app):
-        """Trigger runs the job for real (via execute_job), not just marks it due."""
+    def test_runs_carry_the_conversation(self, mock_app, cron_store):
+        from agentica.cron.jobs import mark_job_run
+        from agentica.cron.types import RunStatus
         client, _ = mock_app
-        fake_run = {"job_id": "j1", "status": "ok", "result": "done"}
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.execute_job", new=AsyncMock(return_value=fake_run)) as m:
-            resp = client.post("/api/scheduler/jobs/j1/trigger")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["run"] == fake_run
-        m.assert_awaited_once()
+        job = self._create(client)
+        mark_job_run(job["id"], RunStatus.OK, result="done", session_id="conv-1")
+        runs = client.get(f"/api/scheduler/jobs/{job['id']}/runs").json()["runs"]
+        assert runs[0]["session_id"] == "conv-1" and runs[0]["result_full"] == "done"
+        # A new_once job keeps delivering into that conversation.
+        assert client.get(f"/api/scheduler/jobs/{job['id']}").json()["job"]["session_id"] == "conv-1"
+        assert client.get("/api/scheduler/runs").json()["total"] == 1
 
-    def test_trigger_failed_run(self, mock_app):
+    def test_clear_completed_keeps_active_and_paused(self, mock_app, cron_store):
+        from agentica.cron.jobs import update_job
         client, _ = mock_app
-        fake_run = {"job_id": "j1", "status": "failed", "error": "boom"}
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.execute_job", new=AsyncMock(return_value=fake_run)):
-            resp = client.post("/api/scheduler/jobs/j1/trigger")
-        assert resp.status_code == 200
-        assert resp.json()["success"] is False
+        done, active = self._create(client), self._create(client)
+        update_job(done["id"], {"status": "completed", "enabled": False})
+        assert client.post("/api/scheduler/jobs/clear_completed").json() == {"deleted": 1}
+        assert [j["id"] for j in client.get("/api/scheduler/jobs").json()["jobs"]] == [active["id"]]
 
-    def test_create_job_with_validate_run(self, mock_app):
-        """validate_run=True runs the freshly created job immediately."""
+    def test_status_toggle_starts_and_stops_the_ticker(self, mock_app, cron_store):
         client, _ = mock_app
-        fake_run = {"job_id": "j1", "status": "ok", "result": "done"}
-        with patch("agentica_gateway.routes.scheduler.cronjob",
-                   return_value='{"success":true,"job":{"job_id":"j1"}}'), \
-             patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.execute_job", new=AsyncMock(return_value=fake_run)) as m:
-            resp = client.post("/api/scheduler/jobs", json={
-                "prompt": "daily report", "schedule": "30 7 * * *", "validate_run": True,
-            })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["validation_run"] == fake_run
-        m.assert_awaited_once()
-
-    def test_list_runs(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
-             patch("agentica_gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
-            resp = client.get("/api/scheduler/runs")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["runs"][0]["job_id"] == "j1"
-        assert data["runs"][0]["result_preview"] == "done"
-        assert data["runs"][0]["result_full"] == "done"
-        assert data["runs"][0]["usage"]["input_tokens"] == 100
-        assert data["runs"][0]["duration_ms"] == 1
-
-    def test_list_runs_result_full_uses_error_when_no_result(self, mock_app):
-        client, _ = mock_app
-        run = self._fake_run(result=None, error="boom")
-        with patch("agentica_gateway.routes.scheduler.list_jobs", return_value=[self._fake_job()]), \
-             patch("agentica_gateway.routes.scheduler.list_task_runs", return_value=[run]):
-            resp = client.get("/api/scheduler/runs")
-        assert resp.json()["runs"][0]["result_full"] == "boom"
-
-    def test_list_job_runs(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica_gateway.routes.scheduler.list_task_runs", return_value=[self._fake_run()]):
-            resp = client.get("/api/scheduler/jobs/j1/runs")
-        assert resp.status_code == 200
-        assert resp.json()["job_id"] == "j1"
-
-    def test_list_job_runs_not_found(self, mock_app):
-        client, _ = mock_app
-        with patch("agentica_gateway.routes.scheduler.get_job", return_value=None):
-            resp = client.get("/api/scheduler/jobs/none/runs")
-        assert resp.status_code == 404
+        with patch("agentica_gateway.services.scheduler_service.set_setting") as saved:
+            assert client.put("/api/scheduler/status", json={"enabled": True}).json()["enabled"] is True
+            assert client.get("/api/scheduler/status").json()["enabled"] is True
+            assert client.put("/api/scheduler/status", json={"enabled": False}).json()["enabled"] is False
+        assert [c.args for c in saved.call_args_list] == [("cron.enabled", True), ("cron.enabled", False)]
 
 
 class TestProfileCrudEndpoints:

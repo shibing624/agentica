@@ -281,6 +281,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # Per-run: the client this turn came through (RunConfig.channel), written
     # to the session sidecar as its latest entry point.
     _run_channel: Optional[str] = field(default=None, init=False, repr=False)
+    # Per-run: RunConfig.input_meta, written onto this turn's user log entry.
+    _run_input_meta: Optional[Dict[str, Any]] = field(default=None, init=False, repr=False)
     # The config.yaml profile this agent's model was built from, when one was
     # (set by DeepAgent). Reported by self_manage so the agent can say which
     # model it runs without guessing from config.yaml's active profile.
@@ -664,6 +666,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._run_fallback_on_break = False
         self._run_automated_input = False
         self._run_channel = None
+        self._run_input_meta = None
         self._run_max_api_retry = 1
         self.todos = []
         self._tool_policy_prompts: List[str] = []

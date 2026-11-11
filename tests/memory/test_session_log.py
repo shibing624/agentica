@@ -38,6 +38,7 @@ class _FakeAgent:
         self.model = _FakeModel()
         self.run_context = None
         self.run_response = _FakeRunResponse(messages, tools)
+        self._run_input_meta = None
 
 
 @pytest.fixture

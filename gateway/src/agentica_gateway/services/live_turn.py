@@ -54,6 +54,10 @@ class LiveTurn:
 
     def __init__(self, session_id: str, owner: str, kind: str = "chat", user_message: str = ""):
         self.run_id = uuid.uuid4().hex[:16]
+        # A scheduled run: ``{"id", "name"}`` of the job that delivered it, and
+        # the message it delivered (logged as automated, not as user_message).
+        self.cron_job: Optional[Dict[str, str]] = None
+        self.automated_message = ""
         self.session_id = session_id
         self.owner = owner
         self.kind = kind
@@ -78,6 +82,9 @@ class LiveTurn:
         }
         if self.user_message:
             out["user_message"] = self.user_message
+        if self.cron_job:
+            out["cron_job"] = self.cron_job
+            out["automated_message"] = self.automated_message
         return out
 
     def publish(self, item: Dict[str, Any]) -> None:

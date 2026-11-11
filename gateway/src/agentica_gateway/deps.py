@@ -21,17 +21,17 @@ channel_manager: Optional[ChannelManager] = None
 message_router: Optional[MessageRouter] = None
 im_bot: Optional[Any] = None
 card_registry: Optional[Any] = None
-# AgentRunner (agentica.cron.scheduler.AgentRunner protocol) used to execute
-# cron jobs immediately (HTTP "run now" and the agent's own cronjob(action=
-# "run") tool call) — same runner the background ticker uses, so an
-# immediate run and a scheduled run behave identically.
+# The gateway's scheduled-task service (services.scheduler_service): the
+# ticker, its on/off switch, and "run now" for both the HTTP route and the
+# agent's cronjob(action="run"). ``cron_runner`` is its runner, the same one
+# the ticker uses, so an immediate run and a scheduled run behave identically.
+scheduler: Optional[Any] = None
 cron_runner: Optional[Any] = None
 # The gateway's single asyncio event loop, captured at startup. The cron
 # tool's immediate-run path is invoked from a worker thread (sync tool
-# entrypoint), so it schedules its coroutine back onto this loop with
-# run_coroutine_threadsafe() instead of spinning up a second event loop —
-# that keeps it on the same AgentService session locks/state as every other
-# request instead of creating a cross-loop hazard.
+# entrypoint), so it hands the run to this loop instead of spinning up a
+# second event loop — that keeps it on the same AgentService session
+# locks/state as every other request.
 main_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
@@ -47,7 +47,7 @@ def get_channel_manager() -> ChannelManager:
     return channel_manager
 
 
-def get_cron_runner() -> Any:
-    if not cron_runner:
+def get_scheduler() -> Any:
+    if not scheduler:
         raise HTTPException(status_code=503, detail="Service not ready")
-    return cron_runner
+    return scheduler

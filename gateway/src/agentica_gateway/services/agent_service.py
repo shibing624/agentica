@@ -32,7 +32,6 @@ from agentica.utils.log import logger
 from agentica.utils.string import replace_invalid_utf8
 from agentica import DeepAgent
 from agentica.agent.config import ExperienceConfig, ToolConfig, WorkspaceMemoryConfig
-from agentica.cron.scheduler import scheduled_job_guidance
 from agentica.run.display import RunDisplayEventKind, classify_run_response
 from agentica.run.response import AgentCancelledError
 from agentica.run.config import RunConfig
@@ -143,10 +142,9 @@ def _profile_model_config(name: str, profile: Dict[str, Any]) -> Dict[str, Any]:
 # Timeout in seconds for building a new Agent instance (guards against SDK hangs)
 _AGENT_BUILD_TIMEOUT_S = 30
 
-# Session-id prefix reserved for scheduled (cron) job runs. These sessions are
-# never surfaced by list_sessions() (the chat sidebar) — cron execution
-# history lives in the dedicated TaskRun store (agentica.cron.jobs), not the
-# chat session log. See AgentService.run_cron().
+# Session-id prefix of the per-job sessions scheduled runs used to write before
+# runs were delivered into conversations. Their logs are still on disk; they
+# were never conversations, so the sidebar keeps leaving them out.
 CRON_SESSION_PREFIX = "scheduled_"
 
 # IM channel values stored in SessionLog sidecar ``source`` so Web and Desktop
@@ -331,6 +329,8 @@ class ChatResult:
     usage: Optional[Dict[str, Any]] = None
     # This run's CostTracker split (input / cache read / hit / output / cost).
     turn_usage: Optional[Dict[str, Any]] = None
+    # Set when the run failed; ``content`` then carries a readable form of it.
+    error: str = ""
 
 
 class LRUAgentCache:
@@ -653,8 +653,6 @@ class AgentService:
 
     def _session_provider(self, session_id: str, owner: Optional[str] = None) -> str:
         """Provider slug of the session's model, for the ``provider/model`` label."""
-        if session_id.startswith(CRON_SESSION_PREFIX) and self.auxiliary_model_name:
-            return self.auxiliary_model_provider or self.model_provider
         return self.session_model_config(session_id, owner)["model_provider"]
 
     @staticmethod
@@ -792,51 +790,38 @@ class AgentService:
         AgentService with the matching kwargs) to route them to a
         different provider / model / base_url / api_key.
 
-        Scheduled (cron) jobs are unattended, don't need flagship-model
-        quality, and can run frequently — so when an auxiliary model is
-        configured, cron sessions use it as their *main* model to cut cost.
-        Interactive chat sessions are unaffected.
-
         An interactive session builds from its own model config
         (:meth:`session_model_config`): the profile picked for it, else its
         project's, else the gateway default.
         """
-        if session_id.startswith(CRON_SESSION_PREFIX) and self.auxiliary_model_name:
-            cfg = self._default_model_config()
-            model = self._build_sibling_model("auxiliary")
-            auxiliary_model = None
-            task_model = None
-            fallback_models: List[Any] = []
-            max_api_retry = 1
-        else:
-            cfg = self.session_model_config(session_id, owner)
-            model = create_model(
-                cfg["model_provider"],
-                cfg["model_name"],
-                base_url=cfg["base_url"] or None,
-                api_key=cfg["api_key"] or None,
-                wire_api=cfg["wire_api"],
-                max_tokens=cfg["max_tokens"],
-                temperature=cfg["temperature"],
-                top_p=cfg["top_p"],
-                context_window=cfg["context_window"],
-                reasoning=cfg["reasoning"],
-                reasoning_effort=cfg["reasoning_effort"],
-                thinking="enabled",
-                enable_cache_control=cfg.get("enable_cache_control"),
-                cache_control_messages=cfg.get("cache_control_messages"),
-                cache_control_session_header=cfg.get("cache_control_session_header") or None,
-                cache_keepalive=cfg.get("cache_keepalive"),
-                extra_body=cfg.get("extra_body"),
-                extra_headers=cfg.get("extra_headers"),
-                default_headers=cfg.get("default_headers"),
-            )
-            auxiliary_model = self._sibling_model(cfg, "auxiliary")
-            # The auxiliary model also serves as the task subagent model (CLI
-            # unified them — no separate task_model config anymore).
-            task_model = auxiliary_model
-            fallback_models = self._fallback_models(cfg)
-            max_api_retry = int(cfg.get("max_api_retry") or 2)
+        cfg = self.session_model_config(session_id, owner)
+        model = create_model(
+            cfg["model_provider"],
+            cfg["model_name"],
+            base_url=cfg["base_url"] or None,
+            api_key=cfg["api_key"] or None,
+            wire_api=cfg["wire_api"],
+            max_tokens=cfg["max_tokens"],
+            temperature=cfg["temperature"],
+            top_p=cfg["top_p"],
+            context_window=cfg["context_window"],
+            reasoning=cfg["reasoning"],
+            reasoning_effort=cfg["reasoning_effort"],
+            thinking="enabled",
+            enable_cache_control=cfg.get("enable_cache_control"),
+            cache_control_messages=cfg.get("cache_control_messages"),
+            cache_control_session_header=cfg.get("cache_control_session_header") or None,
+            cache_keepalive=cfg.get("cache_keepalive"),
+            extra_body=cfg.get("extra_body"),
+            extra_headers=cfg.get("extra_headers"),
+            default_headers=cfg.get("default_headers"),
+        )
+        auxiliary_model = self._sibling_model(cfg, "auxiliary")
+        # The auxiliary model also serves as the task subagent model (CLI
+        # unified them — no separate task_model config anymore).
+        task_model = auxiliary_model
+        fallback_models = self._fallback_models(cfg)
+        max_api_retry = int(cfg.get("max_api_retry") or 2)
         # Per-session project dir (set via routes/chat.py::_apply_session_work_dir
         # from the frontend's session.dir) takes precedence — falls back to the
         # global settings.base_dir only when the session has none set.
@@ -850,7 +835,7 @@ class AgentService:
         extra.extend(self_manage_tools)
 
         ask_cb = self._session_ask_callbacks.get(self._sk(session_id, owner))
-        if ask_cb is not None and not session_id.startswith(CRON_SESSION_PREFIX):
+        if ask_cb is not None:
             from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
             extra.append(AskUserQuestionTool(input_callback=ask_cb))
@@ -904,11 +889,7 @@ class AgentService:
             # is intentionally OFF: the gateway is headless (web/chat channels)
             # with no stdin, so the tool would block on a bare input() call.
             include_ask_user_question=False,
-            # Scheduled runs have nobody to see or stop a detached command.
-            background_process_registry=(
-                None if session_id.startswith(CRON_SESSION_PREFIX)
-                else self._background_registry(session_id, owner)
-            ),
+            background_process_registry=self._background_registry(session_id, owner),
             permission_mode=permission_mode,
             tool_config=ToolConfig(
                 auto_load_mcp=True,
@@ -1140,13 +1121,14 @@ class AgentService:
         channel: Optional[str] = None,
         stream_intermediate_steps: bool = False,
         automated: bool = False,
+        input_meta: Optional[Dict[str, Any]] = None,
     ) -> RunConfig:
         # Tool permission enforcement lives on the Agent itself now
         # (tool_config.permission_mode + sandbox_config, kept in sync with
         # the session's approval mode by set_session_approval_mode above).
         return RunConfig(
             stream_intermediate_steps=stream_intermediate_steps, source=source, channel=channel,
-            automated_input=automated,
+            automated_input=automated, input_meta=input_meta,
         )
 
 
@@ -1353,75 +1335,7 @@ class AgentService:
                     session_id=session_id,
                     user_id=user_id,
                     media_notes=media_notes,
-                )
-
-    async def run_cron(
-        self,
-        message: str,
-        job_id: str,
-        user_id: str = "default",
-        permission_mode: Optional[str] = None,
-        work_dir: Optional[str] = None,
-    ) -> ChatResult:
-        """Run a scheduled job's prompt on a brand-new, independent Agent.
-
-        Unlike chat()/chat_stream(), this never reads from or writes to the
-        interactive-session Agent cache (self._cache): every cron run builds
-        and discards its own Agent, so job run N+1 never inherits any
-        conversation state from run N or from any interactive chat session.
-        The per-job session id keeps run-lock / work_dir / approval-mode
-        bookkeeping scoped to the job (one entry per job, not one per run),
-        but is CRON_SESSION_PREFIX-tagged so it's excluded from
-        list_sessions() (the chat sidebar).
-
-        ``permission_mode`` / ``work_dir`` are the job's mandate (see
-        ``CronJob``). Empty / None clears any earlier per-job override so the
-        job runs on the gateway defaults.
-        """
-        await self._ensure_initialized()
-        session_id = f"{CRON_SESSION_PREFIX}{job_id}"
-        if permission_mode:
-            self.set_session_approval_mode(session_id, permission_mode, user_id)
-        else:
-            self._session_approval_modes.pop(self._sk(session_id, user_id), None)
-        if work_dir:
-            self.set_session_work_dir(session_id, work_dir, user_id)
-        else:
-            self._session_work_dirs.pop(self._sk(session_id, user_id), None)
-
-        lock = self._get_session_lock(session_id, user_id)
-        if lock.locked():
-            raise RuntimeError(f"Job '{job_id}' already has an active run.")
-
-        async with lock:
-            agent = await asyncio.wait_for(
-                asyncio.to_thread(self._build_agent, session_id, user_id),
-                timeout=_AGENT_BUILD_TIMEOUT_S,
-            )
-            agent.add_session_guidance(scheduled_job_guidance(job_id))
-            try:
-                if self._workspace:
-                    await asyncio.to_thread(self._workspace.set_user, user_id)
-
-                response = await agent.run(
-                    message,
-                    config=self._run_config_for_session(session_id, RunSource.cron),
-                )
-                return ChatResult(
-                    content=(response.content or "").strip(),
-                    tool_calls=len(response.tools) if response.tools else 0,
-                    session_id=session_id,
-                    user_id=user_id,
-                    metrics=extract_metrics(agent),
-                    turn_usage=turn_usage_payload(agent),
-                )
-            except Exception as e:
-                logger.error(f"AgentService.run_cron error (job={job_id}): {e}")
-                return ChatResult(
-                    content=f"Error: {e}",
-                    tool_calls=0,
-                    session_id=session_id,
-                    user_id=user_id,
+                    error=str(e),
                 )
 
     async def run_goal(
@@ -1560,6 +1474,7 @@ class AgentService:
         include_usage: bool = True,
         channel: Optional[str] = None,
         automated: bool = False,
+        input_meta: Optional[Dict[str, Any]] = None,
     ) -> ChatResult:
         """Send a message and stream the response via callbacks.
 
@@ -1579,6 +1494,10 @@ class AgentService:
             on_thinking: Called with each reasoning delta
             media: Pasted/attached images from the web UI (same routing as IM).
             channel: The IM channel this turn came from; None = web.
+            automated: No person wrote ``message`` (a job report, a scheduled
+                run); the turn is logged as automated.
+            input_meta: Extra fields for this turn's log entry (e.g. the
+                scheduled job that delivered it).
 
         Returns:
             ChatResult with accumulated content + metrics
@@ -1598,7 +1517,7 @@ class AgentService:
                 message, session_id, user_id,
                 source, on_content, on_tool_call, on_tool_result, on_thinking,
                 owner, media, include_usage=include_usage, channel=channel,
-                automated=automated,
+                automated=automated, input_meta=input_meta,
             )
 
     async def _chat_stream_impl(
@@ -1617,6 +1536,7 @@ class AgentService:
         include_usage: bool = True,
         channel: Optional[str] = None,
         automated: bool = False,
+        input_meta: Optional[Dict[str, Any]] = None,
     ) -> ChatResult:
         """Internal stream implementation (called under per-session lock)."""
         await self._ensure_initialized()
@@ -1645,6 +1565,7 @@ class AgentService:
                     channel=channel,
                     stream_intermediate_steps=True,
                     automated=automated,
+                    input_meta=input_meta,
                 ),
                 images=run_images,
                 audio=run_audio,
@@ -1700,6 +1621,7 @@ class AgentService:
                 tool_calls=0,
                 session_id=session_id,
                 user_id=user_id,
+                error=str(e),
             )
 
     # ============== Session management ==============
@@ -2172,7 +2094,7 @@ class AgentService:
         One attempt per session per process: a failed call leaves the
         first-message fallback the sidebar already shows.
         """
-        if session_id.startswith(CRON_SESSION_PREFIX) or not answer.strip():
+        if not answer.strip():
             return
         key = (owner or "", session_id)
         if key in self._titled:

@@ -33,7 +33,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from agentica.config import AGENTICA_LOG_LEVEL
-from agentica.cron.types import CronRunOutput
 from agentica.shell_hooks import install_hook_egress, load_shell_hooks_config
 from agentica.utils.log import enable_process_file_logging, logger
 from . import accounts, auth, deps, runtime
@@ -47,6 +46,7 @@ from .card_page import (
 from agentica.version import __version__
 from .config import settings
 from .services.agent_service import AgentService
+from .services.scheduler_service import GatewayCronRunner, GatewayScheduler
 from .services.channel_manager import ChannelManager
 from .services.im_bot import ImBotController
 from .services.router import MessageRouter
@@ -170,33 +170,24 @@ async def lifespan(app: FastAPI):
     deps.channel_manager = ChannelManager()
     deps.message_router = MessageRouter(default_agent="main")
 
-    # Cron scheduler — uses the same SDK cron module (agentica.cron.*) and
-    # jobs.json store as the CLI, never the OS crontab. Gated by the same
-    # `cron.enabled` config.yaml setting the CLI's `/cron daemon on` toggles,
-    # so both surfaces share one on/off switch.
-    from agentica.cron.scheduler import tick as cron_tick
+    # Scheduled tasks — the same SDK cron store (agentica.cron.*) as the CLI,
+    # never the OS crontab. Each run is delivered into a conversation (see
+    # services/scheduler_service.py). On/off is the same `cron.enabled`
+    # setting the CLI's `/cron daemon on` toggles; the web page flips it live.
     from agentica.config.profiles import get_setting
 
-    cron_runner = _GatewayAgentRunner(agent_svc)
-    deps.cron_runner = cron_runner
+    async def _deliver_im(owner, session_id, text, meta):
+        if deps.im_bot is None:
+            return None
+        return await deps.im_bot.deliver_scheduled_run(owner, session_id, text, meta)
+
+    deps.scheduler = GatewayScheduler(GatewayCronRunner(agent_svc, deliver_im=_deliver_im))
+    deps.cron_runner = deps.scheduler.runner
     deps.main_loop = asyncio.get_running_loop()
-
-    cron_task = None
     if get_setting("cron.enabled", False):
-        interval = int(get_setting("cron.interval", 60) or 60)
-
-        async def _cron_ticker():
-            while True:
-                await asyncio.sleep(interval)
-                try:
-                    await cron_tick(agent_runner=cron_runner)
-                except Exception as e:
-                    logger.error(f"Cron tick error: {e}")
-
-        cron_task = asyncio.create_task(_cron_ticker())
-        logger.info(f"Cron scheduler started ({interval}s tick)")
+        deps.scheduler.start()
     else:
-        logger.info("Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to enable)")
+        logger.info("Cron scheduler disabled (turn it on from the Automations page, or set `cron.enabled: true`)")
 
     # Channels (IM integrations: WeChat / WeCom / Feishu / QQ / ... ). One
     # gateway per data root owns them; a standby takes over when it exits.
@@ -269,12 +260,7 @@ async def lifespan(app: FastAPI):
         parent_task.cancel()
     if im_task is not None:
         im_task.cancel()
-    if cron_task is not None:
-        cron_task.cancel()
-        try:
-            await cron_task
-        except (asyncio.CancelledError, Exception):
-            pass
+    await deps.scheduler.shutdown()
     if deps.im_bot:
         await deps.im_bot.stop()
     if deps.channel_manager:
@@ -446,6 +432,8 @@ async def post_card_hook(request: Request) -> JSONResponse:
 @app.get("/chat/{full_path:path}", response_class=HTMLResponse)
 @app.get("/traces", response_class=HTMLResponse)
 @app.get("/traces/{full_path:path}", response_class=HTMLResponse)
+@app.get("/automations", response_class=HTMLResponse)
+@app.get("/automations/{full_path:path}", response_class=HTMLResponse)
 @app.get("/users", response_class=HTMLResponse)
 @app.get("/users/{full_path:path}", response_class=HTMLResponse)
 @app.get("/assistant", response_class=HTMLResponse)
@@ -454,7 +442,7 @@ async def post_card_hook(request: Request) -> JSONResponse:
 @app.get("/plugins/{full_path:path}", response_class=HTMLResponse)
 @app.get("/login", response_class=HTMLResponse)
 async def web_spa(full_path: str = ""):
-    """Serve the SPA shell. Client router owns /chat, /traces, /users,
+    """Serve the SPA shell. Client router owns /chat, /traces, /automations, /users,
     /assistant, /plugins and /login.
 
     ``/login`` is outside the token gate (see ``auth._OPEN_PATHS``) — it is the
@@ -913,40 +901,6 @@ async def _process_channel_batch(messages: list, session_id: str) -> None:
 
 
 # ============== Scheduler agent runner ==============
-
-# TaskRun.usage keys, picked out of ChatResult.turn_usage.
-_CRON_USAGE_KEYS = (
-    "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "api_calls", "cost_usd",
-)
-
-
-class _GatewayAgentRunner:
-    """Adapts AgentService to the AgentRunner protocol expected by JobExecutor.
-
-    Runs each job on its own independent Agent (see
-    AgentService.run_cron()) — never the shared interactive-chat cache — so
-    scheduled jobs neither leak context between runs nor show up in the chat
-    sidebar.
-    """
-
-    def __init__(self, agent_svc: AgentService):
-        self._svc = agent_svc
-
-    async def run(self, prompt: str, context: Optional[dict] = None) -> CronRunOutput:
-        ctx = context or {}
-        job_id = ctx.get("job_id", str(uuid4()))
-        user_id = ctx.get("user_id", settings.default_user_id)
-
-        result = await self._svc.run_cron(
-            message=prompt, job_id=job_id, user_id=user_id,
-            permission_mode=ctx.get("permission_mode"),
-            work_dir=ctx.get("work_dir"),
-        )
-        usage = None
-        if result.turn_usage:
-            usage = {k: result.turn_usage.get(k) for k in _CRON_USAGE_KEYS}
-        return CronRunOutput(content=result.content, usage=usage)
-
 
 # ============== Entry point ==============
 

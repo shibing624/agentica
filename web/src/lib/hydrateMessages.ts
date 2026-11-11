@@ -42,12 +42,14 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       let content = String(e.content || "");
       if (e.automated === true) {
         closeAssistant();
+        const job = e.cron_job as { id?: unknown; name?: unknown } | undefined;
         msgs.push({
           role: "user",
           automated: true,
           content,
           ts: tsOf(e),
           ...(uuidOf(e) ? { uuid: uuidOf(e) } : {}),
+          ...(job && typeof job.id === "string" ? { cronJob: { id: job.id, name: String(job.name || "") } } : {}),
         });
         continue;
       }

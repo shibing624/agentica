@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from
 import { setUnauthorizedHandler } from "./api";
 import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
+const AutomationsPage = lazy(() => import("./pages/AutomationsPage").then((m) => ({ default: m.AutomationsPage })));
 const TracesPage = lazy(() => import("./pages/TracesPage").then((m) => ({ default: m.TracesPage })));
 import { AppLayout } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -52,6 +53,7 @@ export function App() {
             <Route element={<AppLayout />}>
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/traces" element={<TracesPage />} />
+              <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/users" element={<SettingsRoute tab="users" />} />
               <Route path="/assistant" element={<SettingsRoute tab="assistant" />} />
               <Route path="/plugins" element={<SettingsRoute tab="plugins" />} />

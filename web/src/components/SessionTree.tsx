@@ -9,7 +9,7 @@ import {
 } from "../sessions";
 import {
   IconArchive, IconChevronRight, IconCopyOutline, IconFolder, IconFork, IconMore, IconPencil, IconPin, IconPlus,
-  IconSpinner, IconTrash,
+  IconClock, IconSpinner, IconTrash,
 } from "../icons";
 import {
   getState, normDir, projectIdForDir, projectNameForDir, setState, showToast, useAppState, type Session,
@@ -29,6 +29,11 @@ const HITS_PREVIEW = 3;
 
 export function SessionTree() {
   const s = useAppState();
+  // Conversations an automation delivers into (not ended), for the row mark.
+  const automatedSessions = useMemo(
+    () => new Set(s.cronJobs.filter((j) => j.session_id && j.status !== "completed").map((j) => j.session_id)),
+    [s.cronJobs],
+  );
   const S = useStrings();
   const nav = useNavigate();
   const { pathname, search } = useLocation();
@@ -293,6 +298,9 @@ export function SessionTree() {
                       </span>
                     )}
                   </div>
+                  {editingSession !== id && automatedSessions.has(id) && (
+                    <span className="s-auto-mark" title={S.automation.sessionMark}><IconClock /></span>
+                  )}
                   {editingSession !== id && sourceBadge && (
                     <span className={"s-source" + (sourceBadge.isIm ? " im" : "")}
                           title={sessionSourceTitle(session.source, session.origin, S.chat.sourceLabels, S.chat)}>

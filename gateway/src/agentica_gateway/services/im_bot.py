@@ -47,6 +47,7 @@ from ..card_page import CardItem, CardRegistry, gateway_public_url, phone_card_b
 from ..channels.base import Channel, ChannelType, Message
 from ..config import settings
 from . import chat_images, live_turn
+from .agent_service import ChatResult
 from .im_files import collect_auto_push_files, format_file_size
 
 PENDING_TTL_SECS = 300.0
@@ -162,6 +163,10 @@ class QueuedTurn:
     # Other chats bound to the same session that also get the report's answer.
     also_notify: List["ImChatState"] = field(default_factory=list)
     from_queue: bool = True
+    # A scheduled task's run: the job named on the turn's log entry, and where
+    # the scheduler waits for the run's result.
+    input_meta: Optional[Dict[str, Any]] = None
+    done: Optional["asyncio.Future"] = None
 
 
 @dataclass
@@ -1257,6 +1262,35 @@ class ImBotController:
             self._turn_tasks[session_id] = asyncio.create_task(self._drain_session_queue(session_id, q))
         return True
 
+    async def deliver_scheduled_run(
+        self, owner: str, session_id: str, text: str, input_meta: Dict[str, Any],
+    ) -> Optional[Any]:
+        """Run a scheduled task's turn in the IM chats bound to this conversation.
+
+        Queued behind whatever those chats are doing, answered on the phone,
+        and logged like any other scheduled run. Returns the run's
+        ``ChatResult``, or None — the caller then runs it on the web — when no
+        connected chat of this gateway is on the conversation.
+        """
+        if self._agent_service is None or self._channel_manager is None or owner != self._user_id():
+            return None
+        chats = [
+            st for st in self._states.values()
+            if st.session_id == session_id and self._channel_connected(st.channel)
+        ]
+        if not chats:
+            return None
+        done: asyncio.Future = asyncio.get_running_loop().create_future()
+        q = self._queued_turns.setdefault(session_id, asyncio.Queue())
+        await q.put(QueuedTurn(
+            chats[0], chats[0].work_dir, session_id, text, automated=True, also_notify=chats[1:],
+            input_meta=input_meta, done=done,
+        ))
+        worker = self._turn_tasks.get(session_id)
+        if worker is None or worker.done():
+            self._turn_tasks[session_id] = asyncio.create_task(self._drain_session_queue(session_id, q))
+        return await done
+
     def _channel_connected(self, channel: ChannelType) -> bool:
         ch = self._channel_manager.get_channel(channel) if self._channel_manager is not None else None
         return ch is not None and ch.is_connected
@@ -1434,11 +1468,18 @@ class ImBotController:
             for item in batch:
                 media.extend(item.media)
             try:
-                await self._run_gateway_turn(
+                result = await self._run_gateway_turn(
                     last.state, last.work_dir, last.session_id,
                     "\n\n".join(item.text for item in batch if item.text), media,
                     automated=batch[0].automated, also_notify=batch[0].also_notify,
+                    input_meta=batch[0].input_meta,
                 )
+                if batch[0].done is not None and not batch[0].done.done():
+                    batch[0].done.set_result(result)
+            except BaseException as exc:
+                if batch[0].done is not None and not batch[0].done.done():
+                    batch[0].done.set_exception(exc if isinstance(exc, Exception) else RuntimeError("cancelled"))
+                raise
             finally:
                 for item in batch:
                     if item.from_queue:
@@ -1464,9 +1505,11 @@ class ImBotController:
         *,
         automated: bool = False,
         also_notify: Optional[List[ImChatState]] = None,
-    ) -> None:
+        input_meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Any]:
+        """Run one turn of an IM chat; returns its ``ChatResult`` (None if it did not run)."""
         if self._agent_service is None:
-            return
+            return None
         uid = self._user_id()
         self._agent_service.set_session_work_dir(session_id, work_dir, owner=uid)
 
@@ -1515,6 +1558,9 @@ class ImBotController:
         self._agent_service.set_session_ask_callback(session_id, _ask_callback, owner=uid)
 
         turn = live_turn.start(session_id, owner=uid, user_message="" if automated else text)
+        if input_meta and input_meta.get("cron_job"):
+            turn.cron_job = input_meta["cron_job"]
+            turn.automated_message = text
         sub_q = turn.subscribe()
         done_event = asyncio.Event()
         started = time.monotonic()
@@ -1606,6 +1652,7 @@ class ImBotController:
                     include_usage=False,
                     channel=state.channel.value,
                     automated=automated,
+                    input_meta=input_meta,
                 )
             else:
                 result = await self._agent_service.chat(
@@ -1619,7 +1666,7 @@ class ImBotController:
         except Exception as exc:
             turn.finish("failed")
             await self._reply(state, f"❌ 执行出错：{exc}")
-            return
+            return ChatResult(content=f"Error: {exc}", session_id=session_id, user_id=uid, error=str(exc))
         finally:
             done_event.set()
             turn.unsubscribe(sub_q)
@@ -1638,7 +1685,11 @@ class ImBotController:
             # The phone is the reason this turn ran; never leave it silent.
             reply = "agent 处理完了，但没有给出文字结论，可以发消息追问。"
         if reply:
-            header = "🔔 后台任务已结束\n" if automated else ""
+            job = (input_meta or {}).get("cron_job")
+            if job:
+                header = f"⏰ 定时任务「{job.get('name') or job.get('id')}」\n"
+            else:
+                header = "🔔 后台任务已结束\n" if automated else ""
             if state.verbose or elapsed >= 10.0 or (result.tool_calls and result.tool_calls >= 2):
                 tools_part = f" · {result.tool_calls} tools" if result.tool_calls else ""
                 header += f"[{short} · {_fmt_elapsed(elapsed)}{tools_part}]\n"
@@ -1659,6 +1710,7 @@ class ImBotController:
 
         if reply:
             await self._push_deliverable_files(state, result.content or "", work_dir)
+        return result
 
     async def _push_deliverable_files(
         self,

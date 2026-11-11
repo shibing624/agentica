@@ -565,3 +565,12 @@ export function FileTypeIcon({
     </svg>
   );
 }
+export const IconPlay = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round"><path d="M5 3.4v9.2a.5.5 0 00.76.43l7.2-4.6a.5.5 0 000-.86l-7.2-4.6A.5.5 0 005 3.4z" /></S>
+);
+export const IconPause = () => (
+  <S strokeWidth="1.4" strokeLinecap="round"><path d="M5.75 3.5v9M10.25 3.5v9" /></S>
+);
+export const IconSparkle = () => (
+  <S strokeWidth="1.3" strokeLinejoin="round"><path d="M8 2l1.3 3.7L13 7l-3.7 1.3L8 12l-1.3-3.7L3 7l3.7-1.3zM12.5 11l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" /></S>
+);

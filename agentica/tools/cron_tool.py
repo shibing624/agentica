@@ -15,7 +15,7 @@ from agentica.agent.permissions import PERMISSION_MODES, validate_permission_mod
 from agentica.tools.base import Tool
 from agentica.tools.decorators import tool
 from agentica.tools.helpers import tool_result
-from agentica.cron.types import validate_deliver
+from agentica.cron.types import JOB_TARGETS, validate_deliver, validate_target
 from agentica.cron.jobs import (
     CronJob,
     create_job,
@@ -28,6 +28,7 @@ from agentica.cron.jobs import (
     resume_job,
     parse_schedule,
     schedule_to_human,
+    CronSchedule,
     compute_next_run_at_ms,
 )
 
@@ -92,29 +93,35 @@ def _format_job(job: CronJob) -> dict:
         "permission_mode": job.permission_mode,
         "work_dir": job.work_dir,
         "paused_reason": job.paused_reason,
+        "target": job.target,
+        "session_id": job.session_id,
     }
 
 
 _CRONJOB_DESCRIPTION = """Manage the user's scheduled (cron) jobs with a single tool. Prefer this over editing cron files by hand.
 
 Actions:
-- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/timeout_seconds/max_retries/permission_mode.
+- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/target/timeout_seconds/max_retries/permission_mode.
 - action='list'    -> list all jobs with their id, schedule, status and next run time.
 - action='runs'    -> show recent execution history (optionally for one job_id) to see the effect of past runs.
 - action='update'  -> change an existing job's prompt/schedule/name/etc. Requires job_id.
 - action='pause' / 'resume' -> disable/enable an existing job. Requires job_id. Pass reason when pausing
                      a job because it cannot proceed unattended; the user is shown it.
 - action='remove'  -> delete a job. Requires job_id.
-- action='run'     -> execute a job ONCE right now and return its result (a trial run to verify it works). Requires job_id.
+- action='run'     -> run a job ONCE right now (a trial run). Requires job_id. It is queued into the job's
+                     conversation and runs once that conversation is idle; read the result there or via 'runs'.
 
 A job runs every time under this session's permission tier and working directory, captured at create.
 permission_mode may only make it stricter: 'ask' gives a trial job that reads and reports but has every
 write, mutating command and network call denied (nobody is there to approve).
 
-Jobs run in a fresh session with no current-chat context, so the prompt must be fully self-contained.
-Results are kept locally only (see action='runs'); nothing is sent to chat channels, so deliver is
-always 'local'.
-Scheduled jobs run autonomously with no user present; write prompts that need no clarification.
+Every run is delivered as an automatic message into a conversation, and the answer stays there for the
+user to read and follow up on. target picks the conversation:
+- 'session'  -> this conversation: each run sees its history (good for "remind me here", digests).
+- 'new_once' -> a conversation created on the first run, reused by every later run.
+- 'new'      -> a fresh conversation for every run (no carry-over between runs).
+Write the prompt so it still makes sense when it arrives later with nobody present to clarify.
+deliver is always 'local' (no push to chat channels).
 
 Not for waiting on a job this session started (training, eval, build, tmux/nohup): a background
 execute watcher on its exit marker costs no tokens and reports back here; a cron poll runs a full
@@ -142,7 +149,9 @@ def _do_cronjob(
     retry_delay_ms: Optional[int] = None,
     permission_mode: Optional[str] = None,
     reason: Optional[str] = None,
+    target: Optional[str] = None,
     mandate: Optional[tuple[str, Optional[str]]] = None,
+    caller_session_id: Optional[str] = None,
 ) -> str:
     """Pure business implementation of the cronjob tool (no immediate-run path).
 
@@ -153,7 +162,9 @@ def _do_cronjob(
 
     ``mandate`` is ``(permission_mode, work_dir)`` of the agent making the
     call, or None when there is none (HTTP route, SDK call without an agent).
-    It is never a model-supplied value.
+    It is never a model-supplied value. ``caller_session_id`` is that agent's
+    conversation, what ``target='session'`` delivers into; also never from the
+    model.
     """
     try:
         normalized = (action or "").strip().lower()
@@ -171,6 +182,8 @@ def _do_cronjob(
                 retry_delay_ms,
                 permission_mode,
                 mandate,
+                target or "new_once",
+                caller_session_id,
             )
         if normalized == "list":
             return _action_list(user_id)
@@ -203,6 +216,10 @@ def _do_cronjob(
                 retry_delay_ms,
                 permission_mode,
                 mandate,
+                target,
+                caller_session_id,
+                job,
+                timezone,
             )
 
         return _to_json({"success": False, "error": f"Unknown action '{action}'"})
@@ -226,6 +243,7 @@ def cronjob(
     retry_delay_ms: Optional[int] = None,
     permission_mode: Optional[str] = None,
     reason: Optional[str] = None,
+    target: Optional[str] = None,
 ) -> str:
     """Unified cron job management tool. See decorator description for actions."""
     return _do_cronjob(
@@ -242,6 +260,7 @@ def cronjob(
         retry_delay_ms=retry_delay_ms,
         permission_mode=permission_mode,
         reason=reason,
+        target=target,
     )
 
 
@@ -280,6 +299,8 @@ def _action_create(
     retry_delay_ms: Optional[int],
     permission_mode: Optional[str],
     mandate: Optional[tuple[str, Optional[str]]],
+    target: str,
+    caller_session_id: Optional[str],
 ) -> str:
     if not prompt:
         return _to_json({"success": False, "error": "prompt is required for create"})
@@ -304,6 +325,8 @@ def _action_create(
         retry_delay_ms=retry_delay_ms or 60000,
         permission_mode=job_mode,
         work_dir=job_work_dir,
+        target=target,
+        session_id=caller_session_id if target == "session" else None,
     )
     return _to_json({
         "success": True,
@@ -389,6 +412,10 @@ def _action_update(
     retry_delay_ms: Optional[int],
     permission_mode: Optional[str],
     mandate: Optional[tuple[str, Optional[str]]],
+    target: Optional[str],
+    caller_session_id: Optional[str],
+    job: CronJob,
+    timezone: Optional[str] = None,
 ) -> str:
     updates: dict = {}
     if prompt is not None:
@@ -411,8 +438,18 @@ def _action_update(
         # work_dir is not moved: an edit of the schedule or prompt from another
         # directory must not silently relocate the job.
         updates["permission_mode"], _ = _resolve_job_mandate(permission_mode, mandate)
-    if schedule is not None:
-        parsed = parse_schedule(schedule)
+    if target is not None and target != job.target:
+        # Into a conversation: the one the job already lands in, else the
+        # editing one. Away from one: later runs make their own.
+        session_id = (job.session_id or caller_session_id or "") if target == "session" else ""
+        updates["target"] = validate_target(target, session_id)
+        updates["session_id"] = session_id
+    if timezone is not None:
+        updates["timezone"] = timezone
+    if schedule is not None or timezone is not None:
+        parsed = parse_schedule(schedule) if schedule is not None else job.schedule
+        if isinstance(parsed, CronSchedule):
+            parsed = CronSchedule(expression=parsed.expression, timezone=timezone or job.timezone)
         updates["schedule"] = parsed.to_dict()
         next_run = compute_next_run_at_ms(parsed)
         updates["next_run_at_ms"] = next_run or 0
@@ -435,12 +472,13 @@ class CronTool(Tool):
         agent = Agent(tools=[CronTool()])
 
     Args:
-        job_runner: optional ``(CronJob) -> dict`` callback that executes a job
-            once synchronously and returns the ``execute_job`` result dict. When
-            provided (the interactive CLI wires this), ``action='run'`` performs a
-            real immediate trial run and returns its output. When omitted (SDK /
-            unattended usage), ``action='run'`` falls back to marking the job due
-            on the next scheduler tick.
+        job_runner: optional ``(CronJob) -> dict`` callback for ``action='run'``.
+            It returns an ``execute_job``-shaped dict: the finished run (the CLI
+            runs it in place), or ``status='queued'`` when the run was handed to
+            the job's conversation and will happen there (the gateway, where the
+            conversation may be this very one and busy with this call). When
+            omitted (SDK / unattended usage), ``action='run'`` falls back to
+            marking the job due on the next scheduler tick.
         owner: when set (gateway web/chat), create/list/edit are scoped to this
             account. The model cannot name a different ``user_id``.
     """
@@ -481,6 +519,7 @@ class CronTool(Tool):
         retry_delay_ms: Optional[int] = None,
         permission_mode: Optional[str] = None,
         reason: Optional[str] = None,
+        target: Optional[str] = None,
         agent: Any = None,
     ) -> str:
         normalized = (action or "").strip().lower()
@@ -513,19 +552,33 @@ class CronTool(Tool):
             retry_delay_ms=retry_delay_ms,
             permission_mode=permission_mode,
             reason=reason,
+            target=target,
             # ``agent`` is injected by the runtime (FunctionCall._build_args),
             # never part of the schema: the job's mandate is the calling
-            # session's tier and directory, not something the model names.
+            # session's tier and directory, and target='session' means the
+            # calling session — not something the model names.
             mandate=(agent.tool_config.permission_mode, agent.work_dir) if agent is not None else None,
+            caller_session_id=agent.session_id if agent is not None else None,
         )
 
     def _run_now(self, job_id: str, job: CronJob) -> str:
-        """Execute a job once, synchronously, and return its result."""
+        """Run a job once now: its result, or where the queued run will land."""
         try:
             result = self._job_runner(job) or {}
         except Exception as e:  # surface as tool error, do not crash the turn
             return _to_json({"success": False, "error": f"Immediate run failed: {e}"})
         status = result.get("status")
+        if status == "queued":
+            return _to_json({
+                "success": True,
+                "job_id": job_id,
+                "run": result,
+                "message": (
+                    f"Job '{job.name}' is queued to run now in its conversation "
+                    f"({result.get('session_id') or 'a new one'}). It starts once that conversation is "
+                    "idle; its answer appears there and in action='runs'."
+                ),
+            })
         # The sub-agent's full response text can be large; returning it verbatim
         # stuffs the parent turn's context. Keep a bounded preview plus length /
         # truncated flags so the LLM knows the run happened and how big it was,

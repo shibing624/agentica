@@ -103,10 +103,19 @@ class CronJobCreateRequest(BaseModel):
     max_retries: int = 0
     retry_delay_ms: int = 60000
     permission_mode: Optional[str] = None
-    # When True, the job is triggered once immediately after creation so the
-    # user can verify the prompt/schedule actually work before waiting for
-    # the first scheduled tick.
+    # Which conversation runs land in: "session" (``session_id``, a
+    # conversation of the caller), "new_once" or "new".
+    target: str = "new_once"
+    session_id: Optional[str] = None
+    # Directory a conversation the job creates works in (its workspace).
+    work_dir: Optional[str] = None
+    # When True, the job is started once right after creation so the user
+    # can see it work before waiting for the first scheduled tick.
     validate_run: bool = False
+
+
+class SchedulerToggleRequest(BaseModel):
+    enabled: bool
 
 
 class PolishPromptRequest(BaseModel):
@@ -153,6 +162,9 @@ class CronJobUpdateRequest(BaseModel):
     name: Optional[str] = None
     prompt: Optional[str] = None
     schedule: Optional[str] = None
+    timezone: Optional[str] = None
+    target: Optional[str] = None
+    work_dir: Optional[str] = None
     deliver: Optional[str] = None
     timeout_seconds: Optional[float] = None
     max_retries: Optional[int] = None
