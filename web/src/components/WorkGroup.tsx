@@ -27,6 +27,7 @@ const ChatMarkdown = lazy(() => import("./ChatMarkdown").then((m) => ({ default:
 function thinkLabel(
   streaming: boolean,
   S: { chat: { thinking: string; thinkingNow: string; stopping: string; reconnecting: string; preparingAttachments: string } },
+  idle: string = S.chat.thinkingNow,
 ): string {
   if (!streaming) return S.chat.thinking;
   const st = getState();
@@ -34,7 +35,7 @@ function thinkLabel(
   if (live?.cancelling) return S.chat.stopping;
   if (live?.reconnecting) return S.chat.reconnecting;
   if (live?.preparing) return S.chat.preparingAttachments;
-  return S.chat.thinkingNow;
+  return idle;
 }
 
 const CATEGORY_ICON: Record<Category, () => JSX.Element> = {
@@ -100,7 +101,9 @@ export function WorkGroup({
 }) {
   const S = useStrings();
   const { running: unfinished } = workSummary(items, Date.now(), live);
-  const running = live && unfinished;
+  // The tail group of a live turn stays "running" between tool batches too:
+  // the turn is waiting on the next LLM step, which reads as analysing.
+  const running = live && (unfinished || isLast);
   const containsPending = !!pendingToolCallId && items.some(
     (p) => p.kind === "tool" && p.toolCallId === pendingToolCallId,
   );
@@ -144,43 +147,25 @@ export function WorkGroup({
     return null;
   });
 
-  if (live) {
-    // Between tool batches on CoT-hiding models (Claude / Gemini / GPT-5), all
-    // issued tools have settled while the turn still waits on the next LLM step.
-    const waitingNextStep = isLast && !unfinished && !containsPending;
-    return (
-      <div ref={rootRef} className="wg wg-live">
-        <div className="wg-body wg-flat">
-          {rows}
-          {waitingNextStep && (
-            <div className="wr running wr-live-wait" aria-live="polite">
-              <div className="wr-line">
-                <div className="wr-head wr-static">
-                  <span className="wr-icon"><IconSpinner /></span>
-                  <span className="wr-title shimmer">{thinkLabel(true, S)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
+  // dsh standard mode: a live group is one folded line — the current step's
+  // category plus its detail (tool argument or latest thought) — and opens
+  // to the full rows on click.
   let title: string;
   let summary = "";
   let icon: JSX.Element;
   if (running) {
-    const tool = runningTool(items);
+    const tool = unfinished ? runningTool(items) : undefined;
     if (tool) {
-      title = S.chat.actRunning[toolCategory(tool.name)];
+      const cat = toolCategory(tool.name);
+      title = S.chat.actRunning[cat];
       summary = toolSummary(tool, S);
+      icon = <CategoryIcon cat={cat} />;
     } else {
-      const think = [...items].reverse().find((p) => p.kind === "think");
-      title = thinkLabel(true, S);
-      summary = think && think.kind === "think" ? lastLine(think.text) : "";
+      const last = items[items.length - 1];
+      title = thinkLabel(true, S, S.chat.analyzingNow);
+      summary = last?.kind === "think" ? latestCompletedParagraphFirstLine(last.text) : "";
+      icon = <IconBrain />;
     }
-    icon = <IconSpinner />;
   } else {
     title = doneTitle(items, S.chat);
     icon = <CategoryIcon cat={groupCategories(items)[0] || "thinking"} />;
@@ -210,11 +195,6 @@ export function WorkGroup({
       )}
     </div>
   );
-}
-
-function lastLine(text: string): string {
-  const lines = text.split("\n").map((l) => l.replace(/\*\*|__|`/g, "").trim()).filter(Boolean);
-  return lines.length ? lines[lines.length - 1] : "";
 }
 
 /** First line of the latest paragraph that is already closed by a blank line. */
