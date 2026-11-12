@@ -267,6 +267,10 @@ export function splitWindowPreamble(content: string): { notes: string; notesPath
     if (peeled === rest) break;
     rest = peeled;
   }
+  // Logs written before the fix carry the harness's own remaining-tokens
+  // fragment after the question (it was folded in, then the window rolled).
+  const tail = rest.lastIndexOf(`\n\n${WINDOW_OPEN}`);
+  if (tail >= 0 && rest.endsWith("</context_window>")) rest = rest.slice(0, tail);
   return { notes: (m?.[2] || "").trim(), notesPath: m?.[1] || "", rest };
 }
 

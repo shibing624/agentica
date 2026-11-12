@@ -532,11 +532,14 @@ class PromptsMixin:
             lines.append("\n" + self.get_json_output_prompt())
 
         # Per run, so below the cache marker: the same session is reached from
-        # the web page, the CLI and IM channels turn by turn.
+        # the web page, the CLI and IM channels turn by turn. It only names the
+        # channel; how a channel renders Markdown is not ours to assert (WeChat
+        # renders it, and telling the model otherwise made it hand-roll
+        # pseudo-tables out of spaces and symbols).
         if self._run_channel:
             lines.append(
                 f"\nThis turn came in over the `{self._run_channel}` IM channel: your reply is "
-                "delivered as chat messages, which show Markdown tables and headings as raw text."
+                "delivered as chat messages."
             )
 
         # Datetime at the very end — day precision for prefix-cache friendliness

@@ -705,7 +705,13 @@ class ImBotController:
         mode = settings_routes.approval_mode_pref(uid) or "auto"
         lines.append(f"  审批：{mode}" + ("（从不询问，不会出现审批卡片）" if mode == "allow-all" else ""))
         if phone_card_base_url(settings.host, settings.port) is None:
-            lines.append("  卡片链接：未启用（网关只监听本机；设置 AGENTICA_PUBLIC_URL 后手机可点开）")
+            # The card page posts the decision back to this gateway, so it needs
+            # an address the phone can reach; a static share link (publish_*)
+            # cannot take the click.
+            lines.append(
+                "  审批卡片链接：不发（卡片要把点击提交回本机网关，手机连不到 127.0.0.1）；"
+                "审批/提问直接回数字即可。要发链接需让手机能访问网关，并设置 AGENTICA_PUBLIC_URL"
+            )
         lines.append(f"  汇报：{'详细 (/verbose)' if state.verbose else '简洁 (/concise)'}")
         bg_jobs = self._session_bg_jobs(state.session_id, state.work_dir)
         running_bg = [j for j in bg_jobs if j.get("status") == "running"]

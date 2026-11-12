@@ -21,6 +21,7 @@ import { askConfirm, showToast } from "../store";
 import { FileTypeIcon, IconChevronDown, IconCopy, IconFinder, IconFolder, IconRefresh, IconTerminal, IconUpload } from "../icons";
 import { PlainText, PreviewActions, type ViewMode } from "./PreviewActions";
 import { SheetView } from "./SheetView";
+import { PreviewableImage } from "../components/ImageLightbox";
 
 const EXTERNAL_REF_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -197,7 +198,7 @@ export function FilePreview({
       </div>
       <div className={"ws-preview-body" + (view === "code" || view === "text" ? " source" : "")
         + (view === "table" || preview.kind === "workbook" ? " sheet" : "")}>
-        {preview.kind === "image" && <img src={src} alt={preview.name} />}
+        {preview.kind === "image" && <PreviewableImage className="ws-preview-img" src={src} alt={preview.name} />}
         {preview.kind === "pdf" && <iframe src={src} title={preview.name} />}
         {preview.kind === "workbook" && <SheetView key={refreshKey} name={preview.name} src={src} />}
         {view === "table" && hasText && (

@@ -155,5 +155,59 @@ class TestRunnerUsesCalibratedCount(unittest.TestCase):
         self.assertFalse(self._run(messages, agent, model, cm).await_count)
 
 
+class TestRemainingReminderSkipsARollover(unittest.TestCase):
+    """The 25%-left reminder is folded into the trailing user turn; when the
+    same request rolls the window over, that turn becomes the new window's
+    first user row and is written back to the log, so the reminder showed up
+    in the user's own bubble. A rollover's preamble already states the
+    tokens left."""
+
+    REMINDER = "tokens left in this context window."
+
+    def _setup(self, fill_ratio: float):
+        from agentica.utils.tokens import count_tokens
+
+        question = "fix the bug"
+        messages = [
+            Message(role="user", content=" ".join(f"w{i}" for i in range(3000))),
+            Message(role="assistant", content="ok"),
+            Message(role="user", content=question),
+        ]
+        local = count_tokens(messages, None, "gpt-4o")
+        agent, model, cm = TestRunnerUsesCalibratedCount._agent(None, window=int(local / fill_ratio))
+        cm.fallback_claimed = True
+        return messages, agent, model, cm, question
+
+    def _run(self, messages, agent, model, cm):
+        from agentica.runner import Runner
+
+        seen = {}
+
+        async def cut(msgs, **_kw):
+            seen["trailing"] = msgs[-1].content
+            return False
+
+        with patch.object(cm, "auto_compact", side_effect=cut) as compact:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+        return compact, seen
+
+    def test_a_request_that_rolls_over_does_not_fold_the_reminder_into_the_question(self):
+        messages, agent, model, cm, question = self._setup(fill_ratio=0.97)
+        compact, seen = self._run(messages, agent, model, cm)
+
+        self.assertEqual(compact.await_count, 1, "97% of the window is past the cut")
+        self.assertEqual(seen["trailing"], question)
+        self.assertFalse(cm.reminder_claimed)
+
+    def test_below_the_cut_the_reminder_is_still_folded_once(self):
+        messages, agent, model, cm, question = self._setup(fill_ratio=0.85)
+        compact, _ = self._run(messages, agent, model, cm)
+
+        self.assertEqual(compact.await_count, 0)
+        self.assertTrue(messages[-1].content.startswith(question + "\n\n<context_window>"))
+        self.assertIn(self.REMINDER, messages[-1].content)
+        self.assertTrue(cm.reminder_claimed)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,9 +4,9 @@
  *
  * Shows:
  *   - New Chat action
- *   - The session currently open in the Desktop window (title + running dot)
  *   - Recent sessions from `/api/sessions?scope=recent` (running first, then
- *     most recently active, with a checkmark on the currently open session)
+ *     most recently active). The checkmark marks the session open in the
+ *     window; it is listed even when the recent page does not include it.
  *
  * Kept free of Electron imports so the menu structure, sorting, truncation,
  * and localisation can be unit-tested in plain Node (`runtime.test.js`).
@@ -21,17 +21,18 @@ const MAX_FOLDER_CHARS = 20;
 const LABELS = {
   zh: {
     newChat: "新建对话",
-    currentPrefix: "当前打开：",
     recentHeader: "最近运行",
     noRecent: "暂无最近会话",
   },
   en: {
     newChat: "New Chat",
-    currentPrefix: "Current: ",
     recentHeader: "Recent Sessions",
     noRecent: "No Recent Sessions",
   },
 };
+
+/** Running marker. U+2022 sits at text height; the black circle U+25CF read as a blob. */
+const RUNNING_MARK = "• ";
 
 function labelsFor(lang) {
   return String(lang || "zh").toLowerCase().startsWith("zh") ? LABELS.zh : LABELS.en;
@@ -80,7 +81,7 @@ function formatSessionLabel(row, maxTitleChars = MAX_TITLE_CHARS) {
   const rawTitle = (row && row.name ? String(row.name) : "").replace(/\s+/g, " ").trim() || "Chat";
   const title = clipText(rawTitle, maxTitleChars);
   const folder = folderName(row && row.work_dir ? row.work_dir : "");
-  const prefix = row && row.running ? "● " : "";
+  const prefix = row && row.running ? RUNNING_MARK : "";
   const suffix = folder && folder.toLowerCase() !== rawTitle.toLowerCase()
     ? ` — ${clipText(folder, MAX_FOLDER_CHARS)}`
     : "";
@@ -96,7 +97,6 @@ function formatSessionLabel(row, maxTitleChars = MAX_TITLE_CHARS) {
  * @param {string} [opts.lang]
  * @param {() => void} [opts.onNewChat]
  * @param {(sessionId: string) => void} [opts.onSelectSession]
- * @param {() => void} [opts.onFocusCurrent]
  * @param {number} [opts.limit]
  */
 function buildDockMenuTemplate({
@@ -105,7 +105,6 @@ function buildDockMenuTemplate({
   lang = "zh",
   onNewChat = null,
   onSelectSession = null,
-  onFocusCurrent = null,
   limit = DEFAULT_RECENT_LIMIT,
 } = {}) {
   const L = labelsFor(lang);
@@ -122,21 +121,15 @@ function buildDockMenuTemplate({
   const curId = current && current.id ? String(current.id) : "";
   const curRunning = Boolean(current && current.running);
 
-  if (curTitle) {
-    template.push({ type: "separator" });
-    template.push({
-      label: `${L.currentPrefix}${curRunning ? "● " : ""}${clipText(curTitle, MAX_TITLE_CHARS)}`,
-      click: () => {
-        if (curId && onSelectSession) onSelectSession(curId);
-        else if (onFocusCurrent) onFocusCurrent();
-      },
-    });
-  }
-
   template.push({ type: "separator" });
   template.push({ label: L.recentHeader, enabled: false });
 
   const items = selectRecentSessions(recent, limit);
+  // The open session keeps its checkmark even when it fell off the recent page.
+  if (curId && curTitle && !items.some((r) => r.session_id === curId)) {
+    items.unshift({ session_id: curId, name: curTitle, running: curRunning });
+    if (items.length > limit) items.pop();
+  }
   if (items.length === 0) {
     template.push({ label: L.noRecent, enabled: false });
     return template;

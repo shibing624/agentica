@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Web / Desktop 一轮里的工具步骤和中途回复收成一组，失败用中性徽章，图片可点开原图**：① 此前 Claude / GPT 在工具之间说的话会拆成多条「执行了命令」；现在收到最后一次工具之前的回复都并进同一组，点开是「回复」行。步骤组默认折叠，不再随「本轮过程」展开。② 工具失败不再把整行标红、用错误文本换掉描述：描述保留，右侧用中性徽章显示 `退出码 N` 或「失败」，错误在展开里。③ 聊天里的 Markdown 图片、用户附图、待发送图片和右侧工作区图片预览点击后在页面上打开原图（Esc、点遮罩或关闭按钮退出）。
+- **macOS Desktop Dock 菜单去掉单独的「当前打开」行，开发态 Dock 名称改为 Agentica**：当前会话只在「最近运行」里用勾标记，即使它不在最近一页也会插到列表顶部；运行中标记从实心圆改为圆点。`npm start` 会把开发用的 Electron.app 显示名改成 Agentica（不改 `app.name`，避免开发配置目录被换掉）。
+- **IM 通道不再告诉模型「表格和标题会显示成原文」，本机网关不发审批卡片链接时说明原因**：微信其实会渲染 Markdown，旧提示让模型改用手写空格表格。`/status` 在只监听 127.0.0.1 时写明卡片要点回本机网关、手机连不到，直接回数字即可，要链接需设置 `AGENTICA_PUBLIC_URL`。
+- **上下文快满时的剩余 token 提醒不再写进即将压缩的那条用户消息**：压缩当回合若先把提醒折进问题，新窗口会把它当成用户原话写回日志。现在只在本回合不压缩时才插入。
 - **Web / Desktop 流式过程中的步骤组收成一行（对齐 dsh）**：此前工具批次之间整组摊开，并在等待下一步时单独插一行「正在思考」。现在进行中的最后一组收成一行，显示当前工具类别和参数，或「正在分析请求」加上最近一段已写完的思考；点击再展开全部步骤。运行中的组标题用类别图标，不再用转圈盖住。
 - **Web / Desktop 右侧侧边栏代码与文本预览支持行号与自动换行切换（对齐 dsh `CodeBlock` / `CodeBody`）**：① **源码行号栏**（`highlight.ts`、`CodeFrame.tsx`、`style.css`）：新增 `splitHighlightedHtmlLines` 自动在跨行注释/多行字符串处平衡高亮 `<span>` 标签并拆为独立 `.line` 行块，采用 CSS `counter(source-line)` + `user-select: none` 渲染左侧自适应位宽（`--code-line-no-w`）行号栏，打开 `.py`、`.yaml`/`.yml`、`.ts` 等代码文件及 Markdown/Skill 源码视图时默认显示行号，且选中复制时不会混入行号字符；② **自动换行开关与贴边排版**（`PreviewActions.tsx`、`WorkspaceBrowser.tsx`、`SkillPane.tsx`、`icons.tsx`）：预览头部工具栏照搬 `dsh` 的 `IconWrap` / `IconNowrap` 切换按钮（每个标签页独立保存换行状态，默认开启自动换行，悬停提示「取消换行 / 自动换行」），代码与纯文本预览去掉聊天卡片的外层圆角边框与灰底，直接贴合右侧分栏自身背景渲染，滚动条从语言复制栏下方开始。
 - **用 `agentica watch` 跟踪 agentica 之外的长任务（tmux / nohup / ssh 远端 / 队列）**：此前这类启动命令一秒就返回，Web/IM 没有卡片也没有结束回报，模型只能在 `execute(background=True)` 里手写轮询循环。现在同一回合再后台跑一条 `agentica watch --done ... --progress ... --result ...`：`--done` 退出 0 表示结束、1 表示仍在跑，其他退出码（ssh 的 255、超时）只算检查失败并重试，连续 10 次后进程以 75 退出，日志写明失联、任务可能还在跑，结束回报据此标明 lost contact，不再把 75 说成任务失败；`--progress` 的新增行进入日志，末行作为卡片进度；`--result` 的退出码作为任务退出码。结果检查超时退出 124（任务已结束但退出码未知），不会和失联的 75 混为一谈。停止这条后台命令（Web 停止、会话结束）只停监控，不碰任务。`wait` 只能等 `execute(background=True)` 或 `delegate` 返回的 id，不能直接等 pid、tmux 或远端主机。

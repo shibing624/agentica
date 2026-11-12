@@ -60,6 +60,36 @@ export function isProcessSegment(segs: PartSeg[], index: number): boolean {
   return seg.part.kind === "text" && index < lastWork;
 }
 
+/**
+ * One process group per stretch of the turn (dsh process grouping): work
+ * groups and the intermediate replies between them — what Claude / GPT-5
+ * emit as `content` alongside tool calls instead of reasoning — merge into a
+ * single `work` segment, so the turn reads as one `执行了命令并调用了工具`
+ * line rather than a stack of them. Steer chips still split it, and text after
+ * the last work group stays out as the answer.
+ */
+export function foldProcess(segs: PartSeg[]): PartSeg[] {
+  const lastWork = lastWorkSegmentIndex(segs);
+  if (lastWork < 0) return segs;
+  const out: PartSeg[] = [];
+  let run: MsgPart[] | null = null;
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    if (i <= lastWork && (seg.type === "work" || seg.part.kind === "text")) {
+      const items = seg.type === "work" ? seg.items : [seg.part];
+      if (run) run.push(...items);
+      else {
+        run = [...items];
+        out.push({ type: "work", items: run });
+      }
+      continue;
+    }
+    run = null;
+    out.push(seg);
+  }
+  return out;
+}
+
 /** Visible final-answer text (segments after the last `work` group), or full text when no work ran. */
 export function finalAnswerOf(m: ChatMsg): string {
   const segs = groupParts(partsOf(m));

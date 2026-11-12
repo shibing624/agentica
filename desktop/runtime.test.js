@@ -234,10 +234,10 @@ test("dock menu sorts running sessions first, then newest, and drops archived", 
   ];
   const picked = selectRecentSessions(rows, 8);
   assert.deepEqual(picked.map((r) => r.session_id), ["run", "new", "old"]);
-  assert.equal(formatSessionLabel(picked[0]), "● Running task — agentica");
+  assert.equal(formatSessionLabel(picked[0]), "• Running task — agentica");
 });
 
-test("dock menu template shows current title, recent sessions with checkmark, and triggers callbacks", () => {
+test("dock menu lists recent sessions, checks the open one under its live title, and triggers callbacks", () => {
   const actions = [];
   const recent = [
     { session_id: "s1", name: "Stale server name", last_timestamp: "2026-11-08T10:00:00Z", work_dir: "/Users/me/agentica" },
@@ -253,19 +253,31 @@ test("dock menu template shows current title, recent sessions with checkmark, an
 
   assert.equal(tpl[0].label, "新建对话");
   tpl[0].click();
-  assert.equal(tpl[2].label, "当前打开：Live renamed title");
-  tpl[2].click();
-  assert.equal(tpl[4].label, "最近运行");
-  assert.equal(tpl[4].enabled, false);
+  assert.equal(tpl[1].type, "separator");
+  assert.equal(tpl[2].label, "最近运行");
+  assert.equal(tpl[2].enabled, false);
+  assert.equal(tpl.some((item) => String(item.label || "").startsWith("当前打开")), false);
 
   // Running session s2 sorts first; current session s1 is checked and uses live title
-  assert.equal(tpl[5].label, "● Fix search highlight — web");
-  assert.equal(tpl[5].checked, false);
-  assert.equal(tpl[6].label, "Live renamed title — agentica");
-  assert.equal(tpl[6].checked, true);
-  tpl[5].click();
+  assert.equal(tpl[3].label, "• Fix search highlight — web");
+  assert.equal(tpl[3].checked, false);
+  assert.equal(tpl[4].label, "Live renamed title — agentica");
+  assert.equal(tpl[4].checked, true);
+  tpl[4].click();
+  tpl[3].click();
 
   assert.deepEqual(actions, ["new", "select:s1", "select:s2"]);
+});
+
+test("dock menu still checks the open session when it is not on the recent page", () => {
+  const tpl = buildDockMenuTemplate({
+    current: { id: "s9", title: "Old but open", running: true },
+    recent: [{ session_id: "s1", name: "Other", last_timestamp: "2026-11-08T10:00:00Z" }],
+    lang: "zh",
+    limit: 1,
+  });
+  const rows = tpl.filter((item) => item.type === "checkbox");
+  assert.deepEqual(rows.map((r) => [r.label, r.checked]), [["• Old but open", true]]);
 });
 
 test("dock menu template falls back cleanly when no session is open or recent list is empty", () => {

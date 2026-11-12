@@ -498,7 +498,6 @@ async function refreshDockMenu(forceFetch = false) {
     lang,
     onNewChat: () => openFromDock({ action: "new-chat" }),
     onSelectSession: (sessionId) => openFromDock({ action: "session", sessionId }),
-    onFocusCurrent: () => focusOrCreateWindow(),
   });
   app.dock.setMenu(Menu.buildFromTemplate(template));
 }

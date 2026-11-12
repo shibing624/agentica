@@ -572,7 +572,7 @@ class TestImBotControllerFlows:
         assert "/c/" not in sent
         assert "1. 允许一次 (Allow)" in sent and "回复数字" in sent
         await bot.handle(_msg("/status"))
-        assert "卡片链接：未启用" in ch.sent[-1][1]
+        assert "审批卡片链接：不发" in ch.sent[-1][1]
 
     @pytest.mark.asyncio
     async def test_help_and_status_show_the_session_model(self, tmp_path):

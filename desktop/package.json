@@ -8,6 +8,7 @@
   "homepage": "https://github.com/shibing624/agentica",
   "main": "main.js",
   "scripts": {
+    "prestart": "node scripts/dev-bundle-name.js",
     "start": "electron .",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",

@@ -197,15 +197,18 @@ class CompressMixin:
             calibration.record_send(messages, raw_tokens)
             return
 
-        CompressMixin._maybe_inject_token_budget_reminder(
-            messages, agent, cm, context_tokens, _working,
-        )
-
         # Layer 2: new window. Threshold checked here so on_pre_compact
         # (memory flush) only runs on turns that actually roll over.
         if not cm.should_auto_compact(
             messages, model, context_tokens=context_tokens if _window else None
         ):
+            # Only when the window stays: a rollover's preamble already states
+            # the tokens left, and a reminder folded into the trailing question
+            # first would be carried into the new window and written back to
+            # the log as part of that user row.
+            CompressMixin._maybe_inject_token_budget_reminder(
+                messages, agent, cm, context_tokens, _working,
+            )
             calibration.record_send(messages, raw_tokens)
             return
         await CompressMixin._install_new_window(

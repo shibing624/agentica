@@ -3,6 +3,7 @@ import Markdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { MarkdownCode } from "./CodeFrame";
+import { PreviewableImage } from "./ImageLightbox";
 import { GFM_PLUGINS } from "../lib/markdownPlugins";
 
 /**
@@ -28,6 +29,7 @@ const STREAMING_COMPONENTS = {
 const SETTLED_COMPONENTS = {
   pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
   code: MarkdownCode,
+  img: ({ src, alt }: { src?: string; alt?: string }) => <PreviewableImage src={src} alt={alt || ""} />,
 };
 
 export const ChatMarkdown = memo(function ChatMarkdown({

@@ -10,7 +10,7 @@ import {
   todoProgress, toolCategory, toolResultPreview, type Category,
 } from "../lib/workActivity";
 import {
-  IconAlert, IconBook, IconBrain, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
+  IconBook, IconBrain, IconChat, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
   IconExternal, IconSpinner, IconTerminal, IconUser, IconUsers,
 } from "../icons";
 import { getState, showToast, type ApprovalDecision, type ApprovalRequest } from "../store";
@@ -89,14 +89,12 @@ export function WorkGroup({
   isLast,
   live = false,
   pendingToolCallId,
-  defaultOpen = false,
   onOpenFile,
 }: {
   items: MsgPart[];
   isLast: boolean;
   live?: boolean;
   pendingToolCallId?: string;
-  defaultOpen?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
   const S = useStrings();
@@ -107,8 +105,9 @@ export function WorkGroup({
   const containsPending = !!pendingToolCallId && items.some(
     (p) => p.kind === "tool" && p.toolCallId === pendingToolCallId,
   );
-  // Folded in settled history unless opened by turn-process or waiting on approval.
-  const [open, setOpen] = useState(defaultOpen || containsPending);
+  // Second level of the process (dsh): folded to one line until clicked,
+  // except while one of its tools waits on approval.
+  const [open, setOpen] = useState(containsPending);
   const userToggled = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
@@ -116,10 +115,6 @@ export function WorkGroup({
   useEffect(() => {
     if (!userToggled.current && containsPending) setOpen(true);
   }, [containsPending]);
-
-  useEffect(() => {
-    if (!userToggled.current && defaultOpen) setOpen(true);
-  }, [defaultOpen]);
 
   useEffect(() => {
     if (!live) return;
@@ -132,6 +127,10 @@ export function WorkGroup({
       const streamingThink = p.ms == null && running;
       if (!streamingThink && !p.text.trim()) return null;
       return <ThinkRow key={i} part={p} streaming={streamingThink} />;
+    }
+    if (p.kind === "text") {
+      if (!p.text.trim()) return null;
+      return <ReplyRow key={i} text={p.text} />;
     }
     if (p.kind === "tool") {
       return (
@@ -247,6 +246,40 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
   );
 }
 
+/**
+ * An assistant reply spoken between tool calls (models that narrate in
+ * `content` instead of reasoning): one line inside the process group, opening
+ * to the rendered text — the same shape as a thought.
+ */
+function ReplyRow({ text }: { text: string }) {
+  const S = useStrings();
+  const [open, setOpen] = useState(false);
+  const preview = firstLine(text);
+  return (
+    <div className={"wr" + (open ? " open" : "")}>
+      <div className="wr-line">
+        <button type="button" className="wr-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <span className="wr-icon"><IconChat /><span className="wr-chev"><IconChevronDown /></span></span>
+          <span className="wr-title">{S.chat.replyRow}</span>
+          {!open && preview && (
+            <>
+              <span className="wr-dot" />
+              <span className="wr-sum">{preview}</span>
+            </>
+          )}
+        </button>
+      </div>
+      {open ? (
+        <div className="wr-body think-text">
+          <Suspense fallback={<span className="markdown-fallback">{text}</span>}>
+            <ChatMarkdown text={text} streaming={false} />
+          </Suspense>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Local file-read tools: the call line is enough. */
 const HIDE_RESULT_TOOLS = new Set(["read_file", "glob", "grep"]);
 const OPEN_FILE_TOOLS = new Set(["read_file", "write_file", "edit_file", "multi_edit"]);
@@ -294,7 +327,14 @@ function ToolRow({
   );
   const rowFailed = isError || shellExitFailed;
   const hasExplicitDesc = isShell && Boolean(firstLine(String(args.description ?? "")));
-  const summary = isError ? firstLine(resultText.slice("Error: ".length)) : toolSummary(part, S);
+  // A failed call keeps its own description; the failure is the neutral badge
+  // after it (dsh `ExitCodeBadge`), and the error text lives in the detail.
+  const summary = toolSummary(part, S);
+  const failBadge = bgJob || running
+    ? ""
+    : shellExitFailed && shellParsed?.exitCode != null
+      ? S.chat.bgExitCode(shellParsed.exitCode)
+      : isError ? S.chat.toolFailed : "";
   const cmdPreview = hasExplicitDesc ? formatToolDisplay("execute", args, cwd).replace(/\s+/g, " ").trim() : "";
   const summaryTip = hasExplicitDesc && cmdPreview ? `${summary}\n$ ${cmdPreview}` : summary;
   const showSummary = Boolean(summary) && (!open || !isShell || hasExplicitDesc);
@@ -320,7 +360,7 @@ function ToolRow({
 
   return (
     <div
-      className={"wr wr-tool" + ((running || bgRunning) ? " running" : "") + (open ? " open" : "") + (rowFailed ? " error" : "")
+      className={"wr wr-tool" + ((running || bgRunning) ? " running" : "") + (open ? " open" : "")
         + (awaitingApproval ? " awaiting-approval" : "")}
       data-tool-call-id={part.toolCallId || undefined}
     >
@@ -328,7 +368,7 @@ function ToolRow({
         <button type="button" className="wr-head" aria-expanded={open}
                 onClick={() => { userToggled.current = true; setOpen((v) => !v); }}>
           <span className="wr-icon">
-            {(running || bgRunning) ? <IconSpinner /> : isError ? <IconAlert /> : <CategoryIcon cat={cat} />}
+            {(running || bgRunning) ? <IconSpinner /> : <CategoryIcon cat={cat} />}
             <span className="wr-chev"><IconChevronDown /></span>
           </span>
           <span className={"wr-title" + (running ? " shimmer" : "")} title={part.name}>{title}</span>
@@ -368,9 +408,7 @@ function ToolRow({
           {bgBadge && bgJob && (
             <span className={"wr-bg-pill " + bgJob.status}>{bgBadge}</span>
           )}
-          {!bgJob && !open && !isError && shellExitFailed && shellParsed?.exitCode != null && (
-            <span className="wr-exit">exit {shellParsed.exitCode}</span>
-          )}
+          {failBadge && <span className="wr-exit"><span className="wr-exit-dot" aria-hidden />{failBadge}</span>}
           {awaitingApproval && <span className="work-awaiting">{S.chat.approvalWaiting}</span>}
           {stats && (
             <span className="wr-diff"><span className="add">+{stats.added}</span> <span className="del">-{stats.removed}</span></span>
@@ -517,7 +555,7 @@ function TerminalCard({
           ))}
         </div>
         {!running && exitCode !== null && exitCode !== 0 && (
-          <span className="term-exit">exit {exitCode}</span>
+          <span className="term-exit"><span className="wr-exit-dot" aria-hidden />{S.chat.bgExitCode(exitCode)}</span>
         )}
         {openableBgLog && onOpenFile && (
           <button type="button" className="term-copy" title={S.chat.bgOpenLogTip} onClick={() => onOpenFile(openableBgLog)}>

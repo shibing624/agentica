@@ -36,13 +36,14 @@ import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUs
 import { rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
   allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
-  finalAnswerOf, finishTool, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
+  finalAnswerOf, finishTool, foldProcess, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
   workSummary,
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
 import { applyChatSearchHighlights } from "../lib/sessionRows";
 import { BackgroundJobs } from "../components/BackgroundJobs";
+import { PreviewableImage } from "../components/ImageLightbox";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
 import type { FileEdits } from "../lib/fileDiff";
@@ -1135,7 +1136,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
     );
   }
   if (!live) settleWork(m);
-  const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
+  const segs = m.role === "assistant" ? foldProcess(groupParts(partsOf(m))) : null;
   const workSegCount = segs ? segs.filter((seg) => seg.type === "work").length : 0;
   const hasWork = workSegCount > 0;
   const hasSteer = Boolean(segs?.some((seg) => seg.type === "single" && seg.part.kind === "steer"));
@@ -1210,7 +1211,6 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
                 isLast={isLast}
                 live={!!live}
                 pendingToolCallId={pendingToolCallId}
-                defaultOpen={showTurnProcess && effectiveProcessOpen && !hasSteer}
                 onOpenFile={onOpenFile}
               />
             );
@@ -1232,7 +1232,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
             <div className="bub">
               {!!m.previews?.length && (
                 <div className="msg-previews">
-                  {m.previews.map((src, i) => <img key={i} src={src} alt="" />)}
+                  {m.previews.map((src, i) => <PreviewableImage key={i} src={src} alt="" />)}
                 </div>
               )}
               {skill
@@ -2610,7 +2610,7 @@ function PendingFileChip({ file, onRemove }: { file: File; onRemove: () => void 
   }, [file]);
   return (
     <div className={"file-chip" + (src ? " img" : "")}>
-      {src ? <img src={src} alt={file.name} /> : <span>{file.name}</span>}
+      {src ? <PreviewableImage src={src} alt={file.name} /> : <span>{file.name}</span>}
       <span className="fx" onClick={onRemove}><IconClose /></span>
     </div>
   );

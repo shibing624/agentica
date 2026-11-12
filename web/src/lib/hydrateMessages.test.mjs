@@ -441,3 +441,20 @@ test("compact card takes notes_path from the boundary row when the preamble carr
   assert.equal(card.compact.notesPath, "~/.agentica/projects/p/s1.notes.md");
   assert.equal(card.compact.notes, "");
 });
+
+test("auto-rollover question logged with the folded remaining-tokens reminder shows only the question", () => {
+  const preamble = "<context_window>\nCurrent context window 1.\nYou have 512000 tokens left in this context window.\n</context_window>";
+  const question = "换个模型后输入框多了东西，fix";
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "earlier" },
+    { type: "assistant", content: "earlier answer" },
+    { type: "compact_boundary", trigger: "auto" },
+    {
+      type: "user",
+      content: `${preamble}\n\n${question}\n\n<context_window>\nYou have 13572 tokens left in this context window.\n</context_window>`,
+    },
+    { type: "assistant", content: "fixed" },
+  ]);
+  const users = msgs.filter((m) => m.role === "user" && !m.compact).map((m) => m.content);
+  assert.equal(users.at(-1), question);
+});

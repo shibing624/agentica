@@ -20,6 +20,7 @@ const {
   finalAnswerOf,
   finishThink,
   finishTool,
+  foldProcess,
   groupParts,
   isProcessSegment,
   partsOf,
@@ -208,4 +209,50 @@ test("ensureTrailingFinalAnswer appends goal final_answer even when earlier roun
   // Does not duplicate if trailing answer already exists.
   ensureTrailingFinalAnswer(m, "不会重复追加");
   assert.equal(finalAnswerOf(m), "目标已完成：所有测试均通过。");
+});
+
+test("foldProcess merges work groups and in-between replies into one process group", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendText(m, "我先查看目录。");
+  appendTool(m, "execute", JSON.stringify({ command: "ls", description: "列出目录" }), "c1");
+  finishTool(m, "a\n[Exit code: 0]", undefined, "c1");
+  appendThink(m, "看完目录，接着读文件。\n\n");
+  appendText(m, "再读 README。");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "README.md" }), "c2");
+  finishTool(m, "", undefined, "c2");
+  appendText(m, "最终结论。");
+  settleWork(m, Date.now());
+
+  const segs = foldProcess(groupParts(partsOf(m)));
+  assert.deepEqual(segs.map((s) => s.type), ["work", "single"]);
+  assert.deepEqual(
+    segs[0].items.map((p) => p.kind),
+    ["text", "tool", "think", "text", "tool"],
+  );
+  assert.equal(segs[1].part.text, "最终结论。");
+  assert.equal(finalAnswerOf(m), "最终结论。");
+});
+
+test("foldProcess keeps a steer chip as a boundary between process groups", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendTool(m, "read_file", JSON.stringify({ file_path: "a.py" }), "c1");
+  finishTool(m, "", undefined, "c1");
+  appendSteerPart(m, "顺便看 b.py");
+  appendText(m, "好的");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "b.py" }), "c2");
+  finishTool(m, "", undefined, "c2");
+  appendText(m, "完成。");
+
+  const segs = foldProcess(groupParts(partsOf(m)));
+  assert.deepEqual(
+    segs.map((s) => (s.type === "work" ? `work:${s.items.length}` : s.part.kind)),
+    ["work:1", "steer", "work:2", "text"],
+  );
+});
+
+test("foldProcess leaves a plain answer without work untouched", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendText(m, "直接回答");
+  const segs = groupParts(partsOf(m));
+  assert.equal(foldProcess(segs), segs);
 });
