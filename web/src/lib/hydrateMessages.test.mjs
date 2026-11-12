@@ -10,7 +10,9 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { eventsToChatMsgs, includeShadowedQuestion } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
+const {
+  eventsToChatMsgs, includeShadowedQuestion, reconcileLiveTurnMsgs,
+} = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
 after(() => vite.close());
 
 function parts(m) {
@@ -500,4 +502,118 @@ test("auto-rollover question logged with the folded remaining-tokens reminder sh
   ]);
   const users = msgs.filter((m) => m.role === "user" && !m.compact).map((m) => m.content);
   assert.equal(users.at(-1), question);
+});
+
+test("mid-turn hydration marks only the unfinished tail assistant inFlight and reattach reuses it in place", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "earlier question", timestamp: "2026-11-12T08:30:01.000Z" },
+    { type: "assistant", content: "earlier answer", finish_reason: "stop", timestamp: "2026-11-12T08:30:22.600Z" },
+    { type: "user", content: "内部评测集的指标", timestamp: "2026-11-12T08:46:46.392Z" },
+    {
+      type: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      timestamp: "2026-11-12T08:47:07.288Z",
+      tool_calls: [{ id: "tc_1", function: { name: "execute", arguments: "{\"command\":\"ls\"}" } }],
+    },
+    { type: "tool", tool_call_id: "tc_1", tool_name: "execute", content: "ok", timestamp: "2026-11-12T08:47:10.000Z" },
+    { type: "user", steer: true, content: "用默认思考即可", timestamp: "2026-11-12T08:50:31.570Z" },
+    {
+      type: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      timestamp: "2026-11-12T08:51:53.993Z",
+      tool_calls: [{ id: "tc_2", function: { name: "read_file", arguments: "{\"file_path\":\"exp/run.py\"}" } }],
+    },
+    { type: "tool", tool_call_id: "tc_2", tool_name: "read_file", content: "code", timestamp: "2026-11-12T08:51:54.100Z", uuid: "u_mid" },
+  ]);
+
+  assert.equal(msgs.length, 4);
+  assert.equal(msgs[1].inFlight, undefined);
+  assert.equal(msgs[3].inFlight, true);
+
+  // Simulate stale round stats stamped before reattach.
+  msgs[3].tokIn = 57700;
+  msgs[3].durationMs = 21600;
+
+  const startedAt = Date.parse("2026-11-12T08:46:46.500Z");
+  const reconciled = reconcileLiveTurnMsgs("s_live_1", msgs, {
+    run_id: "r1",
+    session_id: "s_live_1",
+    status: "running",
+    kind: "chat",
+    seq: 12,
+    first_seq: 1,
+    started_at_ms: startedAt,
+    user_message: "内部评测集的指标",
+  });
+
+  assert.equal(msgs.length, 4, "must reuse the in-flight assistant instead of pushing a second one");
+  assert.equal(reconciled.aiMsg, msgs[3]);
+  assert.equal(reconciled.aiMsg.inFlight, true);
+  assert.equal(reconciled.aiMsg.tokIn, undefined);
+  assert.equal(reconciled.aiMsg.durationMs, undefined);
+  assert.equal(reconciled.aiMsg.uuid, undefined);
+  assert.equal(reconciled.aiMsg.ts, startedAt);
+  assert.deepEqual(
+    reconciled.pendingSteers.map((s) => ({ text: s.text, afterToolCallId: s.afterToolCallId })),
+    [{ text: "用默认思考即可", afterToolCallId: "tc_1" }],
+  );
+});
+
+test("reattach with trimmed server buffer keeps hydrated prefix and requests tail after last tool", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "big task", timestamp: "2026-11-12T08:46:46.000Z" },
+    {
+      type: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      timestamp: "2026-11-12T08:47:00.000Z",
+      tool_calls: [{ id: "tc_early", function: { name: "read_file", arguments: "{\"file_path\":\"a.py\"}" } }],
+    },
+    { type: "tool", tool_call_id: "tc_early", tool_name: "read_file", content: "x", timestamp: "2026-11-12T08:47:01.000Z" },
+  ]);
+
+  const reconciled = reconcileLiveTurnMsgs("s_trimmed", msgs, {
+    run_id: "r2",
+    session_id: "s_trimmed",
+    status: "running",
+    kind: "chat",
+    seq: 5000,
+    first_seq: 1200,
+    started_at_ms: Date.parse("2026-11-12T08:46:46.000Z"),
+    user_message: "big task",
+  });
+
+  assert.equal(msgs.length, 2);
+  assert.equal(reconciled.afterTool, "tc_early");
+  assert.equal(reconciled.aiMsg.parts.some((p) => p.kind === "tool" && p.toolCallId === "tc_early"), true);
+});
+
+test("reattach right as a new turn starts keeps the previous completed answer intact", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "q1", timestamp: "2026-11-12T08:30:01.000Z" },
+    { type: "assistant", content: "final answer 1", finish_reason: "stop", timestamp: "2026-11-12T08:30:23.000Z", uuid: "u_done" },
+  ]);
+  const prevAssistant = msgs[1];
+
+  const reconciled = reconcileLiveTurnMsgs("s_new_turn", msgs, {
+    run_id: "r3",
+    session_id: "s_new_turn",
+    status: "running",
+    kind: "chat",
+    seq: 1,
+    first_seq: 1,
+    started_at_ms: Date.parse("2026-11-12T08:46:46.000Z"),
+    user_message: "q2",
+  });
+
+  assert.equal(msgs.length, 4);
+  assert.equal(msgs[1], prevAssistant);
+  assert.equal(prevAssistant.content, "final answer 1");
+  assert.equal(prevAssistant.uuid, "u_done");
+  assert.equal(msgs[2].role, "user");
+  assert.equal(msgs[2].content, "q2");
+  assert.equal(reconciled.aiMsg, msgs[3]);
+  assert.equal(msgs[3].inFlight, true);
 });

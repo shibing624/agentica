@@ -227,3 +227,21 @@ def test_sse_keepalive_when_queue_is_idle(monkeypatch):
     first, second = asyncio.run(take_two())
     assert first.startswith(": keepalive")
     assert second.startswith(": keepalive")
+
+
+def test_public_exposes_first_seq_started_at_and_seq_after_tool(monkeypatch):
+    monkeypatch.setattr(live_turn, "MAX_BUFFER_EVENTS", 3)
+    turn = live_turn.start("s_meta", owner="default", user_message="hello")
+    assert turn.public()["first_seq"] == 1
+    assert isinstance(turn.public()["started_at_ms"], int)
+    assert turn.public()["user_message"] == "hello"
+
+    turn.publish({"event": "tool_call", "data": {"tool_call_id": "t1", "name": "read_file"}})
+    turn.publish({"event": "tool_result", "data": {"tool_call_id": "t1", "result": "ok"}})
+    turn.publish({"event": "tool_call", "data": {"tool_call_id": "t2", "name": "execute"}})
+    turn.publish({"event": "tool_result", "data": {"tool_call_id": "t2", "result": "ok2"}})
+    turn.publish({"event": "thinking", "data": "next step"})
+
+    assert turn.public()["first_seq"] == 3
+    assert turn.seq_after_tool("t1") == 0
+    assert turn.seq_after_tool("t2") == 4

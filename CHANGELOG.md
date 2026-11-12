@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+- **Release 工作流移除未配置 Trusted Publisher 的 `pypi` 自动发布任务**：PyPI（`agentica` 与 `agentica-gateway`）统一由本地基于 CI 构建校验产物手动上传；移除 `.github/workflows/release.yml` 中的 `pypi` job，避免因未配置 OIDC Trusted Publisher 导致每次打 tag 发版固定变红，或与手动上传重复触发报错。
+
+#### fixes
+- **修复 Web 执行长任务中途切换轨迹页、切会话或刷新重连后，进行中的回复被拆成两条并在中途露出「本条回复涉及 N 个文件」与结束操作栏的问题**：此前一轮任务已有工具批次落盘到 `SessionLog` 后，客户端重新加载并重连 `LiveTurn` 时，`eventsToChatMsgs` 已对已落盘步骤做 `settleWork`，导致 `takeLiveAssistant` 误判最后一条助手消息为历史已完成回复并在其下方再追加一条新的流式消息——前半截变成非 `live` 状态而提前渲染 `MessageFilesCard` 与底部点赞/分叉/用量栏（还会被 `syncSessionRoundStats` 错位盖上上一轮的耗时与 token）。现在 `eventsToChatMsgs` 与 `trace.analyze_entries` 准确标记尚未到达终态行的 `inFlight` 回合，`reconcileLiveTurnMsgs` 原地复用在途助手消息、保留真实起始时间与中途插话（`steer` 同步写入 `LiveTurn` 事件流并在超大输出裁剪缓冲时按 `after_tool` 增量续接），`switchTo` 与 `ChatPage` 在会话仍处于运行态时始终保持流式挂载，不再拆裂在途记录。
 
 ## [1.5.2] - 2026-11-12
 

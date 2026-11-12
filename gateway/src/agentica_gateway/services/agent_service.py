@@ -2247,7 +2247,12 @@ class AgentService:
         agent = self._cached_agent_for_owner(session_id, owner)
         if agent is None:
             return False
-        return bool(agent.steer(self.expand_skill_invocation(guidance)))
+        accepted = bool(agent.steer(self.expand_skill_invocation(guidance)))
+        if accepted:
+            turn = live_turn.active(session_id, self._owner(owner))
+            if turn is not None:
+                turn.publish({"event": "steer", "data": {"text": guidance, "ts": int(time.time() * 1000)}})
+        return accepted
 
     def take_undelivered_steer(self, session_id: str, owner: Optional[str] = None) -> List[str]:
         """Pop steering accepted too late for this run, so the web UI can queue it.

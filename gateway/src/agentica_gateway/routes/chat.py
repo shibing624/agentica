@@ -134,10 +134,19 @@ async def _sse_from_turn(turn: live_turn.LiveTurn, after: int = 0):
         turn.unsubscribe(q)
 
 
-def _spawn_live(session_id: str, run_coro, owner: str, kind: str = "chat"):
+def _spawn_live(
+    session_id: str,
+    run_coro,
+    owner: str,
+    kind: str = "chat",
+    user_message: str = "",
+    automated_message: str = "",
+):
     """Run ``run_coro(turn)`` in the background. Disconnect does not cancel it."""
     _conflict_if_live(session_id, owner)
-    turn = live_turn.start(session_id, owner, kind)
+    turn = live_turn.start(session_id, owner, kind, user_message=user_message)
+    if automated_message:
+        turn.automated_message = automated_message
 
     async def runner():
         try:
@@ -313,7 +322,10 @@ async def run_goal(
         turn.publish({"event": "done", "data": result})
 
     _touch_session_log(svc, session_id, account)
-    turn = _spawn_live(session_id, run_goal_turn, owner=account, kind="goal")
+    turn = _spawn_live(
+        session_id, run_goal_turn, owner=account, kind="goal",
+        user_message=f"/goal {body.objective}",
+    )
     return StreamingResponse(
         _sse_from_turn(turn),
         media_type="text/event-stream",
@@ -332,7 +344,8 @@ async def _start_chat_run(body: ChatRequest, request: Request, svc: AgentService
     _touch_session_log(svc, session_id, account)
     message, media = _message_and_media(body)
     return _spawn_live(
-        session_id, _chat_turn(svc, session_id, account, message, media), owner=account, kind="chat",
+        session_id, _chat_turn(svc, session_id, account, message, media),
+        owner=account, kind="chat", user_message=message,
     )
 
 
@@ -345,7 +358,7 @@ def start_background_report_run(svc: AgentService, session_id: str, owner: str, 
     """
     _spawn_live(
         session_id, _chat_turn(svc, session_id, owner, report, None, automated=True),
-        owner=owner, kind="chat",
+        owner=owner, kind="chat", automated_message=report,
     )
 
 
@@ -519,11 +532,14 @@ async def chat_run_events(
     run_id: str,
     request: Request,
     after: int = 0,
+    after_tool: str = "",
 ):
     """Subscribe or reconnect. Disconnect does not cancel the run."""
     turn = live_turn.get_run(run_id)
     if turn is None or not live_turn.owned(turn, _account(request)):
         raise HTTPException(status_code=404, detail="Run not found")
+    if after_tool:
+        after = max(after, turn.seq_after_tool(after_tool))
     return StreamingResponse(
         _sse_from_turn(turn, after=after),
         media_type="text/event-stream",

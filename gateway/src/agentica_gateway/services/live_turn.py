@@ -192,13 +192,26 @@ class LiveTurn:
             "status": self.status,
             "kind": self.kind,
             "seq": self.seq,
+            "first_seq": self.events[0]["seq"] if self.events else 1,
+            "started_at_ms": int(self.started_wall * 1000),
         }
         if self.user_message:
             out["user_message"] = self.user_message
         if self.cron_job:
             out["cron_job"] = self.cron_job
+        if self.automated_message:
             out["automated_message"] = self.automated_message
         return out
+
+    def seq_after_tool(self, tool_call_id: str) -> int:
+        """Seq of ``tool_result`` for ``tool_call_id`` in the replay buffer, or 0."""
+        if not tool_call_id:
+            return 0
+        for ev in reversed(self.events):
+            if ev.get("event") == "tool_result" and isinstance(ev.get("data"), dict):
+                if ev["data"].get("tool_call_id") == tool_call_id:
+                    return int(ev["seq"])
+        return 0
 
     def publish(self, item: Dict[str, Any]) -> None:
         if self.status == "starting":

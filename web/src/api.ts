@@ -309,18 +309,30 @@ export const createChatRunApi = (body: unknown) =>
     "/api/chat/runs", body,
   );
 
-export function runEvents(runId: string, after = 0, signal?: AbortSignal) {
+export function runEvents(runId: string, after = 0, signal?: AbortSignal, afterTool = "") {
+  const qs = new URLSearchParams({ after: String(after) });
+  if (afterTool) qs.set("after_tool", afterTool);
   return fetch(
-    `/api/chat/runs/${encodeURIComponent(runId)}/events?after=${after}`,
+    `/api/chat/runs/${encodeURIComponent(runId)}/events?${qs.toString()}`,
     { signal },
   );
 }
 
+export type ActiveRunInfo = {
+  run_id: string;
+  session_id: string;
+  status: string;
+  kind: string;
+  seq: number;
+  first_seq?: number;
+  started_at_ms?: number;
+  user_message?: string;
+  cron_job?: { id: string; name: string };
+  automated_message?: string;
+};
+
 export const fetchActiveRun = (sessionId: string) =>
-  request<{ run: {
-    run_id: string; session_id: string; status: string; kind: string; seq: number; user_message?: string;
-    cron_job?: { id: string; name: string }; automated_message?: string;
-  } | null }>(
+  request<{ run: ActiveRunInfo | null }>(
     `/api/chat/runs/active?session_id=${encodeURIComponent(sessionId)}`,
   );
 

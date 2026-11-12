@@ -3,22 +3,20 @@
 # Prepare the tag with `python scripts/versions.py set 1.5.1` (commit it first);
 # the `check` job refuses a tag that does not match every version in the repo.
 #
-#   check ── web ── python ──┬── pypi            agentica + agentica-gateway
-#                            ├── desktop         installers (desktop.yml)
+#   check ── web ── python ──┬── desktop         installers (desktop.yml)
 #                            └── github-release  wheels + sdists + web tarball
 #   check ── sdk-ts ─────────── npm              @agentica-ai/sdk
 #
 # The Web UI is built once; the gateway wheel and every Desktop installer carry
-# those same bytes, and Desktop installs the same wheels PyPI gets.
+# those same bytes, and Desktop installs the same wheels attached to the release.
+# PyPI (`agentica` + `agentica-gateway`) is uploaded manually via `twine` from
+# the verified `python-dist` artifact.
 #
 # One-time setup (repo owner):
-#   PyPI   — add a Trusted Publisher for BOTH projects, `agentica` and
-#            `agentica-gateway`: owner shibing624, repo agentica, workflow
-#            release.yml, environment `pypi`. No API token is stored.
 #   npm    — secret NPM_TOKEN (automation token with publish rights on
 #            @agentica-ai/sdk). Provenance needs `id-token: write` (below).
-#   GitHub — environments `pypi` and `npm` (add required reviewers there if
-#            publishing should wait for a click).
+#   GitHub — environment `npm` (add required reviewers there if publishing
+#            should wait for a click).
 name: Release
 
 on:
@@ -97,34 +95,6 @@ jobs:
           name: python-dist
           path: dist/*
           if-no-files-found: error
-
-  pypi:
-    needs: python
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: python-dist
-          path: dist
-      # Core first: agentica-gateway pins it exactly, so for the seconds in
-      # between, `pip install agentica-gateway` would otherwise fail to resolve.
-      - name: Split by project
-        run: |
-          mkdir core gw
-          mv dist/agentica_gateway-* gw/
-          mv dist/agentica-* core/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: core
-          skip-existing: true
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: gw
-          skip-existing: true
 
   sdk-ts:
     needs: check

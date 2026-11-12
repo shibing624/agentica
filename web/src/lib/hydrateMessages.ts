@@ -1,5 +1,6 @@
+import type { ActiveRunInfo } from "../api";
 import type { ChatMsg, MsgPart } from "../store";
-import { settleWork } from "./msgParts";
+import { appendSteerPart, appendThink, settleWork } from "./msgParts";
 import { parseSkillTurn } from "./skillInvocation";
 
 /**
@@ -18,19 +19,24 @@ import { parseSkillTurn } from "./skillInvocation";
 export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
   const msgs: ChatMsg[] = [];
   let assistant: ChatMsg | null = null;
+  let assistantTerminal = false;
   let turnStartTs = 0;
   let turnEndTs = 0;
   // `trigger` of the boundary whose preamble has not been seen yet ("" = not
   // recorded); null once that preamble is consumed.
   let pendingTrigger: string | null = null;
 
-  const closeAssistant = () => {
+  const closeAssistant = (atTail = false) => {
     if (!assistant) return;
     settleWork(assistant);
     if (assistant.durationMs == null && turnStartTs > 0 && turnEndTs > turnStartTs) {
       assistant.durationMs = turnEndTs - turnStartTs;
     }
+    if (atTail && !assistantTerminal) {
+      assistant.inFlight = true;
+    }
     assistant = null;
+    assistantTerminal = false;
   };
 
   for (const raw of events) {
@@ -81,6 +87,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
         if (explicitTs > turnEndTs) turnEndTs = explicitTs;
         assistant = ensureAssistant(msgs, assistant, tsOf(e));
+        assistantTerminal = false;
         pushSteer(assistant, clean, tsOf(e));
         continue;
       }
@@ -106,6 +113,9 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       if (explicitTs > turnEndTs) turnEndTs = explicitTs;
       assistant = ensureAssistant(msgs, assistant, tsOf(e));
       applyAssistant(assistant, e);
+      const hasTools = toolCallsOf(e).length > 0;
+      const fr = typeof e.finish_reason === "string" ? e.finish_reason : "";
+      assistantTerminal = !hasTools && fr !== "tool_calls" && fr !== "tool_use";
       // The reply ends at its last row: fork / feedback address that one.
       if (uuidOf(e)) assistant.uuid = uuidOf(e);
       continue;
@@ -114,6 +124,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       if (!turnStartTs && explicitTs) turnStartTs = explicitTs;
       if (explicitTs > turnEndTs) turnEndTs = explicitTs;
       assistant = ensureAssistant(msgs, assistant, tsOf(e));
+      assistantTerminal = false;
       applyToolResult(assistant, e);
       if (uuidOf(e)) assistant.uuid = uuidOf(e);
       continue;
@@ -134,7 +145,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
       pendingTrigger = trigger;
     }
   }
-  closeAssistant();
+  closeAssistant(true);
   return msgs;
 }
 
@@ -710,4 +721,159 @@ export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns
     }
   }
   return msgs;
+}
+
+export type PendingSteer = { text: string; ts: number; afterToolCallId?: string };
+
+function isDisconnectedMessageErr(err: string | undefined): boolean {
+  if (!err) return false;
+  const low = err.toLowerCase();
+  return low.includes("network") || low.includes("failed to fetch") || low.includes("load failed");
+}
+
+function extractSteersFromAssistant(m: ChatMsg): PendingSteer[] {
+  const out: PendingSteer[] = [];
+  let lastToolId: string | undefined;
+  for (const p of m.parts || []) {
+    if (p.kind === "tool" && p.toolCallId) lastToolId = p.toolCallId;
+    else if (p.kind === "steer" && isValidSteerText(p.text)) {
+      out.push({ text: p.text, ts: p.ts || m.ts || Date.now(), afterToolCallId: lastToolId });
+    }
+  }
+  return out;
+}
+
+/**
+ * Reconcile a session's hydrated / in-memory ``msgs`` with an active server
+ * ``run`` before opening the SSE stream.
+ *
+ * A mid-turn hydration from ``SessionLog`` closes every flushed think/tool
+ * slice (``settleWork``), so checking only for open slices misread the partial
+ * turn as a finished reply and pushed a second ``assistant`` bubble below it —
+ * exposing ``MessageFilesCard`` and the settled footer mid-run.
+ */
+export function reconcileLiveTurnMsgs(
+  sessionId: string,
+  msgs: ChatMsg[],
+  run: ActiveRunInfo,
+  olderTurns = 0,
+): { aiMsg: ChatMsg; afterTool: string; pendingSteers: PendingSteer[] } {
+  const startedAt = typeof run.started_at_ms === "number" && run.started_at_ms > 0
+    ? run.started_at_ms
+    : 0;
+
+  if (run.automated_message) {
+    let lastUser: ChatMsg | undefined;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user" && !msgs[i].steer) {
+        lastUser = msgs[i];
+        break;
+      }
+    }
+    if (!lastUser || !lastUser.automated || lastUser.content.trim() !== run.automated_message.trim()) {
+      msgs.push({
+        role: "user",
+        automated: true,
+        content: run.automated_message,
+        ts: startedAt || Date.now(),
+        ...(run.cron_job ? { cronJob: run.cron_job } : {}),
+      });
+    }
+  } else if (run.user_message) {
+    const attached = splitImageMarkers(run.user_message);
+    const promptText = attached.text.trim();
+    let lastUser: ChatMsg | undefined;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user" && !msgs[i].automated && !msgs[i].steer) {
+        lastUser = msgs[i];
+        break;
+      }
+    }
+    if (promptText && (!lastUser || lastUser.content.trim() !== promptText)) {
+      msgs.push({
+        role: "user",
+        content: attached.text,
+        ts: startedAt || Date.now(),
+        files: [],
+        previews: attached.previews,
+      });
+    }
+  }
+
+  const last = msgs[msgs.length - 1];
+  const parts = last?.parts || [];
+  const unfinished = parts.some(
+    (p) => (p.kind === "think" && p.ms == null) || (p.kind === "tool" && p.result == null),
+  );
+  const blank = last?.role === "assistant" && !last.content && !parts.length && !last.aborted && last.tokIn == null;
+  const sameRunTime = startedAt > 0 && last?.ts != null && last.ts >= startedAt - 2000;
+  const reuseLast = Boolean(
+    last
+    && last.role === "assistant"
+    && !last.compact
+    && (last.inFlight || unfinished || blank || isDisconnectedMessageErr(last.error) || sameRunTime),
+  );
+
+  if (!reuseLast) {
+    const aiMsg: ChatMsg = {
+      role: "assistant",
+      content: "",
+      steps: [],
+      parts: [],
+      ts: startedAt || Date.now(),
+      durationSec: 0,
+      inFlight: true,
+    };
+    appendThink(aiMsg, "");
+    msgs.push(aiMsg);
+    return { aiMsg, afterTool: "", pendingSteers: [] };
+  }
+
+  rememberSteersFromMsgs(sessionId, msgs, olderTurns);
+  const steers = extractSteersFromAssistant(last);
+  delete last.uuid;
+  delete last.error;
+  delete last.errorTs;
+  last.aborted = false;
+  delete last.durationMs;
+  last.durationSec = 0;
+  delete last.tokIn;
+  delete last.tokOut;
+  delete last.cacheRead;
+  delete last.cacheWrite;
+  delete last.cacheHitPercent;
+  delete last.requests;
+  delete last.costUsd;
+  last.inFlight = true;
+  if (startedAt > 0) {
+    last.ts = last.ts ? Math.min(last.ts, startedAt) : startedAt;
+  }
+
+  // Ring buffer trimmed (>1MB / >4000 events): keep the hydrated prefix intact
+  // and ask the server only for events after the last flushed tool call.
+  if ((run.first_seq ?? 1) > 1 && parts.length > 0) {
+    let lastSettledToolId = "";
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p.kind === "tool" && p.result != null && p.toolCallId) {
+        lastSettledToolId = p.toolCallId;
+        break;
+      }
+    }
+    appendThink(last, "");
+    return { aiMsg: last, afterTool: lastSettledToolId, pendingSteers: [] };
+  }
+
+  last.content = "";
+  last.parts = [];
+  last.steps = [];
+  for (const st of steers) {
+    if (!st.afterToolCallId) appendSteerPart(last, st.text, st.ts);
+  }
+  appendThink(last, "");
+  return {
+    aiMsg: last,
+    afterTool: "",
+    pendingSteers: steers.filter((st) => Boolean(st.afterToolCallId)),
+  };
 }

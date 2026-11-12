@@ -68,6 +68,8 @@ export type ChatMsg = {
   /** SessionLog row this message ends at (assistant: its last row). Set when
    *  the message comes from the server log; fork and feedback address it. */
   uuid?: string;
+  /** True while this assistant turn has not reached a terminal row yet. */
+  inFlight?: boolean;
   /** Thumbs up/down left on this reply. */
   feedback?: { rating: "up" | "down" | null; comment?: string };
   /** A `/skill args` turn: the log holds the expanded SKILL.md prompt; the
@@ -183,6 +185,8 @@ export type AppState = {
     reconnecting?: boolean;
     runId?: string;
     lastSeq?: number;
+    afterTool?: string;
+    pendingSteers?: Array<{ text: string; ts: number; afterToolCallId?: string }>;
     pendingApprovals?: ApprovalRequest[];
     decidingApproval?: boolean;
     pendingQuestions?: QuestionRequest[];
@@ -597,4 +601,15 @@ export function dequeueQuestion(sessId: string, questionId: string) {
   if (!live?.pendingQuestions) return;
   live.pendingQuestions = live.pendingQuestions.filter((x) => x.questionId !== questionId);
   bump();
+}
+
+const resumingStreams = new Set<string>();
+
+export function markStreamResuming(sessId: string, active: boolean) {
+  if (active) resumingStreams.add(sessId);
+  else resumingStreams.delete(sessId);
+}
+
+export function isStreamResuming(sessId: string): boolean {
+  return resumingStreams.has(sessId);
 }

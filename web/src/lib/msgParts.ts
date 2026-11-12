@@ -227,7 +227,21 @@ export function appendThink(m: ChatMsg, delta: string) {
 export function appendTool(m: ChatMsg, name: string, argsStr: string, toolCallId?: string) {
   const t0 = Date.now();
   finishThink(m, t0);
-  ensureParts(m).push({ kind: "tool", name, argsStr, t0, toolCallId });
+  const parts = ensureParts(m);
+  if (toolCallId) {
+    const existing = parts.find((p) => p.kind === "tool" && p.toolCallId === toolCallId);
+    if (existing && existing.kind === "tool") {
+      if (name) existing.name = name;
+      if (argsStr && argsStr !== "{}") existing.argsStr = argsStr;
+      const step = m.steps!.find((s) => s.type === "tool" && s.toolCallId === toolCallId);
+      if (step) {
+        if (name) step.name = name;
+        if (argsStr && argsStr !== "{}") step.argsStr = argsStr;
+      }
+      return;
+    }
+  }
+  parts.push({ kind: "tool", name, argsStr, t0, toolCallId });
   m.steps!.push({ type: "tool", name, argsStr, t0, toolCallId });
 }
 
@@ -292,9 +306,16 @@ export function appendText(m: ChatMsg, delta: string) {
   else parts.push({ kind: "text", text: delta });
 }
 
-export function appendSteerPart(m: ChatMsg, text: string) {
+export function appendSteerPart(m: ChatMsg, text: string, ts = Date.now()) {
   finishThink(m);
-  ensureParts(m).push({ kind: "steer", text, ts: Date.now() });
+  const parts = ensureParts(m);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (p.kind === "think" && !p.text.trim()) continue;
+    if (p.kind === "steer" && p.text === text) return;
+    break;
+  }
+  parts.push({ kind: "steer", text, ts });
 }
 
 function sliceMs(p: MsgPart, now: number, live: boolean): number {

@@ -230,6 +230,12 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
             ttft = (entry.get("metrics") or {}).get("time_to_first_token")
             if isinstance(ttft, (int, float)) and ttft > 0:
                 ttfts.append(float(ttft))
+            if entry.get("finish_reason") in ("cancelled", "error", "interrupted"):
+                open_request = None
+                continuation = False
+        elif event_name in ("run_completed", "run_cancelled", "run_failed"):
+            open_request = None
+            continuation = False
 
         is_steering = _is_steering_user(entry)
         if is_steering:
@@ -424,6 +430,8 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
         elapsed_ms += dur or 0
 
     rounds = _build_rounds(messages, msg_task, tasks, model_segments, tool_spans, requests, meta)
+    if has_timeline and (open_request is not None or continuation) and rounds and not rounds[-1].get("compaction"):
+        rounds[-1]["inFlight"] = True
     out = {
         "elapsedMs": elapsed_ms,
         "hasTimeline": has_timeline,
@@ -1393,7 +1401,7 @@ def last_completed_round(entries: Iterable[Dict[str, Any]]) -> Optional[Dict[str
     """
     rounds = [
         r for r in analyze_entries(entries).get("rounds") or []
-        if not r.get("compaction")
+        if not r.get("compaction") and not r.get("inFlight")
     ]
     return rounds[-1] if rounds else None
 

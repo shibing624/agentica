@@ -29,12 +29,13 @@ import {
   IconCheck, IconTrash, IconQueue, IconSearch,
 } from "../icons";
 import {
-  bump, dequeueApproval, dequeueQuestion, enqueueApproval, enqueueQuestion, getState, pushPrefs, saveSessions,
+  bump, dequeueApproval, dequeueQuestion, enqueueApproval, enqueueQuestion, getState,
+  isStreamResuming, markStreamResuming, pushPrefs, saveSessions,
   sessionViews, setState,
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUsage } from "../components/ContextUsageTip";
-import { rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
+import { reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
   allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
   finalAnswerOf, finishTool, foldProcess, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
@@ -56,13 +57,12 @@ const ChatMarkdown = lazy(() => import("../components/ChatMarkdown").then((m) =>
 const OLDER_PREFETCH_PX = 800;
 /** How long a spliced-in page may keep growing before the reader's position is let go. */
 const PAGING_HOLD_MS = 1500;
-const msgKeys = new WeakMap<ChatMsg, number>();
+const msgKeys = new WeakMap<ChatMsg, string | number>();
 let nextMsgKey = 1;
 function keyOfMsg(m: ChatMsg): string | number {
-  if (m.uuid) return m.uuid;
   let k = msgKeys.get(m);
   if (!k) {
-    k = nextMsgKey++;
+    k = m.uuid || nextMsgKey++;
     msgKeys.set(m, k);
   }
   return k;
@@ -250,10 +250,14 @@ export function ChatPage() {
     void resumeLiveStream(id);
   }, [s.pendingResume]);
   useEffect(() => {
+    if (!s.curSess || streaming || !cur?.running) return;
+    void resumeLiveStream(s.curSess);
+  }, [s.curSess, cur?.running, streaming]);
+  useEffect(() => {
     if (!s.curSess) return;
     void syncSessionRoundStats(s.curSess);
     void syncSessionUsage(s.curSess);
-    if (streaming) return;
+    if (streaming || cur?.running) return;
     const sess = s.sessions[s.curSess];
     if (sess) {
       let healed = false;
@@ -262,7 +266,7 @@ export function ChatPage() {
       }
       if (healed) saveSessions();
     }
-  }, [s.curSess, streaming]);
+  }, [s.curSess, cur?.running, streaming]);
 
   const saveCurrentSessionScroll = () => {
     const el = msgsRef.current;
@@ -545,13 +549,21 @@ export function ChatPage() {
                       {cur.loadingOlder && <><IconSpinner /><span>{S.common.loading}</span></>}
                     </div>
                   )}
-                  {cur.msgs.map((m, i) => (
-                    <MessageView key={keyOfMsg(m)} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
-                      turn={(cur.olderTurns || 0) + turnOf(cur.msgs, i)}
-                      onOpenFile={files.browsePath} onOpenReview={files.openReview} onOpenSkill={files.openSkill}
-                      live={!!(s.curSess && s.streams[s.curSess]?.aiMsg === m)}
-                      pendingToolCallId={pendingToolCallId} />
-                  ))}
+                  {cur.msgs.map((m, i) => {
+                    const isLiveMsg = Boolean(
+                      s.curSess && (
+                        s.streams[s.curSess]?.aiMsg === m
+                        || (!s.streams[s.curSess] && cur.running && i === cur.msgs.length - 1 && m.role === "assistant" && !m.compact && m.inFlight)
+                      ),
+                    );
+                    return (
+                      <MessageView key={keyOfMsg(m)} idx={i} m={m} sessionId={s.curSess} workspace={workspace}
+                        turn={(cur.olderTurns || 0) + turnOf(cur.msgs, i)}
+                        onOpenFile={files.browsePath} onOpenReview={files.openReview} onOpenSkill={files.openSkill}
+                        live={isLiveMsg}
+                        pendingToolCallId={pendingToolCallId} />
+                    );
+                  })}
                 </>
               )}
             </div>
@@ -1890,8 +1902,36 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     // does from the session log after a refresh) rather than the text recap.
     const result = evt.data.task && typeof evt.data.task === "object" ? JSON.stringify(evt.data.task) : evt.data.result;
     finishTool(aiMsg, result, evt.data.diff, evt.data.tool_call_id);
-    if (sessId && callId) dequeueApproval(sessId, callId);
+    if (sessId) {
+      if (callId) dequeueApproval(sessId, callId);
+      const pending = getState().streams[sessId]?.pendingSteers;
+      const resolvedId = evt.data?.tool_call_id || callId;
+      if (pending?.length && resolvedId) {
+        for (let i = 0; i < pending.length;) {
+          if (pending[i].afterToolCallId === resolvedId) {
+            const st = pending.splice(i, 1)[0];
+            appendSteerPart(aiMsg, st.text, st.ts);
+          } else {
+            i += 1;
+          }
+        }
+      }
+    }
     flushStream();
+    return true;
+  }
+  if (evt.event === "steer") {
+    const text = String(evt.data?.text || "").trim();
+    if (text) {
+      const ts = typeof evt.data?.ts === "number" ? evt.data.ts : Date.now();
+      appendSteerPart(aiMsg, text, ts);
+      const pending = sessId ? getState().streams[sessId]?.pendingSteers : undefined;
+      if (pending?.length) {
+        const idx = pending.findIndex((p) => p.text === text);
+        if (idx >= 0) pending.splice(idx, 1);
+      }
+      flushStream();
+    }
     return true;
   }
   if (evt.event === "question_request" && sessId) {
@@ -1943,30 +1983,6 @@ function isDisconnectErr(e: any): boolean {
   if (e.name === "AbortError") return true;
   const msg = String(e.message || e).toLowerCase();
   return msg.includes("network") || msg.includes("failed to fetch") || msg.includes("load failed");
-}
-
-function takeLiveAssistant(sess: { msgs: ChatMsg[] }): ChatMsg {
-  const last = sess.msgs[sess.msgs.length - 1];
-  if (last?.role === "assistant") {
-    const err = (last.error || "").toLowerCase();
-    const disconnected = err.includes("network") || err.includes("failed to fetch") || err.includes("load failed");
-    const parts = last.parts || [];
-    const unfinished = parts.some(
-      (p) => (p.kind === "think" && p.ms == null) || (p.kind === "tool" && p.result == null),
-    );
-    const blank = !last.content && !parts.length && !last.aborted && last.tokIn == null;
-    if (disconnected || unfinished || blank) {
-      last.content = "";
-      last.parts = [];
-      last.steps = [];
-      delete last.error;
-      last.aborted = false;
-      return last;
-    }
-  }
-  const aiMsg: ChatMsg = { role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0 };
-  sess.msgs.push(aiMsg);
-  return aiMsg;
 }
 
 async function consumeSse(
@@ -2051,9 +2067,15 @@ async function consumeSse(
 }
 
 async function finishLive(sessId: string, aiMsg: ChatMsg, t0: number, disconnected: boolean) {
+  const leftoverSteers = getState().streams[sessId]?.pendingSteers;
+  if (leftoverSteers?.length) {
+    for (const st of leftoverSteers) appendSteerPart(aiMsg, st.text, st.ts);
+  }
   flushStream();
   settleWork(aiMsg, Date.now());
   if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - t0) / 1000;
+  if (disconnected) aiMsg.inFlight = true;
+  else delete aiMsg.inFlight;
   delete getState().streams[sessId];
   const sess = getState().sessions[sessId];
   if (sess) {
@@ -2087,7 +2109,8 @@ async function watchRun(
     if (live) live.reconnecting = attempt > 0;
     if (attempt > 0) bump();
     try {
-      const resp = await api.runEvents(runId, lastSeq, abortCtrl.signal);
+      const afterTool = lastSeq === 0 ? (live?.afterTool || "") : "";
+      const resp = await api.runEvents(runId, lastSeq, abortCtrl.signal, afterTool);
       if (!resp.ok || !resp.body) {
         if (resp.status === 404) return false;
         let detail = `HTTP ${resp.status}`;
@@ -2128,68 +2151,58 @@ async function watchRun(
 /** Sessions a resume is already attaching to. switchTo and syncFromServer
  *  can both ask for one; without this both pass the `streams` check before
  *  either has awaited the active run, and the turn gets two streams. */
-const resuming = new Set<string>();
-
 async function resumeLiveStream(sessId: string) {
-  if (getState().streams[sessId] || resuming.has(sessId)) return;
-  resuming.add(sessId);
+  if (getState().streams[sessId] || isStreamResuming(sessId)) return;
+  markStreamResuming(sessId, true);
   try {
     await attachLiveStream(sessId);
   } finally {
-    resuming.delete(sessId);
+    markStreamResuming(sessId, false);
   }
 }
 
 async function attachLiveStream(sessId: string) {
-  const sess = getState().sessions[sessId];
+  let sess = getState().sessions[sessId];
   if (!sess) return;
+  const wasRunning = Boolean(sess.running);
+  if ((!sess.msgs.length && sess.sizeBytes) || (sess.sizeBytes && sess.hydratedSize !== sess.sizeBytes)) {
+    await hydrateSession(sessId, true, true);
+    sess = getState().sessions[sessId];
+    if (!sess) return;
+  }
   const { ok, data } = await api.fetchActiveRun(sessId);
   if (getState().streams[sessId]) return;
   const run = (ok && data?.run) ? data.run : null;
   if (!run) {
-    if (sess) sess.running = false;
-    if (looksDisconnectedMsg(sess.msgs[sess.msgs.length - 1])) {
-      await hydrateSession(sessId, true);
+    sess.running = false;
+    const tail = sess.msgs[sess.msgs.length - 1];
+    if (wasRunning || tail?.inFlight || looksDisconnectedMsg(tail)) {
+      await hydrateSession(sessId, true, true);
+      const refreshed = getState().sessions[sessId];
+      const refreshedTail = refreshed?.msgs[refreshed.msgs.length - 1];
+      if (refreshedTail) delete refreshedTail.inFlight;
     }
     if (getState().curSess === sessId) markSessionRead(sessId);
     else saveSessions();
     bump();
     return;
   }
-  if (run.cron_job && run.automated_message) {
-    if ((!sess.title || sess.title === "Chat") && run.cron_job.name?.trim()) {
-      sess.title = run.cron_job.name.trim();
-    }
-    // A scheduled run streaming in: show its card, once, above the reply.
-    const last = [...sess.msgs].reverse().find((m) => m.role === "user");
-    if (!last?.cronJob || last.content !== run.automated_message) {
-      sess.msgs.push({
-        role: "user", automated: true, content: run.automated_message, ts: Date.now(),
-        cronJob: run.cron_job,
-      });
-    }
-  } else if (run.user_message) {
-    let lastUser: ChatMsg | undefined;
-    for (let i = sess.msgs.length - 1; i >= 0; i--) {
-      if (sess.msgs[i].role === "user" && !sess.msgs[i].automated) {
-        lastUser = sess.msgs[i];
-        break;
-      }
-    }
-    if (!lastUser || lastUser.content.trim() !== run.user_message.trim()) {
-      sess.msgs.push({
-        role: "user",
-        content: run.user_message,
-        ts: Date.now(),
-        files: [],
-        previews: [],
-      });
-    }
+  if (run.cron_job && (!sess.title || sess.title === "Chat") && run.cron_job.name?.trim()) {
+    sess.title = run.cron_job.name.trim();
   }
-  const aiMsg = takeLiveAssistant(sess);
-  appendThink(aiMsg, "");
+  const { aiMsg, afterTool, pendingSteers } = reconcileLiveTurnMsgs(
+    sessId, sess.msgs, run, sess.olderTurns || 0,
+  );
   const abortCtrl = new AbortController();
-  getState().streams[sessId] = { abortCtrl, aiMsg, runId: run.run_id, lastSeq: 0 };
+  getState().streams[sessId] = {
+    abortCtrl,
+    aiMsg,
+    runId: run.run_id,
+    lastSeq: 0,
+    ...(afterTool ? { afterTool } : {}),
+    ...(pendingSteers.length ? { pendingSteers } : {}),
+  };
+  sess.running = true;
   bump();
   const t0 = performance.now();
   const disconnected = await watchRun(sessId, sess, aiMsg, t0, run.run_id, abortCtrl);
@@ -2210,7 +2223,9 @@ async function sendMessage(sessId: string, text: string, files: File[]) {
 
   const userMsg: ChatMsg = { role: "user", content: text, ts: Date.now(), files: [], previews: [] };
   const abortCtrl = new AbortController();
-  const aiMsg: ChatMsg = { role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0 };
+  const aiMsg: ChatMsg = {
+    role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0, inFlight: true,
+  };
   appendThink(aiMsg, "");
   sess.msgs.push(userMsg);
   sess.msgs.push(aiMsg);
@@ -2544,7 +2559,9 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
   if (!sess) return;
   sess.msgs.push({ role: "user", content: `/goal ${objective}`, ts: Date.now() });
   const abortCtrl = new AbortController();
-  const aiMsg: ChatMsg = { role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0 };
+  const aiMsg: ChatMsg = {
+    role: "assistant", content: "", steps: [], parts: [], ts: Date.now(), durationSec: 0, inFlight: true,
+  };
   appendThink(aiMsg, "");
   getState().streams[sessId] = { abortCtrl, aiMsg };
   sess.msgs.push(aiMsg);

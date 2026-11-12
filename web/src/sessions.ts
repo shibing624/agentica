@@ -11,7 +11,7 @@ import { messageFileCandidates } from "./lib/messageFiles";
 import { cachedExisting, statWorkspaceFilesBatched } from "./lib/workspaceStat";
 import { searchEventsConversation, searchMsgsConversation, type SessionContentHit } from "./lib/sessionRows";
 import {
-  askConfirm, bump, getState, projectIdForDir, readLastSessionId, readSessionCache,
+  askConfirm, bump, getState, isStreamResuming, projectIdForDir, readLastSessionId, readSessionCache,
   saveSessions, sessionViews, setState, showToast, writeLastSessionId,
   type ChatMsg, type Session,
 } from "./store";
@@ -143,7 +143,10 @@ export function switchTo(id: string) {
   writeLastSessionId(id);
   bump();
   if (!sess || sessionIsLive(id)) return;
-  if (sess.msgs.length && sess.hydratedSize === sess.sizeBytes) return;
+  if (sess.msgs.length && sess.hydratedSize === sess.sizeBytes) {
+    if (sess.running) setState({ pendingResume: id });
+    return;
+  }
   void (async () => {
     await hydrateSession(id, true);
     if (getState().curSess !== id) return;
@@ -251,9 +254,9 @@ export async function pollSessionsPulse() {
   }
 }
 
-function sessionIsLive(id: string): boolean {
+function sessionIsLive(id: string, allowResuming = false): boolean {
   const st = getState();
-  return !!(st.streams[id] || st.goalRuns[id] || st.commandRuns[id]);
+  return !!(st.streams[id] || (!allowResuming && isStreamResuming(id)) || st.goalRuns[id] || st.commandRuns[id]);
 }
 
 function countUserTurns(msgs: Session["msgs"]): number {
@@ -360,8 +363,8 @@ async function prefetchFileCards(msgs: Session["msgs"], workspace: string) {
 /** Replay a session's transcript from the server log so a reload (or another
  *  machine) still shows history localStorage never had — including tool
  *  calls, matching the live web turn. */
-export async function hydrateSession(id: string, force = false) {
-  if (sessionIsLive(id)) return;
+export async function hydrateSession(id: string, force = false, allowResuming = false) {
+  if (sessionIsLive(id, allowResuming)) return;
   const existing = getState().sessions[id];
   if (!force && existing?.msgs.length && existing.hydratedSize === existing.sizeBytes) return;
   if (existing?.msgs.length) {
@@ -375,7 +378,7 @@ export async function hydrateSession(id: string, force = false) {
   const { ok, data } = await fetchTurnPageCompat(id, turns);
   if (!ok || !data?.events || hydrateGenerations[id] !== generation) return;
   const sess = getState().sessions[id];
-  if (!sess || sessionIsLive(id)) return;
+  if (!sess || sessionIsLive(id, allowResuming)) return;
   if (sess.msgs.length) {
     rememberSteersFromMsgs(id, sess.msgs, sess.olderTurns || 0);
   }
@@ -388,8 +391,8 @@ export async function hydrateSession(id: string, force = false) {
   // Look up the files cards' paths before the transcript is shown, so each
   // reply and its card land in one paint. Bounded: a slow stat only brings
   // back the late card, never a blank chat.
-  await prefetchFileCards(msgs, sess.dir);
-  if (hydrateGenerations[id] !== generation || sessionIsLive(id) || getState().sessions[id] !== sess) return;
+  await prefetchFileCards(sess.running ? msgs.filter((m) => !m.inFlight) : msgs, sess.dir);
+  if (hydrateGenerations[id] !== generation || sessionIsLive(id, allowResuming) || getState().sessions[id] !== sess) return;
   sess.msgs = msgs;
   sess.hasOlder = !!data.has_more;
   sess.olderCursor = data.next_before ?? 0;
@@ -524,6 +527,7 @@ export async function syncSessionRoundStats(id: string) {
   if (!sess) return;
   const rounds = (data.rounds as Array<{
     compaction?: boolean;
+    inFlight?: boolean;
     durationMs: number;
     llmMs: number;
     requests?: number;
@@ -540,8 +544,11 @@ export async function syncSessionRoundStats(id: string) {
   const model = typeof data.meta?.model === "string" ? data.meta.model : "";
   // Compact cards are not rounds (the analysis drops compaction rounds too).
   const liveAi = getState().streams[id]?.aiMsg;
-  const assistants = sess.msgs.filter((m) => m.role === "assistant" && !m.compact && m !== liveAi);
-  const settledRounds = liveAi && rounds.length > assistants.length ? rounds.slice(0, rounds.length - 1) : rounds;
+  const assistants = sess.msgs.filter(
+    (m) => m.role === "assistant" && !m.compact && m !== liveAi && !(sess.running && m.inFlight),
+  );
+  const tailInFlight = Boolean((sess.running || liveAi) && rounds[rounds.length - 1]?.inFlight);
+  const settledRounds = tailInFlight ? rounds.slice(0, rounds.length - 1) : rounds;
   const n = assistants.length;
   const roundOffset = Math.max(0, settledRounds.length - n);
   let changed = false;

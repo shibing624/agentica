@@ -1033,3 +1033,42 @@ class TestChatTurnPageIncludeTurn:
         turns = self._user_turns(page)
         assert turns[0] == 2 and turns[-1] == 34, "stops where the loaded window begins"
         assert page["older_turns"] == 1
+
+
+def test_analyze_marks_in_flight_round_until_terminal_row():
+    from agentica.memory.trace import analyze_entries, last_completed_round
+
+    base = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="q1"),
+        _e("2026-01-01T00:00:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="text"),
+        _e("2026-01-01T00:00:02.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:00:02.100Z", type="assistant", content="a1", finish_reason="stop"),
+        _e("2026-01-01T00:01:00.000Z", type="user", content="q2"),
+        _e("2026-01-01T00:01:01.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:01:02.000Z", type="event", name="tool_call", tool_call_id="tc1", tool_name="execute"),
+        _e("2026-01-01T00:01:02.000Z", type="event", name="request_end", status="completed"),
+        _e(
+            "2026-01-01T00:01:02.100Z",
+            type="assistant",
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[{"id": "tc1", "function": {"name": "execute", "arguments": "{}"}}],
+        ),
+        _e("2026-01-01T00:01:05.000Z", type="tool", tool_call_id="tc1", tool_name="execute", content="ok"),
+    ]
+    mid = analyze_entries(base)
+    assert len(mid["rounds"]) == 2
+    assert not mid["rounds"][0].get("inFlight")
+    assert mid["rounds"][1].get("inFlight") is True
+    assert last_completed_round(base)["title"] == "q1"
+
+    done = base + [
+        _e("2026-01-01T00:01:06.000Z", type="event", name="request_begin"),
+        _e("2026-01-01T00:01:07.000Z", type="event", name="text"),
+        _e("2026-01-01T00:01:07.000Z", type="event", name="request_end", status="completed"),
+        _e("2026-01-01T00:01:07.100Z", type="assistant", content="a2", finish_reason="stop"),
+    ]
+    settled = analyze_entries(done)
+    assert not settled["rounds"][1].get("inFlight")
+    assert last_completed_round(done)["title"] == "q2"
