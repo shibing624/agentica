@@ -2,7 +2,7 @@
 name = "agentica-gateway"
 # Lockstep with agentica: scripts/versions.py keeps this, the agentica pin
 # below and agentica/version.py identical, and CI fails when they drift.
-version = "1.5.1"
+version = "1.5.2"
 description = "Agentica Gateway: FastAPI server, Web UI, IM channels and cron for the agentica agent runtime"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     # Exact pin: the gateway uses agentica internals (config, run, cron,
     # compression), not only its public API, so any other version can break.
-    "agentica==1.5.1",
+    "agentica==1.5.2",
     "fastapi[standard]>=0.109",
     "uvicorn[standard]>=0.27",
     "websockets>=12.0",

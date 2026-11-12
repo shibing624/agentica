@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### changes
+
+## [1.5.2] - 2026-11-12
+
+#### changes
 - **Web 自动压缩发生在提问刚发出时，同一个问题不再显示两次**：切到上下文更小的模型时，一轮开始会先自动压缩，再把这条提问接在新窗口的开头重新记一次。重新加载会话时，压缩卡片前那条一模一样、还没有回复的提问会被去掉，和搜索索引里的 `drop_shadowed_by_boundary` 做法一致；已经得到回答的同样提问保留。向前翻页时这条提问和后面的压缩卡片留在同一页，不会在上一页再露出来（`web/src/lib/hydrateMessages.ts`、`chat_turn_page`）。
 - **`ask_user_question` 在 Web / Desktop / IM 上是同一张卡，先回答的生效；停止或回合结束会把卡收掉**：网关里的提问挂在这一轮的 `LiveTurn` 上，Web / Desktop 在输入框上方出卡片（`POST /api/sessions/{id}/questions/{question_id}`），IM 仍发 `/c/<token>` 和编号回复。任何一边提交后其余表面立刻关掉，第二次提交返回 404。没有进行中的回合时立刻超时，不再空等。点停止会马上结束等待（与审批的拒绝相同），回合结束、取消或失败也会发 `question_resolved` 并收起 IM 卡片，而不是把卡留到用户再点一次才说已过期。IM 发卡失败时提问仍留在 Web 上可答，不会直接变成工具报错；这张没发出去的 IM 卡会立即作废并清掉聊天里的待答状态，用户之后发的普通消息不会被当成它的答案。发布出去的 `publish_html` / `publish_markdown` 页面是只读的，工具提示不再把它当成能收回回答的表单。
 - **Claude / GPT（Responses）在 Web 运行中也能实时显示思考与当前步骤，修复原生 Anthropic 的 Claude 在网关里直接 400**：① 根因：Claude opus-4-7 及以后的自适应思考默认 `display: omitted`，Responses API 不带 `reasoning.summary` 时也不推送任何推理文本，所以工具调用之间什么都收不到，组头只剩「正在分析请求」。现在 `Claude` 开启自适应思考时默认发 `thinking.display: "summarized"`（`thinking_display=None` 交给模型默认），`OpenAIResponses` 默认发 `reasoning.summary: "auto"`（`reasoning_summary=None` 不发）。② 网关构建主模型固定传 `thinking="enabled"`，对 Anthropic 会生成 `{"type": "enabled", "budget_tokens": 8000}`，覆盖了 profile 的 `reasoning_effort`，claude-opus-5-5 直接 400「thinking.type.enabled is not supported」；现在 Claude profile 设了 `reasoning_effort` 时走自适应思考（与 CLI 一致），没设时保持原有固定预算。③ Web「正在分析请求」后的细节：正在流的思考仍只显示已写完的段落；没有思考文本时，退回显示最近一段过渡回复的末行或刚执行完的命令，不再空着。
@@ -130,8 +134,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 侧栏收起后左上角的「新建对话」图标从铅笔改为加号。
 - **任务清单在任务完成后仍显示转圈**。聊天记录里的 `write_todos` 是写入那一刻的快照，其中的 `in_progress` 项一直用旋转图标显示。现在只有输入框上方的任务面板在回合运行中才转圈，其他地方的进行中项显示为静止的蓝色圆圈。
 - **另一个客户端完成的回合不会同步过来**。Web 和 Desktop 连的是同一个网关，但每个窗口只在启动时读一次会话列表，打开的会话也只读一次日志，所以在 Web 里跑完的回合，Desktop 要重启才能看到。现在窗口重新获得焦点、页面变为可见时，以及可见期间每 5 秒，会刷新会话列表；当前会话的日志变大就重新读取，有在别处启动的运行就接上它的实时输出。另外，刷新会话列表时不再按 localStorage 里的「上次打开」切换会话（这个值可能被另一个标签页改过），只在启动时恢复一次。
-- **1.5.1 的 Desktop 安装包补打。** Windows 上 Git 自带的 GNU tar 不能解开带盘符的路径，改用 `System32\tar.exe`；macOS 上空的 `CSC_LINK` 被 electron-builder 当成证书路径，未签名构建直接失败；CPython 压缩包下载失败会再试两次。三条都只影响安装包，不影响已发布的 PyPI / npm 包。
-
 ---
 
 更早的发布说明（1.5.1 及以前）在 [docs/changelog-archive.md](docs/changelog-archive.md)。

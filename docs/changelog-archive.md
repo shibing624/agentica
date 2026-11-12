@@ -7,6 +7,7 @@
 ## [1.5.1] - 2026-11-04
 
 #### changes
+- **1.5.1 的 Desktop 安装包补打。** Windows 上 Git 自带的 GNU tar 不能解开带盘符的路径，改用 `System32\tar.exe`；macOS 上空的 `CSC_LINK` 被 electron-builder 当成证书路径，未签名构建直接失败；CPython 压缩包下载失败会再试两次。三条都只影响安装包，不影响已发布的 PyPI / npm 包。
 - **会话标题不再为了识别技能轮次去加载整个技能包。** `SessionLog.session_preview` 原来 `from agentica.skills.skill import Skill`，这会先执行 `agentica.skills` 的包初始化（loader、installer、curator）。识别逻辑挪到 `agentica.utils.skill_invocation.invocation_label`，`Skill.invocation_label` 改为调用它。
 - **Gateway 拆成独立发行包 `agentica-gateway`，Web 产物改到 `web/dist`，一个 tag 统一发布全部产物**（参照 deepseek-harness 的「按包拆源码、按家族统一版本」）：
   - **两个 PyPI 包，同一个版本。** `agentica` 只剩 SDK + CLI，`pip install agentica` 不再装 fastapi、uvicorn、lark-oapi。服务端、Web UI、IM 渠道、cron 移到 `gateway/`，发布为 `agentica-gateway`（导入名 `agentica_gateway`），精确锁定同版本的 `agentica`，因为它用到核心包内部模块。`agentica[gateway]` 改为「同版本的 `agentica-gateway[feishu]`」，`agentica[wechat]` 等渠道 extra 照旧，**README 里的 `uv tool install "agentica[gateway]"` 不用改**。`agentica-gateway` 自己的 extra 是 `[feishu]`、`[wechat]`、`[telegram]`…和 `[all]`；单装它不带飞书 SDK，飞书渠道缺 SDK 时日志会给出安装命令。

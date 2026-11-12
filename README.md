@@ -106,6 +106,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 ## 🔥 News
 
+- [2026/11/12] **v1.5.2**：Web / Desktop 后台任务与自动化任务、提问卡与实时思考，以及用 `agentica watch` 跟踪本机之外的长任务。详见 [Release-v1.5.2](https://github.com/shibing624/agentica/releases/tag/v1.5.2)
 - [2026/11/04] **v1.5.1**：Web 与桌面端后端独立为 `agentica-gateway` 包并与 `agentica` 同版本发布；桌面端 macOS / Windows / Linux 安装包、PyPI 与 npm `@agentica-ai/sdk` 同步更新。详见 [Release-v1.5.1](https://github.com/shibing624/agentica/releases/tag/v1.5.1)
 - [2026/10/22] **v1.5.0**：Langfuse 5 全链路追踪升级；长会话历史完整重放与跨模型切换保留工具记录；按模型实测 token 校准上下文压缩。详见 [Release-v1.5.0](https://github.com/shibing624/agentica/releases/tag/v1.5.0)
 - [2026/10/15] **v1.4.17**：内置看图工具；网关空回复自动重试；目录结构收敛，公开导入保持兼容。详见 [Release-v1.4.17](https://github.com/shibing624/agentica/releases/tag/v1.4.17)
