@@ -111,7 +111,6 @@ class FakeAgentService:
     def __init__(self, default_work_dir: str) -> None:
         self.work_dirs: Dict[str, str] = {}
         self.profiles: Dict[str, str] = {}
-        self.ask_callbacks: Dict[str, object] = {}
         self.approval_modes: Dict[str, str] = {}
         self.active_sessions: set = set()
         self.cancelled_sessions: List[str] = []
@@ -150,9 +149,6 @@ class FakeAgentService:
 
     def set_session_approval_mode(self, session_id: str, mode: str, owner=None) -> None:
         self.approval_modes[session_id] = mode
-
-    def set_session_ask_callback(self, session_id: str, callback, owner=None) -> None:
-        self.ask_callbacks[session_id] = callback
 
     def is_session_active(self, session_id: str, owner=None) -> bool:
         return session_id in self.active_sessions
@@ -547,6 +543,83 @@ class TestImBotControllerFlows:
         if task:
             await task
         assert "approval=allow" in ch.sent[-1][1]
+
+    def _question_bot(self, tmp_path, monkeypatch):
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        ch = FakeChannel()
+        svc = FakeAgentService(default_work_dir=str(proj))
+        reg = CardRegistry(secret_provider=lambda: "card-sec")
+        monkeypatch.setattr(deps, "card_registry", reg)
+        monkeypatch.setenv("AGENTICA_PUBLIC_URL", "https://cards.example.com")
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch), agent_service=svc,
+            card_registry=reg, state_file=tmp_path / "im_state.json",
+        )
+        return ch, svc, bot
+
+    @staticmethod
+    def _asking_turn(answers: list):
+        """A turn that asks the way the gateway's ask_user_question does: through the live turn."""
+        from agentica_gateway.services import live_turn
+
+        async def handler(message, sid, wd):
+            turn = live_turn.active(sid, "default")
+            question, future = turn.open_question("部署到哪？", ["staging（推荐）", "prod"])
+            await turn.question_notifier(question)
+            answers.append(await asyncio.wait_for(future, timeout=5.0))
+            return ChatResult(content=f"answer={answers[-1]}", tool_calls=1, session_id=sid)
+
+        return handler
+
+    @pytest.mark.asyncio
+    async def test_ask_user_question_goes_out_as_a_card_and_the_tap_answers_it(self, tmp_path, monkeypatch):
+        ch, svc, bot = self._question_bot(tmp_path, monkeypatch)
+        answers: list = []
+        svc.chat_handler = self._asking_turn(answers)
+        await bot.handle(_msg("上线"))
+        state = bot.state_for(_msg("noop"))
+        for _ in range(100):
+            if state.has_active_pending() and state.pending.kind == "interaction":
+                break
+            await asyncio.sleep(0.02)
+
+        sent = ch.sent[-1][1]
+        assert "部署到哪？" in sent and "1. staging（推荐）" in sent and "2. prod" in sent
+        assert f"https://cards.example.com/c/{state.pending.card_token}" in sent
+
+        resp = TestClient(app).post(
+            f"/c/{state.pending.card_token}", content="choice=1",
+            headers={"content-type": "application/x-www-form-urlencoded"}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        await bot._turn_tasks[state.session_id]
+        assert answers == ["prod"]
+        assert "answer=prod" in ch.sent[-1][1]
+
+    @pytest.mark.asyncio
+    async def test_answering_on_the_web_closes_the_im_card(self, tmp_path, monkeypatch):
+        from agentica_gateway.services import live_turn
+
+        ch, svc, bot = self._question_bot(tmp_path, monkeypatch)
+        answers: list = []
+        svc.chat_handler = self._asking_turn(answers)
+        await bot.handle(_msg("上线"))
+        state = bot.state_for(_msg("noop"))
+        for _ in range(100):
+            if state.has_active_pending() and state.pending.kind == "interaction":
+                break
+            await asyncio.sleep(0.02)
+        token = state.pending.card_token
+        turn = live_turn.active(state.session_id, "default")
+        qid = turn.open_questions[0].question_id
+
+        assert turn.answer_question(qid, "staging（推荐）", by="Web")
+        await bot._turn_tasks[state.session_id]
+        assert answers == ["staging（推荐）"]
+        # The phone's card and the numbered reply no longer take an answer.
+        assert bot._cards.get_by_token(token).state == "expired"
+        assert not state.has_active_pending()
 
     @pytest.mark.asyncio
     async def test_loopback_gateway_sends_no_card_link_the_phone_cannot_open(self, tmp_path, monkeypatch):

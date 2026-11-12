@@ -35,6 +35,11 @@ class OpenAIResponses(OpenAIChat):
     supports_native_compaction: bool = True
 
     reasoning: Optional[str] = None
+    # ``reasoning.summary`` sent with ``reasoning``: without it the API streams
+    # no reasoning text at all, so the UI has nothing to show between tool
+    # calls. None omits it (an organization not verified for summaries gets a
+    # 400 for any value).
+    reasoning_summary: Optional[str] = "auto"
     max_output_tokens: Optional[int] = None
     parallel_tool_calls: Optional[bool] = None
     truncation: Optional[str] = None
@@ -386,6 +391,8 @@ class OpenAIResponses(OpenAIChat):
             request["max_output_tokens"] = output_limit
         if self.reasoning is not None:
             request["reasoning"] = {"effort": self.reasoning}
+            if self.reasoning_summary is not None:
+                request["reasoning"]["summary"] = self.reasoning_summary
         if self.parallel_tool_calls is not None:
             request["parallel_tool_calls"] = self.parallel_tool_calls
         if self.truncation is not None:

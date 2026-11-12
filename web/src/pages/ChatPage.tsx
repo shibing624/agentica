@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import * as api from "../api";
 import { ChatNav } from "../components/ChatNav";
 import { ComposerDir } from "../components/ComposerDir";
-import { SteerChip, WorkGroup, ApprovalCard } from "../components/WorkGroup";
+import { SteerChip, WorkGroup, ApprovalCard, QuestionCard } from "../components/WorkGroup";
 import { RenameInput } from "../components/SessionTree";
 import { CommandMenu, ComposerPicker, invocableSkills, slashQuery, type PickerGroup } from "../components/SlashMenu";
 import { flatItems, plusMenuGroups, slashMenuGroups, type MenuItem } from "../lib/composerCommands";
@@ -29,7 +29,8 @@ import {
   IconCheck, IconTrash, IconQueue, IconSearch,
 } from "../icons";
 import {
-  bump, dequeueApproval, enqueueApproval, getState, pushPrefs, saveSessions, sessionViews, setState,
+  bump, dequeueApproval, dequeueQuestion, enqueueApproval, enqueueQuestion, getState, pushPrefs, saveSessions,
+  sessionViews, setState,
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUsage } from "../components/ContextUsageTip";
@@ -133,13 +134,16 @@ export function ChatPage() {
   const queued = s.messageQueue.filter((q) => q.sessionId === s.curSess);
   const pendingImages = s.pendingFiles.filter((f) => f.type.startsWith("image/"));
   const pendingApprovals = s.curSess ? (s.streams[s.curSess]?.pendingApprovals || []) : [];
+  const pendingQuestion = s.curSess ? s.streams[s.curSess]?.pendingQuestions?.[0] : undefined;
+  // An open approval or question owns the composer until it is answered.
   const pendingReq = pendingApprovals[0];
+  const composerLocked = !!pendingReq || !!pendingQuestion;
   const q = slashQuery(s.inputText);
-  const slashGroups = q != null && !pendingReq ? slashMenuGroups(q, s.pluginsData.skills || [], S.chat) : [];
+  const slashGroups = q != null && !composerLocked ? slashMenuGroups(q, s.pluginsData.skills || [], S.chat) : [];
   const slashItems = flatItems(slashGroups);
   const plusGroups = plusMenuGroups(S.chat);
   const plusItems = flatItems(plusGroups);
-  const slashOpen = q != null && !pendingReq;
+  const slashOpen = q != null && !composerLocked;
   const pendingToolCallId = pendingReq?.toolCallId;
   const decidingApproval = !!(s.curSess && s.streams[s.curSess]?.decidingApproval);
   const goalBudgetText = s.goalCompose?.budgetText ?? "";
@@ -580,6 +584,14 @@ export function ChatPage() {
               onDecide={(d) => void decideCurrentApproval(d)}
             />
           )}
+          {!pendingReq && pendingQuestion && (
+            <QuestionCard
+              key={pendingQuestion.questionId}
+              q={pendingQuestion}
+              busy={!!(s.curSess && s.streams[s.curSess]?.answeringQuestion)}
+              onAnswer={(a) => void answerCurrentQuestion(a)}
+            />
+          )}
           {cur && <TodoDock todos={dockTodos(cur.msgs, busy)} live={streaming} />}
           {goalRun && (
             <div className="goal-bar" title={goalRun.progress}>
@@ -590,14 +602,14 @@ export function ChatPage() {
           {!!queued.length && (
             <QueueDock queued={queued} streaming={streaming} />
           )}
-          <div className={"input-box" + (pendingReq ? " approval-locked" : "")} onPaste={(e) => {
-            if (pendingReq) return;
+          <div className={"input-box" + (composerLocked ? " approval-locked" : "")} onPaste={(e) => {
+            if (composerLocked) return;
             const files = imageFilesFromClipboard(e.clipboardData);
             if (!files.length) return;
             e.preventDefault();
             setState({ pendingFiles: [...getState().pendingFiles, ...files] });
           }} onDragOver={(e) => {
-            if (pendingReq) return;
+            if (composerLocked) return;
             e.preventDefault();
             e.currentTarget.classList.add("dragover");
           }}
@@ -605,7 +617,7 @@ export function ChatPage() {
              onDrop={(e) => {
                e.preventDefault();
                e.currentTarget.classList.remove("dragover");
-               if (pendingReq) return;
+               if (composerLocked) return;
                const files = Array.from(e.dataTransfer.files || []);
                if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
              }}>
@@ -613,7 +625,7 @@ export function ChatPage() {
               <CommandMenu groups={slashGroups} active={slashActive} onPick={pick} onHover={setSlashActive}
                            className="slash-menu" emptyText={S.chat.slashEmpty} />
             )}
-            {s.composerPicker && !slashOpen && !pendingReq && (
+            {s.composerPicker && !slashOpen && !composerLocked && (
               <ComposerPicker
                 key={s.composerPicker}
                 menuRef={pickerRef}
@@ -644,7 +656,7 @@ export function ChatPage() {
               />
             )}
             {s.goalCompose && (
-              <div className="goal-chip-row" inert={pendingReq ? true : undefined}>
+              <div className="goal-chip-row" inert={composerLocked ? true : undefined}>
                 <span className="goal-chip">
                   <span className="goal-chip-label">{S.chat.goalMode}</span>
                   <span className="goal-chip-sep" aria-hidden />
@@ -707,7 +719,7 @@ export function ChatPage() {
               </div>
             )}
             {s.pendingFiles.length > 0 && (
-              <div className="file-list" inert={pendingReq ? true : undefined}>
+              <div className="file-list" inert={composerLocked ? true : undefined}>
                 {s.pendingFiles.map((f, i) => (
                   <PendingFileChip key={i} file={f} onRemove={() => setState({ pendingFiles: s.pendingFiles.filter((_, j) => j !== i) })} />
                 ))}
@@ -728,8 +740,8 @@ export function ChatPage() {
               ref={taRef}
               className="input-ta"
               rows={1}
-              disabled={!!pendingReq}
-              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : pendingReq ? S.chat.placeholderApproval : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
+              disabled={composerLocked}
+              placeholder={compacting ? S.chat.placeholderCompacting : s.goalCompose ? S.chat.placeholderGoal : pendingReq ? S.chat.placeholderApproval : pendingQuestion ? S.chat.placeholderQuestion : busy ? S.chat.placeholderStreaming : S.chat.placeholder}
               value={s.inputText}
               onChange={(e) => setState({ inputText: e.target.value })}
               onScroll={(e) => { if (skillHlRef.current) skillHlRef.current.scrollTop = e.currentTarget.scrollTop; }}
@@ -784,7 +796,7 @@ export function ChatPage() {
             />
             </div>
             <div className="input-foot">
-              <div className="input-foot-l" inert={pendingReq ? true : undefined}>
+              <div className="input-foot-l" inert={composerLocked ? true : undefined}>
                 <input type="file" multiple accept="image/*,*/*" style={{ display: "none" }} id="fileInput" onChange={(e) => {
                   const files = Array.from(e.target.files || []);
                   if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
@@ -1396,6 +1408,25 @@ async function decideCurrentApproval(decision: ApprovalDecision) {
   }
 }
 
+async function answerCurrentQuestion(answer: string) {
+  const st = getState();
+  const sessId = st.curSess || "";
+  const live = st.streams[sessId];
+  const q = live?.pendingQuestions?.[0];
+  if (!sessId || !live || !q || live.answeringQuestion) return;
+  live.answeringQuestion = true;
+  bump();
+  const res = await api.postSessionAnswer(sessId, q.questionId, answer);
+  const again = getState().streams[sessId];
+  if (again) again.answeringQuestion = false;
+  if (res.ok || res.status === 404) {
+    dequeueQuestion(sessId, q.questionId);
+  } else {
+    bump();
+    showToast(getStrings().chat.questionFailed);
+  }
+}
+
 async function stopGen() {
   const st = getState();
   const sessId = st.curSess || "";
@@ -1733,7 +1764,8 @@ const STOP_GRACE_MS = 600;
 
 async function submit() {
   const st = getState();
-  if (st.curSess && st.streams[st.curSess]?.pendingApprovals?.[0]) return;
+  const lockLive = st.curSess ? st.streams[st.curSess] : undefined;
+  if (lockLive?.pendingApprovals?.[0] || lockLive?.pendingQuestions?.[0]) return;
   const text = st.inputText.trim();
   const files = st.pendingFiles.slice();
   const S = getStrings();
@@ -1859,6 +1891,24 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     const result = evt.data.task && typeof evt.data.task === "object" ? JSON.stringify(evt.data.task) : evt.data.result;
     finishTool(aiMsg, result, evt.data.diff, evt.data.tool_call_id);
     if (sessId && callId) dequeueApproval(sessId, callId);
+    flushStream();
+    return true;
+  }
+  if (evt.event === "question_request" && sessId) {
+    const qid = String(evt.data?.question_id || "");
+    if (qid) {
+      enqueueQuestion(sessId, {
+        questionId: qid,
+        prompt: String(evt.data?.prompt || ""),
+        options: Array.isArray(evt.data?.options) ? evt.data.options.map(String) : [],
+      });
+    }
+    flushStream();
+    return true;
+  }
+  if (evt.event === "question_resolved" && sessId) {
+    const qid = String(evt.data?.question_id || "");
+    if (qid) dequeueQuestion(sessId, qid);
     flushStream();
     return true;
   }

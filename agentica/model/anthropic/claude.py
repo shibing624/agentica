@@ -238,13 +238,12 @@ class Claude(Model):
     # which is enforced automatically. Mirrors the CLI reasoning_effort knob so
     # one setting controls thinking depth across all providers.
     reasoning_effort: Optional[str] = None
-    # Adaptive-thinking display: "summarized" (return a thinking summary) or
-    # "omitted" (hide thinking). Only meaningful when adaptive thinking is on.
-    # Model default varies: opus-4-7/opus-4-8 default to "omitted" (thinking is
-    # NOT surfaced regardless of what you pass), while opus-4-6 / sonnet-4-6
-    # default to "summarized". Set this to force a value when the model supports
-    # it. Rides along in extra_body next to output_config.
-    thinking_display: Optional[str] = None
+    # Adaptive-thinking display: "summarized" (stream a thinking summary) or
+    # "omitted" (no thinking text). Sent as ``thinking.display`` whenever
+    # ``reasoning_effort`` turns adaptive thinking on. "summarized" by default:
+    # opus-4-7 and later otherwise default to "omitted", and the UI then has
+    # nothing to show between tool calls. None leaves it to the model.
+    thinking_display: Optional[str] = "summarized"
     request_params: Optional[Dict[str, Any]] = None
 
     # Client parameters
@@ -424,6 +423,8 @@ class Claude(Model):
             # Adaptive thinking requires temperature=1 — enforce it here so a
             # stale temperature can't 400 the request.
             _request_params["thinking"] = {"type": "adaptive"}
+            if self.thinking_display:
+                _request_params["thinking"]["display"] = self.thinking_display
             _extra = _request_params.get("extra_body") or {}
             _extra["output_config"] = {"effort": self.reasoning_effort}
             _request_params["extra_body"] = _extra

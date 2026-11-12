@@ -1438,6 +1438,23 @@ class TestModelFactory:
         model = create_model("kimi", "moonshot-v1")
         assert model.__class__.__name__ == "KimiChat"
 
+    def test_claude_with_effort_gets_adaptive_thinking_not_a_fixed_budget(self):
+        """The gateway always passes thinking="enabled". For a Claude profile
+        with reasoning_effort that used to send {"type": "enabled",
+        "budget_tokens": 8000}, which claude-opus-5-5 rejects with a 400 and
+        which overrode the effort. It must be adaptive thinking, with the
+        summarized display so thinking actually streams."""
+        from agentica_gateway.services.model_factory import create_model
+        model = create_model("anthropic", "claude-opus-5-5", api_key="k", reasoning_effort="medium", thinking="enabled")
+        kwargs = model.request_kwargs
+        assert kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
+        assert kwargs["extra_body"]["output_config"] == {"effort": "medium"}
+
+    def test_claude_without_effort_keeps_the_fixed_budget(self):
+        from agentica_gateway.services.model_factory import create_model
+        model = create_model("anthropic", "claude-sonnet-4-5", api_key="k", thinking="enabled")
+        assert model.request_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+
     def test_openai_compat_provider(self):
         """Providers in PROVIDER_FACTORIES (e.g. deepseek) should be created via the factory dispatch."""
         from agentica_gateway.services.model_factory import create_model

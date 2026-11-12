@@ -24,6 +24,13 @@ export type ApprovalRequest = {
   options: ApprovalDecision[];
 };
 
+/** SSE `question_request`: an open `ask_user_question`. */
+export type QuestionRequest = {
+  questionId: string;
+  prompt: string;
+  options: string[];
+};
+
 export type ChatMsg = {
   role: "user" | "assistant";
   content: string;
@@ -178,6 +185,8 @@ export type AppState = {
     lastSeq?: number;
     pendingApprovals?: ApprovalRequest[];
     decidingApproval?: boolean;
+    pendingQuestions?: QuestionRequest[];
+    answeringQuestion?: boolean;
   }>;
   goalRuns: Record<string, { status: string; objective: string; progress: string }>;
   /** Blocking slash commands (``/compact``) that hold the session lock. */
@@ -572,5 +581,20 @@ export function dequeueApproval(sessId: string, toolCallId: string) {
   const live = state.streams[sessId];
   if (!live?.pendingApprovals) return;
   live.pendingApprovals = live.pendingApprovals.filter((x) => x.toolCallId !== toolCallId);
+  bump();
+}
+
+export function enqueueQuestion(sessId: string, q: QuestionRequest) {
+  const live = state.streams[sessId];
+  if (!live) return;
+  const list = live.pendingQuestions || (live.pendingQuestions = []);
+  if (!list.some((x) => x.questionId === q.questionId)) list.push(q);
+  bump();
+}
+
+export function dequeueQuestion(sessId: string, questionId: string) {
+  const live = state.streams[sessId];
+  if (!live?.pendingQuestions) return;
+  live.pendingQuestions = live.pendingQuestions.filter((x) => x.questionId !== questionId);
   bump();
 }

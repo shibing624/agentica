@@ -257,6 +257,9 @@ class CosPublishTool(Tool):
         "with the key conclusion in plain text plus the link, not the whole answer "
         "twice. Short or conversational answers stay as text. Anyone with the link "
         "can read it, so never publish secrets, credentials or private data."
+        "\n\nThese pages are read-only: buttons or forms on them reach nobody. To ask "
+        "the user to choose, confirm or approve something, call `ask_user_question` "
+        "(it delivers an answerable card on every channel), not a published page."
     )
 
     def __init__(self) -> None:
@@ -297,7 +300,10 @@ class CosPublishTool(Tool):
         return self._result(url, title=title)
 
     async def publish_html(self, html: str, title: str = "") -> str:
-        """Publish an HTML page and return its public URL.
+        """Publish a read-only HTML page and return its public URL.
+
+        For showing content only. Nothing on the page can send an answer back;
+        to get a choice or approval from the user, call `ask_user_question`.
 
         Args:
             html: A complete, self-contained HTML document (inline CSS, no

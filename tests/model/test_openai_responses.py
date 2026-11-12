@@ -180,7 +180,8 @@ def test_request_maps_reasoning_tools_and_replays_response_items():
     result = asyncio.run(model.response(messages))
 
     request = fake_client.responses.calls[0]
-    assert request["reasoning"] == {"effort": "high"}
+    # summary=auto: without it the API streams no reasoning text at all.
+    assert request["reasoning"] == {"effort": "high", "summary": "auto"}
     assert request["include"] == ["reasoning.encrypted_content"]
     assert request["max_output_tokens"] == 4096
     assert request["tools"] == [
@@ -575,3 +576,8 @@ def test_replay_origin_is_the_model_and_endpoint_that_produced_the_output():
     legacy = [m.model_copy(deep=True) for m in stored]
     del legacy[1].provider_data["replay_origin"]
     assert [i.get("type") for i in first.format_messages(legacy)[1:]] == ["function_call", "function_call_output"]
+
+
+def test_reasoning_summary_none_leaves_it_out_of_the_request():
+    model = OpenAIResponses(id="gpt-5.6-sol", api_key="k", reasoning="high", reasoning_summary=None)
+    assert model.request_kwargs["reasoning"] == {"effort": "high"}

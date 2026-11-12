@@ -40,7 +40,6 @@ from agentica.config.profiles import get_active_profile_name, get_profiles
 from agentica.memory.session_log import SessionLog, local_turn_stamp
 from agentica.peers import PeerInfo, PeerMessageRefused, list_live_peers
 from agentica.peers import send_message as send_peer_message
-from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout
 from agentica.tools.background_processes import (
     count_running_session_jobs,
     load_session_job_views,
@@ -1782,45 +1781,34 @@ class ImBotController:
         if mode:
             self._agent_service.set_session_approval_mode(session_id, mode, owner=uid)
 
-        loop = asyncio.get_running_loop()
-
-        def _ask_callback(prompt: str, options: Optional[List[str]] = None) -> str:
-            req_id = f"ask-{uuid.uuid4().hex[:8]}"
-            fut: asyncio.Future = loop.create_future()
-            opts = [str(o) for o in (options or [])]
-            vals = opts if opts else []
-
-            def _resolve(ans: str) -> bool:
-                if not fut.done():
-                    loop.call_soon_threadsafe(fut.set_result, ans)
-                    return True
-                return False
-
-            asyncio.run_coroutine_threadsafe(
-                self._publish_interaction(
-                    state,
-                    interaction_kind="ask",
-                    title=prompt,
-                    text="",
-                    options=opts,
-                    values=vals,
-                    session_id=session_id,
-                    request_id=req_id,
-                    resolve_fn=_resolve,
-                ),
-                loop,
-            )
-            try:
-                future_concurrent = asyncio.run_coroutine_threadsafe(
-                    asyncio.wait_for(fut, timeout=PENDING_TTL_SECS), loop
-                )
-                return str(future_concurrent.result(timeout=PENDING_TTL_SECS + 2.0))
-            except Exception:
-                raise AskUserQuestionTimeout(PENDING_TTL_SECS)
-
-        self._agent_service.set_session_ask_callback(session_id, _ask_callback, owner=uid)
-
         turn = live_turn.start(session_id, owner=uid, user_message="" if automated else text)
+
+        async def _notify_question(question: live_turn.PendingQuestion) -> None:
+            # The turn owns the question; this card is one more place to answer it.
+            await self._publish_interaction(
+                state,
+                interaction_kind="ask",
+                title=question.prompt,
+                text="",
+                options=question.options,
+                values=question.options,
+                session_id=session_id,
+                request_id=question.question_id,
+                resolve_fn=lambda ans, qid=question.question_id: turn.answer_question(qid, ans, by="IM"),
+            )
+
+        turn.question_notifier = _notify_question
+
+        def _close_question_card(question_id: str, by: str) -> None:
+            # Answered on the Web / Desktop or timed out: the phone's card and
+            # its numbered reply must not take a second answer.
+            card = self._cards.find_open(request_id=question_id)
+            if card is not None:
+                self._cards.expire(card.token, reason=f"已在 {by} 处理" if by else "该提问已超时关闭")
+            if state.pending is not None and state.pending.request_id == question_id:
+                state.clear_pending()
+
+        turn.question_closed = _close_question_card
         if input_meta and input_meta.get("cron_job"):
             turn.cron_job = input_meta["cron_job"]
             turn.automated_message = text

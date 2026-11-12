@@ -66,6 +66,62 @@ export function runningTool(items: MsgPart[]): Extract<MsgPart, { kind: "tool" }
   return null;
 }
 
+/** First line of the latest paragraph that is already closed by a blank line. */
+export function latestCompletedParagraphFirstLine(text: string): string {
+  let summary = "";
+  let paragraphStart = 0;
+  const separator = /\r?\n(?:[\t ]*\r?\n)+/g;
+  while (true) {
+    const next = separator.exec(text);
+    const paragraphEnd = next === null ? text.length : next.index + next[0].indexOf("\n");
+    const newline = text.indexOf("\n", paragraphStart);
+    if (newline !== -1 && newline <= paragraphEnd) {
+      const candidate = text.slice(paragraphStart, newline).trim();
+      if (candidate) summary = candidate.replaceAll("**", "");
+    }
+    if (next === null) return summary;
+    paragraphStart = next.index + next[0].length;
+  }
+}
+
+function lastLine(text: string): string {
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].replace(/\*\*|__|`/g, "").replace(/^#+\s*/, "").trim();
+    if (line) return line;
+  }
+  return "";
+}
+
+/**
+ * Detail after "Analyzing request" while the turn waits on the model: the
+ * newest step that has something to say. Thinking that is still streaming
+ * shows its latest closed paragraph (dsh), so a half-written line never
+ * flickers. Models that stream no reasoning between tool calls (Claude with
+ * thinking omitted, Responses without a summary) or write `content` there
+ * instead still show what just happened: that text, or the command that
+ * just finished.
+ */
+export function analyzingDetail(
+  items: MsgPart[],
+  summarizeTool: (tool: Extract<MsgPart, { kind: "tool" }>) => string,
+): string {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const p = items[i];
+    let detail = "";
+    if (p.kind === "think") {
+      detail = latestCompletedParagraphFirstLine(p.text);
+      if (!detail && i < items.length - 1) detail = lastLine(p.text);
+    } else if (p.kind === "text") {
+      detail = lastLine(p.text);
+    } else if (p.kind === "tool") {
+      detail = summarizeTool(p);
+    }
+    if (detail) return detail;
+  }
+  return "";
+}
+
 /** First non-empty line, markdown emphasis stripped, for one-line previews. */
 export function firstLine(text: string): string {
   for (const raw of text.split("\n")) {

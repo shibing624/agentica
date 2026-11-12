@@ -6,14 +6,15 @@ import { normalizeMentionedPath } from "../lib/filePath";
 import { workSummary, type MsgPart } from "../lib/msgParts";
 import { formatToolDisplay, layoutToolDisplay, parseToolArgs } from "../lib/toolDisplay";
 import {
-  diffStats, doneTitle, firstLine, groupCategories, parseShellOutput, parseTaskResult, parseTodos, runningTool,
+  analyzingDetail, diffStats, doneTitle, firstLine, groupCategories, latestCompletedParagraphFirstLine, parseShellOutput,
+  parseTaskResult, parseTodos, runningTool,
   todoProgress, toolCategory, toolResultPreview, type Category,
 } from "../lib/workActivity";
 import {
   IconBook, IconBrain, IconChat, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
   IconExternal, IconSpinner, IconTerminal, IconUser, IconUsers,
 } from "../icons";
-import { getState, showToast, type ApprovalDecision, type ApprovalRequest } from "../store";
+import { getState, showToast, type ApprovalDecision, type ApprovalRequest, type QuestionRequest } from "../store";
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
 import { HIGHLIGHT_LIMIT } from "../lib/highlight";
@@ -160,9 +161,8 @@ export function WorkGroup({
       summary = toolSummary(tool, S);
       icon = <CategoryIcon cat={cat} />;
     } else {
-      const last = items[items.length - 1];
       title = thinkLabel(true, S, S.chat.analyzingNow);
-      summary = last?.kind === "think" ? latestCompletedParagraphFirstLine(last.text) : "";
+      summary = analyzingDetail(items, (t) => toolSummary(t, S));
       icon = <IconBrain />;
     }
   } else {
@@ -194,24 +194,6 @@ export function WorkGroup({
       )}
     </div>
   );
-}
-
-/** First line of the latest paragraph that is already closed by a blank line. */
-function latestCompletedParagraphFirstLine(text: string): string {
-  let summary = "";
-  let paragraphStart = 0;
-  const separator = /\r?\n(?:[\t ]*\r?\n)+/g;
-  while (true) {
-    const next = separator.exec(text);
-    const paragraphEnd = next === null ? text.length : next.index + next[0].indexOf("\n");
-    const newline = text.indexOf("\n", paragraphStart);
-    if (newline !== -1 && newline <= paragraphEnd) {
-      const candidate = text.slice(paragraphStart, newline).trim();
-      if (candidate) summary = candidate.replaceAll("**", "");
-    }
-    if (next === null) return summary;
-    paragraphStart = next.index + next[0].length;
-  }
 }
 
 function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" }>; streaming: boolean }) {
@@ -703,6 +685,46 @@ export function ApprovalCard({
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** An open `ask_user_question`: pick an option or type a reply. Sits where the approval card does. */
+export function QuestionCard({ q, busy, onAnswer }: {
+  q: QuestionRequest;
+  busy: boolean;
+  onAnswer: (answer: string) => void;
+}) {
+  const S = useStrings();
+  const [text, setText] = useState("");
+  const send = () => {
+    const answer = text.trim();
+    if (answer && !busy) onAnswer(answer);
+  };
+  return (
+    <div className="approval-card question-card" role="dialog" aria-label={q.prompt}>
+      <div className="approval-card-head">
+        <div className="approval-card-q">{q.prompt}</div>
+      </div>
+      {q.options.length > 0 && (
+        <div className="question-opts">
+          {q.options.map((opt, i) => (
+            <button key={i} type="button" className={"question-opt" + (i === 0 ? " first" : "")}
+                    disabled={busy} onClick={() => onAnswer(opt)}>
+              <span className="question-opt-n">{i + 1}</span>{opt}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="question-free">
+        <input value={text} disabled={busy} autoFocus={q.options.length === 0}
+               placeholder={q.options.length ? S.chat.questionOther : S.chat.questionReply}
+               onChange={(e) => setText(e.target.value)}
+               onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+        <button type="button" className="approval-allow question-send" disabled={busy || !text.trim()} onClick={send}>
+          {S.chat.questionSend}
+        </button>
       </div>
     </div>
   );

@@ -904,6 +904,24 @@ async def decide_session_approval(
     return {"status": "ok", "tool_call_id": tool_call_id, "decision": body.decision}
 
 
+class QuestionAnswerRequest(BaseModel):
+    answer: str
+
+
+@router.post("/api/sessions/{session_id}/questions/{question_id}")
+async def answer_session_question(
+    session_id: str,
+    question_id: str,
+    body: QuestionAnswerRequest,
+    request: Request,
+):
+    """Answer an open ``ask_user_question``. Already answered, unknown, or another account's → 404."""
+    turn = live_turn.active(session_id, _account(request))
+    if turn is None or not turn.answer_question(question_id, body.answer, by="Web"):
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"status": "ok", "question_id": question_id}
+
+
 @router.post("/api/sessions/{session_id}/compact")
 async def compact_session(
     session_id: str,

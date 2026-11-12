@@ -136,3 +136,26 @@ test("parseTaskResult extracts model and modelTier for trace and chat cards", ()
   assert.equal(parsed?.model, "openai/claude-opus-5-5");
   assert.equal(parsed?.modelTier, "main");
 });
+
+test("analyzing detail falls back to what just happened when no thinking streams", () => {
+  const summarize = (t) => `cmd:${t.name}`;
+  // Claude (thinking omitted) / Responses (no summary): only tools, no think text.
+  assert.equal(A.analyzingDetail([tool("execute")], summarize), "cmd:execute");
+  // The empty placeholder think after the tool does not hide it.
+  assert.equal(A.analyzingDetail([tool("execute"), { kind: "think", text: "" }], summarize), "cmd:execute");
+  // Intermediate content (GPT / Claude narrate between calls): its last line.
+  assert.equal(
+    A.analyzingDetail([tool("execute"), { kind: "text", text: "列目录失败。\n**再试 echo**" }], summarize),
+    "再试 echo",
+  );
+});
+
+test("analyzing detail on streaming thinking shows only closed paragraphs", () => {
+  const summarize = () => "cmd";
+  const streaming = { kind: "think", text: "检查目录\n\n半句还没写完" };
+  assert.equal(A.analyzingDetail([tool("execute"), streaming], summarize), "检查目录");
+  // A think with no closed line yet falls back to the step before it, not the half line.
+  assert.equal(A.analyzingDetail([tool("execute"), { kind: "think", text: "半句" }], summarize), "cmd");
+  // An earlier think whose only line never closed still shows that line.
+  assert.equal(A.analyzingDetail([{ kind: "think", text: "只有一句" }, { kind: "think", text: "" }], summarize), "只有一句");
+});

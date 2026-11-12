@@ -94,7 +94,8 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.reasoning_effort, "high")
         # And it must actually enable adaptive thinking in the request kwargs.
         kwargs = model.request_kwargs
-        self.assertEqual(kwargs.get("thinking"), {"type": "adaptive"})
+        # display=summarized: opus-4-7+ default to omitted, which streams no thinking text.
+        self.assertEqual(kwargs.get("thinking"), {"type": "adaptive", "display": "summarized"})
         self.assertEqual(kwargs.get("extra_body", {}).get("output_config"), {"effort": "high"})
         # Adaptive thinking requires temperature=1; it must be forced.
         self.assertEqual(kwargs.get("temperature"), 1)
@@ -109,7 +110,7 @@ class TestCLIModelParams(unittest.TestCase):
         )
 
         self.assertEqual(model.reasoning_effort, "high")
-        self.assertEqual(model.request_kwargs.get("thinking"), {"type": "adaptive"})
+        self.assertEqual(model.request_kwargs.get("thinking"), {"type": "adaptive", "display": "summarized"})
         self.assertEqual(
             model.request_kwargs.get("extra_body", {}).get("output_config"),
             {"effort": "high"},
@@ -507,3 +508,11 @@ class TestBuildFallbackModels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClaudeThinkingDisplay(unittest.TestCase):
+    def test_thinking_display_none_leaves_it_to_the_model(self):
+        from agentica.model.anthropic.claude import Claude
+
+        model = Claude(id="claude-opus-4-8", api_key="k", reasoning_effort="high", thinking_display=None)
+        self.assertEqual(model.request_kwargs.get("thinking"), {"type": "adaptive"})

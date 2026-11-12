@@ -349,6 +349,12 @@ export const postSessionApproval = (
     { decision },
   );
 
+export const postSessionAnswer = (sessionId: string, questionId: string, answer: string) =>
+  postJson<{ status?: string }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(questionId)}`,
+    { answer },
+  );
+
 export const cancelChatApi = (session_id: string) =>
   postJson<{ status?: string; cancelled: boolean }>("/api/chat/cancel", { session_id, message: "" });
 

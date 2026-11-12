@@ -69,6 +69,7 @@ def create_model(
         ValueError: If the provider is not recognized or tuning is invalid.
     """
     _ANTHROPIC_PROVIDERS = {"kimi", "anthropic", "claude"}
+    _CLAUDE_PROVIDERS = {"anthropic", "claude"}
     effective_wire_api = wire_api or "chat_completions"
     if effective_wire_api not in ("chat_completions", "responses"):
         raise ValueError("wire_api must be either 'chat_completions' or 'responses'")
@@ -96,7 +97,11 @@ def create_model(
         params["reasoning"] = reasoning
 
     # Thinking mode — Anthropic-family gets a dict, others go via extra_body.
-    if thinking and thinking in ("enabled", "disabled", "auto"):
+    # A Claude profile with an effort uses adaptive thinking instead (the
+    # Claude class builds it, as in the CLI): a fixed budget here would
+    # override it, and newer Claude models reject ``thinking.type: enabled``.
+    claude_adaptive = model_provider in _CLAUDE_PROVIDERS and bool(reasoning_effort)
+    if thinking and thinking in ("enabled", "disabled", "auto") and not claude_adaptive:
         if model_provider in _ANTHROPIC_PROVIDERS:
             params["thinking"] = {"type": thinking, "budget_tokens": 8000}
         else:
@@ -114,13 +119,15 @@ def create_model(
         if extra_headers:
             params["extra_headers"] = dict(extra_headers)
 
-    # Reasoning effort — any string the endpoint accepts. Anthropic-family
-    # skips it (uses thinking budget instead); DeepSeek/OpenAI/o-series
-    # take it as a top-level field; other OpenAI-compatible providers get
-    # it via extra_body.
+    # Reasoning effort — any string the endpoint accepts. Claude takes it as
+    # adaptive-thinking effort; Kimi skips it (thinking budget instead);
+    # DeepSeek/OpenAI/o-series take it as a top-level field; other
+    # OpenAI-compatible providers get it via extra_body.
     effort = reasoning_effort
     if effort:
-        if model_provider not in _ANTHROPIC_PROVIDERS:
+        if claude_adaptive:
+            params["reasoning_effort"] = effort
+        elif model_provider not in _ANTHROPIC_PROVIDERS:
             if model_provider in ("deepseek", "openai", "openrouter"):
                 params["reasoning_effort"] = effort
             else:

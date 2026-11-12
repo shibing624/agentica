@@ -50,6 +50,7 @@ from agentica.config.profiles import (
 )
 from agentica.memory.session_log import SessionLog, iso_timestamp, is_session_unread
 from agentica.skills import get_skill_registry, load_system_skills
+from agentica.tools.ask_user_question_tool import AskUserQuestionTimeout, AskUserQuestionTool
 from agentica.tools.background_processes import (
     BackgroundProcess,
     BackgroundProcessCompleted,
@@ -211,14 +212,18 @@ def is_system_temp_path(path: str) -> bool:
 # evict another's cached Agent / lock / live run.
 _OWNER_SEP = "\x1f"
 
+# How long an ask_user_question waits on the Web card / IM card before the
+# model is told nobody answered (same 5 minutes as the IM pending action).
+QUESTION_WAIT_S = 300.0
+
 
 def _cache_key_is_pinned(key: str) -> bool:
-    """True when this cache entry has a LiveTurn waiting on an approval."""
+    """True when this cache entry has a LiveTurn waiting on an approval or a question."""
     owner, sep, session_id = key.partition(_OWNER_SEP)
     if not sep:
         owner, session_id = settings.default_user_id, key
     turn = live_turn.active(session_id, owner)
-    return turn is not None and turn.approvals.size > 0
+    return turn is not None and (turn.approvals.size > 0 or bool(turn.open_questions))
 
 
 async def dispatch_stream_chunk(
@@ -459,7 +464,6 @@ class AgentService:
         self._workspace: Optional[Workspace] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
-        self._session_ask_callbacks: Dict[str, Callable] = {}
         # Per session, outside the agent: a model switch or LRU eviction
         # rebuilds the agent, and its running commands must stay reachable.
         self._session_background: Dict[str, BackgroundProcessRegistry] = {}
@@ -840,11 +844,7 @@ class AgentService:
         self_manage_tools = get_self_manage_tools()
         extra.extend(self_manage_tools)
 
-        ask_cb = self._session_ask_callbacks.get(self._sk(session_id, owner))
-        if ask_cb is not None:
-            from agentica.tools.ask_user_question_tool import AskUserQuestionTool
-
-            extra.append(AskUserQuestionTool(input_callback=ask_cb))
+        extra.append(AskUserQuestionTool(input_callback=self._make_ask_callback(session_id, owner)))
 
         instructions = list(self.extra_instructions) if self.extra_instructions else None
         if cron_tools:
@@ -891,9 +891,9 @@ class AgentService:
             instructions=instructions,
             debug=settings.debug,
             # memory, skills, experience capture, workspace memory all on by
-            # DeepAgent default — no explicit overrides needed. ask_user_question
-            # is intentionally OFF: the gateway is headless (web/chat channels)
-            # with no stdin, so the tool would block on a bare input() call.
+            # DeepAgent default — no explicit overrides needed. The builtin
+            # ask_user_question stays off: it would read stdin. The gateway
+            # mounts its own (above), answered through the session's live turn.
             include_ask_user_question=False,
             background_process_registry=self._background_registry(session_id, owner),
             permission_mode=permission_mode,
@@ -1008,30 +1008,48 @@ class AgentService:
                 return True
         return False
 
-    def set_session_ask_callback(
-        self,
-        session_id: str,
-        callback: Optional[Callable[[str, Optional[List[str]]], str]],
-        owner: Optional[str] = None,
-    ) -> None:
-        """Register or clear the ``ask_user_question`` callback for a session."""
-        key = self._sk(session_id, owner)
-        if callback is None:
-            self._session_ask_callbacks.pop(key, None)
-        else:
-            self._session_ask_callbacks[key] = callback
-            cached = self._cache.get(key)
-            if cached is not None:
-                from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+    def _make_ask_callback(self, session_id: str, owner: Optional[str]) -> Callable[[str, Optional[List[str]]], str]:
+        """``ask_user_question`` answered through the session's live turn.
 
-                found = False
-                for t in cached.tools or []:
-                    if isinstance(t, AskUserQuestionTool):
-                        t.input_callback = callback
-                        found = True
-                        break
-                if not found:
-                    self._stale_agents.add(key)
+        Runs on the tool's worker thread. The question is published on the
+        turn (Web/Desktop draw a card from the SSE event; an IM-started turn
+        also sends a ``/c/<token>`` card through ``question_notifier``), and
+        the first answer from any of them is the reply. No live turn means no
+        one can see the question: that is a timeout, not an empty answer.
+        """
+        owner_id = self._owner(owner)
+
+        def ask(prompt: str, options: Optional[List[str]] = None) -> str:
+            loop = self._loop
+            turn = live_turn.active(session_id, owner_id)
+            if loop is None or turn is None:
+                raise AskUserQuestionTimeout(0)
+            opts = [str(o) for o in (options or [])]
+
+            async def open_and_wait() -> Optional[str]:
+                if turn.done:
+                    return None
+                question, future = turn.open_question(prompt, opts)
+                if turn.question_notifier is not None:
+                    try:
+                        await turn.question_notifier(question)
+                    except Exception:
+                        # The question is already on the turn. A failed IM
+                        # send must not abandon the Web/Desktop card or fail
+                        # the tool before anyone can answer.
+                        logger.exception("ask_user_question notifier failed")
+                try:
+                    return await asyncio.wait_for(asyncio.shield(future), timeout=QUESTION_WAIT_S)
+                except asyncio.TimeoutError:
+                    turn.close_question(question.question_id)
+                    return None
+
+            answer = asyncio.run_coroutine_threadsafe(open_and_wait(), loop).result()
+            if answer is None:
+                raise AskUserQuestionTimeout(QUESTION_WAIT_S)
+            return answer
+
+        return ask
 
     # Default approval mode for web sessions: "auto" — file edits and commands
     # are allowed (writes restricted to work_dir). "ask" is opt-in via the
@@ -1921,7 +1939,6 @@ class AgentService:
         self._session_work_dirs.pop(key, None)
         self._session_approval_modes.pop(key, None)
         self._session_grants.pop(key, None)
-        self._session_ask_callbacks.pop(key, None)
         background = self._session_background.pop(key, None)
         bg_records_dir = Path(base_dir) / session_id / "background"
         if background is not None or bg_records_dir.is_dir():

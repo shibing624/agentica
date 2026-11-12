@@ -14,7 +14,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from agentica.agent.approvals import ApprovalRegistry, PendingApproval
 
@@ -38,6 +39,15 @@ _COALESCE_EVENTS = frozenset({"content", "thinking"})
 _TERMINAL = frozenset({"completed", "cancelled", "failed"})
 
 _SessionKey = Tuple[str, str]
+
+
+@dataclass
+class PendingQuestion:
+    """One ``ask_user_question`` call waiting on this turn for an answer."""
+
+    question_id: str
+    prompt: str
+    options: List[str] = field(default_factory=list)
 
 
 def _event_chars(ev: dict) -> int:
@@ -72,6 +82,62 @@ class LiveTurn:
         self._subs: list[asyncio.Queue] = []
         self._buffer_chars = 0
         self.approvals = ApprovalRegistry()
+        # ask_user_question: open questions and the futures their answers land in.
+        self._questions: Dict[str, Tuple[PendingQuestion, asyncio.Future]] = {}
+        # Set by the surface that started the turn when it can show the
+        # question itself too (IM sends a /c/<token> card). Awaited on the loop.
+        self.question_notifier: Optional[Callable[[PendingQuestion], Awaitable[None]]] = None
+        # Called synchronously when a question closes (answered anywhere, or
+        # timed out), so that surface takes its own copy down at once.
+        self.question_closed: Optional[Callable[[str, str], None]] = None
+
+    @property
+    def open_questions(self) -> List[PendingQuestion]:
+        return [q for q, _ in self._questions.values()]
+
+    def open_question(self, prompt: str, options: List[str]) -> Tuple[PendingQuestion, asyncio.Future]:
+        """Register a question and publish it. Must run on the event loop."""
+        question = PendingQuestion(question_id=f"q-{uuid.uuid4().hex[:10]}", prompt=prompt, options=list(options))
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._questions[question.question_id] = (question, future)
+        self.publish(question_event(question))
+        return question, future
+
+    def answer_question(self, question_id: str, answer: str, by: str) -> bool:
+        """First answer wins; every surface showing the question hears it closed."""
+        entry = self._questions.pop(question_id, None)
+        if entry is None or entry[1].done():
+            return False
+        entry[1].set_result(answer)
+        self.publish({"event": "question_resolved", "data": {"question_id": question_id, "answer": answer, "by": by}})
+        if self.question_closed is not None:
+            self.question_closed(question_id, by)
+        return True
+
+    def close_question(self, question_id: str) -> None:
+        """Take an unanswered question down (timed out)."""
+        if self._questions.pop(question_id, None) is not None:
+            self.publish({"event": "question_resolved", "data": {"question_id": question_id, "answer": "", "by": ""}})
+            if self.question_closed is not None:
+                self.question_closed(question_id, "")
+
+    def release_questions(self) -> None:
+        """Unblock every open question and take its cards down.
+
+        Stop and a turn that ends while a question is open both come through
+        here. Setting the future is what lets the tool return; the resolved
+        event and ``question_closed`` are what take the Web card and the IM
+        card down. Clearing first makes a late answer lose.
+        """
+        pending = list(self._questions.items())
+        self._questions.clear()
+        for _qid, (_question, future) in pending:
+            if not future.done():
+                future.set_result(None)
+        for qid, _entry in pending:
+            self.publish({"event": "question_resolved", "data": {"question_id": qid, "answer": "", "by": ""}})
+            if self.question_closed is not None:
+                self.question_closed(qid, "")
 
     def progress_summary(self) -> Dict[str, Any]:
         """Current live step summary for IM /status and /ps."""
@@ -179,6 +245,7 @@ class LiveTurn:
         if self.done:
             return
         self.approvals.deny_all()
+        self.release_questions()
         self.status = status
         self.done = True
         self.finished_at = time.monotonic()
@@ -211,9 +278,11 @@ class LiveTurn:
             pass
 
     def republish_pending_approvals(self) -> None:
-        """Re-push still-pending cards so a refresh/reconnect sees them."""
+        """Re-push still-pending cards (approvals and questions) so a refresh/reconnect sees them."""
         for pending in self.approvals.list():
             self.publish(approval_event(pending))
+        for question in self.open_questions:
+            self.publish(question_event(question))
 
 
 _by_run: Dict[str, LiveTurn] = {}
@@ -258,15 +327,23 @@ def approval_event(pending: PendingApproval) -> Dict[str, Any]:
     }
 
 
+def question_event(question: PendingQuestion) -> Dict[str, Any]:
+    """SSE envelope for one open ``ask_user_question``."""
+    return {
+        "event": "question_request",
+        "data": {"question_id": question.question_id, "prompt": question.prompt, "options": list(question.options)},
+    }
+
+
 def gc() -> None:
     """Drop finished runs whose reconnect window has expired.
 
-    A turn with pending approvals is never dropped: the card is still
-    waiting, even if ``done`` was set somehow without ``deny_all``.
+    A turn with pending approvals or questions is never dropped: the card is
+    still waiting, even if ``done`` was set somehow without ``deny_all``.
     """
     now = time.monotonic()
     for rid, turn in list(_by_run.items()):
-        if turn.approvals.size:
+        if turn.approvals.size or turn.open_questions:
             continue
         if turn.done and turn.finished_at and now - turn.finished_at >= RETAIN_AFTER_DONE_S:
             _drop_run(rid)
@@ -371,6 +448,9 @@ async def cancel_and_wait(
 
     turn.status = "cancelling"
     turn.approvals.deny_all()
+    # Same as deny_all: a question parks the tool thread, so Stop cannot
+    # reach the runner's cancel check until that wait is released.
+    turn.release_questions()
     svc.cancel_session(turn.session_id, owner=turn.owner)
     if (
         turn.task is not None
