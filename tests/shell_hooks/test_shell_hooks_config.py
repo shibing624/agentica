@@ -15,7 +15,7 @@ from agentica.shell_hooks.config import (
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in ("ENABLED", "CONSUMERS", "COMMAND"):
+    for name in ("ENABLED", "GATEWAY", "CONSUMERS", "COMMAND"):
         monkeypatch.delenv(f"AGENTICA_HOOKS_{name}", raising=False)
 
 
@@ -34,9 +34,32 @@ class TestDisabledByDefault:
         cfg = _cfg({"enabled": True})
         assert cfg.consumers == []
 
-    def test_gateway_is_off_unless_asked_for(self):
+    def test_gateway_is_off_unless_asked_for_or_consumer_opts_in(self):
         assert _cfg({"enabled": True}).gateway is False
         assert _cfg({"enabled": True, "gateway": True}).gateway is True
+        mixed = _cfg(
+            {
+                "enabled": True,
+                "consumers": [
+                    {"name": "open-island", "command": ["/bin/oi"]},
+                    {"name": "memhub", "command": ["/bin/memhub"], "gateway": True},
+                ],
+            }
+        )
+        assert mixed.gateway is False
+        assert [c.name for c in mixed.consumers] == ["open-island", "memhub"]
+        assert [c.name for c in mixed.for_gateway().consumers] == ["memhub"]
+        top_on_but_opted_out = _cfg(
+            {
+                "enabled": True,
+                "gateway": True,
+                "consumers": [
+                    {"name": "open-island", "command": ["/bin/oi"], "gateway": False},
+                    {"name": "memhub", "command": ["/bin/memhub"]},
+                ],
+            }
+        )
+        assert [c.name for c in top_on_but_opted_out.for_gateway().consumers] == ["memhub"]
 
 
 class TestCommandIsArgv:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
 from agentica.config.profiles import get_setting
@@ -90,6 +90,8 @@ class HookConsumer:
     command: List[str] = field(default_factory=list)
     enabled: bool = True
     events: Dict[str, bool] = field(default_factory=_default_events)
+    #: Per-consumer gateway override. ``None`` inherits ``ShellHooksConfig.gateway``.
+    gateway: Optional[bool] = None
 
     def __post_init__(self) -> None:
         """Treat ``events`` as a partial override over the full default set.
@@ -115,14 +117,27 @@ class ShellHooksConfig:
 
     enabled: bool = False
     consumers: List[HookConsumer] = field(default_factory=list)
-    #: The gateway (web UI, IM channels, desktop app) wires these hooks too.
-    #: Off by default: IM channels carry messages from people other than you.
+    #: Top-level default for consumers that omit ``gateway``. Off by default so
+    #: terminal-oriented consumers stay off Web/Desktop/IM unless they opt in.
     gateway: bool = False
 
     @property
     def effective(self) -> bool:
         """Wired only when it is switched on *and* there is something to run."""
         return bool(self.enabled and any(c.enabled and c.command for c in self.consumers))
+
+    def for_gateway(self) -> "ShellHooksConfig":
+        """Narrow to consumers enabled on the gateway (per-consumer beats top-level)."""
+        picked = [
+            c
+            for c in self.consumers
+            if (self.gateway if c.gateway is None else c.gateway)
+        ]
+        return ShellHooksConfig(
+            enabled=self.enabled,
+            consumers=picked,
+            gateway=bool(picked),
+        )
 
     def consumers_for(self, event: str) -> List[HookConsumer]:
         """Enabled consumers subscribed to ``event``, in config order."""
@@ -153,12 +168,14 @@ def _parse_consumers(raw: Any, *, location: str) -> List[HookConsumer]:
             continue
         names.add(name)
         events = item.get("events")
+        raw_gw = item.get("gateway")
         consumers.append(
             HookConsumer(
                 name=name,
                 command=_parse_command(item.get("command"), location=item_location),
                 enabled=bool(item.get("enabled", True)),
                 events=events if isinstance(events, dict) else {},
+                gateway=None if raw_gw is None else bool(raw_gw),
             )
         )
     return consumers
@@ -198,5 +215,9 @@ def load_shell_hooks_config(config: Optional[Dict[str, Any]] = None) -> ShellHoo
         cfg.consumers = _parse_consumers(
             parsed_consumers, location="AGENTICA_HOOKS_CONSUMERS"
         )
+    env_gateway = _env_bool("GATEWAY")
+    if env_gateway is not None:
+        cfg.gateway = env_gateway
+        cfg.consumers = [replace(c, gateway=env_gateway) for c in cfg.consumers]
 
     return cfg

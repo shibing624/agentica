@@ -227,19 +227,21 @@ goal 会报 5 次「跑完了」。这条规则与 notify sink 共用（同一�
 | 入口 | 默认 | 开启方式 |
 |---|---|---|
 | `agentica` CLI（交互、`--query`/`--print`、cron daemon、ACP） | 开（只看 `enabled`） | — |
-| `agentica-gateway`（Web UI、IM 渠道、Desktop App 共用这一个进程） | 关 | `settings.hooks.gateway: true` |
+| `agentica-gateway`（Web UI、IM 渠道、Desktop App 共用这一个进程） | 关 | 单条 consumer 写 `gateway: true`，或顶层 `settings.hooks.gateway: true` |
 | SDK（`Agent` / `DeepAgent`） | 关 | 代码里调用 `install_hook_egress()` |
 
-Gateway 默认关闭，是因为 IM 渠道里的消息可能来自别人：开启后，记忆类消费者会用你的
-记忆去回答他们，采集类消费者会把他们的对话当成你的存下来。只有你自己用（Desktop App、
-本机 Web UI、只放行你自己的 IM 账号）时再打开：
+Gateway 顶层默认关闭，这样只面向终端的消费者（如桌宠通知、终端审批）不会在 Web / IM / 定时任务上误触发，也避免多人共享网关时把别人的 IM 消息当成你的存下来。全端个人记忆等需要跨 CLI / Web / Desktop / IM 生效的消费者，只在自己的条目上写 `gateway: true` 即可（不影响其他 consumer）：
 
 ```yaml
 settings:
   hooks:
     enabled: true
-    gateway: true
-    consumers: [...]
+    consumers:
+      - name: open-island
+        command: [...]
+      - name: memhub
+        gateway: true
+        command: [...]
 ```
 
 SDK 是给开发者写服务用的，服务的用户不是你，所以不会自动读这份配置。需要时显式调用一次：

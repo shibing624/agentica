@@ -10,10 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### features
+- **Web / Desktop 对话 Markdown 兼容渲染 `<br>` / `<br/>` 换行标签**：`ChatMarkdown`（流式与完结态共用 `remarkHtmlBreak`）将模型在 GFM 表格单元格或分点描述中输出的 `<br>` / `<br/>` / `<br />` 转为标准 Markdown 硬换行，同时保持不开启全局 `rehype-raw`，行内代码 `` `<br>` ``、代码块、不等号（如 `d_old < d_new`）及任意其他 `<tag>` 仍安全转义不误吞（`web/src/lib/markdownPlugins.ts`）。
+
 #### changes
 - **Release 工作流移除未配置 Trusted Publisher 的 `pypi` 自动发布任务**：PyPI（`agentica` 与 `agentica-gateway`）统一由本地基于 CI 构建校验产物手动上传；移除 `.github/workflows/release.yml` 中的 `pypi` job，避免因未配置 OIDC Trusted Publisher 导致每次打 tag 发版固定变红，或与手动上传重复触发报错。
 
 #### fixes
+- **修复 Web / Desktop 宽 Markdown 表格短表头列（如「臂」）下方的英文或行内代码标识符被逐字母竖排挤压的问题**：此前聊天区 `.bub table` 直接在 `<table>` 本身设置 `display: block; max-width: 100%; overflow-x: auto`，同时继承了外层气泡的 `word-break: break-word`（文档预览 `.md-doc` 继承了 `overflow-wrap: anywhere`）且 `<td>` 内的 `<code>` 允许断词——当表格总宽超出容器时，浏览器把只有 1 个汉字表头（「臂」）的第一列压缩到 1 字宽，导致 **`no_memory`**、**`long_context_32k`** 逐字符竖向叠排拉高整行。现在 `ChatMarkdown` 统一用 `<div class="md-table">` 横向滚动容器包裹原生 `display: table`（与工作区文档预览对齐，并覆盖轨迹详情、子智能体报告与压缩卡片），重置表格内 `word-break: normal; overflow-wrap: normal`、固定表格内 `<code>` 为 `white-space: nowrap`、补齐 GFM 列对齐属性与 `tabular-nums` 数字等宽（`web/src/components/ChatMarkdown.tsx`、`web/src/style.css`）。
+- **支持 `settings.hooks.consumers` 按单条消费者声明 `gateway: true`（`HookConsumer.gateway`）**：保持顶层 `settings.hooks.gateway` 默认 `False`（不误触发 `open-island` 等只面向终端的消费者，也不影响多人网关默认隔离），允许全端个人记忆（如 `memhub`）在自身 consumer 条目中单独声明 `gateway: true`（`ShellHooksConfig.for_gateway()`），使其在 Web UI、Desktop App 与 IM 渠道上按需生效，同时支持 `AGENTICA_HOOKS_GATEWAY` 环境变量全局覆盖。
 - **修复 Web 执行长任务中途切换轨迹页、切会话或刷新重连后，进行中的回复被拆成两条并在中途露出「本条回复涉及 N 个文件」与结束操作栏的问题**：此前一轮任务已有工具批次落盘到 `SessionLog` 后，客户端重新加载并重连 `LiveTurn` 时，`eventsToChatMsgs` 已对已落盘步骤做 `settleWork`，导致 `takeLiveAssistant` 误判最后一条助手消息为历史已完成回复并在其下方再追加一条新的流式消息——前半截变成非 `live` 状态而提前渲染 `MessageFilesCard` 与底部点赞/分叉/用量栏（还会被 `syncSessionRoundStats` 错位盖上上一轮的耗时与 token）。现在 `eventsToChatMsgs` 与 `trace.analyze_entries` 准确标记尚未到达终态行的 `inFlight` 回合，`reconcileLiveTurnMsgs` 原地复用在途助手消息、保留真实起始时间与中途插话（`steer` 同步写入 `LiveTurn` 事件流并在超大输出裁剪缓冲时按 `after_tool` 增量续接），`switchTo` 与 `ChatPage` 在会话仍处于运行态时始终保持流式挂载，不再拆裂在途记录。
 
 ## [1.5.2] - 2026-11-12

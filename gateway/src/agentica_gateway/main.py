@@ -73,18 +73,20 @@ def _display_home_path(path: str) -> str:
 
 
 def _install_gateway_hooks() -> None:
-    """Wire ``settings.hooks`` here only when ``settings.hooks.gateway`` is on.
+    """Wire ``settings.hooks`` consumers opted into the gateway.
 
-    The gateway is the same personal agent as the CLI behind another surface
-    (web UI, desktop app, IM). But IM channels carry other people's messages:
-    with hooks on, a recall consumer answers *them* from your memory and a
-    capture consumer files *their* chats as yours. So it is opt-in.
+    Top-level ``settings.hooks.gateway`` defaults to ``False`` so terminal-only
+    consumers (e.g. desktop notifications) stay off Web/Desktop/IM; individual
+    consumers such as personal memory opt in with ``gateway: true``.
     """
-    cfg = load_shell_hooks_config()
-    if not cfg.gateway:
-        logger.info("Shell hooks: off for the gateway (set `settings.hooks.gateway: true` to enable)")
+    gw_cfg = load_shell_hooks_config().for_gateway()
+    if not gw_cfg.effective:
+        logger.info(
+            "Shell hooks: off for the gateway "
+            "(set consumer `gateway: true` or `settings.hooks.gateway: true` to enable)"
+        )
         return
-    installed = install_hook_egress(cfg)
+    installed = install_hook_egress(gw_cfg)
     names = [c.name for c in installed.consumers if c.enabled] if installed else []
     logger.info(f"Shell hooks: {', '.join(names) or 'none active'}")
 

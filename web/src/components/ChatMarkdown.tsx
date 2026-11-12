@@ -21,14 +21,20 @@ function StreamCode({ className, children }: { className?: string; children?: Re
   return <code>{children}</code>;
 }
 
+function MdTable({ children }: { children?: ReactNode }) {
+  return <div className="md-table"><table>{children}</table></div>;
+}
+
 const STREAMING_COMPONENTS = {
   pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
   code: StreamCode,
+  table: MdTable,
 };
 
 const SETTLED_COMPONENTS = {
   pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
   code: MarkdownCode,
+  table: MdTable,
   img: ({ src, alt }: { src?: string; alt?: string }) => <PreviewableImage src={src} alt={alt || ""} />,
 };
 

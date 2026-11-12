@@ -44,3 +44,39 @@ test("double tildes still render strikethrough in chat markdown", () => {
   }
 });
 
+test("LLM <br> / <br/> / <br /> render as line breaks in prose and GFM tables without enabling raw HTML", () => {
+  const prose =
+    "① 199 / 199 题（100%） 严格跨两个不同历史日期（d_old < d_new < d_probe），客户在 d_new 亲口声明“将旧值改为新值、旧值作废”，直接触发自建 Jev 的 ADD_OVERRIDE 归档旧节点（而 ADD-only 的 mem0 无法删除旧节点）；<br>② fact_1（仅新值）与 superseded（仅旧值）100% 零重叠";
+  for (const streaming of [true, false]) {
+    const html = render(prose, streaming);
+    assert.equal(html.includes("&lt;br&gt;"), false, `streaming=${streaming} should render <br> instead of escaping`);
+    assert.match(html, /<br\s*\/?>/);
+    assert.match(html, /d_old &lt; d_new &lt; d_probe/);
+  }
+
+  const table = [
+    "| 指标 | **Internal-1108**<br>(4B / 9B %) |",
+    "|---|---|",
+    "| 覆盖 | ① 第一条<br/>② 第二条<br />③ 第三条 |",
+  ].join("\n");
+  for (const streaming of [true, false]) {
+    const html = render(table, streaming);
+    assert.equal(html.includes("&lt;br"), false);
+    assert.equal((html.match(/<br\s*\/?>/g) || []).length, 3);
+    assert.match(html, /<div class="md-table"><table>/);
+  }
+});
+
+test("code spans, code fences, and non-br HTML tags stay safely escaped", () => {
+  const text = "行内 `<br>`、占位符 <user_id> 与 <script>alert(1)</script>\n\n```html\n<div>a<br>b</div>\n```";
+  for (const streaming of [true, false]) {
+    const html = render(text, streaming);
+    assert.match(html, /<code>&lt;br&gt;<\/code>/);
+    assert.match(html, /&lt;user_id&gt;/);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.equal(html.includes("<script>"), false);
+    assert.equal(/<br\s*\/?>/i.test(html), false, `streaming=${streaming} must not emit a real <br> inside code`);
+    assert.match(html, streaming ? /a&lt;br&gt;b/ : /&lt;<span class="hljs-name">br<\/span>&gt;/);
+  }
+});
+
