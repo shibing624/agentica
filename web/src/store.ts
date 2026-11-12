@@ -70,8 +70,8 @@ export type ChatMsg = {
   uuid?: string;
   /** True while this assistant turn has not reached a terminal row yet. */
   inFlight?: boolean;
-  /** Thumbs up/down left on this reply. */
-  feedback?: { rating: "up" | "down" | null; comment?: string };
+  /** Thumbs up/down left on this reply. `tags` is the dislike categories. */
+  feedback?: { rating: "up" | "down" | null; comment?: string; tags?: string[] };
   /** A `/skill args` turn: the log holds the expanded SKILL.md prompt; the
    *  bubble shows this chip instead. */
   skill?: { name: string; args: string };

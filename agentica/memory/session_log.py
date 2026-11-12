@@ -1827,40 +1827,108 @@ class SessionLog:
 
     FEEDBACK_RATINGS = ("up", "down")
     FEEDBACK_COMMENT_MAX = 4000
+    # Dislike chips, in display order. A like stores an empty list.
+    FEEDBACK_TAGS = (
+        "task-result",
+        "instruction-following",
+        "product-interaction",
+        "service-stability",
+        "resource-cost",
+        "security-privacy-permission",
+        "other",
+    )
 
     def read_feedback(self) -> Dict[str, Dict[str, Any]]:
-        """Per-message feedback from the sidecar: ``{entry_uuid: {rating, comment, at}}``."""
+        """Per-message feedback from the sidecar: ``{entry_uuid: {rating, tags, comment, at}}``."""
         value = self._read_meta(self.meta_path).get("feedback")
         if not isinstance(value, dict):
             return {}
         return {k: dict(v) for k, v in value.items() if isinstance(k, str) and isinstance(v, dict)}
 
-    def set_feedback(self, entry_uuid: str, rating: Optional[str], comment: str = "") -> Dict[str, Dict[str, Any]]:
-        """Record a thumbs up/down (and optional comment) on one log entry.
+    def set_feedback(
+        self,
+        entry_uuid: str,
+        rating: Optional[str],
+        comment: str = "",
+        tags: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Record a thumbs up/down, dislike tags, and an optional comment.
 
-        ``rating=None`` with an empty comment clears it. Kept in the sidecar,
-        not the JSONL: the transcript is append-only replay input, and a vote
-        is a view annotation that may be changed or withdrawn.
+        ``rating=None`` clears the vote. The sidecar is what the session UI
+        reads. The same row is upserted into the account ``session_index.db``
+        (``message_feedback``) so likes and dislikes can be counted across
+        sessions. The JSONL stays untouched: a vote is a view annotation.
         """
-        from datetime import datetime, timezone
-
         entry_uuid = (entry_uuid or "").strip()
         if not entry_uuid:
             raise ValueError("entry uuid is required")
         if rating is not None and rating not in self.FEEDBACK_RATINGS:
             raise ValueError(f"rating must be one of {self.FEEDBACK_RATINGS} or null")
         comment = (comment or "").strip()[: self.FEEDBACK_COMMENT_MAX]
+        normalized = self._normalize_feedback_tags(tags, rating)
         feedback = self.read_feedback()
-        if rating is None and not comment:
+        row: Optional[Dict[str, Any]]
+        if rating is None:
             feedback.pop(entry_uuid, None)
+            row = None
         else:
-            feedback[entry_uuid] = {
+            row = {
                 "rating": rating,
+                "tags": normalized,
                 "comment": comment,
                 "at": datetime.now(timezone.utc).isoformat(),
             }
+            feedback[entry_uuid] = row
         self._write_meta({"feedback": feedback})
+        self._sync_feedback_db(entry_uuid, row)
         return feedback
+
+    def _normalize_feedback_tags(self, tags: Optional[List[str]], rating: Optional[str]) -> List[str]:
+        if rating != "down" or not tags:
+            return []
+        allowed = set(self.FEEDBACK_TAGS)
+        seen: List[str] = []
+        for raw in tags:
+            if not isinstance(raw, str):
+                raise ValueError(f"unknown feedback tag {raw!r}")
+            tag = raw.strip()
+            if not tag or tag in seen:
+                continue
+            if tag not in allowed:
+                raise ValueError(f"unknown feedback tag {tag!r}")
+            seen.append(tag)
+        order = {tag: i for i, tag in enumerate(self.FEEDBACK_TAGS)}
+        seen.sort(key=lambda tag: order[tag])
+        return seen
+
+    def _feedback_index(self):
+        """The account ``session_index.db`` next to this session's project dir.
+
+        Imported lazily: ``session_index`` imports ``session_search``, which
+        imports this module.
+        """
+        from agentica.memory.session_index import INDEX_FILENAME, SessionIndex
+
+        attached = self._search_index
+        if isinstance(attached, SessionIndex):
+            return attached
+        root = str(self.base_dir.parent)
+        return SessionIndex.shared(os.path.join(root, INDEX_FILENAME), projects_dir=root)
+
+    def _sync_feedback_db(self, entry_uuid: str, row: Optional[Dict[str, Any]]) -> None:
+        index = self._feedback_index()
+        if row is None:
+            index.clear_message_feedback(self.session_id, entry_uuid)
+            return
+        index.set_message_feedback(
+            self.session_id,
+            entry_uuid,
+            row["rating"],
+            row["tags"],
+            row["comment"],
+            row["at"],
+            work_dir=self._cwd,
+        )
 
     def _write_meta(self, updates: Dict[str, Any]) -> None:
         """Merge sidecar metadata updates and persist atomically."""

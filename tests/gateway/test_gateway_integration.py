@@ -305,9 +305,14 @@ class TestSessionEndpoints:
         client, mock_svc = mock_app
         mock_svc.set_session_feedback = MagicMock(return_value={"u-3": {"rating": "down", "comment": "x"}})
         mock_svc.session_feedback = MagicMock(return_value={"u-3": {"rating": "down", "comment": "x"}})
-        resp = client.post("/api/sessions/s1/feedback", json={"uuid": "u-3", "rating": "down", "comment": "x"})
+        resp = client.post(
+            "/api/sessions/s1/feedback",
+            json={"uuid": "u-3", "rating": "down", "comment": "x", "tags": ["task-result", "other"]},
+        )
         assert resp.status_code == 200
-        mock_svc.set_session_feedback.assert_called_with("s1", "u-3", "down", "x", owner="default")
+        mock_svc.set_session_feedback.assert_called_with(
+            "s1", "u-3", "down", "x", ["task-result", "other"], owner="default",
+        )
         assert client.get("/api/sessions/s1/feedback").json()["feedback"]["u-3"]["rating"] == "down"
         mock_svc.set_session_feedback.side_effect = ValueError("rating")
         assert client.post("/api/sessions/s1/feedback", json={"uuid": "u-3", "rating": "meh"}).status_code == 400

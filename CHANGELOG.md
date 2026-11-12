@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- **Web / Desktop 点踩可选分类标签，点赞和点踩写入已有的会话索引库**：点踩弹窗可单选或多选「任务结果 / 指令理解与遵循 / 产品功能与交互 / 稳定性和速度 / 资源使用与费用 / 安全隐私与权限 / 其他」，只选标签、不填说明也能提交。点赞、点踩、标签和说明除了写在会话 sidecar 外，还写入该账号已有的 `projects/<user>/session_index.db` 的 `message_feedback` 表（`session_id`、`entry_uuid`、`work_dir`、`rating`、`tags`、`comment`），取消投票会删掉对应行，方便跨会话统计（`SessionLog.set_feedback`、`POST /api/sessions/{id}/feedback`）。
 - **Web / Desktop 对话 Markdown 兼容渲染 `<br>` / `<br/>` 换行标签**：`ChatMarkdown`（流式与完结态共用 `remarkHtmlBreak`）将模型在 GFM 表格单元格或分点描述中输出的 `<br>` / `<br/>` / `<br />` 转为标准 Markdown 硬换行，同时保持不开启全局 `rehype-raw`，行内代码 `` `<br>` ``、代码块、不等号（如 `d_old < d_new`）及任意其他 `<tag>` 仍安全转义不误吞（`web/src/lib/markdownPlugins.ts`）。
 
 #### changes

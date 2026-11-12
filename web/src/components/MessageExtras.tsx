@@ -77,30 +77,61 @@ export function SkillTurn({ name, args, source, onOpen }: {
   );
 }
 
-/** Thumbs-down note: what was wrong. Sending empty keeps just the vote. */
-export function FeedbackDialog({ initial, onSubmit, onClose }: {
+/** Dislike chips, in display order. Ids are what the session log and the stats db store. */
+export const FEEDBACK_TAG_IDS = [
+  "task-result",
+  "instruction-following",
+  "product-interaction",
+  "service-stability",
+  "resource-cost",
+  "security-privacy-permission",
+  "other",
+] as const;
+
+export type FeedbackTagId = (typeof FEEDBACK_TAG_IDS)[number];
+
+/** Thumbs-down: one or more tags, plus an optional note. Tags alone can be submitted. */
+export function FeedbackDialog({ initial, initialTags, onSubmit, onClose }: {
   initial: string;
-  onSubmit: (comment: string) => void;
+  initialTags: string[];
+  onSubmit: (comment: string, tags: string[]) => void;
   onClose: () => void;
 }) {
   const S = useStrings();
   const [text, setText] = useState(initial);
+  const [tags, setTags] = useState<string[]>(initialTags);
+  const send = () => onSubmit(text, tags);
+  const toggle = (id: string) => {
+    setTags((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  };
   return (
     <Dialog
+      wide
       title={S.chat.feedbackTitle}
       onClose={onClose}
       footer={
         <>
           <button className="dp-btn" onClick={onClose}>{S.common.cancel}</button>
-          <button className="dp-btn primary" onClick={() => onSubmit(text)}>{S.chat.feedbackSend}</button>
+          <button className="dp-btn primary" onClick={send}>{S.chat.feedbackSend}</button>
         </>
       }
     >
+      <div className="feedback-tags" role="group" aria-label={S.chat.feedbackCategories}>
+        {FEEDBACK_TAG_IDS.map((id) => (
+          <button key={id} type="button"
+                  className={"feedback-tag" + (tags.includes(id) ? " on" : "")}
+                  aria-pressed={tags.includes(id)}
+                  onClick={() => toggle(id)}>
+            {S.chat.feedbackTags[id]}
+          </button>
+        ))}
+      </div>
       <textarea className="feedback-text" autoFocus rows={5} value={text}
                 placeholder={S.chat.feedbackPlaceholder}
+                aria-label={S.chat.feedbackPlaceholder}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onSubmit(text); }
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
                 }} />
     </Dialog>
   );

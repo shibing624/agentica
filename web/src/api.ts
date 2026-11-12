@@ -129,11 +129,13 @@ export const stopBackgroundJobApi = (id: string, jobId: string) =>
 export const markSessionReadApi = (id: string) => request(`/api/sessions/${id}/read`, { method: "POST" });
 export const forkSessionApi = (id: string, at_uuid?: string) =>
   postJson<{ session_id: string }>(`/api/sessions/${id}/fork`, { at_uuid: at_uuid || null });
-export type MsgFeedback = { rating: "up" | "down" | null; comment?: string; at?: string };
+export type MsgFeedback = { rating: "up" | "down" | null; comment?: string; tags?: string[]; at?: string };
 export const fetchFeedbackApi = (id: string) =>
   request<{ feedback: Record<string, MsgFeedback> }>(`/api/sessions/${id}/feedback`);
-export const setFeedbackApi = (id: string, uuid: string, rating: "up" | "down" | null, comment = "") =>
-  postJson<{ feedback: Record<string, MsgFeedback> }>(`/api/sessions/${id}/feedback`, { uuid, rating, comment });
+export const setFeedbackApi = (
+  id: string, uuid: string, rating: "up" | "down" | null, comment = "", tags: string[] = [],
+) =>
+  postJson<{ feedback: Record<string, MsgFeedback> }>(`/api/sessions/${id}/feedback`, { uuid, rating, comment, tags });
 
 export async function uploadFileApi(file: File, targetDir?: string) {
   const fd = new FormData();

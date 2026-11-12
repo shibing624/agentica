@@ -16,6 +16,9 @@ read model, one per user at ``<projects>/<user>/session_index.db``:
   session that exits before its batch is processed is picked up later.
 - ``files``: byte offset already indexed per transcript, so backfill is
   incremental (transcripts are append-only).
+- ``message_feedback``: thumbs up/down on an assistant reply (rating, dislike
+  tags, comment). The session sidecar is what the UI reads back; this table
+  is the cross-session copy for counts.
 
 Full-text search uses FTS5 over a pre-tokenized ``terms`` column: ASCII
 tokens plus overlapping CJK bigrams (the same split ``search_session`` uses),
@@ -92,6 +95,18 @@ CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
     offset INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS message_feedback (
+    session_id TEXT NOT NULL,
+    entry_uuid TEXT NOT NULL,
+    work_dir TEXT NOT NULL,
+    rating TEXT,
+    tags TEXT NOT NULL,
+    comment TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, entry_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_rating ON message_feedback(rating);
 """
 
 
@@ -163,13 +178,72 @@ class SessionIndex:
     def for_user(cls, user_id: Optional[str] = None) -> "SessionIndex":
         """Process-wide instance for ``user_id``'s projects root."""
         root = projects_root(user_id)
-        path = os.path.join(root, INDEX_FILENAME)
+        return cls.shared(os.path.join(root, INDEX_FILENAME), projects_dir=root)
+
+    @classmethod
+    def shared(cls, db_path: str, projects_dir: Optional[str] = None) -> "SessionIndex":
+        """Process-wide instance for one database file."""
         with cls._instances_lock:
-            inst = cls._instances.get(path)
+            inst = cls._instances.get(db_path)
             if inst is None:
-                inst = cls(path, projects_dir=root)
-                cls._instances[path] = inst
+                inst = cls(db_path, projects_dir=projects_dir)
+                cls._instances[db_path] = inst
             return inst
+
+    def set_message_feedback(
+        self,
+        session_id: str,
+        entry_uuid: str,
+        rating: Optional[str],
+        tags: List[str],
+        comment: str,
+        updated_at: str,
+        work_dir: str = "",
+    ) -> None:
+        """Upsert one like/dislike. ``tags`` is the dislike categories, empty for a like."""
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO message_feedback
+                    (session_id, entry_uuid, work_dir, rating, tags, comment, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, entry_uuid) DO UPDATE SET
+                    work_dir = excluded.work_dir,
+                    rating = excluded.rating,
+                    tags = excluded.tags,
+                    comment = excluded.comment,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, entry_uuid, work_dir, rating, json.dumps(tags, ensure_ascii=False), comment, updated_at),
+            )
+            self._conn.commit()
+
+    def clear_message_feedback(self, session_id: str, entry_uuid: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM message_feedback WHERE session_id = ? AND entry_uuid = ?",
+                (session_id, entry_uuid),
+            )
+            self._conn.commit()
+
+    def get_message_feedback(self, session_id: str, entry_uuid: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT rating, tags, comment, updated_at, work_dir
+                FROM message_feedback WHERE session_id = ? AND entry_uuid = ?
+                """,
+                (session_id, entry_uuid),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "rating": row[0],
+            "tags": json.loads(row[1]),
+            "comment": row[2],
+            "updated_at": row[3],
+            "work_dir": row[4],
+        }
 
     def close(self) -> None:
         with self._lock:

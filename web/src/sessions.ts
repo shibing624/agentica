@@ -465,7 +465,7 @@ async function syncFeedback(id: string) {
   for (const m of sess.msgs) {
     const fb = m.uuid ? data.feedback[m.uuid] : undefined;
     if (!fb && !m.feedback) continue;
-    m.feedback = fb ? { rating: fb.rating, comment: fb.comment } : undefined;
+    m.feedback = fb ? { rating: fb.rating, comment: fb.comment, tags: fb.tags } : undefined;
     changed = true;
   }
   if (changed) bump();
@@ -497,17 +497,17 @@ export async function forkAt(id: string, idx: number) {
   showToast(S.chat.forkDone);
 }
 
-/** Thumbs up/down (click the active one again to clear) and an optional note. */
+/** Thumbs up/down (click the active one again to clear), dislike tags, and an optional note. */
 export async function rateMessage(
-  id: string, idx: number, rating: "up" | "down" | null, comment = "",
+  id: string, idx: number, rating: "up" | "down" | null, comment = "", tags: string[] = [],
 ) {
   const S = getStrings();
   const at = await msgUuid(id, idx);
   if (!at) { showToast(S.chat.forkNotSaved, 2500); return false; }
   const m = getState().sessions[id]?.msgs[idx];
   const before = m?.feedback;
-  if (m) { m.uuid = at; m.feedback = rating || comment ? { rating, comment } : undefined; bump(); }
-  const { ok } = await api.setFeedbackApi(id, at, rating, comment);
+  if (m) { m.uuid = at; m.feedback = rating || comment || tags.length ? { rating, comment, tags } : undefined; bump(); }
+  const { ok } = await api.setFeedbackApi(id, at, rating, comment, tags);
   if (!ok) {
     if (m) { m.feedback = before; bump(); }
     showToast(S.chat.feedbackFailed, 2500);

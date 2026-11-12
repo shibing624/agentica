@@ -2135,14 +2135,14 @@ class AgentService:
 
     def set_session_feedback(
         self, session_id: str, entry_uuid: str, rating: Optional[str], comment: str = "",
-        owner: Optional[str] = None,
+        tags: Optional[List[str]] = None, owner: Optional[str] = None,
     ) -> Dict[str, Dict[str, Any]]:
         log = self.session_log_for(session_id, owner=owner)
         if not log.path.exists():
             raise FileNotFoundError(f"Session not found: {session_id}")
         if not log.has_entry(entry_uuid):
             raise ValueError(f"No entry {entry_uuid} in session {session_id}")
-        return log.set_feedback(entry_uuid, rating, comment)
+        return log.set_feedback(entry_uuid, rating, comment, tags)
 
     def rename_session(self, session_id: str, name: str, owner: Optional[str] = None) -> None:
         """Rename a session by writing the sidecar .meta.json (SessionLog)."""

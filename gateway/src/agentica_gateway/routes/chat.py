@@ -705,6 +705,7 @@ class FeedbackRequest(BaseModel):
     uuid: str
     rating: Optional[str] = None
     comment: str = ""
+    tags: list[str] = []
 
 
 @router.get("/api/sessions/{session_id}/feedback")
@@ -724,10 +725,10 @@ async def set_session_feedback(
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """Thumbs up/down and an optional comment on one assistant reply."""
+    """Thumbs up/down, dislike tags, and an optional comment on one assistant reply."""
     try:
         feedback = await asyncio.to_thread(
-            svc.set_session_feedback, session_id, body.uuid, body.rating, body.comment,
+            svc.set_session_feedback, session_id, body.uuid, body.rating, body.comment, body.tags,
             owner=_account(request),
         )
     except FileNotFoundError:

@@ -1334,9 +1334,9 @@ function MessageFooter({ m, live, sessionId, idx, copyText }: {
   const hasStats = m.tokIn != null;
   const rating = m.feedback?.rating || null;
   const canAct = !!sessionId;
-  const rate = (next: "up" | "down" | null, comment = "") => {
+  const rate = (next: "up" | "down" | null, comment = "", tags: string[] = []) => {
     if (!sessionId) return;
-    void rateMessage(sessionId, idx, next, comment).then((ok) => {
+    void rateMessage(sessionId, idx, next, comment, tags).then((ok) => {
       if (ok && next) showToast(S.chat.feedbackSaved);
     });
   };
@@ -1369,8 +1369,9 @@ function MessageFooter({ m, live, sessionId, idx, copyText }: {
       {feedbackOpen && (
         <FeedbackDialog
           initial={m.feedback?.comment || ""}
+          initialTags={m.feedback?.rating === "down" ? (m.feedback.tags || []) : []}
           onClose={() => setFeedbackOpen(false)}
-          onSubmit={(comment) => { setFeedbackOpen(false); rate("down", comment.trim()); }}
+          onSubmit={(comment, tags) => { setFeedbackOpen(false); rate("down", comment.trim(), tags); }}
         />
       )}
     </div>

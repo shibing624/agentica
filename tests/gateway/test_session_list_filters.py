@@ -200,16 +200,37 @@ class TestForkAndFeedback:
         log = _session("s1", dirs["proj"], source="gateway")
         answer = next(e["uuid"] for e in log._iter_entries() if e.get("type") == "assistant")
 
-        fb = svc.set_session_feedback("s1", answer, "down", "wrong file", owner="default")
+        fb = svc.set_session_feedback(
+            "s1", answer, "down", "wrong file",
+            ["other", "task-result", "task-result"],
+            owner="default",
+        )
         assert fb[answer]["rating"] == "down" and fb[answer]["comment"] == "wrong file"
-        assert svc.session_feedback("s1", owner="default")[answer]["rating"] == "down"
+        assert fb[answer]["tags"] == ["task-result", "other"]
+        assert svc.session_feedback("s1", owner="default")[answer]["tags"] == ["task-result", "other"]
+        log = svc.session_log_for("s1", owner="default")
+        index = log._feedback_index()
+        assert index.db_path.name == "session_index.db"
+        assert not (log.base_dir.parent / "feedback.db").exists()
+        row = index.get_message_feedback("s1", answer)
+        assert row["rating"] == "down" and row["tags"] == ["task-result", "other"]
+        assert row["comment"] == "wrong file"
 
         svc.set_session_feedback("s1", answer, "up", owner="default")
-        assert svc.session_feedback("s1", owner="default")[answer] == {
-            **svc.session_feedback("s1", owner="default")[answer], "rating": "up", "comment": "",
-        }
+        stored = svc.session_feedback("s1", owner="default")[answer]
+        assert stored["rating"] == "up" and stored["comment"] == "" and stored["tags"] == []
+        up = index.get_message_feedback("s1", answer)
+        assert up["rating"] == "up" and up["tags"] == []
+
         svc.set_session_feedback("s1", answer, None, owner="default")
         assert svc.session_feedback("s1", owner="default") == {}
+        assert index.get_message_feedback("s1", answer) is None
+
+    def test_feedback_rejects_unknown_tag(self, svc, dirs):
+        log = _session("s1", dirs["proj"], source="gateway")
+        answer = next(e["uuid"] for e in log._iter_entries() if e.get("type") == "assistant")
+        with pytest.raises(ValueError, match="unknown feedback tag"):
+            svc.set_session_feedback("s1", answer, "down", tags=["not-a-tag"], owner="default")
 
     def test_feedback_validates(self, svc, dirs):
         log = _session("s1", dirs["proj"])
