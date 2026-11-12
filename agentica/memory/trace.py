@@ -596,6 +596,41 @@ def search_conversation(
     return hits
 
 
+def _include_shadowed_question(entries: List[Dict[str, Any]], start: int) -> int:
+    """Pull the unanswered question re-logged by the boundary at ``start``.
+
+    The row immediately before an auto compact is logged again behind the
+    new window's preamble. A page that starts at the boundary would leave
+    that first copy on the previous page, and the chat then shows it twice.
+    A reply between the question and the boundary means it was answered.
+    """
+    if start <= 0 or entries[start].get("type") != "compact_boundary":
+        return start
+    tail_user = None
+    for entry in entries[start + 1:]:
+        if entry.get("type") == "compact_boundary":
+            break
+        if (
+            entry.get("type") == "user"
+            and not entry.get("automated")
+            and not _is_steering_user(entry)
+        ):
+            tail_user = entry
+            break
+    if tail_user is None:
+        return start
+    tail_prose = _strip_window_preamble(str(tail_user.get("content") or "")).strip()
+    if not tail_prose:
+        return start
+    prev = entries[start - 1]
+    if prev.get("type") != "user" or prev.get("automated") or _is_steering_user(prev):
+        return start
+    prev_prose = _strip_window_preamble(str(prev.get("content") or "")).strip()
+    if prev_prose != tail_prose:
+        return start
+    return start - 1
+
+
 def chat_turn_page(
     entries: Iterable[Dict[str, Any]],
     turns: int,
@@ -606,8 +641,10 @@ def chat_turn_page(
 
     Drops ``type="event"`` trace markers (which ``eventsToChatMsgs`` ignores)
     and cuts at the ``turns``-th non-automated ``user`` row from ``before``
-    (or the end), keeping an immediately preceding ``compact_boundary`` attached
-    to the ``<context_window>`` user row that follows it.
+    (or the end). An immediately preceding ``compact_boundary`` stays with
+    the ``<context_window>`` user row that follows it, and so does the
+    unanswered question that boundary re-logged, so a later page does not
+    show that question a second time above the card.
 
     ``include_turn`` (1-based, counted from the start of the log the way
     ``older_turns`` is) reaches back further when the page would stop short of
@@ -644,6 +681,11 @@ def chat_turn_page(
             or _is_window_preamble_only(chat_entries[start - 1])
         ):
             start -= 1
+        attached = _include_shadowed_question(chat_entries, start)
+        if attached < start:
+            if attached in turn_starts:
+                older_turns -= 1
+            start = attached
     return {
         "offset": start,
         "limit": end - start,

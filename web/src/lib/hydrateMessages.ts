@@ -73,6 +73,7 @@ export function eventsToChatMsgs(events: unknown[]): ChatMsg[] {
         pendingTrigger = null;
         if (!pre.rest) continue;
         content = pre.rest;
+        dropShadowedQuestion(msgs, card, splitImageMarkers(content).text);
       }
       if (isSteerUserEvent(e, content)) {
         const clean = splitImageMarkers(cleanSteerContent(content)).text;
@@ -195,6 +196,22 @@ function insertCompactCommand(msgs: ChatMsg[], card: ChatMsg) {
   msgs.splice(at < 0 ? msgs.length : at, 0, { role: "user", content: "/compact", ts: card.ts });
 }
 
+/**
+ * An auto compact that fires as a turn starts: the question was logged, then
+ * the new window re-logs it behind its preamble, which is the copy the turn
+ * runs on. The earlier bubble is the same question shown twice — drop it,
+ * the way `drop_shadowed_by_boundary` drops it from search. Only the bubble
+ * right before the card counts: a question that already got an answer is a
+ * real repeat.
+ */
+function dropShadowedQuestion(msgs: ChatMsg[], card: ChatMsg, question: string) {
+  const at = msgs.indexOf(card);
+  const prev = at > 0 ? msgs[at - 1] : undefined;
+  if (prev?.role === "user" && !prev.automated && prev.content.trim() === question.trim()) {
+    msgs.splice(at - 1, 1);
+  }
+}
+
 const WINDOW_OPEN = "<context_window>";
 const WINDOW_CONTINUATION = "New context window started. Continue from session notes and search_session.";
 
@@ -278,6 +295,42 @@ export function isPureWindowPreamble(e: Record<string, unknown>): boolean {
   if (e.type !== "user" || e.automated === true || e.steer === true) return false;
   const pre = splitWindowPreamble(String(e.content || ""));
   return Boolean(pre && !pre.rest);
+}
+
+/**
+ * A turn page that starts on a ``compact_boundary`` should also keep the
+ * unanswered question sitting immediately before it. The boundary re-logs
+ * that question behind its preamble; if the cut leaves the original on the
+ * previous page, prepending that page shows it a second time above the card.
+ * An assistant reply between the question and the boundary means it was
+ * answered, so it stays on the previous page.
+ */
+export function includeShadowedQuestion(entries: Array<Record<string, unknown>>, start: number): number {
+  if (start <= 0) return start;
+  const boundary = entries[start];
+  if (!boundary || boundary.type !== "compact_boundary") return start;
+  let tail: Record<string, unknown> | undefined;
+  for (let i = start + 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (!e || e.type === "compact_boundary") break;
+    if (e.type === "user" && e.automated !== true && !isSteerUserEvent(e)) {
+      tail = e;
+      break;
+    }
+  }
+  if (!tail) return start;
+  const tailProse = questionProse(tail);
+  if (!tailProse) return start;
+  const prev = entries[start - 1];
+  if (!prev || prev.type !== "user" || prev.automated === true || isSteerUserEvent(prev)) return start;
+  if (questionProse(prev) !== tailProse) return start;
+  return start - 1;
+}
+
+function questionProse(e: Record<string, unknown>): string {
+  const raw = String(e.content || "");
+  const peeled = splitWindowPreamble(raw);
+  return splitImageMarkers(peeled ? peeled.rest : raw).text.trim();
 }
 
 function uuidOf(e: Record<string, unknown>): string {

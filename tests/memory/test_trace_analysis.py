@@ -948,6 +948,41 @@ def test_window_preamble_with_relayed_mention_is_not_classified_as_steering_or_r
     assert page["events"][2]["content"] == "second turn after compact"
 
 
+def test_chat_turn_page_keeps_the_unanswered_question_with_its_boundary():
+    from agentica.memory.trace import chat_turn_page
+
+    question = "batch1 怎么算？"
+    preamble = (
+        "<context_window>\nCurrent context window 2.\n</context_window>\n\n"
+        '<session_notes path="/tmp/s.notes.md">\n- goal: ship\n</session_notes>\n\n'
+        "<dropped_span>\n- user: hi\n</dropped_span>\n\n"
+        "New context window started. Continue from session notes and search_session.\n\n"
+        + question
+    )
+    entries = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="old"),
+        _e("2026-01-01T00:00:01.000Z", type="assistant", content="before"),
+        _e("2026-01-01T00:00:02.000Z", type="user", content=question),
+        _e("2026-01-01T00:00:03.000Z", type="compact_boundary", trigger="auto", summary=""),
+        _e("2026-01-01T00:00:04.000Z", type="user", content=preamble),
+        _e("2026-01-01T00:00:05.000Z", type="assistant", content="这样算"),
+    ]
+    page = chat_turn_page(entries, turns=1)
+    assert [e["type"] for e in page["events"][:3]] == ["user", "compact_boundary", "user"]
+    assert page["events"][0]["content"] == question
+    assert page["older_turns"] == 1
+
+    answered = [
+        _e("2026-01-01T00:00:00.000Z", type="user", content="q"),
+        _e("2026-01-01T00:00:01.000Z", type="assistant", content="a"),
+        _e("2026-01-01T00:00:02.000Z", type="compact_boundary", trigger="auto", summary=""),
+        _e("2026-01-01T00:00:03.000Z", type="user", content=preamble.replace(question, "q")),
+    ]
+    kept = chat_turn_page(answered, turns=1)
+    assert kept["events"][0]["type"] == "compact_boundary"
+    assert kept["older_turns"] == 1
+
+
 class TestChatTurnPageIncludeTurn:
     """A search hit deep in a long log is reached in one page, not N/6 of them."""
 

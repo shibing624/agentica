@@ -10,7 +10,7 @@ const vite = await createServer({
   logLevel: "silent",
   server: { middlewareMode: true },
 });
-const { eventsToChatMsgs } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
+const { eventsToChatMsgs, includeShadowedQuestion } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
 after(() => vite.close());
 
 function parts(m) {
@@ -231,6 +231,49 @@ test("auto compact keeps the pending question and shows no /compact", () => {
   ]);
   assert.deepEqual(view(msgs), ["user:old", "assistant:before", "card:auto", "user:what next?", "assistant:this"]);
   assert.equal(msgs[2].compact.notes, "- goal: ship");
+});
+
+test("auto compact as a turn starts shows the question once, after the card", () => {
+  // The question is logged, the window rolls over, and the new window re-logs
+  // it behind the preamble: the copy the turn actually runs on.
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "old" },
+    { type: "assistant", content: "before" },
+    { type: "user", content: "batch1 怎么算？" },
+    { type: "compact_boundary", trigger: "auto" },
+    { type: "user", content: PREAMBLE + "\n\nbatch1 怎么算？" },
+    { type: "assistant", content: "这样算" },
+  ]);
+  assert.deepEqual(view(msgs), ["user:old", "assistant:before", "card:auto", "user:batch1 怎么算？", "assistant:这样算"]);
+});
+
+test("a page cut keeps the unanswered question on the boundary's page", () => {
+  const entries = [
+    { type: "user", content: "old" },
+    { type: "assistant", content: "before" },
+    { type: "user", content: "batch1 怎么算？" },
+    { type: "compact_boundary", trigger: "auto" },
+    { type: "user", content: PREAMBLE + "\n\nbatch1 怎么算？" },
+    { type: "assistant", content: "这样算" },
+  ];
+  assert.equal(includeShadowedQuestion(entries, 3), 2);
+  const answered = [
+    { type: "user", content: "q" },
+    { type: "assistant", content: "a" },
+    { type: "compact_boundary", trigger: "auto" },
+    { type: "user", content: PREAMBLE + "\n\nq" },
+  ];
+  assert.equal(includeShadowedQuestion(answered, 2), 2);
+});
+
+test("a question asked again after it was answered is not a shadow", () => {
+  const msgs = eventsToChatMsgs([
+    { type: "user", content: "q" },
+    { type: "assistant", content: "a" },
+    { type: "compact_boundary", trigger: "auto" },
+    { type: "user", content: PREAMBLE + "\n\nq" },
+  ]);
+  assert.deepEqual(view(msgs), ["user:q", "assistant:a", "card:auto", "user:q"]);
 });
 
 test("logs without trigger: bare preamble means /compact, a folded question means auto", () => {

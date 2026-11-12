@@ -3,7 +3,8 @@ import { loadCronJobs } from "./data";
 import { getStrings } from "./i18n";
 import { uid, lastQueryTs } from "./lib/format";
 import {
-  eventsToChatMsgs, isPureWindowPreamble, isSteerUserEvent, mergeClientSteers, rememberSteersFromMsgs,
+  eventsToChatMsgs, includeShadowedQuestion, isPureWindowPreamble, isSteerUserEvent, mergeClientSteers,
+  rememberSteersFromMsgs,
 } from "./lib/hydrateMessages";
 import { emptyChatIds } from "./lib/sessionDrafts";
 import { messageFileCandidates } from "./lib/messageFiles";
@@ -289,6 +290,11 @@ function sliceTurnPageClient(all: any[], turns: number, before?: number): api.Tr
       && (chatEntries[start - 1]?.type === "compact_boundary" || isPureWindowPreamble(chatEntries[start - 1]))
     ) {
       start -= 1;
+    }
+    const attached = includeShadowedQuestion(chatEntries, start);
+    if (attached < start) {
+      if (turnStarts.includes(attached)) olderTurns -= 1;
+      start = attached;
     }
   }
   return {
