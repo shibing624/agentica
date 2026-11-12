@@ -648,6 +648,34 @@ class TestImBotControllerFlows:
         assert "审批卡片链接：不发" in ch.sent[-1][1]
 
     @pytest.mark.asyncio
+    async def test_a_card_that_failed_to_send_leaves_nothing_pending(self, tmp_path):
+        """The user never saw it, so their next message must not answer it, and its link is dead."""
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        ch = FakeChannel()
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch),
+            agent_service=FakeAgentService(default_work_dir=str(proj)),
+            state_file=tmp_path / "im_state.json",
+        )
+        state = bot.state_for(_msg("noop"))
+        answers = []
+
+        async def broken_reply(_state, _text):
+            raise RuntimeError("im down")
+
+        bot._reply = broken_reply
+        with pytest.raises(RuntimeError):
+            await bot._publish_interaction(
+                state, interaction_kind="ask", title="部署到哪？", text="",
+                options=["staging", "prod"], values=["staging", "prod"],
+                session_id=state.session_id, request_id="q-1", resolve_fn=lambda v: answers.append(v) or True,
+            )
+        assert not state.has_active_pending()
+        assert bot._cards.find_open(request_id="q-1") is None
+        assert answers == []
+
+    @pytest.mark.asyncio
     async def test_help_and_status_show_the_session_model(self, tmp_path):
         proj = tmp_path / "proj"
         proj.mkdir()

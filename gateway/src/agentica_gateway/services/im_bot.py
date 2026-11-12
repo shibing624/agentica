@@ -1079,7 +1079,15 @@ class ImBotController:
             else "回复数字 1..N / 直接输入文字回答"
         )
         lines.append(f"（可直接点链接，或在此{reply_hint}）" if base is not None else f"（在此{reply_hint}）")
-        await self._reply(state, "\n".join(lines))
+        try:
+            await self._reply(state, "\n".join(lines))
+        except BaseException:
+            # The user never saw this card: their next ordinary message must
+            # not be read as its answer, and its link must not take one.
+            if state.pending is not None and state.pending.card_token == card.token:
+                state.clear_pending()
+            self._cards.expire(card.token, reason="发送失败")
+            raise
         return card
 
     async def _handle_interaction_number(self, state: ImChatState, n: int) -> str:
