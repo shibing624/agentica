@@ -17,7 +17,13 @@ export function partsOf(m: ChatMsg): MsgPart[] {
   return out;
 }
 
-/** Consecutive think/tool runs become one work group; text and steer break it. */
+/**
+ * Consecutive think/tool runs become one work group; text and steer break it.
+ *
+ * This is the whole structure: a reply is never merged into a work group, so an
+ * expanded turn reads `G1 → 中间回复 → G2 → … → 最终回答` (what dsh calls one
+ * node, two rows — reasoning joins the step run, a reply stands outside it).
+ */
 export function groupParts(parts: MsgPart[]): PartSeg[] {
   const segs: PartSeg[] = [];
   let run: MsgPart[] = [];
@@ -46,10 +52,16 @@ export function lastWorkSegmentIndex(segs: PartSeg[]): number {
 }
 
 /**
- * Whether `segs[index]` belongs to the collapsible turn process (`已完成，用时 …`):
+ * Whether `segs[index]` is folded into the turn process line (`已完成，用时 …`):
  * every `work` group plus any intermediate assistant `text` emitted before a later
  * `work` group (e.g. Claude / Gemini / GPT-5 commentary between tool calls while
  * internal CoT is hidden). User `steer` chips and trailing final-answer text stay out.
+ *
+ * Intermediate replies are still *replies* — they render as their own bubble, not
+ * as a row inside a work group — but they belong to this fold: collapsing the turn
+ * hides them with the steps, expanding it shows them in place. That is the one
+ * level of folding, deliberately: nesting a reply inside the group's own fold hid
+ * it behind two clicks.
  */
 export function isProcessSegment(segs: PartSeg[], index: number): boolean {
   const seg = segs[index];
@@ -58,36 +70,6 @@ export function isProcessSegment(segs: PartSeg[], index: number): boolean {
   const lastWork = lastWorkSegmentIndex(segs);
   if (lastWork < 0) return false;
   return seg.part.kind === "text" && index < lastWork;
-}
-
-/**
- * One process group per stretch of the turn (dsh process grouping): work
- * groups and the intermediate replies between them — what Claude / GPT-5
- * emit as `content` alongside tool calls instead of reasoning — merge into a
- * single `work` segment, so the turn reads as one `执行了命令并调用了工具`
- * line rather than a stack of them. Steer chips still split it, and text after
- * the last work group stays out as the answer.
- */
-export function foldProcess(segs: PartSeg[]): PartSeg[] {
-  const lastWork = lastWorkSegmentIndex(segs);
-  if (lastWork < 0) return segs;
-  const out: PartSeg[] = [];
-  let run: MsgPart[] | null = null;
-  for (let i = 0; i < segs.length; i++) {
-    const seg = segs[i];
-    if (i <= lastWork && (seg.type === "work" || seg.part.kind === "text")) {
-      const items = seg.type === "work" ? seg.items : [seg.part];
-      if (run) run.push(...items);
-      else {
-        run = [...items];
-        out.push({ type: "work", items: run });
-      }
-      continue;
-    }
-    run = null;
-    out.push(seg);
-  }
-  return out;
 }
 
 /** Visible final-answer text (segments after the last `work` group), or full text when no work ran. */

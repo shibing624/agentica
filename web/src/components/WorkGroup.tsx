@@ -11,7 +11,7 @@ import {
   todoProgress, toolCategory, toolResultPreview, type Category,
 } from "../lib/workActivity";
 import {
-  IconBook, IconBrain, IconChat, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
+  IconBook, IconBrain, IconChevronDown, IconCopy, IconFile, IconGlobe, IconListCheck, IconPencil, IconSearch,
   IconExternal, IconSpinner, IconTerminal, IconUser, IconUsers,
 } from "../icons";
 import { getState, showToast, type ApprovalDecision, type ApprovalRequest, type QuestionRequest } from "../store";
@@ -129,10 +129,6 @@ export function WorkGroup({
       if (!streamingThink && !p.text.trim()) return null;
       return <ThinkRow key={i} part={p} streaming={streamingThink} />;
     }
-    if (p.kind === "text") {
-      if (!p.text.trim()) return null;
-      return <ReplyRow key={i} text={p.text} />;
-    }
     if (p.kind === "tool") {
       return (
         <ToolRow
@@ -228,39 +224,6 @@ function ThinkRow({ part, streaming }: { part: Extract<MsgPart, { kind: "think" 
   );
 }
 
-/**
- * An assistant reply spoken between tool calls (models that narrate in
- * `content` instead of reasoning): one line inside the process group, opening
- * to the rendered text — the same shape as a thought.
- */
-function ReplyRow({ text }: { text: string }) {
-  const S = useStrings();
-  const [open, setOpen] = useState(false);
-  const preview = firstLine(text);
-  return (
-    <div className={"wr" + (open ? " open" : "")}>
-      <div className="wr-line">
-        <button type="button" className="wr-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          <span className="wr-icon"><IconChat /><span className="wr-chev"><IconChevronDown /></span></span>
-          <span className="wr-title">{S.chat.replyRow}</span>
-          {!open && preview && (
-            <>
-              <span className="wr-dot" />
-              <span className="wr-sum">{preview}</span>
-            </>
-          )}
-        </button>
-      </div>
-      {open ? (
-        <div className="wr-body think-text">
-          <Suspense fallback={<span className="markdown-fallback">{text}</span>}>
-            <ChatMarkdown text={text} streaming={false} />
-          </Suspense>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 /** Local file-read tools: the call line is enough. */
 const HIDE_RESULT_TOOLS = new Set(["read_file", "glob", "grep"]);

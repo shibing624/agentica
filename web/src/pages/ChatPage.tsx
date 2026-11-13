@@ -38,7 +38,7 @@ import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUs
 import { reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
   allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
-  finalAnswerOf, finishTool, foldProcess, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
+  finalAnswerOf, finishTool, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
   workSummary,
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
@@ -1160,7 +1160,9 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
     );
   }
   if (!live) settleWork(m);
-  const segs = m.role === "assistant" ? foldProcess(groupParts(partsOf(m))) : null;
+  // Replies stay outside the work groups (dsh: reasoning joins the step run, a
+  // reply stands on its own); only think/tool are folded as steps.
+  const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
   const workSegCount = segs ? segs.filter((seg) => seg.type === "work").length : 0;
   const hasWork = workSegCount > 0;
   const hasSteer = Boolean(segs?.some((seg) => seg.type === "single" && seg.part.kind === "steer"));

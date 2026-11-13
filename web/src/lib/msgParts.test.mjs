@@ -20,7 +20,6 @@ const {
   finalAnswerOf,
   finishThink,
   finishTool,
-  foldProcess,
   groupParts,
   isProcessSegment,
   partsOf,
@@ -195,6 +194,12 @@ test("hydrated JSONL turn folds Claude/GPT-5 intermediate content and keeps fina
     segs.map((_, i) => isProcessSegment(segs, i)),
     [true, true, true, true, false],
   );
+  // A reloaded turn has the same shape as a live one: the two spoken lines are
+  // their own replies between the step groups, not rows inside them.
+  assert.deepEqual(
+    segs.map((s) => (s.type === "work" ? "work" : s.part.text)),
+    ["我先看看目录与配置。", "work", "再读取 WorkGroup.tsx。", "work", "根因已定位并修复完成。"],
+  );
   assert.equal(finalAnswerOf(ai), "根因已定位并修复完成。");
 });
 
@@ -211,7 +216,7 @@ test("ensureTrailingFinalAnswer appends goal final_answer even when earlier roun
   assert.equal(finalAnswerOf(m), "目标已完成：所有测试均通过。");
 });
 
-test("foldProcess merges work groups and in-between replies into one process group", () => {
+test("an intermediate reply stands between two work groups, never inside one", () => {
   const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
   appendText(m, "我先查看目录。");
   appendTool(m, "execute", JSON.stringify({ command: "ls", description: "列出目录" }), "c1");
@@ -223,17 +228,56 @@ test("foldProcess merges work groups and in-between replies into one process gro
   appendText(m, "最终结论。");
   settleWork(m, Date.now());
 
-  const segs = foldProcess(groupParts(partsOf(m)));
-  assert.deepEqual(segs.map((s) => s.type), ["work", "single"]);
+  const segs = groupParts(partsOf(m));
+  // G1 -> 中间回复 -> G2 -> 最终回答: the reply is its own segment, and the two
+  // tool stretches are two groups rather than one merged run.
+  assert.deepEqual(segs.map((s) => s.type), ["single", "work", "single", "work", "single"]);
   assert.deepEqual(
-    segs[0].items.map((p) => p.kind),
-    ["text", "tool", "think", "text", "tool"],
+    segs.map((_, i) => isProcessSegment(segs, i)),
+    [true, true, true, true, false],
   );
-  assert.equal(segs[1].part.text, "最终结论。");
+  // dsh rule: a reply never joins the steps. Anything text-shaped inside a work
+  // group would be hidden behind the group's own fold — two clicks, not one.
+  assert.equal(segs.some((s) => s.type === "work" && s.items.some((p) => p.kind === "text")), false);
+  assert.equal(segs[2].part.text, "再读 README。");
+  assert.equal(segs[4].part.text, "最终结论。");
   assert.equal(finalAnswerOf(m), "最终结论。");
 });
 
-test("foldProcess keeps a steer chip as a boundary between process groups", () => {
+test("an intermediate reply is hidden by the turn fold, shown when it opens", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendThink(m, "先看看");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "a.py" }), "c1");
+  finishTool(m, "", undefined, "c1");
+  appendText(m, "中间说明");
+  appendTool(m, "read_file", JSON.stringify({ file_path: "b.py" }), "c2");
+  finishTool(m, "", undefined, "c2");
+  appendText(m, "最终回答");
+
+  const segs = groupParts(partsOf(m));
+  const hiddenWhenCollapsed = segs
+    .map((_, i) => isProcessSegment(segs, i))
+    .filter(Boolean)
+    .length;
+  // The reply sits inside `已完成，用时 …` with the steps, so collapsing the turn
+  // leaves only the answer.
+  const replyIndex = segs.findIndex((s) => s.type === "single" && s.part.text === "中间说明");
+  assert.equal(isProcessSegment(segs, replyIndex), true);
+  assert.equal(hiddenWhenCollapsed, segs.length - 1);
+  const finalIndex = segs.findIndex((s) => s.type === "single" && s.part.text === "最终回答");
+  assert.equal(isProcessSegment(segs, finalIndex), false);
+});
+
+test("a turn with only a reply has no process segments", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendText(m, "直接回答");
+  const segs = groupParts(partsOf(m));
+  assert.deepEqual(segs.map((s) => s.type), ["single"]);
+  assert.equal(isProcessSegment(segs, 0), false);
+  assert.equal(finalAnswerOf(m), "直接回答");
+});
+
+test("a steer chip is never folded into the turn process", () => {
   const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
   appendTool(m, "read_file", JSON.stringify({ file_path: "a.py" }), "c1");
   finishTool(m, "", undefined, "c1");
@@ -243,16 +287,13 @@ test("foldProcess keeps a steer chip as a boundary between process groups", () =
   finishTool(m, "", undefined, "c2");
   appendText(m, "完成。");
 
-  const segs = foldProcess(groupParts(partsOf(m)));
-  assert.deepEqual(
-    segs.map((s) => (s.type === "work" ? `work:${s.items.length}` : s.part.kind)),
-    ["work:1", "steer", "work:2", "text"],
-  );
-});
-
-test("foldProcess leaves a plain answer without work untouched", () => {
-  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
-  appendText(m, "直接回答");
   const segs = groupParts(partsOf(m));
-  assert.equal(foldProcess(segs), segs);
+  assert.deepEqual(
+    segs.map((s) => (s.type === "work" ? "work" : s.part.kind)),
+    ["work", "steer", "text", "work", "text"],
+  );
+  assert.deepEqual(
+    segs.map((_, i) => isProcessSegment(segs, i)),
+    [true, false, true, true, false],
+  );
 });
