@@ -36,6 +36,15 @@ def job_turn_meta(context: Dict[str, Any]) -> Dict[str, Any]:
     return {"cron_job": {"id": context.get("job_id") or "", "name": context.get("job_name") or ""}}
 
 
+# How long a run waits for the terminal to finish the turn it was handed.
+# Bounded on purpose: ``tick`` holds the scheduler's file lock while awaiting a
+# run, so waiting out the attach protocol's 600s grace would stall every other
+# due job (and make another process's tick report "another tick is running").
+# Two minutes covers the short turns this handoff is worth waiting for; a longer
+# one gets the honest "still working" line and finishes in the terminal.
+ATTACH_PROMPT_TIMEOUT = 120.0
+
+
 def _prompt_open_terminal(peer: Any, prompt: str, session_id: str) -> Optional[str]:
     """Run this run's turn in the terminal that has the conversation open.
 
@@ -46,7 +55,9 @@ def _prompt_open_terminal(peer: Any, prompt: str, session_id: str) -> Optional[s
     """
     from agentica.cli.attach import prompt_live_session
 
-    result = prompt_live_session(peer, prompt, session_id=session_id)
+    result = prompt_live_session(
+        peer, prompt, session_id=session_id, timeout=ATTACH_PROMPT_TIMEOUT,
+    )
     if result is None:
         return None
     answer = str(result.get("agenticaAnswer") or "").strip()

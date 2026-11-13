@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from uuid import uuid4
 
 from agentica.ticket import current_ticket_id
 from agentica.utils.log import logger
@@ -225,6 +226,12 @@ class BackgroundProcessCompleted:
     kind: str = "command"
     label: str = ""
     stop_requested: bool = False
+    # The durable record this event is about, when the job had one. Carried on
+    # the event so a consumer can look up *that* record instead of guessing the
+    # path from whatever session it happens to be attached to now — a session
+    # switch would otherwise make the event path and the disk sweep disagree
+    # and deliver the same report twice.
+    record_path: str = ""
 
     @property
     def elapsed(self) -> str:
@@ -453,6 +460,7 @@ class BackgroundProcessRegistry:
                 kind=item.kind,
                 label=item.label,
                 stop_requested=item.stop_requested,
+                record_path=item.record_path or "",
             )
             payload = self._record_payload(item, session_id) if item.record_path else None
         if item.record_path and payload is not None:
@@ -1003,18 +1011,24 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
-def _claim_is_stale(claim: Dict[str, Any], ttl: float) -> bool:
-    try:
-        age = time.time() - float(claim.get("at") or 0.0)
-    except (TypeError, ValueError):
-        return True
-    if age > ttl:
-        return True
+def _claim_is_stale(claim: Dict[str, Any], ttl: float, *, age: float) -> bool:
+    """A claim is abandoned when its *owner* is gone, not when it got old.
+
+    Liveness of the owner pid is the primary signal. An age-based TTL alone was
+    wrong in the one case that matters: a delivery legitimately waits on a
+    terminal that is mid-turn (the attach call's timeout is minutes), so a TTL
+    shorter than that turned the claim into a second delivery of the same
+    report — the duplicate this module exists to prevent, produced by its own
+    expiry. The TTL therefore only bounds a claim whose owner cannot be read at
+    all (an empty or half-written file).
+    """
     try:
         pid = int(claim.get("pid") or 0)
     except (TypeError, ValueError):
-        return True
-    return pid > 0 and not _pid_is_alive(pid)
+        pid = 0
+    if pid > 0:
+        return not _pid_is_alive(pid)
+    return age > ttl
 
 
 def claim_job_delivery(
@@ -1033,15 +1047,34 @@ def claim_job_delivery(
     path = Path(record_path)
     claim_file = _claim_path(path)
     payload = {"owner": owner, "pid": os.getpid(), "at": time.time()}
-    for _ in range(2):
+    for _ in range(3):
         try:
             fd = os.open(claim_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
             existing = _read_claim(claim_file)
-            if existing is not None and not _claim_is_stale(existing, ttl):
-                return False
             try:
-                claim_file.unlink()
+                age = time.time() - claim_file.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if existing is None and age <= ttl:
+                # Created but not written yet (the O_CREAT .. os.write window),
+                # or written short. Not abandoned — wait for the TTL.
+                return False
+            if existing is not None and not _claim_is_stale(existing, ttl, age=age):
+                return False
+            # Steal by rename: ``os.replace`` is atomic, so of N processes that
+            # all decided this claim is dead exactly one wins. Unlinking first
+            # let two stealers delete each other's fresh claim and both return
+            # True, which is a second delivery of the same report.
+            stolen = claim_file.with_name(
+                f"{claim_file.name}.stale.{os.getpid()}.{uuid4().hex[:6]}"
+            )
+            try:
+                os.replace(claim_file, stolen)
+            except OSError:
+                continue
+            try:
+                stolen.unlink()
             except OSError:
                 pass
             continue
@@ -1064,7 +1097,15 @@ def release_job_claim(record_path: Path | str) -> None:
 
 
 def mark_job_delivered(record_path: Path | str, owner: str) -> bool:
-    """Record that this job's report reached its destination. Idempotent."""
+    """Record that this job's report reached its destination. Idempotent.
+
+    The write is verified by reading it back. ``_write_json_atomic`` swallows
+    ``OSError`` by design, and an unverified marker means the very next sweep
+    offers the same report again — a duplicate produced by the mechanism that
+    exists to prevent duplicates. When the marker cannot be persisted the claim
+    is deliberately kept: it expires after the TTL, so retries are spaced out
+    instead of firing every poll.
+    """
     path = Path(record_path)
     rec = _read_json_record(path)
     if rec is None:
@@ -1075,6 +1116,10 @@ def mark_job_delivered(record_path: Path | str, owner: str) -> bool:
     rec["delivered_at"] = time.time()
     rec["delivery_owner"] = owner
     _write_json_atomic(path, rec)
+    fresh = _read_json_record(path)
+    if not (fresh and fresh.get("delivered_at")):
+        logger.warning(f"could not record delivery of {path.name}; it stays claimed until the TTL")
+        return False
     release_job_claim(path)
     return True
 
@@ -1121,13 +1166,71 @@ def completed_from_record(rec: Dict[str, Any]) -> Optional[BackgroundProcessComp
         return None
 
 
+def _orphan_report(rec: Dict[str, Any]) -> str:
+    """Report a job that ended while the process that started it was gone.
+
+    Nobody was left to record its exit code. Saying that plainly, with the tail
+    of the log, is the report: the alternative is what this module was written
+    to stop — a job that ends with nobody told.
+    """
+    tail = read_log_tail(str(rec.get("log_path") or ""), max_lines=20, max_chars=4000)
+    lines = [
+        f"[Background terminal #{rec.get('num')} ({rec.get('id')}) ended while nobody was watching]",
+        f"Command: {rec.get('command') or ''}",
+        f"Log: {rec.get('log_path') or ''}",
+        "",
+        "The process that started this job is gone, so its exit code was never "
+        "recorded and it is no longer running. Read the output before deciding "
+        "whether it succeeded.",
+    ]
+    if tail:
+        lines.extend(["", "Output tail:", tail])
+    return "\n".join(lines)
+
+
 def background_report_from_record(rec: Dict[str, Any]) -> Optional[str]:
-    """Render a durable record as the agent-facing report, or ``None`` when the
-    job has nothing to report (stopped, or no exit code to describe)."""
-    event = completed_from_record(rec)
-    if event is None or event.stop_requested:
+    """Render a durable record as the agent-facing report.
+
+    ``None`` means the job genuinely has nothing to say: the user stopped it, or
+    it has not settled. A job that settled without an exit code (its owner died
+    first) still owes a report, and gets :func:`_orphan_report`.
+    """
+    if rec.get("stop_requested"):
         return None
+    if rec.get("finished_at") is None:
+        return None
+    event = completed_from_record(rec)
+    if event is None:
+        return _orphan_report(rec)
     return background_result_for_agent(event)
+
+
+def record_is_settled(records_dir: Optional[Path], job_id: str) -> bool:
+    """True when the durable record for ``job_id`` knows the job finished.
+
+    The completion write is best-effort (``_write_json_atomic`` swallows disk
+    errors), so "a record file exists" is not the same as "the record is
+    usable": a start-time record whose completion write failed has no
+    ``finished_at`` and can never be adopted by the sweep. A caller holding the
+    in-memory completion event is the only one that can still deliver it.
+    """
+    if records_dir is None or not job_id:
+        return False
+    return record_file_is_settled(records_dir / f"{job_id}.json")
+
+
+def record_file_is_settled(record_path: Optional[Path | str]) -> bool:
+    """Same question as :func:`record_is_settled`, for a known record path.
+
+    A completion event carries the path of *its own* record, which is not
+    necessarily under the records dir the consumer is bound to now (the user may
+    have switched sessions). Asking about the real file is what keeps the event
+    path and the sweep disjoint.
+    """
+    if not record_path:
+        return False
+    rec = _read_json_record(Path(record_path))
+    return bool(rec and rec.get("finished_at") is not None)
 
 
 def undelivered_job_records(
@@ -1149,7 +1252,13 @@ def undelivered_job_records(
         rec = _read_json_record(path)
         if rec is None:
             continue
-        if rec.get("delivered_at"):
+        # ``delivered_at`` is written by every record this module creates. A
+        # record that does not have the key at all was written before delivery
+        # state existed: its report was delivered (or lost) by the old in-memory
+        # path and there is no way to tell which. Treat it as settled — the same
+        # rule as "a missing ticket means unmanaged": a legacy record must not
+        # be replayed as newly owed, and must not be given a made-up state.
+        if "delivered_at" not in rec or rec.get("delivered_at"):
             continue
         finished_at = rec.get("finished_at")
         if finished_at is None:

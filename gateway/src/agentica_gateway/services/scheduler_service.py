@@ -73,7 +73,31 @@ class GatewayCronRunner:
         peer = live_cli_peer(session_id)
         if peer is not None:
             # The terminal owns this conversation's log; a gateway turn would
-            # write it alongside. Its agent takes the prompt instead.
+            # write it alongside. Ask it to run the turn over the same attach
+            # socket the IM path uses, which also hands the answer back — the
+            # mailbox handoff this replaces could only report that the prompt
+            # had been handed over, so the automation record was always empty.
+            from agentica.cli.attach import prompt_live_session
+            from agentica.cron.cli_runner import ATTACH_PROMPT_TIMEOUT
+
+            result = await asyncio.to_thread(
+                prompt_live_session,
+                peer,
+                prompt,
+                session_id=session_id,
+                timeout=ATTACH_PROMPT_TIMEOUT,
+            )
+            if result is not None:
+                answer = str(result.get("agenticaAnswer") or "").strip()
+                if not answer:
+                    if result.get("stopReason") == "cancelled":
+                        answer = f"The open terminal [{peer.name}] cancelled this run."
+                    else:
+                        answer = (
+                            f"Handed to the open terminal [{peer.name}]; it has not "
+                            "reported a result yet."
+                        )
+                return CronRunOutput(content=answer, session_id=session_id)
             from agentica.peers import send_message
 
             send_message(peer, text=prompt, from_name="cron", from_peer_id="cron", from_kind="agent")
@@ -93,10 +117,17 @@ class GatewayCronRunner:
             log.set_name(name[:60])
         meta = job_turn_meta(ctx)
         result = None
-        if self._deliver_im is not None:
-            result = await self._deliver_im(owner, session_id, prompt, meta)
-        if result is None:
-            result = await run_scheduled_turn(self._svc, session_id, owner, prompt, meta)
+        # The job's dispatch ticket, so the conversation this run creates records
+        # the same name as the automation that created it. ``ticket_scope`` is
+        # the channel because the Runner resolves the ambient value; nothing
+        # downstream needs a new parameter.
+        from agentica.ticket import ticket_scope
+
+        with ticket_scope(ctx.get("ticket_id")):
+            if self._deliver_im is not None:
+                result = await self._deliver_im(owner, session_id, prompt, meta)
+            if result is None:
+                result = await run_scheduled_turn(self._svc, session_id, owner, prompt, meta)
         if result.error:
             raise RuntimeError(result.error)
         usage = None

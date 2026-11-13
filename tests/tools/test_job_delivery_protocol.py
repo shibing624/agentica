@@ -25,6 +25,7 @@ from agentica.tools.background_processes import (
     delivery_owner,
     load_session_job_views,
     mark_job_delivered,
+    record_is_settled,
     stop_session_job,
     undelivered_job_records,
 )
@@ -97,14 +98,34 @@ def test_a_claim_from_a_dead_process_is_stealable(tmp_path):
     assert claim_job_delivery(path, "owner") is True
 
 
-def test_a_claim_older_than_the_ttl_is_stealable(tmp_path):
+def test_a_claim_whose_owner_is_alive_is_never_stolen(tmp_path):
+    """Age must not decide this.
+
+    A delivery legitimately waits on a terminal that is mid-turn, which is
+    minutes, so an age-based expiry would hand the same record to a second
+    process and deliver the report twice. The owner being alive is the signal.
+    """
     path = write_record(tmp_path)
     claim = path.with_suffix(".claim")
     claim.write_text(
         json.dumps({"owner": "slow", "pid": os.getpid(), "at": time.time() - 10_000}),
         encoding="utf-8",
     )
-    assert claim_job_delivery(path, "owner", ttl=1.0) is True
+    assert claim_job_delivery(path, "owner", ttl=1.0) is False
+
+
+def test_a_claim_that_was_never_written_is_not_stolen_before_the_ttl(tmp_path):
+    """The O_CREAT..os.write window must not read as "abandoned"."""
+    path = write_record(tmp_path)
+    path.with_suffix(".claim").write_text("", encoding="utf-8")
+    assert claim_job_delivery(path, "owner") is False
+
+
+def test_a_half_written_claim_is_left_alone_until_it_ages_out(tmp_path):
+    path = write_record(tmp_path)
+    claim = path.with_suffix(".claim")
+    claim.write_text('{"owner": "tor', encoding="utf-8")
+    assert claim_job_delivery(path, "owner") is False
 
 
 def test_the_claim_file_is_not_read_as_a_job_record(tmp_path):
@@ -250,3 +271,83 @@ def test_a_job_this_process_never_started_can_be_stopped_by_id(tmp_path):
 def test_the_same_owner_string_is_stable_enough_to_compare(tmp_path):
     assert delivery_owner("cli").endswith(f"pid:{os.getpid()}")
     assert delivery_owner("cli") != delivery_owner("gateway")
+
+
+# --------------------------------------------------------------------------
+# The two failure modes the sweep cannot see
+# --------------------------------------------------------------------------
+
+def test_record_is_settled_requires_the_completion_write(tmp_path):
+    """A record that exists but never recorded its end can't be adopted.
+
+    The start-time record is written too, and the completion write is
+    best-effort, so "the file is there" is not "the report is owed here".
+    """
+    assert record_is_settled(tmp_path, "term_1") is False
+    write_record(tmp_path, finished=False)
+    assert record_is_settled(tmp_path, "term_1") is False
+    write_record(tmp_path, finished=True)
+    assert record_is_settled(tmp_path, "term_1") is True
+    assert record_is_settled(None, "term_1") is False
+
+
+def test_a_marker_that_cannot_be_written_keeps_the_claim(tmp_path, monkeypatch):
+    """An unverified marker would re-deliver on the next poll.
+
+    ``_write_json_atomic`` swallows OSError, so the marker is read back. When it
+    did not land the claim stays, which spaces the retry by the TTL instead of
+    by the poll interval.
+    """
+    import agentica.tools.background_processes as bp
+
+    path = write_record(tmp_path)
+    assert claim_job_delivery(path, "owner") is True
+    monkeypatch.setattr(bp, "_write_json_atomic", lambda *a, **k: None)
+    assert mark_job_delivered(path, "owner") is False
+    assert path.with_suffix(".claim").exists()
+    assert read_record(path)["delivered_at"] is None
+
+
+def test_a_record_from_before_delivery_state_is_never_replayed(tmp_path):
+    """Upgrading must not re-deliver every report the old path already handled.
+
+    A pre-upgrade record has no ``delivered_at`` key at all. Its report was
+    delivered (or lost) by the in-memory path and there is no way to tell which,
+    so it is treated as settled — the same rule as a missing ticket.
+    """
+    path = write_record(tmp_path)
+    raw = read_record(path)
+    for key in ("delivered_at", "delivery_owner", "delivery_attempts"):
+        raw.pop(key, None)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    assert undelivered_job_records(tmp_path) == []
+    seen = []
+    assert deliver_undelivered_jobs(tmp_path, lambda rec, report: seen.append(report)) == 0
+    assert seen == []
+
+
+def test_a_job_whose_owner_died_still_gets_a_report(tmp_path):
+    """The job outlived the process that started it; nobody wrote an exit code.
+
+    Silence is the bug this whole module exists to remove, so an orphan is
+    reported as "ended while nobody was watching" rather than quietly settled.
+    """
+    path = write_record(tmp_path)
+    raw = read_record(path)
+    raw["returncode"] = None  # the watcher died before it could record one
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    seen = []
+    assert deliver_undelivered_jobs(tmp_path, lambda rec, report: seen.append(report)) == 1
+    assert "ended while nobody was watching" in seen[0]
+    assert "echo hello" in seen[0]
+    assert "hello" in seen[0], "the log tail is the only evidence left"
+    assert read_record(path)["delivered_at"]
+
+
+def test_a_stopped_orphan_still_has_nothing_to_say(tmp_path):
+    write_record(tmp_path, stop_requested=True, returncode=None)
+    seen = []
+    assert deliver_undelivered_jobs(tmp_path, lambda rec, report: seen.append(report)) == 0
+    assert seen == []

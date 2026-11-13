@@ -1238,10 +1238,19 @@ def run_interactive(
         text = str(content).strip()
         return text or None
 
-    def _event_record(event) -> Optional[Path]:
-        """The durable record a completion event refers to, if this process has a records dir."""
-        records_dir = state.background_processes.records_dir
-        return None if records_dir is None else records_dir / f"{event.id}.json"
+    def _event_is_settled(event) -> bool:
+        """True when the record this event came from already knows the job ended.
+
+        Two things this must not do. It must not read the *current* session's
+        records dir (the user may have switched sessions since): the event names
+        its own record. And it must not settle for "the file exists" — the
+        start-time record exists too, and the completion write is best-effort,
+        so a present-but-unfinished record can never be adopted by the sweep and
+        the event is the only thing that can still deliver it.
+        """
+        from agentica.tools.background_processes import record_file_is_settled
+
+        return record_file_is_settled(getattr(event, "record_path", ""))
 
     def _deliver_finished_jobs() -> int:
         """Deliver every finished job this session owes a report for, once.
@@ -1273,13 +1282,18 @@ def run_interactive(
         )
 
     def background_completion_loop():
+        from agentica.tools.background_processes import delivery_owner, mark_job_delivered
+
         idle_ticks = 0
+        # Held, not consumed, while an ask/approval is on screen: dropping the
+        # event there would lose the report outright, because the sweep can only
+        # adopt records whose completion write landed.
+        pending_events: List = []
         while not state.should_exit:
-            event = None
             try:
                 # A wakeup, not the delivery source: the record on disk is what
                 # gets delivered, so this queue only tells us when to look.
-                event = state.background_processes.wait_completed(timeout=0.2)
+                pending_events.append(state.background_processes.wait_completed(timeout=0.2))
                 idle_ticks = 0
             except queue.Empty:
                 idle_ticks += 1
@@ -1288,24 +1302,28 @@ def run_interactive(
                 if _ask_active[0] or state.input_request is not None:
                     continue
                 delivered = 0
-                record = _event_record(event) if event is not None else None
-                if event is not None and not event.stop_requested and (
-                    record is None or not record.exists()
-                ):
-                    # No durable record to adopt: no transcript at all, or the
-                    # record write failed (it is best-effort by design). The
-                    # sweep cannot see this job, so deliver the event here —
-                    # the two paths are disjoint by construction, since the
-                    # sweep only delivers records that exist.
+                for event in pending_events:
+                    if event.stop_requested or _event_is_settled(event):
+                        # Settled: the sweep owns it, whichever process gets
+                        # there first. Stopped: nobody owes a report.
+                        continue
+                    # The record is missing or unusable (no transcript at all,
+                    # or the best-effort completion write failed). The sweep
+                    # cannot see this job, so the event has to deliver it.
                     _print_background_completion(event)
                     if state.background_processes.delivers_results:
                         _hand_to_agent(_background_result_for_agent(event), automated=True)
-                    delivered = 1
+                    if getattr(event, "record_path", ""):
+                        # Mark the record this event came from, so returning to
+                        # that session later does not deliver it a second time.
+                        mark_job_delivered(event.record_path, delivery_owner("cli"))
+                    delivered += 1
+                pending_events = []
                 # Immediately when something finished here, and every ~5s
                 # otherwise to adopt jobs that finished while no terminal was
                 # watching.
-                elif idle_ticks == 0 or idle_ticks % 25 == 0:
-                    delivered = _deliver_finished_jobs()
+                if idle_ticks == 0 or idle_ticks % 25 == 0:
+                    delivered += _deliver_finished_jobs()
             if delivered and app.is_running:
                 app.invalidate()
 

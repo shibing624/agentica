@@ -91,9 +91,12 @@ def reset_ticket_id(token: Token) -> None:
         _current.reset(token)
     except ValueError:
         # A different context (a thread, or a task that outlived its parent's
-        # turn) cannot reset another context's token. Leaving the value bound is
-        # the only option, and it is harmless: the next dispatch binds over it.
-        pass
+        # turn) cannot reset another context's token. Leaving the value bound
+        # would NOT be harmless: the next dispatch in this context resolves
+        # ``current_ticket_id()`` first and would *inherit* a ticket belonging to
+        # work that has ended. Clearing this context's value is the only thing
+        # available, and it keeps a finished dispatch from naming the next one.
+        _current.set(None)
 
 
 def resolve_ticket_id(ticket_id: Optional[str] = None) -> str:

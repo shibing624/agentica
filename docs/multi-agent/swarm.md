@@ -2,7 +2,7 @@
 
 Swarm 模式实现对等自主多智能体协作，与 `Agent.as_tool()`（轻量黑盒组合）和 Workflow（确定性管道）相比，更适合需要多 worker 并行/自治分工的场景。
 
-Swarm 是进阶 recipe，不是多步骤任务的默认选择。固定顺序用 [Workflow](workflow.md)，轻量助手组合用 `Agent.as_tool()`，需要权限隔离的委派用 [Subagent](subagent.md)。完整取舍见 [编排模式决策树](choosing.md)。
+Swarm 是进阶 recipe，不是多步骤任务的默认选择。固定顺序用 [Workflow](workflow.md)，轻量助手组合用 `Agent.as_tool()`，需要权限隔离的委派用 [Subagent](subagent.md)。本文只讲 Swarm 自身的用法：它是进阶 recipe，[编排模式决策树](choosing.md) 里不再把 Swarm 列为可选路径，新代码默认从那里选 `Workflow` / `Agent.as_tool()` / `Subagent`，只有明确需要并行自治协作时才回到本文。
 
 `mode` 是 `Swarm(...)` 的构造参数，不是 `swarm.run(...)` 的参数。当前 API 形态是：
 

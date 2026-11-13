@@ -20,9 +20,11 @@ from agentica.memory.session_log import SessionLog, is_session_unread, iso_times
 from agentica.run.context import RunSource
 from agentica.tools.background_processes import (
     BackgroundProcess,
+    BackgroundProcessCompleted,
     BackgroundProcessRegistry,
     background_job_view_from_process,
     background_report_from_record,
+    background_result_for_agent,
     claim_job_delivery,
     count_running_session_jobs,
     delivery_owner,
@@ -30,6 +32,7 @@ from agentica.tools.background_processes import (
     mark_job_delivered,
     note_job_delivery_failure,
     read_log_tail,
+    record_file_is_settled,
     release_job_claim,
     stop_all_session_jobs,
     stop_session_job,
@@ -360,27 +363,88 @@ class AgentSessionsMixin:
         to adopt reports that finished while nothing was watching.
         """
         idle = 0
+        key = self._sk(session_id, owner)
+        # Events whose durable record is unusable. Held, not dropped: while a
+        # sweep is in flight the queue still has to be drained, and discarding
+        # these here would lose the only copy of the report.
+        unusable: List[BackgroundProcessCompleted] = []
         while self._background_registry_is_current(session_id, owner, registry):
+            event = None
             try:
-                registry.wait_completed(timeout=1.0)
+                event = registry.wait_completed(timeout=1.0)
                 idle = 0
             except queue.Empty:
                 idle += 1
-            if idle and idle % 5:
-                continue
+            if (
+                event is not None
+                and not event.stop_requested
+                and not record_file_is_settled(event.record_path)
+            ):
+                unusable.append(event)
             loop = self._loop
             if loop is None or loop.is_closed():
                 return
+            # One delivery job per session at a time. A sweep waits for the
+            # conversation to be idle, so on a long turn every tick would
+            # otherwise stack another waiting coroutine.
+            if key in self._bg_delivery_inflight:
+                continue
+            if unusable:
+                # The record cannot be adopted by the sweep (no transcript, or
+                # the best-effort completion write failed), so the event is the
+                # only copy left.
+                pending_event = unusable.pop(0)
+                self._bg_delivery_inflight.add(key)
+                future = asyncio.run_coroutine_threadsafe(
+                    self._report_background_event(session_id, owner, registry, pending_event), loop,
+                )
+                future.add_done_callback(self._background_delivery_done(key))
+                continue
+            if idle and idle % 5:
+                continue
+            self._bg_delivery_inflight.add(key)
             future = asyncio.run_coroutine_threadsafe(
                 self._sweep_undelivered_background(session_id, owner), loop,
             )
-            future.add_done_callback(_log_report_failure)
+            future.add_done_callback(self._background_delivery_done(key))
+
+    def _background_delivery_done(self, key: str):
+        """Release the per-session delivery slot and log a failed coroutine."""
+
+        def _cb(future) -> None:
+            self._bg_delivery_inflight.discard(key)
+            _log_report_failure(future)
+
+        return _cb
 
     def _background_registry_is_current(
         self, session_id: str, owner: Optional[str], registry: BackgroundProcessRegistry,
     ) -> bool:
         """False once the session is deleted: its pending reports are void."""
         return self._session_background.get(self._sk(session_id, owner)) is registry
+
+    async def _report_background_event(
+        self,
+        session_id: str,
+        owner: Optional[str],
+        registry: BackgroundProcessRegistry,
+        event: BackgroundProcessCompleted,
+    ) -> None:
+        """Deliver a report whose durable record cannot be adopted.
+
+        Kept because the record is written best-effort: when the completion
+        write fails there is no record to claim, and dropping the event would
+        bring back exactly the loss this change is about.
+        """
+        report = background_result_for_agent(event)
+        while self._background_registry_is_current(session_id, owner, registry) and (
+            self.is_session_active(session_id, owner) or _pkg().live_turn.active(session_id, self._owner(owner))
+        ):
+            await asyncio.sleep(1.0)
+        handler = self.background_report_handler
+        if handler is None or not self._background_registry_is_current(session_id, owner, registry):
+            return
+        await handler(session_id, self._owner(owner), report)
 
     async def _sweep_undelivered_background(self, session_id: str, owner: Optional[str]) -> None:
         """Deliver every finished-but-unreported job for this session, once.
@@ -403,7 +467,9 @@ class AgentSessionsMixin:
         if handler is None or not self._background_registry_is_current(session_id, owner, registry):
             return
         who = delivery_owner("gateway")
-        for path, rec in undelivered_job_records(records_dir):
+        # Same pacing as the CLI sweep: a session that comes back after downtime
+        # can owe several reports, and each one queues a turn.
+        for path, rec in undelivered_job_records(records_dir)[:5]:
             if not claim_job_delivery(path, who):
                 continue
             report = background_report_from_record(rec)

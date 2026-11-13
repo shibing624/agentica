@@ -53,6 +53,9 @@ class AgentService(AgentModelMixin, AgentBuilderMixin, AgentExecutionMixin, Agen
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._session_background: Dict[str, BackgroundProcessRegistry] = {}
+        # Sessions with a background-report delivery coroutine in flight, so
+        # a sweep that is waiting for an idle conversation is not stacked.
+        self._bg_delivery_inflight: set = set()
         self.background_report_handler: Optional[
             Callable[[str, str, str], Awaitable[None]]
         ] = None
