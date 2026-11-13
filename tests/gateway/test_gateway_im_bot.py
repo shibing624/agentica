@@ -357,12 +357,18 @@ class TestCommandParsing:
     def test_parses_commands_and_aliases(self):
         assert parse_im_command("/menu").kind == "menu"
         assert parse_im_command("菜单").kind == "menu"
-        assert parse_im_command("/switch").kind == "switch"
-        assert parse_im_command("切换工作区").kind == "switch"
+        assert parse_im_command("/project").kind == "project"
+        assert parse_im_command("项目").kind == "project"
+        assert parse_im_command("切换项目").kind == "project"
+        assert parse_im_command("切换工作区").kind == "project"
         assert parse_im_command("/new 帮我跑测试") == parse_im_command("/n 帮我跑测试")
         assert parse_im_command("/new 帮我跑测试").arg == "帮我跑测试"
-        assert parse_im_command("/resume").kind == "resume"
-        assert parse_im_command("恢复会话").kind == "resume"
+        assert parse_im_command("/session").kind == "session"
+        assert parse_im_command("会话").kind == "session"
+        assert parse_im_command("切换会话").kind == "session"
+        # Old `/switch` and `/resume` were removed in favour of `/project` and `/session`
+        assert parse_im_command("/switch").kind == "chat"
+        assert parse_im_command("/resume").kind == "chat"
         assert parse_im_command("/cancel").kind == "cancel"
         assert parse_im_command("停止").kind == "cancel"
         assert parse_im_command("/ps").kind == "ps"
@@ -395,6 +401,7 @@ class TestImBotControllerFlows:
         monkeypatch.setenv("AGENTICA_PROJECTS_DIR", str(proj_root))
         monkeypatch.setenv("AGENTICA_ATTACH_DIR", short_attach)
         monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(cache_dir))
+        monkeypatch.setattr(im_bot_mod, "is_system_temp_path", lambda p: Path(str(p)).name == "sys_tmp")
         yield tmp_path
         shutil.rmtree(short_attach, ignore_errors=True)
 
@@ -425,7 +432,7 @@ class TestImBotControllerFlows:
         await bot.handle(_msg("菜单"))
         assert "回复数字选择操作" in ch.sent[-1][1]
 
-        # 2. Reply '3' (selects /switch from menu) -> opens workspace picker
+        # 2. Reply '3' (selects /project from menu) -> opens workspace picker
         await bot.handle(_msg("３"))
         assert "选择要控制的项目工作区" in ch.sent[-1][1]
         assert "proj_b" in ch.sent[-1][1]
@@ -442,12 +449,12 @@ class TestImBotControllerFlows:
 
         # 3. Reply with proj_b's number -> switches to proj_b and binds its session
         await bot.handle(_msg(f"{idx_b}。"))
-        assert "已切换工作区" in ch.sent[-1][1]
+        assert "已切换项目" in ch.sent[-1][1]
         assert state.work_dir == str(proj_b.resolve())
         assert state.session_id == "sess-b-11111111"
 
-        # 4. /resume lists sessions in proj_b
-        await bot.handle(_msg("/resume"))
+        # 4. /session lists sessions in proj_b
+        await bot.handle(_msg("/session"))
         assert "修复缓存命中率" in ch.sent[-1][1]
         await bot.handle(_msg("1"))
         assert "已挂载会话" in ch.sent[-1][1]
@@ -687,7 +694,7 @@ class TestImBotControllerFlows:
         )
         await bot.handle(_msg("/help"))
         assert "模型：openai/gpt-4o (profile: default)" in ch.sent[-1][1]
-        assert "/switch" in ch.sent[-1][1] and "self_manage" in ch.sent[-1][1]
+        assert "/project" in ch.sent[-1][1] and "/session" in ch.sent[-1][1] and "self_manage" in ch.sent[-1][1]
         await bot.handle(_msg("/status"))
         assert "模型：openai/gpt-4o" in ch.sent[-1][1]
 
@@ -1148,5 +1155,92 @@ class TestImBotControllerFlows:
         assert "已停止后台任务 #1 [term_1]" in stopped_text
         assert svc.bg_jobs[sid][0]["status"] == "stopped"
         live_turn.reset()
+
+    @pytest.mark.asyncio
+    async def test_switch_pages_by_activity_disambiguates_and_picks_session(self, tmp_path):
+        import os
+
+        root = tmp_path / "codes"
+        repo = root / "agentica"
+        example = repo / "examples" / "basic"
+        sys_tmp = tmp_path / "sys_tmp"
+        for d in (repo, example, sys_tmp):
+            d.mkdir(parents=True)
+
+        # Temp residue should not crowd out real projects.
+        tlog = SessionLog(session_id="tmp-sess", work_dir=str(sys_tmp), user_id="default")
+        tlog.append("user", "scratch")
+        tlog.append("assistant", "ok")
+
+        ex_log = SessionLog(session_id="ex-sess-1", work_dir=str(example), user_id="default")
+        ex_log.append("user", "跑一下示例")
+        ex_log.append("assistant", "好")
+        os.utime(ex_log.path, (1000, 1000))
+
+        # Fill 9 filler projects older than `repo` so `repo` must win by mtime,
+        # and total projects exceed one page (WORKSPACE_PAGE_SIZE = 8).
+        for i in range(9):
+            d = root / f"old_{i:02d}"
+            d.mkdir()
+            flog = SessionLog(session_id=f"old-sess-{i}", work_dir=str(d), user_id="default")
+            flog.append("user", f"old {i}")
+            flog.append("assistant", "done")
+            os.utime(flog.path, (2000 + i, 2000 + i))
+
+        r1 = SessionLog(session_id="repo-older", work_dir=str(repo), user_id="default")
+        r1.set_name("修了网关")
+        r1.append("user", "看下网关")
+        r1.append("assistant", "好")
+        os.utime(r1.path, (5000, 5000))
+
+        r2 = SessionLog(session_id="repo-newer", work_dir=str(repo), user_id="default")
+        r2.set_name("做标签统计")
+        r2.append("user", "加几个标签")
+        r2.append("assistant", "好")
+        os.utime(r2.path, (6000, 6000))
+
+        cur = root / "current"
+        cur.mkdir()
+        ch = FakeChannel()
+        bot = ImBotController(
+            channel_manager=FakeChannelManager(ch),
+            agent_service=FakeAgentService(default_work_dir=str(cur)),
+            state_file=tmp_path / "im_state.json",
+        )
+        state = bot.state_for(_msg("noop"))
+        bot._bind_session(state, str(cur), "cur-sess")
+
+        await bot.handle(_msg("/project"))
+        page1 = ch.sent[-1][1]
+        assert "第 1 页" in page1 and "0. 下一页" in page1
+        assert "sys_tmp" not in page1
+        assert "agentica · 最近：做标签统计（共 2 个会话）" in page1
+
+        # Page 2 reaches the older nested `examples/basic` with its parent shown.
+        await bot.handle(_msg("0"))
+        page2 = ch.sent[-1][1]
+        assert "第 2 页" in page2
+        assert "examples/basic" in page2
+
+        # Go back to page 1 and pick `repo`: multiple sessions -> session picker + new option.
+        await bot.handle(_msg("/project"))
+        idx_repo = state.pending.options.index(str(repo.resolve())) + 1
+        await bot.handle(_msg(str(idx_repo)))
+        pick_text = ch.sent[-1][1]
+        assert "共有 2 个会话" in pick_text
+        assert "做标签统计" in pick_text and "修了网关" in pick_text
+        assert "在此项目新建会话" in pick_text
+
+        # Pick the older session explicitly.
+        await bot.handle(_msg("2"))
+        assert state.work_dir == str(repo.resolve())
+        assert state.session_id == "repo-older"
+
+        # `/session` stays inside `repo` — sessions from `examples/basic` or `old_*` do not leak in.
+        await bot.handle(_msg("/session"))
+        resume_text = ch.sent[-1][1]
+        assert "做标签统计" in resume_text and "修了网关" in resume_text
+        assert "跑一下示例" not in resume_text and "old 0" not in resume_text
+
 
 

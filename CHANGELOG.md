@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### breaking
+- **IM 远控命令 `/switch` 改为 `/project`（`项目`），`/resume` 改为 `/session`（`会话`）**：原 `/switch`（`切换`）与 `/resume`（`恢复`）命名不指明操作对象，已直接替换为 `/project`（别名 `/p`、`/projects`、`/workspace`、`项目`、`切换项目`、`切换工作区`）与 `/session`（别名 `/s`、`/sessions`、`会话`、`切换会话`、`会话列表`）；`/status` 保留全名与 `状态`（`/s` 归属 `/session`）（`gateway/src/agentica_gateway/services/im_bot/commands.py`）。
+
 #### features
+- **IM `/project` 与 `/session` 职责分离，项目列表按最近会话排序并支持翻页**：`/project` 按项目最近活跃时间排序、每页 8 条（发 `0` 翻页，不再固定截断在 15 条并漏掉靠后的仓库），过滤 `/tmp`、`/var/folders` 下的临时目录，目录重名或父子嵌套时自动带上父目录（如 `agentica` 与 `examples/basic`），并在每行写出最近一场会话标题与会话数；选中只有 1 场会话的项目直接绑定，有多场会话时弹出该项目的会话列表（含「在此项目新建会话」），不再静默挑文件。`/session` 只列当前绑定项目里的会话与在线终端，不再混入其他项目的记录（`gateway/src/agentica_gateway/services/im_bot/menus.py`）。
 - **Web / Desktop 点踩可选分类标签，点赞和点踩写入已有的会话索引库**：点踩弹窗可单选或多选「任务结果 / 指令理解与遵循 / 产品功能与交互 / 稳定性和速度 / 资源使用与费用 / 安全隐私与权限 / 其他」，只选标签、不填说明也能提交。点赞、点踩、标签和说明除了写在会话 sidecar 外，还写入该账号已有的 `projects/<user>/session_index.db` 的 `message_feedback` 表（`session_id`、`entry_uuid`、`work_dir`、`rating`、`tags`、`comment`），取消投票会删掉对应行，方便跨会话统计（`SessionLog.set_feedback`、`POST /api/sessions/{id}/feedback`）。
 - **Web / Desktop 对话 Markdown 兼容渲染 `<br>` / `<br/>` 换行标签**：`ChatMarkdown`（流式与完结态共用 `remarkHtmlBreak`）将模型在 GFM 表格单元格或分点描述中输出的 `<br>` / `<br/>` / `<br />` 转为标准 Markdown 硬换行，同时保持不开启全局 `rehype-raw`，行内代码 `` `<br>` ``、代码块、不等号（如 `d_old < d_new`）及任意其他 `<tag>` 仍安全转义不误吞（`web/src/lib/markdownPlugins.ts`）。
 

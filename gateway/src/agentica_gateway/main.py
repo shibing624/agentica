@@ -204,7 +204,7 @@ async def lifespan(app: FastAPI):
         card_registry=deps.card_registry,
         user_id_provider=_home_account,
     )
-    logger.info("IM bot controller started (/menu, /resume, /switch, /new, /cancel, /c/<token>)")
+    logger.info("IM bot controller started (/menu, /session, /project, /new, /cancel, /c/<token>)")
 
     # Publish how to reach this process (port + token) so a desktop shell or a
     # second terminal can find it.
