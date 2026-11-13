@@ -19,7 +19,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from agentica.model.base import Model
-from agentica.model.cache_routing import resolve_cache_session_id
+from agentica.model.cache_routing import default_sticky_session_header, resolve_cache_session_id
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
@@ -365,7 +365,17 @@ class Claude(Model):
             _headers["Authorization"] = f"Bearer {self.api_key}"
         if self.default_headers:
             _headers.update(self.default_headers)
-        if self.cache_control_session_header:
+        _lower_header_keys = {k.lower() for k in _headers}
+        _session_header = (
+            self.cache_control_session_header
+            if self.cache_control_session_header is not None
+            else (
+                None
+                if ("venus-sticky-routing" in _lower_header_keys or "venus-session-id" in _lower_header_keys)
+                else default_sticky_session_header(self.base_url)
+            )
+        )
+        if _session_header:
             # Resolved per client build, not memoized: the client may first be
             # built before update_model() assigns session_id, and caching that
             # fallback would hide the real session on every later rebuild.
@@ -374,7 +384,8 @@ class Claude(Model):
             )
             # setdefault, not assignment: an explicit same-named entry in
             # default_headers is the user's deliberate value and wins.
-            _headers.setdefault(self.cache_control_session_header, _sid)
+            if _session_header.lower() not in _lower_header_keys:
+                _headers[_session_header] = _sid
         if _headers:
             _client_params["default_headers"] = _headers
         if self.timeout is not None:
@@ -473,6 +484,7 @@ class Claude(Model):
         # results for the open tool_use round; Anthropic wants every result of
         # one round in a single user message, right after the tool_use.
         tool_result_turn: Optional[int] = None
+        reminder_user_turn: Optional[int] = None
 
         # This path intentionally does NOT round-trip through
         # ``Message.to_model_dict()``: Anthropic needs block-typed content
@@ -486,13 +498,35 @@ class Claude(Model):
         # so a dump-everything regression (model_dump-style) will not be silent.
         for idx, message in enumerate(messages):
             content = message.content or ""
-            if message.role == "system" or (
-                message.role != "user"
-                and message.role != "assistant"
-                and idx in [0, 1]
-                and not getattr(message, "tool_call_id", None)
+            if not chat_messages and (
+                message.role == "system"
+                or (
+                    message.role != "user"
+                    and message.role != "assistant"
+                    and idx in [0, 1]
+                    and not getattr(message, "tool_call_id", None)
+                )
             ):
                 system_messages.append(content)  # type: ignore
+            elif message.role == "system":
+                # In-history system updates stay after cached conversation history
+                # instead of rewriting the top-level ``system`` block (which would
+                # invalidate every cached token from offset 0).
+                text = content if isinstance(content, str) else str(content)
+                if not text.strip():
+                    continue
+                reminder_block = {
+                    "type": "text",
+                    "text": f"<system-reminder>\n{text.strip()}\n</system-reminder>",
+                }
+                if chat_messages and chat_messages[-1]["role"] == "user":
+                    chat_messages[-1]["content"].append(reminder_block)  # type: ignore
+                    reminder_user_turn = len(chat_messages) - 1
+                else:
+                    chat_messages.append({"role": "user", "content": [reminder_block]})  # type: ignore
+                    reminder_user_turn = len(chat_messages) - 1
+                tool_result_turn = None
+                pending_tool_use_ids = set()
             elif message.role == "tool":
                 # OpenAI-shape result: from a resumed transcript, a history
                 # converted on /model, or a placeholder the shared repair code
@@ -509,14 +543,27 @@ class Claude(Model):
                 else:
                     chat_messages[tool_result_turn]["content"].append(block)  # type: ignore
             else:
-                if isinstance(content, str):
-                    blocks = [{"type": "text", "text": content}] if content.strip() else []
-                else:
+                replayed_blocks = None
+                if message.role == "assistant" and isinstance(message.provider_data, dict):
+                    block_origin = message.provider_data.get("anthropic_model")
+                    if not block_origin or block_origin == self.id:
+                        replayed_blocks = message.provider_data.get("anthropic_blocks")
+                if isinstance(content, list):
                     blocks = [
                         b
                         for b in content
                         if not _is_empty_text_block(b) and not _is_unsigned_thinking_block(b)
                     ]
+                elif isinstance(replayed_blocks, list):
+                    blocks = [
+                        b
+                        for b in replayed_blocks
+                        if not _is_empty_text_block(b) and not _is_unsigned_thinking_block(b)
+                    ]
+                elif isinstance(content, str):
+                    blocks = [{"type": "text", "text": content}] if content.strip() else []
+                else:
+                    blocks = []
                 if (
                     message.role == "assistant"
                     and message.tool_calls
@@ -559,6 +606,7 @@ class Claude(Model):
 
                 if message.role == "assistant":
                     tool_result_turn = None
+                    reminder_user_turn = None
                     chat_messages.append({"role": "assistant", "content": blocks})  # type: ignore
                     pending_tool_use_ids = {
                         block.get("id")
@@ -575,11 +623,13 @@ class Claude(Model):
                 # pads a partial native round): every result lands in the one
                 # message right after the tool_use, results first, and the
                 # request never carries two consecutive user turns.
-                if tool_result_turn is None:
+                merge_turn = tool_result_turn if tool_result_turn is not None else reminder_user_turn
+                if merge_turn is None:
                     chat_messages.append({"role": "user", "content": blocks})  # type: ignore
                     tool_result_turn = len(chat_messages) - 1 if answered else None
                 else:
-                    chat_messages[tool_result_turn]["content"].extend(blocks)  # type: ignore
+                    chat_messages[merge_turn]["content"].extend(blocks)  # type: ignore
+                reminder_user_turn = None
                 if answered:
                     pending_tool_use_ids -= answered
                 else:
@@ -599,13 +649,17 @@ class Claude(Model):
         #      has cache_control (e.g. a tool_result). We must not stack a second.
         # So we first STRIP every existing cache_control block, then re-apply at
         # most 3 (system takes the 4th), newest-first.
+        system_joined = " ".join(system_messages)
         if self.enable_cache_control and chat_messages:
             self._strip_cache_control(chat_messages)
+            has_tools_bp = bool(self._get_structured_output_tool() or (self.tools and self.get_tools()))
+            has_sys_bp = bool(system_joined.replace(VOLATILE_SYSTEM_MARKER, "").strip())
+            msg_budget = max(0, 4 - (1 if has_tools_bp else 0) - (1 if has_sys_bp else 0))
             applied = 0
-            # Newest messages first so the freshest context stays cached when we
-            # hit the budget. Budget is 3 here; the system prompt takes the 4th.
+            # Newest messages first within the remaining 4-breakpoint budget
+            # after tools(0|1) + system(0|1).
             for msg in reversed(chat_messages):
-                if applied >= 3:
+                if applied >= msg_budget:
                     break
                 # Tag a text/tool_use/tool_result block, never thinking:
                 # adding cache_control to a thinking block invalidates its
@@ -613,7 +667,7 @@ class Claude(Model):
                 if _attach_cache_control(msg["content"]):
                     applied += 1
 
-        return chat_messages, " ".join(system_messages)
+        return chat_messages, system_joined
 
     @staticmethod
     def _strip_cache_control(chat_messages: List[Dict[str, Any]]) -> None:
@@ -736,6 +790,17 @@ class Claude(Model):
         elif self.tools:
             request_kwargs["tools"] = self.get_tools()
 
+        # Tag the last tool definition so the tools schema forms its own cache
+        # prefix block ahead of ``system`` (tools -> system -> messages).
+        active_tools = request_kwargs.get("tools")
+        if self.enable_cache_control and isinstance(active_tools, list) and active_tools:
+            tagged_tools = list(active_tools)
+            if isinstance(tagged_tools[-1], dict):
+                last_tool = dict(tagged_tools[-1])
+                last_tool["cache_control"] = {"type": "ephemeral"}
+                tagged_tools[-1] = last_tool
+            request_kwargs["tools"] = tagged_tools
+
         return request_kwargs
 
     def get_tools(self) -> Optional[List[Dict[str, Any]]]:
@@ -817,6 +882,36 @@ class Claude(Model):
         )
         return True
 
+    async def _create_message(
+        self,
+        chat_messages: List[Dict[str, Any]],
+        request_kwargs: Dict[str, Any],
+    ) -> AnthropicMessage:
+        """Call ``messages.create``, falling back to ``messages.stream`` for high caps.
+
+        The Anthropic Python SDK rejects non-streaming ``messages.create``
+        locally with ``ValueError("Streaming is required for operations that
+        may take longer than 10 minutes...")`` whenever ``max_tokens`` is large
+        (e.g. 64k). Aggregating the stream transparently keeps ``agent.run()``
+        working with full output caps.
+        """
+        client = self.get_client()
+        try:
+            return await client.messages.create(
+                model=self.id,
+                messages=chat_messages,
+                **request_kwargs,
+            )
+        except ValueError as ve:
+            if "Streaming is required" not in str(ve):
+                raise
+            async with client.messages.stream(
+                model=self.id,
+                messages=chat_messages,
+                **request_kwargs,
+            ) as stream:
+                return await stream.get_final_message()
+
     @override
     async def invoke(self, messages: List[Message]) -> AnthropicMessage:
         """
@@ -832,19 +927,11 @@ class Claude(Model):
         request_kwargs = self.prepare_request_kwargs(system_message)
 
         try:
-            return await self.get_client().messages.create(
-                model=self.id,
-                messages=chat_messages,
-                **request_kwargs,
-            )
+            return await self._create_message(chat_messages, request_kwargs)
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
             if self._maybe_recover_max_tokens(e, request_kwargs):
-                return await self.get_client().messages.create(
-                    model=self.id,
-                    messages=chat_messages,
-                    **request_kwargs,
-                )
+                return await self._create_message(chat_messages, request_kwargs)
             raise
 
     @override
@@ -983,11 +1070,22 @@ class Claude(Model):
             cache_read = usage.cache_read_input_tokens or 0
             cache_write = usage.cache_creation_input_tokens or 0
             # Native input_tokens excludes both cache counters; the request
-            # occupied all three in the window.
-            assistant_message.metrics["context_tokens"] = (
-                metrics.input_tokens + cache_read + cache_write
-            )
+            # occupied all three in the window. Record inclusive prompt_tokens
+            # and prompt_tokens_details on assistant_message.metrics so
+            # SessionLog, PersistMixin._trace_token_usage, and Trace UI see the
+            # real cache read/write breakdown instead of only the 2-4 fresh tail tokens.
+            prompt_total = metrics.input_tokens + cache_read + cache_write
+            assistant_message.metrics["context_tokens"] = prompt_total
+            assistant_message.metrics["prompt_tokens"] = prompt_total
+            assistant_message.metrics["total_tokens"] = prompt_total + (metrics.output_tokens or 0)
             if cache_read or cache_write:
+                assistant_message.metrics["cache_read_tokens"] = cache_read
+                assistant_message.metrics["cache_write_tokens"] = cache_write
+                assistant_message.metrics["prompt_tokens_details"] = {
+                    "cached_tokens": cache_read,
+                    "cache_read_tokens": cache_read,
+                    "cache_creation_tokens": cache_write,
+                }
                 entry.input_tokens_details = TokenDetails(
                     cached_tokens=cache_read,
                     cache_read_tokens=cache_read,

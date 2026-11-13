@@ -7,6 +7,7 @@
 import asyncio
 import json
 import os
+import re
 from datetime import datetime
 from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -39,6 +40,9 @@ _FILE_TOOL_NAMES = frozenset({
     "read_file", "write_file",
     "apply_patch", "glob", "grep",
 })
+
+_PINNED_DATE_RE = re.compile(r"(?:Today's date is |^Date: )(\d{4}-\d{2}-\d{2})", re.MULTILINE)
+_PINNED_CHANNEL_RE = re.compile(r"This turn came in over the `([^`]+)` IM channel:")
 
 
 class PromptsMixin:
@@ -218,8 +222,119 @@ class PromptsMixin:
             directives.append(f"Regardless of the input language, you must output text in {pc.output_language}.")
         return directives
 
+    def _can_pin_system_prompt(self) -> bool:
+        """True when ``messages[0]`` should stay byte-frozen across turns in this window."""
+        pc = self.prompt_config
+        if self._enabled_skills is not None:
+            return False
+        if callable(pc.system_prompt) or callable(self.instructions):
+            return False
+        return True
+
+    def _current_runtime_state(self) -> Dict[str, str]:
+        """Snapshot of volatile runtime facts that may drift across turns."""
+        pc = self.prompt_config
+        date_val = datetime.now().strftime("%Y-%m-%d") if (
+            pc.add_datetime_to_instructions or pc.minimal or bool(os.environ.get("AGENTICA_SIMPLE"))
+        ) else ""
+        channel_val = str(self._run_channel) if self._run_channel else ""
+        summary_val = (
+            self.working_memory.summary.model_dump_json(indent=2)
+            if self.working_memory.create_session_summary and self.working_memory.summary is not None
+            else ""
+        )
+        return {
+            "date": date_val,
+            "channel": channel_val,
+            "summary": summary_val,
+        }
+
+    def _extract_runtime_state_from_prompt(self, prompt_text: str) -> Dict[str, str]:
+        """Reconstruct the embedded runtime state from a persisted ``system_prompt``."""
+        pc = self.prompt_config
+        date_match = _PINNED_DATE_RE.search(prompt_text)
+        expect_date = pc.add_datetime_to_instructions or pc.minimal or bool(os.environ.get("AGENTICA_SIMPLE"))
+        date_val = date_match.group(1) if (date_match and expect_date) else ""
+        chan_match = _PINNED_CHANNEL_RE.search(prompt_text)
+        channel_val = chan_match.group(1) if chan_match else ""
+        summary_val = (
+            self.working_memory.summary.model_dump_json(indent=2)
+            if (
+                "## Summary of Previous Interactions" in prompt_text
+                and self.working_memory.create_session_summary
+                and self.working_memory.summary is not None
+            )
+            else ""
+        )
+        return {
+            "date": date_val,
+            "channel": channel_val,
+            "summary": summary_val,
+        }
+
+    def _take_runtime_context_reminder(self) -> Optional[str]:
+        """Emit an in-history ``<system-reminder>`` only when volatile facts changed.
+
+        Mirrors dsh ``RuntimeContextProjection``: ``messages[0]`` stays frozen so
+        the cached conversation prefix remains valid; changed runtime facts are
+        appended once at the tail and supersede earlier snapshots.
+        """
+        if self._pinned_system_prompt is None or self._pinned_runtime_state is None:
+            return None
+        current = self._current_runtime_state()
+        prev = self._pinned_runtime_state
+        if current == prev:
+            return None
+
+        sections: List[str] = []
+        if current["date"] != prev.get("date", "") and current["date"]:
+            sections.append(f"Today's date is {current['date']}.")
+        if current["channel"] != prev.get("channel", ""):
+            if current["channel"]:
+                sections.append(
+                    f"This turn came in over the `{current['channel']}` IM channel: "
+                    "your reply is delivered as chat messages."
+                )
+            else:
+                sections.append(
+                    "This turn came in over a direct interactive client (no longer via an IM channel)."
+                )
+        if current["summary"] != prev.get("summary", "") and current["summary"]:
+            sections.append(
+                "## Summary of Previous Interactions\n"
+                f"{current['summary']}\n"
+                "This summary may be outdated; prefer this conversation where they differ."
+            )
+
+        self._pinned_runtime_state = current
+        if not sections:
+            return None
+        body = "\n\n".join(sections)
+        return (
+            "<system-reminder>\n"
+            "The following information describes your current session. "
+            "It replaces earlier versions of this context:\n\n"
+            f"{body}\n"
+            "</system-reminder>"
+        )
+
     async def get_system_message(self) -> Optional[Message]:
-        """Return the system message for the Agent."""
+        """Return the system message for the Agent, keeping ``messages[0]`` pinned mid-window."""
+        pc = self.prompt_config
+        can_pin = self._can_pin_system_prompt()
+        has_active_history = bool(self.working_memory.runs)
+
+        if can_pin and has_active_history and self._pinned_system_prompt is not None:
+            return Message(role=pc.system_message_role, content=self._pinned_system_prompt)
+
+        rendered = await self._render_system_message_raw()
+        if can_pin and rendered is not None and isinstance(rendered.content, str):
+            self._pinned_system_prompt = rendered.content
+            self._pinned_runtime_state = self._current_runtime_state()
+        return rendered
+
+    async def _render_system_message_raw(self) -> Optional[Message]:
+        """Render a fresh system message from the Agent's current state."""
         pc = self.prompt_config
 
         # 0. Minimal mode: one-line system prompt, skip all section assembly.
@@ -919,6 +1034,22 @@ class PromptsMixin:
             if note:
                 last = user_messages[-1]
                 user_messages[-1] = last.model_copy(update={"content": f"{note}\n\n{last.content}"})
+
+        # Append volatile runtime deltas (date rollover, IM channel switch,
+        # updated session summary) in-history rather than mutating messages[0].
+        if (
+            self.add_history_to_context
+            and len(self.working_memory.runs) > 0
+            and self._can_pin_system_prompt()
+            and user_messages
+            and isinstance(user_messages[-1].content, str)
+        ):
+            runtime_reminder = self._take_runtime_context_reminder()
+            if runtime_reminder:
+                last = user_messages[-1]
+                user_messages[-1] = last.model_copy(
+                    update={"content": f"{runtime_reminder}\n\n{last.content}"}
+                )
 
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)

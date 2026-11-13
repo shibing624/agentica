@@ -129,8 +129,12 @@ class PersistMixin:
     def _provider_replay_meta(message: Message) -> Dict[str, Any]:
         """Return provider state required for faithful same-provider replay."""
         meta: Dict[str, Any] = {}
-        if message.provider_data is not None:
-            meta["provider_data"] = message.provider_data
+        provider_data = dict(message.provider_data) if isinstance(message.provider_data, dict) else message.provider_data
+        if message.role == "assistant" and isinstance(message.content, list):
+            provider_data = dict(provider_data) if isinstance(provider_data, dict) else {}
+            provider_data.setdefault("anthropic_blocks", message.content)
+        if provider_data is not None:
+            meta["provider_data"] = provider_data
         if message.provider_checkpoint is not None:
             meta["provider_checkpoint"] = message.provider_checkpoint
         if message.reasoning_content is not None:
@@ -167,8 +171,12 @@ class PersistMixin:
         if not text:
             return
         meta = PersistMixin._provider_replay_meta(user_messages[-1]) if user_messages else {}
-        if user_messages and user_messages[-1].automated:
-            meta["automated"] = True
+        if user_messages:
+            if user_messages[-1].automated:
+                meta["automated"] = True
+            wire_body = user_messages[-1].content
+            if isinstance(wire_body, str) and wire_body != text:
+                meta["wire_content"] = wire_body
         if agent._run_input_meta:
             meta.update(agent._run_input_meta)
         if agent.run_context is not None:
@@ -884,11 +892,24 @@ class PersistMixin:
                 system_prompt = msg.content if isinstance(msg.content, str) else ""
                 break
         model = agent.model
+        ordered_tools: List[str] = []
+        if model is not None:
+            for item in model.get_tools_for_api() or []:
+                if isinstance(item, dict):
+                    fn = item.get("function")
+                    tname = fn.get("name") if isinstance(fn, dict) else item.get("name")
+                    if isinstance(tname, str) and tname:
+                        ordered_tools.append(tname)
+            if not ordered_tools and model.functions:
+                ordered_tools = [
+                    k for k, fn in model.functions.items()
+                    if not fn.deferred and fn.is_available()
+                ]
         slog.append_trace_prelude(
             model=model.id if model is not None else None,
             provider=model.provider if model is not None else None,
             context_window=model.context_window if model is not None else None,
-            tools=sorted((model.functions or {}).keys()) if model is not None else [],
+            tools=ordered_tools,
             system_prompt=system_prompt,
         )
 
@@ -995,14 +1016,26 @@ class PersistMixin:
             fresh_input = max(prompt_tokens - cache_read - cache_write, 0)
         output = _num(metrics.get("output_tokens"))
         total = _num(metrics.get("total_tokens")) or (prompt_tokens + output)
+        prompt_actual = fresh_input + cache_read + cache_write
+        req_payload: Dict[str, Any] = {
+            "input": fresh_input,
+            "cache_read": cache_read,
+            "cache_write": cache_write,
+            "output": output,
+            "total": total,
+        }
+        slog = agent._session_log
+        if slog is not None and prompt_actual > 0:
+            prev_prompt = slog._last_request_prompt_tokens
+            if prev_prompt > 0:
+                reuse_ratio = round(cache_read / prev_prompt, 4)
+                req_payload["prev_prompt"] = prev_prompt
+                req_payload["prefix_reuse_ratio"] = reuse_ratio
+                if prev_prompt >= 1024 and reuse_ratio < 0.9:
+                    req_payload["cache_cliff"] = True
+            slog._last_request_prompt_tokens = prompt_actual
         PersistMixin._trace_event(
             agent,
             "token_usage",
-            request={
-                "input": fresh_input,
-                "cache_read": cache_read,
-                "cache_write": cache_write,
-                "output": output,
-                "total": total,
-            },
+            request=req_payload,
         )

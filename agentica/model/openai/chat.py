@@ -42,6 +42,8 @@ from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from agentica.model.base import Model, require_first_choice
 from agentica.model.cache_routing import (
+    default_sticky_session_header,
+    is_claude_model_id,
     persistent_cache_session_id,
     resolve_cache_session_id,
 )
@@ -351,12 +353,10 @@ class OpenAIChat(Model):
     # The proxy accepts Anthropic-style ``cache_control`` blocks
     # inside OpenAI-format system / messages / tools and reports
     # ``prompt_tokens_details.cache_read_tokens`` / ``cache_creation_tokens``.
-    # Default OFF: pure OpenAI / DeepSeek / Zhipu may reject the non-standard
-    # ``cache_control`` key. Enable explicitly (SDK flag, CLI --enable_cache_control,
-    # or config.yaml profile) for Anthropic-via-OpenAI proxies. If a request
-    # already carries cache_control blocks while this is off, a warning is logged
-    # telling the user to flip it on.
-    enable_cache_control: bool = False
+    # ``None`` auto-enables for Claude model ids (Claude has no implicit prefix
+    # cache and re-prices the entire history without breakpoints) while keeping
+    # pure OpenAI / DeepSeek / Zhipu models OFF unless explicitly set True.
+    enable_cache_control: Optional[bool] = None
     # Max cache breakpoints placed on the trailing non-system messages
     # (rolling cache window). Anthropic caps a request at 4 breakpoints total,
     # so the effective count is min(cache_control_messages, 4 - tools - system).
@@ -426,6 +426,7 @@ class OpenAIChat(Model):
     # from model-name families.
     _OUTPUT_CAP_KEYS: ClassVar[tuple[str, ...]] = ("max_tokens", "max_completion_tokens")
     _OUTPUT_CAP_KEY_BY_DEPLOYMENT: ClassVar[Dict[tuple[str, str, str], str]] = {}
+    _UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS: ClassVar[set[tuple[str, str, str]]] = set()
 
     def _output_cap_deployment_key(self) -> tuple[str, str, str]:
         """Identity used to share a learned wire key across per-run clones."""
@@ -448,7 +449,14 @@ class OpenAIChat(Model):
 
     @staticmethod
     def _is_unsupported_parameter(error: openai.BadRequestError, parameter: str) -> bool:
-        return error.code == "unsupported_parameter" and error.param == parameter
+        if error.code == "unsupported_parameter" and error.param == parameter:
+            return True
+        body = error.body
+        if isinstance(body, dict):
+            err = body.get("error") if isinstance(body.get("error"), dict) else body
+            if err.get("code") == "unsupported_parameter" and err.get("param") == parameter:
+                return True
+        return False
 
     def _apply_learned_output_cap_key(self, request_kwargs: Dict[str, Any]) -> Dict[str, Any]:
         active_key = self._active_output_cap_key(request_kwargs)
@@ -461,6 +469,8 @@ class OpenAIChat(Model):
 
     def __post_init__(self):
         super().__post_init__()
+        if self.enable_cache_control is None:
+            self.enable_cache_control = is_claude_model_id(self.id)
         # Output cap precedence: user config > catalog ceiling > gateway default.
         # Without a cap in the request the gateway picks one — 20000 on one
         # gateway for claude-opus-5-5, which a high-effort thinking turn can spend
@@ -521,10 +531,23 @@ class OpenAIChat(Model):
         dropped.
         """
         request_kwargs = self._apply_learned_output_cap_key(request_kwargs)
+        if (
+            "prompt_cache_key" in request_kwargs
+            and self._output_cap_deployment_key() in self._UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS
+        ):
+            request_kwargs = {k: v for k, v in request_kwargs.items() if k != "prompt_cache_key"}
         active_key = self._active_output_cap_key(request_kwargs)
         try:
             return await create(request_kwargs)
         except openai.BadRequestError as error:
+            if (
+                "prompt_cache_key" in request_kwargs
+                and self._is_unsupported_parameter(error, "prompt_cache_key")
+            ):
+                self._UNSUPPORTED_PROMPT_CACHE_KEY_DEPLOYMENTS.add(self._output_cap_deployment_key())
+                without_cache_key = {k: v for k, v in request_kwargs.items() if k != "prompt_cache_key"}
+                logger.info(f"{self.id}: endpoint rejected prompt_cache_key; omitting it for this deployment")
+                return await self._create_with_auto_cap(create, without_cache_key)
             if (
                 active_key is not None
                 and len(self._OUTPUT_CAP_KEYS) == 2
@@ -906,6 +929,12 @@ class OpenAIChat(Model):
         # update_model() sets session_id must not pin the fallback id.
         return resolve_cache_session_id(session_id=self.session_id, base_url=self.base_url)
 
+    def _effective_session_header(self) -> Optional[str]:
+        """Resolved sticky-routing header name (explicit config, or known proxy default)."""
+        if self.cache_control_session_header is not None:
+            return self.cache_control_session_header or None
+        return default_sticky_session_header(self.base_url)
+
     def _with_cache_session_header(self, existing: Any) -> Any:
         """Merge a stable per-run session id into extra_headers for sticky routing.
 
@@ -922,7 +951,8 @@ class OpenAIChat(Model):
         proxy pins you to a misbehaving backend. The endpoint-persistent id is
         the fallback for bare SDK use with no session.
         """
-        if not self.cache_control_session_header:
+        header_name = self._effective_session_header()
+        if not header_name:
             return existing
         # Resolved per call (see cache_routing.resolve_cache_session_id): a
         # first request before update_model() sets session_id must not pin the
@@ -934,7 +964,7 @@ class OpenAIChat(Model):
             headers = {}
         else:
             return existing
-        headers.setdefault(self.cache_control_session_header, sid)
+        headers.setdefault(header_name, sid)
         return headers
 
     def _arm_cache_keepalive(self) -> None:
@@ -950,7 +980,7 @@ class OpenAIChat(Model):
         if not (
             self.enable_cache_control
             and self.cache_keepalive
-            and self.cache_control_session_header
+            and self._effective_session_header()
             and self._last_cache_payload
         ):
             return
@@ -1040,6 +1070,10 @@ class OpenAIChat(Model):
             # The volatile marker only drives the cache split, which is off on
             # this path; strip it so it never pollutes the prompt.
             formatted = [_strip_volatile_marker_from_message(m) for m in formatted]
+            if self._effective_session_header():
+                new_kwargs = dict(request_kwargs)
+                new_kwargs["extra_headers"] = self._with_cache_session_header(new_kwargs.get("extra_headers"))
+                return formatted, new_kwargs
             return formatted, request_kwargs
 
         budget = _CACHE_CONTROL_BREAKPOINT_BUDGET
@@ -1086,7 +1120,7 @@ class OpenAIChat(Model):
                 tagged += 1
 
         # Sticky routing so consecutive invokes hit the same backend cache.
-        if self.cache_control_session_header:
+        if self._effective_session_header():
             new_kwargs["extra_headers"] = self._with_cache_session_header(new_kwargs.get("extra_headers"))
         # Remember the tagged payload for cache keep-alive pings.
         self._last_cache_payload = (out, new_kwargs)

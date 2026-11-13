@@ -925,6 +925,7 @@ class LoopMixin:
                     agent.hooks.set_observer(agent._hook_recorder.run)
 
                 # 1. Setup
+                agent._restore_prelude_from_session_log()
                 agent.update_model()
                 agent.run_response.model = agent.model.id if agent.model is not None else None
                 if agent.context is not None:

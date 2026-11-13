@@ -397,6 +397,7 @@ def ensure_history_portable(agent) -> bool:
     if written_for is None or written_for == identity:
         return False
     make_history_portable(agent.working_memory)
+    agent.reset_window_pins()
     return True
 
 

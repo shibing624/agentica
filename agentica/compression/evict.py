@@ -56,6 +56,7 @@ from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, TYPE_
 
 from agentica.compression.tool_call_args import (
     OMITTED_ARG_KEY,
+    _LEGACY_OMITTED_PREFIX,
     is_omitted_tool_arg,
     omitted_tool_args,
     rewrite_omitted_arg_leaves,
@@ -506,15 +507,36 @@ def _map_assistant_tool_args(msg: "Message", transform) -> int:
     return changed
 
 
+def _message_may_carry_legacy_omitted_arg(msg: "Message") -> bool:
+    for tc in msg.tool_calls or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function")
+        if isinstance(fn, dict):
+            raw = fn.get("arguments")
+            if isinstance(raw, str) and _LEGACY_OMITTED_PREFIX in raw:
+                return True
+        raw_top = tc.get("arguments")
+        if isinstance(raw_top, str) and _LEGACY_OMITTED_PREFIX in raw_top:
+            return True
+    if isinstance(msg.content, list):
+        for block in msg.content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                if _LEGACY_OMITTED_PREFIX in str(block.get("input") or ""):
+                    return True
+    return False
+
+
 def upgrade_legacy_omitted_args(messages: "List[Message]") -> int:
     """Rewrite leftover string markers in every assistant call, including live.
 
     Those strings are already in the transcript. Leaving them is how the
-    model copies a marker into ``send_message``.
+    model copies a marker into ``send_message``. Fast-path substring check
+    avoids parsing or touching clean assistant messages on normal steps.
     """
     changed = 0
     for msg in messages:
-        if msg.role == "assistant":
+        if msg.role == "assistant" and _message_may_carry_legacy_omitted_arg(msg):
             changed += _map_assistant_tool_args(msg, rewrite_omitted_arg_leaves)
     return changed
 

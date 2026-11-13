@@ -426,6 +426,9 @@ class SessionLog:
         # What ``append_trace_prelude`` last wrote, so the same header is not
         # repeated on every request of the session.
         self._trace_prelude_key: Optional[str] = None
+        # Prompt size of the immediately preceding LLM request in the current
+        # context window, used to measure step-over-step prefix reuse and cliffs.
+        self._last_request_prompt_tokens: int = 0
 
     def begin_turn(self) -> None:
         """Open a turn for incremental writes (resets the per-turn bookkeeping).
@@ -561,6 +564,7 @@ class SessionLog:
             "covered_prefix_hash": covered_prefix_hash,
         })
         self._last_uuid = entry_uuid
+        self._last_request_prompt_tokens = 0
         return entry_uuid
 
     def lineage_key(self, model: Optional[str] = None) -> str:
@@ -769,6 +773,73 @@ class SessionLog:
                 tokens=count_text_tokens(system_prompt, model or "gpt-4o"),
             )
         return True
+
+    def load_active_prelude(self, model: Optional[str] = None) -> tuple[Optional[str], List[str]]:
+        """Recover the active window's last sent ``(system_prompt, tools)`` from disk.
+
+        Keeping ``messages[0]`` and the tool declaration order byte-identical
+        across ``/resume`` or Gateway agent rebuilds preserves the provider's
+        prefix cache instead of invalidating the entire conversation from
+        token 0 when ``Today's date`` or workspace memory drifted on disk.
+
+        Reset at each valid ``compact_boundary`` (a new window re-baselines
+        node 0, matching dsh ``startsSeries``) and discarded when the recorded
+        ``session_meta.model`` differs from ``model``.
+        """
+        if not self.path.exists():
+            return None, []
+
+        entries = list(self._iter_entries())
+        last_boundary_idx = -1
+        last_boundary_entry: Optional[Dict[str, Any]] = None
+        for idx, entry in enumerate(entries):
+            if entry.get("type") == "compact_boundary":
+                last_boundary_idx = idx
+                last_boundary_entry = entry
+
+        start_idx = 0
+        if last_boundary_idx >= 0 and self._projection_valid(last_boundary_entry, model):
+            start_idx = last_boundary_idx + 1
+
+        active_model: Optional[str] = None
+        active_prompt: Optional[str] = None
+        active_tools: List[str] = []
+        active_hash: Optional[str] = None
+        last_prompt_tokens = 0
+
+        for entry in entries[start_idx:]:
+            if entry.get("type") != "event":
+                continue
+            name = entry.get("name")
+            if name == "session_meta":
+                m = entry.get("model")
+                active_model = str(m) if m is not None else None
+                h = entry.get("prelude_hash")
+                active_hash = str(h) if isinstance(h, str) and h else None
+            elif name == "tool_list_ready":
+                tools = entry.get("tools")
+                if isinstance(tools, list):
+                    active_tools = [str(t) for t in tools if t]
+            elif name == "system_prompt":
+                content = entry.get("content")
+                if isinstance(content, str) and content:
+                    active_prompt = content
+            elif name == "token_usage":
+                req = entry.get("request")
+                if isinstance(req, dict):
+                    p = int(req.get("input") or 0) + int(req.get("cache_read") or 0) + int(req.get("cache_write") or 0)
+                    if p > 0:
+                        last_prompt_tokens = p
+
+        if model and active_model and active_model != model:
+            return None, []
+
+        if active_hash and self._trace_prelude_key is None:
+            self._trace_prelude_key = active_hash
+        if last_prompt_tokens > 0 and self._last_request_prompt_tokens == 0:
+            self._last_request_prompt_tokens = last_prompt_tokens
+
+        return active_prompt, active_tools
 
     def iter_raw_entries(self):
         """Yield every JSONL object, skipping blank and corrupt lines."""
@@ -1191,9 +1262,12 @@ class SessionLog:
                     messages.append(steered_msg)
                 continue
             if entry_type in ("user", "assistant", "system", "tool"):
+                msg_content = entry.get("content", "")
+                if entry_type == "user" and isinstance(entry.get("wire_content"), str):
+                    msg_content = entry["wire_content"]
                 msg = {
                     "role": entry_type,
-                    "content": entry.get("content", ""),
+                    "content": msg_content,
                 }
                 for key in replay_fields:
                     if key in entry and entry[key] is not None:
@@ -1413,11 +1487,17 @@ class SessionLog:
             "cache_write_tokens": 0,
             "reasoning_tokens": 0,
             "compactions": 0,
+            "cache_cliffs": 0,
         }
         tools_by_name: Dict[str, int] = {}
         for entry in self._iter_entries():
             entry_type = entry.get("type", "")
             stats["entries"] += 1
+            if entry_type == "event" and entry.get("name") == "token_usage":
+                req = entry.get("request")
+                if isinstance(req, dict) and req.get("cache_cliff") is True:
+                    stats["cache_cliffs"] += 1
+                continue
             if entry_type == "compact_boundary":
                 stats["compactions"] += 1
             elif entry_type == "user" and not entry.get("steer"):

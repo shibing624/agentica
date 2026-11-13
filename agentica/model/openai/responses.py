@@ -13,7 +13,8 @@ from typing import Any, AsyncIterator, ClassVar, Dict, List, Optional
 from pydantic import BaseModel
 
 from agentica.model.base import Model, NativeCompactionResult
-from agentica.model.message import Message
+from agentica.model.cache_routing import is_venus_llmproxy
+from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics
 from agentica.model.openai.chat import OpenAIChat
 from agentica.model.response import ModelResponse, StreamEndedError
@@ -47,6 +48,8 @@ class OpenAIResponses(OpenAIChat):
     _OUTPUT_CAP_KEYS: ClassVar[tuple[str, ...]] = ("max_output_tokens",)
 
     def __post_init__(self):
+        if self.enable_cache_control is None:
+            self.enable_cache_control = False
         super().__post_init__()
         if self.reasoning_effort is not None:
             raise ValueError("OpenAIResponses uses 'reasoning', not Chat Completions' 'reasoning_effort'.")
@@ -260,10 +263,13 @@ class OpenAIResponses(OpenAIChat):
         else:
             if message.role == "user" and message.images is not None:
                 message = self.add_images_to_message(message=message, images=message.images)
+            content = self._content_for_responses(message.content)
+            if message.role == "system" and isinstance(content, str) and VOLATILE_SYSTEM_MARKER in content:
+                content = content.replace(VOLATILE_SYSTEM_MARKER, "")
             formatted.append(
                 {
                     "role": message.role,
-                    "content": self._content_for_responses(message.content),
+                    "content": content,
                 }
             )
 
@@ -417,6 +423,15 @@ class OpenAIResponses(OpenAIChat):
             request["tool_choice"] = choice if choice is not None else "auto"
         if self.request_params is not None:
             request.update(self.request_params)
+        cache_key = self._prompt_cache_key()
+        if cache_key is not None:
+            request.setdefault("prompt_cache_key", cache_key)
+        if self._effective_session_header():
+            headers = self._with_cache_session_header(request.get("extra_headers"))
+            if is_venus_llmproxy(self.base_url) and isinstance(headers, dict):
+                if not any(k.lower() == "venus-codex-routing" for k in headers):
+                    headers["Venus-Codex-Routing"] = "true"
+            request["extra_headers"] = headers
         if self.reasoning is not None and self.store is not True:
             include = list(request.get("include") or [])
             if "reasoning.encrypted_content" not in include:

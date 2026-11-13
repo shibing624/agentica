@@ -10,11 +10,43 @@ one provider's module — importing ``model/openai/chat.py`` from the Anthropic
 side would drag the whole OpenAI SDK in.
 """
 import json
+import os
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
 CACHE_ROUTING_FILENAME = "cache_routing.json"
+
+
+def _cache_routing_path(home: Optional[Path] = None) -> Path:
+    if home is not None:
+        return home / ".agentica" / "cache" / CACHE_ROUTING_FILENAME
+    env_home = os.environ.get("AGENTICA_HOME")
+    if env_home:
+        return Path(env_home) / "cache" / CACHE_ROUTING_FILENAME
+    return Path.home() / ".agentica" / "cache" / CACHE_ROUTING_FILENAME
+
+
+def is_claude_model_id(model_id: Optional[str]) -> bool:
+    """True when an OpenAI-compatible model id routes to Anthropic Claude.
+
+    Claude has no implicit prefix cache: without ``cache_control`` breakpoints
+    on ``tools`` / ``system`` / trailing messages, OpenAI-compatible gateways
+    fronting Claude re-price the conversation history on every step.
+    """
+    return "claude" in (model_id or "").lower()
+
+
+def is_venus_llmproxy(base_url: Any) -> bool:
+    raw = str(base_url or "").lower()
+    return ("venus.oa.com" in raw or "venus.woa.com" in raw) and "/llmproxy" in raw
+
+
+def default_sticky_session_header(base_url: Any) -> Optional[str]:
+    """Known proxy sticky-routing header when the caller left it unset."""
+    if is_venus_llmproxy(base_url):
+        return "Venus-Session-Id"
+    return None
 
 
 def persistent_cache_session_id(base_url: Any, home: Optional[Path] = None) -> str:
@@ -27,7 +59,7 @@ def persistent_cache_session_id(base_url: Any, home: Optional[Path] = None) -> s
 
     ``home`` overrides ``~`` for tests; production callers leave it None.
     """
-    path = (home or Path.home()) / ".agentica" / "cache" / CACHE_ROUTING_FILENAME
+    path = _cache_routing_path(home)
     key = str(base_url or "default").rstrip("/")
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}

@@ -189,6 +189,10 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
     has_timeline = False
     reconnect_count = 0
     compaction_count = 0
+    prefix_reuse_steps = 0
+    prefix_reuse_hits = 0
+    cache_cliff_count = 0
+    prev_window_prompt = 0
     usage_trend: List[Dict[str, Any]] = []
     # Seconds to the first streamed token, one per answered request.
     ttfts: List[float] = []
@@ -252,6 +256,7 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
 
         if entry_type == "compact_boundary":
             compaction_count += 1
+            prev_window_prompt = 0
             continuation = False
             task_index += 1
             t = _ensure_task(task_stats, task_index)
@@ -342,11 +347,37 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
                 fresh_input = max(total - output - cache_read - cache_write, 0)
             else:
                 fresh_input = int(request.get("input") or 0)
+            curr_prompt = fresh_input + cache_read + cache_write
+            ratio_val = request.get("prefix_reuse_ratio")
+            if isinstance(ratio_val, (int, float)):
+                reuse_ratio: Optional[float] = float(ratio_val)
+                ref_prev = int(request.get("prev_prompt") or prev_window_prompt)
+            elif prev_window_prompt > 0 and curr_prompt > 0:
+                reuse_ratio = round(cache_read / prev_window_prompt, 4)
+                ref_prev = prev_window_prompt
+            else:
+                reuse_ratio = None
+                ref_prev = 0
+            is_cliff = bool(request.get("cache_cliff")) or (
+                reuse_ratio is not None and ref_prev >= 1024 and reuse_ratio < 0.9
+            )
+            if reuse_ratio is not None:
+                prefix_reuse_steps += 1
+                if reuse_ratio >= 0.9:
+                    prefix_reuse_hits += 1
+            if is_cliff:
+                cache_cliff_count += 1
+            if curr_prompt > 0:
+                prev_window_prompt = curr_prompt
             if open_request is not None:
                 open_request["tokens"] = {
                     "input": fresh_input, "cacheRead": cache_read,
                     "cacheWrite": cache_write, "output": output,
                 }
+                if reuse_ratio is not None:
+                    open_request["prefixReuseRatio"] = reuse_ratio
+                if is_cliff:
+                    open_request["cacheCliff"] = True
             t["tokens"]["input"] += fresh_input
             t["tokens"]["cacheRead"] += cache_read
             t["tokens"]["cacheWrite"] += cache_write
@@ -446,7 +477,16 @@ def analyze_entries(entries: Iterable[Dict[str, Any]], *, lite: bool = False) ->
         "messageTask": msg_task,
         "meta": meta,
         "rounds": rounds,
-        "totals": _totals(rounds, requests, elapsed_ms, compaction_count, ttfts),
+        "totals": _totals(
+            rounds,
+            requests,
+            elapsed_ms,
+            compaction_count,
+            ttfts,
+            prefix_reuse_steps=prefix_reuse_steps,
+            prefix_reuse_hits=prefix_reuse_hits,
+            cache_cliffs=cache_cliff_count,
+        ),
     }
     if lite:
         for key in ("requests", "tasks", "modelSegments", "toolSpans", "otherSpans", "usageTrend", "messageTask"):
@@ -1362,6 +1402,10 @@ def _totals(
     elapsed_ms: int,
     compaction_count: int,
     ttfts: List[float],
+    *,
+    prefix_reuse_steps: int = 0,
+    prefix_reuse_hits: int = 0,
+    cache_cliffs: int = 0,
 ) -> Dict[str, Any]:
     tokens = _empty_tokens()
     for r in rounds:
@@ -1382,6 +1426,9 @@ def _totals(
         "toolOk": tool_results - tool_errors,
         "toolErrors": tool_errors,
         "compactions": compaction_count,
+        "cacheCliffs": cache_cliffs,
+        "prefixReuseSteps": prefix_reuse_steps,
+        "prefixReuseHits": prefix_reuse_hits,
         "tokens": _token_view(tokens),
         "elapsedMs": elapsed_ms,
         "llmMs": llm_ms,

@@ -250,6 +250,10 @@ class CompressionManager:
         except Exception as cb_err:
             logger.warning(f"Failed to write compact boundary: {cb_err}")
 
+        from agentica.agent.base import Agent
+        if isinstance(agent, Agent):
+            agent.reset_window_pins()
+
         return True
 
     @staticmethod
@@ -290,6 +294,8 @@ async def apply_idle_compact(agent: Any) -> bool:
         # included. Rebinds wm.messages, so it is read only after this.
         if agent.add_history_to_context:
             ensure_history_portable(agent)
+        agent._restore_prelude_from_session_log()
+        agent.update_model()
     messages = wm.messages
     # ``wm.messages`` holds no system prompt; the notes request is built the
     # way the next turn's prefix is, so it matches what the last request sent

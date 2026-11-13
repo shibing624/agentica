@@ -680,6 +680,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # freeze_session_guidance(). Reset here so clone() (which re-runs
         # _init_runtime) starts unfrozen rather than inheriting the parent's.
         self._session_guidance_snapshot: Optional[str] = None
+        # Active context-window prefix pins (dsh log-derived prefix stability):
+        # once history exists in the window, ``messages[0]`` and existing tool
+        # declarations stay byte-identical; runtime deltas append in-history,
+        # and new tools append at the tail. Reset on compact_boundary / model switch.
+        self._pinned_system_prompt: Optional[str] = None
+        self._pinned_runtime_state: Optional[Dict[str, str]] = None
+        self._pinned_tool_order: List[str] = []
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
@@ -1037,6 +1044,33 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """
         if self._session_guidance_snapshot is None:
             self._session_guidance_snapshot = "\n\n---\n\n".join(self._session_guidance_prompts)
+
+    def reset_window_pins(self) -> None:
+        """Clear pinned system prompt and tool declaration order for a fresh window.
+
+        Called when a ``compact_boundary`` replaces the activity window or when
+        switching models rewrites history — matching dsh ``startsSeries`` node-0
+        re-baselining so the new window picks up fresh date/snapshots cleanly.
+        """
+        self._pinned_system_prompt = None
+        self._pinned_runtime_state = None
+        self._pinned_tool_order = []
+
+    def _restore_prelude_from_session_log(self) -> None:
+        """Recover the active window's system prompt and tool order on resume."""
+        if (
+            self._session_log is None
+            or self._pinned_system_prompt is not None
+            or len(self.working_memory.runs) == 0
+        ):
+            return
+        model_id = self.model.id if self.model is not None else None
+        prompt_text, tool_names = self._session_log.load_active_prelude(model=model_id)
+        if prompt_text:
+            self._pinned_system_prompt = prompt_text
+            self._pinned_runtime_state = self._extract_runtime_state_from_prompt(prompt_text)
+        if tool_names and not self._pinned_tool_order:
+            self._pinned_tool_order = list(tool_names)
 
     def steer(
         self,
@@ -1557,6 +1591,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 
             # Filter out disabled functions from model after add_tool
             self._filter_model_functions()
+            # Preserve existing tool declaration positions and append additions at the tail.
+            self._stabilize_model_tool_order()
 
         # Set tool_choice
         if self.model.get_tool_choice() is None and self.tool_config.tool_choice is not None:
@@ -1749,6 +1785,54 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             ]
 
         logger.debug(f"Filtered {len(disabled_funcs)} disabled tools: {disabled_funcs}")
+
+    def _stabilize_model_tool_order(self) -> None:
+        """Keep existing tool declarations in their established order; append additions last.
+
+        Tool schemas sit at offset 0 of every provider's KV cache (ahead of ``system``).
+        Inserting a mid-session tool ahead of an existing one invalidates the entire
+        cached prefix. Only skipped when a per-query ``enabled_tools`` whitelist is set.
+        """
+        if self._enabled_tools is not None or self.model is None:
+            return
+
+        func_tools: Dict[str, Dict[str, Any]] = {}
+        other_tools: List[Any] = []
+        for entry in self.model.tools or []:
+            if isinstance(entry, dict) and entry.get("type") == "function":
+                fn = entry.get("function")
+                name = fn.get("name") if isinstance(fn, dict) else None
+                if isinstance(name, str) and name:
+                    func_tools[name] = entry
+                    continue
+            other_tools.append(entry)
+
+        current_names = list(func_tools.keys()) or list((self.model.functions or {}).keys())
+        if not current_names:
+            return
+
+        if self._pinned_tool_order:
+            pinned_set = set(self._pinned_tool_order)
+            current_set = set(current_names)
+            ordered_names = [n for n in self._pinned_tool_order if n in current_set]
+            new_names = [n for n in current_names if n not in pinned_set]
+            ordered_names.extend(new_names)
+            self._pinned_tool_order.extend(new_names)
+        else:
+            ordered_names = current_names
+            self._pinned_tool_order = list(current_names)
+
+        if func_tools and self.model.tools is not None:
+            self.model.tools = [func_tools[n] for n in ordered_names if n in func_tools] + other_tools
+
+        if self.model.functions:
+            reordered_funcs = {
+                n: self.model.functions[n] for n in ordered_names if n in self.model.functions
+            }
+            for k, v in self.model.functions.items():
+                if k not in reordered_funcs:
+                    reordered_funcs[k] = v
+            self.model.functions = reordered_funcs
 
     # =========================================================================
     # Run API — delegates to self._runner
