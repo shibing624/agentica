@@ -172,7 +172,7 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
             console.print(Padding(note, (0, 0, 0, 2)))
 
 
-def display_attached_user_message(text: str, *, from_name: str = "") -> None:
+def display_attached_user_message(text: str, *, from_name: str = "", automated: bool = False) -> None:
     """Show a line that arrived from outside this terminal, before the answer.
 
     The same "the human spoke, from elsewhere" panel the peer path uses, because
@@ -181,11 +181,20 @@ def display_attached_user_message(text: str, *, from_name: str = "") -> None:
     (the host normally prints its own arrival block) — and a caller that prints
     nothing would leave the terminal showing an answer to a question that is
     nowhere on screen.
+
+    ``automated`` is a scheduled job or a finished job's report, not a person.
+    It keeps the panel (the line still has to be visible) but drops the user
+    styling: the terminal's one signal for "the human said this" must not be
+    borrowed by something nobody typed.
     """
     body = Text()
     if from_name:
         body.append(f"via {from_name}  ", style="dim")
-    body.append(text, style=f"bold {COLORS['user']}")
+    if automated:
+        body.append("automated  ", style="dim")
+        body.append(text, style="dim")
+    else:
+        body.append(text, style=f"bold {COLORS['user']}")
     _echo_panel(body)
 
 

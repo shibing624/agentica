@@ -95,10 +95,13 @@ class CronJob:
     retry_delay_ms: int = 60000
     target: str = "new_once"
     session_id: str = ""
-    # Dispatch identity for this automation (``agentica.ticket``), minted when
-    # the job is created and inherited by every run. One job is one objective;
-    # the runs are its occurrences, and a session a run creates records the same
+    # Dispatch identity for this automation (``agentica.ticket``), minted by
+    # ``create_job`` and inherited by every run. One job is one objective; the
+    # runs are its occurrences, and a session a run creates records the same
     # value so the automation and its conversations are one lookup apart.
+    # A job constructed directly (tests, scripts importing ``CronJob``) stays
+    # empty = unmanaged; only the real creation path mints one, and nothing
+    # back-fills a made-up id.
     ticket_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:

@@ -86,6 +86,11 @@ class GatewayCronRunner:
                 prompt,
                 session_id=session_id,
                 timeout=ATTACH_PROMPT_TIMEOUT,
+                # Nobody at that terminal typed this: keep it out of the
+                # user's transcript styling and records, and let jobs it
+                # starts name this automation's ticket.
+                automated=True,
+                ticket_id=ctx.get("ticket_id"),
             )
             if result is not None:
                 answer = str(result.get("agenticaAnswer") or "").strip()

@@ -197,7 +197,10 @@ class AttachServer:
         self,
         peer_id: str,
         *,
-        inject: Callable[[str], str],
+        # Called as ``inject(text, automated=..., ticket_id=...)``. The host owns
+        # what that means (the CLI routes it through ``hand_to_agent``); the
+        # server only carries the provenance the client supplied.
+        inject: Callable[..., str],
         is_running: Callable[[], bool] = lambda: False,
         snapshot: Optional[Callable[[], Dict[str, Any]]] = None,
         session_id: Optional[Callable[[], Optional[str]]] = None,
@@ -528,12 +531,17 @@ class AttachServer:
         return self._session_id or None
 
     def _prompt(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Inject the user's text and answer when the turn carrying it ends.
+        """Inject the text and answer when the turn carrying it ends.
 
         The text reaches the agent by the same route a typed line takes
         (``hand_to_agent``): steered into a running turn at the next tool-batch
-        boundary, or queued as the next turn when idle. So this is the user
-        speaking, not a side channel into the run.
+        boundary, or queued as the next turn when idle.
+
+        ``params["automated"]`` marks text nobody at this terminal typed (a
+        scheduled job, a background job's report). It is provenance, not
+        permission — the receiver still decides what to do with it — and the
+        default is the user, because the IM bridge and the desktop relay a line
+        a person actually wrote.
         """
         text = _prompt_text(params.get("prompt"))
         current = self._current_session_id()
@@ -543,6 +551,9 @@ class AttachServer:
                 ERR_REFUSED,
                 f"this socket serves session {current}, not {wanted}",
             )
+        automated = bool(params.get("automated"))
+        raw_ticket = params.get("ticketId")
+        ticket_id = raw_ticket.strip() if isinstance(raw_ticket, str) and raw_ticket.strip() else None
 
         with self._prompt_lock:
             # A cancel from an earlier prompt must not label this one. Cleared
@@ -552,7 +563,7 @@ class AttachServer:
             # for. Reading ``is_running`` before injecting cannot: ``hand_to_agent``
             # queues when a run is ending inside its check-then-act window, so a
             # message that looks "steered" may in fact be waiting for the next turn.
-            disposition = self._inject(text)
+            disposition = self._inject(text, automated=automated, ticket_id=ticket_id)
             if disposition not in ("steered", "queued"):
                 # An injector that reports nothing usable: do not claim to know
                 # when the work ends. ``end_turn`` would be that claim, so this
@@ -778,6 +789,17 @@ def _prompt_text(prompt: Any) -> str:
 # wait for the answer) and a second copy of them would drift from the protocol
 # the server actually speaks.
 
+class AttachPromptTimeout(Exception):
+    """The prompt request was written, but no answer came back in time.
+
+    The server injects the text *before* waiting for the turn it became, so by
+    the time this is raised the terminal has already accepted the work. It is a
+    different fact from "the socket could not take the prompt", and callers must
+    act on the difference: falling back to running the prompt themselves would
+    execute it twice, in the same conversation.
+    """
+
+
 class AttachClient:
     """Minimal synchronous JSON-RPC client for a CLI session's AttachServer socket."""
 
@@ -805,8 +827,15 @@ class AttachClient:
                 return init_resp.get("result") or {}
 
             req = {"jsonrpc": "2.0", "id": 2, "method": method, "params": params or {}}
+            # Split send from receive: everything after the request is on the
+            # wire means the server owns the work. A timeout waiting for the
+            # reply is "still running", not "it never took it" — the server
+            # injects before it waits and holds ``_prompt_lock`` for the turn.
             sock.sendall(json.dumps(req).encode("utf-8") + b"\n")
-            resp, _ = self._read_line(sock, buf)
+            try:
+                resp, _ = self._read_line(sock, buf)
+            except (TimeoutError, socket.timeout) as exc:
+                raise AttachPromptTimeout(str(exc)) from exc
             if "error" in resp:
                 raise RuntimeError(resp["error"].get("message", f"attach {method} failed"))
             return resp.get("result") or {}
@@ -848,19 +877,31 @@ def prompt_live_session(
     *,
     timeout: float = 620.0,
     session_id: Optional[str] = None,
+    automated: bool = False,
+    ticket_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Run ``text`` as a turn in the terminal that holds this session.
 
     Returns the ACP result (``stopReason`` plus ``agenticaAnswer`` when the turn
-    finished), or ``None`` when the terminal cannot take it — no socket, no
-    token, or the RPC failed. ``None`` is the caller's signal to fall back to
-    running the turn itself; it is deliberately not an exception, because every
-    caller has a working fallback and none of them should have to catch a
-    transport error to find that out.
+    finished), or ``None`` when the terminal *never took it* — no socket, no
+    token, or the connection/auth failed. ``None`` is the caller's signal to run
+    the turn itself.
+
+    A timeout **after** the prompt was written is not ``None``: it comes back as
+    ``{"stopReason": "agentica_pending"}``, because the server injects the text
+    before waiting for its turn. Callers that treat it as a soft failure would
+    run the same prompt a second time, in the same conversation; the distinction
+    is the whole reason this function does not simply catch every error.
+
+    ``automated`` marks text nobody at that terminal typed (a scheduled job, a
+    finished background job's report). The receiver keeps its normal authority
+    rules; the flag only stops the turn from being recorded and rendered as the
+    user's own words. ``ticket_id`` rides along so records started by that turn
+    name the dispatch that caused it.
 
     ``timeout`` defaults to just over the server's 600s grace window: a shorter
-    client timeout turns "still running" into "failed", which is a different
-    answer than the one the terminal would have given.
+    client timeout turns "still running" into "pending", which is honest but
+    loses the answer the terminal would have produced.
     """
     sock_path = getattr(peer, "attach_socket", None)
     peer_id = getattr(peer, "peer_id", "") or ""
@@ -871,11 +912,26 @@ def prompt_live_session(
     target_session = session_id or getattr(peer, "session_id", None)
     if target_session:
         params["sessionId"] = target_session
+    if automated:
+        params["automated"] = True
+    if ticket_id:
+        params["ticketId"] = str(ticket_id)
     try:
         return AttachClient(sock_path, token, timeout=timeout).call("session/prompt", params)
+    except AttachPromptTimeout as exc:
+        logger.debug(f"attach prompt to {sock_path} is still running: {exc}")
+        return {"stopReason": "agentica_pending", "agenticaPending": True}
     except (OSError, RuntimeError, ValueError) as exc:
         logger.debug(f"attach prompt to {sock_path} failed: {exc}")
         return None
 
 
-__all__ = ["AttachClient", "AttachError", "AttachServer", "prompt_live_session", "read_attach_token"]
+__all__ = [
+    "AttachClient",
+    "AttachError",
+    "AttachPromptTimeout",
+    "AttachServer",
+    "prompt_live_session",
+    "read_attach_token",
+]
+

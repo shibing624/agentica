@@ -45,18 +45,27 @@ def job_turn_meta(context: Dict[str, Any]) -> Dict[str, Any]:
 ATTACH_PROMPT_TIMEOUT = 120.0
 
 
-def _prompt_open_terminal(peer: Any, prompt: str, session_id: str) -> Optional[str]:
+def _prompt_open_terminal(
+    peer: Any, prompt: str, session_id: str, ticket_id: Optional[str] = None,
+) -> Optional[str]:
     """Run this run's turn in the terminal that has the conversation open.
 
-    ``None`` means the terminal could not take it (no socket, no token, RPC
-    failed) and the caller should fall back. Any *answer* — including "still
-    working on it" or "cancelled there" — is a result: the terminal did accept
-    the turn, so falling back would run the same prompt twice.
+    ``None`` means the terminal could not take it (no socket, no token, the
+    connection/auth failed) and the caller should fall back. Any *answer* —
+    including "still working on it" or "cancelled there" — is a result: the
+    terminal did accept the turn, so falling back would run the same prompt
+    twice. That includes a client-side timeout, which is why the client reports
+    it as ``agentica_pending`` rather than as a failure.
+
+    ``automated`` is passed because nobody at that terminal typed this: the
+    scheduled prompt must not be recorded or rendered as the user's own words,
+    and ``ticket_id`` makes the records this turn starts name the job.
     """
     from agentica.cli.attach import prompt_live_session
 
     result = prompt_live_session(
         peer, prompt, session_id=session_id, timeout=ATTACH_PROMPT_TIMEOUT,
+        automated=True, ticket_id=ticket_id,
     )
     if result is None:
         return None
@@ -113,7 +122,9 @@ class CliAgentRunner:
             # answer back: the mailbox handoff this replaces could only say the
             # prompt had been handed over, so a scheduled run landing on an open
             # terminal produced an automation record with no output at all.
-            answer = await asyncio.to_thread(_prompt_open_terminal, peer, prompt, session_id)
+            answer = await asyncio.to_thread(
+                _prompt_open_terminal, peer, prompt, session_id, context.get("ticket_id"),
+            )
             if answer is not None:
                 return CronRunOutput(content=answer, session_id=session_id)
             from agentica.peers import send_message

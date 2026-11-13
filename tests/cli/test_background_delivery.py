@@ -14,6 +14,7 @@ from agentica.cli.interactive.btw import (
     promote_late_steer,
 )
 from agentica.cli.interactive.session_state import SessionState
+from agentica.cli.interactive.attachments import unpack_queue_payload
 from agentica.agent.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.tools.background_processes import BackgroundProcessCompleted
 
@@ -164,6 +165,25 @@ class TestHandToAgent:
         state.current_agent.steer.assert_not_called()
         # Tagged, so the turn is not echoed as if the user had typed the report.
         assert pending.peek_all() == [("__RELAYED__", "report", True)]
+
+    def test_a_relayed_ticket_rides_the_queued_turn(self):
+        """The dispatch that caused relayed text must reach the turn it becomes.
+
+        A scheduled prompt handed over the attach bridge names its job; without
+        the ticket on the payload the turn would inherit whatever the terminal
+        session last ran.
+        """
+        state = SessionState()
+        state.agent_running = False
+        state.current_agent = MagicMock()
+        pending = PendingQueue()
+
+        hand_to_agent(state, pending, "run the tests", automated=True, ticket_id="tk_abc123")
+
+        assert pending.peek_all() == [("__RELAYED__", "run the tests", True, "tk_abc123")]
+        queued = unpack_queue_payload(pending.peek_all()[0])
+        assert queued.is_automated is True
+        assert queued.ticket_id == "tk_abc123"
 
     def test_a_refused_steer_falls_back_to_the_queue(self):
         # steer() returns False when the run ended between the check and the

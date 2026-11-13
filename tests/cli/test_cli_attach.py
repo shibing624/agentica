@@ -104,7 +104,7 @@ def _server(tmp_path, **kw):
         session = _Session()
     disposition = kw.pop("disposition", "queued")
 
-    def inject(text):
+    def inject(text, automated=False, ticket_id=None):
         injected.append(text)
         return disposition
 
@@ -274,8 +274,8 @@ class TestAddressing:
             server.stop()
 
     def test_two_sessions_get_two_sockets(self, tmp_path):
-        a = AttachServer("aaaaaaaa", inject=lambda t: None, is_running=lambda: False)
-        b = AttachServer("bbbbbbbb", inject=lambda t: None, is_running=lambda: False)
+        a = AttachServer("aaaaaaaa", inject=lambda t, automated=False, ticket_id=None: None, is_running=lambda: False)
+        b = AttachServer("bbbbbbbb", inject=lambda t, automated=False, ticket_id=None: None, is_running=lambda: False)
         assert a.start() and b.start()
         try:
             assert a.path != b.path
@@ -338,7 +338,7 @@ class TestAddressing:
         current = {"session": "before-resume"}
         server = AttachServer(
             "abcd1234",
-            inject=lambda t: "queued",
+            inject=lambda t, automated=False, ticket_id=None: "queued",
             is_running=lambda: False,
             session_id=lambda: current["session"],
         )
@@ -884,7 +884,7 @@ class TestRobustness:
             server.stop()
 
     def test_an_injector_that_raises_is_reported_not_fatal(self, tmp_path):
-        def boom(text):
+        def boom(text, automated=False, ticket_id=None):
             raise RuntimeError("session is gone")
 
         server = AttachServer("abcd1234", inject=boom, is_running=lambda: False,
@@ -965,7 +965,7 @@ class TestLifecycle:
         session = peers.PeerSession(name="tmux-cli", cwd="/tmp/proj")
         session.publish()
         server = AttachServer(
-            session.peer_id, inject=lambda t: "queued", is_running=lambda: False
+            session.peer_id, inject=lambda t, automated=False, ticket_id=None: "queued", is_running=lambda: False
         )
         assert server.start()
         try:
@@ -1034,7 +1034,7 @@ class TestLifecycle:
             server2.stop()
 
     def test_no_peer_id_means_no_server(self, tmp_path):
-        server = AttachServer("", inject=lambda t: None)
+        server = AttachServer("", inject=lambda t, automated=False, ticket_id=None: None)
         assert server.start() is False
         assert server.listening is False
 
@@ -1114,7 +1114,7 @@ class TestSessionAnswer:
         received = []
         server = AttachServer(
             "ans12345",
-            inject=lambda t: "queued",
+            inject=lambda t, automated=False, ticket_id=None: "queued",
             is_running=lambda: True,
             answer_interaction=lambda ans, req_id: (received.append((ans, req_id)) or True),
             snapshot=lambda: {
@@ -1212,3 +1212,74 @@ class TestTheSharedClient:
             peer_id="abcd1234", attach_socket=str(sock), session_id="s",
         )
         assert prompt_live_session(peer, "hello", timeout=1.0) is None
+
+    def test_a_prompt_that_outlives_the_client_timeout_is_pending_not_a_fallback(self):
+        """The server injects *before* it waits for the turn.
+
+        So a client timeout means "accepted, still running" — the caller must
+        not fall back to running the prompt itself, or the same text runs twice
+        in one conversation. This is the exact boundary between ``None`` (never
+        taken) and ``agentica_pending`` (taken, no answer yet).
+        """
+        import types
+
+        from agentica.cli.attach import prompt_live_session
+
+        injected = []
+
+        def inject(text, automated=False, ticket_id=None):
+            injected.append(text)
+            return "queued"
+
+        server = AttachServer(
+            "abcd1234", inject=inject, is_running=lambda: False,
+            session_id="sess-1234", grace=5.0,
+        )
+        assert server.start()
+        try:
+            peer = types.SimpleNamespace(
+                peer_id="abcd1234", attach_socket=str(server.path),
+                session_id="sess-1234", name="terminal-1",
+            )
+            result = prompt_live_session(peer, "cron prompt", timeout=0.3)
+        finally:
+            server.stop()
+
+        assert injected == ["cron prompt"], "the terminal took the text"
+        assert result is not None, "a timeout after send is not a soft failure"
+        assert result.get("stopReason") == "agentica_pending"
+
+    def test_an_automated_prompt_carries_its_ticket_to_the_host(self):
+        """Cron and job reports are not the user's words: the flag and the
+        dispatch ticket have to arrive with the text, not be guessed later."""
+        import types
+
+        from agentica.cli.attach import prompt_live_session
+
+        seen = []
+
+        def inject(text, automated=False, ticket_id=None):
+            seen.append((text, automated, ticket_id))
+            return "queued"
+
+        session = _Session()
+        server = AttachServer(
+            "abcd1234", inject=inject, is_running=session.is_running,
+            session_id="sess-1234",
+        )
+        assert server.start()
+        try:
+            _run_one_turn_soon(session)
+            peer = types.SimpleNamespace(
+                peer_id="abcd1234", attach_socket=str(server.path),
+                session_id="sess-1234", name="terminal-1",
+            )
+            result = prompt_live_session(
+                peer, "run the tests", timeout=15.0,
+                automated=True, ticket_id="tk_abc123",
+            )
+        finally:
+            server.stop()
+
+        assert seen == [("run the tests", True, "tk_abc123")]
+        assert result is not None and result.get("stopReason") == "end_turn"

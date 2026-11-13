@@ -290,7 +290,8 @@ _BACKGROUND_GUIDANCE = """
 - ``background=True`` decides how long the command lives, not how many run at
   once: use it when the output is not needed this turn or the command may
   outlive one call (a killed foreground command loses its output; a background
-  one keeps its log). For speed, use ``parallel_safe``.
+  one keeps its log). For speed within a turn, batch steps in one shell command
+  or mark independent calls ``parallel_safe=True``.
   {delivery}
   Never wait inside a turn with ``sleep`` or polling (a 120s+ leading ``sleep``
   is refused), and never detach with a trailing ``&``.
@@ -405,36 +406,65 @@ class BuiltinExecuteTool(Tool):
         execute_fn.description = execute_fn.description.replace(
             "{default_timeout}", str(self._timeout)
         ).replace("{timeout_cap}", cap_note)
-        execute_fn.parameters["properties"]["timeout"]["description"] = (
+        props = execute_fn.parameters["properties"]
+        props["description"]["description"] = (
+            "Clear, concise 5-10 word summary of what this command does in active voice "
+            "(in the user's language), shown in the UI. "
+            'Examples: "git status" -> "Show working tree status"; '
+            '"pytest -q" -> "Run test suite".'
+        )
+        props["command"]["description"] = (
+            "Exact shell command to execute, passed unchanged to /bin/sh."
+        )
+        props["timeout"]["description"] = (
             f"seconds; default {self._timeout}.{cap_note}"
         )
-        execute_fn.parameters["properties"]["description"]["description"] = (
-            "Concise 5-10 word summary of what this command does "
-            "(in the user's language), shown in the UI."
+        props["work_dir"]["description"] = (
+            "Working directory for this command. Defaults to the session directory; "
+            "a relative path resolves against it."
         )
-        required = list(execute_fn.parameters.get("required") or [])
-        if "description" not in required:
-            required.append("description")
-            execute_fn.parameters["required"] = required
+        props["parallel_safe"]["description"] = (
+            "Run concurrently with adjacent parallel_safe=True calls in the same message "
+            "(for independent heavy commands like separate test suites). "
+            "Omit to run sequentially in issued order."
+        )
         if self._background_process_registry is not None:
             execute_fn.description += _BACKGROUND_GUIDANCE.format(
                 delivery=_DELIVERED if self._background_process_registry.delivers_results
                 else _NOT_DELIVERED,
+            )
+            props["background"]["description"] = (
+                "Run in the background and return a job id immediately "
+                "(collect within this turn via wait, or let completion report back)."
             )
             self.register(self.wait, concurrency_safe=True, is_read_only=True, is_destructive=False)
             # `wait` may block past the outer 120s executor wrapper; it owns its
             # timeout so the caller-supplied value is not cut short mid-wait.
             self.functions["wait"].manages_own_timeout = True
         else:
-            execute_fn.parameters["properties"].pop("background", None)
+            props.pop("background", None)
         if self._os_sandbox:
             execute_fn.description += _SANDBOX_GUIDANCE
-            execute_fn.parameters["properties"]["escalate"]["description"] = (
+            props["escalate"]["description"] = (
                 "run outside the OS sandbox; the user is asked first. Only when "
                 "the sandbox is what stops the command"
             )
         else:
-            execute_fn.parameters["properties"].pop("escalate", None)
+            props.pop("escalate", None)
+        # Put `description` before `command` (as in dsh's bash schema) so streaming
+        # UIs receive the short human label before a long compound script finishes.
+        ordered_keys = [
+            k for k in (
+                "description", "command", "timeout", "work_dir",
+                "parallel_safe", "background", "escalate",
+            )
+            if k in props
+        ] + [k for k in props if k not in {
+            "description", "command", "timeout", "work_dir",
+            "parallel_safe", "background", "escalate",
+        }]
+        execute_fn.parameters["properties"] = {k: props[k] for k in ordered_keys}
+        execute_fn.parameters["required"] = ["description", "command"]
         execute_fn.skip_entrypoint_processing = True
 
     def set_work_dir(self, work_dir: str) -> None:
@@ -626,44 +656,42 @@ class BuiltinExecuteTool(Tool):
             work_dir: str = "",
             escalate: bool = False,
     ) -> str:
-        """Executes a shell command, capturing both stdout and stderr.
+        """Execute a shell command (``/bin/sh``) and return its stdout and stderr.
 
-        Any shell command goes here: explore, analyze, verify, build, git, and
-        pipelines that shape stdout. Split or combine as needed:
-        do not force every probe into one script. Dependent steps share one command (``&&``,
-        pipes); a miss that must not stop the rest uses ``;`` and
-        ``2>/dev/null``. Search with ``rg -n PAT`` or
-        ``rg -g '*.py' -n TODO src``.
-        Never ``rg -rn``: ``-r`` is ``--replace``.
-        Search from ``.`` or a known directory; do not assemble
-        a long absolute path from package layout. Bound noisy output with
-        ``| head`` / ``| tail``; do not ``cat`` whole source files. Quote paths
-        with spaces. Heredocs (``python3 - <<'EOF'``) work.
+        Each call runs in a fresh shell; pass ``work_dir`` instead of leading
+        with ``cd``. Provide ``description`` before ``command`` in the arguments.
+
+        Batch related steps, pipelines, and verification checks into one
+        compound command (``&&``, ``;``, ``||``, pipes, subshells, heredocs
+        ``python3 - <<'EOF'``) to finish in a single round-trip: use ``&&``
+        when later steps depend on earlier ones, and ``;`` or ``|| ...`` /
+        ``2>/dev/null`` when a non-zero check (such as a no-match search) must
+        not stop the rest. Both ``rg`` (``rg -n PAT``, ``rg -g '*.py' -n TODO
+        src``; note ``rg -r`` is ``--replace``, not recursive) and ``grep``
+        (``grep -rn --include='*.py' PAT .``) work; for a search that stands on
+        its own, dedicated file-search tools (when available) are the better
+        first call, and shell search belongs inside a larger pipeline. Search from
+        ``.`` or a known directory rather than guessing long paths from
+        package layout. Bound noisy output with ``| head`` / ``| tail`` and
+        quote paths with spaces.
 
         - The command is passed unchanged to the shell; safety checks may
           refuse it but never rewrite it.
         - Foreground timeout: {default_timeout}s by default.{timeout_cap}
-        - ``parallel_safe=True`` runs this call together with the adjacent
-          calls in the same message. Default: calls run one at a time in the
-          order issued, and a failing command cancels the ones after it. Only
-          for commands independent of every sibling (two test suites, two
-          reads); never ``git add`` + ``git commit`` or anything touching one
-          file twice.
-        - ``work_dir`` runs this command in that directory (e.g. a path
-          ``worktree`` returned); omit for the session directory.
-        - Output over the limit is saved to a file; you get a head/tail
-          preview and its path.
+        - Long output is truncated to a head/tail preview and the full output
+          is saved to a file whose path is reported when available.
+        - ``parallel_safe=True`` is optional concurrency across separate calls
+          in the same message (for independent heavy commands like separate
+          test suites); for quick multi-step probes or verification, running
+          one compound shell command is often faster and saves round-trips.
+          Default (``False``) runs calls sequentially in issued order and
+          cancels remaining siblings on failure; never mark dependent or
+          same-file mutating commands ``parallel_safe=True``.
+        - Before any delete or move, verify that the resolved target path is
+          the intended one; an unset shell variable expands to empty, so guard
+          variables in such paths with ``${VAR:?}``.
         - Git: prefer new commits over amending; ask before ``reset --hard`` /
           ``push --force``; never ``--no-verify`` unless asked.
-
-        Args:
-            command: Exact shell command. Not rewritten.
-            description: Clear, concise 5-10 word description of what this command does.
-            timeout: seconds
-            parallel_safe: run concurrently with adjacent calls in this message
-
-        Returns:
-            str: The output of the command (stdout + stderr) with exit code
         """
         # `parallel_safe` is read by the executor (via Function.parallel_arg) to
         # decide the schedule before this ever runs; it means nothing here.
@@ -947,11 +975,8 @@ class BuiltinExecuteTool(Tool):
         the command has already failed, and cannot tell you its exit code.
 
         Args:
-            id: Background command id from execute(background=True), e.g. "term_4"
-            timeout: Seconds this one call may wait (default 300, no upper cap —
-                same as ``execute(timeout=...)``). Reaching it does not stop the
-                command: the result reports the progress so far and you may wait
-                again.
+            id: Background job id returned by execute(background=True) or delegate (e.g. "term_4").
+            timeout: Max seconds to wait in this call (default 300, no upper cap). Reaching it leaves the job running and returns output so far.
 
         Returns:
             str: Exit code and log tail once it finishes, or its output so far

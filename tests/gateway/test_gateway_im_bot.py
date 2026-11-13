@@ -717,7 +717,7 @@ class TestImBotControllerFlows:
         )
         peer_session.publish()
 
-        def _inject(text: str) -> str:
+        def _inject(text: str, automated=False, ticket_id=None) -> str:
             injected.append(text)
 
             def _sim_cli_run():
@@ -954,7 +954,7 @@ class TestImBotControllerFlows:
         )
         peer_session.publish()
 
-        def _inject(text: str) -> str:
+        def _inject(text: str, automated=False, ticket_id=None) -> str:
             def _sim_cli_run():
                 import time as _t
                 _t.sleep(0.03)

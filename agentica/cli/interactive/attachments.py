@@ -119,6 +119,9 @@ class QueuedInput(NamedTuple):
     is_relayed: bool
     # No person wrote it (a peer agent, a job report); implies is_relayed.
     is_automated: bool = False
+    # Dispatch that caused relayed text, when the sender knew it (a cron job's
+    # ticket over the attach bridge). Typed lines have none.
+    ticket_id: Optional[str] = None
 
 
 def unpack_queue_payload(item) -> QueuedInput:
@@ -139,7 +142,10 @@ def unpack_queue_payload(item) -> QueuedInput:
             return QueuedInput(str(item[1]) if len(item) > 1 else "", [], True, False)
         if item and item[0] == "__RELAYED__":
             automated = len(item) > 2 and item[2] is True
-            return QueuedInput(str(item[1]) if len(item) > 1 else "", [], False, True, automated)
+            ticket = item[3] if len(item) > 3 and isinstance(item[3], str) else None
+            return QueuedInput(
+                str(item[1]) if len(item) > 1 else "", [], False, True, automated, ticket,
+            )
         text, images = item
         return QueuedInput(str(text), list(images or []), False, False)
     return QueuedInput(str(item), [], False, False)

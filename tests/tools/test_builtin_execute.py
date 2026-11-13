@@ -53,8 +53,14 @@ class TestBuiltinExecuteTool:
         function.process_entrypoint(strict=False)
 
         assert "passed unchanged" in function.description
-        assert "command" in function.parameters["required"]
-        assert "description" in function.parameters["required"]
+        assert "Provide ``description`` before ``command``" in function.description
+        assert "Args:" not in function.description
+        assert "Returns:" not in function.description
+        assert function.parameters["required"] == ["description", "command"]
+        props = function.parameters["properties"]
+        assert list(props)[:2] == ["description", "command"]
+        for key in ("description", "command", "timeout", "work_dir", "parallel_safe"):
+            assert props[key].get("description"), key
 
     def test_background_command_management_tools_not_registered(self, execute_tool):
         assert "list_background_commands" not in execute_tool.functions
@@ -119,12 +125,9 @@ class TestBuiltinExecuteTool:
         assert "sed -i" not in doc
         assert "Bad examples" not in doc
         assert "| head" in doc or "| rg" in doc
-        assert "rg -g '*.py' -n TODO src" in doc
-        # `-r` on rg is --replace and corrupts output silently; execute does
-        # not teach `grep` at all (there is a dedicated `grep` tool).
-        assert "grep" not in doc
-        assert "Never ``rg -rn``" in doc
-        assert "``-r`` is ``--replace``" in doc
+        assert "rg -g '*.py' -n TODO" in doc
+        assert "rg -r" in doc and "--replace" in doc
+        assert "grep -rn --include='*.py'" in doc
         assert "-g '*.py'" in doc
         assert "2>/dev/null" in doc
         assert "apply_patch" not in doc
@@ -136,15 +139,15 @@ class TestBuiltinExecuteTool:
         assert "find . -type f" not in doc
         assert "xargs ls" not in doc
         assert "(find, ls, cat, awk)" not in doc
-        assert "do not force every probe" in doc
+        assert "do not force every probe" not in doc
+        assert "single round-trip" in doc
         assert "parallel_safe=True" in doc
-        assert "Prefer one long" not in doc
+        assert "${VAR:?}" in doc
         assert "<<'EOF'" in doc
         assert "DO NOT use newlines" not in doc
         assert "avoid cd when possible" not in doc
         assert "swift" not in doc
         assert "App.app" not in doc
-        assert "--include" not in doc
 
     def test_execute_rg_glob_filters_by_extension(self, execute_tool, tmp_dir):
         import shutil

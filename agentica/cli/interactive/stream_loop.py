@@ -345,6 +345,7 @@ def _process_stream_response(
     images: Optional[list] = None,
     work_dir: Optional[str] = None,
     automated_input: bool = False,
+    ticket_id: Optional[str] = None,
 ) -> None:
     """Process the agent's streaming response and display it."""
     con = get_console()
@@ -405,6 +406,7 @@ def _process_stream_response(
             stream_intermediate_steps=True,
             source=RunSource.cli,
             automated_input=automated_input,
+            ticket_id=ticket_id,
         )
 
         # ── Per-turn rewind checkpoint ─────────────────────────────

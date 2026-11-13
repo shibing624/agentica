@@ -1102,9 +1102,12 @@ def mark_job_delivered(record_path: Path | str, owner: str) -> bool:
     The write is verified by reading it back. ``_write_json_atomic`` swallows
     ``OSError`` by design, and an unverified marker means the very next sweep
     offers the same report again — a duplicate produced by the mechanism that
-    exists to prevent duplicates. When the marker cannot be persisted the claim
-    is deliberately kept: it expires after the TTL, so retries are spaced out
-    instead of firing every poll.
+    exists to prevent duplicates. So when the marker cannot be persisted the
+    claim is deliberately kept: the report *was* delivered, and a live owner's
+    claim never expires (staleness is pid liveness, not age), which is what
+    stops this process from sending it twice. A process that starts after this
+    one exits will find the claim stale and deliver once more — at-least-once,
+    with ``delivery_owner`` left on the record to show who already sent it.
     """
     path = Path(record_path)
     rec = _read_json_record(path)
@@ -1118,7 +1121,10 @@ def mark_job_delivered(record_path: Path | str, owner: str) -> bool:
     _write_json_atomic(path, rec)
     fresh = _read_json_record(path)
     if not (fresh and fresh.get("delivered_at")):
-        logger.warning(f"could not record delivery of {path.name}; it stays claimed until the TTL")
+        logger.warning(
+            f"could not record delivery of {path.name}; keeping the claim so this "
+            f"process does not deliver it again"
+        )
         return False
     release_job_claim(path)
     return True

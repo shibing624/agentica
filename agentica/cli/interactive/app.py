@@ -1062,6 +1062,7 @@ def run_interactive(
                 images=turn_images,
                 work_dir=agent_config.get("work_dir"),
                 automated_input=queued.is_automated,
+                ticket_id=queued.ticket_id,
             )
             state.agent_running = False
             tui_state["spinner_text"] = ""
@@ -1182,10 +1183,12 @@ def run_interactive(
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()
 
-    def _hand_to_agent(text: str, *, automated: bool = False) -> str:
-        return hand_to_agent(state, pending_queue, text, automated=automated)
+    def _hand_to_agent(text: str, *, automated: bool = False, ticket_id: Optional[str] = None) -> str:
+        return hand_to_agent(state, pending_queue, text, automated=automated, ticket_id=ticket_id)
 
-    def _inject_from_outside(text: str) -> str:
+    def _inject_from_outside(
+        text: str, *, automated: bool = False, ticket_id: Optional[str] = None,
+    ) -> str:
         """Take a line handed in by an external client (the attach socket).
 
         Echoed first, and that is not decoration: relayed input is deliberately
@@ -1194,6 +1197,12 @@ def run_interactive(
         block — but this caller is another program, so without this the terminal
         would show an answer to a question that is nowhere on screen.
 
+        ``automated`` comes from the client: the IM bridge relays a line the
+        user wrote (False), while a scheduled job or a finished background job's
+        report is nobody's typed words (True). The flag must reach both the echo
+        and the turn, or the terminal shows and records a human question nobody
+        asked.
+
         Returns where the text went (``steered`` / ``queued``): the attach layer
         waits for the turn that carries it, and only the injector knows which turn
         that is.
@@ -1201,13 +1210,13 @@ def run_interactive(
         try:
             from agentica.cli.display.messages import display_attached_user_message
 
-            display_attached_user_message(text)
+            display_attached_user_message(text, automated=automated)
             if app.is_running:
                 app.invalidate()
         except Exception as exc:
             # Display must never be the reason an injected line is lost.
             logger.debug(f"attach: could not echo the incoming line: {exc}")
-        return _hand_to_agent(text)
+        return _hand_to_agent(text, automated=automated, ticket_id=ticket_id)
 
     def _request_cancel() -> None:
         """Cancel the running turn — what ``session/cancel`` means here.

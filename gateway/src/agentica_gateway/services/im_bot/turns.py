@@ -182,7 +182,10 @@ class ImTurnsMixin:
         """
         from agentica.cli.attach import prompt_live_session
 
-        result = await asyncio.to_thread(prompt_live_session, peer, report)
+        # The default 620s window is deliberate here: the report's answer is
+        # what the phone is waiting for, so the claim and this session's
+        # delivery slot stay held while the terminal works.
+        result = await asyncio.to_thread(prompt_live_session, peer, report, automated=True)
         if result is not None:
             answer = str(result.get("agenticaAnswer") or "").strip()
             if answer:
