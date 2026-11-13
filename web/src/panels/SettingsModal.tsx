@@ -16,7 +16,7 @@ import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession, loadSessions } from "../sessions";
 import {
   askConfirm, emptyMcpForm, emptyProfileForm, emptySkillForm,
-  getState, saveSessions, setState, setTheme, showToast, useAppState, type ProfileForm,
+  getState, saveSessions, setFoldedReplies, setState, setTheme, showToast, useAppState, type ProfileForm,
 } from "../store";
 import { PluginsPanel } from "./PluginsPanel";
 import { AssistantPanel } from "../pages/AssistantPage";
@@ -570,6 +570,23 @@ function GeneralTab() {
                   onClick={() => void toggleCliSessions()}>
             <i />
           </button>
+        </div>
+
+        {/* Rendering, not behaviour: it decides what survives collapsing a turn's
+            process line. Default is "all replies" — a reply between tool calls is
+            the model reporting to the reader, and folding it hides the only
+            progress anchor a long turn has. */}
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">{S.settings.foldedReplies}</div>
+            <div className="settings-row-hint">{S.settings.foldedRepliesHint}</div>
+          </div>
+          <div className="seg">
+            {([["all", S.settings.foldedRepliesAll], ["final", S.settings.foldedRepliesFinal]] as const).map(([v, label]) => (
+              <button key={v} className={"seg-btn" + (s.foldedReplies === v ? " active" : "")}
+                      onClick={() => setFoldedReplies(v)}>{label}</button>
+            ))}
+          </div>
         </div>
       </div>
 

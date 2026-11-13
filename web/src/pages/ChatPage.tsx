@@ -38,7 +38,7 @@ import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUs
 import { reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
 import {
   allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
-  finalAnswerOf, finishTool, groupParts, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
+  finalAnswerOf, finishTool, groupParts, isFoldedReply, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
   workSummary,
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
@@ -1160,9 +1160,10 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
     );
   }
   if (!live) settleWork(m);
-  // Replies stay outside the work groups (dsh: reasoning joins the step run, a
-  // reply stands on its own); only think/tool are folded as steps.
+  // dsh structure: reasoning and tool calls join the step run, a reply stands on
+  // its own between groups. Only the process folds; a reply is content.
   const segs = m.role === "assistant" ? groupParts(partsOf(m)) : null;
+  const foldedReplies = getState().foldedReplies;
   const workSegCount = segs ? segs.filter((seg) => seg.type === "work").length : 0;
   const hasWork = workSegCount > 0;
   const hasSteer = Boolean(segs?.some((seg) => seg.type === "single" && seg.part.kind === "steer"));
@@ -1206,8 +1207,10 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
         : S.chat.turnProcessWorked;
   const finalAnswer = m.role === "assistant" ? finalAnswerOf(m) : "";
   const filesCardText = m.role === "assistant" ? finalAnswer : (m.content || "");
+  // Copy what is on screen: with replies folded away that is the answer alone,
+  // otherwise the whole turn (copying must never silently drop a visible line).
   const copyText = m.role === "assistant"
-    ? ((!effectiveProcessOpen && finalAnswer) ? finalAnswer : allAssistantTextOf(m))
+    ? ((!effectiveProcessOpen && foldedReplies === "final" && finalAnswer) ? finalAnswer : allAssistantTextOf(m))
     : m.content;
   return (
     <div id={"msg-" + idx} data-turn={turn} data-role={m.role}
@@ -1226,7 +1229,11 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
         )}
         {segs ? segs.map((seg, i) => {
           const isLast = !!live && i === segs.length - 1;
-          if ((showTurnProcess || showLiveProcess) && !processOpenNow && isProcessSegment(segs, i)) {
+          if (
+            (showTurnProcess || showLiveProcess)
+            && !processOpenNow
+            && (isProcessSegment(segs, i) || isFoldedReply(segs, i, foldedReplies))
+          ) {
             return null;
           }
           if (seg.type === "work") {

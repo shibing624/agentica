@@ -21,6 +21,7 @@ const {
   finishThink,
   finishTool,
   groupParts,
+  isFoldedReply,
   isProcessSegment,
   partsOf,
   settleWork,
@@ -110,7 +111,7 @@ test("settleWork keeps a think that has text", () => {
   assert.equal(m.steps.length, 1);
 });
 
-test("CoT-hiding models: intermediate commentary between tool calls folds with turn process", () => {
+test("CoT-hiding models: intermediate commentary is a reply, not process", () => {
   const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
   appendThink(m, "");
   appendText(m, "我先查看 ChatPage.tsx 的渲染结构。");
@@ -124,9 +125,19 @@ test("CoT-hiding models: intermediate commentary between tool calls folds with t
 
   const segs = groupParts(partsOf(m));
   assert.equal(segs.length, 5);
+  // Default (dsh): only reasoning/tool fold; both spoken lines stay readable.
   assert.deepEqual(
     segs.map((_, i) => isProcessSegment(segs, i)),
-    [true, true, true, true, false],
+    [false, true, false, true, false],
+  );
+  // Opt-in "final answer only": the two intermediate ones fold, the answer does not.
+  assert.deepEqual(
+    segs.map((_, i) => isFoldedReply(segs, i, "final")),
+    [true, false, true, false, false],
+  );
+  assert.deepEqual(
+    segs.map((_, i) => isFoldedReply(segs, i, "all")),
+    [false, false, false, false, false],
   );
   assert.equal(finalAnswerOf(m), "已完成全部优化：\n1. 流式平铺命令简述\n2. 折叠隐藏过渡说明");
   assert.equal(
@@ -144,7 +155,7 @@ test("plain Q&A without work keeps its text outside process folding", () => {
   assert.equal(finalAnswerOf(m), "直接给出的最终回答");
 });
 
-test("user steer chip stays outside process folding while surrounding commentary folds", () => {
+test("user steer chip is never folded, in either mode", () => {
   const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
   appendText(m, "先读文件");
   appendTool(m, "read_file", JSON.stringify({ file_path: "a.py" }), "c1");
@@ -159,12 +170,17 @@ test("user steer chip stays outside process folding while surrounding commentary
   // [text, work, steer, text, work, final text]
   assert.deepEqual(
     segs.map((_, i) => isProcessSegment(segs, i)),
-    [true, true, false, true, true, false],
+    [false, true, false, false, true, false],
+  );
+  // `final` hides the two spoken replies but never the steer chip.
+  assert.deepEqual(
+    segs.map((_, i) => isFoldedReply(segs, i, "final")),
+    [true, false, false, true, false, false],
   );
   assert.equal(finalAnswerOf(m), "两处都检查完毕。");
 });
 
-test("hydrated JSONL turn folds Claude/GPT-5 intermediate content and keeps final answer", () => {
+test("hydrated JSONL turn keeps Claude/GPT-5 intermediate content as replies", () => {
   const msgs = eventsToChatMsgs([
     { type: "user", content: "排查问题", timestamp: "2026-11-11T06:00:00Z" },
     {
@@ -192,7 +208,7 @@ test("hydrated JSONL turn folds Claude/GPT-5 intermediate content and keeps fina
   const segs = groupParts(partsOf(ai));
   assert.deepEqual(
     segs.map((_, i) => isProcessSegment(segs, i)),
-    [true, true, true, true, false],
+    [false, true, false, true, false],
   );
   // A reloaded turn has the same shape as a live one: the two spoken lines are
   // their own replies between the step groups, not rows inside them.
@@ -234,7 +250,7 @@ test("an intermediate reply stands between two work groups, never inside one", (
   assert.deepEqual(segs.map((s) => s.type), ["single", "work", "single", "work", "single"]);
   assert.deepEqual(
     segs.map((_, i) => isProcessSegment(segs, i)),
-    [true, true, true, true, false],
+    [false, true, false, true, false],
   );
   // dsh rule: a reply never joins the steps. Anything text-shaped inside a work
   // group would be hidden behind the group's own fold — two clicks, not one.
@@ -244,7 +260,7 @@ test("an intermediate reply stands between two work groups, never inside one", (
   assert.equal(finalAnswerOf(m), "最终结论。");
 });
 
-test("an intermediate reply is hidden by the turn fold, shown when it opens", () => {
+test("collapsing a turn hides the steps only, unless the reader asked for final-only", () => {
   const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
   appendThink(m, "先看看");
   appendTool(m, "read_file", JSON.stringify({ file_path: "a.py" }), "c1");
@@ -255,17 +271,18 @@ test("an intermediate reply is hidden by the turn fold, shown when it opens", ()
   appendText(m, "最终回答");
 
   const segs = groupParts(partsOf(m));
-  const hiddenWhenCollapsed = segs
-    .map((_, i) => isProcessSegment(segs, i))
-    .filter(Boolean)
-    .length;
-  // The reply sits inside `已完成，用时 …` with the steps, so collapsing the turn
-  // leaves only the answer.
   const replyIndex = segs.findIndex((s) => s.type === "single" && s.part.text === "中间说明");
-  assert.equal(isProcessSegment(segs, replyIndex), true);
-  assert.equal(hiddenWhenCollapsed, segs.length - 1);
   const finalIndex = segs.findIndex((s) => s.type === "single" && s.part.text === "最终回答");
+
+  // Default: the reply is content, so collapsing the process leaves it on screen.
+  assert.equal(isProcessSegment(segs, replyIndex), false);
+  assert.equal(isFoldedReply(segs, replyIndex, "all"), false);
   assert.equal(isProcessSegment(segs, finalIndex), false);
+  assert.equal(isFoldedReply(segs, finalIndex, "all"), false);
+
+  // Final-answer-only: the intermediate one goes with the process, the answer stays.
+  assert.equal(isFoldedReply(segs, replyIndex, "final"), true);
+  assert.equal(isFoldedReply(segs, finalIndex, "final"), false);
 });
 
 test("a turn with only a reply has no process segments", () => {
@@ -294,6 +311,11 @@ test("a steer chip is never folded into the turn process", () => {
   );
   assert.deepEqual(
     segs.map((_, i) => isProcessSegment(segs, i)),
-    [true, false, true, true, false],
+    [true, false, false, true, false],
+  );
+  // Not even the final-answer-only mode swallows a steer chip.
+  assert.deepEqual(
+    segs.map((_, i) => isFoldedReply(segs, i, "final")),
+    [false, false, true, false, false],
   );
 });

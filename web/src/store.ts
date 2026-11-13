@@ -126,6 +126,15 @@ export type Session = {
 
 export type QueuedMessage = { id: string; sessionId: string; text: string; files: File[]; ts: number };
 
+/**
+ * When a turn's process line (`已完成，用时 …`) is collapsed, which assistant
+ * replies stay visible. `all` is the default and what dsh does: reasoning and
+ * tool calls fold, content is a reply and stays readable. `final` folds the
+ * intermediate ones too, leaving only the answer — the "quiet transcript"
+ * preference. A rendering choice, so it is per browser, not per account.
+ */
+export type FoldedReplies = "all" | "final";
+
 export type ProfileForm = {
   name: string;
   editing: boolean;
@@ -240,6 +249,8 @@ export type AppState = {
   /** UI language. Lives here rather than in i18n.ts so a component reading
    *  strings re-renders through the same `rev` bump as everything else. */
   lang: "en" | "zh";
+  /** Which replies survive collapsing a turn's process line (see `FoldedReplies`). */
+  foldedReplies: FoldedReplies;
   toast: { show: boolean; msg: string };
   confirm: { open: boolean; title: string; msg: string; okLabel: string; onOk: (() => void) | null };
   dirModal: { open: boolean; forNewSession: boolean; value: string };
@@ -370,6 +381,7 @@ const state: AppState = {
   workspaceAdd: { open: false, value: "" },
   theme: localStorage.getItem("ag_theme") || "auto",
   lang: localStorage.getItem("ag_lang") === "zh" ? "zh" : "en",
+  foldedReplies: localStorage.getItem("ag_folded_replies") === "final" ? "final" : "all",
   toast: { show: false, msg: "" },
   confirm: { open: false, title: "", msg: "", okLabel: "", onOk: null },
   dirModal: { open: false, forNewSession: false, value: "" },
@@ -543,6 +555,12 @@ export function setTheme(raw: string) {
   applyTheme(raw);
   setState({ theme: raw });
   pushPrefs();
+}
+
+/** Remembers the fold preference for this browser; no server round-trip needed. */
+export function setFoldedReplies(v: FoldedReplies) {
+  localStorage.setItem("ag_folded_replies", v);
+  setState({ foldedReplies: v });
 }
 
 export const UNFILED_PROJECT_ID = "unfiled";

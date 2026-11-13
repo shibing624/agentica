@@ -1,4 +1,4 @@
-import type { ChatMsg, MsgPart } from "../store";
+import type { ChatMsg, FoldedReplies, MsgPart } from "../store";
 
 export type { MsgPart };
 
@@ -52,24 +52,37 @@ export function lastWorkSegmentIndex(segs: PartSeg[]): number {
 }
 
 /**
- * Whether `segs[index]` is folded into the turn process line (`已完成，用时 …`):
- * every `work` group plus any intermediate assistant `text` emitted before a later
- * `work` group (e.g. Claude / Gemini / GPT-5 commentary between tool calls while
- * internal CoT is hidden). User `steer` chips and trailing final-answer text stay out.
+ * Whether `segs[index]` is *process* — reasoning and tool calls — and therefore
+ * hides when the turn's `已完成，用时 …` line is collapsed.
  *
- * Intermediate replies are still *replies* — they render as their own bubble, not
- * as a row inside a work group — but they belong to this fold: collapsing the turn
- * hides them with the steps, expanding it shows them in place. That is the one
- * level of folding, deliberately: nesting a reply inside the group's own fold hid
- * it behind two clicks.
+ * Content is not process. An assistant reply between tool calls is the model
+ * telling the user something (a finding, a direction change, a blocker), and
+ * folding it turns a long turn into one black box: the reasoning can be
+ * reconstructed from the tool rows, the reply cannot. So a reply is always its
+ * own bubble and stays visible. See `isFoldedReply` for the opt-in exception.
  */
 export function isProcessSegment(segs: PartSeg[], index: number): boolean {
+  return segs[index]?.type === "work";
+}
+
+/**
+ * Whether a reply is hidden by the turn fold — the opt-in `final` preference.
+ *
+ * `all` (default) never hides one. `final` hides the intermediate replies, i.e.
+ * the ones spoken before the last tool batch, leaving the answer alone: the
+ * quiet-transcript reading. It is a preference because it is a genuine split —
+ * some readers want the progress anchors, some want only the result.
+ */
+export function isFoldedReply(
+  segs: PartSeg[],
+  index: number,
+  mode: FoldedReplies,
+): boolean {
+  if (mode !== "final") return false;
   const seg = segs[index];
-  if (!seg) return false;
-  if (seg.type === "work") return true;
+  if (!seg || seg.type !== "single" || seg.part.kind !== "text") return false;
   const lastWork = lastWorkSegmentIndex(segs);
-  if (lastWork < 0) return false;
-  return seg.part.kind === "text" && index < lastWork;
+  return lastWork >= 0 && index < lastWork;
 }
 
 /** Visible final-answer text (segments after the last `work` group), or full text when no work ran. */
