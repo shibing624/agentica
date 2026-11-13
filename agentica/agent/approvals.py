@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
 
-from agentica.tools.base import FunctionCall
+from agentica.tools.base import Function, FunctionCall
 from agentica.tools.acp_agent_tool import ACP_AGENT_TOOL, ACP_PERMISSION_TOOL
 from agentica.tools.safety import (
     check_command_safety,
@@ -120,6 +120,8 @@ class ApprovalRegistry:
         self._pending: Dict[str, _PendingEntry] = {}
         # tool_call_id -> seconds waited, for waits that expired unanswered.
         self._expired: Dict[str, float] = {}
+        # tool_call_ids resolved automatically when permission_mode changed mid-turn.
+        self._mode_resolved: set = set()
 
     @property
     def size(self) -> int:
@@ -171,6 +173,20 @@ class ApprovalRegistry:
     def pop_expired(self, tool_call_id: str) -> Optional[float]:
         """Seconds waited if this id's wait expired, else None."""
         return self._expired.pop(tool_call_id, None)
+
+    def resolve_by_mode(self, tool_call_id: str, decision: ApprovalDecision) -> bool:
+        """Resolve a wait superseded by a mid-turn permission-mode switch."""
+        if not self.decide(tool_call_id, decision):
+            return False
+        self._mode_resolved.add(tool_call_id)
+        return True
+
+    def pop_mode_resolved(self, tool_call_id: str) -> bool:
+        """True once when this id was resolved by a mid-turn mode switch."""
+        if tool_call_id not in self._mode_resolved:
+            return False
+        self._mode_resolved.discard(tool_call_id)
+        return True
 
 
 @dataclass
@@ -526,6 +542,22 @@ def classify(
     return "allow"
 
 
+def classify_pending(
+    mode: str,
+    pending: PendingApproval,
+    grants: SessionGrants,
+    *,
+    work_dir: Optional[str],
+) -> ApprovalRoute:
+    """Re-classify an already-parked approval after a mid-turn mode change."""
+    fc = FunctionCall(
+        function=Function(name=pending.name),
+        arguments=dict(pending.arguments),
+        call_id=pending.tool_call_id,
+    )
+    return classify(mode, fc, grants, work_dir=work_dir)
+
+
 def is_sandbox_escalation(fc: FunctionCall) -> bool:
     """Does this ``execute`` call ask to run outside the OS sandbox?
 
@@ -753,6 +785,7 @@ def make_approve(
         decision = await waiter
         wait_s = round(time.monotonic() - started, 2)
         expired_after = registry.pop_expired(pending.tool_call_id)
+        mode_resolved = registry.pop_mode_resolved(pending.tool_call_id)
         if expired_after is not None:
             fc.denied_result = APPROVAL_TIMED_OUT_RESULT.format(
                 seconds=round(expired_after)
@@ -760,18 +793,24 @@ def make_approve(
         if decision not in ("allow", "allow_prefix", "deny", "deny_prefix"):
             decision = "deny"
         grant: Optional[Dict[str, Any]] = None
-        if decision == "deny_prefix":
-            grant = _record_deny_grant(fc, grants, work_dir=work_dir)
-            persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
-        elif decision != "deny":
-            prefix = decision == "allow_prefix"
-            grant = _record_grant(fc, grants, work_dir=work_dir, prefix=prefix)
-            if prefix:
+        if not mode_resolved:
+            if decision == "deny_prefix":
+                grant = _record_deny_grant(fc, grants, work_dir=work_dir)
                 persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
-            if fc.function.name in FILE_TOOLS:
-                for path in call_paths(fc, work_dir=work_dir):
-                    sensitive = _is_sensitive_path(path)
-                    apply_path_grant(path, prefix and not sensitive)
+            elif decision != "deny":
+                prefix = decision == "allow_prefix"
+                grant = _record_grant(fc, grants, work_dir=work_dir, prefix=prefix)
+                if prefix:
+                    persist_grants_to_project(grants, work_dir=work_dir, user_id=user_id)
+                if fc.function.name in FILE_TOOLS:
+                    for path in call_paths(fc, work_dir=work_dir):
+                        sensitive = _is_sensitive_path(path)
+                        apply_path_grant(path, prefix and not sensitive)
+        reason: Optional[str] = None
+        if expired_after is not None:
+            reason = "timeout"
+        elif mode_resolved:
+            reason = "mode_switch"
         fc.approval_trace = {
             "tool": fc.function.name,
             "arguments": _clip_trace_args(fc.arguments or {}),
@@ -779,9 +818,9 @@ def make_approve(
             "preview": preview,
             "options": list(options),
             "similar_label": similar_label or None,
-            "mode": mode,
+            "mode": get_mode() if mode_resolved else mode,
             "decision": decision,
-            "reason": "timeout" if expired_after is not None else None,
+            "reason": reason,
             "wait_s": wait_s,
             "grant": grant,
         }

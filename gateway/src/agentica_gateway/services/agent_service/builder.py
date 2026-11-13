@@ -13,10 +13,12 @@ from agentica import DeepAgent
 from agentica.agent.approvals import (
     SessionGrants,
     apply_path_grant_on_agent,
+    classify_pending,
     make_approve,
     sync_grants_from_project,
 )
 from agentica.agent.config import ExperienceConfig, ToolConfig, WorkspaceMemoryConfig
+from agentica.agent.permissions import PERMISSION_MODES
 from agentica.compression.manager import parse_compact_token_limit
 from agentica.config.profiles import get_setting
 from agentica.run.config import RunConfig
@@ -254,6 +256,7 @@ class AgentBuilderMixin:
                 f"for session {session_id}. Check MCP server connectivity."
             )
 
+        agent.set_permission_mode(self.get_session_approval_mode(session_id, owner))
         self._cache.put(key, agent)
         logger.info(f"Agent created for session: {session_id} (cache size: {len(self._cache)})")
         return agent
@@ -320,17 +323,27 @@ class AgentBuilderMixin:
     def set_session_approval_mode(
         self, session_id: str, mode: str, owner: Optional[str] = None,
     ) -> None:
-        """Persist the selected approval mode for a session."""
-        from agentica.agent.permissions import PERMISSION_MODES
-
+        """Persist the selected approval mode for a session and apply it live."""
         normalized = (mode or self._DEFAULT_APPROVAL_MODE).strip().lower()
         if normalized not in PERMISSION_MODES:
             normalized = self._DEFAULT_APPROVAL_MODE
-        self._session_approval_modes[self._sk(session_id, owner)] = normalized
+        key = self._sk(session_id, owner)
+        self._session_approval_modes[key] = normalized
 
-        cached_agent = self._cache.get(self._sk(session_id, owner))
+        cached_agent = self._cache.get(key)
         if cached_agent is not None:
             cached_agent.set_permission_mode(normalized)
+
+        owner_id = self._owner(owner)
+        turn = _pkg().live_turn.active(session_id, owner_id)
+        if turn is not None and turn.approvals.size:
+            grants = self._grants_for(session_id, owner)
+            work_dir = self.get_session_work_dir(session_id, owner)
+            sync_grants_from_project(grants, work_dir=work_dir, user_id=owner_id)
+            for pending in turn.approvals.list():
+                route = classify_pending(normalized, pending, grants, work_dir=work_dir)
+                if route in ("allow", "deny"):
+                    turn.resolve_approval(pending.tool_call_id, route, by="mode")
 
     def get_session_approval_mode(self, session_id: str, owner: Optional[str] = None) -> str:
         return self._session_approval_modes.get(

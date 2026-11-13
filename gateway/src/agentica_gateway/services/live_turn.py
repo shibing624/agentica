@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from agentica.agent.approvals import ApprovalRegistry, PendingApproval
+from agentica.agent.approvals import ApprovalDecision, ApprovalRegistry, PendingApproval
 
 if TYPE_CHECKING:
     from .agent_service import AgentService
@@ -90,6 +90,25 @@ class LiveTurn:
         # Called synchronously when a question closes (answered anywhere, or
         # timed out), so that surface takes its own copy down at once.
         self.question_closed: Optional[Callable[[str, str], None]] = None
+        # Same for an approval card resolved on Web, IM, or by a mode switch.
+        self.approval_closed: Optional[Callable[[str, str], None]] = None
+
+    def resolve_approval(self, tool_call_id: str, decision: ApprovalDecision, by: str = "") -> bool:
+        """First decision wins; every surface showing the card hears it closed."""
+        ok = (
+            self.approvals.resolve_by_mode(tool_call_id, decision)
+            if by == "mode"
+            else self.approvals.decide(tool_call_id, decision)
+        )
+        if not ok:
+            return False
+        self.publish({
+            "event": "approval_resolved",
+            "data": {"tool_call_id": tool_call_id, "decision": decision, "by": by},
+        })
+        if self.approval_closed is not None:
+            self.approval_closed(tool_call_id, by)
+        return True
 
     @property
     def open_questions(self) -> List[PendingQuestion]:

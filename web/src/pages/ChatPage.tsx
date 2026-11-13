@@ -808,13 +808,13 @@ export function ChatPage() {
             />
             </div>
             <div className="input-foot">
-              <div className="input-foot-l" inert={composerLocked ? true : undefined}>
+              <div className="input-foot-l">
                 <input type="file" multiple accept="image/*,*/*" style={{ display: "none" }} id="fileInput" onChange={(e) => {
                   const files = Array.from(e.target.files || []);
                   if (files.length) setState({ pendingFiles: [...getState().pendingFiles, ...files] });
                   e.currentTarget.value = "";
                 }} />
-                <div className="plus-wrap" ref={plusWrapRef}>
+                <div className="plus-wrap" ref={plusWrapRef} inert={composerLocked ? true : undefined}>
                   <button type="button" className={"foot-btn plus-btn" + (plusOpen ? " on" : "")}
                           title={plusOpen ? undefined : S.chat.plusMenu} aria-haspopup="menu" aria-expanded={plusOpen}
                           onClick={() => {
@@ -1959,6 +1959,12 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     flushStream();
     return true;
   }
+  if (evt.event === "approval_resolved" && sessId) {
+    const id = String(evt.data?.tool_call_id || "");
+    if (id) dequeueApproval(sessId, id);
+    flushStream();
+    return true;
+  }
   if (evt.event === "content") {
     appendText(aiMsg, evt.data);
     bumpStream();
@@ -2387,7 +2393,9 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
 
 function setApprovalMode(mode: "ask" | "auto" | "allow-all") {
   localStorage.setItem("ag_approval", mode);
+  const sessId = getState().curSess;
   setState({ selectedApprovalMode: mode, approvalMenuOpen: false });
+  if (sessId) void api.setSessionApprovalMode(sessId, mode);
   pushPrefs();
 }
 
@@ -2578,6 +2586,7 @@ async function runGoalCmd(sessId: string, objective: string, tokenBudget = UNLIM
       objective,
       session_id: sessId,
       token_budget: tokenBudget,
+      approval_mode: getState().selectedApprovalMode,
     }, abortCtrl.signal);
     if (!resp.ok || !resp.body) {
       let detail = `HTTP ${resp.status}`;

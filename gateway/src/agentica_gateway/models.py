@@ -64,6 +64,11 @@ class ApprovalDecisionRequest(BaseModel):
     decision: Literal["allow", "allow_prefix", "deny", "deny_prefix"]
 
 
+class SessionApprovalModeRequest(BaseModel):
+    """Live per-session approval mode switch (ask / auto / allow-all)."""
+    approval_mode: Literal["ask", "auto", "allow-all"]
+
+
 class CompactRequest(BaseModel):
     """Optional extra instructions for ``/compact`` (same as the CLI args)."""
     instructions: str = ""
@@ -128,6 +133,7 @@ class GoalRequest(BaseModel):
     # ``-1`` = unlimited (web default). A positive int is a hard cap.
     # Turns and wall-clock are not web knobs — CLI ``/goal --turns/--wall`` still has them.
     token_budget: int = -1
+    approval_mode: Optional[str] = None
 
     @field_validator("objective")
     @classmethod

@@ -24,6 +24,7 @@ from ..config import settings
 from ..models import (
     ChatImage, ChatRequest, ChatResponse, CompactRequest, MemoryRequest,
     RenameRequest, GoalRequest, SteerRequest, ApprovalDecisionRequest,
+    SessionApprovalModeRequest,
 )
 from ..services.agent_service import AgentService
 from ..services import chat_images, live_turn
@@ -303,6 +304,8 @@ async def run_goal(
     """
     session_id = body.session_id
     account = _account(request)
+    if body.approval_mode:
+        svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
 
     async def run_goal_turn(turn: live_turn.LiveTurn):
         on_content, on_tool_call, on_tool_result, on_thinking = _sse_stream_hooks(turn.publish)
@@ -906,6 +909,22 @@ async def session_usage(
     return await svc.session_usage(session_id, owner=_account(request))
 
 
+@router.post("/api/sessions/{session_id}/approval_mode")
+async def set_session_approval_mode(
+    session_id: str,
+    body: SessionApprovalModeRequest,
+    request: Request,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Switch this session's approval tier immediately, including mid-run."""
+    account = _account(request)
+    svc.set_session_approval_mode(session_id, body.approval_mode, owner=account)
+    return {
+        "session_id": session_id,
+        "approval_mode": svc.get_session_approval_mode(session_id, owner=account),
+    }
+
+
 @router.post("/api/sessions/{session_id}/approvals/{tool_call_id}")
 async def decide_session_approval(
     session_id: str,
@@ -916,7 +935,7 @@ async def decide_session_approval(
     """Resolve a parked tool call. Unknown id or another account's turn → 404."""
     owner = _account(request)
     turn = live_turn.active(session_id, owner)
-    if turn is None or not turn.approvals.decide(tool_call_id, body.decision):
+    if turn is None or not turn.resolve_approval(tool_call_id, body.decision, by="Web"):
         raise HTTPException(status_code=404, detail="Approval not found")
     return {"status": "ok", "tool_call_id": tool_call_id, "decision": body.decision}
 

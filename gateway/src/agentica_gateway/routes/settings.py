@@ -45,6 +45,7 @@ from ..models import (
     OpenRequest,
 )
 from ..services.agent_service import AgentService
+from ..services import live_turn
 from ..services.media_understanding import is_gemini, media_model_label
 
 router = APIRouter()
@@ -353,6 +354,11 @@ async def put_prefs(request: Request):
                 raise HTTPException(status_code=400, detail=f"Path is not a directory: {p}")
     merged = _clean_prefs({**previous, **body})
     _write_prefs(uid, merged)
+    if "approval_mode" in body and merged.get("approval_mode") and deps.agent_service is not None:
+        new_mode = merged["approval_mode"]
+        for turn in live_turn.iter_owner(uid):
+            if not turn.done and not turn.cron_job:
+                deps.agent_service.set_session_approval_mode(turn.session_id, new_mode, owner=uid)
     old_extract = previous.get("auto_extract_memory", True)
     new_extract = merged.get("auto_extract_memory", True)
     if bool(old_extract) != bool(new_extract) and deps.agent_service is not None:

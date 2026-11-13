@@ -821,7 +821,8 @@ html[data-desktop="mac"] .sidebar.collapsed .side-head{-webkit-app-region:no-dra
 .input-box{margin:0 auto;max-width:var(--chat-content-w);border:none;border-radius:26px;background:var(--bg);box-shadow:var(--elev-card);transition:box-shadow var(--t);position:relative}
 .input-box:focus-within{box-shadow:var(--elev-card-focus)}
 .input-box.approval-locked .input-ta,
-.input-box.approval-locked .input-foot-l,
+.input-box.approval-locked .plus-wrap,
+.input-box.approval-locked .composer-dir,
 .input-box.approval-locked .file-list,
 .input-box.approval-locked .goal-chip-row,
 .input-box.approval-locked .vision-note{opacity:.45;pointer-events:none}

@@ -260,3 +260,124 @@ class TestDenyAllOnFinish:
             assert result["status"] == "cancelled"
 
         asyncio.run(_run())
+
+
+class TestMidTurnApprovalModeSwitch:
+    def test_switching_to_allow_all_unparks_current_and_skips_next_in_same_turn(self, tmp_path):
+        from agentica_gateway.services.agent_service import AgentService
+
+        async def _run():
+            svc = AgentService(workspace_path=str(tmp_path))
+            svc.set_session_work_dir("s1", str(tmp_path), owner="default")
+            svc.set_session_approval_mode("s1", "ask", owner="default")
+            turn = live_turn.start("s1", owner="default")
+            approve = svc._make_session_approve("s1", "default")
+
+            fc1 = _fc("write_file", {"file_path": "/tmp/outside_mode_switch.txt"}, call_id="c1")
+            wait1 = asyncio.create_task(approve(fc1))
+            await asyncio.sleep(0)
+            assert turn.approvals.size == 1
+
+            # User gets tired of approving and flips permission mode to allow-all mid-turn.
+            svc.set_session_approval_mode("s1", "allow-all", owner="default")
+
+            assert await wait1 == "allow"
+            assert turn.approvals.size == 0
+            assert fc1.approval_trace["reason"] == "mode_switch"
+            assert fc1.approval_trace["mode"] == "allow-all"
+            assert fc1.approval_trace["grant"] is None
+            # Switching back to ask must NOT leave /tmp/outside_mode_switch.txt whitelisted.
+            grants = svc._grants_for("s1", "default")
+            assert not grants.path_exact
+
+            resolved = [e for e in turn.events if e.get("event") == "approval_resolved"]
+            assert len(resolved) == 1
+            assert resolved[0]["data"] == {
+                "tool_call_id": "c1",
+                "decision": "allow",
+                "by": "mode",
+            }
+
+            # Next mutating execute in the same turn runs immediately without parking.
+            fc2 = _fc("execute", {"command": "python run_step.py"}, call_id="c2")
+            assert await approve(fc2) == "allow"
+            assert turn.approvals.size == 0
+
+        asyncio.run(_run())
+
+    def test_switching_ask_to_auto_unparks_execute_but_keeps_outside_write_parked(self, tmp_path):
+        from agentica_gateway.services.agent_service import AgentService
+
+        async def _run():
+            work = tmp_path / "proj"
+            outside = tmp_path / "outside.txt"
+            work.mkdir()
+            svc = AgentService(workspace_path=str(tmp_path))
+            svc.set_session_work_dir("s1", str(work), owner="default")
+            svc.set_session_approval_mode("s1", "ask", owner="default")
+            turn = live_turn.start("s1", owner="default")
+            approve = svc._make_session_approve("s1", "default")
+
+            fc_exec = _fc("execute", {"command": "python run_step.py"}, call_id="exec1")
+            fc_out = _fc("write_file", {"file_path": str(outside)}, call_id="out1")
+            t_exec = asyncio.create_task(approve(fc_exec))
+            t_out = asyncio.create_task(approve(fc_out))
+            await asyncio.sleep(0)
+            assert turn.approvals.size == 2
+
+            svc.set_session_approval_mode("s1", "auto", owner="default")
+            assert await t_exec == "allow"
+            assert not t_out.done()
+            assert [p.tool_call_id for p in turn.approvals.list()] == ["out1"]
+
+            turn.resolve_approval("out1", "deny", by="Web")
+            assert await t_out == "deny"
+
+        asyncio.run(_run())
+
+    def test_route_and_prefs_update_live_non_cron_turn_only(self, tmp_path, monkeypatch):
+        from agentica_gateway import deps
+        from agentica_gateway.models import SessionApprovalModeRequest
+        from agentica_gateway.routes import chat as chat_routes
+        from agentica_gateway.routes import settings as settings_routes
+        from agentica_gateway.services.agent_service import AgentService
+
+        monkeypatch.setattr(settings_routes, "AGENTICA_HOME", str(tmp_path))
+
+        async def _run():
+            svc = AgentService(workspace_path=str(tmp_path))
+            original = deps.agent_service
+            deps.agent_service = svc
+            try:
+                svc.set_session_approval_mode("chat1", "ask", owner="default")
+                svc.set_session_approval_mode("cron1", "ask", owner="default")
+                t_chat = live_turn.start("chat1", owner="default")
+                t_cron = live_turn.start("cron1", owner="default")
+                t_cron.cron_job = {"id": "j1", "name": "nightly"}
+
+                resp = await chat_routes.set_session_approval_mode(
+                    "chat1",
+                    SessionApprovalModeRequest(approval_mode="auto"),
+                    _request("default"),
+                    svc=svc,
+                )
+                assert resp == {"session_id": "chat1", "approval_mode": "auto"}
+
+                w_chat = t_chat.approvals.wait(_pending("tc_chat"))
+                w_cron = t_cron.approvals.wait(_pending("tc_cron"))
+
+                req = SimpleNamespace(
+                    state=SimpleNamespace(principal=SimpleNamespace(user_id="default")),
+                    json=lambda: asyncio.sleep(0, result={"approval_mode": "allow-all"}),
+                )
+                await settings_routes.put_prefs(req)
+
+                assert svc.get_session_approval_mode("chat1", owner="default") == "allow-all"
+                assert await w_chat == "allow"
+                # Cron mandate stays untouched.
+                assert svc.get_session_approval_mode("cron1", owner="default") == "ask"
+                assert not w_cron.done()
+            finally:
+                deps.agent_service = original
+
+        asyncio.run(_run())

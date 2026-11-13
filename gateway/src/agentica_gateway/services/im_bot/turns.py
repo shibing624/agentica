@@ -448,6 +448,16 @@ class ImTurnsMixin:
                 state.clear_pending()
 
         turn.question_closed = _close_question_card
+
+        def _close_approval_card(tool_call_id: str, by: str) -> None:
+            card = self._cards.find_open(request_id=tool_call_id)
+            if card is not None:
+                reason = "权限模式已切换" if by == "mode" else (f"已在 {by} 处理" if by else "该审批已关闭")
+                self._cards.expire(card.token, reason=reason)
+            if state.pending is not None and state.pending.request_id == tool_call_id:
+                state.clear_pending()
+
+        turn.approval_closed = _close_approval_card
         if input_meta and input_meta.get("cron_job"):
             turn.cron_job = input_meta["cron_job"]
             turn.automated_message = text
@@ -520,7 +530,7 @@ class ImTurnsMixin:
 
                     def _resolve_approval(decision_str: str, tid: str = tc_id) -> bool:
                         d: ApprovalDecision = decision_str  # type: ignore[assignment]
-                        return turn.approvals.decide(tid, d)
+                        return turn.resolve_approval(tid, d, by="IM")
 
                     await self._publish_interaction(
                         state,
