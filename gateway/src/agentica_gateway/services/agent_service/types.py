@@ -158,12 +158,15 @@ QUESTION_WAIT_S = 300.0
 
 
 def _cache_key_is_pinned(key: str) -> bool:
-    """True when this cache entry has a LiveTurn waiting on an approval or a question."""
+    """True while this cache entry's Agent is running a LiveTurn.
+
+    Evicting it would leave the run going while steer, cancel, approvals and
+    questions look up a different (or missing) Agent.
+    """
     owner, sep, session_id = key.partition(_OWNER_SEP)
     if not sep:
         owner, session_id = settings.default_user_id, key
-    turn = _pkg().live_turn.active(session_id, owner)
-    return turn is not None and (turn.approvals.size > 0 or bool(turn.open_questions))
+    return _pkg().live_turn.active(session_id, owner) is not None
 
 
 async def dispatch_stream_chunk(

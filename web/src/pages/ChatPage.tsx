@@ -1745,7 +1745,7 @@ async function applySteer(sessId: string, text: string): Promise<boolean> {
     return true;
   }
   enqueueMessage(sessId, text, [], { silent: true });
-  showToast(S.chat.interruptQueued);
+  showToast(ok ? S.chat.interruptQueued : S.chat.interruptFailed);
   return false;
 }
 

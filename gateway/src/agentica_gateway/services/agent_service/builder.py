@@ -37,6 +37,8 @@ def _pkg():
 class AgentBuilderMixin:
     """Workspace init, DeepAgent construction, session locks, approvals, and ask callback."""
 
+    _agent_builds: Dict[str, "asyncio.Future[DeepAgent]"]
+
     async def _ensure_initialized(self) -> None:
         """Ensure the workspace is initialized (idempotent, Lock-protected)."""
         self._loop = asyncio.get_running_loop()
@@ -215,12 +217,30 @@ class AgentBuilderMixin:
         return agent
 
     async def _get_agent(self, session_id: str, owner: Optional[str] = None) -> DeepAgent:
-        """Return the cached Agent for a session, creating one if absent."""
+        """Return the cached Agent for a session, creating one if absent.
+
+        Concurrent callers share one build. Otherwise a usage poll racing a
+        chat start builds a second Agent that replaces the running one in the
+        cache, and steer / cancel reach the idle copy.
+        """
         key = self._sk(session_id, owner)
         agent = self._cache.get(key)
         if agent is not None and agent.user_id == self._owner(owner):
             if key not in self._stale_agents or self.is_session_active(session_id, owner):
                 return agent
+        build = self._agent_builds.get(key)
+        if build is None:
+            build = asyncio.ensure_future(self._build_and_cache_agent(key, session_id, owner))
+            self._agent_builds[key] = build
+
+            def _forget(done: asyncio.Future) -> None:
+                if self._agent_builds.get(key) is done:
+                    del self._agent_builds[key]
+
+            build.add_done_callback(_forget)
+        return await asyncio.shield(build)
+
+    async def _build_and_cache_agent(self, key: str, session_id: str, owner: Optional[str]) -> DeepAgent:
         self._stale_agents.discard(key)
 
         try:

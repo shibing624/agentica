@@ -48,6 +48,7 @@ class AgentService(AgentModelMixin, AgentBuilderMixin, AgentExecutionMixin, Agen
         self._title_tasks: set[asyncio.Task] = set()
         self._session_locks: Dict[str, asyncio.Lock] = {}
         self._stale_agents: set[str] = set()
+        self._agent_builds = {}
         self._workspace: Optional[Workspace] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()

@@ -7,6 +7,7 @@ the chat (``<id>.meta.json`` ``profile_name``), a chat without one follows its
 project's default, and the gateway default stays where it was.
 """
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -15,9 +16,11 @@ pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 import yaml
 
+from agentica import Agent
 from agentica.config.profiles import get_active_profile_name, set_project_profile
 from agentica_gateway.services import agent_service as svc_mod
-from agentica_gateway.services.agent_service import AgentService
+from agentica_gateway.services import live_turn
+from agentica_gateway.services.agent_service import AgentService, LRUAgentCache
 
 PROFILES = {
     "active_profile": "base",
@@ -130,6 +133,49 @@ def test_a_pick_rebuilds_only_that_chats_agent(svc, monkeypatch):
 
     asyncio.run(scenario())
     assert built == ["a", "b", "a"]
+
+
+def test_concurrent_lookups_share_one_agent_so_steer_reaches_the_run(svc, monkeypatch):
+    """A usage poll racing a chat start must not replace the running Agent."""
+    built = []
+    release = threading.Event()
+
+    def build(sid, owner=None):
+        release.wait(5)
+        agent = Agent(user_id=svc._owner(owner))
+        built.append(agent)
+        return agent
+
+    monkeypatch.setattr(svc, "_build_agent", build)
+
+    async def scenario():
+        chat = asyncio.create_task(svc._get_agent("a"))
+        usage = asyncio.create_task(svc._get_agent("a"))
+        await asyncio.sleep(0.05)
+        release.set()
+        running, polled = await chat, await usage
+        assert running is polled
+        running._begin_steer_window()
+        assert svc.steer_session("a", "change direction") is True
+        assert [item.text for item in running._drain_steer()] == ["change direction"]
+        running._end_steer_window()
+
+    asyncio.run(scenario())
+    assert len(built) == 1
+
+
+def test_running_agent_is_not_evicted_from_the_cache(svc):
+    async def scenario():
+        live_turn.reset()
+        live_turn.start("a", owner=svc._owner(None))
+        cache = LRUAgentCache(max_size=1)
+        running = SimpleNamespace()
+        cache.put(svc._sk("a"), running)
+        cache.put(svc._sk("b"), SimpleNamespace())
+        assert cache.get(svc._sk("a")) is running
+        live_turn.reset()
+
+    asyncio.run(scenario())
 
 
 def test_gateway_forwards_profile_cache_control_and_headers_to_model(svc):
