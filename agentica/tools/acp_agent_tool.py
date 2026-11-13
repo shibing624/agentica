@@ -135,7 +135,13 @@ class ACPAgentTool(Tool):
         self._work_dir = work_dir
         self.register(self.acp_agent, is_destructive=True)
         # A turn of an external agent runs for minutes; the tool owns its timeout.
-        self.functions[ACP_AGENT_TOOL].manages_own_timeout = True
+        acp_fn = self.functions[ACP_AGENT_TOOL]
+        acp_fn.manages_own_timeout = True
+        acp_fn.process_entrypoint()
+        acp_fn.parameters["properties"]["action"]["enum"] = [
+            "list", "start", "message", "close",
+        ]
+        acp_fn.skip_entrypoint_processing = True
 
     def _cwd(self, work_dir: str) -> str:
         raw = (work_dir or "").strip()

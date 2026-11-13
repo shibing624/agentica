@@ -318,12 +318,12 @@ class Function(BaseModel):
 
     @staticmethod
     def _parse_parameters(entrypoint: Callable, strict: bool = False) -> Dict[str, Any]:
-        """Parse callable's type hints into JSON Schema parameters.
+        """Parse callable's type hints and docstring ``Args:`` into JSON Schema parameters.
 
         Shared logic for from_callable() and process_entrypoint().
         """
-        from inspect import signature
-        from agentica.utils.json_schema import get_json_schema
+        from inspect import getdoc, signature
+        from agentica.utils.json_schema import get_json_schema, parse_docstring_sections
 
         parameters: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
         sig = signature(entrypoint)
@@ -342,6 +342,11 @@ class Function(BaseModel):
         }
         parameters = get_json_schema(type_hints=param_type_hints, strict=strict)
 
+        _, arg_docs = parse_docstring_sections(getdoc(entrypoint))
+        for name, prop in parameters.get("properties", {}).items():
+            if isinstance(prop, dict) and "description" not in prop and name in arg_docs:
+                prop["description"] = arg_docs[name]
+
         if strict:
             parameters["required"] = [name for name in parameters["properties"] if name != "agent"]
         else:
@@ -355,6 +360,7 @@ class Function(BaseModel):
     @classmethod
     def from_callable(cls, c: Callable, strict: bool = False) -> "Function":
         from inspect import getdoc
+        from agentica.utils.json_schema import parse_docstring_sections
 
         function_name = normalize_tool_name(c.__name__)
         try:
@@ -363,12 +369,15 @@ class Function(BaseModel):
             logger.warning(f"Could not parse args for {function_name}: {e}", exc_info=True)
             parameters = {"type": "object", "properties": {}, "required": []}
 
+        clean_doc, _ = parse_docstring_sections(getdoc(c))
+        doc_description = clean_doc or getdoc(c)
+
         # Check for @tool decorator metadata
         metadata = getattr(c, "_tool_metadata", None)
         if metadata:
             return cls(
                 name=metadata["name"],
-                description=metadata.get("description") or getdoc(c),
+                description=metadata.get("description") or doc_description,
                 parameters=parameters,
                 entrypoint=_safe_validate_call(c),
                 show_result=metadata.get("show_result", False),
@@ -383,7 +392,7 @@ class Function(BaseModel):
 
         return cls(
             name=function_name,
-            description=getdoc(c),
+            description=doc_description,
             parameters=parameters,
             entrypoint=_safe_validate_call(c),
         )
@@ -391,6 +400,7 @@ class Function(BaseModel):
     def process_entrypoint(self, strict: bool = False):
         """Process the entrypoint and make it ready for use by an agent."""
         from inspect import getdoc
+        from agentica.utils.json_schema import parse_docstring_sections
         if self.skip_entrypoint_processing:
             return
         if self.entrypoint is None:
@@ -407,7 +417,8 @@ class Function(BaseModel):
         except Exception as e:
             logger.warning(f"Could not parse args for {self.name}: {e}", exc_info=True)
 
-        self.description = getdoc(self.entrypoint) or self.description
+        clean_doc, _ = parse_docstring_sections(getdoc(self.entrypoint))
+        self.description = clean_doc or getdoc(self.entrypoint) or self.description
         self.entrypoint = _safe_validate_call(self.entrypoint)
 
     def get_type_name(self, t: Type[T]):
@@ -970,10 +981,14 @@ class Tool:
                     f"Allowed: {sorted(allowed_schema_keys)}"
                 )
         try:
+            from agentica.utils.json_schema import parse_docstring_sections
+
             origin_type = "builtin" if (self.name and self.name.startswith("builtin_")) else "function"
+            raw_doc = inspect.getdoc(function)
+            clean_doc, _ = parse_docstring_sections(raw_doc)
             f = Function(
                 name=normalize_tool_name(function.__name__),
-                description=function.__doc__ or self.description,
+                description=clean_doc or raw_doc or self.description,
                 entrypoint=function,
                 concurrency_safe=concurrency_safe,
                 is_read_only=is_read_only,

@@ -930,16 +930,11 @@ class BuiltinFileTool(Tool):
         vision-capable model instead of reading its bytes here.
 
         Args:
-            file_path: File path for md/txt/py/etc. Absolute, relative, or `~`
-            offset: 0-based start line when not using tail. Negative = window
-                of that many lines at the end.
-            limit: Lines to return from offset (default 500). From-the-start
-                paging uses this, not tail.
-            tail: Last N lines (N>=1). Omit or 0 = read from the start with
-                offset/limit. Negative N is last |N| lines.
-            work_dir: Resolve relative ``file_path`` here. Omit to use this
-                session's directory. Use the path ``worktree`` returned for
-                another checkout; this does not move the session.
+            file_path: Path to the text file (absolute, `~`-prefixed, or relative to `work_dir`).
+            offset: 0-based start line when paging from the top (default 0). Negative N opens a window of the last |N| lines.
+            limit: Maximum number of lines to return from `offset` (default 500).
+            tail: Read the last N lines (N >= 1). Omit or pass 0 to page from the start with `offset`/`limit`.
+            work_dir: Working directory used to resolve a relative `file_path` (e.g. a worktree path). Omit to use the session directory.
 
         Returns:
             File content with line numbers
@@ -1067,20 +1062,18 @@ class BuiltinFileTool(Tool):
         return "\n".join(output_lines), total_lines, window[0][0], window[-1][0]
 
     async def write_file(self, file_path: str, content: str, work_dir: str = "") -> str:
-        """Writes content to a file in the filesystem.
+        """Create or fully replace a UTF-8 text file.
 
-        Creates a new file or overwrites an existing one entirely. Prefer
-        apply_patch for modifying existing files. Use write_file for new files
-        or whole-file rewrites, including HTML reports the user can open in a
-        browser (inline CSS is fine). Parent directories are created if needed.
+        Provide ``file_path`` before ``content`` in the arguments. Prefer
+        ``apply_patch`` for targeted edits to existing files; use ``write_file``
+        for new standalone files or whole-file rewrites (including HTML reports
+        with inline CSS). Parent directories are created automatically.
         Relative paths resolve against ``work_dir`` or the session directory.
 
         Args:
-            file_path: File path (relative or absolute). Examples: "tmp/script.py", "outputs/result.txt", "./tmp/main.py", use './tmp/' prefix file path for temporary files
-            content: File content to write
-            work_dir: Resolve relative ``file_path`` here. Omit to use this
-                session's directory. Use the path ``worktree`` returned for
-                another checkout; this does not move the session.
+            file_path: Path to write (absolute, `~`-prefixed, or relative to `work_dir`). Provide `file_path` before `content` in the arguments.
+            content: Full UTF-8 text content to write.
+            work_dir: Working directory used to resolve a relative `file_path` (e.g. a worktree path). Omit to use the session directory.
 
         Returns:
             Operation result message containing the actual absolute path of the file
@@ -1143,22 +1136,25 @@ class BuiltinFileTool(Tool):
         )
 
     async def apply_patch(self, patch: str, work_dir: str = "") -> str:
-        """Apply one context patch across one or more text files.
+        """Create, update, or delete UTF-8 text files in one atomic patch.
 
-        Use this for code edits, multi-hunk edits, and changes that span
-        multiple files. Each site in a file is one ``@@`` under the same
+        Prefer this over separate edits when a change spans multiple files or
+        separated regions. Each site in a file is one ``@@`` under the same
         Update File, not another call. One Update File per path. The same
         substitution in several files is one patch with several Update
         File hunks, not a shell rewriter.
         Related edits: parallel read_file, then one patch — not
         read-then-patch one file at a time.
-        Use write_file for new files or whole-file rewrites.
+        Use ``*** Add File: <path>`` (``+`` lines) to create a file alongside
+        related updates, ``*** Delete File: <path>`` to remove a file, or
+        ``write_file`` for a standalone whole-file write.
         Matching is per whole line. This tool cannot edit one oversized
         line (a JSONL record); write a unique-literal replace for that case.
 
         After ``@@``, the first character of each line is a space (keep an
-        existing line), ``-`` (delete), or ``+`` (insert). To add a comment,
-        emit a ``+`` line; a spaced copy of the file is a no-op.
+        existing line), ``-`` (delete), or ``+`` (insert); ``*** End of File``
+        optionally anchors the last hunk to the end of the file. To add a
+        comment, emit a ``+`` line; a spaced copy of the file is a no-op.
 
         *** Begin Patch
         *** Update File: app.py
@@ -1180,17 +1176,16 @@ class BuiltinFileTool(Tool):
         rewriting. Parallel ``read_file`` the files you will edit, then
         one patch covering all of them; do not reconstruct context from
         memory.
-        All paths are validated before any file is changed. A markdown
-        fence, heredoc, or omitted Begin/End around a File header is
-        accepted. A keep line that forgot its leading space is recovered
-        when it uniquely matches the current file; other hunk lines still
-        need ' ', '-', or '+'.
+        The whole patch is preflight-checked (syntax, hunk matching, paths)
+        before any file is modified, so a rejected patch changes nothing. A
+        markdown fence, heredoc, or omitted Begin/End around a File header is
+        accepted. A keep line that forgot its leading space is recovered when
+        it uniquely matches the current file; other hunk lines still need
+        ' ', '-', or '+'.
 
         Args:
-            patch: Begin/End Patch envelope. After @@: space keeps, '-' deletes, '+' inserts.
-            work_dir: Resolve relative patch paths here. Omit to use this
-                session's directory. Use the path ``worktree`` returned for
-                another checkout; this does not move the session.
+            patch: Patch text: start with *** Begin Patch and end with *** End Patch. Use *** Add File: path with + lines; *** Update File: path with @@ hunks (space-prefixed context, - removed, + added, optional *** End of File anchor); *** Delete File: path to delete. Relative paths resolve against work_dir or the session directory.
+            work_dir: Working directory for relative patch paths (e.g. a worktree path). Omit to use the session directory.
 
         Returns:
             Summary of files and line counts actually changed.
@@ -1400,9 +1395,8 @@ class BuiltinFileTool(Tool):
         directory holds.
 
         Args:
-            pattern: Glob pattern, e.g. "*.py", "**/*.md", "src/?*.js". May be
-                absolute ("/home/user/*.py") or relative to `path`.
-            path: Directory to search from (default: ".")
+            pattern: Glob pattern to match paths against (e.g. "*.py" in one directory, "**/*.py" or "src/**/*.ts" recursively). May be absolute or relative to `path`.
+            path: Directory to search in. Defaults to "." (the session directory).
 
         Returns:
             JSON list of sorted absolute file paths, empty when nothing matches.
@@ -1476,9 +1470,9 @@ class BuiltinFileTool(Tool):
         in the file. To filter by filename, pass a tighter ``path``.
 
         Args:
-            pattern: Regex to search for
-            path: File or directory to search (default: ".")
-            limit: Maximum matching lines (default: 100)
+            pattern: Regular expression to search for (ripgrep syntax).
+            path: File or directory to search. Defaults to "." (the session directory); pass a narrower directory or file path to scope results.
+            limit: Maximum number of matching lines to return (default 100).
 
         Returns:
             Search results as formatted string

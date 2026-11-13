@@ -224,6 +224,35 @@ def self_manage(
     return _do_self_manage(action, key, value, profile, confirm)
 
 
+_SELF_MANAGE_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": ["show", "set_config", "set_env", "check_upgrade", "upgrade", "install_skill"],
+            "description": "Management action to perform.",
+        },
+        "key": {
+            "type": "string",
+            "description": "For set_config: profile field name; for set_env: environment variable name.",
+        },
+        "value": {
+            "type": "string",
+            "description": "For set_config: new field value; for set_env: value (or '-' to delete); for install_skill: git URL or local path.",
+        },
+        "profile": {
+            "type": "string",
+            "description": "For set_config: target config.yaml profile name (must not be the active session profile).",
+        },
+        "confirm": {
+            "type": "boolean",
+            "description": "Set True to confirm upgrade or overwrite an existing skill in install_skill.",
+        },
+    },
+    "required": ["action"],
+}
+
+
 class SelfManageTool(Tool):
     """Self-management tool for Agent integration.
 
@@ -241,7 +270,11 @@ class SelfManageTool(Tool):
     def __init__(self, restart_hint: Optional[str] = None):
         self._restart_hint = restart_hint or DEFAULT_RESTART_HINT
         super().__init__(name="self_manage", description=_build_description(self._restart_hint))
-        self.register(self.self_manage, is_destructive=True)
+        self.register(
+            self.self_manage,
+            is_destructive=True,
+            parameters_override=_SELF_MANAGE_PARAMETERS,
+        )
 
     # No docstring on the method: Tool.register() falls back to self.description
     # (set in __init__ from _build_description()) when function.__doc__ is None,

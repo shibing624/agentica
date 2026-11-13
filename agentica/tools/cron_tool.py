@@ -465,6 +465,73 @@ def _action_update(
 
 # ============== Tool class wrapper for Agent(tools=[CronTool()]) ==============
 
+_CRONJOB_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": ["create", "list", "runs", "update", "pause", "resume", "remove", "run"],
+            "description": "Operation to perform.",
+        },
+        "job_id": {
+            "type": "string",
+            "description": "Target job id (required for update, pause, resume, remove, run; optional filter for runs).",
+        },
+        "name": {
+            "type": "string",
+            "description": "For create/update: short human-readable task title in the user's language.",
+        },
+        "prompt": {
+            "type": "string",
+            "description": "For create/update: self-contained instruction delivered on each scheduled run.",
+        },
+        "schedule": {
+            "type": "string",
+            "description": 'For create/update: cron expression ("30 7 * * *"), interval ("30m", "every 2h"), or one-shot ISO timestamp.',
+        },
+        "timezone": {
+            "type": "string",
+            "description": 'Optional IANA timezone for cron schedules (e.g. "Asia/Shanghai").',
+        },
+        "target": {
+            "type": "string",
+            "enum": list(JOB_TARGETS),
+            "description": "Destination conversation: 'session' (this session), 'new_once' (one dedicated session reused across runs), or 'new' (fresh session every run).",
+        },
+        "permission_mode": {
+            "type": "string",
+            "enum": list(PERMISSION_MODES),
+            "description": "Optional stricter permission tier for unattended runs ('ask' denies writes and mutating commands).",
+        },
+        "timeout_seconds": {
+            "type": "number",
+            "description": "Optional per-run timeout in seconds.",
+        },
+        "max_retries": {
+            "type": "number",
+            "description": "Optional retry count on failed runs.",
+        },
+        "retry_delay_ms": {
+            "type": "number",
+            "description": "Optional delay between retries in milliseconds.",
+        },
+        "reason": {
+            "type": "string",
+            "description": "For pause: short explanation shown to the user for why the job paused.",
+        },
+        "deliver": {
+            "type": "string",
+            "description": "Delivery channel ('local').",
+        },
+        "user_id": {
+            "type": "string",
+            "description": "Optional owner scope (ignored when bound by the gateway).",
+        },
+    },
+    "required": ["action"],
+}
+
+
 class CronTool(Tool):
     """Cron job management tool for Agent integration.
 
@@ -491,7 +558,11 @@ class CronTool(Tool):
         super().__init__(name="cronjob", description=_CRONJOB_DESCRIPTION)
         self._job_runner = job_runner
         self._owner = owner
-        self.register(self.cronjob, is_destructive=True)
+        self.register(
+            self.cronjob,
+            is_destructive=True,
+            parameters_override=_CRONJOB_PARAMETERS,
+        )
         # The immediate-run path spawns a sub-agent in a worker thread via its
         # own asyncio.run() loop, which the outer asyncio.wait_for() cannot
         # cancel — a 120s outer timeout would orphan that thread (still burning

@@ -180,6 +180,12 @@ class BuiltinDelegateTool(Tool):
         self._session_profile = session_profile
         self._profile_lookup = profile_lookup or profile_for_model
         self.register(self.delegate, is_destructive=True)
+        delegate_fn = self.functions["delegate"]
+        delegate_fn.process_entrypoint()
+        props = delegate_fn.parameters["properties"]
+        ordered = [k for k in ("label", "task", "work_dir", "model") if k in props]
+        delegate_fn.parameters["properties"] = {k: props[k] for k in ordered}
+        delegate_fn.skip_entrypoint_processing = True
 
     def refresh_session_models(
         self,
@@ -210,45 +216,30 @@ class BuiltinDelegateTool(Tool):
             self._model_provider = provider
 
     async def delegate(self, task: str, label: str = "", work_dir: str = "", model: str = "") -> str:
-        """Runs a task in a separate agentica session, in parallel with your own work.
+        """Delegate a large, self-contained task to a separate agentica OS process running in parallel.
 
-        The worker is a full agentica run in its own OS process: its own context
-        window, its own model, its own tools. It starts immediately and you are
-        not blocked — start several, keep working, and each one's report arrives
-        when it finishes. Call wait(id="term_N") when your next step
-        actually needs a worker's answer.
+        Provide ``label`` before the task instruction in the arguments. The worker runs in
+        its own OS process with its own context window, model, and tools. It
+        starts immediately without blocking your turn, and its final report is
+        delivered back when it finishes; call ``wait(id="term_N")`` only when
+        your next step actually needs its answer before continuing.
 
-        Use it for a chunk of work that is independent of what you are doing and
-        big enough to deserve its own context window: build and verify a feature
-        in another checkout, run a long migration end to end, do the same review
-        against three services at once.
+        Use this for independent work big enough to deserve its own context
+        window (e.g. building and verifying a feature in another checkout, a
+        long end-to-end migration, or parallel multi-service audits). Do NOT
+        use it for work you can finish in a few tool calls yourself, a quick
+        in-process lookup, or anything requiring user interaction — the worker
+        runs headless with no terminal and cannot ask anyone anything.
 
-        Do NOT use it for: anything you can do in a few tool calls yourself;
-        a cheap in-process search; or work that needs to ask the user
-        something — the worker has no terminal and cannot ask anyone anything.
-
-        The task text is all the worker gets. It cannot see your conversation, so
-        state the goal, the files or directory involved, and what "done" means.
+        The task text is all the worker sees: it does not share this
+        conversation's context, so state the goal, target files or directory,
+        and concrete completion criteria.
 
         Args:
-            task: The complete self-contained instruction for the worker.
-            label: A few words naming the task, for the user's process list and
-                the completion report. Defaults to the start of the task.
-            work_dir: Directory the worker runs in. Defaults to yours — set it
-                when the point of delegating is to work on another checkout.
-            model: Model for the worker, as "provider/name" (e.g.
-                "deepseek/deepseek-chat") or just a name to keep your provider.
-                A value that is already your model id — including ids that
-                contain a slash, like "openai/glm-5" — is kept whole; only
-                when that string is not an id does it split on the first "/".
-                Only two models exist for you: your own, and the auxiliary one
-                (``--auxiliary_model_name``). Naming anything else is refused —
-                the model decides the endpoint and the bill, and changing it is
-                the user's call, not a per-call one, in the CLI and the SDK
-                alike. Omit it to inherit your own model, which is what you
-                normally want. Both available models are launched on the
-                session's profile, so the worker stays on the endpoint the user
-                chose.
+            label: Short 3-6 word display name for this delegated task (in the user's language), shown in the process list and completion report.
+            task: Complete, self-contained instruction for the worker, including goal, relevant paths, and what "done" means.
+            work_dir: Working directory for the worker process. Defaults to this session's directory; set it when working in another checkout.
+            model: Optional worker model id (or "provider/id"). Omit to inherit this session's main model; only this session's main model or auxiliary model is accepted (any other model is refused).
 
         Returns:
             str: The worker's id and how to reach its result, or why it was refused.

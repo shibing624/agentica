@@ -87,7 +87,11 @@ class BuiltinTaskTool(Tool):
         # "launch independent tasks in one message to run them in parallel"
         # (stated in this tool's own system prompt) a lie.
         self.register(self.task, concurrency_safe=True, is_read_only=True)
-        self.functions["task"].manages_own_timeout = True
+        task_fn = self.functions["task"]
+        task_fn.manages_own_timeout = True
+        task_fn.process_entrypoint()
+        task_fn.parameters["properties"]["model_tier"]["enum"] = ["auxiliary", "main"]
+        task_fn.skip_entrypoint_processing = True
 
     def _free_slot(self) -> asyncio.Semaphore:
         """Bound how many subagents this agent runs at once.
@@ -195,20 +199,16 @@ class BuiltinTaskTool(Tool):
         resume_from_run_id: Optional[str] = None,
         model_tier: Optional[str] = None,
     ) -> str:
-        """Spawn a subagent. See the "task Tool" section for when this applies.
+        """Delegate an open-ended read-only investigation to a subagent in its own context window; returns one summary, not intermediate steps. See the "task Tool" section for available types and when this applies.
 
         Args:
-            description: What to investigate. Brief the subagent like a
-                colleague who has no prior context.
-            subagent_type: One of the type ids listed in that section
-                (default ``explore``).
-            timeout: Wall-clock limit in seconds for this call; defaults to
-                the type's timeout in the table. Raise it for broad work.
-            max_turns: Per-call ReAct turn budget override.
-            system_prompt_override: Replacement system prompt for this call.
-            resume_from_run_id: ``run_id`` of a prior partial run to resume.
-            model_tier: Optional ``"auxiliary"`` (default) or ``"main"`` (use
-                the parent main model for complex tasks).
+            description: Complete, self-contained task prompt for the subagent. It does not share this conversation's context, so include the goal, background, starting paths, and ask for findings as path:line.
+            subagent_type: Subagent type id from the "task Tool" table (default "explore").
+            timeout: Wall-clock limit in seconds for this call; defaults to the type's configured timeout. Raise up front for broad multi-module investigations.
+            max_turns: Optional per-call ReAct turn budget override.
+            system_prompt_override: Optional replacement system prompt for this call.
+            resume_from_run_id: run_id of a prior partial subagent run to resume at most once.
+            model_tier: Model tier override: "auxiliary" (fast/cheap default for fact-gathering) or "main" (parent's main model for complex analysis).
         """
         if self._parent_agent is None:
             return json.dumps({

@@ -23,6 +23,10 @@ class PeerMessagingTool(Tool):
         self._peers = peer_session
         self.register(self.list_agents, is_read_only=True, concurrency_safe=True, is_destructive=False)
         self.register(self.send_message, concurrency_safe=True, is_destructive=False)
+        send_fn = self.functions["send_message"]
+        send_fn.process_entrypoint()
+        send_fn.parameters["properties"]["delivery"]["enum"] = ["steer", "queue"]
+        send_fn.skip_entrypoint_processing = True
 
     async def list_agents(self) -> str:
         """Lists the user's other live agent sessions — each on its own work.

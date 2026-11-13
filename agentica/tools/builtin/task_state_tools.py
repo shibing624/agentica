@@ -39,12 +39,42 @@ class BuiltinTodoTool(Tool):
       for N turns (see Runner._inject_todo_reminder)
     """
 
+    _TODOS_PARAMETERS = {
+        "type": "object",
+        "properties": {
+            "todos": {
+                "type": "array",
+                "description": "The COMPLETE task list, replacing any previous list.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "What the step is — a short imperative line.",
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "pending (not started) | in_progress (active now) | completed (done and verified).",
+                        },
+                    },
+                    "required": ["content", "status"],
+                },
+            },
+        },
+        "required": ["todos"],
+    }
+
     def __init__(self):
         """Initialize BuiltinTodoTool."""
         super().__init__(name="builtin_todo_tool")
         self._agent: Optional["Agent"] = None
         self._todos: List[Dict[str, Any]] = []
-        self.register(self.write_todos, is_destructive=True)
+        self.register(
+            self.write_todos,
+            is_destructive=True,
+            parameters_override=self._TODOS_PARAMETERS,
+        )
 
     def set_agent(self, agent: "Agent") -> None:
         """Receive agent reference so todos are stored on the agent."""
@@ -181,6 +211,12 @@ class BuiltinMemoryTool(Tool):
         self.register(self.save_memory, is_destructive=True)
         self.register(self.forget_memory, is_destructive=True)
         self.register(self.search_memory, concurrency_safe=True, is_read_only=True)
+        save_fn = self.functions["save_memory"]
+        save_fn.process_entrypoint()
+        save_fn.parameters["properties"]["memory_type"]["enum"] = [
+            "user", "feedback", "project", "reference",
+        ]
+        save_fn.skip_entrypoint_processing = True
 
     def set_workspace(self, workspace, work_dir: Optional[str] = None) -> None:
         """Set the workspace for persistence and the agent's work_dir.
@@ -229,18 +265,17 @@ class BuiltinMemoryTool(Tool):
         it and search would return a duplicate). Search first; update an
         existing entry rather than adding a near-duplicate.
 
-        title: short searchable name, e.g. "user_role".
-        content: what to remember and how to apply it; for feedback lead with
-        the rule, then why.
-        memory_type: user (who the user is, preferences), feedback (a
-        correction or a confirmed approach), project (non-derivable work
-        context, measured results), reference (external systems, env, paths
-        outside the repo).
-        description: one line saying when this memory is relevant, with the
-        keywords a later search would use; it becomes the index hook.
-        replaces: file name of an existing entry (as shown in MEMORY.md, e.g.
-        "user_prefer_uv.md") that this one corrects or supersedes; that entry
-        is removed. Use it when new information contradicts a saved memory.
+        Categories (``memory_type``): ``user`` (who the user is, preferences),
+        ``feedback`` (a correction or confirmed approach), ``project``
+        (non-derivable work context, measured results), ``reference`` (external
+        systems, env, paths outside the repo).
+
+        Args:
+            title: Short searchable name, e.g. "user_role".
+            content: What to remember and how to apply it; for feedback lead with the rule, then why.
+            memory_type: Category: "user" | "feedback" | "project" (default) | "reference".
+            description: One-line index hook stating when this memory is relevant, with keywords a later search would use.
+            replaces: File name of an existing entry in MEMORY.md (e.g. "user_prefer_uv.md") that this entry supersedes and deletes.
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured. Memory cannot be saved.")
@@ -277,9 +312,11 @@ class BuiltinMemoryTool(Tool):
     async def forget_memory(self, filename: str) -> str:
         """Delete a long-term memory entry the user asked to forget, or one that is wrong.
 
-        filename: the entry's file name as shown in MEMORY.md, e.g.
-        "project_gateway_port.md". To correct an entry instead, call
-        save_memory with replaces=<filename>.
+        To correct an entry instead of deleting it, call ``save_memory`` with
+        ``replaces=<filename>``.
+
+        Args:
+            filename: Entry file name as shown in MEMORY.md, e.g. "project_gateway_port.md".
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")
@@ -308,6 +345,12 @@ class BuiltinMemoryTool(Tool):
         injected into the system prompt (title + hook + path).
         Does not search this session's JSONL or its notes file; use
         search_session for those.
+
+        Args:
+            query: Search keywords or phrase.
+            limit: Max entries to return (default 10).
+            max_chars: Max total characters across returned entries (default 6000).
+            conversation_days: Days of recent conversation archives to include (default 7).
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")

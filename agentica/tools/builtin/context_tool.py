@@ -78,6 +78,7 @@ _SEARCH_SCHEMA = {
             "description": _SEARCH_SESSION_ID_DESC,
         },
     },
+    "required": [],
 }
 
 # Empty-query listing for scope=project: newest other sessions x their last asks.

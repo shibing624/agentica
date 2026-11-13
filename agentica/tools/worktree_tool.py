@@ -20,6 +20,12 @@ class WorktreeTool(Tool):
         super().__init__(name="worktree_tool")
         self._binder = binder
         self.register(self.worktree, is_destructive=False)
+        wt_fn = self.functions["worktree"]
+        wt_fn.process_entrypoint()
+        wt_fn.parameters["properties"]["action"]["enum"] = [
+            "status", "new", "merge", "remove",
+        ]
+        wt_fn.skip_entrypoint_processing = True
 
     async def worktree(self, action: str = "status", name: str = "", base: str = "") -> str:
         """Create a git worktree of this repository, or dispose of one.

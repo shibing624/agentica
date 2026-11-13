@@ -7,9 +7,84 @@ Used by ``Function.from_callable()`` (tools/base.py) to auto-generate the
 ``parameters`` block sent to the LLM as a tool definition. Not a JSON parser
 -- for parsing JSON OUT of LLM text responses see ``json_parse.py``.
 """
-from typing import Any, Dict, Union, get_args, get_origin, Optional, Literal
+import re
+from typing import Any, Dict, Tuple, Union, get_args, get_origin, Optional, Literal
 
 from agentica.utils.log import logger
+
+_SECTION_HEADER_RE = re.compile(
+    r"^(Args|Arguments|Parameters|Returns|Return|Raises|Yields):\s*$"
+)
+_ARG_ENTRY_RE = re.compile(
+    r"^\*{0,2}([A-Za-z_]\w*)(?:\s*\([^)]*\))?\s*:\s*(.*)$"
+)
+
+
+def parse_docstring_sections(doc: Optional[str]) -> Tuple[str, Dict[str, str]]:
+    """Split a cleaned (``inspect.getdoc``) docstring into body prose and per-arg descriptions.
+
+    Extracts Google-style ``Args:`` / ``Arguments:`` / ``Parameters:`` entries
+    into ``{param_name: description}`` and strips ``Args:`` / ``Returns:`` /
+    ``Raises:`` / ``Yields:`` blocks from the top-level tool description so
+    argument docs live on ``parameters.properties.<name>.description`` rather
+    than being duplicated as raw docstring boilerplate.
+    """
+    if not doc:
+        return "", {}
+
+    body_lines = []
+    arg_parts: Dict[str, list] = {}
+    section: Optional[str] = None
+    arg_indent: Optional[int] = None
+    current_arg: Optional[str] = None
+
+    for raw_line in doc.splitlines():
+        stripped = raw_line.strip()
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+
+        if indent == 0 and stripped:
+            header = _SECTION_HEADER_RE.match(stripped)
+            if header:
+                kind = header.group(1)
+                section = "args" if kind in ("Args", "Arguments", "Parameters") else "skip"
+                arg_indent = None
+                current_arg = None
+                continue
+            section = None
+            arg_indent = None
+            current_arg = None
+
+        if section is None:
+            body_lines.append(raw_line)
+            continue
+
+        if section == "skip":
+            continue
+
+        # Inside Args:
+        if not stripped:
+            continue
+        if arg_indent is None:
+            arg_indent = indent
+        if indent <= arg_indent:
+            entry = _ARG_ENTRY_RE.match(stripped)
+            if entry:
+                arg_indent = indent
+                current_arg = entry.group(1)
+                first = entry.group(2).strip()
+                arg_parts[current_arg] = [first] if first else []
+                continue
+        if current_arg is not None:
+            arg_parts[current_arg].append(stripped)
+
+    body = "\n".join(body_lines).strip()
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    arg_docs = {
+        name: " ".join(part for part in parts if part)
+        for name, parts in arg_parts.items()
+        if any(parts)
+    }
+    return body, arg_docs
 
 
 def get_json_type_for_py_type(arg: str) -> str:

@@ -21,7 +21,10 @@ Supports BOTH bare and parameterized usage (since v1.3.6):
     agent = Agent(tools=[search])
 """
 from functools import wraps
+import inspect
 from typing import Callable, Optional, Union
+
+from agentica.utils.json_schema import parse_docstring_sections
 
 
 def _apply_metadata(
@@ -42,9 +45,14 @@ def _apply_metadata(
 
     Factored out so we can call it from both bare and parameterized paths.
     """
+    if description is None:
+        clean_doc, _ = parse_docstring_sections(inspect.getdoc(func))
+        resolved_description = clean_doc or (func.__doc__ or "").strip()
+    else:
+        resolved_description = description
     metadata = {
         "name": name or func.__name__,
-        "description": description or (func.__doc__ or "").strip(),
+        "description": resolved_description,
         "show_result": show_result,
         "stop_after_tool_call": stop_after_tool_call,
         "concurrency_safe": concurrency_safe,

@@ -91,6 +91,14 @@ class GoalTool(Tool):
         self._work_dir = work_dir
         self.register(self.verify_completion)
         self.register(self.update_goal)
+        verify_fn = self.functions["verify_completion"]
+        verify_fn.process_entrypoint()
+        verify_fn.parameters["properties"]["mode"]["enum"] = ["test", "criteria"]
+        verify_fn.skip_entrypoint_processing = True
+        update_fn = self.functions["update_goal"]
+        update_fn.process_entrypoint()
+        update_fn.parameters["properties"]["status"]["enum"] = ["complete", "paused"]
+        update_fn.skip_entrypoint_processing = True
 
     # ------------------------------------------------------------------ helpers
     def _load_active_payload(self):
