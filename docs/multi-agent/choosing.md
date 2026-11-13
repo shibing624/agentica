@@ -27,9 +27,6 @@ Do you need more than one agent?
           |     |
           |     +-- Does the helper need isolation, tool permissions, or timeout?
           |     |     Use Subagent (same as the CLI `task` tool)
-          |     |
-          |     +-- Do multiple peers need to work in parallel or autonomously split work?
-          |           Use Swarm as an advanced recipe
           |
           +-- Interactive CLI session
                 |
@@ -45,7 +42,7 @@ Do you need more than one agent?
 
 ## Default Recommendation
 
-Start with `Agent.as_tool()` for lightweight composition and `Workflow` for deterministic pipelines. Use `Subagent` when the child run needs a permission boundary, separate runtime state, or task timeout. Use `Swarm` only when parallel peer collaboration is the product requirement, not just because a task has multiple steps.
+Start with `Agent.as_tool()` for lightweight composition and `Workflow` for deterministic pipelines. Use `Subagent` when the child run needs a permission boundary, separate runtime state, or task timeout.
 
 In the CLI: default to `task`; reach for `delegate` only when the work deserves its own context window or another checkout; use peer messaging to inform another session, not to hire a worker.
 
@@ -58,7 +55,6 @@ In the CLI: default to `task`; reach for `delegate` only when the work deserves 
 | `Agent.as_tool()` | Parent agent calls focused helpers | LLM chooses when to call | Medium | Low |
 | `Workflow` | Fixed pipelines and mixed Python/LLM steps | Developer controls order | High | Low |
 | `Subagent` | Isolated delegated tasks | Runtime enforces tool/depth/time limits | Medium | Medium |
-| `Swarm` | Autonomous or parallel peer work | Coordinator prompt controls split | Lower | Higher |
 
 ### CLI session tools
 
@@ -75,6 +71,5 @@ In the CLI: default to `task`; reach for `delegate` only when the work deserves 
 - If a plain Python function can express the step, keep it in `Workflow` instead of asking an LLM to coordinate it.
 - If the only reason for a child agent is specialization, try `Agent.as_tool()` first.
 - If a child must not inherit all parent tools, use `Subagent` with explicit `allowed_tools` or `denied_tools`.
-- If you cannot describe why workers must coordinate autonomously, do not use `Swarm`.
-- Scheduled daily tasks should call a bounded agent preset through the cron scheduler, not a free-form `Swarm`.
+- Scheduled daily tasks should call a bounded agent preset through the cron scheduler.
 - In the CLI: do not `delegate` what a few tool calls or several parallel `task` calls can finish; do not use peer messaging as a substitute for `delegate` when you need a report back.

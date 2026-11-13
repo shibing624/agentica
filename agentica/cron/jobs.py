@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from agentica.agent.permissions import validate_permission_mode
 from agentica.config import AGENTICA_CRON_DIR
+from agentica.ticket import new_ticket_id
 from agentica.cron.types import (
     Schedule,
     AtSchedule,
@@ -94,6 +95,11 @@ class CronJob:
     retry_delay_ms: int = 60000
     target: str = "new_once"
     session_id: str = ""
+    # Dispatch identity for this automation (``agentica.ticket``), minted when
+    # the job is created and inherited by every run. One job is one objective;
+    # the runs are its occurrences, and a session a run creates records the same
+    # value so the automation and its conversations are one lookup apart.
+    ticket_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -121,6 +127,7 @@ class CronJob:
             "retry_delay_ms": self.retry_delay_ms,
             "target": self.target,
             "session_id": self.session_id,
+            "ticket_id": self.ticket_id,
         }
 
     @classmethod
@@ -152,6 +159,9 @@ class CronJob:
             retry_delay_ms=data.get("retry_delay_ms", 60000),
             target=data.get("target", "new_once"),
             session_id=data.get("session_id", ""),
+            # Jobs written before tickets existed stay empty = unmanaged; they
+            # are not back-filled with a made-up id.
+            ticket_id=str(data.get("ticket_id") or ""),
         )
 
     def delivery_session_id(self) -> str:
@@ -556,6 +566,7 @@ def create_job(
         retry_delay_ms=retry_delay_ms,
         target=target,
         session_id=(session_id or "") if target == "session" else "",
+        ticket_id=new_ticket_id(),
     )
 
     jobs = _load_jobs()

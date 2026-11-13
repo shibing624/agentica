@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Callable, List, Optional
 
 from agentica.model.defaults import model_display_label, provider_env_var, provider_for_model
 from agentica.config.profiles import get_profiles
+from agentica.ticket import TICKET_ENV, current_ticket_id
 from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -334,6 +335,13 @@ class BuiltinDelegateTool(Tool):
             argv += ["--work_dir", target_dir]
 
         command = " ".join(shlex.quote(part) for part in argv)
+        # The OS process and its environment are the only channel that survives
+        # ``exec``, so the child inherits this turn's dispatch ticket through
+        # ``AGENTICA_TICKET_ID`` — its transcript, its own background jobs and
+        # anything it delegates further will all name the same dispatch.
+        ticket = current_ticket_id()
+        if ticket:
+            child_env[TICKET_ENV] = ticket
         item = self._registry.start(
             command,
             cwd=target_dir,

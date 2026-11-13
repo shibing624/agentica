@@ -36,6 +36,27 @@ def job_turn_meta(context: Dict[str, Any]) -> Dict[str, Any]:
     return {"cron_job": {"id": context.get("job_id") or "", "name": context.get("job_name") or ""}}
 
 
+def _prompt_open_terminal(peer: Any, prompt: str, session_id: str) -> Optional[str]:
+    """Run this run's turn in the terminal that has the conversation open.
+
+    ``None`` means the terminal could not take it (no socket, no token, RPC
+    failed) and the caller should fall back. Any *answer* — including "still
+    working on it" or "cancelled there" — is a result: the terminal did accept
+    the turn, so falling back would run the same prompt twice.
+    """
+    from agentica.cli.attach import prompt_live_session
+
+    result = prompt_live_session(peer, prompt, session_id=session_id)
+    if result is None:
+        return None
+    answer = str(result.get("agenticaAnswer") or "").strip()
+    if answer:
+        return answer
+    if result.get("stopReason") == "cancelled":
+        return f"The open terminal [{peer.name}] cancelled this run."
+    return f"Handed to the open terminal [{peer.name}]; it has not reported a result yet."
+
+
 def live_cli_peer(session_id: str):
     """The live terminal serving ``session_id``, or None.
 
@@ -75,6 +96,15 @@ class CliAgentRunner:
         job_name = (context.get("job_name") or "").strip()
         peer = live_cli_peer(session_id)
         if peer is not None:
+            # A terminal owns this conversation, so this run must not write its
+            # log — two writers interleave one JSONL. Ask that terminal to run
+            # the turn over the same attach socket IM uses, which also hands the
+            # answer back: the mailbox handoff this replaces could only say the
+            # prompt had been handed over, so a scheduled run landing on an open
+            # terminal produced an automation record with no output at all.
+            answer = await asyncio.to_thread(_prompt_open_terminal, peer, prompt, session_id)
+            if answer is not None:
+                return CronRunOutput(content=answer, session_id=session_id)
             from agentica.peers import send_message
 
             send_message(peer, text=prompt, from_name="cron", from_peer_id="cron", from_kind="agent")
@@ -99,6 +129,7 @@ class CliAgentRunner:
             agent._session_log.set_name(job_name[:60])
         response = await agent.run(message=prompt, config=RunConfig(
             source=RunSource.cron, automated_input=True, input_meta=job_turn_meta(context),
+            ticket_id=context.get("ticket_id") or None,
         ))
         # RunResponse.content is the final text; fall back to "" for safety.
         return CronRunOutput(

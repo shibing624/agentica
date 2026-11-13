@@ -1142,3 +1142,73 @@ class TestSessionAnswer:
         finally:
             server.stop()
 
+
+
+class TestTheSharedClient:
+    """The RPC client now lives in the core package next to the server.
+
+    It was in ``agentica_gateway``, which is why the cron daemon (a core caller)
+    had to hand prompts over through the file mailbox instead: it cannot import
+    the gateway. The client therefore has to work against the *real* server, not
+    a stub — the framing and auth handshake are the whole contract.
+    """
+
+    def test_a_real_client_round_trips_a_prompt(self, tmp_path):
+        import types
+
+        from agentica.cli.attach import prompt_live_session
+
+        session = _Session()
+        server, injected, _ = _server(tmp_path, session=session)
+        try:
+            _run_one_turn_soon(session)
+            peer = types.SimpleNamespace(
+                peer_id="abcd1234",
+                attach_socket=str(server.path),
+                session_id="sess-1234",
+                name="terminal-1",
+            )
+            result = prompt_live_session(peer, "hello there", timeout=15.0)
+        finally:
+            server.stop()
+
+        assert result is not None, "a listening server with a valid token must answer"
+        assert injected == ["hello there"]
+        assert result.get("stopReason") == "end_turn"
+
+    def test_no_socket_is_a_soft_failure_the_caller_can_fall_back_from(self):
+        import types
+
+        from agentica.cli.attach import prompt_live_session
+
+        peer = types.SimpleNamespace(peer_id="nobody", attach_socket=None, session_id="s")
+        assert prompt_live_session(peer, "hello") is None
+
+    def test_a_missing_token_is_a_soft_failure(self, tmp_path):
+        import types
+
+        from agentica.cli.attach import prompt_live_session
+
+        peer = types.SimpleNamespace(
+            peer_id="nobody",
+            attach_socket=str(tmp_path / "gone.sock"),
+            session_id="s",
+        )
+        assert prompt_live_session(peer, "hello") is None
+
+    def test_a_dead_socket_is_a_soft_failure_not_a_crash(self, tmp_path):
+        import socket as _socket
+        import types
+
+        from agentica.cli.attach import prompt_live_session
+
+        # A short path: AF_UNIX cannot take the deep pytest tmp dir, which is
+        # why the attach dir has its own override (see ``isolated_root``).
+        sock = attach.attach_dir() / "dead.sock"
+        listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        listener.bind(str(sock))
+        listener.close()  # bound but nobody listening
+        peer = types.SimpleNamespace(
+            peer_id="abcd1234", attach_socket=str(sock), session_id="s",
+        )
+        assert prompt_live_session(peer, "hello", timeout=1.0) is None

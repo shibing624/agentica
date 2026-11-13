@@ -31,7 +31,9 @@ from agentica.memory.models import AgentRun
 from agentica.memory.session_log import local_turn_stamp
 from agentica.model.message import Message
 from agentica.peers import DELIVERY_QUEUE, DELIVERY_STEER, PeerMessageRefused
+from agentica.run.config import RunConfig
 from agentica.run.response import RunResponse
+from agentica.ticket import current_ticket_id
 
 # ==================== Command Handlers ====================
 
@@ -586,13 +588,66 @@ def _cmd_btw(ctx: CommandContext, cmd_args: str = ""):
 
 
 
+def _stop_session_jobs(ctx: CommandContext, target: str) -> int:
+    """Stop one (or every) background job for this session, across processes.
+
+    Counts only jobs that were actually running, so ``/stop`` cannot claim it
+    stopped something that had already finished — the old in-memory path got
+    that right by accident and the durable path has to keep it.
+    """
+    from agentica.tools.background_processes import (
+        load_session_job_views,
+        stop_all_session_jobs,
+        stop_session_job,
+    )
+
+    registry = ctx.background_processes
+    records_dir = getattr(registry, "records_dir", None)
+    user_id = getattr(registry, "user_id", None)
+    if registry is None and records_dir is None:
+        return 0
+    if target.strip().lower() in {"all", "*"}:
+        return len(stop_all_session_jobs(records_dir, registry, user_id=user_id))
+    running_before = {
+        str(v.get("id"))
+        for v in load_session_job_views(records_dir, registry)
+        if v.get("status") == "running"
+    }
+    if not running_before:
+        return 0
+    view = stop_session_job(records_dir, target, registry, user_id=user_id)
+    if view is None or view.get("status") != "stopped":
+        return 0
+    return 1 if str(view.get("id")) in running_before else 0
+
+
+def _session_job_views(ctx: CommandContext, *, include_finished: bool = True):
+    """This session's background jobs, read the way every other surface reads them.
+
+    ``/ps`` used to answer from the registry's in-memory list alone. That list
+    only contains jobs *this process* started, so a job started by the gateway,
+    by the IM bridge or by a second CLI on the same session was invisible here
+    while Desktop/Web/IM listed it — one question with two answers, and the CLI's
+    was the strictly smaller one. ``load_session_job_views`` merges memory with
+    the per-session records on disk; it is the single read model.
+    """
+    from agentica.tools.background_processes import load_session_job_views
+
+    registry = ctx.background_processes
+    records_dir = getattr(registry, "records_dir", None)
+    if registry is None and records_dir is None:
+        return []
+    views = load_session_job_views(records_dir, registry)
+    if include_finished:
+        return views
+    return [v for v in views if v.get("status") == "running"]
+
+
 def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
     """List background agent tasks and background terminal commands."""
     con = get_console()
     active_agents = list(ctx.bg_tasks.items())
-    terminals = []
-    if ctx.background_processes is not None:
-        terminals = ctx.background_processes.list(include_finished=False)
+    terminals = _session_job_views(ctx, include_finished=False)
 
     if not active_agents and not terminals:
         con.print("  [dim]No active background tasks.[/dim]")
@@ -601,22 +656,24 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
 
     if terminals:
         con.print(f"  [cyan]Background terminals ({len(terminals)}):[/cyan]")
-        for item in terminals:
-            kind = " [magenta]delegated session[/magenta]" if item.kind == "delegate" else ""
+        for view in terminals:
+            kind = " [magenta]delegated session[/magenta]" if view.get("kind") == "delegate" else ""
             con.print(
-                f"    #{item.num} [dim]{item.id}[/dim] pid={item.pid} "
-                f"elapsed={item.elapsed}{kind}"
+                f"    #{view.get('num')} [dim]{view.get('id')}[/dim] pid={view.get('pid')} "
+                f"elapsed={view.get('elapsed')}{kind}"
             )
             # Full command on its own lines — /ps is the inspection surface,
             # so never truncate here (preview is only for one-line status UI).
             # A delegated session shows its task instead: its command line is a
             # `python -m agentica.cli.main --query <the whole task>`.
-            body = item.label if item.kind == "delegate" else (item.command or "")
-            if item.kind != "delegate" and item.label:
-                con.print(f"      [bold]{item.label}[/bold]")
+            label = view.get("label") or ""
+            command = view.get("command") or ""
+            body = label if view.get("kind") == "delegate" else command
+            if view.get("kind") != "delegate" and label and label != command:
+                con.print(f"      [bold]{label}[/bold]")
             for line in body.splitlines() or [""]:
                 con.print(f"      {line}")
-            con.print(f"      [dim]log: {item.log_path}[/dim]")
+            con.print(f"      [dim]log: {view.get('log_path')}[/dim]")
 
     if active_agents:
         con.print(f"  [cyan]Background agents ({len(active_agents)}):[/cyan]")
@@ -668,6 +725,12 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
         # Keep only last 10 messages to avoid blowing up context
         context_snapshot = context_snapshot[-10:]
 
+    # This thread does not inherit the turn's contextvars, so the dispatch it
+    # belongs to has to be handed over explicitly — otherwise the background
+    # session would start a new ticket and its records would not line up with
+    # the conversation that asked for it.
+    dispatch_ticket = current_ticket_id()
+
     def _run_bg():
         bg_config = dict(agent_config)
         bg_config["session_id"] = _generate_session_id()
@@ -699,7 +762,10 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
 
         result_text = ""
         try:
-            response = bg_agent.run_sync(prompt)
+            response = bg_agent.run_sync(
+                prompt,
+                config=RunConfig(ticket_id=dispatch_ticket),
+            )
             result_text = response.content if response else ""
         except Exception as e:
             if bg_agent._cancelled:
@@ -754,11 +820,7 @@ def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
         # agent object hasn't been constructed yet (the thread is still starting)
         # still counts — otherwise /ps lists one and /stop says there are none.
         running_agents = list(ctx.bg_tasks)
-        running_terms = (
-            ctx.background_processes.list(include_finished=False)
-            if ctx.background_processes is not None
-            else []
-        )
+        running_terms = _session_job_views(ctx, include_finished=False)
         if not running_agents and not running_terms:
             con.print("  [dim]No active background tasks.[/dim]")
             con.print("  [dim]Ctrl+C interrupts the current run; /stop is only for background tasks.[/dim]")
@@ -781,8 +843,10 @@ def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
             agent.cancel()
             stopped_agents += 1
 
-    if ctx.background_processes is not None:
-        stopped_terms = len(ctx.background_processes.stop(target))
+    # Same read model as /ps, and the same stop path the gateway and IM use:
+    # stopping a job this process did not start is the whole point of a durable
+    # record, so a cross-process job must be stoppable from here too.
+    stopped_terms = _stop_session_jobs(ctx, target)
 
     if stopped_agents == 0 and stopped_terms == 0:
         con.print(f"  [dim]No running background task matched '{target}'.[/dim]")

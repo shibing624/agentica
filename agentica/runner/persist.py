@@ -173,6 +173,17 @@ class PersistMixin:
             meta.update(agent._run_input_meta)
         if agent.run_context is not None:
             session_log.set_source(agent._run_channel or agent.run_context.source.value)
+        # One sidecar field per session: the ticket its first turn ran under.
+        # Written here, next to ``source``, because this is the one place both
+        # the turn's identity and the log are in hand; every later turn inherits
+        # it rather than overwriting (``set_ticket_id`` is a no-op once set), so
+        # "/resume this session" and "the background job it started" agree on
+        # what "the same job" means. See ``agentica/ticket.py``.
+        # ``getattr``: this method is also exercised with duck-typed agents in
+        # tests and by callers that predate the field.
+        ticket_id = getattr(agent, "_run_ticket_id", None)
+        if ticket_id:
+            session_log.set_ticket_id(ticket_id)
         session_log._turn_user_uuid = session_log.append("user", text, **meta)
 
     @staticmethod

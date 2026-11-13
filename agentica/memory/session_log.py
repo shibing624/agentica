@@ -1512,6 +1512,7 @@ class SessionLog:
             "cli": cls._meta_cli(meta),
             "source": cls._meta_source(meta),
             "origin": cls._meta_origin(meta),
+            "ticket_id": cls._meta_ticket_id(meta),
         }
 
     @classmethod
@@ -1824,6 +1825,42 @@ class SessionLog:
     def get_origin(self) -> Optional[str]:
         """Return the entry point this session was started from, if recorded."""
         return self._meta_origin(self._read_meta(self.meta_path))
+
+    @staticmethod
+    def _meta_ticket_id(data: Dict[str, Any]) -> Optional[str]:
+        # Imported lazily so ``session_log`` keeps no import-time dependency on
+        # the ticket module (which ``agentica/__init__`` also loads).
+        from agentica.ticket import normalize_ticket_id
+
+        return normalize_ticket_id(data.get("ticket_id"))
+
+    def get_ticket_id(self) -> Optional[str]:
+        """Return the dispatch ticket this session belongs to, if recorded.
+
+        ``None`` means unmanaged — a session written before tickets existed.
+        Callers must treat that as "not tracked" and never mint a replacement:
+        a made-up id would claim a relationship to records that do not share it.
+        """
+        return self._meta_ticket_id(self._read_meta(self.meta_path))
+
+    def set_ticket_id(self, ticket_id: Optional[str]) -> None:
+        """Record the dispatch ticket that owns this session. First write wins.
+
+        A session is one conversation and the ticket names the dispatch that
+        started it; later turns continue the same dispatch, so re-stamping it
+        would only make the sidecar disagree with the records already written
+        under the old value. A new session (``/new``, ``/fork``, a cron run that
+        creates its own) has no ticket yet and gets a fresh one.
+        """
+        from agentica.ticket import normalize_ticket_id
+
+        normalized = normalize_ticket_id(ticket_id)
+        if not normalized:
+            return
+        meta = self._read_meta(self.meta_path)
+        if self._meta_ticket_id(meta):
+            return
+        self._write_meta({"ticket_id": normalized})
 
     FEEDBACK_RATINGS = ("up", "down")
     FEEDBACK_COMMENT_MAX = 4000

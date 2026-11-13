@@ -213,7 +213,7 @@ EAGER_PUBLIC_EXPORTS = [
     "SkillLifecycleHooks", "NoopSkillLifecycleHooks",
     "Workspace", "WorkspaceConfig",
     "Critic", "CritiqueResult", "CritiqueStyle", "RefineResult", "RefineRound",
-    "SchemaCritic", "ExecCritic", "AgentCritic", "refine",
+    "SchemaCritic", "refine",
 ]
 
 PUBLIC_API_ALL = [

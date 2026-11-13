@@ -47,7 +47,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agentica.utils.log import logger
 
@@ -766,3 +766,116 @@ def _prompt_text(prompt: Any) -> str:
     if not text:
         raise AttachError(ERR_INVALID_PARAMS, "prompt is empty")
     return text
+
+
+# ==================== Client ====================
+#
+# The server above answers `session/prompt`; this is the matching caller. It
+# lives in the core package, not in the gateway, because the callers are not all
+# gateway code: the cron daemon hands a scheduled prompt to the terminal that
+# has the conversation open, and the gateway hands a finished background job's
+# report there. Both need the same three steps (find the socket, authenticate,
+# wait for the answer) and a second copy of them would drift from the protocol
+# the server actually speaks.
+
+class AttachClient:
+    """Minimal synchronous JSON-RPC client for a CLI session's AttachServer socket."""
+
+    def __init__(self, sock_path: str, token: str, timeout: float = 10.0) -> None:
+        self.sock_path = sock_path
+        self.token = token
+        self.timeout = timeout
+
+    def call(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(self.timeout)
+            sock.connect(self.sock_path)
+            buf = b""
+            init_req = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"authToken": self.token, "clientCapabilities": {}},
+            }
+            sock.sendall(json.dumps(init_req).encode("utf-8") + b"\n")
+            init_resp, buf = self._read_line(sock, buf)
+            if "error" in init_resp:
+                raise RuntimeError(init_resp["error"].get("message", "attach auth failed"))
+            if method == "initialize":
+                return init_resp.get("result") or {}
+
+            req = {"jsonrpc": "2.0", "id": 2, "method": method, "params": params or {}}
+            sock.sendall(json.dumps(req).encode("utf-8") + b"\n")
+            resp, _ = self._read_line(sock, buf)
+            if "error" in resp:
+                raise RuntimeError(resp["error"].get("message", f"attach {method} failed"))
+            return resp.get("result") or {}
+
+    @staticmethod
+    def _read_line(sock: socket.socket, buf: bytes) -> Tuple[Dict[str, Any], bytes]:
+        while b"\n" not in buf:
+            chunk = sock.recv(65536)
+            if not chunk:
+                raise RuntimeError("attach socket closed unexpectedly")
+            buf += chunk
+        line, _, rest = buf.partition(b"\n")
+        return json.loads(line.decode("utf-8")), rest
+
+
+def read_attach_token(attach_socket: Optional[str], peer_id: str) -> Optional[str]:
+    """The auth token for ``attach_socket``, or ``None`` when it is not readable.
+
+    Two locations are tried on purpose: the socket's sibling ``.token`` is what a
+    server writes next to itself, while ``token_path(peer_id)`` is the stable
+    per-peer file — a server that has not finished writing the sibling yet is
+    still reachable through the second.
+    """
+    if not attach_socket:
+        return None
+    sock_file = Path(attach_socket)
+    tok_file = sock_file.with_suffix(".token")
+    if not tok_file.is_file():
+        tok_file = token_path(peer_id)
+    try:
+        return tok_file.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def prompt_live_session(
+    peer: Any,
+    text: str,
+    *,
+    timeout: float = 620.0,
+    session_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Run ``text`` as a turn in the terminal that holds this session.
+
+    Returns the ACP result (``stopReason`` plus ``agenticaAnswer`` when the turn
+    finished), or ``None`` when the terminal cannot take it — no socket, no
+    token, or the RPC failed. ``None`` is the caller's signal to fall back to
+    running the turn itself; it is deliberately not an exception, because every
+    caller has a working fallback and none of them should have to catch a
+    transport error to find that out.
+
+    ``timeout`` defaults to just over the server's 600s grace window: a shorter
+    client timeout turns "still running" into "failed", which is a different
+    answer than the one the terminal would have given.
+    """
+    sock_path = getattr(peer, "attach_socket", None)
+    peer_id = getattr(peer, "peer_id", "") or ""
+    token = read_attach_token(sock_path, peer_id)
+    if not sock_path or not token:
+        return None
+    params: Dict[str, Any] = {"prompt": text}
+    target_session = session_id or getattr(peer, "session_id", None)
+    if target_session:
+        params["sessionId"] = target_session
+    try:
+        return AttachClient(sock_path, token, timeout=timeout).call("session/prompt", params)
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.debug(f"attach prompt to {sock_path} failed: {exc}")
+        return None
+
+
+__all__ = ["AttachClient", "AttachError", "AttachServer", "prompt_live_session", "read_attach_token"]

@@ -172,6 +172,28 @@ class ImTurnsMixin:
         return ch is not None and ch.is_connected
 
     async def _hand_report_to_cli(self, chats: List[ImChatState], peer: PeerInfo, report: str) -> None:
+        """Give a finished job's report to the terminal that owns the session.
+
+        Attach first: it returns the terminal's answer, so the phone learns the
+        conclusion instead of a note that something was handed to a terminal it
+        cannot see. The peer mailbox stays as the fallback for a terminal whose
+        socket is not usable yet — it cannot tell us anything, which is exactly
+        why it is second.
+        """
+        from agentica.cli.attach import prompt_live_session
+
+        result = await asyncio.to_thread(prompt_live_session, peer, report)
+        if result is not None:
+            answer = str(result.get("agenticaAnswer") or "").strip()
+            if answer:
+                notice = f"🔔 后台任务已结束（终端 [{peer.name}] 处理）：\n{answer}"
+            elif result.get("stopReason") == "cancelled":
+                notice = f"🔔 后台任务已结束，终端 [{peer.name}] 取消了这次处理。"
+            else:
+                notice = f"🔔 后台任务已结束，终端 [{peer.name}] 仍在处理，稍后可在终端查看结果。"
+            for st in chats:
+                await self._reply(st, notice)
+            return
         try:
             _pkg().send_peer_message(
                 peer, text=report, from_name="gateway", from_peer_id="gateway", from_kind="agent",

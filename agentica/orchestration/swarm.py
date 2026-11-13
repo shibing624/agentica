@@ -20,7 +20,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from agentica.orchestration.handoff import default_handoff_mapper
+from agentica.subagents.handoff import default_handoff_mapper
 from agentica.prompts.swarm import COORDINATOR_SYSTEM_PROMPT, SYNTHESIZER_PROMPT
 from agentica.run.config import RunConfig
 from agentica.utils.json_parse import extract_json_array

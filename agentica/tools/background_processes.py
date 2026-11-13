@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from agentica.ticket import current_ticket_id
+from agentica.utils.log import logger
+
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _SAFE_JS_STAMP_MOD = 4_000_000_000_000_000
 
@@ -179,6 +182,11 @@ class BackgroundProcess:
     stop_requested: bool = False
     finished_at: Optional[float] = None
     record_path: Optional[str] = None
+    # Dispatch this job belongs to (``agentica.ticket``), stamped at ``start()``
+    # because the watcher thread that writes the completion record does not
+    # inherit the turn's context. Empty means unmanaged — a job started outside
+    # any turn, or before tickets existed.
+    ticket_id: str = ""
     # Set by the watcher thread once the process is reaped. Callers that need to
     # block until the command is done wait on this instead of racing the watcher
     # for the same waitpid.
@@ -291,6 +299,16 @@ class BackgroundProcessRegistry:
             "pid": item.pid,
             "owner_pid": os.getpid(),
             "session_id": session_id or "",
+            # Which dispatch this job belongs to. Empty = unmanaged; readers must
+            # treat a missing value as "not tracked", never mint a replacement.
+            "ticket_id": item.ticket_id,
+            # Delivery is a fact about the *record*, not about this process: the
+            # job's report has to be delivered exactly once even when the process
+            # that started it is gone by the time it finishes. ``None`` here means
+            # "not delivered yet" — see ``deliver_undelivered_jobs``.
+            "delivered_at": None,
+            "delivery_owner": None,
+            "delivery_attempts": 0,
             "kind": item.kind,
             "label": item.label,
             "command": item.command,
@@ -311,6 +329,19 @@ class BackgroundProcessRegistry:
     def user_id(self) -> Optional[str]:
         with self._lock:
             return self._user_id
+
+    @property
+    def records_dir(self) -> Optional[Path]:
+        """Where this registry's durable job records live, if it has any.
+
+        Public because reading a session's jobs is not the registry's private
+        business: the CLI, the gateway and the IM bridge must all ask the *same*
+        question (memory ∪ disk) or one of them shows a subset. Callers pass
+        this to ``load_session_job_views`` / ``stop_session_job`` instead of
+        reaching into ``_records_dir``.
+        """
+        with self._lock:
+            return self._records_dir
 
     def start(
         self,
@@ -385,6 +416,10 @@ class BackgroundProcessRegistry:
             kind=kind,
             label=label,
             record_path=record_path,
+            # Stamped here, not in the watcher: this call happens inside the
+            # turn, so the ambient ticket is readable; the watcher thread that
+            # writes the completion record has no context of its own.
+            ticket_id=current_ticket_id() or "",
         )
         with self._lock:
             self._items[proc_id] = item
@@ -423,6 +458,14 @@ class BackgroundProcessRegistry:
         if item.record_path and payload is not None:
             payload["returncode"] = int(returncode)
             payload["finished_at"] = completed_at
+            # Never clobber a delivery marker. The completion write is the last
+            # writer before anything can be delivered, so this can only trigger
+            # on a re-watch of an already-settled record — but losing the marker
+            # would mean re-delivering a report the user has already seen.
+            prior = _read_json_record(Path(item.record_path)) or {}
+            for key in ("delivered_at", "delivery_owner", "delivery_attempts"):
+                if prior.get(key):
+                    payload[key] = prior[key]
             _write_json_atomic(Path(item.record_path), payload)
         self._completed.put(event)
         self._notify_change()
@@ -647,6 +690,8 @@ def background_job_view_from_process(item: BackgroundProcess) -> Dict[str, Any]:
         "progress": read_last_log_line(item.log_path) if status == "running" else "",
         "started_at_ms": int(item.started_at * 1000),
         "finished_at_ms": int(item.finished_at * 1000) if item.finished_at else None,
+        "elapsed": item.elapsed,
+        "ticket_id": item.ticket_id or "",
     }
 
 
@@ -718,6 +763,8 @@ def _view_from_disk_record(record_path: Path, rec: Dict[str, Any]) -> Dict[str, 
         "progress": read_last_log_line(log_path) if status == "running" else "",
         "started_at_ms": int(started_at * 1000),
         "finished_at_ms": int(finished_at * 1000) if finished_at is not None else None,
+        "elapsed": _format_elapsed((finished_at if finished_at is not None else time.time()) - started_at),
+        "ticket_id": str(rec.get("ticket_id") or ""),
     }
 
 
@@ -873,3 +920,291 @@ def stop_all_session_jobs(
         touch_activity_stamp(user_id)
     return stopped_views
 
+
+# ============================================================================
+# Durable delivery
+# ============================================================================
+#
+# A finished background job's report used to be an event in the memory of the
+# process that started it (``_completed`` queue -> the owner's poll loop). That
+# is fine while the owner is alive and loses the report outright when it is not:
+# a job that outlives the CLI that started it simply ends, silently. The record
+# on disk always knew the job had finished — nothing ever asked it.
+#
+# The four ownership rules this section enforces, in the order they bite:
+#
+# 1. **One writer per fact.** ``delivered_at`` / ``delivery_owner`` are written
+#    only by the delivery helpers below; everything else (start, completion,
+#    stop, view-synthesis) reads the record and puts the fields back untouched.
+#    A fact with two writers is the bug; a fact with one writer and three
+#    readers is a cache.
+# 2. **"Not yet" is not "no".** ``delivered_at`` is ``None`` until delivery.
+#    A surface that renders "no report" from a ``None`` is inventing a terminal
+#    value out of a pending one — the same mistake as a session titled "Chat"
+#    because its title job hasn't finished.
+# 3. **Delivery is idempotent and recorded.** Any process bound to the same
+#    ``records_dir`` may adopt an undelivered record, so two of them can race;
+#    the ``.claim`` file makes one win, and the marker makes a second delivery
+#    visible instead of silent. Exactly-once across a crash inside the delivery
+#    window is not achievable with files; at-least-once plus a marker is, and
+#    the marker is what lets a reader notice the duplicate.
+# 4. **Nothing retries forever.** ``delivery_attempts`` caps a report that
+#    raises, so one poisoned record cannot become a 5-second loop in every
+#    process that opens the session.
+#
+# A job the user stopped, or that ended without a return code, has no report to
+# deliver. Those records are marked delivered (with no text) rather than left
+# permanently "pending" — pending means "someone still owes this", and nobody
+# does.
+
+DELIVERY_CLAIM_TTL_SECONDS = 300.0
+DELIVERY_MAX_ATTEMPTS = 3
+DELIVERY_MAX_AGE_SECONDS = 24 * 60 * 60.0
+
+
+def delivery_owner(prefix: str = "") -> str:
+    """Identify this process in a record's ``delivery_owner`` field."""
+    label = f"{prefix}:" if prefix else ""
+    return f"{label}pid:{os.getpid()}"
+
+
+def _claim_path(record_path: Path) -> Path:
+    # ``.claim``, not ``.json``: ``load_session_job_views`` globs ``*.json`` and
+    # a claim file must never be mistaken for a job record.
+    return record_path.with_suffix(".claim")
+
+
+def _read_claim(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """Plain "does this pid exist", for claim liveness.
+
+    Deliberately NOT ``is_job_pid_alive``: that one also asserts the pid leads
+    its own process group, because every *job* is started with
+    ``start_new_session=True``. A delivery claimer is an ordinary process (the
+    gateway, the CLI), so reusing the job predicate here reports every live
+    claim as stale and quietly turns the lock off.
+    """
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _claim_is_stale(claim: Dict[str, Any], ttl: float) -> bool:
+    try:
+        age = time.time() - float(claim.get("at") or 0.0)
+    except (TypeError, ValueError):
+        return True
+    if age > ttl:
+        return True
+    try:
+        pid = int(claim.get("pid") or 0)
+    except (TypeError, ValueError):
+        return True
+    return pid > 0 and not _pid_is_alive(pid)
+
+
+def claim_job_delivery(
+    record_path: Path | str,
+    owner: str,
+    *,
+    ttl: float = DELIVERY_CLAIM_TTL_SECONDS,
+) -> bool:
+    """Take the exclusive right to deliver one job's report.
+
+    ``O_CREAT | O_EXCL`` on ``<job>.claim`` is the whole lock: it is atomic on
+    every filesystem this project supports, needs no daemon, and leaves the
+    evidence behind when a process dies mid-delivery (the TTL then lets the next
+    process adopt the record instead of losing it).
+    """
+    path = Path(record_path)
+    claim_file = _claim_path(path)
+    payload = {"owner": owner, "pid": os.getpid(), "at": time.time()}
+    for _ in range(2):
+        try:
+            fd = os.open(claim_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            existing = _read_claim(claim_file)
+            if existing is not None and not _claim_is_stale(existing, ttl):
+                return False
+            try:
+                claim_file.unlink()
+            except OSError:
+                pass
+            continue
+        except OSError:
+            return False
+        try:
+            os.write(fd, json.dumps(payload).encode("utf-8"))
+        finally:
+            os.close(fd)
+        return True
+    return False
+
+
+def release_job_claim(record_path: Path | str) -> None:
+    """Give up a claim without marking the job delivered (a retry will re-claim)."""
+    try:
+        _claim_path(Path(record_path)).unlink()
+    except OSError:
+        pass
+
+
+def mark_job_delivered(record_path: Path | str, owner: str) -> bool:
+    """Record that this job's report reached its destination. Idempotent."""
+    path = Path(record_path)
+    rec = _read_json_record(path)
+    if rec is None:
+        return False
+    if rec.get("delivered_at"):
+        release_job_claim(path)
+        return True
+    rec["delivered_at"] = time.time()
+    rec["delivery_owner"] = owner
+    _write_json_atomic(path, rec)
+    release_job_claim(path)
+    return True
+
+
+def note_job_delivery_failure(record_path: Path | str) -> None:
+    path = Path(record_path)
+    rec = _read_json_record(path)
+    if rec is None:
+        return
+    try:
+        attempts = int(rec.get("delivery_attempts") or 0)
+    except (TypeError, ValueError):
+        attempts = 0
+    rec["delivery_attempts"] = attempts + 1
+    _write_json_atomic(path, rec)
+
+
+def completed_from_record(rec: Dict[str, Any]) -> Optional[BackgroundProcessCompleted]:
+    """Rebuild the completion event a record describes, or ``None`` if it can't.
+
+    Lets a report be rendered identically by the process that ran the job and by
+    one that merely found the record later — one formatter, two callers.
+    """
+    finished_at = rec.get("finished_at")
+    returncode = rec.get("returncode")
+    if finished_at is None or returncode is None:
+        return None
+    try:
+        return BackgroundProcessCompleted(
+            id=str(rec.get("id") or ""),
+            num=int(rec.get("num") or 0),
+            pid=int(rec.get("pid") or 0),
+            command=str(rec.get("command") or ""),
+            cwd=str(rec.get("cwd") or "") or None,
+            log_path=str(rec.get("log_path") or ""),
+            started_at=float(rec.get("started_at") or 0.0),
+            completed_at=float(finished_at),
+            returncode=int(returncode),
+            kind=str(rec.get("kind") or "command"),
+            label=str(rec.get("label") or ""),
+            stop_requested=bool(rec.get("stop_requested")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def background_report_from_record(rec: Dict[str, Any]) -> Optional[str]:
+    """Render a durable record as the agent-facing report, or ``None`` when the
+    job has nothing to report (stopped, or no exit code to describe)."""
+    event = completed_from_record(rec)
+    if event is None or event.stop_requested:
+        return None
+    return background_result_for_agent(event)
+
+
+def undelivered_job_records(
+    records_dir: Optional[Path],
+    *,
+    max_age_seconds: float = DELIVERY_MAX_AGE_SECONDS,
+) -> List[tuple[Path, Dict[str, Any]]]:
+    """Completed records whose report nobody has delivered yet.
+
+    ``max_age_seconds`` is a horizon, not a policy decision: a report from a job
+    that finished a week ago is noise, and re-opening a session must not replay
+    a backlog of them. Within the horizon an undelivered report is owed.
+    """
+    if records_dir is None or not records_dir.is_dir():
+        return []
+    now = time.time()
+    pending: List[tuple[Path, Dict[str, Any]]] = []
+    for path in sorted(records_dir.glob("*.json")):
+        rec = _read_json_record(path)
+        if rec is None:
+            continue
+        if rec.get("delivered_at"):
+            continue
+        finished_at = rec.get("finished_at")
+        if finished_at is None:
+            continue
+        try:
+            settled = float(finished_at)
+            attempts = int(rec.get("delivery_attempts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if now - settled > max_age_seconds:
+            continue
+        if attempts >= DELIVERY_MAX_ATTEMPTS:
+            continue
+        pending.append((path, rec))
+    return pending
+
+
+def deliver_undelivered_jobs(
+    records_dir: Optional[Path],
+    deliver: Callable[[Dict[str, Any], str], None],
+    *,
+    owner: str = "",
+    max_age_seconds: float = DELIVERY_MAX_AGE_SECONDS,
+    claim_ttl: float = DELIVERY_CLAIM_TTL_SECONDS,
+    max_reports: int = 5,
+) -> int:
+    """Deliver every finished-but-unreported job under ``records_dir`` once.
+
+    Returns how many reports were handed to ``deliver``. Safe to call from any
+    process that shares the directory, on bind and on a poll: claiming makes the
+    passes disjoint, and the marker makes a second pass a no-op.
+    """
+    who = owner or delivery_owner()
+    delivered = 0
+    for path, rec in undelivered_job_records(records_dir, max_age_seconds=max_age_seconds):
+        # A session opened after some downtime can owe several reports at once.
+        # Delivering them in one burst would queue that many agent turns; the
+        # caller's next pass picks up the rest.
+        if delivered >= max_reports:
+            break
+        if not claim_job_delivery(path, who, ttl=claim_ttl):
+            continue
+        try:
+            report = background_report_from_record(rec)
+            if report is None:
+                # Settled with nothing to say (stopped, or no exit code): mark it
+                # so it stops reading as "someone still owes this".
+                mark_job_delivered(path, who)
+                continue
+            deliver(rec, report)
+        except Exception as exc:  # noqa: BLE001 - one poisoned record must not stop the sweep
+            logger.debug(f"background report delivery failed for {path.name}: {exc}")
+            note_job_delivery_failure(path)
+            release_job_claim(path)
+            continue
+        mark_job_delivered(path, who)
+        delivered += 1
+    return delivered

@@ -78,7 +78,6 @@ from agentica.tools.ask_user_question_tool import (
     AskUserQuestionTimeout,
     set_default_ask_user_question_callback,
 )
-from agentica.tools.background_processes import BackgroundProcessCompleted
 from agentica.utils.log import logger, restore_console_logging, suppress_console_logging
 from agentica.utils.string import replace_invalid_utf8
 from agentica.workspace import Workspace
@@ -1239,28 +1238,75 @@ def run_interactive(
         text = str(content).strip()
         return text or None
 
+    def _event_record(event) -> Optional[Path]:
+        """The durable record a completion event refers to, if this process has a records dir."""
+        records_dir = state.background_processes.records_dir
+        return None if records_dir is None else records_dir / f"{event.id}.json"
+
+    def _deliver_finished_jobs() -> int:
+        """Deliver every finished job this session owes a report for, once.
+
+        The durable records are the source, not this process's completion queue:
+        a job whose owner process died has a record here and no event anywhere,
+        and a job started by the gateway has a record but never was in this
+        queue. Reading the records (and claiming one before reporting it) means
+        the CLI, the gateway and IM cannot each deliver the same report, and
+        that a report survives the process that started it.
+        """
+        from agentica.tools.background_processes import (
+            completed_from_record,
+            deliver_undelivered_jobs,
+            delivery_owner,
+        )
+
+        registry = state.background_processes
+
+        def _deliver(rec, report):
+            event = completed_from_record(rec)
+            if event is not None and not event.stop_requested:
+                _print_background_completion(event)
+            if registry.delivers_results:
+                _hand_to_agent(report, automated=True)
+
+        return deliver_undelivered_jobs(
+            registry.records_dir, _deliver, owner=delivery_owner("cli"),
+        )
+
     def background_completion_loop():
-        pending_events: List[BackgroundProcessCompleted] = []
+        idle_ticks = 0
         while not state.should_exit:
+            event = None
             try:
-                pending_events.append(state.background_processes.wait_completed(timeout=0.2))
+                # A wakeup, not the delivery source: the record on disk is what
+                # gets delivered, so this queue only tells us when to look.
+                event = state.background_processes.wait_completed(timeout=0.2)
+                idle_ticks = 0
             except queue.Empty:
-                pass
+                idle_ticks += 1
 
             with _ask_state_lock:
                 if _ask_active[0] or state.input_request is not None:
                     continue
-
-                printed = False
-                while pending_events:
-                    event = pending_events.pop(0)
-                    if event.stop_requested:
-                        continue
+                delivered = 0
+                record = _event_record(event) if event is not None else None
+                if event is not None and not event.stop_requested and (
+                    record is None or not record.exists()
+                ):
+                    # No durable record to adopt: no transcript at all, or the
+                    # record write failed (it is best-effort by design). The
+                    # sweep cannot see this job, so deliver the event here —
+                    # the two paths are disjoint by construction, since the
+                    # sweep only delivers records that exist.
                     _print_background_completion(event)
                     if state.background_processes.delivers_results:
                         _hand_to_agent(_background_result_for_agent(event), automated=True)
-                    printed = True
-            if printed and app.is_running:
+                    delivered = 1
+                # Immediately when something finished here, and every ~5s
+                # otherwise to adopt jobs that finished while no terminal was
+                # watching.
+                elif idle_ticks == 0 or idle_ticks % 25 == 0:
+                    delivered = _deliver_finished_jobs()
+            if delivered and app.is_running:
                 app.invalidate()
 
     background_completion_thread = threading.Thread(

@@ -456,8 +456,6 @@ from agentica.orchestration.critic import (
     RefineResult,
     RefineRound,
     SchemaCritic,
-    ExecCritic,
-    AgentCritic,
     refine,
 )
 

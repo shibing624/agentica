@@ -283,6 +283,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     _run_channel: Optional[str] = field(default=None, init=False, repr=False)
     # Per-run: RunConfig.input_meta, written onto this turn's user log entry.
     _run_input_meta: Optional[Dict[str, Any]] = field(default=None, init=False, repr=False)
+    # Per-run dispatch identity (``agentica.ticket``), bound by the Runner and
+    # inherited by anything this turn starts. Tools read it to stamp their own
+    # durable records so one dispatch keeps one name across substrates.
+    _run_ticket_id: Optional[str] = field(default=None, init=False, repr=False)
     # The config.yaml profile this agent's model was built from, when one was
     # (set by DeepAgent). Reported by self_manage so the agent can say which
     # model it runs without guessing from config.yaml's active profile.
@@ -667,6 +671,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._run_automated_input = False
         self._run_channel = None
         self._run_input_meta = None
+        self._run_ticket_id = None
         self._run_max_api_retry = 1
         self.todos = []
         self._tool_policy_prompts: List[str] = []

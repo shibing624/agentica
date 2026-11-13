@@ -20,15 +20,20 @@ from agentica.memory.session_log import SessionLog, is_session_unread, iso_times
 from agentica.run.context import RunSource
 from agentica.tools.background_processes import (
     BackgroundProcess,
-    BackgroundProcessCompleted,
     BackgroundProcessRegistry,
     background_job_view_from_process,
-    background_result_for_agent,
+    background_report_from_record,
+    claim_job_delivery,
     count_running_session_jobs,
+    delivery_owner,
     load_session_job_views,
+    mark_job_delivered,
+    note_job_delivery_failure,
     read_log_tail,
+    release_job_claim,
     stop_all_session_jobs,
     stop_session_job,
+    undelivered_job_records,
 )
 from agentica.utils.log import logger
 
@@ -346,19 +351,28 @@ class AgentSessionsMixin:
     def _deliver_background_reports(
         self, registry: BackgroundProcessRegistry, session_id: str, owner: Optional[str],
     ) -> None:
-        """Hand each finished command back to the agent, like the CLI does."""
+        """Hand each finished command back to the agent, exactly once.
+
+        The durable record is the source, not this process's completion queue: a
+        job started by the CLI has a record here and never had an event in this
+        registry, and a job whose owner process died has a record and no event
+        anywhere. The queue is only a wakeup, so the sweep also runs on a timer
+        to adopt reports that finished while nothing was watching.
+        """
+        idle = 0
         while self._background_registry_is_current(session_id, owner, registry):
             try:
-                event = registry.wait_completed(timeout=1.0)
+                registry.wait_completed(timeout=1.0)
+                idle = 0
             except queue.Empty:
-                continue
-            if event.stop_requested:
+                idle += 1
+            if idle and idle % 5:
                 continue
             loop = self._loop
             if loop is None or loop.is_closed():
                 return
             future = asyncio.run_coroutine_threadsafe(
-                self._report_background(session_id, owner, registry, event), loop,
+                self._sweep_undelivered_background(session_id, owner), loop,
             )
             future.add_done_callback(_log_report_failure)
 
@@ -368,14 +382,19 @@ class AgentSessionsMixin:
         """False once the session is deleted: its pending reports are void."""
         return self._session_background.get(self._sk(session_id, owner)) is registry
 
-    async def _report_background(
-        self,
-        session_id: str,
-        owner: Optional[str],
-        registry: BackgroundProcessRegistry,
-        event: BackgroundProcessCompleted,
-    ) -> None:
-        report = background_result_for_agent(event)
+    async def _sweep_undelivered_background(self, session_id: str, owner: Optional[str]) -> None:
+        """Deliver every finished-but-unreported job for this session, once.
+
+        Waits for the session to be idle *before* claiming, so a long busy
+        period cannot expire the claim and let a second process take the same
+        record. The claim itself then covers only the hand-off, which is short.
+        """
+        records_dir = self._session_bg_records_dir(session_id, owner)
+        if not undelivered_job_records(records_dir):
+            return
+        registry = self._session_background.get(self._sk(session_id, owner))
+        if registry is None:
+            return
         while self._background_registry_is_current(session_id, owner, registry) and (
             self.is_session_active(session_id, owner) or _pkg().live_turn.active(session_id, self._owner(owner))
         ):
@@ -383,7 +402,24 @@ class AgentSessionsMixin:
         handler = self.background_report_handler
         if handler is None or not self._background_registry_is_current(session_id, owner, registry):
             return
-        await handler(session_id, self._owner(owner), report)
+        who = delivery_owner("gateway")
+        for path, rec in undelivered_job_records(records_dir):
+            if not claim_job_delivery(path, who):
+                continue
+            report = background_report_from_record(rec)
+            if report is None:
+                # Settled with nothing to say (stopped, or no exit code): mark
+                # it rather than leaving it permanently owed.
+                mark_job_delivered(path, who)
+                continue
+            try:
+                await handler(session_id, self._owner(owner), report)
+            except Exception as exc:  # noqa: BLE001 - one bad record must not stop the sweep
+                logger.warning(f"background report delivery failed for {path.name}: {exc}")
+                note_job_delivery_failure(path)
+                release_job_claim(path)
+                continue
+            mark_job_delivered(path, who)
 
     @staticmethod
     def _background_job_view(item: BackgroundProcess) -> Dict[str, Any]:

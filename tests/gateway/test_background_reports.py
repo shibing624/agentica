@@ -128,7 +128,14 @@ def test_deleting_the_chat_while_its_report_waits_voids_the_report(tmp_path):
     assert got == []
 
 
-def test_a_failing_handler_is_logged_and_later_reports_still_arrive(tmp_path):
+def test_a_failing_handler_is_retried_and_later_reports_still_arrive(tmp_path):
+    """Delivery is at-least-once now that the record is the source.
+
+    A handler that raises means the user probably never got the report, so the
+    same record is offered again on the next sweep instead of being dropped as
+    it was when the only copy of the event was this process's queue. The
+    trade-off is explicit: a failure may be reported twice, a success never is.
+    """
     seen = []
 
     async def scenario():
@@ -149,7 +156,10 @@ def test_a_failing_handler_is_logged_and_later_reports_still_arrive(tmp_path):
         await asyncio.wait_for(second.wait(), timeout=15)
 
     _run(scenario())
-    assert len(seen) == 2
+    # The failed report came back once and succeeded; the other was delivered
+    # once and never repeated.
+    assert sum("print(1)" in report for report in seen) == 2
+    assert sum("print(2)" in report for report in seen) == 1
 
 
 def test_an_automated_turn_does_not_name_the_chat(tmp_path, monkeypatch):

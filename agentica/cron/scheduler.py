@@ -319,6 +319,10 @@ async def _execute_job_once(
             # True when the job itself starts a new conversation (even if the
             # caller pre-allocated ``session_id`` for immediate UI navigation).
             "fresh_session": fresh_session or not session_id,
+            # The automation's dispatch ticket, inherited by the session this
+            # run creates so "which job produced this conversation" is one
+            # field, not an inference from a name prefix.
+            "ticket_id": job.ticket_id,
         }
         run_coro = agent_runner.run(prompt=context["message"], context=context)
         if job.timeout_seconds > 0:

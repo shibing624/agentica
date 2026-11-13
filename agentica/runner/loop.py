@@ -48,6 +48,7 @@ from agentica.run.response import (
     RunResponse,
 )
 from agentica.security.redact import redact_sensitive_text
+from agentica.ticket import enter_ticket, reset_ticket_id
 from agentica.tools.base import FunctionCall
 from agentica.tools.helpers import files_unified_diff
 from agentica.utils.langfuse_integration import (
@@ -1952,6 +1953,23 @@ class LoopMixin:
             langfuse_tags = model_for_tags.langfuse_tags
 
         run_state_token = Model.begin_run_state()
+        # Bind this dispatch's ticket (see ``agentica/ticket.py``). Unlike the
+        # run id above it IS reset on exit: the next turn in this task is a
+        # different dispatch, and a leaked value would make a whole terminal
+        # session share one ticket. A nested run (a subagent inside this turn)
+        # executes in a copied context and still sees this value, which is the
+        # inheritance that links a parent turn to the work it started.
+        #
+        # Resolution order: an explicit ``RunConfig.ticket_id`` (already on the
+        # agent), then the session's own ticket, then ambient, then a new one. A
+        # session is one dispatch, so every turn of it keeps the ticket its
+        # first turn got — a `/resume` a week later still names the work its
+        # background records were written under.
+        _inherited_ticket = agent._run_ticket_id
+        if not _inherited_ticket and agent._session_log is not None:
+            _inherited_ticket = agent._session_log.get_ticket_id()
+        _ticket_id, _ticket_token = enter_ticket(_inherited_ticket)
+        agent._run_ticket_id = _ticket_id
         try:
             with langfuse_trace_context(
                 name=trace_name,
@@ -1981,6 +1999,10 @@ class LoopMixin:
                     reply_preview = str(output_content) if output_content else "<no reply>"
                     cast(Any, logger).chat(f"[{agent.identifier}] -> user: {reply_preview}")
         finally:
+            reset_ticket_id(_ticket_token)
+            # Per-run by definition: the next dispatch resolves its own value
+            # from its own session, never from whatever this agent ran last.
+            agent._run_ticket_id = None
             Model.reset_run_state(run_state_token)
             # Release async HTTP clients on the (still-alive) run loop so they
             # are not garbage-collected later on a closed loop — httpx raises
