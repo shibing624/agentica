@@ -105,7 +105,7 @@ def _run_prefix() -> str:
 # CHAT_LEVEL is a custom log level dedicated to inter-agent conversation
 # (semantic dialog flow), distinct from system-level INFO/DEBUG. Sits between
 # INFO (20) and WARNING (30) so it surfaces above routine info logs but below
-# real warnings. Used by Runner turn boundaries, Swarm assignments, and
+# real warnings. Used by Runner turn boundaries and
 # Subagent spawn/return so multi-agent debugging shows the conversation flow
 # without being drowned in framework chatter.
 CHAT_LEVEL = 25

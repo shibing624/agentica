@@ -100,9 +100,7 @@ LAZY_IMPORTS = {
     # built-in tools — moved to eager imports in __init__.py.
     # Only the helper factory stays lazy (avoids importing all tool modules at startup).
     "get_builtin_tools": "agentica.tools.builtin",
-    # swarm / subagent
-    "Swarm": "agentica.orchestration.swarm",
-    "SwarmResult": "agentica.orchestration.swarm",
+    # subagent
     "SubagentConfig": "agentica.subagents",
     "SubagentRun": "agentica.subagents",
     "SubagentRegistry": "agentica.subagents",
@@ -175,8 +173,6 @@ EAGER_PUBLIC_EXPORTS = [
     "ExperienceEventStore", "ExperienceCompiler", "CompiledExperienceStore", "SkillEvolutionManager",
     "SkillLifecycleHooks", "NoopSkillLifecycleHooks",
     "Workspace", "WorkspaceConfig",
-    "Critic", "CritiqueResult", "CritiqueStyle", "RefineResult", "RefineRound",
-    "SchemaCritic", "refine",
 ]
 
 PUBLIC_API_ALL = [

@@ -4,7 +4,7 @@
 @description:
 Structured handoff context for parent → child agent task delegation.
 
-Used by ``Subagent.spawn()`` and ``Swarm`` autonomous mode to bundle the
+Used by ``Subagent.spawn()`` to bundle the
 artefacts a child needs (parent identity, condensed instructions, workspace
 summary, recent history, free-form extra context) into one Markdown block
 injected into the child's prompt.

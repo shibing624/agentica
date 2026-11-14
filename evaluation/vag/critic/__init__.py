@@ -50,7 +50,7 @@ Example
 
     from pydantic import BaseModel
     from agentica import Agent
-    from agentica.orchestration.critic import SchemaCritic, AgentCritic, refine
+    from evaluation.vag.critic import SchemaCritic, AgentCritic, refine
 
     class Reply(BaseModel):
         intent: str
@@ -77,8 +77,11 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Protocol, Type
 
 from pydantic import BaseModel, ValidationError
 
-from agentica.prompts.critic import CRITIC_PROMPT_TEMPLATE, REVISE_PROMPT_TEMPLATE
+from agentica.prompts.utils import load_prompt
 from agentica.utils.log import logger
+
+CRITIC_PROMPT_TEMPLATE: str = load_prompt(__file__, "critic.md")
+REVISE_PROMPT_TEMPLATE: str = load_prompt(__file__, "revise.md")
 
 if TYPE_CHECKING:
     from agentica.agent import Agent

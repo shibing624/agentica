@@ -726,7 +726,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # references (BuiltinTodoTool, BuiltinTaskTool, BuiltinMemoryTool,
         # SkillTool) override Tool.clone() to return a fresh instance, so the
         # caller's original tool object is never overwritten when the same
-        # logical tool config is shared across multiple agents (Swarm clones,
+        # logical tool config is shared across multiple agents (clones,
         # subagents, manual reuse). Stateless tools clone to ``self`` (no-op).
         # Tool list may also contain raw callables / ModelTool / Function — left
         # as-is since they hold no agent state. Must happen BEFORE any mutation
@@ -1444,7 +1444,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """
         clone = copy.copy(self)
         # Model isolation: route through SubagentRegistry._clone_parent_model so
-        # Agent.clone() / SubagentRegistry.spawn() / Swarm._clone_agent_for_task
+        # Agent.clone() / SubagentRegistry.spawn()
         # share ONE concurrency-safe handoff strategy: shallow copy + reset
         # tools/functions/tool_choice/metrics + fresh ``Usage`` + drop HTTP
         # client (the original belongs to the source agent's loop).

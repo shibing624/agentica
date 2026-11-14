@@ -8,8 +8,8 @@ wrapped in prose, markdown code fences, or with a stray trailing token.
 These two helpers tolerate that, returning ``None`` when no valid JSON of
 the expected top-level shape can be recovered.
 
-Used by ``Swarm`` for parsing coordinator output and available to user code
-that asks an LLM to return structured JSON without a tool-call schema.
+Available to user code that asks an LLM to return structured JSON without a
+tool-call schema.
 """
 from __future__ import annotations
 

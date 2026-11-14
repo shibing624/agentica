@@ -639,7 +639,7 @@ class LoopMixin:
             # Guard: warn if this agent instance is already running concurrently.
             # Agent is not thread-safe — concurrent runs share mutable state
             # (run_id, run_response, _run_hooks, _enabled_tools, model.functions).
-            # Swarm autonomous mode avoids this by cloning agents before parallel dispatch.
+            # Parallel callers use Agent.clone() to get an isolated copy.
             if agent._running:
                 logger.warning(
                     f"Agent '{agent.identifier}' is already running. "

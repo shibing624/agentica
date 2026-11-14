@@ -52,7 +52,7 @@ class TestRunnerEmptyMessage(unittest.TestCase):
 
 class TestRunnerConcurrentWarning(unittest.TestCase):
     """Runner warns when same Agent instance is reused concurrently.
-    Swarm autonomous mode avoids this by cloning agents before parallel dispatch.
+    Parallel callers use Agent.clone() to get an isolated copy.
     """
 
     def test_concurrent_run_emits_warning(self):

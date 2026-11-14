@@ -8,7 +8,7 @@ This is the *only* multi-agent surface area at the Agent level. Earlier "team"
 machinery (transfer functions, has_team, get_transfer_prompt) has been removed
 in favor of two clearer composition primitives:
   - ``Agent.as_tool()`` — orchestrator agent calls a worker agent as a tool
-  - ``Swarm`` / ``BuiltinTaskTool`` — explicit multi-agent runtimes
+  - ``BuiltinTaskTool`` — explicit subagent runtime
 """
 
 import json

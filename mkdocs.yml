@@ -40,7 +40,6 @@ nav:
   - 多智能体与协作:
       - 如何选择协作方式: multi-agent/choosing.md
       - Subagent (子任务): multi-agent/subagent.md
-      - Swarm (多智能体自治): multi-agent/swarm.md
       - 多会话共用仓库 (Worktree): multi-agent/worktrees.md
   - 进阶功能:
       - 长任务循环 (/goal): advanced/goals.md

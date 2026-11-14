@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for review fixes: sandbox, swarm, archive, compression."""
+"""Tests for review fixes: sandbox, archive, compression."""
 
 import asyncio
 import json
@@ -12,7 +12,6 @@ import pytest
 from agentica.agent.config import SandboxConfig
 from agentica.compression.manager import CompressionManager
 from agentica.agent.hooks import ConversationArchiveHooks
-from agentica.orchestration.swarm import Swarm, SwarmResult
 from agentica.workspace import Workspace
 
 
@@ -266,93 +265,6 @@ class TestSandboxCommandBlocking:
         ):
             result = asyncio.run(tool.execute("dd if=/tmp/a of=/tmp/b"))
         assert "gone" in result
-
-
-# =========================================================================
-# C2: Swarm race condition fixes
-# =========================================================================
-
-class TestSwarmDuplicateNames:
-    """Tests for I4: Swarm validates agent names."""
-
-    def test_duplicate_agent_names_raises(self):
-        """Swarm should reject agents with duplicate names."""
-        agent1 = MagicMock()
-        agent1.name = "worker"
-        agent2 = MagicMock()
-        agent2.name = "worker"
-
-        with pytest.raises(ValueError, match="unique names"):
-            Swarm(agents=[agent1, agent2])
-
-    def test_unique_names_accepted(self):
-        """Swarm should accept agents with unique names."""
-        agent1 = MagicMock()
-        agent1.name = "researcher"
-        agent2 = MagicMock()
-        agent2.name = "coder"
-
-        swarm = Swarm(agents=[agent1, agent2])
-        assert len(swarm._agent_map) == 2
-
-    def test_none_names_get_index_fallback(self):
-        """Agents with None name get 'agent_N' fallback, which are unique."""
-        agent1 = MagicMock()
-        agent1.name = None
-        agent2 = MagicMock()
-        agent2.name = None
-
-        # This should work because fallback names agent_0 and agent_1 are unique
-        swarm = Swarm(agents=[agent1, agent2])
-        assert "agent_0" in swarm._agent_map
-        assert "agent_1" in swarm._agent_map
-
-
-# JSON extraction was moved to agentica.utils.json_parse; see tests/test_json_parse.py
-
-
-# =========================================================================
-# I6: Swarm failed result handling
-# =========================================================================
-
-class TestSwarmFailedResults:
-    """Tests for I6: Failed results marked in synthesis."""
-
-    def test_synthesize_marks_failures(self):
-        """Failed results should be marked with [FAILED] in synthesis."""
-        agent1 = MagicMock()
-        agent1.name = "worker1"
-        agent1.description = "Worker 1"
-        agent1.instructions = None
-        agent2 = MagicMock()
-        agent2.name = "worker2"
-        agent2.description = "Worker 2"
-        agent2.instructions = None
-
-        # Mock synthesizer response
-        mock_response = MagicMock()
-        mock_response.content = "Synthesized result"
-        agent1.run = AsyncMock(return_value=mock_response)
-
-        swarm = Swarm(agents=[agent1, agent2])
-
-        results = [
-            {"agent_name": "worker1", "content": "Good result", "success": True},
-            {"agent_name": "worker2", "content": "Error occurred", "success": False},
-        ]
-
-        # We can't easily test the full _synthesize without mocking agents,
-        # but we can test that the result text includes [FAILED]
-        results_text = ""
-        for r in results:
-            name = r.get("agent_name", "unknown")
-            content = r.get("content", "")
-            success = r.get("success", True)
-            status = "[FAILED] " if not success else ""
-            results_text += f"\n### {status}{name}\n{content}\n"
-
-        assert "[FAILED] worker2" in results_text
-        assert "[FAILED]" not in results_text.split("worker1")[0] + results_text.split("worker1")[1].split("\n")[0]
 
 
 # =========================================================================

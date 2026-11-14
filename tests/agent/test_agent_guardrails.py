@@ -258,36 +258,3 @@ async def test_input_guardrail_sees_multimodal_payload():
             )
     fake_response.assert_not_called()
     assert "images:2" in str(captured["data"])
-
-
-# ---------------------------------------------------------------------------
-# Swarm clone safety: guardrails must propagate to per-task clones
-# ---------------------------------------------------------------------------
-
-def test_swarm_clone_preserves_guardrails():
-    """Autonomous swarm spawns ephemeral agent clones via _clone_agent_for_task.
-    Those clones MUST inherit input_guardrails / output_guardrails — otherwise
-    a protected agent silently loses its safety rails in swarm execution."""
-    from agentica.orchestration.swarm import _clone_agent_for_task
-
-    @input_guardrail
-    def in_guard(ctx, agent, input_data):
-        return GuardrailOutput(output_info=None, tripwire_triggered=False)
-
-    @output_guardrail
-    def out_guard(ctx, agent, output):
-        return GuardrailOutput(output_info=None, tripwire_triggered=False)
-
-    source = Agent(
-        name="Protected",
-        model=_make_model(),
-        input_guardrails=[in_guard],
-        output_guardrails=[out_guard],
-    )
-    clone = _clone_agent_for_task(source)
-    assert clone.input_guardrails == [in_guard], "input_guardrails not propagated to clone"
-    assert clone.output_guardrails == [out_guard], "output_guardrails not propagated to clone"
-    assert clone.input_guardrails is not source.input_guardrails, (
-        "clone shares the SAME list object as source — clone-side mutations "
-        "would leak back into the protected source agent"
-    )

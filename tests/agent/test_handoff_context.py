@@ -2,8 +2,7 @@
 """
 Tests for HandoffContext + default_handoff_mapper.
 
-P1-6: structured context handed off from parent to a Subagent / Swarm
-sub-task. Replaces the previous ad-hoc string concatenation in
+P1-6: structured context handed off from parent to a Subagent sub-task. Replaces the previous ad-hoc string concatenation in
 ``Subagent._build_inherited_context``.
 """
 import os

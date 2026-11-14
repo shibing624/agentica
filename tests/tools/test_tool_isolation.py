@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tool isolation tests — Tool.clone() protocol must prevent multiple agents
 from corrupting each other's state when they share the same logical tool config
-(Swarm clones, subagents, manual reuse).
+(subagents, manual reuse).
 
 All tests mock the OpenAI key — no real LLM calls.
 """
@@ -115,37 +115,6 @@ class TestAgentToolIsolation(unittest.TestCase):
         self.assertIs(a2_task._parent_agent, a2)
 
 
-class TestSwarmCloneToolIsolation(unittest.TestCase):
-    """Swarm._clone_agent_for_task must not let cloned agents stomp on the
-    source agent's tool state. This is the bug the user explicitly asked to fix.
-    """
-
-    def test_swarm_clone_does_not_overwrite_source_agent_tool(self):
-        from agentica.orchestration.swarm import _clone_agent_for_task
-
-        source = Agent(
-            name="source",
-            model=_model(),
-            tools=[BuiltinTodoTool(), BuiltinTaskTool()],
-        )
-        source_todo = next(t for t in source.tools if isinstance(t, BuiltinTodoTool))
-        source_task = next(t for t in source.tools if isinstance(t, BuiltinTaskTool))
-
-        clone = _clone_agent_for_task(source)
-        clone_todo = next(t for t in clone.tools if isinstance(t, BuiltinTodoTool))
-        clone_task = next(t for t in clone.tools if isinstance(t, BuiltinTaskTool))
-
-        # Source bindings are untouched
-        self.assertIs(source_todo._agent, source)
-        self.assertIs(source_task._parent_agent, source)
-        # Clone has its own bindings
-        self.assertIs(clone_todo._agent, clone)
-        self.assertIs(clone_task._parent_agent, clone)
-        # And they're different instances
-        self.assertIsNot(clone_todo, source_todo)
-        self.assertIsNot(clone_task, source_task)
-
-
 class TestSubagentRegistryToolFiltering(unittest.TestCase):
     """Bug 1 regression: ``_select_child_tools`` must not let the filtered child
     tool's functions remain bound to the parent's tool instance — otherwise
@@ -244,26 +213,6 @@ class TestAgentCloneRuntimeIsolation(unittest.TestCase):
         self.assertEqual(b._session_guidance_prompts, [])
 
 
-class TestSwarmCloneModelUsageIsolation(unittest.TestCase):
-    """Bug 4 regression: ``_clone_agent_for_task`` must give each clone its own
-    ``Usage`` instance — concurrent swarm tasks would otherwise pollute each
-    other's token counters via the shared Usage from ``copy.copy(model)``.
-    """
-
-    def test_swarm_clone_isolates_model_usage(self):
-        from agentica.orchestration.swarm import _clone_agent_for_task
-
-        source = Agent(name="source", model=_model())
-        source.model.usage.total_tokens = 100  # simulate prior accumulation
-
-        clone = _clone_agent_for_task(source)
-        self.assertIsNot(clone.model.usage, source.model.usage,
-                         "swarm clone must own a fresh Usage instance")
-        # Mutating the clone's usage must not bleed back
-        clone.model.usage.total_tokens = 999
-        self.assertEqual(source.model.usage.total_tokens, 100)
-
-
 class TestSubagentSpawnContextRobustness(unittest.TestCase):
     """Bug 3 regression: ``spawn()`` and ``_build_inherited_context`` must not
     crash on string contexts or dicts containing non-JSON-serializable values.
@@ -296,45 +245,10 @@ class TestSubagentSpawnContextRobustness(unittest.TestCase):
         self.assertEqual(result, "raw string brief from upstream")
 
 
-class TestSwarmCloneContextRobustness(unittest.TestCase):
-    """``_clone_agent_for_task`` must not crash when source.context is a
-    non-dict (string / callable / arbitrary object) — Agent.context is documented
-    to support all these shapes via ``Agent._resolve_context``.
-    """
-
-    def test_swarm_clone_passes_string_context_through(self):
-        from agentica.orchestration.swarm import _clone_agent_for_task
-
-        source = Agent(
-            name="source",
-            model=_model(),
-            context="raw string brief from upstream",
-        )
-        clone = _clone_agent_for_task(source)
-        self.assertEqual(clone.context, "raw string brief from upstream")
-
-    def test_swarm_clone_passes_callable_context_through(self):
-        from agentica.orchestration.swarm import _clone_agent_for_task
-
-        sentinel = lambda: {"key": "value"}
-        source = Agent(name="source", model=_model(), context=sentinel)
-        clone = _clone_agent_for_task(source)
-        self.assertIs(clone.context, sentinel)
-
-    def test_swarm_clone_deep_copies_dict_context(self):
-        from agentica.orchestration.swarm import _clone_agent_for_task
-
-        source = Agent(name="source", model=_model(), context={"k": "v"})
-        clone = _clone_agent_for_task(source)
-        self.assertIsNot(clone.context, source.context)
-        clone.context["k"] = "mutated"
-        self.assertEqual(source.context["k"], "v")
-
-
 class TestResolveContextNonDict(unittest.TestCase):
     """Regression: ``Agent._resolve_context`` and ``convert_context_to_string``
     must not crash when ``self.context`` is a non-dict. Runner calls
-    ``_resolve_context`` unconditionally on ``run()`` for Swarm clones, and
+    ``_resolve_context`` unconditionally on ``run()``, and
     the prompt builder calls ``convert_context_to_string`` to inject context
     into the user message.
     """

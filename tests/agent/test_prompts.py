@@ -536,7 +536,7 @@ class TestSessionSnapshotsKeepThePromptByteStable:
         agent.freeze_session_guidance()
 
         assert agent._get_session_guidance_block() == "FIRST"
-        # A subagent / swarm clone is a new session and must freeze its own.
+        # A subagent / clone is a new session and must freeze its own.
         assert agent.clone()._session_guidance_snapshot is None
 
 

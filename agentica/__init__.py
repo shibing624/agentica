@@ -436,17 +436,6 @@ from agentica.experience import (
 # ── Workspace ──
 from agentica.workspace import Workspace, WorkspaceConfig
 
-# ── Critic (actor-critic protocol + refine composer) ──
-from agentica.orchestration.critic import (
-    Critic,
-    CritiqueResult,
-    CritiqueStyle,
-    RefineResult,
-    RefineRound,
-    SchemaCritic,
-    refine,
-)
-
 _LAZY_CACHE = {}
 _LAZY_LOCK = threading.Lock()
 

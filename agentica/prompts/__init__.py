@@ -15,9 +15,6 @@ Sub-packages:
 - ``memory/``       — Memory taxonomy, extraction, and correction-judge
                       prompts (shared between ``BuiltinMemoryTool`` and
                       ``MemoryExtractHooks`` / ``ExperienceCaptureHooks``).
-- ``swarm/``        — Coordinator and synthesizer prompts used by
-                      ``Swarm``.
-- ``critic/``       — Critic/revise loop templates used by ``critic.refine``.
 
 Shared loader: ``agentica.prompts.utils.load_prompt``.
 """
