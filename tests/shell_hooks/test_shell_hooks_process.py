@@ -30,6 +30,13 @@ class TestTheDocumentArrivesOnStdin:
         assert proc.stdout == '{"answer": "needs.input"}\n'
 
     def test_a_complete_document_does_not_wait_for_process_exit(self):
+        # The claim is "does not wait for the child to exit", so the budget has
+        # to be measured against the child's 5s sleep, not against interpreter
+        # startup. A 1s deadline conflated the two: the round trip is ~25ms when
+        # idle, but a machine running the rest of the suite in parallel can take
+        # longer than that just to exec python, and the test then failed for a
+        # reason it was never about.
+        budget = 3.0
         proc = HookProcess(
             _py(
                 "import json,sys,time;"
@@ -40,8 +47,8 @@ class TestTheDocumentArrivesOnStdin:
         )
         assert proc.start() is True
         started = time.monotonic()
-        assert proc.wait(timeout=1) is True
-        assert time.monotonic() - started < 1
+        assert proc.wait(timeout=budget) is True
+        assert time.monotonic() - started < budget
         assert proc.stdout == '{"answer": "ready"}\n'
         proc.kill()
 
