@@ -36,10 +36,18 @@ def read_csv_file(path: Path, row_limit: Optional[int] = None) -> str:
     try:
         with open(path, newline="") as csvfile:
             reader = csv.DictReader(csvfile)
-            if row_limit is not None:
-                csv_data = [row for row in reader][:row_limit]
-            else:
+            if row_limit is None:
                 csv_data = [row for row in reader]
+            elif row_limit >= 0:
+                # Stop before parsing records outside the requested prefix.
+                csv_data = []
+                for _ in range(row_limit):
+                    try:
+                        csv_data.append(next(reader))
+                    except StopIteration:
+                        break
+            else:
+                csv_data = [row for row in reader][:row_limit]
         return json.dumps(csv_data, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
