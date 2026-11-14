@@ -351,3 +351,71 @@ def test_a_stopped_orphan_still_has_nothing_to_say(tmp_path):
     seen = []
     assert deliver_undelivered_jobs(tmp_path, lambda rec, report: seen.append(report)) == 0
     assert seen == []
+
+
+# --------------------------------------------------------------------------
+# Batched hand-over
+# --------------------------------------------------------------------------
+
+class TestBatchedHandover:
+    """Printing stays per job; only the agent hand-over is folded.
+
+    Several jobs settling in one pass used to queue one agent turn each, so a
+    fan-out of parallel commands cost N turns to say what N printed blocks
+    already said.
+    """
+
+    def test_the_batch_callback_runs_once_for_the_whole_pass(self, tmp_path):
+        for n in (1, 2, 3):
+            write_record(tmp_path, f"term_{n}", num=n)
+
+        per_record, batches = [], []
+        delivered = deliver_undelivered_jobs(
+            tmp_path,
+            lambda rec, report: per_record.append(rec["id"]),
+            deliver_batch=lambda pairs: batches.append([rec["id"] for rec, _ in pairs]),
+        )
+
+        assert delivered == 3
+        assert per_record == ["term_1", "term_2", "term_3"], "display stays per term"
+        assert batches == [["term_1", "term_2", "term_3"]], "hand-over is one call"
+
+    def test_a_batch_marks_every_record_delivered(self, tmp_path):
+        paths = [write_record(tmp_path, f"term_{n}", num=n) for n in (1, 2)]
+
+        deliver_undelivered_jobs(tmp_path, deliver_batch=lambda pairs: None)
+
+        for path in paths:
+            assert read_record(path)["delivered_at"]
+        assert undelivered_job_records(tmp_path) == []
+
+    def test_a_failed_batch_leaves_the_whole_batch_owed(self, tmp_path):
+        """Half-reporting is worse than not reporting: the user would be told
+        about jobs they were already shown, and the rest would be lost."""
+        for n in (1, 2):
+            write_record(tmp_path, f"term_{n}", num=n)
+
+        def explode(pairs):
+            raise RuntimeError("gateway down")
+
+        delivered = deliver_undelivered_jobs(tmp_path, deliver_batch=explode)
+
+        assert delivered == 0
+        assert len(undelivered_job_records(tmp_path)) == 2
+
+    def test_a_single_record_still_reaches_the_batch_callback(self, tmp_path):
+        write_record(tmp_path)
+        batches = []
+
+        deliver_undelivered_jobs(tmp_path, deliver_batch=lambda pairs: batches.append(len(pairs)))
+
+        assert batches == [1]
+
+    def test_records_with_nothing_to_say_never_reach_the_batch(self, tmp_path):
+        write_record(tmp_path, "term_1")
+        write_record(tmp_path, "term_2", num=2, stop_requested=True)
+        batches = []
+
+        deliver_undelivered_jobs(tmp_path, deliver_batch=lambda pairs: batches.append(len(pairs)))
+
+        assert batches == [1], "a stopped job is settled, not reported"

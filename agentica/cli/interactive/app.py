@@ -91,7 +91,6 @@ from .attachments import (
     unpack_queue_payload,
 )
 from .btw import (
-    _background_result_for_agent,
     _print_background_completion,
     _run_btw_concurrent,
     hand_to_agent,
@@ -233,6 +232,18 @@ def _stop_cron(state: SessionState) -> None:
     """Signal the cron daemon thread to stop. Safe to call when not running."""
     if state.cron_stop_event is not None:
         state.cron_stop_event.set()
+
+
+def should_steer_report(agent_running: bool, quiet: bool) -> bool:
+    """Whether a finished-job report goes into the current run right now.
+
+    A running agent takes it as steering regardless of the setting: that costs
+    no extra turn and the result is useful mid-task, which is the whole point of
+    watching a long command. Only an *idle* agent is what ``quiet`` protects —
+    waking one buys a model turn nobody asked for, to restate a completion the
+    user already saw printed.
+    """
+    return agent_running or not quiet
 
 
 def run_interactive(
@@ -438,6 +449,12 @@ def run_interactive(
     state.background_processes.delivers_results = bool(
         get_setting("deliver_background_results", True)
     )
+    # "wakeup" (default): a finished job may open a turn on its own, so a
+    # long-running command can hand its result straight back and the agent keeps
+    # working. "quiet": still print every completion, still steer a *running*
+    # turn, but never wake an idle session — the report rides in front of the
+    # next thing the user asks for. Same trade as dsh's completionDelivery.
+    quiet_mode = str(get_setting("background_report_mode", "wakeup")).strip().lower() == "quiet"
     cli_approve = build_interactive_approve(state, _ui_holder)
     # Publish this terminal in the peer directory before the first agent exists:
     # the messaging tools are built from this object, and the identity must
@@ -1038,6 +1055,17 @@ def run_interactive(
                         f"  Skill activated: {skill_to_invoke.name}"
                     )
 
+            # Reports held back by `background_report_mode: quiet` ride in front
+            # of the turn the user just asked for. Prepended to the model payload
+            # only: the displayed line stays what they typed, and the reported
+            # completions were already printed when they happened. A relayed or
+            # automated turn is not a person starting work, so it does not pick
+            # them up — otherwise a report would wake the agent it was held for.
+            if state.pending_background_reports and not queued.is_automated and not already_shown:
+                held = "\n\n".join(state.pending_background_reports)
+                state.pending_background_reports.clear()
+                final_input = f"{held}\n\n{final_input}"
+
             turn_images = submit_images if submit_images else None
 
             # BTW: ephemeral side question (when agent is NOT running, via queue)
@@ -1259,6 +1287,22 @@ def run_interactive(
 
         return record_file_is_settled(getattr(event, "record_path", ""))
 
+    def _hand_report_to_agent(report: str) -> None:
+        """Give a finished-job report to the agent, or hold it for the next turn.
+
+        A running agent is steered: the report lands at its next tool boundary,
+        which is what makes a watcher's result useful mid-task and costs nothing
+        extra. An idle agent is the case this setting is about — waking it buys a
+        model turn nobody asked for, and the user gets a summary of a report
+        already printed above. ``background_report_mode: quiet`` holds the text
+        instead; it is prepended to the next turn a person actually starts, so
+        the model still sees it and nothing is dropped.
+        """
+        if should_steer_report(state.agent_running, quiet_mode):
+            _hand_to_agent(report, automated=True)
+            return
+        state.pending_background_reports.append(report)
+
     def _deliver_finished_jobs() -> int:
         """Deliver every finished job this session owes a report for, once.
 
@@ -1273,23 +1317,44 @@ def run_interactive(
             completed_from_record,
             deliver_undelivered_jobs,
             delivery_owner,
+            render_batch_report,
         )
 
         registry = state.background_processes
 
-        def _deliver(rec, report):
+        def _print(rec, report):
+            """One completion block per terminal: watching N jobs means N lines."""
             event = completed_from_record(rec)
             if event is not None and not event.stop_requested:
                 _print_background_completion(event)
-            if registry.delivers_results:
-                _hand_to_agent(report, automated=True)
+
+        def _deliver_batch(pairs):
+            """Hand the whole pass to the agent once, not once per job.
+
+            Several jobs settling together used to queue one agent turn each, so
+            the user paid for N turns to be told what N printed blocks already
+            said. The report still names every job, so folding them costs no
+            information — only the turns.
+            """
+            if not registry.delivers_results or not pairs:
+                return
+            events = [completed_from_record(rec) for rec, _ in pairs]
+            live = [event for event in events if event is not None and not event.stop_requested]
+            if not live:
+                return
+            _hand_report_to_agent(render_batch_report(live))
 
         return deliver_undelivered_jobs(
-            registry.records_dir, _deliver, owner=delivery_owner("cli"),
+            registry.records_dir, _print, owner=delivery_owner("cli"),
+            deliver_batch=_deliver_batch,
         )
 
     def background_completion_loop():
-        from agentica.tools.background_processes import delivery_owner, mark_job_delivered
+        from agentica.tools.background_processes import (
+            delivery_owner,
+            mark_job_delivered,
+            render_batch_report,
+        )
 
         idle_ticks = 0
         # Held, not consumed, while an ask/approval is on screen: dropping the
@@ -1309,6 +1374,7 @@ def run_interactive(
                 if _ask_active[0] or state.input_request is not None:
                     continue
                 delivered = 0
+                unrecorded = []
                 for event in pending_events:
                     if event.stop_requested or _event_is_settled(event):
                         # Settled: the sweep owns it, whichever process gets
@@ -1318,13 +1384,17 @@ def run_interactive(
                     # or the best-effort completion write failed). The sweep
                     # cannot see this job, so the event has to deliver it.
                     _print_background_completion(event)
-                    if state.background_processes.delivers_results:
-                        _hand_to_agent(_background_result_for_agent(event), automated=True)
+                    unrecorded.append(event)
                     if getattr(event, "record_path", ""):
                         # Mark the record this event came from, so returning to
                         # that session later does not deliver it a second time.
                         mark_job_delivered(event.record_path, delivery_owner("cli"))
                     delivered += 1
+                # One agent turn for the whole batch, same as the sweep: the
+                # printed blocks above are the per-terminal account, this is the
+                # single hand-over.
+                if unrecorded and state.background_processes.delivers_results:
+                    _hand_report_to_agent(render_batch_report(unrecorded))
                 pending_events = []
                 # Immediately when something finished here, and every ~5s
                 # otherwise to adopt jobs that finished while no terminal was

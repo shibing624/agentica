@@ -16,7 +16,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
 from agentica.ticket import current_ticket_id
@@ -613,9 +613,58 @@ def background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     lines.extend(
         [
             "",
-            "This is an automatic report of a command you started in the background. "
-            "Pick the work back up where that command left off, or report the outcome "
-            "to the user if nothing is left to do.",
+            # States what the record is and what the model may do with it, without
+            # asking for a reply. The old wording ended in "report the outcome to
+            # the user", which read as an instruction to answer: every finished
+            # job bought a model turn and the user got a summary of a report they
+            # had already been shown. A finished job is information; the model
+            # acts on it when it has a reason to, and `wait` collected results
+            # arrive as tool output rather than here.
+            "Automatic report: a command you started in the background has finished. "
+            "No reply is needed unless the work depends on this. Continue what you "
+            "were doing; if nothing was in flight, stop here.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_batch_report(events: Sequence[BackgroundProcessCompleted]) -> str:
+    """One agent-facing report for several commands that just finished.
+
+    The sweep can owe reports for a whole batch at once — a fan-out of parallel
+    commands, or a session reopened after downtime. Delivering them one at a
+    time cost one model turn each, so the user got N summaries of N reports they
+    had already been shown. One combined report costs one turn and still names
+    every job, so nothing is hidden by the merge.
+
+    Success is one line each; only failures carry their output tail, because a
+    failing job's tail is the part someone will act on. The full log paths are
+    always present, so the tail is never the only way back to the output.
+    """
+    if len(events) == 1:
+        return background_result_for_agent(events[0])
+    lines = [f"[{len(events)} background terminals finished]"]
+    for event in events:
+        status = exit_status(event.returncode)
+        lines.append(
+            f"- #{event.num} ({event.id}) {status}: "
+            f"{exit_detail(event.returncode)} after {event.elapsed} — {event.command}"
+        )
+        if status != "finished":
+            tail = read_log_tail(event.log_path, max_lines=15, max_chars=2000)
+            if tail:
+                lines.extend(["", f"  Output tail (#{event.num}):", tail])
+        lines.append(f"  Log: {event.log_path}")
+    failures = [e for e in events if exit_status(e.returncode) != "finished"]
+    lines.extend(
+        [
+            "",
+            # Same contract as the single report: names the records, asks for
+            # nothing.
+            f"Automatic report: {len(events)} command(s) you started in the background "
+            f"have finished ({len(events) - len(failures)} clean, {len(failures)} not). "
+            "No reply is needed unless the work depends on these. Continue what you "
+            "were doing; if nothing was in flight, stop here.",
         ]
     )
     return "\n".join(lines)
@@ -1240,26 +1289,36 @@ def undelivered_job_records(
 
 def deliver_undelivered_jobs(
     records_dir: Optional[Path],
-    deliver: Callable[[Dict[str, Any], str], None],
+    deliver: Optional[Callable[[Dict[str, Any], str], None]] = None,
     *,
     owner: str = "",
     max_age_seconds: float = DELIVERY_MAX_AGE_SECONDS,
     claim_ttl: float = DELIVERY_CLAIM_TTL_SECONDS,
     max_reports: int = 5,
+    deliver_batch: Optional[Callable[[List[Tuple[Dict[str, Any], str]]], None]] = None,
 ) -> int:
     """Deliver every finished-but-unreported job under ``records_dir`` once.
 
     Returns how many reports were handed to ``deliver``. Safe to call from any
     process that shares the directory, on bind and on a poll: claiming makes the
     passes disjoint, and the marker makes a second pass a no-op.
+
+    Two delivery shapes, because "tell the user" and "wake the model" want
+    different granularity. ``deliver`` runs per record — that is what prints one
+    completion line per terminal, which is the whole point of watching several.
+    ``deliver_batch`` runs once for everything this pass collected, so several
+    jobs settling together cost one agent turn instead of one each; it receives
+    the claimed pairs and is only marked delivered if it returns, so a failure
+    leaves the whole batch owed rather than half-reported.
     """
     who = owner or delivery_owner()
-    delivered = 0
+    collected: List[Tuple[Dict[str, Any], str]] = []
+    handed = 0
     for path, rec in undelivered_job_records(records_dir, max_age_seconds=max_age_seconds):
         # A session opened after some downtime can owe several reports at once.
-        # Delivering them in one burst would queue that many agent turns; the
-        # caller's next pass picks up the rest.
-        if delivered >= max_reports:
+        # One combined agent turn is affordable; N of them are not, so a pass
+        # stops at max_reports and the caller's next pass picks up the rest.
+        if handed >= max_reports:
             break
         if not claim_job_delivery(path, who, ttl=claim_ttl):
             continue
@@ -1270,12 +1329,27 @@ def deliver_undelivered_jobs(
                 # so it stops reading as "someone still owes this".
                 mark_job_delivered(path, who)
                 continue
-            deliver(rec, report)
+            if deliver is not None:
+                deliver(rec, report)
         except Exception as exc:  # noqa: BLE001 - one poisoned record must not stop the sweep
             logger.debug(f"background report delivery failed for {path.name}: {exc}")
             note_job_delivery_failure(path)
             release_job_claim(path)
             continue
-        mark_job_delivered(path, who)
-        delivered += 1
-    return delivered
+        handed += 1
+        if deliver_batch is None:
+            mark_job_delivered(path, who)
+        else:
+            collected.append((rec, report, path))
+    if deliver_batch is not None and collected:
+        try:
+            deliver_batch([(rec, report) for rec, report, _ in collected])
+        except Exception as exc:  # noqa: BLE001 - the batch stays owed, not marked
+            logger.debug(f"batched background report delivery failed: {exc}")
+            for _, _, path in collected:
+                note_job_delivery_failure(path)
+                release_job_claim(path)
+            return 0
+        for _, _, path in collected:
+            mark_job_delivered(path, who)
+    return handed

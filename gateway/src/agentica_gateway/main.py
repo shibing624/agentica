@@ -516,16 +516,47 @@ IM_TAKEOVER_POLL_S = 5.0
 
 
 def _background_report_handler(agent_svc: AgentService):
-    """Where a finished background command's report runs: the IM chat on its
-    session (the user is on the phone), else a live web run any open page
-    attaches to."""
+    """Where a finished background command's report goes.
+
+    IM first (the user is on the phone and it is the only surface that can reach
+    them away from the machine). Otherwise it runs as a live web turn any open
+    page attaches to — unless ``background_report_mode: quiet`` asks for no turn
+    at all, in which case the report is only recorded as an automated entry: the
+    page renders it like any other completion notice, and the model reads it
+    from history on the next turn that somebody actually starts.
+    """
+    from agentica.config.profiles import get_setting
+
+    quiet = str(get_setting("background_report_mode", "wakeup")).strip().lower() == "quiet"
 
     async def deliver(session_id: str, owner: str, report: str) -> None:
         if deps.im_bot is not None and await deps.im_bot.deliver_background_report(owner, session_id, report):
             return
+        if quiet:
+            await asyncio.to_thread(_record_quiet_report, agent_svc, session_id, owner, report)
+            return
         chat.start_background_report_run(agent_svc, session_id, owner, report)
 
     return deliver
+
+
+def _record_quiet_report(agent_svc: AgentService, session_id: str, owner: str, report: str) -> None:
+    """Write a completion report into the session log without running a turn.
+
+    The entry is marked ``automated`` for the same reason a delivered one is:
+    nobody typed it. It carries the job header the report already has, so the
+    page's completion card and the model's next request read the same text — one
+    artifact, two readers, and no extra model call for either.
+    """
+    from agentica_gateway.services import live_turn
+
+    try:
+        log = agent_svc.session_log_for(session_id, owner=owner)
+        log.append("user", report, automated=True)
+    except Exception as exc:  # noqa: BLE001 - a log write failure must not wedge the sweep
+        logger.warning(f"could not record background report for {session_id}: {exc}")
+        return
+    live_turn.bump_pulse(agent_svc._owner(owner))
 
 
 async def _claim_and_start_im() -> bool:

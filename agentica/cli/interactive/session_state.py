@@ -116,6 +116,12 @@ class SessionState:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
+    # Finished-job reports held back instead of waking the agent
+    # (``background_report_mode: quiet``). They ride in front of the next turn
+    # the user actually asks for, so nothing is lost and no turn is invented:
+    # the user still sees each completion block, and the model still learns what
+    # finished — just not by being woken up for it.
+    pending_background_reports: List[str] = field(default_factory=list)
     # This terminal's end of the cross-session peer channel (agentica/live/__init__.py).
     peer_session: Any = None
     # Standing-goal loop (see agentica/agent/goals.py).
