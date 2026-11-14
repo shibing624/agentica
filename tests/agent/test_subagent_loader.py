@@ -90,7 +90,6 @@ class TestParseValidFrontmatter(_LoaderTestCase):
             "can_spawn_subagents: true\n"
             "inherit_context: true\n"
             "inherit_workspace: true\n"
-            "inherit_knowledge: true\n"
             "---\n"
             "Do the focused task.\n",
         )
@@ -104,7 +103,6 @@ class TestParseValidFrontmatter(_LoaderTestCase):
         self.assertTrue(descriptor["can_spawn_subagents"])
         self.assertTrue(descriptor["inherit_context"])
         self.assertTrue(descriptor["inherit_workspace"])
-        self.assertTrue(descriptor["inherit_knowledge"])
 
     def test_empty_allowed_tools_means_no_tools(self):
         path = self._write(
@@ -301,7 +299,6 @@ class TestCreateAgentFile(_LoaderTestCase):
                 can_spawn_subagents=True,
                 inherit_context=True,
                 inherit_workspace=True,
-                inherit_knowledge=True,
             )
 
         self.assertTrue(Path(path).is_file())
@@ -314,7 +311,6 @@ class TestCreateAgentFile(_LoaderTestCase):
         self.assertTrue(config.can_spawn_subagents)
         self.assertTrue(config.inherit_context)
         self.assertTrue(config.inherit_workspace)
-        self.assertTrue(config.inherit_knowledge)
 
     def test_create_agent_file_validates_runtime_fields_before_writing(self):
         with patch(

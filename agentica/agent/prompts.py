@@ -8,7 +8,6 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.agent.goals import is_goal_generated_prompt
@@ -17,11 +16,10 @@ from agentica.compression.token_budget import (
     fold_window_preamble,
     is_pending_window_preamble,
 )
-from agentica.knowledge.document import Document
 from agentica.memory.recall import build_recall
 from agentica.memory.session_recall import RELATED_LIMIT, draft_session_recall_safe
 from agentica.utils.git_snapshot import build_git_snapshot
-from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
+from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
 from agentica.prompts.base.soul import get_soul_prompt
 from agentica.prompts.builder import PromptBuilder
@@ -30,7 +28,6 @@ from agentica.run.response import RunResponseExtraData
 from agentica.shell_hooks.prompt import collect_prompt_context
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
-from agentica.utils.timer import Timer
 
 # tools.md is only about the file-tool family. Injected when any of these
 # names is registered. An SDK agent can have files without execute / task;
@@ -685,36 +682,6 @@ class PromptsMixin:
             lines.append(f"\nToday's date is {datetime.now().strftime('%Y-%m-%d')}.")
         return lines
 
-    async def get_relevant_docs_from_knowledge(
-            self, query: str, num_documents: Optional[int] = None, **kwargs
-    ) -> Optional[List[Dict[str, Any]]]:
-        """Return a list of references from the knowledge base.
-
-        ``Knowledge.search`` is synchronous all the way down — a query
-        embedding over HTTP, then the vector store, then an optional reranker
-        over HTTP again. Called inline it would block the event loop for that
-        whole round trip on every turn that has ``add_references`` on, freezing
-        unrelated concurrent work, so it runs in the default executor.
-        """
-        if self.knowledge is None:
-            return None
-        loop = asyncio.get_running_loop()
-        relevant_docs: List[Document] = await loop.run_in_executor(
-            None,
-            partial(self.knowledge.search, query=query, num_documents=num_documents, **kwargs),
-        )
-        if len(relevant_docs) == 0:
-            return None
-        return [doc.to_dict() for doc in relevant_docs]
-
-    def convert_documents_to_string(self, docs: List[Dict[str, Any]]) -> str:
-        if docs is None or len(docs) == 0:
-            return ""
-        if self.prompt_config.references_format == "yaml":
-            import yaml
-            return yaml.dump(docs)
-        return json.dumps(docs, indent=2, ensure_ascii=False)
-
     def convert_context_to_string(self, context: Any) -> str:
         """Convert the context to a string representation.
 
@@ -751,27 +718,9 @@ class PromptsMixin:
     ) -> Optional[Message]:
         """Return the user message for the Agent."""
         pc = self.prompt_config
-        tc = self.tool_config
-
-        references = None
-        if tc.add_references and message and isinstance(message, str):
-            retrieval_timer = Timer()
-            retrieval_timer.start()
-            docs_from_knowledge = await self.get_relevant_docs_from_knowledge(query=message, **kwargs)
-            if docs_from_knowledge is not None:
-                references = MessageReferences(
-                    query=message, references=docs_from_knowledge, time=round(retrieval_timer.elapsed, 4)
-                )
-                if self.run_response.extra_data is None:
-                    self.run_response.extra_data = RunResponseExtraData()
-                if self.run_response.extra_data.references is None:
-                    self.run_response.extra_data.references = []
-                self.run_response.extra_data.references.append(references)
-            retrieval_timer.stop()
-            logger.debug(f"Time to get references: {retrieval_timer.elapsed:.4f}s")
 
         if pc.user_prompt_template is not None:
-            user_prompt_kwargs = {"agent": self, "message": message, "references": references}
+            user_prompt_kwargs = {"agent": self, "message": message}
             user_prompt_from_template = pc.user_prompt_template.get_prompt(**user_prompt_kwargs)
             return Message(
                 role=pc.user_message_role, content=user_prompt_from_template,
@@ -802,17 +751,6 @@ class PromptsMixin:
             )
 
         user_prompt = message
-        if (
-                tc.add_references
-                and references is not None
-                and references.references is not None
-                and len(references.references) > 0
-        ):
-            user_prompt += "\n\nUse the following references from the knowledge base if it helps:\n"
-            user_prompt += "<references>\n"
-            user_prompt += self.convert_documents_to_string(references.references) + "\n"
-            user_prompt += "</references>"
-
         if self.context is not None:
             user_prompt += "\n\n<context>\n"
             user_prompt += self.convert_context_to_string(self.context) + "\n"

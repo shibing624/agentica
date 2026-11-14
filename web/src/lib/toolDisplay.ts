@@ -19,7 +19,7 @@ export type ToolDisplayLayout = {
   bodyKind: "args" | "call";
 };
 
-const BODY_ONLY_DISPLAYS = new Set(["write_todos", "list_agents", "ask_user_question"]);
+const BODY_ONLY_DISPLAYS = new Set(["write_todos", "ask_user_question"]);
 
 export function layoutToolDisplay(name: string, display: string): ToolDisplayLayout {
   if (name === "execute") {
@@ -95,16 +95,7 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
     // raw ``model`` argument is the only honest thing this formatter can show.
     return formatHandoff(args, "description", ["subagent_type", "timeout", "max_turns", "resume_from_run_id"]);
   }
-  if (name === "delegate") {
-    return formatHandoff(args, "task", ["label", "work_dir", "model"]);
-  }
-  if (name === "send_message") {
-    const target = String(args.target ?? "");
-    const message = String(args.message ?? "");
-    if (!message) return target ? `→ ${target}` : "";
-    return target ? `→ ${target}\n    ${message}` : message;
-  }
-  if (name === "list_agents" || name === "ask_user_question") {
+  if (name === "ask_user_question") {
     return "";
   }
 

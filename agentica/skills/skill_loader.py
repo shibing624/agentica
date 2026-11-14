@@ -382,7 +382,7 @@ def load_skills(
     Load skills from standard directories.
 
     ``include_system`` defaults False: SDK callers must not pick up the
-    CLI/gateway manuals (``agentica``, ``multi-agent``). Product entry
+    CLI/gateway manuals (``agentica``, ``worktree``). Product entry
     points use :func:`load_system_skills` instead.
 
     Args:

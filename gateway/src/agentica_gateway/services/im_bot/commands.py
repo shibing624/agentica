@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from agentica.peers import PeerInfo
+from agentica.live import PeerInfo
 
 from ...channels.base import ChannelType
 

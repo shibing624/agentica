@@ -17,7 +17,7 @@ from agentica.skills.skill import Skill
 from agentica.skills.skill_loader import SkillLoader
 from agentica.skills.skill_registry import SkillRegistry
 
-BUNDLED = ("agentica", "browser", "cron", "long-running-jobs", "multi-agent", "worktree")
+BUNDLED = ("agentica", "browser", "cron", "long-running-jobs", "worktree")
 
 
 class TestBundledSkillsShip(unittest.TestCase):
@@ -93,7 +93,6 @@ class TestSkillRegistrationLogging(unittest.TestCase):
         self.assertEqual(cmds["/agentica"].name, "agentica")
         self.assertEqual(cmds["/browser"].name, "browser")
         self.assertEqual(cmds["/cron"].name, "cron")
-        self.assertEqual(cmds["/multi-agent"].name, "multi-agent")
         self.assertEqual(cmds["/worktree"].name, "worktree")
 
     def test_loading_registers_exactly_these_as_bundled(self):
@@ -130,22 +129,22 @@ class TestBundledSkillsArePreemptable(unittest.TestCase):
         registry = SkillRegistry()
         loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
         bundled = loader.load_skill(
-            SkillLoader.BUNDLED_SKILL_DIR / "multi-agent" / "SKILL.md", "bundled",
+            SkillLoader.BUNDLED_SKILL_DIR / "worktree" / "SKILL.md", "bundled",
         )
         registry.register(bundled)
-        self.assertTrue(self._register(registry, "multi-agent", "user"))
-        self.assertEqual(registry.get("multi-agent").location, "user")
-        self.assertIn("my own version", registry.get("multi-agent").content)
+        self.assertTrue(self._register(registry, "worktree", "user"))
+        self.assertEqual(registry.get("worktree").location, "user")
+        self.assertIn("my own version", registry.get("worktree").content)
 
     def test_a_bundled_skill_never_displaces_one_already_loaded(self):
         registry = SkillRegistry()
-        self._register(registry, "multi-agent", "user")
+        self._register(registry, "worktree", "user")
         loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
         bundled = loader.load_skill(
-            SkillLoader.BUNDLED_SKILL_DIR / "multi-agent" / "SKILL.md", "bundled",
+            SkillLoader.BUNDLED_SKILL_DIR / "worktree" / "SKILL.md", "bundled",
         )
         self.assertFalse(registry.register(bundled))
-        self.assertEqual(registry.get("multi-agent").location, "user")
+        self.assertEqual(registry.get("worktree").location, "user")
 
     def test_sdk_search_paths_omit_bundled(self):
         loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
@@ -173,7 +172,7 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
         self.assertIsNone(registry.get("agentica"))
         self.assertIsNone(registry.get("browser"))
         self.assertIsNone(registry.get("cron"))
-        self.assertIsNone(registry.get("multi-agent"))
+        self.assertIsNone(registry.get("worktree"))
         self.assertIsNone(registry.get("worktree"))
 
     def test_sdk_load_skips_leftover_system_dir(self):
@@ -214,17 +213,17 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
         from agentica.skills.skill_registry import reset_skill_registry
 
         with tempfile.TemporaryDirectory() as tmp:
-            user = Path(tmp) / "multi-agent"
+            user = Path(tmp) / "worktree"
             user.mkdir()
             (user / "SKILL.md").write_text(
-                "---\nname: multi-agent\ndescription: mine\n---\nmy own version\n",
+                "---\nname: worktree\ndescription: mine\n---\nmy own version\n",
                 encoding="utf-8",
             )
             with patch("agentica.skills.skill_loader.AGENTICA_SKILL_DIR", tmp):
                 reset_skill_registry()
                 registry = load_system_skills(project_root=Path(tmp))
-            self.assertEqual(registry.get("multi-agent").location, "user")
-            self.assertIn("my own version", registry.get("multi-agent").content)
+            self.assertEqual(registry.get("worktree").location, "user")
+            self.assertIn("my own version", registry.get("worktree").content)
 
     def test_skill_tool_sdk_auto_load_omits_system_skills(self):
         from agentica.skills.skill_registry import reset_skill_registry
@@ -244,7 +243,7 @@ class TestSystemSkillsAreProductOnly(unittest.TestCase):
         self.assertIsNone(tool.registry.get("agentica"))
         self.assertIsNone(tool.registry.get("browser"))
         self.assertIsNone(tool.registry.get("cron"))
-        self.assertIsNone(tool.registry.get("multi-agent"))
+        self.assertIsNone(tool.registry.get("worktree"))
         self.assertIsNone(tool.registry.get("worktree"))
 
     def test_skill_tool_after_product_load_keeps_system_skills(self):
@@ -293,25 +292,6 @@ class TestBundledSkillContent(unittest.TestCase):
         for action in ("action='set_env'", "action='check_upgrade'"):
             self.assertNotIn(action, body)
 
-    def test_the_multi_agent_skill_covers_all_three_mechanisms(self):
-        # Phrases are checked across line wraps, so rewrapping the prose
-        # does not break them.
-        body = " ".join(self._body("multi-agent").split())
-        for mechanism in ("`task`", "`delegate`", "tmux"):
-            self.assertIn(mechanism, body)
-        # Verified behaviours that are easy to get wrong.
-        self.assertIn("tmux kill-session", body)
-        self.assertIn("tmux attach", body)
-        self.assertIn("never by session id", body)
-        # Parallelism is a property of `task`, not a reason to pick delegate.
-        self.assertIn("several `task` calls", body)
-        self.assertIn("not a reason to reach for `delegate`", body)
-        # Other live sessions are coordinated with, not dispatched to.
-        self.assertIn("are not a worker pool", body)
-        self.assertIn("IS your user", body)
-        self.assertIn("goes back to the sender with `send_message`", body)
-        self.assertIn("goes in a file and the message carries its absolute path", body)
-
     def test_the_cron_skill_points_at_the_tool_and_both_daemon_surfaces(self):
         body = self._body("cron")
         self.assertIn("cronjob", body)
@@ -327,7 +307,7 @@ class TestBundledSkillContent(unittest.TestCase):
         body = self._body("worktree")
         self.assertIn("git worktree add", body)
         self.assertIn("worktree(action=\"new\")", body)
-        self.assertIn("list_agents", body)
+        self.assertNotIn("list_agents", body)
 
     def test_the_browser_skill_routes_clean_vs_logged_in_and_guards_daemon(self):
         body = self._body("browser")

@@ -41,7 +41,7 @@ def main():
     _enable_cli_file_logging()
 
     # External hook egress (settings.hooks in ~/.agentica/config.yaml). Only
-    # the CLI wires it — interactive, --query/--print (delegate workers), the
+    # the CLI wires it — interactive, --query/--print, the
     # cron daemon and ACP are all this user's own runs. An SDK process never
     # reads that file on its own, so a service embedding Agent/DeepAgent on
     # this machine gets no recall injected and is not captured by the user's

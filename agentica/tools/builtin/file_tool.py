@@ -101,14 +101,14 @@ def _nested_checkouts(base: "Path") -> tuple:
     """Worktrees of this repository that live under ``base``, from git itself.
 
     A worktree inside the checkout is a second copy of every file, so searches
-    from the repository root skip it — see ``agentica.peers.worktrees.nested_worktrees``
+    from the repository root skip it — see ``agentica.git.worktree.nested_worktrees``
     for why this is asked of git instead of matched by name. Never the base
     itself (a session or call pointed at that worktree must see its own files),
     and never when ``base`` is the worktrees container directory itself
     (e.g. ``path=".worktrees"`` or ``path=".agentica/worktrees"``).
     """
     try:
-        from agentica.peers.worktrees import nested_worktrees
+        from agentica.git.worktree import nested_worktrees
 
         here = os.path.realpath(str(base))
         return tuple(
@@ -122,7 +122,7 @@ def _nested_checkouts(base: "Path") -> tuple:
 def _in_worktree_tree(base: "Path") -> bool:
     """True when ``base`` is inside a nested worktree or is its container dir."""
     try:
-        from agentica.peers.worktrees import nested_worktrees
+        from agentica.git.worktree import nested_worktrees
 
         here = os.path.realpath(str(base))
         for wt in nested_worktrees(str(base)):

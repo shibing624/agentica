@@ -20,13 +20,6 @@ PROVIDER_ALIAS_EXPORTS = [
 ]
 
 LAZY_IMPORTS = {
-    # database implementations
-    "SqliteDb": "agentica.db.sqlite",
-    "PostgresDb": "agentica.db.postgres",
-    "InMemoryDb": "agentica.db.memory",
-    "JsonDb": "agentica.db.json",
-    "MysqlDb": "agentica.db.mysql",
-    "RedisDb": "agentica.db.redis",
     # model core / default OpenAI models (lazy so `import agentica` stays fast)
     "Model": "agentica.model.base",
     "ModelResponse": "agentica.model.response",
@@ -42,33 +35,6 @@ LAZY_IMPORTS = {
     "KimiChat": "agentica.model.kimi.chat",
     "Claude": "agentica.model.anthropic.claude",
     "Ollama": "agentica.model.ollama.chat",
-    # knowledge
-    "Knowledge": "agentica.knowledge.base",
-    "LlamaIndexKnowledge": "agentica.knowledge.llamaindex_knowledge",
-    "LangChainKnowledge": "agentica.knowledge.langchain_knowledge",
-    # vectordb
-    "SearchType": "agentica.vectordb.base",
-    "Distance": "agentica.vectordb.base",
-    "VectorDb": "agentica.vectordb.base",
-    "InMemoryVectorDb": "agentica.vectordb.memory_vectordb",
-    # embeddings
-    "Embedding": "agentica.embedding.base",
-    "OpenAIEmbedding": "agentica.embedding.openai",
-    "AzureOpenAIEmbedding": "agentica.embedding.azure_openai",
-    "HashEmbedding": "agentica.embedding.hash",
-    "OllamaEmbedding": "agentica.embedding.ollama",
-    "TogetherEmbedding": "agentica.embedding.together",
-    "FireworksEmbedding": "agentica.embedding.fireworks",
-    "ZhipuAIEmbedding": "agentica.embedding.zhipuai",
-    "HttpEmbedding": "agentica.embedding.http",
-    "JinaEmbedding": "agentica.embedding.jina",
-    "GeminiEmbedding": "agentica.embedding.gemini",
-    "HuggingfaceEmbedding": "agentica.embedding.huggingface",
-    "MulanAIEmbedding": "agentica.embedding.mulanai",
-    # rerank
-    "Rerank": "agentica.rerank.base",
-    "JinaRerank": "agentica.rerank.jina",
-    "ZhipuAIRerank": "agentica.rerank.zhipuai",
     # skills
     "Skill": "agentica.skills",
     "SkillRegistry": "agentica.skills",
@@ -134,9 +100,7 @@ LAZY_IMPORTS = {
     # built-in tools — moved to eager imports in __init__.py.
     # Only the helper factory stays lazy (avoids importing all tool modules at startup).
     "get_builtin_tools": "agentica.tools.builtin",
-    # swarm / subagent
-    "Swarm": "agentica.orchestration.swarm",
-    "SwarmResult": "agentica.orchestration.swarm",
+    # subagent
     "SubagentConfig": "agentica.subagents",
     "SubagentRun": "agentica.subagents",
     "SubagentRegistry": "agentica.subagents",
@@ -147,12 +111,11 @@ LAZY_IMPORTS = {
     "unregister_custom_subagent": "agentica.subagents",
     "get_custom_subagent_configs": "agentica.subagents",
     # cross-session peer messaging
-    "PeerSession": "agentica.peers",
-    "PeerInfo": "agentica.peers",
-    "PeerMessage": "agentica.peers",
-    "PeerMessageRefused": "agentica.peers",
-    "list_live_peers": "agentica.peers",
-    "PeerMessagingTool": "agentica.tools.peer_tool",
+    "PeerSession": "agentica.live",
+    "PeerInfo": "agentica.live",
+    "PeerMessage": "agentica.live",
+    "PeerMessageRefused": "agentica.live",
+    "list_live_peers": "agentica.live",
     # acp system
     "ACPServer": "agentica.acp",
     "ACPTool": "agentica.acp",
@@ -185,20 +148,17 @@ EAGER_PUBLIC_EXPORTS = [
     "AGENTICA_CRON_DIR", "AGENTICA_CACHE_DIR",
     "set_log_level_to_debug", "set_log_level_to_info", "logger",
     "write_audio_to_file",
-    "Message", "MessageReferences", "UserMessage", "AssistantMessage",
+    "Message", "UserMessage", "AssistantMessage",
     "SystemMessage", "ToolMessage", "Media", "Video", "Audio", "Image",
     "Usage", "RequestUsage", "TokenDetails",
     "BuiltinFileTool", "BuiltinExecuteTool", "BuiltinFetchUrlTool",
     "BuiltinWebSearchTool", "BuiltinTodoTool", "BuiltinTaskTool", "BuiltinMemoryTool",
     "AgentRun", "SessionSummary", "MemorySummarizer", "WorkingMemory",
     "MemoryType", "MemoryEntry",
-    "WorkflowRun", "WorkflowMemory",
-    "BaseDb", "SessionRow", "MemoryRow", "MetricsRow",
     "RunResponse", "RunEvent", "RunBreakReason", "RunResponseExtraData", "ToolCallInfo", "pprint_run_response",
     "RunContext", "RunSource", "RunStatus", "TaskAnchor",
     "RunEventRecord", "RunEventType",
     "LearningReport", "LearningStatus", "write_learning_report",
-    "Document",
     "Tool", "ModelTool", "Function", "FunctionCall", "tool",
     "CompressionManager",
     "CheckpointManager", "Checkpoint", "CheckpointFile",
@@ -207,13 +167,11 @@ EAGER_PUBLIC_EXPORTS = [
     "Agent", "AgentCancelledError",
     "PromptConfig", "ToolConfig", "WorkspaceMemoryConfig", "HistoryConfig", "SandboxConfig",
     "ToolRuntimeConfig", "SkillRuntimeConfig", "ExperienceConfig", "SkillUpgradeConfig",
-    "RunConfig", "Workflow", "WorkflowSession", "AgentHooks", "RunHooks",
+    "RunConfig", "AgentHooks", "RunHooks",
     "ConversationArchiveHooks", "MemoryExtractHooks", "ExperienceCaptureHooks",
     "ExperienceEventStore", "ExperienceCompiler", "CompiledExperienceStore", "SkillEvolutionManager",
     "SkillLifecycleHooks", "NoopSkillLifecycleHooks",
     "Workspace", "WorkspaceConfig",
-    "Critic", "CritiqueResult", "CritiqueStyle", "RefineResult", "RefineRound",
-    "SchemaCritic", "refine",
 ]
 
 PUBLIC_API_ALL = [

@@ -9,7 +9,7 @@ from agentica.api_registry import (
 
 
 def test_api_registry_contains_core_lazy_exports():
-    assert LAZY_IMPORTS["SqliteDb"] == "agentica.db.sqlite"
+    assert "SqliteDb" not in LAZY_IMPORTS
     assert LAZY_IMPORTS["AskUserQuestionTool"] == "agentica.tools.ask_user_question_tool"
     assert LAZY_IMPORTS["AskUserQuestionRequired"] == "agentica.tools.ask_user_question_tool"
     assert "UserInputTool" not in LAZY_IMPORTS
@@ -61,7 +61,8 @@ def test_agentica_public_api_uses_registry_names():
 
     assert agentica.__all__ == PUBLIC_API_ALL
     assert "DeepSeekChat" in agentica.__all__
-    assert "SqliteDb" in agentica.__all__
+    assert "SqliteDb" not in agentica.__all__
+    assert "Workflow" not in agentica.__all__
     assert "AskUserQuestionTool" in agentica.__all__
     assert "AskUserQuestionRequired" in agentica.__all__
     assert "UserInputTool" not in agentica.__all__

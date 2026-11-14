@@ -1882,7 +1882,7 @@ html[data-desktop="mac"] .files-panel.fullscreen .files-panel-head{padding-left:
 .s-menu .p-menu-item:focus-visible{outline:none;background:var(--hover)}
 .p-menu-sep{height:var(--hair);margin:4px 6px;background:var(--border)}
 
-/* Automatic reports (background command, delegated subagent, peer message):
+/* Automatic reports (background command, peer message):
    a system notice on the assistant's side, never a user bubble. */
 .m-auto{margin:2px 0 6px}
 .auto-notice{max-width:var(--chat-content-w);width:100%;border-left:2px solid var(--border);padding-left:10px}

@@ -11,7 +11,7 @@ Agentica 采用自底向上的模块化分层设计：
 ```text
 +-------------------------------------------------------------------+
 |                        编排层 (Orchestration)                      |
-|   Agent.as_tool()  ·  Subagent (task)  ·  Workflow  ·  Swarm      |
+|           Agent.as_tool()  ·  Subagent (task)                     |
 +-------------------------------------------------------------------+
 |                           代理层 (Agent)                           |
 |   Agent / DeepAgent  ·  Runner (Agentic Loop)  ·  PromptsMixin    |
@@ -104,7 +104,7 @@ OpenAI 与 Anthropic 对工具结果的协议形状完全不同：
 
 Layer 1 绝不淘汰模型还没看过的尾部工具结果，也绝不收缩正在执行的调用参数。`live_tool_round_start` 在定位尾部边界时会先跳过带 `_injected=True` 标记的中途插话消息（`_inject_steering` / `_inject_peer_messages`），防止插话把边界抬高而误伤刚返回的工具结果。
 
-此外，被收缩的超长工具参数叶节点会被替换为 JSON 对象 `{"$evicted": N}`，而不是字符串标记（防止模型把字符串占位符当成正文内容抄进下一次 `write_file` 或 `send_message`）。
+此外，被收缩的超长工具参数叶节点会被替换为 JSON 对象 `{"$evicted": N}`，而不是字符串标记（防止模型把字符串占位符当成正文内容抄进下一次 `write_file` 或 `apply_patch`）。
 
 ### 3. 水位校准 (`ContextCalibration`)
 

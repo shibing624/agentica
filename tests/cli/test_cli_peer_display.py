@@ -17,7 +17,7 @@ from agentica.cli.interactive.attachments import (
 )
 from agentica.cli.interactive.btw import hand_to_agent
 from agentica.cli.interactive.session_state import SessionState
-from agentica.peers import PeerMessage
+from agentica.live import PeerMessage
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -218,8 +218,7 @@ class TestQueuePayloadClassification:
         assert not queued.is_relayed
 
     def test_a_relayed_slash_command_stays_text(self):
-        """The multi-agent skill promises the sender that a slash command in a
-        peer message is plain text; this is what makes that true."""
+        """A slash command inside a peer message is plain text, not a command."""
         queued = unpack_queue_payload(("__RELAYED__", "/compact now please"))
 
         assert queued.is_relayed

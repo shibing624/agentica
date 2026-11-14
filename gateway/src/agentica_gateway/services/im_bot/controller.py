@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from agentica.memory.session_log import SessionLog
-from agentica.peers import PeerInfo, list_live_peers
+from agentica.live import PeerInfo, list_live_peers
 from agentica.utils.log import logger
 
 from ...card_page import CardRegistry

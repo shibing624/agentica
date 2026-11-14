@@ -1,6 +1,6 @@
 # 外部进程协议：Attach Socket（开发者选读）
 
-> **阅读提示**：本文档面向需要从外部程序向正在运行的交互式 CLI 会话注入用户输入（Unix Socket + JSON-RPC）的开发者。如果是两个终端会话之间互发消息，请直接使用 `/send-message`（见 [CLI 终端指南](terminal.md)）。
+> **阅读提示**：本文档面向需要从外部程序向正在运行的交互式 CLI 会话注入用户输入（Unix Socket + JSON-RPC）的开发者。如果只是想查看本机其它终端会话，请直接使用 `/list-agents`（见 [CLI 终端指南](terminal.md)）。
 
 让**别的进程**（桌宠、快捷键脚本、通知程序、你自己的工具）往一个**正在跑的**
 agentica 会话里说一句话 —— 效果等同于**你自己在那个终端里敲**。
@@ -24,8 +24,7 @@ agentica 会话里说一句话 —— 效果等同于**你自己在那个终端�
 ### 它解决的是哪件事
 
 会话的输入只有一个写者：坐在键盘前面的人。这条通道给了第二个入口，但它送进去的
-仍然是**用户本人**的输入，不是另一个 agent 的话（那是 `send-message`，见
-[terminal.md](terminal.md)）。
+仍然是**用户本人**的输入，不是另一个 agent 的话。
 
 所以它走的正是你敲一行所走的那条路（`hand_to_agent`）：会话在跑就**插到下一次
 tool 边界**（和 `/steer` 一样），空闲就**作为下一轮**。
@@ -76,7 +75,6 @@ launchd 起的 `.app` 是硬要求：默认 `PATH` 下的 `/usr/bin/python3` 是
 ```bash
 # 人类看：这个会话的 socket 在哪
 #   /list-agents        （交互会话里；每个会话的 "attach" 行）
-#   list_agents         （agent 侧，同一份字段）
 ```
 
 **直接读记录里的路径，不要自己拼** —— 它由 uid 和 `TMPDIR` 决定，拼错的症状是
@@ -84,7 +82,7 @@ launchd 起的 `.app` 是硬要求：默认 `PATH` 下的 `/usr/bin/python3` 是
 
 > 注意：`attach_socket` 是 presence 记录里的字段；**不要**去 grep 进程或按 cwd 找会话。
 > 也没有「列出所有 attach socket」的独立子命令 —— 会话列表就是 `live/*.json`
-> 这一份数据，`/list-agents` 与 `list_agents` 读的是同一份。
+> 这一份数据，`/list-agents` 读的就是它。
 
 **`AGENTICA_HOME` 会连带把 cache 一起搬走。** presence 记录写在
 `AGENTICA_CACHE_DIR` 下，而它的默认值是 `$AGENTICA_HOME/cache`。所以一个
@@ -232,4 +230,3 @@ PY
 | **attach**（本文） | **用户**（从别的程序） | 进 | 让外部程序替用户在这个会话里说一句 |
 | `shell hooks`（[shell-hooks.md](shell-hooks.md)） | agentica | 出 | 把 run 的状态告诉外部；审批/提问的回话 |
 | `notify sink`（[notify-sink.md](notify-sink.md)） | agentica | 出，只看 | 把 run 的状态告诉桌宠（单向） |
-| `send-message` / `/n`（[terminal.md](terminal.md)） | **另一个 agent 会话** | 双向 | agent 之间交接 |

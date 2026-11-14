@@ -141,7 +141,7 @@ agent = Agent(model=Ollama(id="llama3.1"))
 ## 下一步
 
 - [Agent 核心概念](../concepts/agent.md) -- 深入理解 Agent 的组成
-- [Workflow](../multi-agent/workflow.md) -- 多智能体协作
+- [Subagent](../multi-agent/subagent.md) -- 多智能体协作
 - [工具系统](../concepts/tools.md) -- 内置工具与自定义工具
 - [MCP 集成](../advanced/mcp.md) -- Model Context Protocol
 - [CLI 终端指南](terminal.md) -- CLI 完整功能

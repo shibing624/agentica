@@ -15,7 +15,6 @@ from agentica.tools.builtin import (
     BuiltinTodoTool,
     BuiltinWebSearchTool,
 )
-from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool
 from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
 # Names that are separately installable. A function on one Tool must not
@@ -33,10 +32,6 @@ _FOREIGN = {
     "wait": frozenset({
         "read_file", "write_file", "apply_patch", "glob", "grep",
         "task", "web_search", "fetch_url",
-    }),
-    "delegate": frozenset({
-        "task", "execute", "read_file", "write_file",
-        "apply_patch", "glob", "grep", "web_search", "fetch_url",
     }),
     "task": frozenset({
         "execute", "wait", "delegate", "read_file", "write_file",
@@ -93,10 +88,6 @@ def _tools():
         BuiltinFileTool(work_dir="/tmp"),
         BuiltinExecuteTool(work_dir="/tmp", background_process_registry=registry),
         BuiltinTaskTool(),
-        BuiltinDelegateTool(
-            background_process_registry=registry,
-            permission_mode=lambda: "allow-all",
-        ),
         BuiltinWebSearchTool(search_fn=_noop_search),
         BuiltinFetchUrlTool(),
         BuiltinTodoTool(),
@@ -119,16 +110,6 @@ def test_builtin_schemas_do_not_name_foreign_tools():
     assert hits == []
 
 
-def test_delegate_schema_names_wait():
-    registry = BackgroundProcessRegistry()
-    tool = BuiltinDelegateTool(
-        background_process_registry=registry,
-        permission_mode=lambda: "allow-all",
-    )
-    doc = tool.functions["delegate"].description or ""
-    assert "wait(id=" in doc
-
-
 def test_tools_md_does_not_name_execute():
     from agentica.prompts.base.tools import get_tools_prompt
     content = get_tools_prompt()
@@ -146,7 +127,6 @@ def test_every_builtin_tool_property_has_description_and_clean_top_doc():
     from agentica.tools.builtin.vision_tool import BuiltinVisionTool
     from agentica.tools.cron_tool import CronTool
     from agentica.tools.goal_tool import GoalTool
-    from agentica.tools.peer_tool import PeerMessagingTool
     from agentica.tools.self_manage_tool import SelfManageTool
     from agentica.tools.skill_tool import SkillTool
     from agentica.tools.worktree_tool import WorktreeTool
@@ -157,7 +137,6 @@ def test_every_builtin_tool_property_has_description_and_clean_top_doc():
         SkillTool(),
         AskUserQuestionTool(),
         WorktreeTool(MagicMock()),
-        PeerMessagingTool(MagicMock()),
         CronTool(),
         SelfManageTool(),
         GoalTool(MagicMock()),
@@ -179,9 +158,8 @@ def test_every_builtin_tool_property_has_description_and_clean_top_doc():
 
 
 def test_key_builtin_tool_schemas_match_structured_contracts():
-    """Pin structural schema improvements on apply_patch, task, delegate,
+    """Pin structural schema improvements on apply_patch, task,
     write_todos, and web_search."""
-    registry = BackgroundProcessRegistry()
     file_tool = BuiltinFileTool(work_dir="/tmp")
     patch_fn = file_tool.functions["apply_patch"]
     patch_fn.process_entrypoint()
@@ -196,14 +174,6 @@ def test_key_builtin_tool_schemas_match_structured_contracts():
     assert "cannot see" in task_fn.parameters["properties"]["description"]["description"] or (
         "does not share" in task_fn.parameters["properties"]["description"]["description"]
     )
-
-    delegate_fn = BuiltinDelegateTool(
-        background_process_registry=registry,
-        permission_mode=lambda: "allow-all",
-    ).functions["delegate"]
-    delegate_fn.process_entrypoint()
-    assert list(delegate_fn.parameters["properties"])[:2] == ["label", "task"]
-    assert delegate_fn.parameters["required"] == ["task"]
 
     todos_fn = BuiltinTodoTool().functions["write_todos"]
     todos_fn.process_entrypoint()

@@ -41,17 +41,9 @@ test("headless multi-line displays remain in the expanded body", () => {
   });
 });
 
-test("handoff rows show the model argument the caller passed", () => {
-  // Unlike the CLI, no resolved ``model=`` label is added: that needs the live
-  // session, which the chat row does not have. An explicit argument still
-  // shows, and an omitted one stays omitted rather than being invented.
-  const withModel = formatToolDisplay("delegate", {
-    task: "port the parser",
-    label: "parser port",
-    model: "zhipuai/glm-4.7",
-  });
-  assert.equal(withModel.split("\n")[0], "label='parser port', model='zhipuai/glm-4.7'");
-
+test("task rows show subagent_type without inventing a model", () => {
+  // The chat row has no live session to resolve the subagent's model from,
+  // so no ``model=`` label is added.
   const inherited = formatToolDisplay("task", { subagent_type: "explore", description: "find it" });
   assert.equal(inherited.split("\n")[0], "subagent_type='explore'");
   assert.ok(!inherited.includes("model="));

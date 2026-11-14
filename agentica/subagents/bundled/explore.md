@@ -12,7 +12,6 @@ timeout: 1800
 can_spawn_subagents: false
 inherit_context: false
 inherit_workspace: false
-inherit_knowledge: false
 ---
 You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 

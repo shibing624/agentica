@@ -6,7 +6,7 @@
 import asyncio
 import unittest
 
-from agentica.orchestration.critic import CritiqueResult, ExecCritic, SchemaCritic
+from evaluation.vag.critic import CritiqueResult, ExecCritic, SchemaCritic
 from evaluation.vag.lifecycle import (
     SkillAdmissionGate,
     SkillCandidate,

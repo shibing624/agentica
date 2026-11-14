@@ -24,10 +24,9 @@ from typing import (
 
 # Imported at runtime (not TYPE_CHECKING) so the field annotation
 # ``Optional[SkillLifecycleHooks]`` below resolves at class-build time.
-# Pydantic 2.12+ eagerly resolves forward refs when a subclass of
-# ``Workflow`` exposes ``Agent`` typed fields; a deferred TYPE_CHECKING
-# import leaves the name undefined and raises ``PydanticUserError:
-# `<Workflow subclass>` is not fully defined``.
+# Pydantic 2.12+ eagerly resolves forward refs when a model exposes
+# ``Agent`` typed fields; a deferred TYPE_CHECKING import leaves the name
+# undefined and raises ``PydanticUserError: ... is not fully defined``.
 from agentica.experience.skill_lifecycle_hooks import SkillLifecycleHooks
 
 
@@ -52,7 +51,6 @@ class PromptConfig:
     expected_output: Optional[str] = None
     additional_context: Optional[str] = None
     introduction: Optional[str] = None
-    references_format: Literal["json", "yaml"] = "json"
 
     # Prompt behavior switches
     add_name_to_instructions: bool = False
@@ -87,11 +85,6 @@ class ToolConfig:
     tool_call_limit: Optional[int] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     auto_load_mcp: bool = False
-    # Knowledge tools
-    search_knowledge: bool = True
-    update_knowledge: bool = False
-    # References
-    add_references: bool = False
     # Compression. The manager is always constructed (for /compact and
     # cross-provider fallback); these two flags gate the *automatic* path.
     # Both default on. Layer 0 (tool-result budget) is an output policy,

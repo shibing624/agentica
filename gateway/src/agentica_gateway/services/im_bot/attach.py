@@ -19,7 +19,7 @@ from agentica.cli.attach import (
     prompt_live_session,
     read_attach_token,
 )
-from agentica.peers import PeerInfo
+from agentica.live import PeerInfo
 
 
 def _read_attach_token(peer: PeerInfo) -> Optional[str]:

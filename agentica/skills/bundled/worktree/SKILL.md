@@ -3,7 +3,7 @@ name: worktree
 description: >-
   Isolate parallel work in a git worktree of the current repository
   (worktree tool: status / new / merge / remove). Use when another live
-  session is dirty in the same directory (list_agents), when two agents would
+  session is dirty in the same directory (/list-agents), when two agents would
   fight over index.lock, or when starting a parallel task checkout.
 metadata:
   version: "2.1"
@@ -27,7 +27,7 @@ calls still use this session unless you pass `work_dir` / `path`. Use
 
 ## When
 
-- `list_agents` shows another session in this directory (dirty files, same
+- Another live session is working in this directory (dirty files, same
   branch) and you are about to edit.
 - A change should not land on the shared working tree.
 
@@ -49,9 +49,6 @@ make room.
   will allow (dirty is refused; an unmerged branch is left in place)
 
 `new(name="main")` is refused: `main` is the repository root, not a task.
-
-For a chunk of work big enough for its own process, `delegate(task=...,
-work_dir=<path>)` already takes the same path.
 
 If a directory goes missing, `status` labels it `(directory gone)` or
 `(not a checkout)`. Say so; do not rebuild it by destroying what sits there.

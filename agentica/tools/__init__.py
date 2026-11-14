@@ -22,7 +22,6 @@ from agentica.tools.code_tool import CodeTool
 from agentica.tools.e2b_tool import E2BExecuteTool
 from agentica.tools.lsp_tool import LspTool
 from agentica.tools.cron_tool import CronTool
-from agentica.tools.peer_tool import PeerMessagingTool
 from agentica.tools.use_capability_tool import UseCapabilityTool
 from agentica.tools.helpers import tool_error, tool_result
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
@@ -62,6 +61,5 @@ __all__ = [
     "E2BExecuteTool",  # Remote sandboxed Python / shell execution (E2B cloud)
     "LspTool",         # LSP-based code navigation
     "CronTool",        # Cron job management
-    "PeerMessagingTool",  # Message the user's other live CLI sessions
     "UseCapabilityTool",  # Stable proxy for discovering/calling deferred (optional) tools
 ]

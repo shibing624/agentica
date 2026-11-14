@@ -31,7 +31,7 @@
 | Model / RunResponse / RunContext / hooks interfaces          |
 +--------------------------------------------------------------+
 | Optional Capabilities                                        |
-| Workspace / Skills / Experience / Workflow / Subagent / Swarm|
+| Workspace / Skills / Experience / Subagent                   |
 +--------------------------------------------------------------+
 ```
 
@@ -145,35 +145,6 @@ agent = DeepAgent()
 
 ## Tier 2：主仓可选能力（`agentica[xxx]`）
 
-### RAG 栈 — `uv add "agentica[rag]"`
-
-```python
-from agentica.knowledge import Knowledge
-from agentica.vectordb.base import VectorDb, Distance
-from agentica.embedding.base import Embedding
-from agentica.rerank.base import Rerank
-```
-
-Vector DB 具体实现：
-
-```python
-from agentica.vectordb import InMemoryVectorDb
-# 需 agentica[qdrant]：
-# from agentica.vectordb import QdrantVectorDb
-# 需 agentica[chroma]：
-# from agentica.vectordb import ChromaDb
-```
-
-### Storage — `uv add "agentica[sql]"` / `[postgres]` / `[mysql]` / `[redis]`
-
-```python
-from agentica.db import InMemoryDb, JsonDb  # 默认可用
-from agentica.db import SqliteDb            # 需 [sql]
-from agentica.db import PostgresDb          # 需 [postgres]
-from agentica.db import MysqlDb             # 需 [mysql]
-from agentica.db import RedisDb             # 需 [redis]
-```
-
 ### Guardrails
 
 ```python
@@ -200,7 +171,7 @@ from agentica_gateway.channels import (
 )
 ```
 
-`agentica-gateway` 与 `agentica` 同版本发布，并精确锁定同版本的 `agentica`。旧路径 `agentica.gateway.*` 仍可导入（指向同一模块对象），但会给 `DeprecationWarning`，计划在 1.7 移除。
+`agentica-gateway` 与 `agentica` 同版本发布，并精确锁定同版本的 `agentica`。旧路径 `agentica.gateway.*` 已移除，请改用 `agentica_gateway.*`。
 
 详见 [Gateway 文档](advanced/gateway.md)。
 
@@ -260,12 +231,6 @@ uv add "agentica[tools-media]"       # dalle + cogview + cogvideo + ocr + image/
 # 子 Agent（建议新代码用 @tool + Agent() 组合）
 from agentica.subagents import SubagentRegistry
 
-# 多 Agent 并行 / 自治（建议新代码用 asyncio.gather）
-from agentica.orchestration.swarm import Swarm
-
-# 工作流编排（建议新代码用顺序 Python）
-from agentica.orchestration.workflow import Workflow
-
 # 技能 / 经验（自进化能力）
 from agentica.skills import SkillRegistry
 from agentica.experience import (
@@ -286,7 +251,7 @@ from agentica.compression import CompressionManager
 以下模块/路径属于内部实现，**外部代码不建议直接 import**，API 可能在任何 patch 版本变化：
 
 - `agentica._internal.*`（如果未来新增）
-- `agentica.utils.markdown_converter.MarkdownConverter`（被 knowledge 内部使用）
+- `agentica.utils.markdown_converter.MarkdownConverter`（内部文档转换工具）
 - `agentica.runner.Runner`（Agent 的执行引擎，通过 Agent.run() 访问）
 - `agentica.compression.*`（内部压缩管道）
 

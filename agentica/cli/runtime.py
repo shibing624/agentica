@@ -69,8 +69,7 @@ def _generate_session_id() -> str:
 
 # Builtin tools — single source of truth for all CLI display/listing.
 # Mirrors the default DeepAgent toolset assembled by get_builtin_tools()
-# (file/execute/web/todos/task/skills) plus the CLI conditionals: delegate
-# (model + process registry, agent/deep.py), save_memory/search_memory
+# (file/execute/web/todos/task/skills) plus the CLI conditionals: save_memory/search_memory
 # (enable_long_term_memory, agent/base.py), ask_user_question (CLI turns it
 # on explicitly), and wait (registered with the background process registry).
 # Keep in sync — tests/cli/test_builtin_tools_listing.py fails if the factory
@@ -88,7 +87,6 @@ BUILTIN_TOOLS = [
     "write_todos",
     "task",
     "analyze_image",
-    "delegate",
     "save_memory",
     "forget_memory",
     "search_memory",
@@ -920,7 +918,6 @@ def create_agent(
     include_ask_user_question: bool,
     ask_user_question_callback=None,
     background_process_registry=None,
-    acp_sessions=None,
     enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
     peer_session=None,
@@ -946,11 +943,6 @@ def create_agent(
         the background agent thread).
     background_process_registry: optional shared registry used by
         execute(background=True), /ps, /stop, and the status bar.
-    acp_sessions: optional ``ACPSessionRegistry`` owned by the interactive CLI.
-        When given, the agent gets the ``acp_agent`` tool (runners: built-in
-        defaults overlaid with config.yaml ``settings.acp_runners``). Its
-        permission requests go through ``approve``, so only a surface with an
-        owner for the registry *and* a person to ask should pass one.
     enable_cron_immediate_run: when True (interactive CLI) the ``cronjob`` tool's
         ``action='run'`` executes a job once immediately and returns its output.
         Set False for cron-spawned agents so a scheduled job cannot recursively
@@ -958,9 +950,9 @@ def create_agent(
     permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
         see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
         then "allow-all" (the CLI's actual --permissions default; see parse_args()).
-    peer_session: optional ``agentica.peers.PeerSession`` for cross-session
-        messaging. When given, the agent gets the ``list_agents`` /
-        ``send_message`` tools and its inbox is drained between tool batches.
+    peer_session: optional ``agentica.live.PeerSession``. When given, messages
+        delivered to this session (cron, scheduler) are drained between tool
+        batches.
     worktree_binder: optional ``agentica.cli.worktree_binding.WorktreeBinder``.
         When given, the agent gets the ``worktree`` tool and can move this
         session into a per-task checkout on its own — including when the
@@ -1108,36 +1100,12 @@ def create_agent(
         CronTool(job_runner=cron_job_runner),
     ] + list(extra_tools or [])
 
-    if peer_session is not None:
-        from agentica.tools.peer_tool import PeerMessagingTool
-
-        cli_tools.insert(0, PeerMessagingTool(peer_session))
-
-    # Worktrees are the other half of peer messaging: list_agents shows that
-    # another session is dirty in the same directory, and this is what the agent
-    # does about it without asking a human to restart it somewhere else.
+    # A per-task checkout the agent can move this session into on its own, for
+    # when another session is dirty in the same directory.
     if worktree_binder is not None:
         from agentica.tools.worktree_tool import WorktreeTool
 
         cli_tools.insert(0, WorktreeTool(worktree_binder))
-
-    if acp_sessions is not None:
-        from agentica.tools.acp_agent_tool import ACPAgentTool, merge_runners
-
-        cli_tools.insert(0, ACPAgentTool(
-            acp_sessions,
-            runners=merge_runners(get_setting("acp_runners", None)),
-            work_dir=work_dir,
-        ))
-
-    # Delegating needs the session's process registry (that is how the worker is
-    # tracked, waited on and reported), so a one-shot `--query` run and a
-    # cron-spawned agent — neither of which has one — simply do not get the tool.
-    # Nor does a worker that was itself delegated: MAX_DEPTH stops a tree of
-    # agents spawning agents with nobody watching the bill.
-    # The tool itself is registered inside DeepAgent (the worker needs the model
-    # object's credentials, and config.yaml may not have any); the removal below
-    # runs after the agent is built.
 
     new_agent = DeepAgent(
         model=model,
@@ -1180,21 +1148,6 @@ def create_agent(
         ),
         approve=approve,
     )
-
-    # A one-shot `--query` run and a cron-spawned agent have no process
-    # registry, and a worker they started could never be waited on or reported
-    # back; MAX_DEPTH likewise stops a worker from delegating further. The tool
-    # is registered inside DeepAgent, so here it is only ever removed.
-    from agentica.tools.builtin.delegate_tool import (
-        BuiltinDelegateTool,
-        MAX_DEPTH,
-        delegation_depth,
-    )
-
-    if background_process_registry is None or delegation_depth() >= MAX_DEPTH:
-        new_agent.tools = [
-            tool for tool in (new_agent.tools or []) if not isinstance(tool, BuiltinDelegateTool)
-        ]
 
     if skills_registry and len(skills_registry) > 0:
         has_skill_tool = any(isinstance(tool, SkillTool) for tool in (new_agent.tools or []))

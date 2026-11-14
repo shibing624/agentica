@@ -17,7 +17,7 @@ from rich.table import Table
 from rich.text import Text
 
 from agentica.cli.runtime import get_console
-from agentica.peers import PeerMessage
+from agentica.live import PeerMessage
 from agentica.utils.string import format_file_size
 
 from .console import (

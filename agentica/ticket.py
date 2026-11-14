@@ -5,7 +5,7 @@
 
 A *ticket* names one unit of work as it crosses a process or runtime boundary:
 the turn that started it, the ``background/<id>.json`` record of the shell
-command or delegated worker it started, the environment of that child process,
+command it started, the environment of that child process,
 the cron job that fired it. Today each of those carries its own id
 (``BackgroundProcess.id``, ``RunResponse.run_id``, ``session_id``, a subagent
 id) and nothing ties them together, so "the same job" has no name that survives
@@ -17,7 +17,7 @@ from becoming a fourth copy of something:
 
 1. **Minted once, at the dispatch boundary**, then only inherited. The runner
    binds it at the start of a turn; a child run, a background command started by
-   that turn, a delegated process and a cron run all *inherit* the value rather
+   that turn, a child process and a cron run all *inherit* the value rather
    than minting a new one. Inheritance is what makes the record chain readable.
 2. **Never a source of truth for anything.** Liveness, exit status and delivery
    are owned by the ``background/*.json`` record and the session log. A ticket
@@ -38,8 +38,7 @@ from typing import Iterator, Optional, Tuple
 from uuid import uuid4
 
 #: Environment variable a child process reads to inherit its parent's dispatch.
-#: This is how `delegate` links a worker to the turn that started it: the OS
-#: process and its environment are the only channel that survives exec.
+#: The OS process environment is the only channel that survives exec.
 TICKET_ENV = "AGENTICA_TICKET_ID"
 
 _current: ContextVar[Optional[str]] = ContextVar("agentica_ticket_id", default=None)
@@ -49,7 +48,7 @@ def new_ticket_id() -> str:
     """Mint a fresh ticket id.
 
     Short and log-friendly on purpose: it appears in ``background/*.json``, in
-    session sidecars and in a delegated worker's environment, so it has to be
+    session sidecars and in a child process's environment, so it has to be
     something a human can compare by eye across two files.
     """
     return f"tk_{uuid4().hex[:12]}"
@@ -70,7 +69,7 @@ def normalize_ticket_id(value: object) -> Optional[str]:
 def current_ticket_id() -> Optional[str]:
     """The ticket this turn belongs to, or ``None`` when nothing is bound.
 
-    The environment fallback is what makes a delegated child inherit: it is
+    The environment fallback is what makes a child process inherit: it is
     started with ``AGENTICA_TICKET_ID`` set, so its very first turn binds the
     parent's ticket without anyone passing a parameter through ``--query``.
     """
@@ -103,7 +102,7 @@ def resolve_ticket_id(ticket_id: Optional[str] = None) -> str:
     """The ticket this dispatch gets, without binding it.
 
     Order: an explicit id wins, then whatever this context already inherited
-    (a subagent inside a parent turn, a delegated child reading its env), then a
+    (a subagent inside a parent turn, a child process reading its env), then a
     fresh one. Every dispatch ends up with a value, which is what lets a tool
     running inside the turn stamp it onto the record it writes.
     """

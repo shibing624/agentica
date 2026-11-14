@@ -18,7 +18,7 @@ from uuid import uuid4
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from agentica.peers import git_state
+from agentica.git import state as git_state
 from agentica import config
 from agentica.cli.approvals import (
     approval_decision_from_key,
@@ -65,7 +65,7 @@ from agentica.notify import (
     set_attach_endpoint,
     set_idle_provider,
 )
-from agentica.peers import PeerSession, format_for_model
+from agentica.live import PeerSession, format_for_model
 from agentica.run.response import AgentCancelledError
 from agentica.shell_hooks import (
     emit_request_resolved,
@@ -496,8 +496,8 @@ def run_interactive(
     requested_worktree = agent_config.pop("worktree", None)
     started_in_worktree = False
     if requested_worktree:
-        from agentica.peers.worktrees import WorktreeError
-        from agentica.peers.worktrees import ensure as ensure_worktree
+        from agentica.git.worktree import WorktreeError
+        from agentica.git.worktree import ensure as ensure_worktree
 
         try:
             bound = ensure_worktree(agent_config.get("work_dir") or os.getcwd(), requested_worktree)
@@ -552,7 +552,6 @@ def run_interactive(
         include_ask_user_question=True,
         ask_user_question_callback=_cli_ask_user_question_callback,
         background_process_registry=state.background_processes,
-        acp_sessions=state.acp_sessions,
         permission_mode=perm_mode,
         peer_session=state.peer_session,
         worktree_binder=worktree_binder,
@@ -723,7 +722,6 @@ def run_interactive(
             bg_tasks=state.bg_tasks,
             bg_task_counter=state.bg_task_counter,
             background_processes=state.background_processes,
-            acp_sessions=state.acp_sessions,
             peer_session=state.peer_session,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
@@ -936,8 +934,8 @@ def run_interactive(
             skill_cmds = skills_registry.auto_commands() if skills_registry else {}
             # A slash command is a shortcut for the human at this keyboard, so
             # only typed input dispatches one. Relayed text (a peer message, a
-            # finished job's report) stays plain text — the single place that
-            # enforces what the bundled multi-agent skill promises the sender.
+            # finished job's report) stays plain text, so a sender cannot run a
+            # command in this session by putting one in a message.
             # Until now it held only by accident: `format_for_model` happens to
             # prefix an authority header, so the first word was never `/compact`.
             is_command = not already_shown and (
@@ -1369,7 +1367,7 @@ def run_interactive(
                 # "unset" rather than being skipped, so clearing works too;
                 # heartbeat itself only writes when one of these differs.
                 #
-                # Git state rides the same tick (agentica/peers/git_state.py caches
+                # Git state rides the same tick (agentica/git/state.py caches
                 # for CACHE_TTL, so this is not three subprocesses per second).
                 # It is what lets another session read "who is behind main and
                 # who has that file dirty" instead of asking.
@@ -1582,7 +1580,6 @@ def run_interactive(
         try:
             _stop_cron(state)
             state.background_processes.stop()
-            state.acp_sessions.close_all()
             if worktree_binder is not None:
                 removed = worktree_binder.release()
                 if removed:

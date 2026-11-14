@@ -14,7 +14,7 @@ import json
 import pytest
 
 from agentica.model.anthropic.claude import Claude
-from agentica.model.message import Message, MessageReferences
+from agentica.model.message import Message
 from agentica.model.openai.chat import OpenAIChat
 
 # OpenAI top-level allowlist — mirrors Message.to_model_dict()'s include set.
@@ -25,7 +25,6 @@ ANTHROPIC_WIRE_KEYS = {"role", "content"}
 # in a wire payload means a field escaped its boundary.
 SENTINELS = (
     "SENTINEL_METRICS_x7q",
-    "SENTINEL_REFERENCES_x7q",
     "SENTINEL_PROVIDER_DATA_x7q",
     "SENTINEL_COMPRESSED_x7q",
     "SENTINEL_THINKING_x7q",
@@ -42,7 +41,6 @@ def _loaded_message(role: str = "user") -> Message:
         role=role,
         content="hello world",
         metrics={"tokens": "SENTINEL_METRICS_x7q"},
-        references=MessageReferences(query="SENTINEL_REFERENCES_x7q"),
         provider_data={"blob": "SENTINEL_PROVIDER_DATA_x7q"},
         compressed_content="SENTINEL_COMPRESSED_x7q",
         thinking="SENTINEL_THINKING_x7q",

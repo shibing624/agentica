@@ -35,17 +35,6 @@ def strip_volatile_marker(role: str, content: Any) -> Any:
     return content
 
 
-class MessageReferences(BaseModel):
-    """The references added to user message for RAG"""
-
-    # The query used to retrieve the references.
-    query: str
-    # References (from the vector database or function calls)
-    references: Optional[List[Dict[str, Any]]] = None
-    # Time taken to retrieve the references.
-    time: Optional[float] = None
-
-
 class Message(BaseModel):
     """Message sent to the Model"""
 
@@ -132,9 +121,6 @@ class Message(BaseModel):
 
     # Metrics for the message. This is not sent to the Model API.
     metrics: Dict[str, Any] = Field(default_factory=dict)
-
-    # The references added to the message for RAG
-    references: Optional[MessageReferences] = None
 
     # Compressed content for tool results (used by CompressionManager)
     compressed_content: Optional[str] = None

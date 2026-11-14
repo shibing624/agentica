@@ -69,30 +69,19 @@ def test_handoff_lines_lead_with_the_model():
     )
     assert task.splitlines()[0].startswith("model=openai/gpt-4o-mini,")
 
-    delegate = format_tool_display(
-        "delegate",
-        {"task": "port it", "label": "a very long label that would push the model off the line"},
-        model_label="zhipuai/glm-4.7",
-    )
-    assert delegate.splitlines()[0].startswith("model=zhipuai/glm-4.7,")
-
 
 def test_a_resolved_model_replaces_the_raw_model_argument():
     """The argument and the resolved label say the same thing; printing both
     makes the line read as two different models."""
     display = format_tool_display(
-        "delegate", {"task": "port it", "model": "zhipuai/glm-4.7"},
+        "task", {"description": "port it", "model": "zhipuai/glm-4.7"},
         model_label="glm-4.7 (profile zhipu-flash)",
     )
     assert display.count("glm-4.7") == 1
     assert "profile zhipu-flash" in display
 
 
-def test_peers_and_default():
-    assert format_tool_display("list_agents", {}) == ""
-    send = format_tool_display("send_message", {"target": "web-af", "message": "please commit"})
-    assert "→ web-af" in send
-    assert "please commit" in send
+def test_memory_and_worktree_args():
     mem = format_tool_display("save_memory", {"title": "note", "content": "keep this", "memory_type": "project"})
     assert "title=" in mem and "note" in mem
     search = format_tool_display("search_memory", {"query": "worktree lock"})

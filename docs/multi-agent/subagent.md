@@ -2,9 +2,21 @@
 
 Subagent 用于把边界清楚的调查任务放进独立上下文，例如定位文件、追踪调用链、收集外部资料。主 Agent 负责理解结果、修改代码、正确性审查和最终决策。
 
-CLI 里模型通过 **`task` 工具**调用 Subagent（同进程、默认 auxiliary 模型、内置类型只读）。若需要**另一个完整 agentica 进程**（独立 context / cwd、可写、经 `/ps`/`wait` 托管），那是 CLI 的 **`delegate`**，不是 Subagent——见 [Choosing](choosing.md) 与 [终端文档](../getting-started/terminal.md)。
+CLI 里模型通过 **`task` 工具**调用 Subagent（同进程、默认 auxiliary 模型、内置类型只读）。若需要**另一个完整 agentica 进程**（独立 context / cwd、可写），用后台命令 `execute(background=True)` 运行 `agentica --query ...`，经 `/ps`/`wait` 托管——见 [终端文档](../getting-started/terminal.md)。
 
-如果任务只是固定步骤流水线，优先使用 [Workflow](workflow.md)；如果要把长期存在的 Agent 当作工具组合，使用 `Agent.as_tool()`。只有子任务确实需要独立的提示词、工具权限、模型和运行预算时，才使用 Subagent。
+## 选择协作方式
+
+需要多个 Agent 时，先用能满足控制边界的最小方案：
+
+| 方式 | 适用场景 | 控制方式 | 成本可预期性 |
+|------|----------|----------|--------------|
+| `Agent.as_tool()` | 父 Agent 调用专门的辅助 Agent | 由 LLM 决定何时调用 | 中 |
+| Subagent（`task`） | 需要隔离的委派任务 | 运行时限制工具、深度和时长 | 中 |
+
+- 如果步骤顺序固定，直接写一个普通的 `async def` 流水线依次调用各 Agent，不必让 LLM 来协调。
+- 如果子 Agent 存在的唯一理由是专业分工，先试 `Agent.as_tool()`。
+- 如果子 Agent 不应继承父 Agent 的全部工具，或需要独立的提示词、模型、权限和运行预算，使用 Subagent，并显式配置 `allowed_tools` 或 `denied_tools`。
+- 在 CLI 里默认用 `task`；几次工具调用或几个并行 `task` 能完成的事，不要再起一个独立进程。
 
 ## 内置 Subagent
 
@@ -40,7 +52,6 @@ timeout: 900
 can_spawn_subagents: false
 inherit_context: false
 inherit_workspace: false
-inherit_knowledge: false
 ---
 You are a read-only data analyst.
 
@@ -127,7 +138,6 @@ Never modify files, dependencies, Git state, or external systems.
 | `can_spawn_subagents` | `false` | 是否允许继续委派；运行时仍限制最大深度 |
 | `inherit_context` | `false` | 是否注入父 Agent 的指令摘要、近期历史等交接上下文 |
 | `inherit_workspace` | `false` | 是否共享父 Agent 的 Workspace 记忆 |
-| `inherit_knowledge` | `false` | 是否共享父 Agent 的 Knowledge 实例 |
 
 默认隔离是刻意设计的：委派描述应像交给一个没有读过当前对话的同事一样自包含。只有子任务确实依赖父上下文或长期数据时，才开启对应的继承字段。
 
@@ -190,6 +200,5 @@ if result["status"] == "completed":
 
 ## 下一步
 
-- [选择多智能体编排模式](choosing.md)
-- [Swarm](swarm.md)
-- [Workflow](workflow.md)
+- [多会话共用仓库 (Worktree)](worktrees.md)
+- [CLI 终端指南](../getting-started/terminal.md)

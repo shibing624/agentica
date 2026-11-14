@@ -20,8 +20,7 @@ metadata:
 | The job runs on its own (tmux, nohup/setsid, ssh to another host, a queue) | launch it with a foreground `execute`, then `execute(background=True)` an `agentica watch` |
 | The very next step of this turn needs a background id's result | `wait(id)` |
 
-`wait` only blocks on an id that `execute(background=True)` or `delegate`
-returned; it cannot reach a pid, a tmux session or another host. Without a next
+`wait` only blocks on an id that `execute(background=True)` returned; it cannot reach a pid, a tmux session or another host. Without a next
 step that needs the result, do not `wait`: end the turn, the report arrives on
 its own.
 

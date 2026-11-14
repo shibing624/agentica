@@ -30,7 +30,6 @@ from agentica.cli.commands.runtime import (
     _cmd_ps,
     _cmd_queue,
     _cmd_rewind,
-    _cmd_send_message,
     _cmd_steer,
     _cmd_stop,
 )
@@ -86,13 +85,8 @@ COMMAND_REGISTRY = {
     "/ps": (_cmd_ps, "List background agents and terminal commands"),
     "/stop": (_cmd_stop, "Stop background tasks: /stop <id|#n|pid> | all (Ctrl+C stops the current run)"),
     "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (plain text typed mid-run steers by default)"),
-    "/list-agents": (_cmd_list_agents, "List your other live CLI sessions this one can message"),
-    "/peers": (_cmd_list_agents, "List messageable live sessions (alias for /list-agents)"),
-    "/send-message": (
-        _cmd_send_message,
-        "Message another session: /send-message [--steer|--queue] <session> <text>",
-    ),
-    "/send": (_cmd_send_message, "Send a message to a session (alias for /send-message)"),
+    "/list-agents": (_cmd_list_agents, "List your other live CLI sessions"),
+    "/peers": (_cmd_list_agents, "List live sessions (alias for /list-agents)"),
     "/worktree": (
         _cmd_worktree,
         "This session's git worktree: status | use <name> | main | merge | remove",

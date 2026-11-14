@@ -12,7 +12,6 @@ timeout: 1800
 can_spawn_subagents: false
 inherit_context: false
 inherit_workspace: false
-inherit_knowledge: false
 ---
 You are a research specialist that excels at finding and analyzing information.
 

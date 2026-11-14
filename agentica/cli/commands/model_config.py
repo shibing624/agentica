@@ -53,7 +53,6 @@ from agentica.cli.commands.helpers import (
     _count_enabled_skills,
     _run_async_safe,
     _update_task_tool_auxiliary_model,
-    _update_delegate_tool_models,
     format_cli_log_location,
     format_path_for_display,
 )
@@ -380,9 +379,6 @@ def _rebind_live_model(ctx: CommandContext) -> None:
         # agent.tools also holds plain functions, which have no model to bind.
         if isinstance(tool, Tool):
             tool.set_agent_model(agent.model)
-    # delegate judges a ``model`` arg against the session's own models and
-    # launches the worker on the session profile, so both follow the switch.
-    _update_delegate_tool_models(agent, ctx.agent_config.get("profile_name") or None)
 
 
 
@@ -651,7 +647,6 @@ def _apply_profile(
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
-        acp_sessions=ctx.acp_sessions,
         worktree_binder=ctx.worktree_binder,
         approve=ctx.approve,
     )

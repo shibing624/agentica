@@ -5,7 +5,7 @@ import { useStrings } from "../i18n";
 import { useAppState } from "../store";
 
 /**
- * A turn no person wrote — a background command's or a delegated subagent's
+ * A turn no person wrote — a background command's
  * report, another session's message — drawn as a quiet system notice on the
  * assistant's side, never as the user's bubble. The user's queries are the
  * one thing a reader scans for; a report the agent got is context for the

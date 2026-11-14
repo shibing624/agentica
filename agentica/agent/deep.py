@@ -173,7 +173,6 @@ class DeepAgent(Agent):
         agent_id: Optional[str] = None,
         description: Optional[str] = None,
         instructions: Optional[Union[str, List[str], Callable]] = None,
-        knowledge: Optional[Any] = None,
         auxiliary_task_models: Optional[Dict[str, Model]] = None,
         fallback_models: Optional[List[Model]] = None,
         fallback_on_break: bool = False,
@@ -295,45 +294,6 @@ class DeepAgent(Agent):
         if cos_configured() and not any(isinstance(t, CosPublishTool) for t in all_tools):
             all_tools.append(CosPublishTool())
 
-        # Delegate runs a task in a whole other agentica CLI process. It needs
-        # the session's process registry (that is how the worker is tracked,
-        # waited on and reported), so callers without one — the plain SDK
-        # default, a one-shot `--query` run, a cron-spawned agent — simply do
-        # not get the tool. Nor does a worker that was itself delegated:
-        # MAX_DEPTH stops a tree of agents spawning agents with nobody
-        # watching the bill.
-        from agentica.tools.builtin.delegate_tool import (
-            BuiltinDelegateTool,
-            MAX_DEPTH,
-            delegation_depth,
-            provider_for_model,
-        )
-
-        if model is not None and background_process_registry is not None and delegation_depth() < MAX_DEPTH:
-            all_tools.insert(
-                0,
-                BuiltinDelegateTool(
-                    background_process_registry=background_process_registry,
-                    # Read at call time, not now: the permission tier can be
-                    # switched in place without rebuilding the agent, and a
-                    # worker must start under the tier in effect when it is
-                    # spawned.
-                    permission_mode=lambda: self.tool_config.permission_mode,
-                    work_dir=work_dir,
-                    # The model object is the SDK credential source: its
-                    # provider/id/base_url/api_key describe the worker's model
-                    # even when no config.yaml profile exists on this machine.
-                    model=model,
-                    model_provider=provider_for_model(model),
-                    model_name=model.id,
-                    # The other model this session offers. `delegate`'s
-                    # ``model`` arg may name either one and nothing else — the
-                    # profile is the user's choice and fixes endpoint + bill.
-                    auxiliary_model=auxiliary_model,
-                    session_profile=session_profile,
-                ),
-            )
-
         # Opinionated config defaults (user can override by passing their own)
         if prompt_config is None:
             prompt_config = PromptConfig(
@@ -413,7 +373,6 @@ class DeepAgent(Agent):
             agent_id=agent_id,
             description=description,
             instructions=instructions,
-            knowledge=knowledge,
             auxiliary_task_models=auxiliary_task_models,
             fallback_models=fallback_models,
             fallback_on_break=fallback_on_break,

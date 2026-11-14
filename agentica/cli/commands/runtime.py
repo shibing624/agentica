@@ -30,7 +30,6 @@ from agentica.agent.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import local_turn_stamp
 from agentica.model.message import Message
-from agentica.peers import DELIVERY_QUEUE, DELIVERY_STEER, PeerMessageRefused
 from agentica.run.config import RunConfig
 from agentica.run.response import RunResponse
 from agentica.ticket import current_ticket_id
@@ -321,7 +320,6 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
-        acp_sessions=ctx.acp_sessions,
         worktree_binder=ctx.worktree_binder,
         approve=ctx.approve,
     )
@@ -369,77 +367,10 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
 
 
 
-def _parse_send_message_args(cmd_args: str) -> tuple[str, str, str]:
-    """Parse ``[--steer|--queue] <session> [--steer|--queue] <text>``.
-
-    The flag is only accepted as the first token or immediately after the
-    session name, so a body that mentions ``--queue`` is not eaten.
-    """
-    tokens = (cmd_args or "").strip().split()
-    delivery = DELIVERY_STEER
-    if tokens and tokens[0] in ("--steer", "--queue"):
-        delivery = tokens.pop(0)[2:]
-    target = tokens.pop(0) if tokens else ""
-    if tokens and tokens[0] in ("--steer", "--queue"):
-        delivery = tokens.pop(0)[2:]
-    text = " ".join(tokens).strip()
-    return target, text, delivery
-
-
-def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
-    """Send a message from you to one of your other live sessions.
-
-    Named after the ``send_message`` tool the agent calls, the way
-    ``/list-agents`` is named after ``list_agents``: same channel, different
-    sender. This is for when you want to say something yourself without typing
-    it into that terminal. It arrives marked as coming from you, so the
-    receiving agent treats it as your instruction rather than another agent's
-    information.
-
-    ``--steer`` (default) injects between the receiver's tool calls; ``--queue``
-    waits until that run finishes and becomes its next turn.
-    """
-    con = get_console()
-    peers = ctx.peer_session
-    if peers is None:
-        con.print("  [yellow]Cross-session messaging is not active in this session.[/yellow]")
-        return
-
-    target, text, delivery = _parse_send_message_args(cmd_args)
-    if not target or not text:
-        con.print(
-            "  [dim]Usage: /send-message [--steer|--queue] <session> <text>   "
-            "(see /list-agents for names)[/dim]"
-        )
-        con.print(
-            "  [dim]e.g. /send-message --queue benchmarks-b read tmp/handoff.md "
-            "when you finish[/dim]"
-        )
-        return
-
-    try:
-        sent = peers.send(target, text, from_kind="user", delivery=delivery)
-    except PeerMessageRefused as exc:
-        con.print(f"  [red]Not sent: {exc}[/red]")
-        return
-    # Name the peer it actually resolved to: '/send-message 7e17' should show
-    # which session that prefix picked.
-    if sent.delivery == DELIVERY_QUEUE:
-        when = "next turn after its current run (or immediately if idle)"
-    else:
-        when = "between tool calls if running, or as its next turn if idle"
-    con.print(
-        f"  [green]Queued for {sent.to_name} ({sent.delivery}).[/green] "
-        f"[dim]The other session accepts it {when}.[/dim]"
-    )
-
-
-
 def _print_peer_details(con, info, *, indent: str) -> None:
     """Print one session's fields, aligned, from ``PeerInfo.detail_rows()``.
 
-    The rows come from the same place the ``list_agents`` tool renders, so the
-    user and the model never see different field sets.
+    The rows come from ``PeerInfo.detail_rows()``.
     """
     rows = info.detail_rows()
     width = max((len(label) for label, _ in rows), default=0)
@@ -448,11 +379,7 @@ def _print_peer_details(con, info, *, indent: str) -> None:
 
 
 def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
-    """Show the live CLI sessions this one can exchange messages with.
-
-    Purely for the user to inspect: the agent finds its own targets through the
-    ``list_agents`` tool, so nothing has to be run before asking it to send.
-    """
+    """Show the user's other live CLI sessions."""
     con = get_console()
     peers = ctx.peer_session
     if peers is None:
@@ -467,17 +394,12 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
 
     live = peers.list_peers()
     if not live:
-        con.print("  [dim]No other live sessions. Start agentica in another terminal to message it.[/dim]")
+        con.print("  [dim]No other live sessions.[/dim]")
         return
     con.print(f"\n  [cyan]Other live sessions ({len(live)}):[/cyan]")
     for info in live:
         con.print(f"    [bold]{info.name}[/bold] [dim]peer={info.peer_id}[/dim]  pid={info.pid}")
         _print_peer_details(con, info, indent="      ")
-    con.print(
-        "  [dim]Ask the agent to message one by name / peer id / session_id "
-        "(it calls send_message itself), or say it yourself with "
-        "/send-message <name|id> <text>.[/dim]"
-    )
 
 
 
@@ -657,21 +579,17 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
     if terminals:
         con.print(f"  [cyan]Background terminals ({len(terminals)}):[/cyan]")
         for view in terminals:
-            kind = " [magenta]delegated session[/magenta]" if view.get("kind") == "delegate" else ""
             con.print(
                 f"    #{view.get('num')} [dim]{view.get('id')}[/dim] pid={view.get('pid')} "
-                f"elapsed={view.get('elapsed')}{kind}"
+                f"elapsed={view.get('elapsed')}"
             )
             # Full command on its own lines — /ps is the inspection surface,
             # so never truncate here (preview is only for one-line status UI).
-            # A delegated session shows its task instead: its command line is a
-            # `python -m agentica.cli.main --query <the whole task>`.
             label = view.get("label") or ""
             command = view.get("command") or ""
-            body = label if view.get("kind") == "delegate" else command
-            if view.get("kind") != "delegate" and label and label != command:
+            if label and label != command:
                 con.print(f"      [bold]{label}[/bold]")
-            for line in body.splitlines() or [""]:
+            for line in command.splitlines() or [""]:
                 con.print(f"      {line}")
             con.print(f"      [dim]log: {view.get('log_path')}[/dim]")
 

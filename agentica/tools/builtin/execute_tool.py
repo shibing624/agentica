@@ -957,8 +957,7 @@ class BuiltinExecuteTool(Tool):
     async def wait(self, id: str, timeout: int = _DEFAULT_WAIT_SECONDS) -> str:
         """Blocks until a background command finishes, then reports how it went.
 
-        Only for an id that ``execute(background=True)`` or ``delegate``
-        returned; it cannot wait on a pid, a tmux session or another host (see
+        Only for an id that ``execute(background=True)`` returned; it cannot wait on a pid, a tmux session or another host (see
         the ``long-running-jobs`` skill for those).
         Returns the instant the command exits, so a generous timeout costs no
         more than the command itself. Use it when a later step of this turn needs
@@ -975,7 +974,7 @@ class BuiltinExecuteTool(Tool):
         the command has already failed, and cannot tell you its exit code.
 
         Args:
-            id: Background job id returned by execute(background=True) or delegate (e.g. "term_4").
+            id: Background job id returned by execute(background=True) (e.g. "term_4").
             timeout: Max seconds to wait in this call (default 300, no upper cap). Reaching it leaves the job running and returns output so far.
 
         Returns:
@@ -1006,15 +1005,8 @@ class BuiltinExecuteTool(Tool):
         while not item.finished.is_set() and time.monotonic() < deadline:
             await asyncio.sleep(_WAIT_POLL_INTERVAL)
 
-        # A delegated session's stdout is its final report, not a command log,
-        # so it is named for the task and quoted at length.
-        delegated = item.kind == "delegate"
-        what = f'Delegated task "{item.label}"' if delegated else f"Background command #{item.num}"
-        tail = read_log_tail(
-            item.log_path,
-            max_lines=120 if delegated else 40,
-            max_chars=8000 if delegated else 4000,
-        )
+        what = f"Background command #{item.num}"
+        tail = read_log_tail(item.log_path, max_lines=40, max_chars=4000)
         if item.finished.is_set():
             header = (
                 f"{what} ({item.id}) exited with code "
@@ -1027,9 +1019,7 @@ class BuiltinExecuteTool(Tool):
                 f"If it has already outlasted a wait or two, stop waiting: end your "
                 f"turn and let the completion notice the user gets drive the next step."
             )
-        lines = [header, f"Log: {item.log_path}"]
-        if not delegated:
-            lines.insert(1, f"Command: {item.command}")
+        lines = [header, f"Command: {item.command}", f"Log: {item.log_path}"]
         if tail:
             lines.append("")
             lines.append(tail)

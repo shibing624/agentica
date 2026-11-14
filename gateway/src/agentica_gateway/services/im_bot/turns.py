@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from agentica.agent.approvals import ApprovalDecision, PendingApproval
 from agentica.cli.approvals import visible_approval_decisions
-from agentica.peers import PeerInfo, PeerMessageRefused
+from agentica.live import PeerInfo, PeerMessageRefused
 from agentica.tools.background_processes import touch_activity_stamp
 from agentica.utils.log import logger
 

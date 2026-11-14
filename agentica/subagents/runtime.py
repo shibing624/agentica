@@ -114,8 +114,6 @@ class SubagentConfig:
     # --- Permission isolation ---
     # Whether the subagent inherits the parent agent's workspace memory
     inherit_workspace: bool = False
-    # Whether the subagent inherits the parent agent's knowledge base
-    inherit_knowledge: bool = False
     # Whether the parent agent's current context summary is prepended to the task
     inherit_context: bool = False
     # Timeout for subagent execution in seconds (0 = no timeout).
@@ -183,8 +181,7 @@ class SubagentRegistry:
     """
 
     # Tools blocked for ALL subagent types (prevent recursion + privilege escalation).
-    # Pattern borrowed from hermes-agent delegate_tool.py.
-    BLOCKED_TOOLS = {"delegate_task", "spawn_subagent", "save_memory", "forget_memory", "shell", "task"}
+    BLOCKED_TOOLS = {"spawn_subagent", "save_memory", "forget_memory", "shell", "task"}
 
     # Max subagent nesting depth (parent -> child -> grandchild = depth 2)
     MAX_DEPTH = 2
@@ -878,8 +875,6 @@ class SubagentRegistry:
         )
         if config.inherit_workspace and parent_agent.workspace is not None:
             child_kwargs["workspace"] = parent_agent.workspace
-        if config.inherit_knowledge and parent_agent.knowledge is not None:
-            child_kwargs["knowledge"] = parent_agent.knowledge
 
         child = Agent(**child_kwargs)
         child._max_turns = config.max_turns
@@ -1250,7 +1245,6 @@ def register_custom_subagent(
     timeout: int = 1800,
     can_spawn_subagents: bool = False,
     inherit_workspace: bool = False,
-    inherit_knowledge: bool = False,
     inherit_context: bool = False,
     display_name: Optional[str] = None,
 ) -> SubagentConfig:
@@ -1304,7 +1298,6 @@ def register_custom_subagent(
         execute_policy=execute_policy,
         timeout=timeout,
         inherit_workspace=inherit_workspace,
-        inherit_knowledge=inherit_knowledge,
         inherit_context=inherit_context,
     )
     _RUNTIME_SUBAGENT_CONFIGS[agent_id] = config

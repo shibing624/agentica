@@ -18,7 +18,7 @@ def load_prompt(caller_file: str, filename: str, **kwargs) -> str:
     Args:
         caller_file: Pass ``__file__`` from the loader module. We resolve the
             sibling ``md/`` directory relative to it so each prompt subpackage
-            (memory/, compression/, swarm/, ...) keeps its own md/ folder.
+            (memory/, compression/, ...) keeps its own md/ folder.
         filename: Name of the .md file (e.g. ``"extract.md"``).
         **kwargs: Optional ``str.format`` variables to substitute.
 

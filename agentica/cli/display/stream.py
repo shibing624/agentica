@@ -208,7 +208,7 @@ class StreamDisplayManager:
                  model_resolver: Optional[Callable[[str, dict], Optional[str]]] = None):
         self.console = console_instance
         # Display-only: maps (tool_name, tool_args) to the model the call will
-        # run, so the ``task`` / ``delegate`` call lines can name it. Supplied
+        # run, so the ``task`` call line can name it. Supplied
         # by the CLI (``Agent.describe_tool_model``); None in tests and in the
         # SDK path, where the label is simply left off.
         self._model_resolver = model_resolver
@@ -908,12 +908,11 @@ class StreamDisplayManager:
     # already tells the user what happened; errors are still surfaced.
     _SUPPRESS_RESULT_TOOLS = frozenset({"write_todos"})
 
-    # Peer discovery / delivery, wait, and delegate: short multi-line status
+    # wait: short multi-line status
     # whose Log:/Command:/path lines must stay intact. Never fold behind Ctrl+O
     # or the default 120-char ellipsis. ``task`` is NOT here — its result is
-    # JSON with a live-stream dedup path (``_display_task_result``); call-side
-    # briefs already share ``_format_handoff_display`` with delegate.
-    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate"})
+    # JSON with a live-stream dedup path (``_display_task_result``).
+    _FULL_RESULT_TOOLS = frozenset({"wait"})
 
     # Human-in-the-loop. Their result is the only durable record of the
     # exchange — the question widget lives in the prompt_toolkit layout and is
@@ -1039,7 +1038,7 @@ class StreamDisplayManager:
         lines = result_str.splitlines()
 
         # execute: foreground uses a tail-only window; background start text is
-        # status + Log: path (same class as wait/delegate) and goes FULL.
+        # status + Log: path (same class as wait) and goes FULL.
         if tool_name == "execute":
             if _is_background_execute(tool_args, result_str):
                 self._display_full_result_lines(lines, is_error=is_error, elapsed_str=elapsed_str)

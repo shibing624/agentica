@@ -36,7 +36,7 @@ def _tool_call_line(
     """CLI ``format_tool_display`` copy on one stdout line.
 
     ``model_resolver`` is the owning agent's ``describe_tool_model``, so a
-    ``task`` / ``delegate`` line names the model it will run here too — the
+    ``task`` line names the model it will run here too — the
     SDK / ``--print`` path is often the one being piped into a log.
     """
     from pathlib import Path
@@ -55,7 +55,7 @@ def _tool_call_line(
             model_label = None
     # Without work_dir the formatter falls back to os.getcwd(), which is the
     # wrong root whenever the agent runs against another directory
-    # (delegate(work_dir=...), SDK embedding).
+    # (SDK embedding).
     display = format_tool_display(
         name,
         args,

@@ -10,7 +10,7 @@ Isolation is a directory, not a session move. ``new`` returns a path; subsequent
 from __future__ import annotations
 
 from agentica.tools.base import Tool
-from agentica.peers.worktrees import WorktreeError
+from agentica.git.worktree import WorktreeError
 
 
 class WorktreeTool(Tool):

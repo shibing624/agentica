@@ -8,7 +8,7 @@ V2 architecture with layered configuration:
 - config.py: PromptConfig, ToolConfig, WorkspaceMemoryConfig
 - prompts.py: System and user prompt building
 - as_tool.py: Agent.as_tool() composition primitive
-- tools.py: Default tools (knowledge search, memory, etc.)
+- tools.py: Default tools
 - printer.py: Response printing utilities
 
 Execution engine lives in agentica/runner.py (Runner class).

@@ -266,41 +266,6 @@ class TestCLIToolRender(unittest.TestCase):
         fake.print.assert_not_called()
 
 
-    def test_list_agents_result_is_shown_in_full(self):
-        """Peer discovery is multi-line and must not be folded behind Ctrl+O."""
-        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
-
-        clear_truncated_blocks()
-        body = "\n".join(
-            [
-                "1 other live session(s). You are 'nlp-5f' [peer=abc].",
-                "Your session_id: aaaa",
-                "",
-                "- payments [peer=def]",
-                "  session_id: bbbb",
-                "  cwd: /repos/payments",
-                "  project: /tmp/projects/payments-hash",
-                "  session_log: /tmp/projects/payments-hash/bbbb.jsonl",
-                "  log_file (INFO): /tmp/home/.agentica/logs/20260809-80403.log",
-                "  memory: /tmp/ws/users/default/MEMORY.md",
-                "  working on: adding keys",
-            ]
-        )
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
-        dm.display_tool_result("list_agents", body, is_error=False, elapsed=0.004)
-
-        rendered = "\n".join(
-            str(call.args[0]) for call in fake.print.call_args_list if call.args
-        )
-        self.assertIn("session_log:", rendered)
-        self.assertIn("log_file (INFO):", rendered)
-        self.assertIn("MEMORY.md", rendered)
-        self.assertIn("working on: adding keys", rendered)
-        self.assertNotIn("more lines", rendered)
-        self.assertEqual(get_truncated_blocks(), [])
-
     ASK_PROMPT = (
         "实测发现 storage 不可复用（v2 用完即删，316 题记忆只剩 3 个残留）。"
         "方案 A 必须改为重跑 ingest。修正成本：方案 A' = 重跑 qwen ingest"
@@ -544,37 +509,6 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("more lines", rendered)
         self.assertEqual(get_truncated_blocks(), [])
 
-    def test_delegate_result_is_shown_in_full(self):
-        """delegate's Log: path is actionable — same FULL treatment as wait."""
-        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
-
-        clear_truncated_blocks()
-        log_path = (
-            "/root/.agentica/projects/default/"
-            "-apdcephfs-qy3-share-7435715-flemingxu-nlp-6115aec9/background/"
-            "20260810-013023-term_7.log"
-        )
-        body = (
-            f'Delegated "overnight bench" to a separate agentica session: term_7 '
-            f"(PID 4242).\n"
-            f"Log: {log_path}\n"
-            f"It is running now and you are not blocked. Its report is delivered "
-            f'to this conversation when it finishes; call wait(id="term_7") only '
-            f"if your next step needs the answer before you can continue."
-        )
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
-        dm.display_tool_result("delegate", body, is_error=False, elapsed=0.05)
-
-        rendered = "\n".join(
-            str(call.args[0]) for call in fake.print.call_args_list if call.args
-        )
-        self.assertIn(log_path, rendered)
-        self.assertIn('wait(id="term_7")', rendered)
-        self.assertNotIn("more lines", rendered)
-        self.assertEqual(get_truncated_blocks(), [])
-
     def test_background_execute_start_result_is_shown_in_full(self):
         """background=True start text carries Log: — never head/tail or 120-char cut."""
         from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
@@ -643,28 +577,6 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("Ctrl+O", rendered)
         self.assertEqual(disp.get_truncated_blocks(), [])
 
-    def test_send_message_call_shows_full_body(self):
-        """send_message must not hide the handoff behind the default 40-char truncate."""
-        from agentica.cli.display.tool_format import format_tool_display, _display_tool_impl
-
-        long_msg = (
-            "用户决定：合并 schema 改动，并说明这是用户的决定。"
-            "请对方在采纳前仍向其用户确认 agent 消息边界。"
-        )
-        display = format_tool_display(
-            "send_message",
-            {"target": "temp-af", "message": long_msg},
-        )
-        self.assertIn("→ temp-af", display)
-        self.assertIn(long_msg, display)
-        self.assertNotIn("...", display)
-
-        fake = MagicMock()
-        fake.width = 80
-        _display_tool_impl(fake, "send_message", {"target": "temp-af", "message": long_msg})
-        rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list if call.args)
-        self.assertIn(long_msg, rendered)
-
     def test_read_file_negative_offset_display(self):
         """offset=-50 alone reads the last 50 lines; with limit=10 it keeps
         the OLDEST 10 of that window — the label must not read like tail=10."""
@@ -693,8 +605,8 @@ class TestCLIToolRender(unittest.TestCase):
             "a.md (tail 3)",
         )
 
-    def test_task_and_delegate_calls_show_full_brief(self):
-        """task / delegate must not truncate the handoff instruction in the CLI."""
+    def test_task_calls_show_full_brief(self):
+        """task must not truncate the handoff instruction in the CLI."""
         from agentica.cli.display.tool_format import format_tool_display, _display_tool_impl
 
         long_task = (
@@ -704,7 +616,6 @@ class TestCLIToolRender(unittest.TestCase):
             "3. 时间复杂度说明"
         )
         for name, args, body_key in (
-            ("delegate", {"task": long_task, "label": "quicksort-delegate"}, "task"),
             ("task", {"description": long_task, "subagent_type": "code"}, "description"),
         ):
             display = format_tool_display(name, args)
@@ -719,10 +630,7 @@ class TestCLIToolRender(unittest.TestCase):
                 str(call.args[0]) for call in fake.print.call_args_list if call.args
             )
             self.assertIn("2. 边界用例与简单测试", rendered)
-            if name == "delegate":
-                self.assertIn("quicksort-delegate", rendered)
-            else:
-                self.assertIn("subagent_type='code'", rendered)
+            self.assertIn("subagent_type='code'", rendered)
 
     def test_display_tool_defers_read_only_call_line(self):
         """Read-only tools and execute skip the start-time call line (live window)."""
@@ -735,19 +643,15 @@ class TestCLIToolRender(unittest.TestCase):
             dm.display_tool(name, {"file_path": "x.py"})
             fake.print.assert_not_called(), f"{name} call line must be deferred"
 
-    def test_task_and_delegate_call_lines_name_the_model(self):
-        """The call line says which model the handoff will run.
+    def test_task_call_line_names_the_model(self):
+        """The call line says which model the subagent will run.
 
-        ``model=`` is the user's actual question for these two: an omitted
-        ``model`` inherits the session's, and a subagent's model comes from its
-        definition — neither is visible in the arguments.
+        A subagent's model comes from its definition, which is not visible in
+        the arguments.
         """
         from agentica.cli.display import StreamDisplayManager
 
-        resolver = lambda name, args: {
-            "task": "openai/gpt-4o-mini",
-            "delegate": "zhipuai/glm-4.7",
-        }.get(name)
+        resolver = lambda name, args: {"task": "openai/gpt-4o-mini"}.get(name)
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake, model_resolver=resolver)
@@ -756,14 +660,11 @@ class TestCLIToolRender(unittest.TestCase):
         dm.display_tool_result(
             "task", '{"success": true, "result": "x"}', is_error=False, elapsed=1.0,
         )
-        dm.display_tool("delegate", {"task": "do the thing", "label": "thing"})
-        dm.display_tool_result("delegate", "Delegated to term_1", is_error=False, elapsed=0.1)
 
         rendered = "\n".join(
             str(call.args[0]) for call in fake.print.call_args_list if call.args
         )
         self.assertIn("model=openai/gpt-4o-mini", rendered)
-        self.assertIn("model=zhipuai/glm-4.7", rendered)
 
     def test_the_model_needs_no_argument_and_other_tools_gain_none(self):
         """No ``model`` arg is needed to show one, and no other tool shows one."""
@@ -820,9 +721,9 @@ class TestCLIToolRender(unittest.TestCase):
         dm.compose_live()
         self.assertEqual(asked, [])
 
-        dm.display_tool("delegate", {"task": "do it"})
+        dm.display_tool("task", {"description": "do it"})
         dm.compose_live()
-        self.assertEqual(asked, ["delegate"])
+        self.assertEqual(asked, ["task"])
 
 
     def test_display_tool_result_merged_single_line_for_read_ops(self):

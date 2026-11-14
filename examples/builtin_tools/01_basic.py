@@ -111,11 +111,6 @@ async def full_config_example():
     print("Example: Full Configuration")
     print("=" * 60)
 
-    from agentica import SqliteDb
-
-    os.makedirs("tmp", exist_ok=True)
-    db = SqliteDb(db_file="tmp/agent_sessions.db")
-
     work_dir = "."
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),

@@ -102,7 +102,7 @@ class TestGatewayCronRunner:
         sent = []
         turn = AsyncMock()
         with patch("agentica_gateway.services.scheduler_service.live_cli_peer", return_value=peer), \
-             patch("agentica.peers.send_message", side_effect=lambda p, **kw: sent.append(kw["text"])), \
+             patch("agentica.live.send_message", side_effect=lambda p, **kw: sent.append(kw["text"])), \
              patch("agentica_gateway.routes.chat.run_scheduled_turn", turn):
             out = asyncio.run(GatewayCronRunner(_svc(tmp_path)).run("msg", {"job_id": "j1", "session_id": "conv-1"}))
         assert sent == ["msg"] and out.session_id == "conv-1"

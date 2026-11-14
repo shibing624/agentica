@@ -304,14 +304,12 @@ tools = get_builtin_tools(work_dir="./")
 | `glob` | `BuiltinFileTool` | 按文件名通配符查找文件（如 `**/*.py`） |
 | `grep` | `BuiltinFileTool` | 基于 ripgrep 的代码内容搜索（支持 `pattern`、`path`、`limit`） |
 | `execute` | `BuiltinExecuteTool` | 执行 Shell 命令（支持 `parallel_safe=True` 并行只读命令，以及 `background=True` 后台运行） |
-| `wait` | `BuiltinExecuteTool` | 等待后台命令或 `delegate` 任务完成并取回输出 |
+| `wait` | `BuiltinExecuteTool` | 等待后台命令完成并取回输出 |
 | `web_search` | `BuiltinWebSearchTool` | 联网搜索（搜索引擎可切换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取指定网页正文 |
 | `analyze_image` | `BuiltinVisionTool` | 查看并分析本地或指定路径的图片 |
 | `write_todos` | `BuiltinTodoTool` | 创建并更新多步骤任务清单 |
 | `task` | `BuiltinTaskTool` | 在同进程内启动只读 Subagent 处理子任务（默认使用便宜的 `auxiliary_model`） |
-| `delegate` | `BuiltinDelegateTool` | **交互 CLI 专用**：在后台启动独立的 `agentica` 进程处理大任务（通过 `/ps`、`wait`、`/stop` 管理） |
-| `list_agents` / `send_message` | `PeerMessagingTool` | **交互 CLI / Gateway 专用**：查看本机其他活跃会话并互发消息 |
 | `search_session` | `BuiltinContextTool` | 检索当前会话的完整 JSONL 历史（含换窗前的对话与工具结果，可用 `role="tool"` + `uuid` 取全文）及当前 `<session>.notes.md` |
 | `save_memory` / `search_memory` | `BuiltinMemoryTool` | 写入或检索跨会话的 Workspace 长期记忆 |
 
@@ -319,16 +317,16 @@ tools = get_builtin_tools(work_dir="./")
 
 `read_file`、`write_file`、`apply_patch` 会记下文件当时的 `mtime` 和大小（最多 200 个，按最近使用保留）。这些文件之后在磁盘上被改动或删除时，比如你在编辑器里改了、git 切了分支、或者 Agent 自己用 shell 改了，下一次请求模型前会附一条 `[File change notice]`，列出变化的文件，提示模型重读。工具批之间的提示是追加的 user 消息，两轮对话之间的提示放在你这条消息前面。同一次变化只提示一次。只看 `stat`，不读文件内容。
 
-#### `task` vs `delegate` vs peer
+#### `task` vs 后台进程
 
-| | `task` | `delegate` | peer |
-|---|---|---|---|
-| 场景 | SDK / CLI 都可用 | 仅交互 CLI（需要 `BackgroundProcessRegistry`） | 仅交互 CLI（需要 `PeerSession`） |
-| 进程 | 同进程 | 新 OS 进程 | 两个用户开的终端 |
-| 成本 | 低（aux 模型） | 高（完整 agentica run） | 几乎只是写 mailbox |
-| 选用 | 搜代码、查资料 | 独立 context / 换目录的大活 | 通知另一会话，不是雇工 |
+| | `task` | `execute(background=True)` 运行 `agentica --query ...` |
+|---|---|---|
+| 场景 | SDK / CLI 都可用 | 仅交互 CLI（需要 `BackgroundProcessRegistry`） |
+| 进程 | 同进程 | 新 OS 进程 |
+| 成本 | 低（aux 模型） | 高（完整 agentica run） |
+| 选用 | 搜代码、查资料 | 独立 context / 换目录的大活 |
 
-选型见 [Choosing](../multi-agent/choosing.md)；CLI 行为见 [终端文档](../getting-started/terminal.md)。
+选型见 [Subagent](../multi-agent/subagent.md)；CLI 行为见 [终端文档](../getting-started/terminal.md)。
 
 #### 替换 web 搜索引擎
 

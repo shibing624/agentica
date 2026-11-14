@@ -59,7 +59,7 @@ def bind_run_context(
 ) -> Iterator[None]:
     """Bind a run's identifiers to the log context for the duration of the block.
 
-    Meant to wrap a single ``Agent.run`` / ``Workflow.run`` invocation so every
+    Meant to wrap a single ``Agent.run`` invocation so every
     log record emitted from that call (including from tools and subagents
     running on child asyncio Tasks) carries the same ``run=<id>`` prefix.
 
@@ -105,7 +105,7 @@ def _run_prefix() -> str:
 # CHAT_LEVEL is a custom log level dedicated to inter-agent conversation
 # (semantic dialog flow), distinct from system-level INFO/DEBUG. Sits between
 # INFO (20) and WARNING (30) so it surfaces above routine info logs but below
-# real warnings. Used by Runner turn boundaries, Swarm assignments, and
+# real warnings. Used by Runner turn boundaries and
 # Subagent spawn/return so multi-agent debugging shows the conversation flow
 # without being drowned in framework chatter.
 CHAT_LEVEL = 25

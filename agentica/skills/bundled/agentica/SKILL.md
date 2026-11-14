@@ -55,7 +55,7 @@ Everything agentica keeps is under `~/.agentica` (or `$AGENTICA_HOME`):
 | `workspace/` | long-term memory; standing rules in `users/<id>/AGENTS.md` (see below) |
 | `skills/` | user-installed skills, one directory per skill with a `SKILL.md` |
 | `projects/` | session transcripts as JSONL, partitioned per working directory |
-| `cache/peers/` | the live-session directory and mailboxes behind `list_agents` / `send_message` |
+| `cache/peers/` | the live-session directory and mailboxes (`/list-agents`, cron delivery) |
 
 Read these files directly when you need a fact about the current setup. Never
 print an API key you read from them, and never write a key into a command line.

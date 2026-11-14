@@ -244,7 +244,7 @@ _APPROVAL_MODE_INSTRUCTION = (
     "This session's approval mode can pause a tool call until the user "
     "confirms it. In \"ask\" mode, file reads (including outside the work "
     "directory), read-only shell commands (including wrappers such as "
-    "cd && git diff | head), web_search/fetch_url, memory, task/delegate, "
+    "cd && git diff | head), web_search/fetch_url, memory, task, "
     "skills, and other builtins run immediately; write_file / apply_patch "
     "and mutating execute wait for approval. In \"auto\" mode, reads "
     "(including outside the work directory), in-workspace writes, every "

@@ -272,7 +272,7 @@ export function BackgroundJobs({
     const liveRow = isLiveJob(job);
     const isOpen = expanded === job.id;
     const dur = jobDuration(job, now);
-    const kindText = job.kind === "delegate" ? S.chat.bgDelegate : S.chat.bgCommand;
+    const kindText = S.chat.bgCommand;
     const statusDetail = job.status === "failed" && job.exit_code != null
       ? S.chat.bgExitCode(job.exit_code)
       : S.chat.bgStatus[job.status];

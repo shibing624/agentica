@@ -126,7 +126,6 @@ class TestRunEvent:
             "tool_call_started", "tool_call_completed",
             "reasoning_started", "reasoning_step", "reasoning_completed",
             "updating_memory",
-            "workflow_started", "workflow_completed",
         ]
         for event_name in expected:
             assert hasattr(RunEvent, event_name), f"Missing event: {event_name}"
@@ -147,10 +146,6 @@ class TestRunEvent:
         assert RunEvent.reasoning_started.value == "ReasoningStarted"
         assert RunEvent.reasoning_step.value == "ReasoningStep"
         assert RunEvent.reasoning_completed.value == "ReasoningCompleted"
-
-    def test_workflow_events_present(self):
-        assert RunEvent.workflow_started.value == "WorkflowStarted"
-        assert RunEvent.workflow_completed.value == "WorkflowCompleted"
 
 
 class TestToolCallInfo:

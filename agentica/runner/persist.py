@@ -989,7 +989,7 @@ class PersistMixin:
             if not call_id:
                 continue
             payload: Dict[str, Any] = {"tool_call_id": call_id, "tool_name": name}
-            if name in ("task", "delegate"):
+            if name == "task":
                 fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
                 raw_args = fn.get("arguments")
                 parsed_args: Optional[dict] = None

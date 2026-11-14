@@ -62,7 +62,7 @@ Desktop 安装包自带 Python 和同版本的 `agentica`、`agentica-gateway`�
 
 ```bash
 uv add agentica
-uv add "agentica[rag]"          # 可选 extras
+uv add "agentica[mcp]"          # 可选 extras
 ```
 
 ## 开发本仓库
@@ -89,11 +89,6 @@ cd web && npm ci && npm run build        # Web UI → web/dist，网关直接读
 产品安装用 extras（见上）。开发 / 当库用时再按需加：
 
 ```bash
-# RAG / 向量数据库
-uv add lancedb                  # LanceDb（推荐本地向量存储）
-uv add qdrant-client            # QdrantVectorDb
-uv add chromadb                 # ChromaDb
-
 # MCP 协议
 uv add mcp                      # McpTool（Model Context Protocol）
 

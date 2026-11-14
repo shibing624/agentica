@@ -15,7 +15,7 @@ from agentica.model.content import Video, Image, Audio
 from agentica.model.usage import Usage
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
-from agentica.model.message import Message, MessageReferences
+from agentica.model.message import Message
 from agentica.model.cost import CostTracker
 
 if TYPE_CHECKING:
@@ -43,8 +43,6 @@ class RunEvent(str, Enum):
     reasoning_step = "ReasoningStep"
     reasoning_completed = "ReasoningCompleted"
     updating_memory = "UpdatingMemory"
-    workflow_started = "WorkflowStarted"
-    workflow_completed = "WorkflowCompleted"
     subagent_spawned = "SubagentSpawned"
     subagent_completed = "SubagentCompleted"
 
@@ -114,13 +112,12 @@ class ToolCallInfo(BaseModel):
 
 
 class RunResponseExtraData(BaseModel):
-    references: Optional[List[MessageReferences]] = None
     history: Optional[List[Message]] = None
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
 class RunResponse(BaseModel):
-    """Response returned by Agent.run() or Workflow.run() functions"""
+    """Response returned by Agent.run()"""
 
     content: Optional[Any] = None
     content_type: str = "str"
@@ -134,7 +131,6 @@ class RunResponse(BaseModel):
     run_id: Optional[str] = None
     agent_id: Optional[str] = None
     session_id: Optional[str] = None
-    workflow_id: Optional[str] = None
 
     tools: Optional[List[Dict[str, Any]]] = None
     # Subject of a ToolCallStarted / ToolCallCompleted event. ``tools`` is the

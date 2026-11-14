@@ -5,8 +5,8 @@
 
 Composes specialised worker agents as tools on a single orchestrator agent.
 ``Agent.as_tool()`` is the lightweight composition primitive at the Agent
-level — for parallel autonomous execution use ``Swarm``, for ad-hoc isolated
-sub-tasks use the ``BuiltinTaskTool`` / ``SubagentRegistry`` runtime.
+level — for isolated sub-tasks use the ``BuiltinTaskTool`` /
+``SubagentRegistry`` runtime.
 
 1. Researcher agent - Searches and analyzes articles
 2. Writer agent - Writes articles based on research

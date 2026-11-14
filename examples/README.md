@@ -79,15 +79,12 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 01 | [agent_as_tool.py](agent_patterns/01_agent_as_tool.py) | Agent 作为工具嵌套调用 | `agent.as_tool()`, 编排器模式 |
 | 02 | [parallelization.py](agent_patterns/02_parallelization.py) | **asyncio.gather 并行执行**（含耗时对比） | `asyncio.gather()`, 并行 vs 串行 |
 | 03 | [team_collaboration.py](agent_patterns/03_team_collaboration.py) | 多 Agent 协作（as_tool 编排） | `agent.as_tool()`, 编排器模式 |
-| 04 | [debate.py](agent_patterns/04_debate.py) | 多 Agent 辩论 | 多角色对抗, 主持人总结 |
 | 05 | [context_passing.py](agent_patterns/05_context_passing.py) | 上下文传递与共享 | `context={}`, `add_context=True` |
 | 06 | [lifecycle_hooks.py](agent_patterns/06_lifecycle_hooks.py) | 生命周期钩子：Agent/Run/Archive 全链路事件 | `AgentHooks`, `RunHooks`, `ConversationArchiveHooks` |
 | 07 | [routing.py](agent_patterns/07_routing.py) | 路由模式：分诊 Agent 按语言分发 | Triage Agent, handoff, 路由分发 |
-| 08 | [swarm.py](agent_patterns/08_swarm.py) | Swarm 多 Agent 并行/自治协作 | `Swarm`, parallel 模式, autonomous 模式 |
 | 09 | [runtime_config.py](agent_patterns/09_runtime_config.py) | 运行时配置：动态启停工具/技能 | `RunConfig`, `enable_tool`, `disable_tool` |
 | 10 | [subagent_demo.py](agent_patterns/10_subagent_demo.py) | 文件配置驱动的只读子 Agent 委派 | `SubagentRegistry`, `agents/*.md` |
 | 12 | [session_resume.py](agent_patterns/12_session_resume.py) | 会话恢复：JSONL 持久化 + 断点续传 | `SessionLog`, `session_id`, compact boundary |
-| 13 | [actor_critic_refine.py](agent_patterns/13_actor_critic_refine.py) | Actor-Critic 精炼：Schema + Agent 多 critic 并行评审 | `refine()`, `SchemaCritic`, `AgentCritic`, `RefineResult` |
 
 ### 4. 安全护栏 (`guardrails/`)
 
@@ -112,29 +109,7 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 04 | [long_term_memory.py](memory/04_long_term_memory.py) | 长期记忆：持久化存取、多用户隔离、相关性召回 | `enable_long_term_memory`, `WorkspaceMemoryConfig`, `write_memory_entry()` |
 | 05 | [auto_memory.py](memory/05_auto_memory.py) | **LLM 自动长期记忆**：模型自主判断保存 → 新会话自动加载 | `enable_long_term_memory`, `BuiltinMemoryTool`, LLM 自主 tool call |
 
-### 6. RAG 检索增强 (`rag/`)
-
-基于文档的问答和知识库。
-
-| # | 示例 | 描述 | 关键概念 |
-|---|------|------|----------|
-| 01 | [naive_rag.py](rag/01_naive_rag.py) | 基础 RAG（PDF 知识库） | `Knowledge`, `LanceDb`, `ZhipuAIEmb` |
-| 02 | [advanced_rag.py](rag/02_advanced_rag.py) | 高级 RAG（rerank + 混合检索） | `search_knowledge=True`, agentic RAG |
-| 03 | [chat_pdf.py](rag/03_chat_pdf.py) | PDF 对话应用 | 端到端 RAG 应用 |
-| 04 | [langchain_integration.py](rag/04_langchain_integration.py) | LangChain 集成 | `LangChainKnowledge` |
-| 05 | [llamaindex_integration.py](rag/05_llamaindex_integration.py) | LlamaIndex 集成 | `LlamaIndexKnowledge` |
-
-### 7. 工作流编排 (`workflow/`)
-
-确定性多步骤任务编排。Workflow 是 async-first 的：`run()` 为 async，`run_sync()` 为同步适配器。
-
-| # | 示例 | 描述 | 关键概念 |
-|---|------|------|----------|
-| 01 | [data_pipeline.py](workflow/01_data_pipeline.py) | ETL 数据管道（提取 -> 验证 -> 分析） | `Workflow`, 混合 LLM + Python 步骤 |
-| 02 | [investment.py](workflow/02_investment.py) | 投资研究工作流 | 多 Agent 协作工作流 |
-| 03 | [code_review.py](workflow/03_code_review.py) | 代码审查工作流 | 多步骤审查 |
-
-### 8. MCP 协议 (`mcp/`)
+### 6. MCP 协议 (`mcp/`)
 
 Model Context Protocol 集成。
 
@@ -145,7 +120,7 @@ Model Context Protocol 集成。
 | 03 | [http_server.py](mcp/03_http_server.py) / [http_client.py](mcp/03_http_client.py) | HTTP 传输 | Server / Client |
 | 04 | [json_config.py](mcp/04_json_config.py) | JSON 配置加载 | 配置驱动 |
 
-### 9. 模型提供商 (`model_providers/`)
+### 7. 模型提供商 (`model_providers/`)
 
 支持多家 LLM 提供商，统一 async 接口。
 
@@ -158,7 +133,7 @@ Model Context Protocol 集成。
 | 05 | [litellm.py](model_providers/05_litellm.py) | LiteLLM 统一接口 | `LiteLLM` |
 | 06 | [kimi_coding.py](model_providers/06_kimi_coding.py) | Kimi for Coding（扩展思考） | `KimiChat`, extended thinking |
 
-### 10. 技能系统 (`skills/`)
+### 8. 技能系统 (`skills/`)
 
 基于 `SKILL.md` 的能力扩展。
 
@@ -169,7 +144,7 @@ Model Context Protocol 集成。
 | 03 | [custom_skill.py](skills/03_custom_skill.py) | 自定义技能 |
 | 04 | [skills_with_agent.py](skills/04_skills_with_agent.py) | 技能与 Agent 集成 |
 
-### 11. 内置工具场景 (`builtin_tools/`)
+### 9. 内置工具场景 (`builtin_tools/`)
 
 Agent + `get_builtin_tools()` 的场景化示例，展示内置工具的实际使用。
 
@@ -180,7 +155,7 @@ Agent + `get_builtin_tools()` 的场景化示例，展示内置工具的实际�
 | 03 | [code_execute_demo.py](builtin_tools/03_code_execute_demo.py) | 代码执行 | `execute` 工具 |
 | 04 | [web_search_demo.py](builtin_tools/04_web_search_demo.py) | 网页搜索 | `web_search`, `fetch_url` |
 
-### 12. 可观测性 (`observability/`)
+### 10. 可观测性 (`observability/`)
 
 监控、追踪和调试。
 
@@ -190,7 +165,7 @@ Agent + `get_builtin_tools()` 的场景化示例，展示内置工具的实际�
 | 02 | [token_tracking.py](observability/02_token_tracking.py) | Token 追踪 | Token 用量统计 |
 | 03 | [usage_tracking.py](observability/03_usage_tracking.py) | 跨请求 Usage 聚合 | `Usage`, `RequestUsage`, `TokenDetails` |
 
-### 13. CLI (`cli/`)
+### 11. CLI (`cli/`)
 
 命令行交互式界面。
 
@@ -198,7 +173,7 @@ Agent + `get_builtin_tools()` 的场景化示例，展示内置工具的实际�
 |---|------|------|----------|
 | 01 | [cli_demo.py](cli/01_cli_demo.py) | CLI 多种使用方式：交互/单次/自定义模型 | `agentica` CLI, `--query`, `--tools` |
 
-### 14. ACP 协议 (`acp/`)
+### 12. ACP 协议 (`acp/`)
 
 Agent Communication Protocol 集成。
 
@@ -206,18 +181,17 @@ Agent Communication Protocol 集成。
 |---|------|------|
 | 01 | [acp_demo.py](acp/acp_demo.py) | ACP 协议演示 |
 
-### 15. 完整应用 (`applications/`)
+### 13. 完整应用 (`applications/`)
 
 端到端的应用示例。
 
 | 示例 | 描述 |
 |------|------|
-| [llm_os/main.py](applications/llm_os/main.py) | LLM OS — 综合 AI 助手 (Streamlit) |
 | [deep_research/main.py](applications/deep_research/main.py) | 深度研究助手 |
 | [customer_service/main.py](applications/customer_service/main.py) | 客服系统 |
 | [financial_research/main.py](applications/financial_research/main.py) | 金融研究：6-Agent 流水线（规划→搜索→分析→风控→写作→审核） |
 
-### 16. 目标循环 (`goal/`)
+### 14. 目标循环 (`goal/`)
 
 `run_goal()` 驱动 Agent 在循环中自动运行，直到任务完成、暂停或预算耗尽。
 
@@ -261,7 +235,7 @@ Runner 内置完整的 agentic loop，自动驱动多轮链式推理：
 
 ```python
 # 一行代码，Runner 自动完成多轮工具调用链
-agent = Agent(tools=[get_weather, calculate, search_knowledge])
+agent = Agent(tools=[get_weather, calculate])
 response = await agent.run("查北京和上海天气，然后算温差")
 # Runner 自动: 查天气(并行) → 拿到结果 → 算温差 → 最终回答
 ```
@@ -330,17 +304,14 @@ for chunk in agent.run_stream_sync("Hello"):
 4. `tools/02_async_tool.py` — Async 工具（原生无阻塞）
 5. `agent_patterns/01_agent_as_tool.py` — Agent 组合
 6. `guardrails/01_input_guardrail.py` — 安全护栏
-7. `rag/01_naive_rag.py` — RAG 知识库
 
 ### 高级
 
 1. `agent_patterns/03_team_collaboration.py` — 多 Agent 协作（`as_tool()` 编排）
-2. `agent_patterns/08_swarm.py` — Swarm 并行/自治协作
-3. `workflow/01_data_pipeline.py` — 工作流编排
-4. `agent_patterns/10_subagent_demo.py` — 子 Agent 委派
-5. `goal/task_runner.py` — `run_goal()` 多任务循环（tasks.md → 处理 → 写回）
-6. `mcp/01_stdio.py` — MCP 协议集成
-7. `applications/financial_research/main.py` — 6-Agent 金融研究流水线
+2. `agent_patterns/10_subagent_demo.py` — 子 Agent 委派
+3. `goal/task_runner.py` — `run_goal()` 多任务循环（tasks.md → 处理 → 写回）
+4. `mcp/01_stdio.py` — MCP 协议集成
+5. `applications/financial_research/main.py` — 6-Agent 金融研究流水线
 
 ---
 
@@ -370,35 +341,3 @@ for chunk in agent.run_stream_sync("Hello"):
 │    sync func  → run_in_executor  自动包装            │
 └─────────────────────────────────────────────────────┘
 ```
-
----
-
-## LLM OS
-
-Let's build the LLM OS proposed by Andrej Karpathy [in this tweet](https://twitter.com/karpathy/status/1723140519554105733), [this tweet](https://twitter.com/karpathy/status/1707437820045062561) and [this video](https://youtu.be/zjkBMFhNj_g?t=2535).
-
-<img alt="LLM OS" src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/llmos.png" width="600" />
-
-- LLMs are the kernel process of an emerging operating system.
-- This process (LLM) can solve problems by coordinating other resources (memory, computation tools).
-
-### Running the LLM OS
-
-```bash
-# 1. 安装依赖
-pip install agentica streamlit text2vec sqlalchemy lancedb pyarrow
-
-# 2. 配置 API Key
-echo "OPENAI_API_KEY=sk-xxx" > .env
-
-# 3. 启动
-cd examples/applications/llm_os
-streamlit run main.py
-```
-
-![llm_os](https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/llm_os_snap.png)
-
-- Open [localhost:8501](http://localhost:8501) to view your LLM OS.
-- `Web search`: 北京今天天气?
-- `Code execution`: 帮我计算下 [168, 151, 171, 105, 124, 159, 153, 132, 112.2] 的平均值
-- `RAG`: 添加 PDF 到知识库，然后提问

@@ -201,7 +201,6 @@ def _parse_agent_file(
         "execute_policy": execute_policy,
         "can_spawn_subagents": as_bool("can_spawn_subagents", False),
         "inherit_workspace": as_bool("inherit_workspace", False),
-        "inherit_knowledge": as_bool("inherit_knowledge", False),
         "inherit_context": as_bool("inherit_context", False),
         "source": source,
         "path": str(path),
@@ -225,7 +224,6 @@ def _descriptor_to_config(descriptor: Dict[str, Any]) -> SubagentConfig:
         execute_policy=descriptor["execute_policy"],
         can_spawn_subagents=descriptor["can_spawn_subagents"],
         inherit_workspace=descriptor["inherit_workspace"],
-        inherit_knowledge=descriptor["inherit_knowledge"],
         inherit_context=descriptor["inherit_context"],
     )
 
@@ -307,7 +305,6 @@ def create_agent_file(
     can_spawn_subagents: bool = False,
     inherit_context: bool = False,
     inherit_workspace: bool = False,
-    inherit_knowledge: bool = False,
 ) -> str:
     """Write a complete agent definition, reload the registry, and return its path."""
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
@@ -346,7 +343,6 @@ def create_agent_file(
         ("can_spawn_subagents", can_spawn_subagents),
         ("inherit_context", inherit_context),
         ("inherit_workspace", inherit_workspace),
-        ("inherit_knowledge", inherit_knowledge),
     ):
         if not isinstance(value, bool):
             raise ValueError(f"{field} must be a boolean")
@@ -365,7 +361,6 @@ def create_agent_file(
         "can_spawn_subagents": can_spawn_subagents,
         "inherit_context": inherit_context,
         "inherit_workspace": inherit_workspace,
-        "inherit_knowledge": inherit_knowledge,
     }
     if display_name is not None:
         frontmatter["name"] = display_name.strip()

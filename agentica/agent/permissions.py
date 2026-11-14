@@ -9,8 +9,8 @@ schema in every tier; the difference is whether the runner parks before
 ``fc.execute()`` (see ``agentica.agent.approvals``).
 
   - "ask"       : Ask for approval. Reads (including outside the work
-                  directory), read-only ``execute``, memory, ``task`` /
-                  ``delegate``, skills, and other builtins run without
+                  directory), read-only ``execute``, memory, ``task``,
+                  skills, and other builtins run without
                   prompting. Parking: every ``write_file`` / ``apply_patch``,
                   non-read-only ``execute``, network tools
                   (``web_search`` / ``fetch_url``), and hard-unsafe
@@ -33,11 +33,6 @@ it confines every ``execute`` in all three tiers. ``execute(escalate=True)``
 — run outside it — always parks in ask/auto, before any allow-similar grant
 or the read-only fast path; allow-all runs it like everything else.
 
-``acp_agent`` (CLI only) counts as a write in "ask". The external agent's own
-permission requests arrive as ``acp_permission`` calls and park in ask *and*
-auto — it is stepping outside its own sandbox — with no grant answering for
-them; allow-all runs them like everything else.
-
 Callers should not construct their own mode strings — always compare against
 ``PERMISSION_MODES`` / use ``validate_permission_mode`` so a typo fails loud
 instead of silently falling through to the most permissive behavior.
@@ -59,7 +54,6 @@ SANDBOX_MODES = ("off", "workspace-write")
 READ_ONLY_TOOLS: Set[str] = frozenset({
     "read_file", "glob", "grep", "web_search", "fetch_url",
     "write_todos", "task",
-    "list_agents",
     "search_memory",
     "search_session",
 })
