@@ -301,7 +301,7 @@ export function appendText(m: ChatMsg, delta: string) {
   else parts.push({ kind: "text", text: delta });
 }
 
-export function appendSteerPart(m: ChatMsg, text: string, ts = Date.now()) {
+export function appendSteerPart(m: ChatMsg, text: string, ts = Date.now(), previews: string[] = []) {
   finishThink(m);
   const parts = ensureParts(m);
   for (let i = parts.length - 1; i >= 0; i--) {
@@ -310,7 +310,7 @@ export function appendSteerPart(m: ChatMsg, text: string, ts = Date.now()) {
     if (p.kind === "steer" && p.text === text) return;
     break;
   }
-  parts.push({ kind: "steer", text, ts });
+  parts.push({ kind: "steer", text, ts, ...(previews.length ? { previews } : {}) });
 }
 
 function sliceMs(p: MsgPart, now: number, live: boolean): number {

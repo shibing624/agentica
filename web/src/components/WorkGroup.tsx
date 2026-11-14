@@ -17,6 +17,7 @@ import {
 import { getState, showToast, type ApprovalDecision, type ApprovalRequest, type QuestionRequest } from "../store";
 import { useStrings } from "../i18n";
 import { CodeFrame } from "./CodeFrame";
+import { PreviewableImage } from "./ImageLightbox";
 import { HIGHLIGHT_LIMIT } from "../lib/highlight";
 import { parseSkillTurn } from "../lib/skillInvocation";
 import { SkillTurn } from "./MessageExtras";
@@ -701,7 +702,9 @@ export function QuestionCard({ q, busy, onAnswer }: {
   );
 }
 
-export function SteerChip({ text, ts, onOpenSkill }: { text: string; ts?: number; onOpenSkill: (name: string) => void }) {
+export function SteerChip({ text, ts, previews = [], onOpenSkill }: {
+  text: string; ts?: number; previews?: string[]; onOpenSkill: (name: string) => void;
+}) {
   const S = useStrings();
   const skill = parseSkillTurn(text, invocableSkills(getState().pluginsData.skills || []));
   const copy = () => {
@@ -718,6 +721,11 @@ export function SteerChip({ text, ts, onOpenSkill }: { text: string; ts?: number
             {skill ? <SkillTurn name={skill.name} args={skill.args} source={text} onOpen={onOpenSkill} /> : text}
           </p>
         </div>
+        {previews.length > 0 && (
+          <div className="steer-chip-previews">
+            {previews.map((src, i) => <PreviewableImage key={i} src={src} alt="" />)}
+          </div>
+        )}
       </div>
       <div className="steer-chip-footer">
         {text && (

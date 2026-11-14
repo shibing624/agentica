@@ -43,6 +43,7 @@ import {
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
+import { resolveSubmitMode, type SubmitGesture } from "../lib/composerSubmission";
 import { applyChatSearchHighlights } from "../lib/sessionRows";
 import { BackgroundJobs } from "../components/BackgroundJobs";
 import { PreviewableImage } from "../components/ImageLightbox";
@@ -130,6 +131,15 @@ export function ChatPage() {
   const compacting = !!(s.curSess && s.commandRuns[s.curSess]);
   const busy = streaming || !!goalRun || compacting;
   const showStop = busy && !compacting;
+  // dsh labels the send button with what Enter will actually do, so the
+  // queue/steer choice is visible without opening Settings.
+  const enterMode = resolveSubmitMode(
+    s.busyEnter, busy, "enter",
+    !!s.curSess && steerable(s.curSess, s.pendingFiles, s.inputText.trim()),
+  );
+  // The label only speaks about delivery while there is a turn to deliver to;
+  // an idle Enter simply sends, so naming queue/steer there would be a lie.
+  const sendLabel = !busy ? S.chat.send : enterMode === "steer" ? S.chat.sendSteer : S.chat.sendQueue;
   const cur = s.curSess ? s.sessions[s.curSess] : null;
   const queued = s.messageQueue.filter((q) => q.sessionId === s.curSess);
   const pendingImages = s.pendingFiles.filter((f) => f.type.startsWith("image/"));
@@ -802,7 +812,10 @@ export function ChatPage() {
                     showToast(S.chat.compactWait);
                     return;
                   }
-                  void submit();
+                  // Cmd/Ctrl+Enter is the opposite of what plain Enter does
+                  // (dsh `keymap.ts`: exactly Ctrl or Meta takes the
+                  // accelerated path). Shift+Enter still breaks the line.
+                  void submit(e.metaKey || e.ctrlKey ? "chord" : "enter");
                 }
               }}
             />
@@ -894,10 +907,12 @@ export function ChatPage() {
                   )}
                 </div>
                 <button className={"act-btn " + (showStop ? "stop" : "send")}
-                        title={showStop ? S.chat.stop : S.chat.send}
                         // dsh: an empty draft dims the send button; anything to send lights it.
                         disabled={compacting || (!showStop && !s.inputText.trim() && !s.pendingFiles.length)}
-                        onClick={() => showStop ? stopGen() : void submit()}>
+                        title={showStop ? S.chat.stop : sendLabel}
+                        onClick={(e) => showStop
+                          ? stopGen()
+                          : void submit(e.metaKey || e.ctrlKey ? "chord" : "enter")}>
                   {showStop ? <IconStop /> : <IconSend />}
                 </button>
               </div>
@@ -1148,7 +1163,7 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
   if (m.role === "user" && m.steer) {
     return (
       <div id={"msg-" + idx} className="m m-steer-wrap">
-        <SteerChip text={m.content} ts={m.ts} onOpenSkill={onOpenSkill} />
+        <SteerChip text={m.content} ts={m.ts} previews={m.previews} onOpenSkill={onOpenSkill} />
       </div>
     );
   }
@@ -1249,7 +1264,10 @@ function MessageView({ idx, m, sessionId, workspace, turn, onOpenFile, onOpenRev
             );
           }
           if (seg.part.kind === "steer") {
-            return <SteerChip key={i} text={seg.part.text} ts={seg.part.ts} onOpenSkill={onOpenSkill} />;
+            return (
+              <SteerChip key={i} text={seg.part.text} ts={seg.part.ts}
+                         previews={seg.part.previews} onOpenSkill={onOpenSkill} />
+            );
           }
           const text = seg.part.kind === "text" ? seg.part.text : "";
           if (!text) return null;
@@ -1561,9 +1579,10 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
     setState({ messageQueue: getState().messageQueue.filter((x) => x.id !== id) });
   };
   const steerNow = async (qItem: QueuedMessage) => {
-    if (!streaming || qItem.files.length > 0 || !qItem.text.trim()) return;
+    // Only a picture can ride a steer; a queued document still needs its turn.
+    if (!streaming || !qItem.files.every(isImageFile) || !qItem.text.trim()) return;
     removeQueued(qItem.id);
-    await applySteer(qItem.sessionId, qItem.text.trim());
+    await applySteer(qItem.sessionId, qItem.text.trim(), qItem.files);
   };
 
   return (
@@ -1664,7 +1683,7 @@ function QueueDock({ queued, streaming }: { queued: QueuedMessage[]; streaming: 
                         >
                           <IconTrash />
                         </button>
-                        {streaming && qItem.files.length === 0 && (
+                        {streaming && qItem.files.every(isImageFile) && (
                           <button
                             type="button"
                             className="queue-act"
@@ -1729,31 +1748,37 @@ function QueueInlineEditor({
   );
 }
 
-function appendSteerBubble(sessId: string, text: string) {
+/** A mid-run steer joins the turn as a chip; pictures it carried come back on
+ *  the server-rendered record as `[图片: …]` markers, so the chip only needs
+ *  the text plus the object URL that makes the preview show up immediately. */
+function appendSteerBubble(sessId: string, text: string, files: File[] = []) {
+  const previews = files.filter(isImageFile).map((f) => URL.createObjectURL(f));
   const live = getState().streams[sessId]?.aiMsg;
   const sess = getState().sessions[sessId];
   if (live) {
-    appendSteerPart(live, text);
+    appendSteerPart(live, text, Date.now(), previews);
     if (sess) rememberSteersFromMsgs(sessId, sess.msgs, sess.olderTurns || 0);
     saveSessions();
     bump();
     return;
   }
   if (!sess) return;
-  sess.msgs.push({ role: "user", content: text, ts: Date.now(), steer: true });
+  sess.msgs.push({ role: "user", content: text, ts: Date.now(), steer: true, previews });
   saveSessions();
   bump();
 }
 
-async function applySteer(sessId: string, text: string): Promise<boolean> {
+async function applySteer(sessId: string, text: string, files: File[] = []): Promise<boolean> {
   const S = getStrings();
-  const { ok, data } = await api.steerChatApi(sessId, text);
+  const imageFiles = files.filter(isImageFile);
+  const images = await Promise.all(imageFiles.map(fileToImagePayload));
+  const { ok, data } = await api.steerChatApi(sessId, text, images);
   if (ok && data?.accepted) {
-    appendSteerBubble(sessId, text);
+    appendSteerBubble(sessId, text, files);
     showToast(S.chat.interruptToast);
     return true;
   }
-  enqueueMessage(sessId, text, [], { silent: true });
+  enqueueMessage(sessId, text, files, { silent: true });
   showToast(ok ? S.chat.interruptQueued : S.chat.interruptFailed);
   return false;
 }
@@ -1784,7 +1809,16 @@ function ensureSession(): string | null {
 let lastSubmitAt = 0;
 const STOP_GRACE_MS = 600;
 
-async function submit() {
+/** Whether the draft in front of us could be steered, which is what decides
+ *  if the busy-Enter preference applies at all. A slash command or a document
+ *  needs a turn of its own; so does a turn that is already stopping. */
+function steerable(sessId: string, files: File[], text: string): boolean {
+  const live = getState().streams[sessId];
+  if (live?.cancelling || live?.userStopped) return false;
+  return !parseWebCommand(text) && files.every(isImageFile);
+}
+
+async function submit(gesture: SubmitGesture = "enter") {
   const st = getState();
   const lockLive = st.curSess ? st.streams[st.curSess] : undefined;
   if (lockLive?.pendingApprovals?.[0] || lockLive?.pendingQuestions?.[0]) return;
@@ -1854,13 +1888,15 @@ async function submit() {
   }
   setState({ inputText: "", pendingFiles: [] });
   if (isBusy(sessId)) {
-    const live = getState().streams[sessId];
-    if (live?.cancelling || live?.userStopped) {
-      enqueueMessage(sessId, text, files);
-      return;
-    }
-    if (!files.length && !cmd) {
-      await applySteer(sessId, text);
+    // dsh `resolveSubmitMode`: the busy-Enter preference decides what Enter
+    // means, the chord delivers the opposite, and anything unsteerable (a
+    // command, a document, a turn already stopping) falls back to the queue
+    // rather than being refused after the fact.
+    const mode = resolveSubmitMode(
+      st.busyEnter, true, gesture, steerable(sessId, files, text),
+    );
+    if (mode === "steer") {
+      await applySteer(sessId, text, files);
       return;
     }
     enqueueMessage(sessId, text, files);
@@ -2669,6 +2705,12 @@ function imageFilesFromClipboard(data: DataTransfer | null): File[] {
     }
   }
   return out;
+}
+
+/** An attachment a steer can carry: the model sees it as vision, so only
+ *  pictures qualify. A document has to be opened by a turn of its own. */
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/");
 }
 
 function fileToDataUrl(file: File): Promise<string> {

@@ -381,8 +381,11 @@ export const postSessionAnswer = (sessionId: string, questionId: string, answer:
 export const cancelChatApi = (session_id: string) =>
   postJson<{ status?: string; cancelled: boolean }>("/api/chat/cancel", { session_id, message: "" });
 
-export const steerChatApi = (session_id: string, message: string) =>
-  postJson<{ accepted: boolean }>("/api/chat/steer", { session_id, message });
+export const steerChatApi = (
+  session_id: string,
+  message: string,
+  images: { mime: string; data: string }[] = [],
+) => postJson<{ accepted: boolean }>("/api/chat/steer", { session_id, message, images });
 
 export const takeSteerApi = (session_id: string) =>
   postJson<{ messages: string[] }>("/api/chat/steer/take", { session_id, message: "" });

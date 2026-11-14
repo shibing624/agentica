@@ -3,13 +3,14 @@ import * as api from "./api";
 import type { Automation } from "./api";
 import { sessionStatsCache, type SessionStats } from "./lib/sessionCache";
 import { createViewStore } from "./lib/sessionView";
+import { readBusyEnter, type BusyEnterBehavior } from "./lib/composerSubmission";
 
 /** Ordered stream of one assistant turn (text interleaves with tool groups). */
 export type MsgPart =
   | { kind: "think"; text: string; t0?: number; ms?: number }
   | { kind: "tool"; name: string; argsStr: string; result?: string; diff?: string; t0?: number; ms?: number; toolCallId?: string }
   | { kind: "text"; text: string }
-  | { kind: "steer"; text: string; ts?: number };
+  | { kind: "steer"; text: string; ts?: number; previews?: string[] };
 
 export type ApprovalDecision = "allow" | "allow_prefix" | "deny" | "deny_prefix";
 
@@ -252,6 +253,8 @@ export type AppState = {
   lang: "en" | "zh";
   /** Which replies survive collapsing a turn's process line (see `FoldedReplies`). */
   foldedReplies: FoldedReplies;
+  /** What plain Enter means while a turn is running (see `composerSubmission`). */
+  busyEnter: BusyEnterBehavior;
   toast: { show: boolean; msg: string };
   confirm: { open: boolean; title: string; msg: string; okLabel: string; onOk: (() => void) | null };
   dirModal: { open: boolean; forNewSession: boolean; value: string };
@@ -384,6 +387,7 @@ const state: AppState = {
   theme: localStorage.getItem("ag_theme") || "auto",
   lang: localStorage.getItem("ag_lang") === "zh" ? "zh" : "en",
   foldedReplies: localStorage.getItem("ag_folded_replies") === "final" ? "final" : "all",
+  busyEnter: readBusyEnter(localStorage.getItem("ag_busy_enter")),
   toast: { show: false, msg: "" },
   confirm: { open: false, title: "", msg: "", okLabel: "", onOk: null },
   dirModal: { open: false, forNewSession: false, value: "" },
@@ -563,6 +567,13 @@ export function setTheme(raw: string) {
 export function setFoldedReplies(v: FoldedReplies) {
   localStorage.setItem("ag_folded_replies", v);
   setState({ foldedReplies: v });
+}
+
+/** Remembers what plain Enter does mid-run (dsh `busyEnter`); browser-local,
+ *  like the fold preference — it is a reading habit, not an account setting. */
+export function setBusyEnter(v: BusyEnterBehavior) {
+  localStorage.setItem("ag_busy_enter", v);
+  setState({ busyEnter: v });
 }
 
 export const UNFILED_PROJECT_ID = "unfiled";

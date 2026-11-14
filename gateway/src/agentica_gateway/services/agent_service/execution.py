@@ -460,12 +460,24 @@ class AgentExecutionMixin:
             return None
         return agent
 
-    def steer_session(self, session_id: str, guidance: str, owner: Optional[str] = None) -> bool:
-        """Inject mid-run guidance (CLI ``agent.steer``) for a web session."""
+    def steer_session(
+        self,
+        session_id: str,
+        guidance: str,
+        owner: Optional[str] = None,
+        images: Optional[List[Any]] = None,
+    ) -> bool:
+        """Inject mid-run guidance (CLI ``agent.steer``) for a web session.
+
+        ``images`` are already in the shape ``agent.steer`` takes (provider
+        image dicts, the same ``plan.images`` an idle turn sends), so a Web
+        steer carrying a screenshot reaches the model as vision instead of
+        being refused as an empty caption.
+        """
         agent = self._cached_agent_for_owner(session_id, owner)
         if agent is None:
             return False
-        accepted = bool(agent.steer(self.expand_skill_invocation(guidance)))
+        accepted = bool(agent.steer(self.expand_skill_invocation(guidance), images=images or None))
         if accepted:
             turn = _pkg().live_turn.active(session_id, self._owner(owner))
             if turn is not None:
@@ -478,3 +490,26 @@ class AgentExecutionMixin:
         if agent is None:
             return []
         return [item[0] for item in agent.pop_undelivered_steer()]
+
+    async def steer_session_media(
+        self,
+        session_id: str,
+        message: str,
+        media: Optional[List["InboundMedia"]],
+        owner: Optional[str] = None,
+    ) -> bool:
+        """Steer a running turn with attachments, routed like an idle turn.
+
+        A picture a Web user sends mid-run must reach the model the same way
+        the idle path does: natively when the base model sees images, otherwise
+        through ``settings.media_model`` with the description appended to the
+        caption. Steer is text-only at the HTTP level otherwise, and a
+        screenshot would arrive as a bare marker.
+        """
+        if not media:
+            return self.steer_session(session_id, message, owner=owner)
+        agent = self._cached_agent_for_owner(session_id, owner)
+        if agent is None:
+            return False
+        message, run_images, _audio, _notes = await self._prepare_run_media(agent, message, media)
+        return self.steer_session(session_id, message, owner=owner, images=run_images)

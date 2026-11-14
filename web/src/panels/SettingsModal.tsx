@@ -16,7 +16,7 @@ import { agoStr, lastQueryTs, shortenPath } from "../lib/format";
 import { unarchiveSession, deleteSession, loadSessions } from "../sessions";
 import {
   askConfirm, emptyMcpForm, emptyProfileForm, emptySkillForm,
-  getState, saveSessions, setFoldedReplies, setState, setTheme, showToast, useAppState, type ProfileForm,
+  getState, saveSessions, setBusyEnter, setFoldedReplies, setState, setTheme, showToast, useAppState, type ProfileForm,
 } from "../store";
 import { PluginsPanel } from "./PluginsPanel";
 import { AssistantPanel } from "../pages/AssistantPage";
@@ -585,6 +585,23 @@ function GeneralTab() {
             {([["all", S.settings.foldedRepliesAll], ["final", S.settings.foldedRepliesFinal]] as const).map(([v, label]) => (
               <button key={v} className={"seg-btn" + (s.foldedReplies === v ? " active" : "")}
                       onClick={() => setFoldedReplies(v)}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* dsh `busyEnter`: what plain Enter does to a turn that is still
+            running. Queue is the default because a long turn that is going the
+            right way should not be interrupted by the next thought; the chord
+            always delivers the other one, so this is a default, not a limit. */}
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">{S.settings.busyEnter}</div>
+            <div className="settings-row-hint">{S.settings.busyEnterHint}</div>
+          </div>
+          <div className="seg">
+            {([["queue", S.settings.busyEnterQueue], ["steer", S.settings.busyEnterSteer]] as const).map(([v, label]) => (
+              <button key={v} className={"seg-btn" + (s.busyEnter === v ? " active" : "")}
+                      onClick={() => setBusyEnter(v)}>{label}</button>
             ))}
           </div>
         </div>

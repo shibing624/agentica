@@ -162,15 +162,18 @@ class TestSteerEndpoint:
 
     def test_steer_accepted(self, mock_app):
         client, mock_svc = mock_app
-        mock_svc.steer_session = MagicMock(return_value=True)
+        mock_svc.steer_session_media = AsyncMock(return_value=True)
         resp = client.post("/api/chat/steer", json={"session_id": "s1", "message": "stop rewriting"})
         assert resp.status_code == 200
         assert resp.json() == {"accepted": True}
-        mock_svc.steer_session.assert_called_once()
+        mock_svc.steer_session_media.assert_called_once()
+        assert mock_svc.steer_session_media.call_args.args[0] == "s1"
+        assert mock_svc.steer_session_media.call_args.args[1] == "stop rewriting"
+        assert mock_svc.steer_session_media.call_args.args[2] is None
 
     def test_steer_refused_is_200(self, mock_app):
         client, mock_svc = mock_app
-        mock_svc.steer_session = MagicMock(return_value=False)
+        mock_svc.steer_session_media = AsyncMock(return_value=False)
         resp = client.post("/api/chat/steer", json={"session_id": "s1", "message": "too late"})
         assert resp.status_code == 200
         assert resp.json() == {"accepted": False}

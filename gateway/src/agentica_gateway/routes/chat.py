@@ -199,11 +199,13 @@ def _images_to_media(images: list[ChatImage]) -> list[InboundMedia]:
     return out
 
 
-def _message_and_media(body: ChatRequest) -> tuple[str, Optional[list[InboundMedia]]]:
+def _message_and_media(body: "ChatRequest | SteerRequest") -> tuple[str, Optional[list[InboundMedia]]]:
     """The user text plus the decoded images.
 
     Each image is also kept on disk and named by a marker appended to the text,
-    so the logged turn can show the picture again after a reload.
+    so the logged turn can show the picture again after a reload. A mid-run
+    steer stores its pictures the same way, since its text is what gets folded
+    into the transcript.
     """
     if not body.images:
         return body.message, None
@@ -268,8 +270,16 @@ async def steer_chat(
     ``accepted: false`` is not an error — the run ended between the UI check
     and this call, and the client must queue a fresh turn instead of dropping
     the text (same TOCTOU contract as CLI ``agent.steer``).
+
+    Attached images take the idle-turn path: decoded here, written to the
+    content-addressed store (so a reload still shows them) and handed to the
+    model as vision. The marker goes into the text the steer carries, which is
+    also what the SSE ``steer`` event publishes back to the transcript.
     """
-    accepted = svc.steer_session(body.session_id, body.message, owner=_account(request))
+    message, media = _message_and_media(body)
+    accepted = await svc.steer_session_media(
+        body.session_id, message, media, owner=_account(request),
+    )
     return {"accepted": accepted}
 
 

@@ -49,9 +49,14 @@ class SteerRequest(BaseModel):
     Same contract as CLI ``agent.steer()``: accepted only while a run is
     in flight. ``session_id`` is required; an empty ``message`` is rejected
     by the agent and comes back as ``accepted: false``.
+
+    ``images`` ride the same path as an idle turn's attachments: the CLI already
+    steers pasted pictures through ``Agent.steer(images=)``, so a Web steer with
+    a screenshot must not be the one case that silently degrades to text-only.
     """
     session_id: str
     message: str = ""
+    images: List[ChatImage] = []
 
     @field_validator("message")
     @classmethod

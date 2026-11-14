@@ -73,7 +73,7 @@ class TestAgentServiceSteer:
         agent.steer.return_value = True
         svc._cache.put(svc._sk("s1"), agent)
         assert svc.steer_session("s1", "don't rewrite tests") is True
-        agent.steer.assert_called_once_with("don't rewrite tests")
+        agent.steer.assert_called_once_with("don't rewrite tests", images=None)
 
     def test_steer_session_expands_skill_invocation(self, tmp_path):
         """A ``/skill`` steered mid-run reaches the model as the skill prompt,
@@ -91,7 +91,7 @@ class TestAgentServiceSteer:
             return_value=registry,
         ):
             svc.steer_session("s1", "/review x")
-        agent.steer.assert_called_once_with("SKILL PROMPT for x")
+        agent.steer.assert_called_once_with("SKILL PROMPT for x", images=None)
 
     def test_steer_session_missing_agent_is_false(self, tmp_path):
         svc = self._svc(tmp_path)
@@ -114,6 +114,43 @@ class TestAgentServiceSteer:
         svc._cache.put(svc._sk("s1"), agent)
         assert svc.take_undelivered_steer("s1") == ["late", "also"]
         agent.pop_undelivered_steer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_a_steered_picture_reaches_the_model_as_vision(self, tmp_path):
+        """A screenshot sent mid-run must arrive the way an idle turn's does.
+
+        The base model sees images natively here, so media understanding keeps
+        the picture rather than describing it: ``agent.steer`` receives the
+        provider image dict, not ``images=None``.
+        """
+        from agentica_gateway.channels.base import InboundMedia
+
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        agent.steer.return_value = True
+        agent.model.supports_images = True
+        agent.model.id = "vision-model"
+        svc._cache.put(svc._sk("s1"), agent)
+
+        ok = await svc.steer_session_media(
+            "s1", "看这个", [InboundMedia(kind="image", data=b"\x89PNG", mime="image/png")],
+        )
+
+        assert ok is True
+        images = agent.steer.call_args.kwargs["images"]
+        assert len(images) == 1
+        assert images[0]["url"].startswith("data:image/png;base64,")
+
+    @pytest.mark.asyncio
+    async def test_a_text_only_steer_does_not_touch_media_routing(self, tmp_path):
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        agent.steer.return_value = True
+        svc._cache.put(svc._sk("s1"), agent)
+        assert await svc.steer_session_media("s1", "只改方向", None) is True
+        agent.steer.assert_called_once_with("只改方向", images=None)
 
 
 class TestAgentServiceRunSource:
