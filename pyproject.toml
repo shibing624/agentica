@@ -1,6 +1,6 @@
 [project]
 name = "agentica"
-version = "1.5.2"
+version = "1.6.0"
 description = "Agentica: A lightweight Python SDK for building AI agents with persistent memory and self-evolution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -153,14 +153,14 @@ tools-extra = [
 # `agentica-gateway` is released in lockstep with this package (same version,
 # exact pin both ways; scripts/versions.py). These extras keep the old install
 # commands working; `gateway` keeps Feishu in, as before the split.
-gateway  = ["agentica-gateway[feishu]==1.5.2"]
-telegram = ["agentica[gateway]", "agentica-gateway[telegram]==1.5.2"]
-discord  = ["agentica[gateway]", "agentica-gateway[discord]==1.5.2"]
-slack    = ["agentica[gateway]", "agentica-gateway[slack]==1.5.2"]
-qq       = ["agentica[gateway]", "agentica-gateway[qq]==1.5.2"]
-wecom    = ["agentica[gateway]", "agentica-gateway[wecom]==1.5.2"]
-dingtalk = ["agentica[gateway]", "agentica-gateway[dingtalk]==1.5.2"]
-wechat   = ["agentica[gateway]", "agentica-gateway[wechat]==1.5.2"]
+gateway  = ["agentica-gateway[feishu]==1.6.0"]
+telegram = ["agentica[gateway]", "agentica-gateway[telegram]==1.6.0"]
+discord  = ["agentica[gateway]", "agentica-gateway[discord]==1.6.0"]
+slack    = ["agentica[gateway]", "agentica-gateway[slack]==1.6.0"]
+qq       = ["agentica[gateway]", "agentica-gateway[qq]==1.6.0"]
+wecom    = ["agentica[gateway]", "agentica-gateway[wecom]==1.6.0"]
+dingtalk = ["agentica[gateway]", "agentica-gateway[dingtalk]==1.6.0"]
+wechat   = ["agentica[gateway]", "agentica-gateway[wechat]==1.6.0"]
 
 # ═══════════════════════════════════════════════════════════
 # Tracing / Observability
