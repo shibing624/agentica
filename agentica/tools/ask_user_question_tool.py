@@ -127,14 +127,27 @@ Ask only when no reasonable default exists or the step is hard to undo. For an
 ambiguity you can resolve with a recommendation, take it and tell the user
 afterwards. Do not ask whether you may run a command or edit a file: call the
 tool, and the permission system prompts when it needs to. A question nobody
-answers in time returns `"timed_out": true` with a note on how to proceed."""
+answers in time returns `"timed_out": true` with a note on how to proceed.
+
+**Ask everything you already know you need in one call.** Before starting work,
+read the request and list every genuine ambiguity it leaves — the entry point,
+the target file, the naming, which of two approaches, whether to include the
+optional piece. Pass them together as `questions`, one object per item with its
+own `id`. The user answers them in one sitting; asking one now and a second one
+three minutes later turns a single interruption into two, and the second one
+usually arrives when they have moved on to something else. Do not batch
+questions you have not thought of yet: ask the ones that block the whole plan,
+and make a recommendation for the ones that do not."""
 
     _ASK_PARAMETERS = {
         "type": "object",
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "The question to show the user.",
+                "description": (
+                    "The question to show the user. Use this for a single "
+                    "question; use ``questions`` when you have several."
+                ),
             },
             "options": {
                 "type": "array",
@@ -148,8 +161,54 @@ answers in time returns `"timed_out": true` with a note on how to proceed."""
                     'or "(recommended)".'
                 ),
             },
+            "questions": {
+                "type": "array",
+                "description": (
+                    "Several questions to ask in one call. Use this instead of "
+                    "``prompt`` when you have more than one ambiguity to settle "
+                    "before starting work — the user answers them in one sitting "
+                    "instead of being interrupted again a minute later. Each item "
+                    "carries its own ``id``, and the answer echoes that id."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Stable id for this question; echoed in the answer.",
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "The specific question to ask the user.",
+                        },
+                        "header": {
+                            "type": "string",
+                            "description": 'Optional short heading, such as "Confirm" or "Choose Mode".',
+                        },
+                        "options": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Choices for this question. Put the recommended one "
+                                'first and mark it in the label, e.g. "(recommended)".'
+                            ),
+                        },
+                        "multi_select": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether the user may pick more than one option. "
+                                "A hint only: the answer is still whatever they type."
+                            ),
+                        },
+                    },
+                    "required": ["id", "question"],
+                },
+            },
         },
-        "required": ["prompt"],
+        # Neither is required on its own: one call asks either one question
+        # (``prompt``) or several (``questions``). Enforced in the body, where a
+        # missing or contradictory pair can say what to fix.
+        "required": [],
     }
 
     def __init__(
@@ -216,34 +275,149 @@ answers in time returns `"timed_out": true` with a note on how to proceed."""
 
     async def ask_user_question(
         self,
-        prompt: str,
+        prompt: Optional[str] = None,
         options: Optional[List[str]] = None,
+        questions: Optional[List[dict]] = None,
     ) -> str:
-        """Ask the user a question and wait for their reply.
+        """Ask the user one question, or several, and wait for the replies.
 
-        Use when a choice or confirmation is needed before continuing.
-        ``options`` is a JSON array of strings, never a stringified array.
-        Omit it for a free-form answer. The reply comes back verbatim.
+        Two shapes, because the two situations differ. ``prompt`` (+ optional
+        ``options``) asks one thing. ``questions`` asks a batch — the point being
+        that the model settles every ambiguity it already knows about in one
+        sitting, instead of interrupting the user again a minute later.
+
+        A batch is asked **one question at a time** through the same callback a
+        single question uses. That is deliberate: every surface already knows how
+        to show one question and take one answer (the terminal's inline prompt,
+        the Web/Desktop card, the IM link), so batching needs no new UI and no
+        new protocol — the *model's* turn gets the answers together, which is
+        what it asked for.
+
+        The reply comes back verbatim. A timed-out item carries ``timed_out``;
+        the rest of the batch still returns, so a partial answer is usable
+        instead of being thrown away.
         """
-        logger.info(f"User input requested: prompt={prompt[:100]}...")
+        items, error = self._normalize_questions(prompt, options, questions)
+        if error is not None:
+            return json.dumps({"error": error}, ensure_ascii=False)
+
+        if len(items) == 1 and questions is None:
+            # The single-question result shape is unchanged: existing callers
+            # (and the transcript rendering) read ``prompt``/``response``.
+            return await self._ask_one(
+                items[0]["question"], items[0].get("options"), key=None, header=None,
+            )
+
+        answers = []
+        for item in items:
+            raw = await self._ask_one(
+                item["question"], item.get("options"),
+                key=item["id"], header=item.get("header"),
+            )
+            answers.append(json.loads(raw))
+            # A timeout means nobody is at the keyboard. Asking the remaining
+            # questions would arm one prompt after another that nobody will
+            # answer, so the rest are reported as skipped and the model decides.
+            if answers[-1].get("timed_out"):
+                for remaining in items[len(answers):]:
+                    answers.append({
+                        "id": remaining["id"],
+                        "question": remaining["question"],
+                        "response": "",
+                        "timed_out": True,
+                        "skipped": True,
+                    })
+                break
+        return json.dumps({"answers": answers}, ensure_ascii=False)
+
+    @staticmethod
+    def _normalize_questions(
+        prompt: Optional[str],
+        options: Optional[List[str]],
+        questions: Optional[List[dict]],
+    ) -> tuple[list[dict], Optional[str]]:
+        """Validate the two call shapes into one list, or explain what is wrong.
+
+        Returning an error instead of raising keeps this a normal tool result:
+        the model reads what to fix and retries, rather than the run dying on an
+        argument it can correct.
+        """
+        if questions is not None:
+            if prompt is not None:
+                return [], (
+                    "Pass either `prompt` (one question) or `questions` (several), "
+                    "not both."
+                )
+            if not isinstance(questions, list) or not questions:
+                return [], "`questions` must be a non-empty JSON array."
+            normalized: list[dict] = []
+            seen: set[str] = set()
+            for index, raw in enumerate(questions):
+                if not isinstance(raw, dict):
+                    return [], f"questions[{index}] must be an object."
+                text = str(raw.get("question") or "").strip()
+                if not text:
+                    return [], f"questions[{index}] is missing `question`."
+                qid = str(raw.get("id") or "").strip() or f"q{index + 1}"
+                if qid in seen:
+                    # Ids are the answer's only handle; a duplicate would make
+                    # two answers indistinguishable.
+                    return [], f"questions[{index}] reuses id {qid!r}."
+                seen.add(qid)
+                item = {"id": qid, "question": text}
+                header = str(raw.get("header") or "").strip()
+                if header:
+                    item["header"] = header
+                opts = raw.get("options")
+                if isinstance(opts, list) and opts:
+                    item["options"] = [str(option) for option in opts]
+                if raw.get("multi_select") is True:
+                    item["multi_select"] = True
+                normalized.append(item)
+            return normalized, None
+
+        text = str(prompt or "").strip()
+        if not text:
+            return [], (
+                "Pass `prompt` for one question, or `questions` for several. "
+                "Asking nothing is not a question."
+            )
+        item = {"id": "q1", "question": text}
+        if options:
+            item["options"] = [str(option) for option in options]
+        return [item], None
+
+    async def _ask_one(
+        self,
+        question: str,
+        options: Optional[List[str]],
+        *,
+        key: Optional[str],
+        header: Optional[str],
+    ) -> str:
+        """Ask one question through the shared callback and shape one result."""
+        shown = f"[{header}] {question}" if header else question
+        logger.info(f"User input requested: prompt={shown[:100]}...")
 
         # The input callback is sync and may block indefinitely (the CLI's
-        # prompt_toolkit callback parks on a queue until the user types). Run
-        # it in a thread so the event loop stays live to service the UI.
+        # prompt_toolkit callback parks on a queue until the user types). Run it
+        # in a thread so the event loop stays live to service the UI.
         loop = asyncio.get_running_loop()
         try:
             response = await loop.run_in_executor(
-                None, lambda: self._get_input(prompt, options)
+                None, lambda: self._get_input(shown, options)
             )
         except AskUserQuestionTimeout as e:
             logger.info(f"User input timed out after {e.waited_seconds:.0f}s")
             result = {
-                "prompt": prompt,
+                "prompt": question,
                 "response": "",
                 "timed_out": True,
                 "waited_seconds": round(e.waited_seconds),
                 "note": TIMED_OUT_NOTE,
             }
+            if key is not None:
+                result["id"] = key
             if options:
                 result["options"] = list(options)
             return json.dumps(result, ensure_ascii=False)
@@ -255,9 +429,11 @@ answers in time returns `"timed_out": true` with a note on how to proceed."""
         # is transient), and a clipped copy would hide what was actually asked.
         # The options go with it — without them the answer is an orphan label.
         result = {
-            "prompt": prompt,
+            "prompt": question,
             "response": response,
         }
+        if key is not None:
+            result["id"] = key
         if options:
             result["options"] = list(options)
         return json.dumps(result, ensure_ascii=False)

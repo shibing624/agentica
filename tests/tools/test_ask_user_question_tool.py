@@ -228,3 +228,186 @@ class TestAskUserQuestionTimeout:
         text = AskUserQuestionTool().get_system_prompt()
         assert '"timed_out": true' in text
         assert "permission system" in text
+
+
+class TestSeveralQuestionsInOneCall:
+    """Batching: settle every ambiguity before starting work.
+
+    The point is not a nicer prompt. A model unsure about three things used to
+    ask, wait, ask, wait, ask — three interruptions, and the answer to the third
+    arrived after it had already started the work the first two shaped. One call
+    collects them in a single sitting. Surfaces keep their existing one-question
+    callback, so this needed no UI change anywhere.
+    """
+
+    def test_each_question_is_asked_and_answered_in_order(self):
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        seen = []
+
+        def cb(prompt, options=None):
+            seen.append(prompt)
+            return f"answer {len(seen)}"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[
+                {"id": "db", "question": "Which database?"},
+                {"id": "scope", "question": "Which module?"},
+            ]
+        )))
+
+        assert seen == ["Which database?", "Which module?"], "asked in order"
+        assert [a["id"] for a in result["answers"]] == ["db", "scope"]
+        assert [a["response"] for a in result["answers"]] == ["answer 1", "answer 2"]
+
+    def test_the_answer_echoes_each_id_because_labels_can_repeat(self):
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "same")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[
+                {"id": "one", "question": "Q1", "options": ["same"]},
+                {"id": "two", "question": "Q2", "options": ["same"]},
+            ]
+        )))
+
+        assert [a["id"] for a in result["answers"]] == ["one", "two"]
+
+    def test_a_header_prefixes_the_prompt_so_the_card_keeps_its_context(self):
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        seen = []
+        tool = AskUserQuestionTool(
+            input_callback=lambda p, o=None: seen.append(p) or "ok"
+        )
+        asyncio.run(tool.ask_user_question(
+            questions=[{"id": "x", "header": "Storage", "question": "Which?"}]
+        ))
+
+        assert "[Storage] Which?" == seen[0]
+
+    def test_options_travel_with_their_own_question(self):
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        seen = []
+        tool = AskUserQuestionTool(
+            input_callback=lambda p, o=None: seen.append((p, o)) or "ok"
+        )
+        asyncio.run(tool.ask_user_question(
+            questions=[
+                {"id": "a", "question": "Pick", "options": ["X", "Y"]},
+                {"id": "b", "question": "Free form"},
+            ]
+        ))
+
+        assert seen == [("Pick", ["X", "Y"]), ("Free form", None)]
+
+    def test_a_timeout_stops_the_batch_but_keeps_what_was_answered(self):
+        """Nobody at the keyboard: stop asking, keep the answers already given.
+
+        Arming one prompt after another that nobody will answer keeps the tool
+        blocked and the model waiting, so the remaining questions are reported
+        as skipped instead.
+        """
+        from agentica.tools.ask_user_question_tool import (
+            AskUserQuestionTool,
+            AskUserQuestionTimeout,
+            TIMED_OUT_NOTE,
+        )
+
+        calls = []
+
+        def cb(prompt, options=None):
+            calls.append(prompt)
+            if len(calls) == 2:
+                raise AskUserQuestionTimeout(120)
+            return "kept"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[
+                {"id": "a", "question": "Q1"},
+                {"id": "b", "question": "Q2"},
+                {"id": "c", "question": "Q3"},
+            ]
+        )))
+
+        first, second, third = result["answers"]
+        assert first["response"] == "kept"
+        assert second["timed_out"] is True and second["note"] == TIMED_OUT_NOTE
+        assert third["timed_out"] is True and third["skipped"] is True
+        assert len(calls) == 2, "the unanswered questions are not armed"
+
+    def test_a_batch_missing_an_id_is_still_answerable(self):
+        """A question without an id gets one, rather than being refused.
+
+        The id exists so the answer can be attributed; an index is a fine
+        attribution, and refusing would cost the user the whole batch.
+        """
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "ok")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[{"question": "no id here"}]
+        )))
+
+        assert result["answers"][0]["id"] == "q1"
+        assert result["answers"][0]["response"] == "ok"
+
+    def test_duplicate_ids_are_reported_not_asked(self):
+        """Ids are the answer's only handle: two of them collide."""
+
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        asked = []
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: asked.append(p) or "x")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            questions=[{"id": "a", "question": "1"}, {"id": "a", "question": "2"}]
+        )))
+
+        assert "reuses id" in result["error"]
+        assert asked == [], "refused before interrupting the user"
+
+    def test_prompt_and_questions_together_are_refused(self):
+        """Two shapes in one call means the model misread the schema; guessing
+        which it meant would silently drop half the questions."""
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        asked = []
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: asked.append(p) or "x")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            prompt="one", questions=[{"id": "a", "question": "two"}]
+        )))
+
+        assert "not both" in result["error"]
+        assert asked == []
+
+    def test_an_empty_call_is_reported_rather_than_armed(self):
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        asked = []
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: asked.append(p) or "x")
+        result = json.loads(asyncio.run(tool.ask_user_question()))
+
+        assert "`prompt`" in result["error"] and "`questions`" in result["error"]
+        assert asked == []
+
+    def test_the_single_question_result_shape_did_not_change(self):
+        """Existing surfaces parse the single shape; batching must not move it.
+
+        The CLI renders ``prompt`` back as the transcript's record of the
+        exchange, and the gateway reads ``response``; both predate batching.
+        """
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "yes")
+        result = json.loads(asyncio.run(tool.ask_user_question(
+            prompt="Proceed?", options=["Yes", "No"]
+        )))
+
+        assert result == {
+            "prompt": "Proceed?",
+            "response": "yes",
+            "options": ["Yes", "No"],
+        }
