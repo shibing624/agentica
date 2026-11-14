@@ -117,6 +117,7 @@ class AgentBuilderMixin:
         work_dir = self.get_session_work_dir(session_id, owner)
 
         from agentica.tools.product import build_product_tools
+        from ..model_factory import _gateway_cron_job_runner
 
         extra = build_product_tools(
             surface="gateway",
@@ -124,7 +125,7 @@ class AgentBuilderMixin:
             owner=self._owner(owner),
             session_id=session_id,
             service=self,
-            cron_job_runner=pkg._gateway_cron_job_runner,
+            cron_job_runner=_gateway_cron_job_runner,
             extra_tools=list(self.extra_tools),
         )
 
@@ -232,7 +233,7 @@ class AgentBuilderMixin:
         tool_count = len(agent.tools) if agent.tools else 0
         logger.info(
             f"DeepAgent built: {tool_count} tools "
-            f"(extra={len(extra)}, cron={len(cron_tools)}, self_manage={len(self_manage_tools)})"
+            f"(extra={len(extra)})"
         )
         return agent
 
