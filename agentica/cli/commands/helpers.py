@@ -74,7 +74,6 @@ def _refresh_skills_session(ctx: CommandContext):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
-        acp_sessions=ctx.acp_sessions,
         worktree_binder=ctx.worktree_binder,
         approve=ctx.approve,
     )
@@ -233,29 +232,6 @@ def _update_task_tool_auxiliary_model(agent, auxiliary_model) -> None:
         if isinstance(tool, BuiltinTaskTool):
             tool._auxiliary_model = auxiliary_model
             return
-
-
-def _update_delegate_tool_models(agent, session_profile: Optional[str]) -> None:
-    """Repoint the delegate tool's models after an in-place model switch.
-
-    ``/model`` changes ``agent.model`` / ``agent.auxiliary_model`` without
-    rebuilding the agent, and the delegate tool holds its own copies of both —
-    they are what decides whether a ``model`` arg is inside the session and
-    which one it labels. Left stale, the tool would judge a call against the
-    profile the user just left.
-    """
-    from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool
-
-    if not agent or not agent.tools:
-        return
-    for tool in agent.tools:
-        if isinstance(tool, BuiltinDelegateTool):
-            tool.refresh_session_models(
-                model=agent.model,
-                auxiliary_model=getattr(agent, "auxiliary_model", None),
-                session_profile=session_profile,
-            )
-
 
 
 def _safe_tool_module_name(name: str) -> Optional[str]:

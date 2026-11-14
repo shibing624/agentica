@@ -859,7 +859,7 @@ async def list_background_jobs(
     request: Request,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    """This chat's detached commands and delegated workers (the CLI's ``/ps``)."""
+    """This chat's detached commands (the CLI's ``/ps``)."""
     return {"jobs": svc.list_background_jobs(session_id, owner=_account(request))}
 
 

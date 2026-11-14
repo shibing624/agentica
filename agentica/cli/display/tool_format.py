@@ -176,7 +176,7 @@ def _display_execute_command(
 # the display layer can decide whether asking is worth it: resolving a label
 # reads config.yaml, and the live window repaints several times a second, so
 # asking on behalf of ``grep`` would be pure cost for no output.
-HANDOFF_TOOLS = frozenset({"task", "delegate"})
+HANDOFF_TOOLS = frozenset({"task"})
 
 
 def _format_handoff_display(
@@ -186,7 +186,7 @@ def _format_handoff_display(
     meta_keys: tuple,
     model_label: Optional[str] = None,
 ) -> str:
-    """Format a work-handoff tool (task / delegate) with no truncation.
+    """Format a work-handoff tool (task) with no truncation.
 
     Meta args stay on the first line as ``key=value``; the instruction body
     follows on its own lines so newlines in the brief stay readable.
@@ -229,7 +229,7 @@ def format_tool_display(
     ``model_label`` is the model this call will run, when the caller knows it
     (``Agent.describe_tool_model``). It is display metadata, not an argument:
     it must never be read back out of ``tool_args`` as if the model had sent
-    it. Only ``task`` / ``delegate`` print it — for those, "which model" is the
+    it. Only ``task`` prints it — for those, "which model" is the
     user's actual question and the arguments cannot answer it (an omitted
     ``model`` means inherit, a subagent's model comes from its definition).
     """
@@ -304,21 +304,13 @@ def format_tool_display(
         path = tool_args.get("path", ".")
         return f"'{pattern[:40]}' in {_shorten_path(path, work_dir)}"
     
-    # task / delegate — these hand off work; truncating the brief hides what
+    # task hands off work; truncating the brief hides what
     # the user needs to audit. Show every arg in full (multi-line body below).
     if tool_name == "task":
         return _format_handoff_display(
             tool_args,
             body_key="description",
             meta_keys=("subagent_type", "timeout", "max_turns", "resume_from_run_id"),
-            model_label=model_label,
-        )
-
-    if tool_name == "delegate":
-        return _format_handoff_display(
-            tool_args,
-            body_key="task",
-            meta_keys=("label", "work_dir", "model"),
             model_label=model_label,
         )
 
@@ -393,7 +385,7 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     elif tool_name == "write_todos" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
         console_instance.print(f"    {display_str}", style="dim", highlight=False, markup=False)
-    elif tool_name in ("send_message", "task", "delegate") and "\n" in display_str:
+    elif tool_name in ("send_message", "task") and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
         for line in display_str.splitlines():
             console_instance.print(f"    {line}", style="dim", highlight=False, markup=False)

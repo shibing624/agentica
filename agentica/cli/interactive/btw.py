@@ -123,22 +123,12 @@ def _print_background_completion(event: BackgroundProcessCompleted) -> None:
         "failed": "[red]✗[/red]",
     }[status]
     detail = _exit_detail(event.returncode)
-    delegated = event.kind == "delegate"
     con.print()
-    if delegated:
-        con.print(
-            f'{marker} Delegated task "{rich_escape(event.label)}" {status} in '
-            f"{event.elapsed} ({detail})"
-        )
-    else:
-        con.print(
-            f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
-            f"({detail})"
-        )
-    # The delegated command line is a `python -m agentica.cli.main --query <the
-    # whole task>` — the label above already says what it was, so showing it
-    # again as a wrapped shell command is noise.
-    raw_command = "" if delegated else (event.command or "")
+    con.print(
+        f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
+        f"({detail})"
+    )
+    raw_command = event.command or ""
     if raw_command:
         try:
             width = int(getattr(con, "width", 80) or 80)

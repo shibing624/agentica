@@ -59,7 +59,7 @@ export type ChatMsg = {
   errorTs?: number;
   /** Mid-run interrupt (CLI steer), not a new turn. */
   steer?: boolean;
-  /** A turn no person wrote: a background command's or a delegated subagent's
+  /** A turn no person wrote: a background command's
    *  report, another session's message. The log marks the row `automated`;
    *  it renders as a notice, not as the user's query. */
   automated?: boolean;
@@ -105,7 +105,7 @@ export type Session = {
   unread?: boolean;
   /** Server says a run is in flight (refresh can reattach). */
   running?: boolean;
-  /** Number of running background jobs (`execute(background=True)` / `delegate`). */
+  /** Number of running background jobs (`execute(background=True)`). */
   backgroundJobs?: number;
   source?: string;
   /** Where the session was started; `source` is where the latest turn came in. */

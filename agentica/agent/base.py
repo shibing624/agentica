@@ -500,8 +500,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         ``format_tool_display``, which sees arguments but not the agent; a
         delegation tool knows its own resolved model, so the label is fetched
         from the tool instance and passed to the formatter. Only ``task``
-        (subagent model tier) and ``delegate`` (session model / profile /
-        explicit override) can answer — everything else returns None and no
+        (subagent model tier) can answer — everything else returns None and no
         label is printed.
 
         Resolved fresh on every call: ``/model`` and ``/permissions`` mutate

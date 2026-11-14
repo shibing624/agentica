@@ -1042,9 +1042,8 @@ class Tool:
     def model_label_for(self, tool_args: Optional[dict] = None) -> Optional[str]:
         """Model this tool call will actually run, for CLI display.
 
-        Only the delegation tools can answer: ``task`` picks a subagent's model
-        from its ``model_tier``, ``delegate`` resolves one from the session plus
-        the call's ``model`` arg. Everything else returns None, and a None label
+        Only ``task`` can answer: it picks a subagent's model from its
+        ``model_tier``. Everything else returns None, and a None label
         is simply left off the call line — an "unknown" placeholder would be
         noise on every other tool.
 

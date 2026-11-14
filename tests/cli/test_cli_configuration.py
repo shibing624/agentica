@@ -901,33 +901,6 @@ class TestCLIConfiguration(unittest.TestCase):
         tools = captured["tools"] + list(getattr(agent, "tools", []) or [])
         return [tool.name for tool in tools]
 
-    def test_an_interactive_session_can_delegate(self):
-        from agentica.tools.background_processes import BackgroundProcessRegistry
-
-        names = self._tool_names_from_create_agent(
-            background_process_registry=BackgroundProcessRegistry()
-        )
-
-        self.assertIn("builtin_delegate_tool", names)
-
-    def test_a_session_without_a_process_registry_cannot_delegate(self):
-        """A one-shot `--query` run and a cron-spawned agent have no registry,
-        so a worker they started could never be waited on or reported back."""
-        names = self._tool_names_from_create_agent()
-
-        self.assertNotIn("builtin_delegate_tool", names)
-
-    def test_a_delegated_worker_cannot_delegate_further(self):
-        from agentica.tools.background_processes import BackgroundProcessRegistry
-        from agentica.tools.builtin.delegate_tool import DEPTH_ENV_VAR
-
-        with patch.dict(os.environ, {DEPTH_ENV_VAR: "1"}, clear=False):
-            names = self._tool_names_from_create_agent(
-                background_process_registry=BackgroundProcessRegistry()
-            )
-
-        self.assertNotIn("builtin_delegate_tool", names)
-
     def test_create_agent_hands_the_session_profile_to_deep_agent(self):
         from agentica.cli.runtime import create_agent
 

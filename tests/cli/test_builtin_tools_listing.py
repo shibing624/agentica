@@ -43,10 +43,10 @@ class TestBuiltinToolsListing(unittest.TestCase):
         self.assertEqual(missing, set(), f"unlisted builtin tools: {sorted(missing)}")
 
     def test_covers_conditionally_added_tools(self):
-        """delegate / memory / todos are added outside the factory (deep.py,
+        """memory / todos are added outside the factory (deep.py,
         agent/base.py) — the display list must carry them too."""
         for name in (
-            "write_todos", "delegate", "save_memory", "search_memory", "wait",
+            "write_todos", "save_memory", "search_memory", "wait",
             "search_session",
         ):
             self.assertIn(name, BUILTIN_TOOLS)

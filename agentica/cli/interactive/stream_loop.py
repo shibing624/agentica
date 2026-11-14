@@ -464,7 +464,7 @@ def _process_stream_response(
         # view by default.
         subagent_verbosity = "verbose" if tui_state.get("debug") else "all"
         display_work_dir = Path(work_dir) if work_dir is not None else None
-        # Names the model a ``task`` / ``delegate`` call will run, resolved from
+        # Names the model a ``task`` call will run, resolved from
         # the live agent at print time so a mid-session ``/model`` switch shows
         # up immediately. Looked up rather than read directly: an embedded /
         # stubbed agent need not be a full Agent, and a missing label must not

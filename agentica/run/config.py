@@ -80,7 +80,7 @@ class RunConfig:
     input_meta: Optional[Dict[str, Any]] = None
     # Dispatch identity for this turn (``agentica.ticket``). None means "inherit
     # whatever this context already has, else mint one" — a subagent or a
-    # delegated child picks up its parent's value without naming it. Set it
+    # child process picks up its parent's value without naming it. Set it
     # explicitly only when a caller knows which dispatch this turn belongs to
     # and the ambient value would be wrong (a cron job delivering into a
     # session, a worker re-used across dispatches). Never affects behaviour.

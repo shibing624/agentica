@@ -321,7 +321,6 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
         peer_session=ctx.peer_session,
-        acp_sessions=ctx.acp_sessions,
         worktree_binder=ctx.worktree_binder,
         approve=ctx.approve,
     )
@@ -657,21 +656,17 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
     if terminals:
         con.print(f"  [cyan]Background terminals ({len(terminals)}):[/cyan]")
         for view in terminals:
-            kind = " [magenta]delegated session[/magenta]" if view.get("kind") == "delegate" else ""
             con.print(
                 f"    #{view.get('num')} [dim]{view.get('id')}[/dim] pid={view.get('pid')} "
-                f"elapsed={view.get('elapsed')}{kind}"
+                f"elapsed={view.get('elapsed')}"
             )
             # Full command on its own lines — /ps is the inspection surface,
             # so never truncate here (preview is only for one-line status UI).
-            # A delegated session shows its task instead: its command line is a
-            # `python -m agentica.cli.main --query <the whole task>`.
             label = view.get("label") or ""
             command = view.get("command") or ""
-            body = label if view.get("kind") == "delegate" else command
-            if view.get("kind") != "delegate" and label and label != command:
+            if label and label != command:
                 con.print(f"      [bold]{label}[/bold]")
-            for line in body.splitlines() or [""]:
+            for line in command.splitlines() or [""]:
                 con.print(f"      {line}")
             con.print(f"      [dim]log: {view.get('log_path')}[/dim]")
 

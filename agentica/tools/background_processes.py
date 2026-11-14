@@ -166,9 +166,7 @@ def _format_elapsed(seconds: float) -> str:
 class BackgroundProcess:
     """One shell command running outside the agent turn.
 
-    ``kind`` says what started it, which decides how it is counted and how it is
-    reported when it ends: ``"command"`` is execute(background=True), ``"delegate"``
-    is a whole agentica session working on ``label`` (see the delegate tool).
+    ``kind`` says what started it; ``"command"`` is execute(background=True).
     """
 
     id: str
@@ -389,8 +387,7 @@ class BackgroundProcessRegistry:
         log_fh = open(log_path, "ab", buffering=0)
         try:
             # One physical line, always: readers strip the header by dropping a
-            # leading `$ ` line, and a command that spans lines (a delegated
-            # worker's whole task does) would otherwise leak into the output.
+            # leading `$ ` line, and a command that spans lines would otherwise leak into the output.
             header = f"$ {command}".replace("\n", "\\n") + "\n\n"
             header = header.encode("utf-8", errors="replace")
             log_fh.write(header)
@@ -583,8 +580,6 @@ def exit_detail(returncode: int) -> str:
 def background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     """Render a finished background command as a report for the agent."""
     status = exit_status(event.returncode)
-    if event.kind == "delegate":
-        return _delegate_result_for_agent(event, status)
     tail = read_log_tail(event.log_path, max_lines=20, max_chars=4000)
     # ``agentica watch`` exits 75 when its checks lose contact, and 124 when the
     # job has ended but the result check timed out. Both are about the watch,
@@ -626,45 +621,6 @@ def background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     return "\n".join(lines)
 
 
-def _delegate_result_for_agent(event: BackgroundProcessCompleted, status: str) -> str:
-    """Render a finished delegated session as a report for the agent that sent it.
-
-    The worker ran with ``--print``, so its stdout is its final answer and not a
-    command log — it gets a much larger slice than a background command's tail,
-    because that answer is the entire deliverable.
-    """
-    answer = read_log_tail(event.log_path, max_lines=120, max_chars=8000)
-    lines = [f'[Delegated task "{event.label}" {status} after {event.elapsed} ({event.id})]']
-    if event.returncode == 0:
-        lines.extend(["", "Its report:", answer or "(the worker produced no output)"])
-        lines.extend(
-            [
-                "",
-                "This is the whole of what that session hands back. Fold it into your "
-                "own work, or report it to the user if nothing is left to do.",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                f"Exit code: {event.returncode}",
-                f"Log: {event.log_path}",
-                "",
-                "Output tail:",
-                answer or "(no output)",
-            ]
-        )
-        lines.extend(
-            [
-                "",
-                "The delegated session did not finish its task. Decide whether to do "
-                "the work yourself or tell the user why it failed — do not simply "
-                "delegate the same task again.",
-            ]
-        )
-    return "\n".join(lines)
-
-
 def background_job_view_from_process(item: BackgroundProcess) -> Dict[str, Any]:
     """Client-facing projection of an in-process ``BackgroundProcess``."""
     if not item.finished.is_set():
@@ -690,7 +646,7 @@ def background_job_view_from_process(item: BackgroundProcess) -> Dict[str, Any]:
         "pid": item.pid,
         "kind": item.kind,
         "label": display_label,
-        "command": "" if item.kind == "delegate" else item.command,
+        "command": item.command,
         "cwd": item.cwd or "",
         "log_path": item.log_path,
         "status": status,
@@ -763,7 +719,7 @@ def _view_from_disk_record(record_path: Path, rec: Dict[str, Any]) -> Dict[str, 
         "pid": pid,
         "kind": kind,
         "label": display_label,
-        "command": "" if kind == "delegate" else raw_cmd,
+        "command": raw_cmd,
         "cwd": str(rec.get("cwd") or ""),
         "log_path": log_path,
         "status": status,

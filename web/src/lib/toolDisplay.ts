@@ -95,9 +95,6 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
     // raw ``model`` argument is the only honest thing this formatter can show.
     return formatHandoff(args, "description", ["subagent_type", "timeout", "max_turns", "resume_from_run_id"]);
   }
-  if (name === "delegate") {
-    return formatHandoff(args, "task", ["label", "work_dir", "model"]);
-  }
   if (name === "send_message") {
     const target = String(args.target ?? "");
     const message = String(args.message ?? "");
