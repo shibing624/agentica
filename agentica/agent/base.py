@@ -54,7 +54,7 @@ from agentica.run.response import RunResponse, AgentCancelledError
 from agentica.run.config import RunConfig
 from agentica.run.context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
-from agentica.memory.session_log import SessionLog
+from agentica.memory.session_log import SessionLog, tool_policy_key
 from agentica.memory.session_index import SessionIndex
 from agentica.memory.recall import RecallBreaker
 from agentica.compression import CompressionManager
@@ -1066,6 +1066,20 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             return True
         return self.workspace.user_agents_md_digest() == logged
 
+    def _logged_tool_policies(self, logged_keys: List[str]) -> List[str]:
+        """The guides the recovered ``system_prompt`` already contains.
+
+        Only guides whose fingerprint the log recorded belong to the pinned
+        prompt. Anything in the live list without one arrived after that prompt
+        was sent (a tool registered, or the gateway rebuilding the agent with a
+        different tool table), so it must stay out of the known set and reach
+        the model through ``_take_tool_policy_reminder`` instead of vanishing.
+        """
+        if not logged_keys:
+            return []
+        known = set(logged_keys)
+        return [policy for policy in self._tool_policy_prompts if tool_policy_key(policy) in known]
+
     def _restore_prelude_from_session_log(self) -> None:
         """Recover the active window's system prompt and tool order on resume."""
         if (
@@ -1083,7 +1097,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 if prelude.runtime_state is not None
                 else self._current_runtime_state()
             )
-            self._pinned_tool_policies = list(self._tool_policy_prompts)
+            self._pinned_tool_policies = self._logged_tool_policies(prelude.tool_policy_keys)
             workspace = self.workspace
             self._pinned_context_epoch = workspace.context_epoch if workspace is not None else None
         if prelude.tools and not self._pinned_tool_order:

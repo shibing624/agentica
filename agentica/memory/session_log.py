@@ -369,6 +369,17 @@ class ActivePrelude(NamedTuple):
     tools: List[str]
     runtime_state: Optional[Dict[str, str]]
     agents_md_digest: Optional[str]
+    # Fingerprints of the tool policy guides that were rendered into
+    # ``system_prompt``. A resumed agent marks these as already delivered and
+    # sends a reminder for anything else — without them it would mistake the
+    # live policy list for what the pinned prompt contains and silently drop
+    # the guides of tools that appeared since.
+    tool_policy_keys: List[str]
+
+
+def tool_policy_key(policy: str) -> str:
+    """Stable fingerprint for one rendered tool-policy guide."""
+    return hashlib.sha1(policy.encode("utf-8", "replace")).hexdigest()
 
 
 def _runtime_trace_key(
@@ -380,6 +391,14 @@ def _runtime_trace_key(
         sort_keys=True,
         ensure_ascii=False,
     )
+
+
+def _policy_keys_field(entry: Dict[str, Any]) -> Optional[List[str]]:
+    """Read a recorded tool-policy fingerprint list, or None when absent."""
+    raw = entry.get("tool_policy_keys")
+    if not isinstance(raw, list):
+        return None
+    return [str(key) for key in raw if key]
 
 
 def _runtime_fields(entry: Dict[str, Any]) -> tuple[Optional[Dict[str, str]], Optional[str]]:
@@ -456,6 +475,9 @@ class SessionLog:
         # repeated on every request of the session.
         self._trace_prelude_key: Optional[str] = None
         self._trace_runtime_key: Optional[str] = None
+        # The tool-policy fingerprints that went into the last written prelude,
+        # so a guide added mid-session records a new row set once.
+        self._trace_policy_key_str: Optional[str] = None
         # Prompt size of the immediately preceding LLM request in the current
         # context window, used to measure step-over-step prefix reuse and cliffs.
         self._last_request_prompt_tokens: int = 0
@@ -765,6 +787,7 @@ class SessionLog:
         system_prompt: str,
         runtime_state: Optional[Dict[str, str]] = None,
         agents_md_digest: Optional[str] = None,
+        tool_policies: Optional[List[str]] = None,
     ) -> bool:
         """Write the observability header for this session. True if it wrote.
 
@@ -787,18 +810,23 @@ class SessionLog:
             ).encode("utf-8", "replace")
         ).hexdigest()
         runtime_key = _runtime_trace_key(runtime_state, agents_md_digest)
+        policy_keys = [tool_policy_key(policy) for policy in tool_policies or [] if policy]
+        policy_key_str = json.dumps(policy_keys, ensure_ascii=False)
         if digest == self._trace_prelude_key:
-            if runtime_key != self._trace_runtime_key:
+            if runtime_key != self._trace_runtime_key or policy_key_str != self._trace_policy_key_str:
                 self._trace_runtime_key = runtime_key
+                self._trace_policy_key_str = policy_key_str
                 self.append_event(
                     "runtime_state",
                     runtime_state=runtime_state or {},
                     agents_md_digest=agents_md_digest or "",
+                    tool_policy_keys=policy_keys,
                 )
                 return True
             return False
         self._trace_prelude_key = digest
         self._trace_runtime_key = runtime_key
+        self._trace_policy_key_str = policy_key_str
         self.append_event(
             "session_meta",
             model=model,
@@ -808,6 +836,7 @@ class SessionLog:
             prelude_hash=digest,
             runtime_state=runtime_state or {},
             agents_md_digest=agents_md_digest or "",
+            tool_policy_keys=policy_keys,
         )
         self.append_event("tool_list_ready", tools=list(tools), count=len(tools))
         if system_prompt:
@@ -831,7 +860,7 @@ class SessionLog:
         ``session_meta.model`` differs from ``model``.
         """
         if not self.path.exists():
-            return ActivePrelude(None, [], None, None)
+            return ActivePrelude(None, [], None, None, [])
 
         entries = list(self._iter_entries())
         last_boundary_idx = -1
@@ -851,6 +880,7 @@ class SessionLog:
         active_hash: Optional[str] = None
         active_runtime: Optional[Dict[str, str]] = None
         active_digest: Optional[str] = None
+        active_policy_keys: Optional[List[str]] = None
         last_prompt_tokens = 0
 
         for entry in entries[start_idx:]:
@@ -867,12 +897,18 @@ class SessionLog:
                     active_runtime = state
                 if digest is not None:
                     active_digest = digest
+                keys = _policy_keys_field(entry)
+                if keys is not None:
+                    active_policy_keys = keys
             elif name == "runtime_state":
                 state, digest = _runtime_fields(entry)
                 if state is not None:
                     active_runtime = state
                 if digest is not None:
                     active_digest = digest
+                keys = _policy_keys_field(entry)
+                if keys is not None:
+                    active_policy_keys = keys
             elif name == "tool_list_ready":
                 tools = entry.get("tools")
                 if isinstance(tools, list):
@@ -889,7 +925,7 @@ class SessionLog:
                         last_prompt_tokens = p
 
         if model and active_model and active_model != model:
-            return ActivePrelude(None, [], None, None)
+            return ActivePrelude(None, [], None, None, [])
 
         # This read is also the resume path's first look at the window. Seed
         # the trace keys so the next request continues the prelude digest and
@@ -899,10 +935,15 @@ class SessionLog:
             self._trace_prelude_key = active_hash
         if self._trace_runtime_key is None and (active_runtime is not None or active_digest):
             self._trace_runtime_key = _runtime_trace_key(active_runtime, active_digest)
+        if self._trace_policy_key_str is None and active_policy_keys is not None:
+            self._trace_policy_key_str = json.dumps(active_policy_keys, ensure_ascii=False)
         if last_prompt_tokens > 0 and self._last_request_prompt_tokens == 0:
             self._last_request_prompt_tokens = last_prompt_tokens
 
-        return ActivePrelude(active_prompt, active_tools, active_runtime, active_digest)
+        return ActivePrelude(
+            active_prompt, active_tools, active_runtime, active_digest,
+            active_policy_keys or [],
+        )
 
     def iter_raw_entries(self):
         """Yield every JSONL object, skipping blank and corrupt lines."""

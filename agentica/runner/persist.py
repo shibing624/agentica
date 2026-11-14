@@ -932,6 +932,7 @@ class PersistMixin:
             system_prompt=system_prompt,
             runtime_state=dict(agent._pinned_runtime_state) if agent._pinned_runtime_state else None,
             agents_md_digest=workspace.user_agents_md_digest() if workspace is not None else None,
+            tool_policies=list(agent._pinned_tool_policies),
         )
 
     @staticmethod

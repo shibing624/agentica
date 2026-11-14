@@ -21,7 +21,7 @@ from openai.types.completion_usage import CompletionUsage
 from agentica import Agent, OpenAIChat, RunConfig
 from agentica.agent.config import PromptConfig, ToolConfig
 from agentica.compression.manager import CompressionManager
-from agentica.memory.session_log import SessionLog
+from agentica.memory.session_log import SessionLog, tool_policy_key
 from agentica.memory.trace import analyze_entries
 from agentica.model.anthropic.claude import Claude
 from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
@@ -600,6 +600,114 @@ def test_a_tool_guide_added_after_pin_is_appended_once(tmp_path):
     note = agent._take_tool_policy_reminder()
     assert note is not None and "NEW-GUIDE follow this" in note
     assert agent._take_tool_policy_reminder() is None
+
+
+def test_resume_keeps_a_guide_that_arrived_after_the_logged_prompt(tmp_path):
+    """A tool added since the logged prompt must still reach the model.
+
+    Restoring the pin used to adopt the whole live policy list as already
+    delivered, so the new guide was neither in the recovered prompt nor in the
+    reminder: the tool was on the wire with no instructions at all.
+    """
+    slog = SessionLog(session_id="pin-new-guide", base_dir=str(tmp_path / "log"))
+    logged = "OLD-GUIDE follow this"
+    slog.append_trace_prelude(
+        model="gpt-4o-mini",
+        provider="openai",
+        context_window=128000,
+        tools=["search_session"],
+        system_prompt=f"system carrying {logged}",
+        runtime_state={"date": "", "channel": "", "summary": ""},
+        tool_policies=[logged],
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent._session_log = slog
+    agent._tool_policy_prompts = [logged, "BRAND-NEW-GUIDE run this first"]
+    agent.working_memory.runs.append(SimpleNamespace())
+
+    agent._restore_prelude_from_session_log()
+
+    assert agent._pinned_system_prompt == f"system carrying {logged}"
+    note = agent._take_tool_policy_reminder()
+    assert note is not None and "BRAND-NEW-GUIDE run this first" in note
+    assert "OLD-GUIDE" not in note, "a guide already in the pinned prompt must not be resent"
+    assert agent._take_tool_policy_reminder() is None
+
+
+def test_a_prelude_without_policy_keys_resends_every_guide(tmp_path):
+    """Logs written before the fingerprints existed have no key list.
+
+    Nothing proves their prompt contains a guide, so every current guide is
+    delivered once instead of assuming the live list was what was sent.
+    """
+    slog = SessionLog(session_id="pin-legacy", base_dir=str(tmp_path / "log"))
+    slog.append_trace_prelude(
+        model="gpt-4o-mini",
+        provider="openai",
+        context_window=128000,
+        tools=["search_session"],
+        system_prompt="legacy prompt",
+        runtime_state={"date": "", "channel": "", "summary": ""},
+        tool_policies=[],
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent._session_log = slog
+    agent._tool_policy_prompts = ["LEGACY-GUIDE follow this"]
+    agent.working_memory.runs.append(SimpleNamespace())
+
+    agent._restore_prelude_from_session_log()
+
+    note = agent._take_tool_policy_reminder()
+    assert note is not None and "LEGACY-GUIDE follow this" in note
+
+
+def test_tool_policy_key_changes_with_the_guide_text():
+    assert tool_policy_key("same") == tool_policy_key("same")
+    assert tool_policy_key("v1") != tool_policy_key("v2")
+
+
+def test_a_real_turn_records_the_rendered_guide_fingerprints(tmp_path, monkeypatch):
+    """The resume fix is only as good as what the writer actually stored.
+
+    ``persist`` builds the prelude from live state; a guide it fails to pass
+    through leaves the log unable to tell delivered guides from new ones, and
+    the restore path cannot recover it. Drop the argument and this goes red.
+    """
+    monkeypatch.setenv("AGENTICA_HOME", str(tmp_path))
+
+    class _GuideTool(Tool):
+        def __init__(self):
+            super().__init__(name="guide")
+            self.register(self.guide_tool)
+
+        def get_system_prompt(self) -> str:
+            return "GUIDE-TEXT-IN-THE-SYSTEM-PROMPT"
+
+        def guide_tool(self, x: str = "") -> str:
+            """Guide tool."""
+            return x
+
+    asyncio.run(
+        Agent(
+            model=_SpyOpenAIChat(id="gpt-4o-mini"),
+            tools=[_GuideTool()],
+            add_history_to_context=True,
+            tool_config=ToolConfig(auto_load_mcp=False),
+            session_id="prelude-policy-keys",
+            session_base_dir=str(tmp_path / "sessions"),
+        ).run("hello")
+    )
+
+    slog = SessionLog("prelude-policy-keys", base_dir=str(tmp_path / "sessions"))
+    metas = [e for e in slog.iter_raw_entries() if e.get("name") == "session_meta"]
+    assert metas, "a turn must write a trace prelude"
+    assert metas[0]["tool_policy_keys"] == [tool_policy_key("GUIDE-TEXT-IN-THE-SYSTEM-PROMPT")]
 
 
 def test_resume_skips_a_pinned_prompt_when_agents_md_changed(tmp_path):
