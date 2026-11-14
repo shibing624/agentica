@@ -568,7 +568,7 @@ def test_builtin_task_tool_surfaces_partial_on_timeout():
     tool._parent_agent = parent
 
     with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
-        raw = asyncio.run(tool.task(description="d", subagent_type="code"))
+        raw = asyncio.run(tool.task(description="d", prompt="d", subagent_type="code"))
     payload = json.loads(raw)
     assert payload["success"] is False
     assert payload["status"] == "timeout"
@@ -1034,7 +1034,7 @@ def test_task_tool_forwards_auxiliary_model_as_tier_hint_not_hard_override():
         return {"status": "completed", "content": "ok", "agent_type": "explore"}
 
     with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
-        asyncio.run(tool.task("d", subagent_type="explore"))
+        asyncio.run(tool.task("d", "d", subagent_type="explore"))
 
     assert captured["auxiliary_model_override"] is aux
     assert "model_override" not in captured
@@ -1071,7 +1071,7 @@ def test_two_tasks_in_one_batch_actually_overlap():
     calls = [
         FunctionCall(
             function=tool.functions["task"],
-            arguments={"description": f"d{i}", "subagent_type": "explore"},
+            arguments={"description": f"d{i}", "prompt": f"d{i}", "subagent_type": "explore"},
             call_id=f"c{i}",
         )
         for i in range(3)
@@ -1114,7 +1114,7 @@ def test_a_burst_of_tasks_is_capped_at_three_in_flight():
 
     async def _drive():
         await asyncio.gather(*[
-            tool.task(description=f"d{i}", subagent_type="explore") for i in range(6)
+            tool.task(description=f"d{i}", prompt=f"d{i}", subagent_type="explore") for i in range(6)
         ])
 
     with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
@@ -1280,3 +1280,51 @@ def test_readonly_subagent_investigation_leaves_edits_to_parent():
         result = asyncio.run(parent_edits_after_investigation())
         assert "Successfully" in result
         assert file_path.read_text(encoding="utf-8") == "value = 'after'\n"
+
+
+def _spawn_capture(tool):
+    captured = {}
+
+    async def fake_spawn(self, **kwargs):
+        captured.update(kwargs)
+        return {"status": "completed", "content": "ok", "agent_type": "explore"}
+
+    tool._parent_agent = SimpleNamespace(_event_callback=None, run_context=None, run_id=None)
+    return captured, fake_spawn
+
+
+def test_task_takes_the_common_description_plus_prompt_shape():
+    """Models trained on Claude Code / Codex call ``task(description, prompt)``:
+    a short label plus the full brief. The brief is what the subagent runs on;
+    the label never reaches it."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+    from agentica.tools.base import FunctionCall
+
+    tool = BuiltinTaskTool()
+    captured, fake_spawn = _spawn_capture(tool)
+    call = FunctionCall(
+        function=tool.functions["task"],
+        arguments={"description": "Audit skills", "prompt": "Read agentica/skills/bundled and report path:line.", "subagent_type": "explore"},
+        call_id="c1",
+    )
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
+        assert asyncio.run(call.execute()) is True, call.error
+    assert captured["task"] == "Read agentica/skills/bundled and report path:line."
+    assert "system_prompt_override" not in tool.functions["task"].parameters["properties"]
+    assert tool.functions["task"].parameters["required"] == ["description", "prompt"]
+
+
+def test_task_max_turns_can_raise_the_budget_but_not_cut_it():
+    """A guessed small max_turns (12) used to stop a 200-turn explore after a
+    few reads with nothing to report. Only a raise is honoured."""
+    from agentica.subagents import get_subagent_config
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    default = get_subagent_config("explore").max_turns
+    tool = BuiltinTaskTool()
+    captured, fake_spawn = _spawn_capture(tool)
+    with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
+        asyncio.run(tool.task("a", "b", subagent_type="explore", max_turns=12))
+        assert captured["max_turns_override"] is None
+        asyncio.run(tool.task("a", "b", subagent_type="explore", max_turns=default * 2))
+        assert captured["max_turns_override"] == default * 2

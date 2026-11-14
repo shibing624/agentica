@@ -616,7 +616,7 @@ class TestCLIToolRender(unittest.TestCase):
             "3. 时间复杂度说明"
         )
         for name, args, body_key in (
-            ("task", {"description": long_task, "subagent_type": "code"}, "description"),
+            ("task", {"description": "快排", "prompt": long_task, "subagent_type": "code"}, "prompt"),
         ):
             display = format_tool_display(name, args)
             self.assertIn(args[body_key].splitlines()[0], display)

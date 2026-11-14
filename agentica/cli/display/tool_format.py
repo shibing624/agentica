@@ -309,8 +309,8 @@ def format_tool_display(
     if tool_name == "task":
         return _format_handoff_display(
             tool_args,
-            body_key="description",
-            meta_keys=("subagent_type", "timeout", "max_turns", "resume_from_run_id"),
+            body_key="prompt",
+            meta_keys=("description", "subagent_type", "timeout", "max_turns", "resume_from_run_id"),
             model_label=model_label,
         )
 

@@ -857,6 +857,7 @@ def _task_call_fields(raw_args: Any) -> Optional[Dict[str, Any]]:
         "subagentType": str(args.get("subagent_type") or "explore"),
     }
     for src, dst in (
+        ("prompt", "prompt"),
         ("timeout", "timeout"),
         ("max_turns", "maxTurns"),
         ("resume_from_run_id", "resumeFrom"),

@@ -148,7 +148,7 @@ class TestBuiltinTaskTool:
     def test_task_without_parent_returns_error(self):
         """Unbound tool (no parent agent) cannot spawn anything."""
         tool = BuiltinTaskTool()
-        result = asyncio.run(tool.task("do something"))
+        result = asyncio.run(tool.task("do", "do something"))
         parsed = json.loads(result)
         assert parsed["success"] is False
         assert "not bound" in parsed["error"]
@@ -175,7 +175,7 @@ class TestBuiltinTaskTool:
             return spawn_result
 
         with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
-            result = asyncio.run(tool.task("compute 6 * 7", subagent_type="code"))
+            result = asyncio.run(tool.task("compute", "compute 6 * 7", subagent_type="code"))
 
         parsed = json.loads(result)
         assert parsed["success"] is True
@@ -199,7 +199,7 @@ class TestBuiltinTaskTool:
             }
 
         with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
-            result = asyncio.run(tool.task("slow"))
+            result = asyncio.run(tool.task("slow", "slow"))
 
         parsed = json.loads(result)
         assert parsed["success"] is False
@@ -254,7 +254,7 @@ class TestBuiltinTaskTool:
                     "tool_calls_summary": [], "tool_count": 0, "execution_time": 0}
 
         with patch("agentica.subagents.runtime.SubagentRegistry.spawn", new=fake_spawn):
-            asyncio.run(tool.task("test", subagent_type="code"))
+            asyncio.run(tool.task("test", "test", subagent_type="code"))
 
         assert captured["auxiliary_model_override"] is custom_model
 

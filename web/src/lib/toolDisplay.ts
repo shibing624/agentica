@@ -93,7 +93,7 @@ export function formatToolDisplay(name: string, args: Record<string, unknown>, c
     // session (``Agent.describe_tool_model``) and the chat row has no agent to
     // ask: the arguments alone cannot say which model a subagent runs, so the
     // raw ``model`` argument is the only honest thing this formatter can show.
-    return formatHandoff(args, "description", ["subagent_type", "timeout", "max_turns", "resume_from_run_id"]);
+    return formatHandoff(args, "prompt", ["description", "subagent_type", "timeout", "max_turns", "resume_from_run_id"]);
   }
   if (name === "ask_user_question") {
     return "";

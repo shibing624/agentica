@@ -8,7 +8,7 @@ limit, registry tracking, event streaming, usage merge, timeout) lives in
 ``agentica.subagents.runtime.SubagentRegistry``. This tool only:
 
   1. Renders the user-facing system prompt (the available subagent table).
-  2. Exposes a single ``task(description, subagent_type)`` LLM function that
+  2. Exposes a single ``task(description, prompt, subagent_type)`` LLM function that
      forwards to ``SubagentRegistry().spawn(parent_agent=self._parent_agent, ...)``.
   3. JSON-serializes the registry's structured result for the LLM.
 """
@@ -66,7 +66,7 @@ class BuiltinTaskTool(Tool):
       limit the subagent is told to stop and report what it has.
     - On `partial=true`, synthesize the partial output; if it holds no
       findings, finish the work yourself. Resume at most once, with the SAME
-      `description` plus `resume_from_run_id`.""")
+      `prompt` plus `resume_from_run_id`.""")
 
     def __init__(self, auxiliary_model: Optional["Model"] = None):
         """
@@ -192,21 +192,21 @@ class BuiltinTaskTool(Tool):
     async def task(
         self,
         description: str,
+        prompt: str,
         subagent_type: str = "explore",
         timeout: Optional[int] = None,
         max_turns: Optional[int] = None,
-        system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
         model_tier: Optional[str] = None,
     ) -> str:
         """Delegate an open-ended read-only investigation to a subagent in its own context window; returns one summary, not intermediate steps. See the "task Tool" section for available types and when this applies.
 
         Args:
-            description: Complete, self-contained task prompt for the subagent. It does not share this conversation's context, so include the goal, background, starting paths, and ask for findings as path:line.
+            description: Short (3-5 word) label for this task, shown to the user.
+            prompt: Complete, self-contained task for the subagent. It does not share this conversation's context, so include the goal, background, starting paths, and ask for findings as path:line.
             subagent_type: Subagent type id from the "task Tool" table (default "explore").
             timeout: Wall-clock limit in seconds for this call; defaults to the type's configured timeout. Raise up front for broad multi-module investigations.
-            max_turns: Optional per-call ReAct turn budget override.
-            system_prompt_override: Optional replacement system prompt for this call.
+            max_turns: ReAct turn budget; defaults to the type's own (100-200). Pass only to raise it, e.g. when resuming.
             resume_from_run_id: run_id of a prior partial subagent run to resume at most once.
             model_tier: Model tier override: "auxiliary" (fast/cheap default for fact-gathering) or "main" (parent's main model for complex analysis).
         """
@@ -216,22 +216,27 @@ class BuiltinTaskTool(Tool):
                 "error": "task tool is not bound to a parent agent.",
             }, ensure_ascii=False)
 
-        from agentica.subagents import SubagentRegistry
+        from agentica.subagents import SubagentRegistry, get_subagent_config
 
         tier_override = (
             model_tier.strip().lower()
             if isinstance(model_tier, str) and model_tier.strip().lower() in ("auxiliary", "main")
             else None
         )
+        # The turn budget can only be raised from here. A model that guesses a
+        # "small" number (12) cuts a 200-turn explore down to a few reads and
+        # gets a max_turns stop instead of a report.
+        config = get_subagent_config(subagent_type)
+        if max_turns is not None and config is not None and max_turns < config.max_turns:
+            max_turns = None
         async with self._free_slot():
             result = await SubagentRegistry().spawn(
                 parent_agent=self._parent_agent,
-                task=description,
+                task=prompt,
                 agent_type=subagent_type,
                 auxiliary_model_override=self._auxiliary_model,
                 timeout_override=timeout,
                 max_turns_override=max_turns,
-                system_prompt_override=system_prompt_override,
                 resume_from_run_id=resume_from_run_id,
                 model_tier_override=tier_override,  # type: ignore[arg-type]
             )

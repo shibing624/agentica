@@ -39,8 +39,8 @@ class TestLiveToolStore(unittest.TestCase):
 
     def test_bind_run_matches_task_description_out_of_order(self):
         store = LiveToolStore()
-        store.start("t1", "task", {"description": "look"})
-        store.start("t2", "task", {"description": "review"})
+        store.start("t1", "task", {"description": "x", "prompt": "look"})
+        store.start("t2", "task", {"description": "x", "prompt": "review"})
         self.assertEqual(store.bind_run("r2", task="review"), "t2")
         self.assertEqual(store.bind_run("r1", task="look"), "t1")
         self.assertEqual(store.parent_for_run("r2"), "t2")

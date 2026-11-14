@@ -43,7 +43,7 @@ type Call = {
   resultSummary?: string;
 };
 
-type TaskFields = Partial<TaskResult> & { description?: string; subagentType?: string; model?: string; modelTier?: string };
+type TaskFields = Partial<TaskResult> & { description?: string; prompt?: string; subagentType?: string; model?: string; modelTier?: string };
 
 type ModelToolCall = {
   index: number;
@@ -1028,7 +1028,7 @@ function BodyView({ c, body, tab, modelTools, onOpenCall }: {
   }
   if (c.kind === "tool" && c.toolName === "task") {
     if (tab === "result" && body.taskResult) {
-      return <TaskCard brief={body.taskCall?.description || ""} subagentType={body.taskCall?.subagentType}
+      return <TaskCard brief={body.taskCall?.prompt || body.taskCall?.description || ""} subagentType={body.taskCall?.subagentType}
                        model={body.taskResult.model || body.taskCall?.model || c.toolModel}
                        modelTier={body.taskResult.modelTier || body.taskCall?.modelTier || c.toolModelTier}
                        result={taskResultOf(body.taskResult)} />;

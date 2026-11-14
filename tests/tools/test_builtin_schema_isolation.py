@@ -170,9 +170,8 @@ def test_key_builtin_tool_schemas_match_structured_contracts():
     task_fn = BuiltinTaskTool().functions["task"]
     task_fn.process_entrypoint()
     assert task_fn.parameters["properties"]["model_tier"]["enum"] == ["auxiliary", "main"]
-    assert "cannot see" in task_fn.parameters["properties"]["description"]["description"] or (
-        "does not share" in task_fn.parameters["properties"]["description"]["description"]
-    )
+    # The brief goes in ``prompt``; ``description`` is only the label.
+    assert "does not share" in task_fn.parameters["properties"]["prompt"]["description"]
 
     todos_fn = BuiltinTodoTool().functions["write_todos"]
     todos_fn.process_entrypoint()

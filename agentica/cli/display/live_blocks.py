@@ -155,7 +155,7 @@ class LiveToolStore:
     ) -> Optional[str]:
         """Attach a subagent ``run_id`` to a live ``task`` block.
 
-        Prefer a unique match on ``tool_args['description']`` so two parallel
+        Prefer a unique match on ``tool_args['prompt']`` (the spawned task) so two parallel
         tasks that finish starting out of order do not steal each other's
         ``sub_lines``. Fall back to the first unbound ``task`` block.
         """
@@ -178,7 +178,7 @@ class LiveToolStore:
                 matched = [
                     block
                     for block in candidates
-                    if (block.tool_args.get("description") or "").strip() == needle
+                    if (block.tool_args.get("prompt") or "").strip() == needle
                 ]
                 if matched:
                     candidates = matched

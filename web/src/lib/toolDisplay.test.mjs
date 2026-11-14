@@ -44,7 +44,8 @@ test("headless multi-line displays remain in the expanded body", () => {
 test("task rows show subagent_type without inventing a model", () => {
   // The chat row has no live session to resolve the subagent's model from,
   // so no ``model=`` label is added.
-  const inherited = formatToolDisplay("task", { subagent_type: "explore", description: "find it" });
-  assert.equal(inherited.split("\n")[0], "subagent_type='explore'");
+  const inherited = formatToolDisplay("task", { description: "Find it", prompt: "find it in src/", subagent_type: "explore" });
+  assert.equal(inherited.split("\n")[0], "description='Find it', subagent_type='explore'");
+  assert.equal(inherited.split("\n")[1].trim(), "find it in src/");
   assert.ok(!inherited.includes("model="));
 });

@@ -407,7 +407,7 @@ function ToolDetail({
     const result = parseTaskResult(resultText);
     return (
       <div className="wr-body">
-        <TaskCard brief={String(args.description ?? "")} subagentType={String(args.subagent_type ?? "")}
+        <TaskCard brief={String(args.prompt ?? args.description ?? "")} subagentType={String(args.subagent_type ?? "")}
                   model={args.model ? String(args.model) : undefined}
                   modelTier={args.model_tier ? String(args.model_tier) : undefined}
                   result={result} running={running} elapsedMs={duration} />
