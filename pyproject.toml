@@ -148,20 +148,6 @@ tools-extra = [
 ]
 
 # ═══════════════════════════════════════════════════════════
-# Storage
-# ═══════════════════════════════════════════════════════════
-postgres = ["psycopg[binary]>=3.1", "sqlalchemy>=2.0"]
-mysql    = ["pymysql>=1.1", "sqlalchemy>=2.0"]
-redis    = ["redis>=5.0"]
-mongo    = ["pymongo>=4.6"]
-storage  = [
-    "agentica[sql]",
-    "agentica[postgres]",
-    "agentica[mysql]",
-    "agentica[redis]",
-]
-
-# ═══════════════════════════════════════════════════════════
 # Gateway (FastAPI + Web UI + IM + cron) — its own distribution since 1.5.1
 # ═══════════════════════════════════════════════════════════
 # `agentica-gateway` is released in lockstep with this package (same version,
@@ -205,7 +191,6 @@ full = [
     "agentica[models]",
     "agentica[mcp]",
     "agentica[acp]",
-    "agentica[storage]",
     "agentica[tools-extra]",
     "agentica[tools-media]",
     "agentica[gateway]",

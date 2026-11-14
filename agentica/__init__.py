@@ -24,7 +24,6 @@ Optional extras (need ``pip install agentica[xxx]``)::
     from agentica.mcp import MCPClient             # pip install agentica[mcp]
     from agentica.acp import ACPServer             # pip install agentica[acp]
     from agentica_gateway.main import app          # pip install agentica-gateway
-    from agentica.db import SqliteDb               # pip install agentica[sql]
 
 ═══════════════════════════════════════════════════════════════
 Backward Compatibility
@@ -354,12 +353,7 @@ from agentica.memory import (
     WorkingMemory,
     MemoryType,
     MemoryEntry,
-    WorkflowRun,
-    WorkflowMemory,
 )
-
-# ── Database (base types only) ──
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow
 
 # ── Run Response ──
 from agentica.run.response import (
@@ -427,7 +421,6 @@ from agentica.agent.config import (
     SkillUpgradeConfig,
 )
 from agentica.run.config import RunConfig
-from agentica.orchestration.workflow import Workflow, WorkflowSession
 from agentica.agent.hooks import AgentHooks, RunHooks, ConversationArchiveHooks, MemoryExtractHooks, ExperienceCaptureHooks
 
 # ── Experience system ──
@@ -485,12 +478,6 @@ def __dir__():
 if TYPE_CHECKING:
     from agentica.model.openai.chat import OpenAIChat  # noqa: F401
     from agentica.model.openai.responses import OpenAIResponses  # noqa: F401
-    from agentica.db.sqlite import SqliteDb  # noqa: F401
-    from agentica.db.postgres import PostgresDb  # noqa: F401
-    from agentica.db.memory import InMemoryDb  # noqa: F401
-    from agentica.db.json import JsonDb  # noqa: F401
-    from agentica.db.mysql import MysqlDb  # noqa: F401
-    from agentica.db.redis import RedisDb  # noqa: F401
     from agentica.model.litellm.chat import LiteLLMChat  # noqa: F401
     from agentica.model.litellm.chat import LiteLLMChat as LiteLLM  # noqa: F401
     from agentica.model.kimi.chat import KimiChat  # noqa: F401

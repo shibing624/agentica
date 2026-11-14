@@ -59,7 +59,7 @@ def bind_run_context(
 ) -> Iterator[None]:
     """Bind a run's identifiers to the log context for the duration of the block.
 
-    Meant to wrap a single ``Agent.run`` / ``Workflow.run`` invocation so every
+    Meant to wrap a single ``Agent.run`` invocation so every
     log record emitted from that call (including from tools and subagents
     running on child asyncio Tasks) carries the same ``run=<id>`` prefix.
 

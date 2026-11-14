@@ -35,8 +35,6 @@ _METADATA_SKIP_EVENTS = {
     RunEvent.updating_memory,
     RunEvent.reasoning_started,
     RunEvent.reasoning_completed,
-    RunEvent.workflow_started,
-    RunEvent.workflow_completed,
     RunEvent.subagent_spawned,
     RunEvent.subagent_completed,
 }

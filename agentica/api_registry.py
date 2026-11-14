@@ -20,13 +20,6 @@ PROVIDER_ALIAS_EXPORTS = [
 ]
 
 LAZY_IMPORTS = {
-    # database implementations
-    "SqliteDb": "agentica.db.sqlite",
-    "PostgresDb": "agentica.db.postgres",
-    "InMemoryDb": "agentica.db.memory",
-    "JsonDb": "agentica.db.json",
-    "MysqlDb": "agentica.db.mysql",
-    "RedisDb": "agentica.db.redis",
     # model core / default OpenAI models (lazy so `import agentica` stays fast)
     "Model": "agentica.model.base",
     "ModelResponse": "agentica.model.response",
@@ -165,8 +158,6 @@ EAGER_PUBLIC_EXPORTS = [
     "BuiltinWebSearchTool", "BuiltinTodoTool", "BuiltinTaskTool", "BuiltinMemoryTool",
     "AgentRun", "SessionSummary", "MemorySummarizer", "WorkingMemory",
     "MemoryType", "MemoryEntry",
-    "WorkflowRun", "WorkflowMemory",
-    "BaseDb", "SessionRow", "MemoryRow", "MetricsRow",
     "RunResponse", "RunEvent", "RunBreakReason", "RunResponseExtraData", "ToolCallInfo", "pprint_run_response",
     "RunContext", "RunSource", "RunStatus", "TaskAnchor",
     "RunEventRecord", "RunEventType",
@@ -179,7 +170,7 @@ EAGER_PUBLIC_EXPORTS = [
     "Agent", "AgentCancelledError",
     "PromptConfig", "ToolConfig", "WorkspaceMemoryConfig", "HistoryConfig", "SandboxConfig",
     "ToolRuntimeConfig", "SkillRuntimeConfig", "ExperienceConfig", "SkillUpgradeConfig",
-    "RunConfig", "Workflow", "WorkflowSession", "AgentHooks", "RunHooks",
+    "RunConfig", "AgentHooks", "RunHooks",
     "ConversationArchiveHooks", "MemoryExtractHooks", "ExperienceCaptureHooks",
     "ExperienceEventStore", "ExperienceCompiler", "CompiledExperienceStore", "SkillEvolutionManager",
     "SkillLifecycleHooks", "NoopSkillLifecycleHooks",

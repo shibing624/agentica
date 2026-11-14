@@ -115,7 +115,6 @@ class TestRunContext:
         assert RunSource.cli.value == "cli"
         assert RunSource.gateway.value == "gateway"
         assert RunSource.cron.value == "cron"
-        assert RunSource.workflow.value == "workflow"
 
     def test_run_config_source_defaults_to_sdk(self):
         from agentica.run.config import RunConfig

@@ -61,7 +61,6 @@ class RunSource(str, Enum):
     cli = "cli"              # Agentica interactive CLI
     gateway = "gateway"      # Gateway HTTP/SSE entry points
     cron = "cron"            # Scheduled cron task execution
-    workflow = "workflow"    # Deterministic workflow execution
     subagent = "subagent"    # Spawned via subagent.spawn() (parent_run_id is set)
 
 

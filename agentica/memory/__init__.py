@@ -11,7 +11,6 @@ from agentica.memory.models import (
 )
 from agentica.memory.summarizer import MemorySummarizer
 from agentica.memory.working import WorkingMemory
-from agentica.memory.workflow import WorkflowRun, WorkflowMemory
 from agentica.memory.session_log import SessionLog
 
 __all__ = [
@@ -21,7 +20,5 @@ __all__ = [
     "MemoryEntry",
     "MemorySummarizer",
     "WorkingMemory",
-    "WorkflowRun",
-    "WorkflowMemory",
     "SessionLog",
 ]

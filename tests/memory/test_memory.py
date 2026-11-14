@@ -13,8 +13,6 @@ from agentica.memory import (
     WorkingMemory,
     AgentRun,
     SessionSummary,
-    WorkflowMemory,
-    WorkflowRun,
 )
 from agentica.memory.working import (
     _clean_message_for_history,
@@ -132,44 +130,6 @@ class TestWorkingMemory(unittest.TestCase):
         memory.clear()
         self.assertEqual(len(memory.messages), 0)
         self.assertEqual(len(memory.runs), 0)
-
-
-class TestWorkflowMemory(unittest.TestCase):
-    """Test cases for WorkflowMemory class."""
-
-    def test_default_initialization(self):
-        """Test WorkflowMemory default initialization."""
-        memory = WorkflowMemory()
-        self.assertEqual(len(memory.runs), 0)
-
-    def test_add_run(self):
-        """Test adding run to WorkflowMemory."""
-        memory = WorkflowMemory()
-        run = WorkflowRun(
-            input={"message": "Hello"},
-            response=RunResponse(content="Hi!")
-        )
-        memory.runs.append(run)
-        self.assertEqual(len(memory.runs), 1)
-
-
-class TestWorkflowRun(unittest.TestCase):
-    """Test cases for WorkflowRun model."""
-
-    def test_workflow_run_creation(self):
-        """Test WorkflowRun creation."""
-        run = WorkflowRun()
-        self.assertIsNone(run.input)
-        self.assertIsNone(run.response)
-
-    def test_workflow_run_with_data(self):
-        """Test WorkflowRun with data."""
-        run = WorkflowRun(
-            input={"key": "value"},
-            response=RunResponse(content="Result")
-        )
-        self.assertEqual(run.input["key"], "value")
-        self.assertEqual(run.response.content, "Result")
 
 
 class TestHelperFunctions(unittest.TestCase):
