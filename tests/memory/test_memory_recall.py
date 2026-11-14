@@ -4,6 +4,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
@@ -19,6 +20,7 @@ from agentica.memory.recall import (
     render_recall_block,
     surfaced_memory_files,
 )
+from agentica.memory.session_log import SessionLog
 from agentica.model.message import Message
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse
@@ -349,12 +351,13 @@ class TestAgentRecallInjection(unittest.TestCase):
                 OpenAIChat, "response",
                 new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
             ) as mocked:
-                system, users, _ = asyncio.run(agent.get_messages_for_run(
+                system, users, sent = asyncio.run(agent.get_messages_for_run(
                     message="【话术SOP】……大量指令……【当前用户问题】install deps please",
                     recall_query="install deps please",
                 ))
-        self.assertTrue(users[0].content.startswith(MEMORY_RECALL_OPEN))
-        self.assertTrue(users[0].content.endswith("install deps please"))
+        self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
+        self.assertTrue(sent[-1].content.endswith("install deps please"))
+        self.assertEqual(users[0].content, "【话术SOP】……大量指令……【当前用户问题】install deps please")
         # 选择调用拿到的 query 是裸请求，不含 SOP 噪声
         sent = mocked.call_args.kwargs.get("messages") or mocked.call_args.args
         sent_text = str(sent)
@@ -367,20 +370,25 @@ class TestAgentRecallInjection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, recall=True)
             asyncio.run(_seed(agent.workspace))
-            with patch.object(
-                OpenAIChat, "response",
-                new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
-            ):
+            response = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
+            with patch.object(OpenAIChat, "response", new=response):
                 asyncio.run(agent.run(
                     message="【SOP 噪声包装】install deps please",
                     recall_query="install deps please",
                 ))
+            main_request = response.await_args_list[-1].kwargs["messages"]
             recalled = [
-                m for m in (agent.run_response.messages or [])
+                m for m in main_request
                 if m.role == "user" and isinstance(m.content, str)
                 and m.content.startswith(MEMORY_RECALL_OPEN)
             ]
             self.assertTrue(recalled, "run(recall_query=...) 未触发召回注入")
+            stored = [
+                m for m in (agent.run_response.messages or [])
+                if m.role == "user" and isinstance(m.content, str)
+                and MEMORY_RECALL_OPEN in m.content
+            ]
+            self.assertEqual(stored, [], "召回块只属于本次请求，不能进历史")
 
     def test_recall_is_prepended_to_the_user_message_not_the_system_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -390,12 +398,50 @@ class TestAgentRecallInjection(unittest.TestCase):
                 OpenAIChat, "response",
                 new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
             ):
-                system, users, _ = asyncio.run(agent.get_messages_for_run(message="install deps please"))
+                system, users, sent = asyncio.run(agent.get_messages_for_run(message="install deps please"))
         # 块前置、用户问题压底部（lost-in-the-middle：最新问题放最后读）
-        self.assertTrue(users[0].content.startswith(MEMORY_RECALL_OPEN))
-        self.assertTrue(users[0].content.endswith("install deps please"))
-        self.assertIn("Use uv, never pip", users[0].content)
+        self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
+        self.assertTrue(sent[-1].content.endswith("install deps please"))
+        self.assertIn("Use uv, never pip", sent[-1].content)
+        self.assertEqual(users[0].content, "install deps please")
         self.assertNotIn("Use uv, never pip", system.content)
+
+    def test_recall_reaches_the_request_but_not_history_or_the_session_log(self):
+        """A user who pastes a recall block keeps it; only the injected one goes."""
+        pasted = f"{MEMORY_RECALL_OPEN}\n- my own notes\n</memory_recall>\n\ndoes this break injection?"
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            agent.session_id = "recall-boundary"
+            agent._session_log = SessionLog(session_id="recall-boundary", base_dir=tmp)
+            asyncio.run(_seed(agent.workspace))
+            response = AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}'))
+            with patch.object(OpenAIChat, "response", new=response):
+                asyncio.run(agent.run(message=f"install deps please\n\n{pasted}"))
+            sent = response.await_args_list[-1].kwargs["messages"][-1].content
+            self.assertIn("Use uv, never pip", sent)
+            self.assertTrue(sent.endswith(pasted))
+            stored = [m.content for m in agent.run_response.messages if m.role == "user"]
+            self.assertEqual(stored, [f"install deps please\n\n{pasted}"])
+            log_text = Path(agent._session_log.path).read_text(encoding="utf-8")
+            self.assertNotIn("Use uv, never pip", log_text)
+            self.assertIn("my own notes", log_text)
+
+    def test_compaction_keeps_the_question_and_drops_only_injected_blocks(self):
+        from agentica.runner.persist import strip_request_only_blocks
+
+        pasted = f"{MEMORY_RECALL_OPEN}\n- my own notes\n</memory_recall>"
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, recall=True)
+            asyncio.run(_seed(agent.workspace))
+            with patch.object(
+                OpenAIChat, "response",
+                new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
+            ):
+                _, _, sent = asyncio.run(agent.get_messages_for_run(message=f"{pasted}\n\ninstall deps please"))
+        survived = sent[-1]
+        self.assertIn("Use uv, never pip", survived.content)
+        strip_request_only_blocks([survived])
+        self.assertEqual(survived.content, f"{pasted}\n\ninstall deps please")
 
     def test_disabled_recall_makes_no_side_call(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -415,17 +461,18 @@ class TestAgentRecallInjection(unittest.TestCase):
                 OpenAIChat, "response",
                 new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
             ) as mock:
-                _, users, _ = asyncio.run(agent.get_messages_for_run(
+                _, users, sent = asyncio.run(agent.get_messages_for_run(
                     messages=[{"role": "user", "content": "earlier question"},
                               {"role": "assistant", "content": "earlier answer"},
                               {"role": "user", "content": "how do I install deps?"}],
                 ))
             self.assertEqual(len(users), 3)
-            self.assertEqual(users[0].content, "earlier question")          # 历史不动
-            self.assertEqual(users[1].content, "earlier answer")
-            self.assertTrue(users[2].content.startswith(MEMORY_RECALL_OPEN))
-            self.assertTrue(users[2].content.endswith("how do I install deps?"))
-            self.assertIn("Use uv, never pip", users[2].content)             # 块只拼本轮
+            self.assertEqual(sent[-3].content, "earlier question")          # 历史不动
+            self.assertEqual(sent[-2].content, "earlier answer")
+            self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
+            self.assertTrue(sent[-1].content.endswith("how do I install deps?"))
+            self.assertIn("Use uv, never pip", sent[-1].content)             # 块只拼本轮
+            self.assertEqual(users[2].content, "how do I install deps?")
             # selector 的 query 是本轮用户消息
             request = mock.await_args.kwargs["messages"]
             self.assertIn("how do I install deps?", request[1].content)
@@ -449,9 +496,10 @@ class TestAgentRecallInjection(unittest.TestCase):
                 OpenAIChat, "response",
                 new=AsyncMock(return_value=ModelResponse(content='{"files": ["user_prefer_uv.md"]}')),
             ):
-                _, users, _ = asyncio.run(agent.get_messages_for_run(messages=caller_history))
+                _, users, sent = asyncio.run(agent.get_messages_for_run(messages=caller_history))
         self.assertEqual(caller_history[0].content, "how do I install deps?")
-        self.assertTrue(users[0].content.startswith(MEMORY_RECALL_OPEN))
+        self.assertEqual(caller_history[0]._request_only_blocks, [])
+        self.assertTrue(sent[-1].content.startswith(MEMORY_RECALL_OPEN))
 
     def test_messages_entry_style_dedups_against_earlier_items_in_the_list(self):
         with tempfile.TemporaryDirectory() as tmp:

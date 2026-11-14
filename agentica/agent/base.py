@@ -688,7 +688,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_runtime_state: Optional[Dict[str, str]] = None
         self._pinned_tool_order: List[str] = []
         self._pinned_tool_policies: List[str] = []
-        self._pinned_context_epoch: int = 0
+        self._pinned_context_epoch: Optional[Tuple[str, int]] = None
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
@@ -1058,7 +1058,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_runtime_state = None
         self._pinned_tool_order = []
         self._pinned_tool_policies = []
-        self._pinned_context_epoch = 0
+        self._pinned_context_epoch = None
 
     def _logged_agents_md_still_current(self, logged: Optional[str]) -> bool:
         """A settings-page edit of AGENTS.md must win over the logged prompt."""
@@ -1085,7 +1085,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             )
             self._pinned_tool_policies = list(self._tool_policy_prompts)
             workspace = self.workspace
-            self._pinned_context_epoch = workspace.context_epoch if workspace is not None else 0
+            self._pinned_context_epoch = workspace.context_epoch if workspace is not None else None
         if prelude.tools and not self._pinned_tool_order:
             self._pinned_tool_order = list(prelude.tools)
 

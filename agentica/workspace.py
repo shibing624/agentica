@@ -184,9 +184,11 @@ class Workspace:
         self._context_snapshot: Optional[str] = None
         self._memory_snapshot: Optional[str] = None
         self._experience_snapshot: Optional[str] = None
-        # Bumped when this user's AGENTS.md is replaced or the active user
-        # changes. Agents compare it with the epoch they pinned against.
-        self._context_epoch: int = 0
+        # Per user: bumped when that user's AGENTS.md is replaced. Agents pin
+        # ``(user_id, epoch)``; the gateway switching between accounts on a
+        # shared Workspace leaves each account's pin intact.
+        self._context_epochs: Dict[str, int] = {}
+        self._agents_md_digest: Optional[Tuple[Path, int, int, str]] = None
 
     @property
     def user_id(self) -> str:
@@ -219,7 +221,6 @@ class Workspace:
                 self._context_snapshot = None
                 self._memory_snapshot = None
                 self._experience_snapshot = None
-                self._context_epoch += 1
             self._user_id = new_id
 
     def _get_user_path(self) -> Path:
@@ -457,13 +458,27 @@ class Workspace:
         return self._experience_snapshot
 
     @property
-    def context_epoch(self) -> int:
+    def context_epoch(self) -> Tuple[str, int]:
         """Changes when the pinned AGENTS.md chain must be rendered again."""
-        return self._context_epoch
+        return self._user_id, self._context_epochs.get(self._user_id, 0)
 
     def user_agents_md_digest(self) -> str:
-        """Content hash of this user's AGENTS.md, for the session-log prelude."""
-        return hashlib.sha1(self.read_user_agents_md().encode("utf-8")).hexdigest()
+        """Content hash of this user's AGENTS.md, for the session-log prelude.
+
+        Asked on every request; re-hashed only when the file's mtime or size
+        changes.
+        """
+        path = self.user_agent_md_path()
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return hashlib.sha1(b"").hexdigest()
+        cached = self._agents_md_digest
+        if cached is not None and cached[:3] == (path, stat.st_mtime_ns, stat.st_size):
+            return cached[3]
+        digest = hashlib.sha1(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+        self._agents_md_digest = (path, stat.st_mtime_ns, stat.st_size, digest)
+        return digest
 
     # =========================================================================
     # Cross-product project config compatibility (Hermes-style)
@@ -666,7 +681,7 @@ class Workspace:
         tmp.write_text(content, encoding="utf-8")
         tmp.replace(path)
         self._context_snapshot = None
-        self._context_epoch += 1
+        self._context_epochs[self._user_id] = self._context_epochs.get(self._user_id, 0) + 1
         return path
 
     def _ensure_home_agent_md_symlink(self, target: Path) -> None:

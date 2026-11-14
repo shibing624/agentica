@@ -244,8 +244,9 @@ class TestAgentCoexistence:
             agent = _agent(tmp)
             asyncio.run(_seed(agent.workspace))
             with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=SELECT_UV)):
-                _, users, _ = asyncio.run(agent.get_messages_for_run(message="install deps please"))
-        content = users[0].content
+                _, users, sent = asyncio.run(agent.get_messages_for_run(message="install deps please"))
+        content = sent[-1].content
+        assert users[0].content == "install deps please"
         assert content.startswith(MEMORY_RECALL_OPEN)
         assert "Use uv, never pip" in content
         assert "<ext>install deps please</ext>" in content
@@ -258,9 +259,9 @@ class TestAgentCoexistence:
             agent = _agent(tmp)
             asyncio.run(_seed(agent.workspace))
             with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=SELECT_UV)):
-                _, users, _ = asyncio.run(agent.get_messages_for_run(message="install deps please"))
-        assert "Use uv, never pip" in users[0].content
-        assert "<ext>" not in users[0].content
+                _, _, sent = asyncio.run(agent.get_messages_for_run(message="install deps please"))
+        assert "Use uv, never pip" in sent[-1].content
+        assert "<ext>" not in sent[-1].content
 
     def test_the_in_process_hook_adds_context_and_never_rewrites_the_message(self, tmp_path):
         class Provider(RunHooks):
@@ -271,8 +272,9 @@ class TestAgentCoexistence:
             agent = _agent(tmp)
             agent._run_hooks = Provider()
             with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=SELECT_UV)):
-                _, users, _ = asyncio.run(agent.get_messages_for_run(message="install deps"))
-        assert users[0].content == "<py>install deps</py>\n\ninstall deps"
+                _, users, sent = asyncio.run(agent.get_messages_for_run(message="install deps"))
+        assert sent[-1].content == "<py>install deps</py>\n\ninstall deps"
+        assert users[0].content == "install deps"
 
     def test_a_blocking_hook_ends_the_run_before_any_model_call(self, tmp_path):
         install_hook_egress(_config(_script(tmp_path, "sys.stderr.write('no'); sys.exit(2)\n")))
@@ -290,8 +292,8 @@ class TestOnlyHumanTurns:
 
     def _users(self, tmp_path, agent, message):
         with patch.object(OpenAIChat, "response", new=AsyncMock(return_value=SELECT_UV)) as mock:
-            _, users, _ = asyncio.run(agent.get_messages_for_run(message=message))
-        return users[0].content, mock
+            _, _, sent = asyncio.run(agent.get_messages_for_run(message=message))
+        return sent[-1].content, mock
 
     @pytest.mark.parametrize("mark", ["subagent", "automated", "goal"])
     def test_machine_written_turns_skip_both(self, tmp_path, mark):

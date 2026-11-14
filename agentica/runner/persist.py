@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -35,37 +34,22 @@ if TYPE_CHECKING:
     from agentica.agent import Agent
 
 
-_TAGGED_EPHEMERAL_RE = re.compile(
-    r"<(session_recall|memory_recall)>.*?</\1>\s*",
-    re.DOTALL,
-)
-_FILE_NOTE_RE = re.compile(
-    r"\[File change notice\] These files changed on disk after you last read "
-    r"or wrote them \(the user, another process, or a shell command you ran\)\. "
-    r"What you saw of them may be out of date; read them again before "
-    r"relying on or editing their contents\.\n(?:- [^\n]*\n)*"
-)
+def strip_request_only_blocks(messages: List[Message]) -> None:
+    """Remove the blocks the prompt builder injected for one request only.
 
-
-def scrub_ephemeral_request_prefix(content: str) -> str:
-    """Drop request-only prefixes that must not enter the transcript.
-
-    ``<git_snapshot>`` and ``<system-reminder>`` stay. Recall, memory recall
-    and the file-change note are regenerated on the next human turn.
+    Only the request copy of this turn's user message carries them, and it
+    reaches history only when compaction made the whole surviving request the
+    stored conversation. The blocks were recorded when they were added, so
+    each is removed by its exact text; anything the user typed stays.
     """
-    cleaned = _TAGGED_EPHEMERAL_RE.sub("", content)
-    cleaned = _FILE_NOTE_RE.sub("", cleaned)
-    if cleaned == content:
-        return content
-    return re.sub(r"\n{3,}", "\n\n", cleaned).lstrip("\n")
-
-
-def scrub_ephemeral_user_messages(messages: List[Any]) -> None:
     for message in messages:
-        if isinstance(message, Message) and message.role == "user" and isinstance(message.content, str):
-            cleaned = scrub_ephemeral_request_prefix(message.content)
-            if cleaned != message.content:
-                message.content = cleaned
+        if not message._request_only_blocks or not isinstance(message.content, str):
+            continue
+        content = message.content
+        for block in message._request_only_blocks:
+            content = content.replace(f"{block}\n\n", "", 1)
+        message.content = content
+        message._request_only_blocks = []
 
 
 class PersistMixin:
@@ -208,8 +192,6 @@ class PersistMixin:
             if user_messages[-1].automated:
                 meta["automated"] = True
             wire_body = user_messages[-1].content
-            if isinstance(wire_body, str):
-                wire_body = scrub_ephemeral_request_prefix(wire_body)
             if isinstance(wire_body, str) and wire_body != text:
                 meta["wire_content"] = wire_body
         if agent._run_input_meta:
@@ -853,7 +835,7 @@ class PersistMixin:
                 run_messages.append(synthesized)
         else:
             run_messages = user_messages + turn_msgs
-        scrub_ephemeral_user_messages(run_messages)
+        strip_request_only_blocks(run_messages)
         if system_message is not None:
             run_messages.insert(0, system_message)
         agent.run_response.messages = run_messages

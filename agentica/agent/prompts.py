@@ -47,6 +47,11 @@ def _join_prefix(parts: Sequence[Optional[str]], tail: str) -> str:
     return "\n\n".join([*body, tail])
 
 
+def _insert_request_only(content: str, blocks: Sequence[str]) -> str:
+    """Put this request's blocks first; the user's question stays last."""
+    return "\n\n".join([*blocks, content])
+
+
 class PromptsMixin:
     """Mixin class containing prompt building methods for Agent."""
 
@@ -262,7 +267,7 @@ class PromptsMixin:
         self._pinned_runtime_state = self._current_runtime_state()
         self._pinned_tool_policies = list(self._tool_policy_prompts)
         workspace = self.workspace
-        self._pinned_context_epoch = workspace.context_epoch if workspace is not None else 0
+        self._pinned_context_epoch = workspace.context_epoch if workspace is not None else None
 
     def _take_tool_policy_reminder(self) -> Optional[str]:
         """Surface a tool guide that arrived after ``messages[0]`` was pinned.
@@ -926,7 +931,18 @@ class PromptsMixin:
             messages: Optional[Sequence[Union[Dict, Message]]] = None,
             **kwargs: Any,
     ) -> Tuple[Optional[Message], List[Message], List[Message]]:
-        """Build and return (system_message, user_messages, messages_for_model)."""
+        """Build and return ``(system_message, user_messages, messages_for_model)``.
+
+        ``user_messages`` is this turn's input as history and the session log
+        store it: the git snapshot and runtime reminders are in it; recall,
+        hook context and the file-change note are not.
+
+        ``messages_for_model`` is the request: system prompt, replayed history
+        and this turn's input, whose last user message is a copy that also
+        carries the request-only blocks (recorded on its
+        ``_request_only_blocks``). Those blocks are regenerated per human turn,
+        so storing them would replay stale recall on the next turn and /resume.
+        """
         # Popped before anything else: kwargs flows on to get_user_message and
         # must not carry recall-only keys there.
         explicit_recall_query = str(kwargs.pop("recall_query", "") or "").strip()
@@ -1013,12 +1029,9 @@ class PromptsMixin:
                 last_msg = user_messages[-1]
                 if last_msg.role == "user" and isinstance(last_msg.content, str):
                     recall_query = last_msg.content
-        # ``sent_override`` is what this request shows the model. History and
-        # the session log keep the durable prefix only (git snapshot and
-        # runtime reminder). Recall, memory, hooks and file-change notes are
-        # injected for this request and must not be replayed on the next turn
-        # or by /resume.
-        sent_override: Optional[str] = None
+        # Recall, hook context and the file-change note go on the request copy
+        # of the last user message only; see the docstring.
+        request_only: List[str] = []
         if (
             recall_query
             and user_messages
@@ -1036,23 +1049,20 @@ class PromptsMixin:
             git_block = self._get_git_snapshot_block() if first_turn else None
             original = user_messages[-1].content
             stored = _join_prefix([git_block], original)
-            sent = _join_prefix([git_block, session_block, memory_block, hook_block], original)
             if stored != original:
                 # A ``messages=`` item may be the caller's own Message object,
                 # kept in its history and passed again next turn; rewrite a
                 # copy so the block never leaks into the caller's state.
                 last = user_messages[-1]
                 user_messages[-1] = last.model_copy(update={"content": stored})
-            if sent != stored:
-                sent_override = sent
+            request_only = [block for block in (session_block, memory_block, hook_block) if block]
 
         # Files the model read in earlier turns may have been edited between
         # turns (the user's editor, git). The note is for this request only.
         if user_messages and isinstance(user_messages[-1].content, str):
             note = self.take_external_file_change_note()
             if note:
-                base = sent_override if sent_override is not None else user_messages[-1].content
-                sent_override = f"{note}\n\n{base}"
+                request_only.insert(0, note)
 
         # Append volatile runtime deltas (date rollover, IM channel switch,
         # updated session summary) in-history rather than mutating messages[0].
@@ -1079,18 +1089,17 @@ class PromptsMixin:
                 user_messages[-1] = last.model_copy(
                     update={"content": f"{reminder}\n\n{last.content}"}
                 )
-                if sent_override is not None:
-                    sent_override = f"{reminder}\n\n{sent_override}"
 
         if pending_preamble and user_messages:
             fold_window_preamble(user_messages[0], pending_preamble)
-            if sent_override is not None and len(user_messages) == 1:
-                sent_override = f"{pending_preamble}\n\n{sent_override}"
             self.working_memory.drop_pending_window_preamble()
 
         model_users = list(user_messages)
-        if sent_override is not None and user_messages:
-            model_users[-1] = user_messages[-1].model_copy(update={"content": sent_override})
+        if request_only:
+            durable = user_messages[-1]
+            sent = durable.model_copy(update={"content": _insert_request_only(durable.content, request_only)})
+            sent._request_only_blocks = list(request_only)
+            model_users[-1] = sent
         messages_for_model.extend(model_users)
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model

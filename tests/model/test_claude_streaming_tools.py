@@ -302,8 +302,61 @@ class TestClaudeFormatMessagesToolRole(unittest.TestCase):
         chat_messages, _ = asyncio.run(model.format_messages(messages))
         self.assertEqual([m["role"] for m in chat_messages], ["user", "assistant", "user"])
         blocks = chat_messages[-1]["content"]
-        self.assertTrue(any(b.get("type") == "tool_result" for b in blocks))
-        self.assertTrue(any("date rolled" in (b.get("text") or "") for b in blocks))
+        self.assertEqual([b.get("type") for b in blocks], ["tool_result", "text"])
+        self.assertIn("date rolled", blocks[1]["text"])
+
+    def test_reminders_follow_every_result_of_the_round(self):
+        """Anthropic wants tool_result blocks first in the user message."""
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.enable_cache_control = False
+        calls = [
+            {"type": "function", "id": tid, "function": {"name": "read_file", "arguments": "{}"}}
+            for tid in ("t1", "t2")
+        ]
+        messages = [
+            Message(role="user", content="read both"),
+            Message(
+                role="assistant",
+                content=[{"type": "tool_use", "id": c["id"], "name": "read_file", "input": {}} for c in calls],
+                tool_calls=calls,
+            ),
+            Message(role="system", content="before results"),
+            Message(role="tool", tool_call_id="t1", content="one", tool_name="read_file"),
+            Message(role="system", content="between results"),
+            Message(role="tool", tool_call_id="t2", content="two", tool_name="read_file"),
+            Message(role="user", content="next"),
+        ]
+        chat_messages, _ = asyncio.run(model.format_messages(messages))
+        self.assertEqual([m["role"] for m in chat_messages], ["user", "assistant", "user"])
+        blocks = chat_messages[-1]["content"]
+        self.assertEqual(
+            [b.get("tool_use_id") or b.get("text") for b in blocks],
+            [
+                "t1",
+                "t2",
+                "<system-reminder>\nbefore results\n</system-reminder>",
+                "<system-reminder>\nbetween results\n</system-reminder>",
+                "next",
+            ],
+        )
+
+    def test_reminder_inside_a_native_result_round_follows_the_results(self):
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.enable_cache_control = False
+        messages = [
+            Message(role="user", content="read it"),
+            Message(
+                role="assistant",
+                content=[{"type": "tool_use", "id": "t1", "name": "read_file", "input": {}}],
+                tool_calls=[{"type": "function", "id": "t1", "function": {"name": "read_file", "arguments": "{}"}}],
+            ),
+            Message(role="system", content="date rolled"),
+            Message(role="user", content=[{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]),
+            Message(role="assistant", content="done"),
+        ]
+        chat_messages, _ = asyncio.run(model.format_messages(messages))
+        self.assertEqual([m["role"] for m in chat_messages], ["user", "assistant", "user", "assistant"])
+        self.assertEqual([b.get("type") for b in chat_messages[2]["content"]], ["tool_result", "text"])
 
     def test_thinking_signed_by_another_claude_is_not_replayed(self):
         model = Claude(id="claude-b", api_key="fake")

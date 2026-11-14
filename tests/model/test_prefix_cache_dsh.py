@@ -629,3 +629,36 @@ def test_resume_skips_a_pinned_prompt_when_agents_md_changed(tmp_path):
     agent._restore_prelude_from_session_log()
     assert agent._pinned_system_prompt is None
     assert agent._pinned_tool_order == ["search_session"]
+
+
+def test_agents_md_epoch_is_per_user_on_a_shared_workspace(tmp_path):
+    """The gateway switches one Workspace between accounts every turn."""
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        workspace=ws,
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent.working_memory.runs.append(SimpleNamespace())
+    first = asyncio.run(agent.get_system_message())
+
+    ws.set_user("bob")
+    ws.write_user_agents_md("BOB-RULE\n")
+    ws.set_user("alice")
+    assert not agent._context_epoch_moved()
+    assert asyncio.run(agent.get_system_message()).content == first.content
+
+    ws.write_user_agents_md("ALICE-RULE\n")
+    assert agent._context_epoch_moved()
+    assert "ALICE-RULE" in asyncio.run(agent.get_system_message()).content
+
+
+def test_agents_md_digest_follows_edits(tmp_path):
+    ws = Workspace(tmp_path / "ws", user_id="alice")
+    ws.initialize()
+    ws.write_user_agents_md("V1\n")
+    first = ws.user_agents_md_digest()
+    assert ws.user_agents_md_digest() == first
+    ws.user_agent_md_path().write_text("V2 longer\n", encoding="utf-8")
+    assert ws.user_agents_md_digest() != first

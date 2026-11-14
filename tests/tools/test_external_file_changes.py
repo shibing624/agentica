@@ -86,11 +86,12 @@ class TestAgentInjection(unittest.TestCase):
 
     def test_next_human_turn_gets_the_note_before_the_question(self):
         _bump(self.path, "x = 2\n")
-        _, user_messages, _ = asyncio.run(self.agent.get_messages_for_run(message="what is x?"))
-        content = user_messages[-1].content
+        _, user_messages, sent = asyncio.run(self.agent.get_messages_for_run(message="what is x?"))
+        content = sent[-1].content
         self.assertTrue(content.startswith("[File change notice]"))
         self.assertTrue(content.endswith("what is x?"))
-        _, again, _ = asyncio.run(self.agent.get_messages_for_run(message="and now?"))
+        self.assertEqual(user_messages[-1].content, "what is x?")
+        _, _, again = asyncio.run(self.agent.get_messages_for_run(message="and now?"))
         self.assertEqual(again[-1].content, "and now?")
 
 

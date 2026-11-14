@@ -477,9 +477,15 @@ class Claude(Model):
         # one round in a single user message, right after the tool_use.
         tool_result_turn: Optional[int] = None
         reminder_user_turn: Optional[int] = None
-        # In-history system text that arrived before this round's tool results.
-        # It joins the result user message instead of opening a second user turn.
+        # In-history system text that arrived inside an open tool round. It
+        # joins the round's result message after every tool_result block
+        # (Anthropic wants the results first) once the round is closed.
         queued_reminders: List[Dict[str, Any]] = []
+
+        def flush_reminders(turn: Optional[int]) -> None:
+            if queued_reminders and turn is not None:
+                chat_messages[turn]["content"].extend(queued_reminders)  # type: ignore
+                queued_reminders.clear()
 
         # This path intentionally does NOT round-trip through
         # ``Message.to_model_dict()``: Anthropic needs block-typed content
@@ -514,11 +520,8 @@ class Claude(Model):
                     "type": "text",
                     "text": f"<system-reminder>\n{text.strip()}\n</system-reminder>",
                 }
-                if pending_tool_use_ids and tool_result_turn is None:
+                if pending_tool_use_ids or tool_result_turn is not None:
                     queued_reminders.append(reminder_block)
-                    continue
-                if tool_result_turn is not None:
-                    chat_messages[tool_result_turn]["content"].append(reminder_block)  # type: ignore
                     continue
                 if chat_messages and chat_messages[-1]["role"] == "user":
                     chat_messages[-1]["content"].append(reminder_block)  # type: ignore
@@ -537,8 +540,7 @@ class Claude(Model):
                 pending_tool_use_ids.discard(message.tool_call_id)
                 block = _tool_result_block(message)
                 if tool_result_turn is None:
-                    chat_messages.append({"role": "user", "content": [*queued_reminders, block]})  # type: ignore
-                    queued_reminders = []
+                    chat_messages.append({"role": "user", "content": [block]})  # type: ignore
                     tool_result_turn = len(chat_messages) - 1
                 else:
                     chat_messages[tool_result_turn]["content"].append(block)  # type: ignore
@@ -616,6 +618,7 @@ class Claude(Model):
                     continue
 
                 if message.role == "assistant":
+                    flush_reminders(tool_result_turn)
                     tool_result_turn = None
                     reminder_user_turn = None
                     chat_messages.append({"role": "assistant", "content": blocks})  # type: ignore
@@ -633,10 +636,10 @@ class Claude(Model):
                 # rows, native tool_result blocks, or both when a placeholder
                 # pads a partial native round): every result lands in the one
                 # message right after the tool_use, results first, and the
-                # request never carries two consecutive user turns.
-                if queued_reminders and (answered or tool_result_turn is not None):
-                    blocks = [*queued_reminders, *blocks]
-                    queued_reminders = []
+                # request never carries two consecutive user turns. Plain input
+                # closes the round, so queued reminders go in ahead of it.
+                if not answered:
+                    flush_reminders(tool_result_turn)
                 merge_turn = tool_result_turn if tool_result_turn is not None else reminder_user_turn
                 if merge_turn is None:
                     chat_messages.append({"role": "user", "content": blocks})  # type: ignore
