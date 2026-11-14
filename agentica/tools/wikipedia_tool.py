@@ -30,7 +30,10 @@ class WikipediaTool(Tool):
             raise ImportError(
                 "The `wikipedia` package is not installed. " "Please install it via `pip install wikipedia`."
             )
-        data = {"name": query, "content": wikipedia.summary(query)}
+        # Same shape the deleted ``Document.to_dict()`` produced: the model has
+        # been handed ``meta_data`` (empty) since 1.x, and a payload that
+        # silently loses a key is a wire change for every caller parsing it.
+        data = {"name": query, "meta_data": {}, "content": wikipedia.summary(query)}
         logger.info(f"Searching wikipedia for: {query}, result: {data}")
         return json.dumps(data, ensure_ascii=False, indent=2)
 
