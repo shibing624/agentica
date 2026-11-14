@@ -10,7 +10,17 @@ export type MsgPart =
   | { kind: "think"; text: string; t0?: number; ms?: number }
   | { kind: "tool"; name: string; argsStr: string; result?: string; diff?: string; t0?: number; ms?: number; toolCallId?: string }
   | { kind: "text"; text: string }
-  | { kind: "steer"; text: string; ts?: number; previews?: string[] };
+  | {
+    kind: "steer";
+    text: string;
+    ts?: number;
+    previews?: string[];
+    /** Client-generated identity, echoed by the server's SSE event. It is what
+     *  lets the local echo be confirmed instead of duplicated. */
+    steerId?: string;
+    /** True until that confirmation arrives (or the turn ends without one). */
+    pending?: boolean;
+  };
 
 export type ApprovalDecision = "allow" | "allow_prefix" | "deny" | "deny_prefix";
 
@@ -60,6 +70,8 @@ export type ChatMsg = {
   errorTs?: number;
   /** Mid-run interrupt (CLI steer), not a new turn. */
   steer?: boolean;
+  /** Identity of the steer this row echoes, so a refused one can be withdrawn. */
+  steerId?: string;
   /** A turn no person wrote: a background command's
    *  report, another session's message. The log marks the row `automated`;
    *  it renders as a notice, not as the user's query. */
@@ -196,7 +208,7 @@ export type AppState = {
     runId?: string;
     lastSeq?: number;
     afterTool?: string;
-    pendingSteers?: Array<{ text: string; ts: number; afterToolCallId?: string }>;
+    pendingSteers?: Array<{ text: string; ts: number; afterToolCallId?: string; steerId?: string }>;
     pendingApprovals?: ApprovalRequest[];
     decidingApproval?: boolean;
     pendingQuestions?: QuestionRequest[];

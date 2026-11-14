@@ -278,7 +278,7 @@ async def steer_chat(
     """
     message, media = _message_and_media(body)
     accepted = await svc.steer_session_media(
-        body.session_id, message, media, owner=_account(request),
+        body.session_id, message, media, owner=_account(request), steer_id=body.steer_id,
     )
     return {"accepted": accepted}
 

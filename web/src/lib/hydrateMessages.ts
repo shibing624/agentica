@@ -550,6 +550,8 @@ export type ClientSteerAnchor = {
   ts: number;
   afterToolCallId?: string;
   turnIdx: number;
+  /** Which steer this is, so a refused one can be withdrawn by identity. */
+  steerId?: string;
 };
 
 const STEER_CACHE_KEY = "ag_steers_v1";
@@ -619,6 +621,7 @@ export function rememberSteersFromMsgs(sessionId: string, msgs: ChatMsg[], older
             ts: p.ts || m.ts || Date.now(),
             afterToolCallId: lastToolId,
             turnIdx: Math.max(1, turnIdx),
+            ...(p.steerId ? { steerId: p.steerId } : {}),
           });
         }
       }
@@ -674,6 +677,29 @@ export function removeUndeliveredSteers(sessionId: string, aiMsg: ChatMsg, lateT
   if (changed) writeSteerStore(store);
 }
 
+/**
+ * Withdraw the client record of one steer the server refused.
+ *
+ * The composer draws its chip before the request, and that chip is written into
+ * the steer cache (which re-attaches steers a gateway did not log). A refusal
+ * removes the chip from the transcript, so the cached copy has to go too —
+ * otherwise a reload would bring back a steer that never happened.
+ */
+export function forgetClientSteer(sessionId: string, steerId: string) {
+  if (!sessionId || !steerId) return;
+  const store = readSteerStore();
+  const list = store[sessionId];
+  if (!list?.length) return;
+  const at = list.findIndex((item) => item.steerId === steerId);
+  if (at < 0) return;
+  list.splice(at, 1);
+  if (list.length) writeSteerStore(store);
+  else {
+    delete store[sessionId];
+    writeSteerStore(store);
+  }
+}
+
 /** Re-attach client-recorded steers when hydrating from a gateway that predates `steer: true` JSONL rows. */
 export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns = 0): ChatMsg[] {
   if (!sessionId || !msgs.length) return msgs;
@@ -723,7 +749,7 @@ export function mergeClientSteers(sessionId: string, msgs: ChatMsg[], olderTurns
   return msgs;
 }
 
-export type PendingSteer = { text: string; ts: number; afterToolCallId?: string };
+export type PendingSteer = { text: string; ts: number; afterToolCallId?: string; steerId?: string };
 
 function isDisconnectedMessageErr(err: string | undefined): boolean {
   if (!err) return false;
@@ -737,7 +763,12 @@ function extractSteersFromAssistant(m: ChatMsg): PendingSteer[] {
   for (const p of m.parts || []) {
     if (p.kind === "tool" && p.toolCallId) lastToolId = p.toolCallId;
     else if (p.kind === "steer" && isValidSteerText(p.text)) {
-      out.push({ text: p.text, ts: p.ts || m.ts || Date.now(), afterToolCallId: lastToolId });
+      out.push({
+        text: p.text,
+        ts: p.ts || m.ts || Date.now(),
+        afterToolCallId: lastToolId,
+        ...(p.steerId ? { steerId: p.steerId } : {}),
+      });
     }
   }
   return out;

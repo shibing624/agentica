@@ -24,6 +24,7 @@ const {
   isFoldedReply,
   isProcessSegment,
   partsOf,
+  removeSteerPart,
   settleWork,
   workSummary,
 } = await vite.ssrLoadModule("/src/lib/msgParts.ts");
@@ -318,4 +319,87 @@ test("a steer chip is never folded into the turn process", () => {
     segs.map((_, i) => isFoldedReply(segs, i, "final")),
     [false, false, true, false, false],
   );
+});
+
+const steerParts = (m) => m.parts.filter((p) => p.kind === "steer");
+
+test("one steer click yields one chip even when thinking lands before the echo", () => {
+  // The composer's optimistic chip, a thinking delta streamed in between, then
+  // the server's SSE event confirming the same steer.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "顺便看 b.py", 1000, [], "s1", true);
+  appendThink(m, "Let me check that file.");
+  appendSteerPart(m, "顺便看 b.py", 1200, [], "s1");
+
+  assert.equal(steerParts(m).length, 1);
+  assert.equal(steerParts(m)[0].pending, false);
+  // The chip keeps its place: the thinking came after it.
+  assert.deepEqual(m.parts.map((p) => p.kind), ["steer", "think"]);
+});
+
+test("a replayed steer event does not add a second chip", () => {
+  // Reconnect replays the run's events, so the same steer arrives again.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "看这个", 1000, [], "s2", true);
+  appendSteerPart(m, "看这个", 1100, [], "s2");
+  appendSteerPart(m, "看这个", 1100, [], "s2");
+  assert.equal(steerParts(m).length, 1);
+});
+
+test("steering the same sentence twice in one turn keeps both chips", () => {
+  // Identity is the steer id, not the text: a deliberate repeat is two steers.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "看这个", 1000, [], "s3", true);
+  appendSteerPart(m, "看这个", 1100, [], "s3");
+  appendSteerPart(m, "看这个", 2000, [], "s4", true);
+  appendSteerPart(m, "看这个", 2100, [], "s4");
+  assert.equal(steerParts(m).length, 2);
+  assert.deepEqual(steerParts(m).map((p) => p.steerId), ["s3", "s4"]);
+});
+
+test("a server that echoes no steer id still confirms the optimistic chip", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "老服务端", 1000, [], "s5", true);
+  appendSteerPart(m, "老服务端", 1100, [], "");
+  assert.equal(steerParts(m).length, 1);
+  assert.equal(steerParts(m)[0].pending, false);
+});
+
+test("a steer carrying a picture is matched by id, not by its text", () => {
+  // The server appends a `[图片: …]` marker, so echo text differs from the
+  // local one; only the id ties them together.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "看这个", 1000, ["blob:x"], "s6", true);
+  appendSteerPart(m, "看这个\n\n[图片: a.png]", 1200, [], "s6");
+  assert.equal(steerParts(m).length, 1);
+  // The local preview survives the confirmation.
+  assert.deepEqual(steerParts(m)[0].previews, ["blob:x"]);
+});
+
+test("the echo arriving before the HTTP response still yields one chip", () => {
+  // The server publishes the SSE echo while it handles the steer request, so
+  // the echo can be consumed first. That used to append one chip and then the
+  // response appended a second. The chip is drawn before the request, so the
+  // echo finds it as the sequence below shows.
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "先画本地气泡", 1000, [], "s7", true);  // composer, before fetch
+  appendSteerPart(m, "先画本地气泡", 1050, [], "s7");        // SSE echo, first
+  assert.equal(steerParts(m).length, 1);
+  // And if the echo somehow lands before the chip is drawn, the id still
+  // dedupes: the optimistic insert finds its own id already present.
+  const n = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(n, "回声先到", 1000, [], "s8");
+  appendSteerPart(n, "回声先到", 1000, [], "s8", true);
+  assert.equal(steerParts(n).length, 1);
+});
+
+test("a refused steer leaves no chip behind", () => {
+  const m = { role: "assistant", content: "", parts: [], steps: [], ts: 0 };
+  appendSteerPart(m, "被拒绝的插话", 1000, [], "s9", true);
+  removeSteerPart(m, "s9");
+  assert.equal(steerParts(m).length, 0);
+  // Removing an unknown id is a no-op, not a crash or a wrong removal.
+  appendSteerPart(m, "保留", 1100, [], "s10", true);
+  removeSteerPart(m, "nope");
+  assert.equal(steerParts(m).length, 1);
 });

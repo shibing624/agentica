@@ -178,6 +178,17 @@ class TestSteerEndpoint:
         assert resp.status_code == 200
         assert resp.json() == {"accepted": False}
 
+    def test_steer_id_reaches_the_service_so_the_echo_can_be_matched(self, mock_app):
+        """The browser draws the chip before the round trip; the id is how the
+        SSE echo confirms that same chip instead of adding a second one."""
+        client, mock_svc = mock_app
+        mock_svc.steer_session_media = AsyncMock(return_value=True)
+        resp = client.post("/api/chat/steer", json={
+            "session_id": "s1", "message": "换个方向", "steer_id": "k-123",
+        })
+        assert resp.json() == {"accepted": True}
+        assert mock_svc.steer_session_media.call_args.kwargs["steer_id"] == "k-123"
+
     def test_take_undelivered(self, mock_app):
         client, mock_svc = mock_app
         mock_svc.take_undelivered_steer = MagicMock(return_value=["late note"])

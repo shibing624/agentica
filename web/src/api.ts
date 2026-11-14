@@ -385,7 +385,8 @@ export const steerChatApi = (
   session_id: string,
   message: string,
   images: { mime: string; data: string }[] = [],
-) => postJson<{ accepted: boolean }>("/api/chat/steer", { session_id, message, images });
+  steer_id = "",
+) => postJson<{ accepted: boolean }>("/api/chat/steer", { session_id, message, images, steer_id });
 
 export const takeSteerApi = (session_id: string) =>
   postJson<{ messages: string[] }>("/api/chat/steer/take", { session_id, message: "" });

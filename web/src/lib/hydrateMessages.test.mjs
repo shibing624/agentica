@@ -15,6 +15,30 @@ const {
 } = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
 after(() => vite.close());
 
+test("a refused steer is dropped from the client cache, not resurrected on reload", async () => {
+  // The module reads `localStorage` at call time, so installing one before the
+  // call is enough — no reload of the module needed.
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => { mem.set(k, String(v)); },
+    removeItem: (k) => { mem.delete(k); },
+  };
+  const H = await vite.ssrLoadModule("/src/lib/hydrateMessages.ts");
+  const msg = {
+    role: "assistant", content: "", ts: 1,
+    parts: [{ kind: "steer", text: "被拒绝的插话", ts: 1000, steerId: "s-refused", pending: true }],
+  };
+  H.rememberSteersFromMsgs("sess-1", [{ role: "user", content: "q" }, msg], 0);
+  assert.equal(mem.size > 0, true, "the steer was cached");
+
+  H.forgetClientSteer("sess-1", "s-refused");
+  // Nothing survives for that session: a reload must not re-attach the steer.
+  const left = JSON.parse(mem.get("ag_steers_v1") || "{}");
+  assert.deepEqual(Object.keys(left), []);
+  delete globalThis.localStorage;
+});
+
 function parts(m) {
   return m.parts || [];
 }

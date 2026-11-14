@@ -56,6 +56,10 @@ class SteerRequest(BaseModel):
     """
     session_id: str
     message: str = ""
+    # Client-generated identity for this steer. The SSE echo carries it back so
+    # the composer's optimistic chip is confirmed rather than duplicated; an
+    # older client that sends none still works (the echo is appended instead).
+    steer_id: str = ""
     images: List[ChatImage] = []
 
     @field_validator("message")

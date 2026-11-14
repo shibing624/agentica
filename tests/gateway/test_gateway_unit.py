@@ -152,6 +152,45 @@ class TestAgentServiceSteer:
         assert await svc.steer_session_media("s1", "只改方向", None) is True
         agent.steer.assert_called_once_with("只改方向", images=None)
 
+    def test_the_published_steer_event_carries_the_client_id(self, tmp_path):
+        """The SSE echo must name the same steer the browser drew locally.
+
+        Without the id the browser can only match by text, which fails for a
+        steer carrying a picture (the server adds a `[图片: …]` marker) and
+        would also swallow a deliberate repeat of the same sentence.
+        """
+        from unittest.mock import patch as _patch
+
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        agent.steer.return_value = True
+        svc._cache.put(svc._sk("s1"), agent)
+        turn = MagicMock()
+        with _patch.object(svc, "_owner", return_value=svc._owner(None)), \
+                _patch("agentica_gateway.services.agent_service.execution._pkg") as pkg:
+            pkg.return_value.live_turn.active.return_value = turn
+            assert svc.steer_session("s1", "换个方向", steer_id="k-123") is True
+        event = turn.publish.call_args.args[0]
+        assert event["event"] == "steer"
+        assert event["data"]["steer_id"] == "k-123"
+        assert event["data"]["text"] == "换个方向"
+
+    def test_an_older_client_without_an_id_publishes_no_steer_id(self, tmp_path):
+        from unittest.mock import patch as _patch
+
+        svc = self._svc(tmp_path)
+        agent = MagicMock()
+        agent.user_id = svc._owner(None)
+        agent.steer.return_value = True
+        svc._cache.put(svc._sk("s1"), agent)
+        turn = MagicMock()
+        with _patch.object(svc, "_owner", return_value=svc._owner(None)), \
+                _patch("agentica_gateway.services.agent_service.execution._pkg") as pkg:
+            pkg.return_value.live_turn.active.return_value = turn
+            svc.steer_session("s1", "老客户端")
+        assert "steer_id" not in turn.publish.call_args.args[0]["data"]
+
 
 class TestAgentServiceRunSource:
     """AgentService passes gateway/cron run source into RunConfig."""

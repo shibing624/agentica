@@ -466,6 +466,7 @@ class AgentExecutionMixin:
         guidance: str,
         owner: Optional[str] = None,
         images: Optional[List[Any]] = None,
+        steer_id: str = "",
     ) -> bool:
         """Inject mid-run guidance (CLI ``agent.steer``) for a web session.
 
@@ -473,6 +474,12 @@ class AgentExecutionMixin:
         image dicts, the same ``plan.images`` an idle turn sends), so a Web
         steer carrying a screenshot reaches the model as vision instead of
         being refused as an empty caption.
+
+        ``steer_id`` is echoed back on the SSE event so the composer can confirm
+        the chip it drew optimistically. Without it the browser would have to
+        match its echo by text — which fails for a steer carrying a picture
+        (the marker is added server-side) and would also swallow a deliberate
+        repeat of the same sentence later in the same turn.
         """
         agent = self._cached_agent_for_owner(session_id, owner)
         if agent is None:
@@ -481,7 +488,14 @@ class AgentExecutionMixin:
         if accepted:
             turn = _pkg().live_turn.active(session_id, self._owner(owner))
             if turn is not None:
-                turn.publish({"event": "steer", "data": {"text": guidance, "ts": int(time.time() * 1000)}})
+                turn.publish({
+                    "event": "steer",
+                    "data": {
+                        "text": guidance,
+                        "ts": int(time.time() * 1000),
+                        **({"steer_id": steer_id} if steer_id else {}),
+                    },
+                })
         return accepted
 
     def take_undelivered_steer(self, session_id: str, owner: Optional[str] = None) -> List[str]:
@@ -497,6 +511,7 @@ class AgentExecutionMixin:
         message: str,
         media: Optional[List["InboundMedia"]],
         owner: Optional[str] = None,
+        steer_id: str = "",
     ) -> bool:
         """Steer a running turn with attachments, routed like an idle turn.
 
@@ -507,9 +522,11 @@ class AgentExecutionMixin:
         screenshot would arrive as a bare marker.
         """
         if not media:
-            return self.steer_session(session_id, message, owner=owner)
+            return self.steer_session(session_id, message, owner=owner, steer_id=steer_id)
         agent = self._cached_agent_for_owner(session_id, owner)
         if agent is None:
             return False
         message, run_images, _audio, _notes = await self._prepare_run_media(agent, message, media)
-        return self.steer_session(session_id, message, owner=owner, images=run_images)
+        return self.steer_session(
+            session_id, message, owner=owner, images=run_images, steer_id=steer_id,
+        )

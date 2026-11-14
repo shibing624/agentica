@@ -301,16 +301,79 @@ export function appendText(m: ChatMsg, delta: string) {
   else parts.push({ kind: "text", text: delta });
 }
 
-export function appendSteerPart(m: ChatMsg, text: string, ts = Date.now(), previews: string[] = []) {
+/**
+ * Add a steer chip to the live turn.
+ *
+ * Two paths land here for the same user action: the composer's local echo
+ * (immediately, so the chip appears before the round trip) and the server's
+ * SSE `steer` event (when the model is actually handed the text). They must
+ * produce ONE chip.
+ *
+ * Identity is the `steerId`, never the text: text cannot work here. A steer
+ * carrying a picture arrives with a server-added `[图片: …]` marker, so the
+ * echo's text differs from the local one; and deduping by text across the turn
+ * would swallow a deliberate repeat of the same sentence. A scan bounded by
+ * "the previous row" additionally fails as soon as a thinking delta arrives
+ * between the echo and its confirmation.
+ *
+ * @param m - the live assistant message.
+ * @param text - what the user steered with.
+ * @param ts - event time for the chip's stamp.
+ * @param previews - object URLs of pictures the steer carried.
+ * @param steerId - identity the server echoes back (absent on older servers).
+ * @param pending - true for the local echo awaiting the server's confirmation.
+ */
+export function appendSteerPart(
+  m: ChatMsg,
+  text: string,
+  ts = Date.now(),
+  previews: string[] = [],
+  steerId = "",
+  pending = false,
+): void {
   finishThink(m);
   const parts = ensureParts(m);
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const p = parts[i];
-    if (p.kind === "think" && !p.text.trim()) continue;
-    if (p.kind === "steer" && p.text === text) return;
-    break;
+  // An identified steer is one chip no matter which side arrives first. The
+  // echo can be consumed before the local insert (the server publishes it while
+  // handling the same request), and a reconnect replays an echo already drawn.
+  const sameId = steerId
+    ? parts.find((p): p is Extract<MsgPart, { kind: "steer" }> =>
+      p.kind === "steer" && p.steerId === steerId)
+    : undefined;
+  if (sameId) {
+    // The echo confirming a chip we drew optimistically clears its mark; a
+    // second insert of the same steer adds nothing either way.
+    if (!pending) sameId.pending = false;
+    return;
   }
-  parts.push({ kind: "steer", text, ts, ...(previews.length ? { previews } : {}) });
+  // A server that echoes no id (older gateway): the newest pending chip is it.
+  if (!pending && !steerId) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p.kind !== "steer" || !p.pending) continue;
+      p.pending = false;
+      p.ts = ts;
+      return;
+    }
+  }
+  parts.push({
+    kind: "steer",
+    text,
+    ts,
+    ...(previews.length ? { previews } : {}),
+    ...(steerId ? { steerId } : {}),
+    ...(pending ? { pending: true } : {}),
+  });
+}
+
+/** Drop the optimistic chip of a steer the server refused, so a refusal leaves
+ *  no trace in the transcript (the text is queued as a fresh turn instead). */
+export function removeSteerPart(m: ChatMsg, steerId: string): void {
+  if (!steerId) return;
+  const parts = m.parts;
+  if (!parts?.length) return;
+  const at = parts.findIndex((p) => p.kind === "steer" && p.steerId === steerId);
+  if (at >= 0) parts.splice(at, 1);
 }
 
 function sliceMs(p: MsgPart, now: number, live: boolean): number {

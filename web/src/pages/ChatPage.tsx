@@ -35,11 +35,13 @@ import {
   showToast, useAppState, type ApprovalDecision, type ApprovalRequest, type ChatMsg, type QueuedMessage,
 } from "../store";
 import { applySessionUsage, ContextUsageTip, prefetchSessionUsage, syncSessionUsage } from "../components/ContextUsageTip";
-import { reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers } from "../lib/hydrateMessages";
+import {
+  forgetClientSteer, reconcileLiveTurnMsgs, rememberSteersFromMsgs, removeUndeliveredSteers,
+} from "../lib/hydrateMessages";
 import {
   allAssistantTextOf, appendSteerPart, appendText, appendThink, appendTool, ensureTrailingFinalAnswer,
-  finalAnswerOf, finishTool, groupParts, isFoldedReply, isProcessSegment, partsOf, settleWork, unfinishedToolCallId,
-  workSummary,
+  finalAnswerOf, finishTool, groupParts, isFoldedReply, isProcessSegment, partsOf, removeSteerPart, settleWork,
+  unfinishedToolCallId, workSummary,
 } from "../lib/msgParts";
 import { approvalKeyAction } from "../lib/approvalKeys";
 import { createStreamFollow, stickToBottom } from "../lib/streamFollow";
@@ -1751,33 +1753,72 @@ function QueueInlineEditor({
 /** A mid-run steer joins the turn as a chip; pictures it carried come back on
  *  the server-rendered record as `[图片: …]` markers, so the chip only needs
  *  the text plus the object URL that makes the preview show up immediately. */
-function appendSteerBubble(sessId: string, text: string, files: File[] = []) {
+function appendSteerBubble(sessId: string, text: string, files: File[] = [], steerId = "") {
   const previews = files.filter(isImageFile).map((f) => URL.createObjectURL(f));
   const live = getState().streams[sessId]?.aiMsg;
   const sess = getState().sessions[sessId];
   if (live) {
-    appendSteerPart(live, text, Date.now(), previews);
+    // Local echo: the chip shows at once and the server's SSE `steer` event
+    // confirms this same chip instead of adding a second one.
+    appendSteerPart(live, text, Date.now(), previews, steerId, true);
     if (sess) rememberSteersFromMsgs(sessId, sess.msgs, sess.olderTurns || 0);
     saveSessions();
     bump();
     return;
   }
   if (!sess) return;
-  sess.msgs.push({ role: "user", content: text, ts: Date.now(), steer: true, previews });
+  sess.msgs.push({
+    role: "user", content: text, ts: Date.now(), steer: true, previews,
+    ...(steerId ? { steerId } : {}),
+  });
   saveSessions();
   bump();
+}
+
+/** Undo the optimistic chip of a steer the server refused. */
+function removeSteerChip(sessId: string, steerId: string) {
+  // The chip was also written to the client steer cache (which re-attaches
+  // steers the gateway did not log); leaving it there would resurrect this
+  // steer on the next reload.
+  forgetClientSteer(sessId, steerId);
+  const live = getState().streams[sessId]?.aiMsg;
+  if (live) {
+    removeSteerPart(live, steerId);
+    saveSessions();
+    bump();
+    return;
+  }
+  const sess = getState().sessions[sessId];
+  if (!sess) return;
+  const at = sess.msgs.findIndex(
+    (m) => m.role === "user" && m.steer && m.steerId === steerId,
+  );
+  if (at >= 0) {
+    sess.msgs.splice(at, 1);
+    saveSessions();
+    bump();
+  }
 }
 
 async function applySteer(sessId: string, text: string, files: File[] = []): Promise<boolean> {
   const S = getStrings();
   const imageFiles = files.filter(isImageFile);
   const images = await Promise.all(imageFiles.map(fileToImagePayload));
-  const { ok, data } = await api.steerChatApi(sessId, text, images);
+  // Generated here so the local echo and the server's SSE event name the same
+  // steer; matching them by text breaks for pictures and swallows a repeat.
+  const steerId = uid();
+  // Draw the chip BEFORE the request. The server publishes its SSE echo while
+  // handling this same request, so it can arrive before the HTTP response —
+  // appending the local chip afterwards would then be a second one.
+  appendSteerBubble(sessId, text, files, steerId);
+  const { ok, data } = await api.steerChatApi(sessId, text, images, steerId);
   if (ok && data?.accepted) {
-    appendSteerBubble(sessId, text, files);
     showToast(S.chat.interruptToast);
     return true;
   }
+  // Refused (the run ended between the UI check and the call): the chip we drew
+  // never happened, so take it back and queue the text as a fresh turn.
+  removeSteerChip(sessId, steerId);
   enqueueMessage(sessId, text, files, { silent: true });
   showToast(ok ? S.chat.interruptQueued : S.chat.interruptFailed);
   return false;
@@ -1970,10 +2011,13 @@ function applyLiveSseEvent(aiMsg: ChatMsg, evt: any, sessId?: string): boolean {
     const text = String(evt.data?.text || "").trim();
     if (text) {
       const ts = typeof evt.data?.ts === "number" ? evt.data.ts : Date.now();
-      appendSteerPart(aiMsg, text, ts);
+      const steerId = typeof evt.data?.steer_id === "string" ? evt.data.steer_id : "";
+      // Confirms the optimistic chip of this same steer (if we drew one) rather
+      // than appending a second copy of it.
+      appendSteerPart(aiMsg, text, ts, [], steerId);
       const pending = sessId ? getState().streams[sessId]?.pendingSteers : undefined;
       if (pending?.length) {
-        const idx = pending.findIndex((p) => p.text === text);
+        const idx = pending.findIndex((p) => p.steerId === steerId);
         if (idx >= 0) pending.splice(idx, 1);
       }
       flushStream();
@@ -2121,7 +2165,15 @@ async function consumeSse(
 async function finishLive(sessId: string, aiMsg: ChatMsg, t0: number, disconnected: boolean) {
   const leftoverSteers = getState().streams[sessId]?.pendingSteers;
   if (leftoverSteers?.length) {
-    for (const st of leftoverSteers) appendSteerPart(aiMsg, st.text, st.ts);
+    for (const st of leftoverSteers) {
+      // A steer the server echoed is already on screen (its chip was confirmed
+      // by the SSE event). Re-showing the parked copy here is how one click
+      // used to end up as two chips.
+      if (st.steerId && (aiMsg.parts || []).some(
+        (p) => p.kind === "steer" && p.steerId === st.steerId,
+      )) continue;
+      appendSteerPart(aiMsg, st.text, st.ts, [], st.steerId || "");
+    }
   }
   flushStream();
   settleWork(aiMsg, Date.now());
