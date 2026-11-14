@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Gateway tool-approval: POST, owner auth, SSE replay, no-LiveTurn deny."""
 import asyncio
+from pathlib import Path
 import json
 import os
 from types import SimpleNamespace
@@ -200,7 +201,7 @@ class TestNoLiveTurnDeny:
 
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))
-            svc.set_session_approval_mode("s1", "ask", owner="default")
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
             approve = svc._make_session_approve("s1", "default")
             assert await approve(_fc()) == "deny"
 
@@ -211,7 +212,7 @@ class TestNoLiveTurnDeny:
 
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))
-            svc.set_session_approval_mode("s1", "ask", owner="default")
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
             turn = live_turn.start("s1", owner="default")
             approve = svc._make_session_approve("s1", "default")
             task = asyncio.create_task(approve(_fc(call_id="park1")))
@@ -269,7 +270,7 @@ class TestMidTurnApprovalModeSwitch:
         async def _run():
             svc = AgentService(workspace_path=str(tmp_path))
             svc.set_session_work_dir("s1", str(tmp_path), owner="default")
-            svc.set_session_approval_mode("s1", "ask", owner="default")
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
             turn = live_turn.start("s1", owner="default")
             approve = svc._make_session_approve("s1", "default")
 
@@ -305,16 +306,17 @@ class TestMidTurnApprovalModeSwitch:
 
         asyncio.run(_run())
 
-    def test_switching_ask_to_auto_unparks_execute_but_keeps_outside_write_parked(self, tmp_path):
+    def test_switching_read_only_to_auto_unparks_execute_but_keeps_outside_write_parked(self, tmp_path):
         from agentica_gateway.services.agent_service import AgentService
 
         async def _run():
             work = tmp_path / "proj"
-            outside = tmp_path / "outside.txt"
+            # Not under the platform temp root: temp is silently writable in auto.
+            outside = Path.home() / "agentica-gateway-outside.txt"
             work.mkdir()
             svc = AgentService(workspace_path=str(tmp_path))
             svc.set_session_work_dir("s1", str(work), owner="default")
-            svc.set_session_approval_mode("s1", "ask", owner="default")
+            svc.set_session_approval_mode("s1", "read-only", owner="default")
             turn = live_turn.start("s1", owner="default")
             approve = svc._make_session_approve("s1", "default")
 
@@ -349,8 +351,8 @@ class TestMidTurnApprovalModeSwitch:
             original = deps.agent_service
             deps.agent_service = svc
             try:
-                svc.set_session_approval_mode("chat1", "ask", owner="default")
-                svc.set_session_approval_mode("cron1", "ask", owner="default")
+                svc.set_session_approval_mode("chat1", "read-only", owner="default")
+                svc.set_session_approval_mode("cron1", "read-only", owner="default")
                 t_chat = live_turn.start("chat1", owner="default")
                 t_cron = live_turn.start("cron1", owner="default")
                 t_cron.cron_job = {"id": "j1", "name": "nightly"}
@@ -375,7 +377,7 @@ class TestMidTurnApprovalModeSwitch:
                 assert svc.get_session_approval_mode("chat1", owner="default") == "allow-all"
                 assert await w_chat == "allow"
                 # Cron mandate stays untouched.
-                assert svc.get_session_approval_mode("cron1", owner="default") == "ask"
+                assert svc.get_session_approval_mode("cron1", owner="default") == "read-only"
                 assert not w_cron.done()
             finally:
                 deps.agent_service = original

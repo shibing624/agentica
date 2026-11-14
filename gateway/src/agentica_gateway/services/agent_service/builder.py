@@ -18,7 +18,11 @@ from agentica.agent.approvals import (
     sync_grants_from_project,
 )
 from agentica.agent.config import ExperienceConfig, ToolConfig, WorkspaceMemoryConfig
-from agentica.agent.permissions import PERMISSION_MODES
+from agentica.agent.permissions import (
+    PERMISSION_MODES,
+    validate_permission_mode,
+    validate_sandbox_mode,
+)
 from agentica.compression.manager import parse_compact_token_limit
 from agentica.config.profiles import get_setting
 from agentica.run.config import RunConfig
@@ -104,6 +108,10 @@ class AgentBuilderMixin:
         # The auxiliary model also serves as the task subagent model (CLI
         # unified them — no separate task_model config anymore).
         task_model = auxiliary_model
+        # Auto-tier review: profile auto_review_model block, else the auxiliary
+        # model, else the main model (Agent.resolve_auxiliary_model order).
+        review_model = self._sibling_model(cfg, "auto_review")
+        auxiliary_task_models = {"auto_review": review_model} if review_model is not None else None
         fallback_models = self._fallback_models(cfg)
         max_api_retry = int(cfg.get("max_api_retry") or 2)
         work_dir = self.get_session_work_dir(session_id, owner)
@@ -130,6 +138,7 @@ class AgentBuilderMixin:
         instructions.append(_APPROVAL_MODE_INSTRUCTION)
 
         permission_mode = self.get_session_approval_mode(session_id, owner)
+        sandbox_mode, sandbox_network_access = self._sandbox_settings()
         enable_evict = get_setting("enable_evict", True)
         enable_auto_compact = get_setting("enable_auto_compact", True)
         profile = pkg.get_profile(self.session_profile_name(session_id, owner) or pkg.get_active_profile_name()) or {}
@@ -145,6 +154,7 @@ class AgentBuilderMixin:
             model=model,
             auxiliary_model=auxiliary_model,
             task_model=task_model,
+            auxiliary_task_models=auxiliary_task_models,
             session_profile=cfg.get("profile") or None,
             fallback_models=fallback_models,
             max_api_retry=max_api_retry,
@@ -167,6 +177,8 @@ class AgentBuilderMixin:
             include_ask_user_question=False,
             background_process_registry=self._background_registry(session_id, owner),
             permission_mode=permission_mode,
+            sandbox=sandbox_mode,
+            sandbox_network_access=sandbox_network_access,
             tool_config=ToolConfig(
                 auto_load_mcp=True,
                 permission_mode=permission_mode,
@@ -320,13 +332,39 @@ class AgentBuilderMixin:
 
     _DEFAULT_APPROVAL_MODE = "auto"
 
+    @staticmethod
+    def _sandbox_settings() -> tuple:
+        """``(sandbox mode, network access)`` from config.yaml ``settings``.
+
+        Default off. A deployment-level value degrades to off with a warning
+        when this host cannot enforce it, instead of failing every request; an
+        explicit ``agentica --sandbox`` argument still raises in the CLI path
+        (argument = intent, config = deployment setting).
+        """
+        mode = get_setting("sandbox", "off")
+        if mode in (None, "", "off"):
+            return "off", False
+        try:
+            validate_sandbox_mode(mode)
+        except ValueError as e:
+            logger.warning("settings.sandbox is invalid (%s); using off", e)
+            return "off", False
+        from agentica.tools.os_sandbox import unsupported_reason
+
+        reason = unsupported_reason()
+        if reason:
+            logger.warning(
+                "settings.sandbox=%r is ignored: %s", mode, reason,
+            )
+            return "off", False
+        return mode, bool(get_setting("sandbox_network_access", False))
+
     def set_session_approval_mode(
         self, session_id: str, mode: str, owner: Optional[str] = None,
     ) -> None:
         """Persist the selected approval mode for a session and apply it live."""
         normalized = (mode or self._DEFAULT_APPROVAL_MODE).strip().lower()
-        if normalized not in PERMISSION_MODES:
-            normalized = self._DEFAULT_APPROVAL_MODE
+        validate_permission_mode(normalized)
         key = self._sk(session_id, owner)
         self._session_approval_modes[key] = normalized
 
@@ -393,6 +431,11 @@ class AgentBuilderMixin:
             if agent is not None:
                 apply_path_grant_on_agent(agent, path, prefix=prefix)
 
+        async def review(fc):
+            agent = self._cache.get(self._sk(session_id, owner))
+            review_fn = getattr(agent, "review_tool_call", None) if agent is not None else None
+            return None if review_fn is None else await review_fn(fc)
+
         return make_approve(
             get_mode=lambda: self.get_session_approval_mode(session_id, owner),
             get_grants=lambda: self._grants_for(session_id, owner),
@@ -401,6 +444,7 @@ class AgentBuilderMixin:
             publish=publish,
             apply_path_grant=apply_path_grant,
             get_user_id=lambda: owner_id,
+            review=review,
         )
 
     def _run_config_for_session(

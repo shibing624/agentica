@@ -430,50 +430,8 @@ def _validate_profile(data: dict) -> List[str]:
     if header is not None and not (isinstance(header, str) and header.strip()):
         errors.append("cache_control_session_header must be a non-empty string.")
 
-    auxiliary = data.get("auxiliary_model")
-    if auxiliary:
-        if not isinstance(auxiliary, dict):
-            errors.append("auxiliary_model must be a mapping.")
-        else:
-            if not auxiliary.get("model_provider"):
-                errors.append("auxiliary_model.model_provider is missing.")
-            elif auxiliary.get("model_provider") not in PROVIDER_PRESETS:
-                errors.append(f"auxiliary_model.model_provider unknown: {auxiliary.get('model_provider')!r}.")
-            if not auxiliary.get("model_name"):
-                errors.append("auxiliary_model.model_name is missing.")
-            aerr = _validate_base_url(auxiliary.get("base_url") or "")
-            if aerr:
-                errors.append(f"auxiliary_model.base_url: {aerr}")
-            for raw_key in _RAW_PASSTHROUGH_KEYS:
-                raw_val = auxiliary.get(raw_key)
-                if raw_val is not None and not isinstance(raw_val, dict):
-                    errors.append(
-                        f"auxiliary_model.{raw_key} must be a mapping (dict), got {type(raw_val).__name__}."
-                    )
-            auxiliary_reasoning = auxiliary.get("reasoning")
-            auxiliary_effort = auxiliary.get("reasoning_effort")
-            auxiliary_wire_api = auxiliary.get("wire_api")
-            if auxiliary_wire_api is not None and auxiliary_wire_api not in _WIRE_API_CHOICES:
-                errors.append(
-                    f"auxiliary_model.wire_api must be one of {list(_WIRE_API_CHOICES)}, "
-                    f"got {auxiliary_wire_api!r}."
-                )
-            if auxiliary_wire_api is not None and auxiliary.get("model_provider") != "openai":
-                errors.append("auxiliary_model.wire_api requires model_provider: openai.")
-            if auxiliary_reasoning is not None and auxiliary_reasoning not in _RESPONSES_REASONING_CHOICES:
-                errors.append(
-                    f"auxiliary_model.reasoning must be one of {list(_RESPONSES_REASONING_CHOICES)}, "
-                    f"got {auxiliary_reasoning!r}."
-                )
-            if auxiliary_reasoning is not None and auxiliary_wire_api != "responses":
-                errors.append("auxiliary_model.reasoning requires wire_api: responses.")
-            if auxiliary_effort is not None and not isinstance(auxiliary_effort, str):
-                errors.append(
-                    f"auxiliary_model.reasoning_effort must be a string, "
-                    f"got {type(auxiliary_effort).__name__}."
-                )
-            if auxiliary_wire_api == "responses" and auxiliary_effort is not None:
-                errors.append("auxiliary_model.wire_api: responses uses reasoning, not reasoning_effort.")
+    for block_key in ("auxiliary_model", "auto_review_model"):
+        _validate_sibling_model_block(errors, data, block_key)
 
     # Optional cross-provider fallback chain: a list of model blocks tried in
     # order after the main model exhausts its retries / hits a hard outage.
@@ -514,6 +472,53 @@ def _validate_profile(data: dict) -> List[str]:
     if mar is not None and not (isinstance(mar, int) and mar > 0):
         errors.append("max_api_retry must be a positive integer.")
     return errors
+
+
+def _validate_sibling_model_block(errors: List[str], data: dict, key: str) -> None:
+    """Validate one optional profile sibling-model block.
+
+    ``auxiliary_model`` is the cheap model for background work; the optional
+    ``auto_review_model`` overrides the model the auto tier uses for its
+    per-call review (default: the auxiliary model, then the main model).
+    """
+    block = data.get(key)
+    if not block:
+        return
+    if not isinstance(block, dict):
+        errors.append(f"{key} must be a mapping.")
+        return
+    if not block.get("model_provider"):
+        errors.append(f"{key}.model_provider is missing.")
+    elif block.get("model_provider") not in PROVIDER_PRESETS:
+        errors.append(f"{key}.model_provider unknown: {block.get('model_provider')!r}.")
+    if not block.get("model_name"):
+        errors.append(f"{key}.model_name is missing.")
+    berr = _validate_base_url(block.get("base_url") or "")
+    if berr:
+        errors.append(f"{key}.base_url: {berr}")
+    for raw_key in _RAW_PASSTHROUGH_KEYS:
+        raw_val = block.get(raw_key)
+        if raw_val is not None and not isinstance(raw_val, dict):
+            errors.append(f"{key}.{raw_key} must be a mapping (dict), got {type(raw_val).__name__}.")
+    reasoning = block.get("reasoning")
+    effort = block.get("reasoning_effort")
+    wire_api = block.get("wire_api")
+    if wire_api is not None and wire_api not in _WIRE_API_CHOICES:
+        errors.append(
+            f"{key}.wire_api must be one of {list(_WIRE_API_CHOICES)}, got {wire_api!r}."
+        )
+    if wire_api is not None and block.get("model_provider") != "openai":
+        errors.append(f"{key}.wire_api requires model_provider: openai.")
+    if reasoning is not None and reasoning not in _RESPONSES_REASONING_CHOICES:
+        errors.append(
+            f"{key}.reasoning must be one of {list(_RESPONSES_REASONING_CHOICES)}, got {reasoning!r}."
+        )
+    if reasoning is not None and wire_api != "responses":
+        errors.append(f"{key}.reasoning requires wire_api: responses.")
+    if effort is not None and not isinstance(effort, str):
+        errors.append(f"{key}.reasoning_effort must be a string, got {type(effort).__name__}.")
+    if wire_api == "responses" and effort is not None:
+        errors.append(f"{key}.wire_api: responses uses reasoning, not reasoning_effort.")
 
 
 def _prompt_int(label: str) -> Optional[int]:
@@ -915,12 +920,17 @@ def run_onboarding(console) -> Dict:
         "api_key": active.get("api_key"),
         **_pick_keys(active, _TUNING_KEYS),
     }
+    main_provider = main_provider if isinstance(main_provider, str) else ""
     result.update(
-        _auxiliary_resolution(
-            auxiliary_block,
-            main_provider if isinstance(main_provider, str) else "",
-            active.get("base_url"),
-            active.get("api_key"),
+        _sibling_resolution(
+            auxiliary_block, "auxiliary", main_provider,
+            active.get("base_url"), active.get("api_key"),
+        )
+    )
+    result.update(
+        _sibling_resolution(
+            active.get("auto_review_model") or {}, "auto_review", main_provider,
+            active.get("base_url"), active.get("api_key"),
         )
     )
     return result
@@ -1106,6 +1116,10 @@ def _configure_one_profile(
                 profile_data[_k] = existing[_k]
     if auxiliary_block:
         profile_data["auxiliary_model"] = auxiliary_block
+    # auto_review_model is a hand-edited knob too: carry it through on a re-run
+    # so `agentica setup` never silently drops the reviewer's model override.
+    if same_provider and isinstance(existing.get("auto_review_model"), dict):
+        profile_data["auto_review_model"] = existing["auto_review_model"]
 
     # Final gate: nothing invalid is ever written to config.yaml. Per-field
     # prompts already re-prompt on bad input, so this guards against corrupted
@@ -1175,39 +1189,40 @@ def _prompt_cron(console) -> None:
         console.print("  [dim]Cron scheduler disabled. Turn on anytime: /cron daemon on[/dim]")
 
 
-def _auxiliary_resolution(
-    auxiliary_block: Dict, main_provider: str, main_base_url: Optional[str], main_api_key: Optional[str]
+def _sibling_resolution(
+    block: Dict, prefix: str, main_provider: str, main_base_url: Optional[str], main_api_key: Optional[str]
 ) -> Dict:
-    """Resolve the auxiliary_model block into flat auxiliary_model_* fields (no CLI flags).
+    """Resolve one sibling-model profile block into flat ``{prefix}_*`` fields.
 
     Same provider as main -> inherit main base_url/api_key for omitted fields.
     Different provider -> base_url from that provider's preset, api_key from the
     block (or a matching profile), never the main key.
     """
-    auxiliary_name = auxiliary_block.get("model_name")
-    if not auxiliary_name:
-        return {"auxiliary_model_provider": None, "auxiliary_model_name": None,
-                "auxiliary_base_url": None, "auxiliary_api_key": None,
-                "auxiliary_wire_api": None,
-                "auxiliary_reasoning": None, "auxiliary_reasoning_effort": None}
-    auxiliary_provider = auxiliary_block.get("model_provider") or main_provider
-    auxiliary_base = auxiliary_block.get("base_url")
-    auxiliary_key = auxiliary_block.get("api_key")
-    if not auxiliary_base:
-        auxiliary_base = main_base_url if auxiliary_provider == main_provider else default_base_url(auxiliary_provider)
-    if not auxiliary_key:
-        if auxiliary_provider == main_provider:
-            auxiliary_key = main_api_key
+    fields = (
+        "model_provider", "model_name", "base_url", "api_key",
+        "wire_api", "reasoning", "reasoning_effort",
+    )
+    name = block.get("model_name")
+    if not name:
+        return {f"{prefix}_{field}": None for field in fields}
+    provider = block.get("model_provider") or main_provider
+    base_url = block.get("base_url")
+    api_key = block.get("api_key")
+    if not base_url:
+        base_url = main_base_url if provider == main_provider else default_base_url(provider)
+    if not api_key:
+        if provider == main_provider:
+            api_key = main_api_key
         else:
-            auxiliary_key = get_profile_api_key(auxiliary_provider, auxiliary_base)
+            api_key = get_profile_api_key(provider, base_url)
     return {
-        "auxiliary_model_provider": auxiliary_provider,
-        "auxiliary_model_name": auxiliary_name,
-        "auxiliary_base_url": auxiliary_base,
-        "auxiliary_api_key": auxiliary_key,
-        "auxiliary_wire_api": auxiliary_block.get("wire_api"),
-        "auxiliary_reasoning": auxiliary_block.get("reasoning"),
-        "auxiliary_reasoning_effort": auxiliary_block.get("reasoning_effort"),
+        f"{prefix}_model_provider": provider,
+        f"{prefix}_model_name": name,
+        f"{prefix}_base_url": base_url,
+        f"{prefix}_api_key": api_key,
+        f"{prefix}_wire_api": block.get("wire_api"),
+        f"{prefix}_reasoning": block.get("reasoning"),
+        f"{prefix}_reasoning_effort": block.get("reasoning_effort"),
     }
 
 
@@ -1282,6 +1297,15 @@ _PROFILE_CONFIG_KEYS = (
     "auxiliary_extra_headers",
     "auxiliary_reasoning",
     "auxiliary_reasoning_effort",
+    "auto_review_model_provider",
+    "auto_review_model_name",
+    "auto_review_base_url",
+    "auto_review_api_key",
+    "auto_review_wire_api",
+    "auto_review_extra_body",
+    "auto_review_extra_headers",
+    "auto_review_reasoning",
+    "auto_review_reasoning_effort",
     "fallback_models",
     "max_api_retry",
 )
@@ -1302,7 +1326,9 @@ def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str
     base_url = profile.get("base_url") or default_base_url(provider)
     api_key = profile.get("api_key") or get_profile_api_key(provider, base_url)
     auxiliary_block = profile.get("auxiliary_model") if isinstance(profile.get("auxiliary_model"), dict) else {}
-    auxiliary = _auxiliary_resolution(auxiliary_block, provider, base_url, api_key)
+    review_block = profile.get("auto_review_model") if isinstance(profile.get("auto_review_model"), dict) else {}
+    auxiliary = _sibling_resolution(auxiliary_block, "auxiliary", provider, base_url, api_key)
+    review = _sibling_resolution(review_block, "auto_review", provider, base_url, api_key)
     fallback_blocks = profile.get("fallback_models")
     fallbacks = (
         _fallback_resolution(fallback_blocks, provider, base_url, api_key)
@@ -1334,9 +1360,12 @@ def resolve_named_profile_config(name: str, source: str = "session") -> Dict[str
         "cache_keepalive": profile.get("cache_keepalive"),
         "auxiliary_extra_body": auxiliary_block.get("extra_body"),
         "auxiliary_extra_headers": auxiliary_block.get("extra_headers"),
+        "auto_review_extra_body": review_block.get("extra_body"),
+        "auto_review_extra_headers": review_block.get("extra_headers"),
         "fallback_models": fallbacks,
         "max_api_retry": profile.get("max_api_retry"),
         **auxiliary,
+        **review,
     }
 
 
@@ -1566,6 +1595,15 @@ def resolve_model_config(args, console=None) -> Dict:
         auxiliary_reasoning = None
         auxiliary_reasoning_effort = None
 
+    # Optional auto-tier reviewer model: profile ``auto_review_model`` block
+    # (hand-edited, no wizard prompt). Default resolution is the auxiliary
+    # model, then the main model — see Agent.resolve_auxiliary_model.
+    review_block = (active_profile.get("auto_review_model") or {}) if use_profile else {}
+    review = _sibling_resolution(review_block, "auto_review", provider, base_url, resolved_key)
+    if review.get("auto_review_model_name"):
+        review["auto_review_extra_body"] = review_block.get("extra_body")
+        review["auto_review_extra_headers"] = review_block.get("extra_headers")
+
     # Optional cross-provider fallback chain (resilience). Resolution mirrors
     # the auxiliary model: same provider inherits the main endpoint/key; a
     # different provider uses its own preset / matching-profile key and never
@@ -1619,6 +1657,8 @@ def resolve_model_config(args, console=None) -> Dict:
         "auxiliary_extra_headers": auxiliary_extra_headers,
         "auxiliary_reasoning": auxiliary_reasoning,
         "auxiliary_reasoning_effort": auxiliary_reasoning_effort,
+        # Auto-tier reviewer model (default: auxiliary, then main).
+        **review,
         # Cross-provider fallback chain + per-model API attempt count.
         "fallback_models": fallbacks,
         "max_api_retry": max_api_retry,

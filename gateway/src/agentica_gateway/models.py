@@ -74,8 +74,8 @@ class ApprovalDecisionRequest(BaseModel):
 
 
 class SessionApprovalModeRequest(BaseModel):
-    """Live per-session approval mode switch (ask / auto / allow-all)."""
-    approval_mode: Literal["ask", "auto", "allow-all"]
+    """Live per-session approval mode switch (read-only / auto / allow-all)."""
+    approval_mode: Literal["read-only", "auto", "allow-all"]
 
 
 class CompactRequest(BaseModel):

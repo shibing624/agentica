@@ -716,7 +716,7 @@ class BuiltinExecuteTool(Tool):
 
         if self._os_sandbox and escalate and not approved_by_user.get():
             # The approval layer routes every escalation to a human in
-            # ask/auto; reaching here unapproved means nothing asked one (an
+            # read-only/auto; reaching here unapproved means nothing asked one (an
             # SDK agent without ``approve``), so the sandbox stays.
             raise PermissionError(
                 "escalate=true runs the command outside the sandbox, which needs the "

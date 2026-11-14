@@ -59,7 +59,7 @@ class TestMandateCapture:
 
         out = json.loads(CronTool().cronjob(
             action="create", prompt="p", schedule="1h", permission_mode="allow-all",
-            agent=_caller("ask", str(tmp_path))))
+            agent=_caller("read-only", str(tmp_path))))
         assert out["success"] is False
         assert "broader" in out["error"]
         assert list_jobs(include_disabled=True) == []
@@ -70,17 +70,17 @@ class TestMandateCapture:
 
         tool = CronTool()
         out = json.loads(tool.cronjob(
-            action="create", prompt="p", schedule="1h", permission_mode="ask",
+            action="create", prompt="p", schedule="1h", permission_mode="read-only",
             agent=_caller("allow-all", str(tmp_path))))
         job_id = out["job"]["job_id"]
-        assert get_job(job_id).permission_mode == "ask"
+        assert get_job(job_id).permission_mode == "read-only"
 
         # Re-tiering on update is held to the editor's ceiling too.
         up = json.loads(tool.cronjob(
             action="update", job_id=job_id, permission_mode="allow-all",
             agent=_caller("auto", "/elsewhere")))
         assert up["success"] is False
-        assert get_job(job_id).permission_mode == "ask"
+        assert get_job(job_id).permission_mode == "read-only"
         # And an edit from another directory does not move the job.
         json.loads(tool.cronjob(
             action="update", job_id=job_id, permission_mode="auto",
@@ -109,15 +109,15 @@ class TestRunUnderMandate:
         from agentica.cron.jobs import create_job, get_job
         from agentica.cron.scheduler import execute_job
 
-        job = create_job(prompt="p", schedule="1h", permission_mode="ask", work_dir=str(tmp_path))
+        job = create_job(prompt="p", schedule="1h", permission_mode="read-only", work_dir=str(tmp_path))
         runner = _RecordingRunner()
         asyncio.run(execute_job(get_job(job.id), runner, verbose=False))
         ctx = runner.contexts[0]
-        assert (ctx["permission_mode"], ctx["work_dir"]) == ("ask", str(tmp_path))
+        assert (ctx["permission_mode"], ctx["work_dir"]) == ("read-only", str(tmp_path))
 
     def test_cli_job_agent_ignores_the_hosts_current_tier(self, tmp_path):
         """The factory closes over the host's agent_config, which `/permissions`
-        mutates in place. A job created under "ask" must still run under "ask"
+        mutates in place. A job created under "read-only" must still run under "read-only"
         after the host switched to allow-all, in the job's own directory."""
         from agentica.cli.runtime import parse_args
         from agentica.cron.cli_runner import build_cli_agent_factory
@@ -129,8 +129,8 @@ class TestRunUnderMandate:
         factory = build_cli_agent_factory(cfg)
         cfg["permissions"] = "allow-all"  # host flips tier after the daemon started
 
-        agent = factory(permission_mode="ask", work_dir=str(tmp_path))
-        assert agent.tool_config.permission_mode == "ask"
+        agent = factory(permission_mode="read-only", work_dir=str(tmp_path))
+        assert agent.tool_config.permission_mode == "read-only"
         assert agent.work_dir == str(tmp_path)
         assert cfg["work_dir"] == "/host/dir"
 
@@ -156,10 +156,10 @@ class TestRunUnderMandate:
 
         with patch("agentica.cron.cli_runner.live_cli_peer", return_value=None):
             out = asyncio.run(CliAgentRunner(factory).run("the prompt", {
-                "job_id": "j42", "job_name": "digest", "permission_mode": "ask",
+                "job_id": "j42", "job_name": "digest", "permission_mode": "read-only",
                 "work_dir": "/w", "session_id": "conv-1",
             }))
-        assert seen["permission_mode"] == "ask" and seen["work_dir"] == "/w"
+        assert seen["permission_mode"] == "read-only" and seen["work_dir"] == "/w"
         assert seen["session_id"] == "conv-1" and out.session_id == "conv-1"
         assert seen["message"] == "the prompt"
         config = seen["config"]

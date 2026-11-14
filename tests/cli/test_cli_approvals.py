@@ -34,7 +34,7 @@ def _fc(name, arguments=None, *, call_id="c1"):
     return FunctionCall(function=fn, arguments=arguments or {}, call_id=call_id)
 
 
-def _agent(*, mode="ask", work_dir="/tmp/work", cancelled=False):
+def _agent(*, mode="read-only", work_dir="/tmp/work", cancelled=False):
     return SimpleNamespace(
         tool_config=SimpleNamespace(permission_mode=mode),
         work_dir=work_dir,
@@ -101,7 +101,7 @@ class TestApprovalPromptCopy:
         assert "No, deny (esc/n)" in text
         assert "don't ask again for `rm -f` commands (x)" in text
 
-    def test_file_and_network_option_two(self):
+    def test_file_and_generic_tool_option_two(self):
         file_pending = PendingApproval(
             tool_call_id="t2",
             name="write_file",
@@ -109,19 +109,19 @@ class TestApprovalPromptCopy:
             question="q",
             preview="/tmp/out.txt",
         )
-        net_pending = PendingApproval(
+        generic_pending = PendingApproval(
             tool_call_id="t3",
-            name="web_search",
-            arguments={"queries": ["news"]},
+            name="custom_tool",
+            arguments={"target": "x"},
             question="q",
-            preview="news",
+            preview="x",
         )
         file_text = format_approval_prompt(file_pending)
-        net_text = format_approval_prompt(net_pending)
+        generic_text = format_approval_prompt(generic_pending)
         assert "don't ask again for this class of path" in file_text
-        assert "don't ask again for this class of network tool" in net_text
         assert "Would you like to allow this file operation?" in file_text
-        assert "Would you like to allow this network request?" in net_text
+        assert "don't ask again for this custom_tool tool" in generic_text
+        assert "Would you like to allow this custom_tool call?" in generic_text
 
     def test_compound_execute_hides_prefix_option(self):
         pending = PendingApproval(
@@ -232,7 +232,7 @@ class TestApprovalPromptCopy:
 class TestNoninteractiveApprove:
     @pytest.mark.asyncio
     async def test_print_mode_denies_instead_of_parking(self):
-        agent = _agent(mode="ask")
+        agent = _agent(mode="read-only")
         approve = build_noninteractive_approve(agent)
         fc = _fc("execute", {"command": "rm -f /tmp/x"})
         assert await approve(fc) == "deny"

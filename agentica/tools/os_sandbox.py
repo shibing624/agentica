@@ -22,18 +22,29 @@ decides what a command may touch.
 
 A command that needs more runs again with ``execute(escalate=True)``, which
 the approval layer always routes to a human (see ``agentica.agent.approvals``).
+
+Nothing here is installed or bundled: ``sandbox-exec`` ships with macOS and
+``bwrap`` is a system package, so availability is a **functional** probe (apply
+a real read-only profile once per process), not a ``which`` check. A host where
+the runner exists but cannot apply a profile — most commonly because this very
+process already runs inside a sandbox and macOS refuses to nest one — reports
+unavailable and the sandboxed agent refuses to start rather than silently
+running commands unconfined.
 """
 import asyncio
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Iterable, List, Optional, Tuple
 
 # Package caches a build writes into even offline. Only existing ones are added.
 _CACHE_DIRS = ("~/.cache", "~/Library/Caches", "~/.npm")
 _GIT_PROBE_TIMEOUT_SECONDS = 5
+_PROBE_TIMEOUT_SECONDS = 5
 # Characters with a meaning in SBPL (POSIX extended) regex.
 _REGEX_SPECIAL = set(".^$*+?()[]{}|\\")
 
@@ -48,17 +59,54 @@ class SandboxPolicy:
     network_access: bool
 
 
-def unsupported_reason() -> Optional[str]:
-    """Why the OS sandbox cannot run on this machine, or None when it can."""
+@lru_cache(maxsize=1)
+def _probe_sandbox() -> Optional[str]:
+    """Run one real read-only profile; cached for the process lifetime."""
     if sys.platform == "darwin":
-        if shutil.which("sandbox-exec") is None:
+        binary = shutil.which("sandbox-exec")
+        if binary is None:
             return "sandbox-exec is not on PATH"
-        return None
-    if sys.platform.startswith("linux"):
-        if shutil.which("bwrap") is None:
+    elif sys.platform.startswith("linux"):
+        binary = shutil.which("bwrap")
+        if binary is None:
             return "bubblewrap (bwrap) is not installed — e.g. `apt install bubblewrap`"
+    else:
+        return f"no OS sandbox is implemented for platform {sys.platform!r}"
+    policy = SandboxPolicy(
+        writable_roots=(), read_only_paths=(), blocked_components=(), network_access=False,
+    )
+    try:
+        probe = subprocess.run(
+            wrap_command("true", policy),
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"cannot start the sandbox runner {binary!r}: {e}"
+    if probe.returncode == 0:
         return None
-    return f"no OS sandbox is implemented for platform {sys.platform!r}"
+    detail = [line for line in (probe.stderr or probe.stdout or "").splitlines() if line.strip()]
+    tail = f" ({detail[-1].strip()[:160]})" if detail else ""
+    return (
+        f"the OS sandbox cannot be applied on this host{tail} — a process that is "
+        "itself already sandboxed cannot nest another sandbox"
+    )
+
+
+def unsupported_reason() -> Optional[str]:
+    """Why the OS sandbox cannot run on this machine, or None when it can.
+
+    A functional probe, not ``which``: the runner may be installed and still be
+    unable to apply a profile (nested sandbox, locked-down kernel). Cached, so
+    constructing one sandboxed agent per turn costs one probe per process.
+    """
+    return _probe_sandbox()
+
+
+def reset_availability_probe() -> None:
+    """Forget the cached probe verdict (tests that fake the host)."""
+    _probe_sandbox.cache_clear()
 
 
 def _real(path: str) -> str:

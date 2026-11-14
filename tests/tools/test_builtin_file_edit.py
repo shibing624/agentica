@@ -95,7 +95,7 @@ class TestBuiltinFileToolGrantPathAccess:
 
     def test_request_path_access_not_in_schema(self, tmp_dir):
         allow = BuiltinFileTool(work_dir=tmp_dir, permission_mode="allow-all")
-        ask = BuiltinFileTool(work_dir=tmp_dir, permission_mode="ask")
+        ask = BuiltinFileTool(work_dir=tmp_dir, permission_mode="read-only")
         auto = BuiltinFileTool(work_dir=tmp_dir, permission_mode="auto")
         assert "request_path_access" not in allow.functions
         assert "request_path_access" not in ask.functions

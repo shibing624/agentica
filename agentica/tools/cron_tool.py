@@ -112,8 +112,8 @@ Actions:
                      conversation and runs once that conversation is idle; read the result there or via 'runs'.
 
 A job runs every time under this session's permission tier and working directory, captured at create.
-permission_mode may only make it stricter: 'ask' gives a trial job that reads and reports but has every
-write, mutating command and network call denied (nobody is there to approve).
+permission_mode may only make it stricter: 'read-only' gives a trial job that reads and reports but has
+every write and mutating command denied (nobody is there to approve).
 
 Every run is delivered as an automatic message into a conversation, and the answer stays there for the
 user to read and follow up on. target picks the conversation:
@@ -501,7 +501,7 @@ _CRONJOB_PARAMETERS = {
         "permission_mode": {
             "type": "string",
             "enum": list(PERMISSION_MODES),
-            "description": "Optional stricter permission tier for unattended runs ('ask' denies writes and mutating commands).",
+            "description": "Optional stricter permission tier for unattended runs ('read-only' denies writes and mutating commands).",
         },
         "timeout_seconds": {
             "type": "number",

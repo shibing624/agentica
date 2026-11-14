@@ -4,7 +4,7 @@
 @description: Unit tests for the unified 3-tier tool permission model
 (agentica.agent.permissions), and its wiring through Agent/DeepAgent.
 
-``ask`` no longer hides write tools: every tier exposes the full schema;
+No tier hides write or network tools: every tier exposes the full schema;
 the runner parks before execute instead.
 """
 import tempfile
@@ -15,7 +15,6 @@ from agentica.agent import Agent
 from agentica.agent.config import SandboxConfig, ToolConfig
 from agentica.agent.permissions import (
     PERMISSION_MODES,
-    read_only_whitelist,
     sandbox_should_be_enabled,
     validate_permission_mode,
 )
@@ -30,13 +29,13 @@ class TestPermissionHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_permission_mode("yolo")
 
-    def test_read_only_whitelist_always_none(self):
-        self.assertIsNone(read_only_whitelist("ask"))
-        self.assertIsNone(read_only_whitelist("auto"))
-        self.assertIsNone(read_only_whitelist("allow-all"))
+    def test_validate_permission_mode_rejects_the_retired_ask(self):
+        """The tier was renamed; a saved "ask" must fail loud, not mean something new."""
+        with self.assertRaises(ValueError):
+            validate_permission_mode("ask")
 
     def test_sandbox_should_be_enabled(self):
-        self.assertTrue(sandbox_should_be_enabled("ask"))
+        self.assertTrue(sandbox_should_be_enabled("read-only"))
         self.assertTrue(sandbox_should_be_enabled("auto"))
         self.assertFalse(sandbox_should_be_enabled("allow-all"))
 
@@ -64,16 +63,16 @@ class TestAgentPermissionMode(unittest.TestCase):
         agent = Agent(sandbox_config=custom)
         self.assertIs(agent.sandbox_config, custom)
 
-    def test_ask_mode_exposes_write_tools(self):
-        agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
+    def test_read_only_mode_exposes_write_tools(self):
+        agent = Agent(tool_config=ToolConfig(permission_mode="read-only"))
         self.assertTrue(agent._is_tool_enabled("read_file"))
         self.assertTrue(agent._is_tool_enabled("write_file"))
         self.assertTrue(agent._is_tool_enabled("execute"))
         self.assertTrue(agent._is_tool_enabled("apply_patch"))
 
-    def test_ask_mode_keeps_memory_tools(self):
-        """Ask no longer hides writes: save_memory stays visible."""
-        agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
+    def test_read_only_mode_keeps_memory_tools(self):
+        """No tier hides writes: save_memory stays visible."""
+        agent = Agent(tool_config=ToolConfig(permission_mode="read-only"))
         self.assertTrue(agent._is_tool_enabled("search_memory"))
         self.assertTrue(agent._is_tool_enabled("save_memory"))
 
@@ -92,8 +91,8 @@ class TestAgentPermissionMode(unittest.TestCase):
 
     def test_set_permission_mode_switches_at_runtime(self):
         agent = Agent()  # allow-all
-        agent.set_permission_mode("ask")
-        self.assertEqual(agent.tool_config.permission_mode, "ask")
+        agent.set_permission_mode("read-only")
+        self.assertEqual(agent.tool_config.permission_mode, "read-only")
         self.assertTrue(agent.sandbox_config.enabled)
         self.assertTrue(agent._is_tool_enabled("write_file"))
 
@@ -108,7 +107,7 @@ class TestAgentPermissionMode(unittest.TestCase):
 
     def test_query_level_enabled_tools_overrides_permission_mode(self):
         """RunConfig.enabled_tools (query-level) still wins over permission_mode."""
-        agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
+        agent = Agent(tool_config=ToolConfig(permission_mode="read-only"))
         agent._enabled_tools = ["write_file"]
         self.assertTrue(agent._is_tool_enabled("write_file"))
         self.assertFalse(agent._is_tool_enabled("read_file"))
@@ -138,9 +137,9 @@ class TestDeepAgentPermissionMode(unittest.TestCase):
         self.assertEqual(agent.tool_config.permission_mode, "allow-all")
         self.assertFalse(agent.sandbox_config.enabled)
 
-    def test_ask_mode_exposes_write_tools_at_construction(self):
-        agent = self._build(permission_mode="ask")
-        self.assertEqual(agent.tool_config.permission_mode, "ask")
+    def test_read_only_mode_exposes_write_tools_at_construction(self):
+        agent = self._build(permission_mode="read-only")
+        self.assertEqual(agent.tool_config.permission_mode, "read-only")
         self.assertTrue(agent._is_tool_enabled("write_file"))
         self.assertTrue(agent._is_tool_enabled("apply_patch"))
         self.assertTrue(agent._is_tool_enabled("read_file"))
@@ -181,7 +180,7 @@ class TestDeepAgentPermissionMode(unittest.TestCase):
 
     def test_request_path_access_removed_from_schema(self):
         allow = self._build()
-        ask = self._build(permission_mode="ask")
+        ask = self._build(permission_mode="read-only")
         auto = self._build(permission_mode="auto")
         from agentica.tools.builtin import BuiltinFileTool
 

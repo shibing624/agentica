@@ -180,7 +180,7 @@ def test_writable_roots_for_a_plain_directory(tmp_path):
 # --- approval routing -----------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["ask", "auto"])
+@pytest.mark.parametrize("mode", ["read-only", "auto"])
 def test_escalation_always_asks_in_ask_and_auto(mode, tmp_path):
     grants = SessionGrants()
     grants.add_command_prefix("git push origin")  # an earlier "allow similar"
@@ -401,3 +401,66 @@ def test_sdk_sandboxed_agent_confines_real_commands(tmp_path):
         assert not outside.exists()
     finally:
         outside.unlink(missing_ok=True)
+
+
+# --- availability probe (DSH-style: functional, cached, fail-closed) ------
+
+
+def test_probe_needs_a_runner_on_path(monkeypatch):
+    from agentica.tools import os_sandbox
+
+    os_sandbox.reset_availability_probe()
+    monkeypatch.setattr(os_sandbox.shutil, "which", lambda name: None)
+    try:
+        reason = os_sandbox.unsupported_reason()
+    finally:
+        os_sandbox.reset_availability_probe()
+    assert reason and ("PATH" in reason or "installed" in reason)
+
+
+def test_probe_runs_a_real_profile_and_reports_an_unusable_runner(monkeypatch):
+    from agentica.tools import os_sandbox
+
+    os_sandbox.reset_availability_probe()
+    monkeypatch.setattr(os_sandbox.shutil, "which", lambda name: "/usr/bin/runner")
+    monkeypatch.setattr(os_sandbox, "wrap_command", lambda command, policy: ["/usr/bin/env", "false"])
+    try:
+        reason = os_sandbox.unsupported_reason()
+    finally:
+        os_sandbox.reset_availability_probe()
+    assert reason and "cannot be applied" in reason
+
+
+def test_probe_accepts_a_runner_that_can_apply_a_profile(monkeypatch):
+    from agentica.tools import os_sandbox
+
+    os_sandbox.reset_availability_probe()
+    monkeypatch.setattr(os_sandbox.shutil, "which", lambda name: "/usr/bin/runner")
+    monkeypatch.setattr(os_sandbox, "wrap_command", lambda command, policy: ["/usr/bin/env", "true"])
+    try:
+        assert os_sandbox.unsupported_reason() is None
+    finally:
+        os_sandbox.reset_availability_probe()
+
+
+def test_probe_verdict_is_cached_per_process(monkeypatch):
+    from agentica.tools import os_sandbox
+
+    os_sandbox.reset_availability_probe()
+    calls = []
+
+    def fake_wrap(command, policy):
+        calls.append(command)
+        return ["/usr/bin/env", "true"]
+
+    monkeypatch.setattr(os_sandbox.shutil, "which", lambda name: "/usr/bin/runner")
+    monkeypatch.setattr(os_sandbox, "wrap_command", fake_wrap)
+    try:
+        assert os_sandbox.unsupported_reason() is None
+        assert os_sandbox.unsupported_reason() is None
+        assert calls == ["true"]
+        os_sandbox.reset_availability_probe()
+        assert os_sandbox.unsupported_reason() is None
+        assert calls == ["true", "true"]
+    finally:
+        os_sandbox.reset_availability_probe()

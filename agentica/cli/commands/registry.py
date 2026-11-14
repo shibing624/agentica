@@ -118,7 +118,7 @@ COMMAND_REGISTRY = {
     ),
     "/agent": (_cmd_agents, "Manage subagents (alias for /agents)"),
     # Permissions
-    "/permissions": (_cmd_permissions, "View or set permission mode (ask/auto/allow-all)"),
+    "/permissions": (_cmd_permissions, "View or set permission mode (read-only/auto/allow-all)"),
     # Media (hidden aliases; prefer Ctrl+V for clipboard paste and
     # @path completion / drag-and-drop for local files. Not shown in /help.)
     "/paste": (_cmd_paste, "Paste image from clipboard"),

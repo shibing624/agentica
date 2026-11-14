@@ -17,7 +17,7 @@ from agentica.config.profiles import (
 from agentica.utils.log import logger
 
 from ...config import settings
-from .types import _profile_model_config
+from .types import _profile_model_config, _sibling_model_fields
 
 
 def _pkg():
@@ -125,6 +125,7 @@ class AgentModelMixin:
             and active.get("model_provider") == self.model_provider
             and active.get("model_name") == self.model_name
         )
+        review = active.get("auto_review_model") if matches_active else None
         raw_fallbacks = active.get("fallback_models") if matches_active else None
         fallbacks: List[Dict[str, Any]] = []
         if isinstance(raw_fallbacks, list):
@@ -163,6 +164,9 @@ class AgentModelMixin:
             "auxiliary_reasoning_effort": self.auxiliary_reasoning_effort,
             "auxiliary_extra_body": (dict(aux["extra_body"]) if isinstance(aux.get("extra_body"), dict) else None) if matches_active else None,
             "auxiliary_extra_headers": (dict(aux["extra_headers"]) if isinstance(aux.get("extra_headers"), dict) else None) if matches_active else None,
+            **_sibling_model_fields(
+                review, "auto_review", self.model_provider, self.model_base_url, self.model_api_key,
+            ),
         }
 
     def _session_profile(self, session_id: str, owner: Optional[str] = None) -> tuple[str, str]:
@@ -227,21 +231,21 @@ class AgentModelMixin:
         the main model. The auxiliary model also serves as the task subagent
         model (CLI unified them).
         """
-        sibling_name = cfg[f"{prefix}_model_name"]
+        sibling_name = cfg.get(f"{prefix}_model_name")
         if not sibling_name:
             return None
         return _pkg().create_model(
-            cfg[f"{prefix}_model_provider"] or cfg["model_provider"],
+            cfg.get(f"{prefix}_model_provider") or cfg["model_provider"],
             sibling_name,
-            base_url=cfg[f"{prefix}_base_url"] or None,
-            api_key=cfg[f"{prefix}_api_key"] or None,
-            wire_api=cfg[f"{prefix}_wire_api"],
+            base_url=cfg.get(f"{prefix}_base_url") or None,
+            api_key=cfg.get(f"{prefix}_api_key") or None,
+            wire_api=cfg.get(f"{prefix}_wire_api"),
             max_tokens=cfg.get("max_tokens") or 0,
             temperature=cfg.get("temperature") or 0.0,
             top_p=cfg.get("top_p") or 0.0,
             context_window=cfg.get("context_window") or 0,
-            reasoning=cfg[f"{prefix}_reasoning"],
-            reasoning_effort=cfg[f"{prefix}_reasoning_effort"],
+            reasoning=cfg.get(f"{prefix}_reasoning"),
+            reasoning_effort=cfg.get(f"{prefix}_reasoning_effort"),
             thinking=settings.model_thinking,
             enable_cache_control=cfg.get("enable_cache_control"),
             cache_control_messages=cfg.get("cache_control_messages"),

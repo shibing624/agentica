@@ -54,7 +54,7 @@ class _Agent:
     session_log = None
 
     class _ToolConfig:
-        permission_mode = "ask"
+        permission_mode = "read-only"
 
     tool_config = _ToolConfig()
 

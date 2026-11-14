@@ -84,7 +84,7 @@ def test_new_prints_summary_then_header_and_resets_session_state(monkeypatch):
         session_id="new-session",
         work_dir="/tmp",
         run_context=None,
-        tool_config=SimpleNamespace(permission_mode="ask"),
+        tool_config=SimpleNamespace(permission_mode="read-only"),
         session_log=None,
     )
     console = MagicMock()

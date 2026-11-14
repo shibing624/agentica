@@ -298,7 +298,7 @@ async def test_publish_file_enforces_size_limit(cos, tmp_path, monkeypatch):
     assert cos.puts == []
 
 
-def test_publish_tools_require_approval_in_ask_mode_and_guard_sensitive_paths():
+def test_publish_tools_run_in_every_tier_and_still_guard_sensitive_paths():
     from agentica.agent.approvals import SessionGrants, classify
     from agentica.tools.base import FunctionCall
 
@@ -306,14 +306,17 @@ def test_publish_tools_require_approval_in_ask_mode_and_guard_sensitive_paths():
     grants = SessionGrants()
 
     fc_html = FunctionCall(function=tool.functions["publish_html"], arguments={"html": "<p>hi</p>"})
-    assert classify("ask", fc_html, grants, work_dir="/tmp") == "ask"
+    # Network is not a permission tier: publishing is not parked for its network
+    # effect in any mode.
+    assert classify("read-only", fc_html, grants, work_dir="/tmp") == "allow"
     assert classify("auto", fc_html, grants, work_dir="/tmp") == "allow"
 
     fc_ssh = FunctionCall(
         function=tool.functions["publish_file"],
         arguments={"file_path": "~/.ssh/id_rsa"},
     )
-    assert classify("ask", fc_ssh, grants, work_dir="/tmp") == "ask"
-    # Sensitive paths must also park in auto mode so secrets cannot be pushed to a public bucket silently.
+    assert classify("read-only", fc_ssh, grants, work_dir="/tmp") == "ask"
+    # A sensitive *file* is the hard-unsafe question, not a network one: it still
+    # parks in auto so secrets cannot be pushed to a public bucket silently.
     assert classify("auto", fc_ssh, grants, work_dir="/tmp") == "ask"
 

@@ -523,10 +523,11 @@ def parse_args():
         # allow-all" (which must beat a saved `ask`) from "it is just the
         # default". The default itself is applied there.
         default=None,
-        choices=["ask", "auto", "allow-all"],
-        help="Permission mode: ask (reads anywhere; confirm writes/network), "
-        "auto (also writes inside work_dir), "
-        "allow-all (never ask; default — the CLI is a single-user tool)",
+        choices=["read-only", "auto", "allow-all"],
+        help="Permission mode: read-only (reads and network run; writes and "
+        "mutating commands need approval), auto (in-workspace writes and "
+        "ordinary commands run; the model reviews the rest before a human is "
+        "asked), allow-all (never ask; default — the CLI is a single-user tool)",
     )
     parser.add_argument(
         "--sandbox",
@@ -947,7 +948,7 @@ def create_agent(
         ``action='run'`` executes a job once immediately and returns its output.
         Set False for cron-spawned agents so a scheduled job cannot recursively
         trigger further immediate runs.
-    permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
+    permission_mode: unified 3-tier tool permission ("read-only"/"auto"/"allow-all",
         see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
         then "allow-all" (the CLI's actual --permissions default; see parse_args()).
     peer_session: optional ``agentica.live.PeerSession``. When given, messages
@@ -1001,6 +1002,10 @@ def create_agent(
     # The task subagent tool shares the auxiliary model (one cheap model for all
     # non-user-facing LLM work), so the CLI exposes only main + auxiliary.
     task_model = auxiliary_model
+    # Auto-tier review: profile ``auto_review_model`` block, else the auxiliary
+    # model, else the main model (Agent.resolve_auxiliary_model order).
+    review_model = _build_sibling_model(agent_config, "auto_review")
+    auxiliary_task_models = {"auto_review": review_model} if review_model is not None else None
     # Cross-provider fallback chain (resilience): built from the resolved flat
     # dicts in agent_config["fallback_models"]. [] when none configured.
     fallback_models = _build_fallback_models(agent_config)
@@ -1111,6 +1116,7 @@ def create_agent(
         model=model,
         auxiliary_model=auxiliary_model,
         task_model=task_model,
+        auxiliary_task_models=auxiliary_task_models,
         session_profile=agent_config.get("profile_name") or None,
         fallback_models=fallback_models,
         max_api_retry=max_api_retry,

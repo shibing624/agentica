@@ -317,6 +317,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     # CLI inject a closure from ``make_approve``. Not reset by _init_runtime
     # so Agent.clone() keeps the same callback.
     approve: Optional[Callable] = None
+    # Lazily created auto-tier LLM reviewer (agentica.agent.reviewer). Bound to
+    # this agent, so a rebuild that replaces the agent replaces the reviewer.
+    _auto_reviewer: Optional[Any] = field(default=None, init=False, repr=False)
 
     def __init__(
         self,
@@ -1361,6 +1364,23 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             return cfg.enabled
         return True
 
+    async def review_tool_call(self, fc: Any) -> Optional[Any]:
+        """Ask the auto tier's LLM reviewer about one parked tool call.
+
+        Returns a ``ReviewOutcome``, or ``None`` when the reviewer is disabled
+        or the agent has no model. It never raises: the approval layer treats
+        every failure as "ask the human", which is also what a deny does.
+        """
+        if not self.tool_config.enable_auto_review:
+            return None
+        from agentica.agent.reviewer import ToolCallReviewer
+
+        reviewer = self._auto_reviewer
+        if reviewer is None:
+            reviewer = ToolCallReviewer(self)
+            self._auto_reviewer = reviewer
+        return await reviewer.review(fc)
+
     def set_permission_mode(self, mode: str) -> None:
         """Switch the tool permission tier at runtime — no Agent rebuild needed.
 
@@ -1369,7 +1389,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         instances (write_file/apply_patch/execute) hold a reference to this
         same ``sandbox_config`` object, so they observe the new mode on
         their very next call. See ``agentica.agent.permissions`` for the
-        exact semantics of "ask" / "auto" / "allow-all".
+        exact semantics of "read-only" / "auto" / "allow-all".
         """
         validate_permission_mode(mode)
         self.tool_config.permission_mode = mode
@@ -1492,6 +1512,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # Fresh Runner bound to the clone
         clone._runner = Runner(clone)
         clone.approve = self.approve
+        # The reviewer holds the agent whose model and history it reads; a
+        # shallow copy would make the clone review against the source agent.
+        clone._auto_reviewer = None
         # Tool isolation: stateful tools (todos, parent_agent, workspace, skill
         # filtering) are cloned per-agent and rewired so the clone does not
         # share or overwrite the source agent's tool state slots.

@@ -72,7 +72,7 @@ function keyOfMsg(m: ChatMsg): string | number {
 }
 
 function permIcon(mode: string) {
-  if (mode === "ask") return <IconAsk />;
+  if (mode === "read-only") return <IconAsk />;
   if (mode === "allow-all") return <IconAllowAll />;
   return <IconAuto />;
 }
@@ -674,7 +674,7 @@ export function ChatPage() {
                   setState({ composerPicker: null });
                   if (kind === "model") void pickSessionModel(key);
                   else if (kind === "skill") setState({ inputText: key + " " });
-                  else setApprovalMode(key as "ask" | "auto" | "allow-all");
+                  else setApprovalMode(key as "read-only" | "auto" | "allow-all");
                   requestAnimationFrame(() => taRef.current?.focus());
                 }}
               />
@@ -865,7 +865,7 @@ export function ChatPage() {
                   </button>
                   {s.approvalMenuOpen && (
                     <div className="approval-dd open">
-                      {(["ask", "auto", "allow-all"] as const).map((mode) => (
+                      {(["read-only", "auto", "allow-all"] as const).map((mode) => (
                         <button key={mode} className={"quick-item" + (s.selectedApprovalMode === mode ? " active" : "")}
                                 title={S.chat.permHint(mode)}
                                 onClick={() => setApprovalMode(mode)}>
@@ -2488,7 +2488,7 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
   }
 }
 
-function setApprovalMode(mode: "ask" | "auto" | "allow-all") {
+function setApprovalMode(mode: "read-only" | "auto" | "allow-all") {
   localStorage.setItem("ag_approval", mode);
   const sessId = getState().curSess;
   setState({ selectedApprovalMode: mode, approvalMenuOpen: false });
@@ -2517,7 +2517,7 @@ function permissionPickerGroups(): PickerGroup[] {
   const cur = getState().selectedApprovalMode;
   return [{
     title: S.chat.pickerPermTitle,
-    options: (["ask", "auto", "allow-all"] as const).map((mode) => ({
+    options: (["read-only", "auto", "allow-all"] as const).map((mode) => ({
       key: mode, label: S.chat.permLabel(mode), sub: S.chat.permHint(mode), icon: permIcon(mode), selected: cur === mode,
     })),
   }];

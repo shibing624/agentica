@@ -197,6 +197,39 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertTrue(captured["enable_diagnostics"])
         self.assertEqual(captured["diagnostics_servers"], ["pyright"])
 
+    def test_create_agent_passes_the_auto_review_model(self):
+        from agentica.cli.runtime import create_agent
+
+        captured = {}
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.tools = []
+
+        review_model = MagicMock(id="review")
+        with (
+            patch("agentica.cli.runtime.get_model", side_effect=[MagicMock(), review_model]),
+            patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
+        ):
+            create_agent(
+                {
+                    "model_provider": "deepseek",
+                    "model_name": "deepseek-v4-flash",
+                    "debug": False,
+                    "work_dir": None,
+                    "auto_review_model_provider": "deepseek",
+                    "auto_review_model_name": "deepseek-chat",
+                },
+                extra_tools=[],
+                workspace=None,
+                skills_registry=None,
+                include_ask_user_question=True,
+            )
+
+        self.assertIs(captured["auxiliary_task_models"]["auto_review"], review_model)
+
+
     def test_model_command_freeform_is_rejected_and_does_not_mutate_config(self):
         """`/model openai/gpt-5` must NOT silently overwrite the active profile.
 

@@ -198,12 +198,12 @@ const en = {
     compactDoneAuto: "context auto-compacted",
     skillSearch: "Search skills",
     skillNone: "No matching skill",
-    permLabel: (mode: string): string => mode === "ask" ? "Read Only" : mode === "allow-all" ? "Full access" : "Workspace Write",
-    permHint: (mode: string): string => mode === "ask"
-      ? "Reads (including outside the workspace), read-only shell, memory, task, and builtins run without asking. File writes, mutating shell, and network (web_search / fetch_url) need confirmation. Hard-unsafe commands are asked, not auto-denied."
+    permLabel: (mode: string): string => mode === "read-only" ? "Read Only" : mode === "allow-all" ? "Full access" : "Workspace Write",
+    permHint: (mode: string): string => mode === "read-only"
+      ? "Reads (including outside the workspace), read-only shell, memory, task, builtins, and network tools run without asking. File writes and mutating shell need confirmation. Hard-unsafe commands are asked, not auto-denied."
       : mode === "allow-all"
-        ? "Never asks and never denies. Project deny-similar applies only in ask/auto; hard-unsafe is logged and still run."
-        : "Asks for file writes outside the workspace, sensitive paths, and hard-unsafe commands (rm -rf /, /etc, ~/.ssh).",
+        ? "Never asks and never denies. Project deny-similar applies only in read-only/auto; hard-unsafe is logged and still run."
+        : "In-workspace writes (temp counts), ordinary shell, network, and builtins run; the model reviews whatever would otherwise ask, and may run it without asking you. Sensitive paths and hard-unsafe commands still reach you.",
     approvalDeny: "Deny",
     approvalAllowOnce: "Allow once",
     approvalAllowSimilar: (name: string, similarLabel?: string): string => {
@@ -1205,12 +1205,12 @@ const zh: Strings = {
     compactDoneAuto: "上下文已自动压缩",
     skillSearch: "搜索技能",
     skillNone: "没有匹配的技能",
-    permLabel: (mode: string): string => mode === "ask" ? "仅可查看" : mode === "allow-all" ? "完全权限" : "工作区内修改",
-    permHint: (mode: string): string => mode === "ask"
-      ? "读（含工作区外）、只读命令、记忆、task 和内置工具自动放行；写文件、会改状态的命令、以及联网（web_search / fetch_url）需确认。硬不安全命令会弹卡，不会直接拒。"
+    permLabel: (mode: string): string => mode === "read-only" ? "仅可查看" : mode === "allow-all" ? "完全权限" : "工作区内修改",
+    permHint: (mode: string): string => mode === "read-only"
+      ? "读（含工作区外）、只读命令、记忆、task、内置工具和联网工具自动放行；写文件、会改状态的命令需确认。硬不安全命令会弹卡，不会直接拒。"
       : mode === "allow-all"
-        ? "不询问、不拒绝。项目里「拒绝类似」只约束 ask/auto；硬不安全会记 warning 并照跑。"
-        : "询问工作区外/敏感路径的文件写入，以及硬不安全命令（rm -rf /、/etc、~/.ssh）。",
+        ? "不询问、不拒绝。项目里「拒绝类似」只约束 read-only/auto；硬不安全会记 warning 并照跑。"
+        : "工作区内写入（临时目录也算）、普通命令、联网和内置工具自动放行；原本要问你的调用先由模型审查，它可以不问你就执行。敏感路径和硬不安全命令仍会到你这里。",
     approvalDeny: "拒绝",
     approvalAllowOnce: "允许一次",
     approvalAllowSimilar: (name: string, similarLabel?: string): string => {

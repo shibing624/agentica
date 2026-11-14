@@ -125,7 +125,7 @@ def test_approval_decision_row_includes_request_wait_and_similar_grant():
         _e(
             "2026-01-01T00:00:05.000Z", type="event", name="approval_decision",
             tool_call_id="c1", decision="allow_prefix", tool="execute",
-            wait_s=2.8, mode="ask",
+            wait_s=2.8, mode="read-only",
             question="Allow running the following command?",
             preview="rm -f /tmp/a.ini", similar_label="rm -f",
             options=["allow", "allow_prefix", "deny"],

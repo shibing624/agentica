@@ -19,22 +19,24 @@ pytest.importorskip("agentica_gateway", reason="requires agentica-gateway")
 
 
 class TestAgentServiceApprovalMode:
-    """set_session_approval_mode uses the unified ask/auto/allow-all vocabulary
-    and mutates an already-cached Agent's permission mode in place."""
+    """set_session_approval_mode uses the unified read-only/auto/allow-all
+    vocabulary and mutates an already-cached Agent's permission mode in place."""
 
-    def test_unknown_mode_falls_back_to_default(self, tmp_path):
+    def test_unknown_mode_raises_instead_of_silently_reinterpreting(self, tmp_path):
         from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
         assert svc._DEFAULT_APPROVAL_MODE == "auto"
-        svc.set_session_approval_mode("s1", "full")
-        assert svc.get_session_approval_mode("s1") == "auto"
+        with pytest.raises(ValueError, match="Invalid permission mode"):
+            svc.set_session_approval_mode("s1", "full")
+        with pytest.raises(ValueError, match="Invalid permission mode"):
+            svc.set_session_approval_mode("s1", "ask")
 
     def test_valid_modes_are_persisted(self, tmp_path):
         from agentica_gateway.services.agent_service import AgentService
 
         svc = AgentService(workspace_path=str(tmp_path))
-        for mode in ("ask", "auto", "allow-all"):
+        for mode in ("read-only", "auto", "allow-all"):
             svc.set_session_approval_mode("s1", mode)
             assert svc.get_session_approval_mode("s1") == mode
 
@@ -45,16 +47,16 @@ class TestAgentServiceApprovalMode:
         agent = MagicMock()
         svc._cache.put(svc._sk("s1"), agent)
 
-        svc.set_session_approval_mode("s1", "ask")
+        svc.set_session_approval_mode("s1", "read-only")
 
-        agent.set_permission_mode.assert_called_once_with("ask")
+        agent.set_permission_mode.assert_called_once_with("read-only")
 
     def test_run_config_no_longer_carries_enabled_tools(self, tmp_path):
         from agentica_gateway.services.agent_service import AgentService
         from agentica.run.context import RunSource
 
         svc = AgentService(workspace_path=str(tmp_path))
-        svc.set_session_approval_mode("s1", "ask")
+        svc.set_session_approval_mode("s1", "read-only")
         run_config = svc._run_config_for_session("s1", RunSource.gateway)
         assert run_config.enabled_tools is None
 

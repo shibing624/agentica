@@ -116,7 +116,7 @@ class TestCronTypes:
             schedule=CronSchedule.at_time(8, 30),
             user_id="alice",
             workspace="/tmp/agentica",
-            permission_mode="ask",
+            permission_mode="read-only",
             work_dir="/tmp/agentica",
             timeout_seconds=30,
             max_retries=2,
@@ -124,7 +124,7 @@ class TestCronTypes:
         restored = DailyTaskSpec.from_dict(spec.to_dict())
         assert restored.name == "Morning Brief"
         assert restored.schedule.expression == "30 8 * * *"
-        assert restored.permission_mode == "ask"
+        assert restored.permission_mode == "read-only"
         assert restored.work_dir == "/tmp/agentica"
         assert restored.timeout_seconds == 30
         assert restored.max_retries == 2
@@ -414,7 +414,7 @@ class TestCronTool:
                 schedule=EverySchedule(interval_ms=1800000),
                 timeout_seconds=15,
                 max_retries=2,
-                permission_mode="ask",
+                permission_mode="read-only",
             )
             result = cronjob(
                 action="create",
@@ -424,14 +424,14 @@ class TestCronTool:
                 timeout_seconds=15,
                 max_retries=2,
                 retry_delay_ms=1000,
-                permission_mode="ask",
+                permission_mode="read-only",
             )
             data = json.loads(result)
             assert data["success"] is True
             assert data["job"]["timeout_seconds"] == 15
             assert data["job"]["max_retries"] == 2
             mock_create.assert_called_once()
-            assert mock_create.call_args.kwargs["permission_mode"] == "ask"
+            assert mock_create.call_args.kwargs["permission_mode"] == "read-only"
 
     def test_list_via_tool(self, tmp_cron_dir):
         from agentica.tools.cron_tool import cronjob

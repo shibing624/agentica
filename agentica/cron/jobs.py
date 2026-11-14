@@ -520,7 +520,7 @@ def create_job(
             and silently never delivered.
         timezone: Timezone for cron expressions.
         workspace: Optional workspace path for product surfaces.
-        permission_mode: Tier every run of this job uses ("ask" / "auto" /
+        permission_mode: Tier every run of this job uses ("read-only" / "auto" /
             "allow-all"). Empty: the runner's default.
         work_dir: Directory every run of this job works in. Empty: the
             runner's default.

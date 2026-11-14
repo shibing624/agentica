@@ -16,7 +16,6 @@ from uuid import uuid4
 from agentica.agent.approvals import (
     EXECUTE_TOOLS,
     FILE_TOOLS,
-    NETWORK_TOOLS,
     ApprovalDecision,
     PendingApproval,
     SessionGrants,
@@ -110,11 +109,6 @@ def format_approval_prompt(pending: PendingApproval) -> str:
         body = preview
         allow_similar = "Yes, and don't ask again for this class of path (p)"
         deny_similar = "No, and don't ask again for this class of path (x)"
-    elif name in NETWORK_TOOLS:
-        question = "Would you like to allow this network request?"
-        body = preview
-        allow_similar = "Yes, and don't ask again for this class of network tool (p)"
-        deny_similar = "No, and don't ask again for this class of network tool (x)"
     else:
         question = f"Would you like to allow this {name} call?"
         body = preview
@@ -261,6 +255,10 @@ def complete_approval(
 
 def build_noninteractive_approve(agent: Any) -> Callable:
     """``--print`` / SDK-style: park would hang, so the manual path is deny."""
+    async def _review(fc):
+        review_fn = getattr(agent, "review_tool_call", None)
+        return None if review_fn is None else await review_fn(fc)
+
     grants = SessionGrants()
     return make_approve(
         get_mode=lambda: agent.tool_config.permission_mode,
@@ -272,6 +270,7 @@ def build_noninteractive_approve(agent: Any) -> Callable:
             agent, path, prefix=prefix
         ),
         get_user_id=lambda: agent.user_id,
+        review=_review,
     )
 
 
@@ -508,6 +507,11 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
             req.touch()
             loop.call_later(1.0, _check_approval_idle, state, req, loop, ui_holder)
 
+    async def _review(fc):
+        agent = _agent()
+        review_fn = getattr(agent, "review_tool_call", None) if agent is not None else None
+        return None if review_fn is None else await review_fn(fc)
+
     inner = make_approve(
         get_mode=lambda: _agent().tool_config.permission_mode if _agent() else "allow-all",
         get_grants=lambda: state.approval_grants,
@@ -518,6 +522,7 @@ def build_interactive_approve(state: Any, ui_holder: dict) -> Callable:
             _agent(), path, prefix=prefix
         ),
         get_user_id=lambda: _agent().user_id if _agent() is not None else None,
+        review=_review,
     )
 
     async def approve(fc) -> ApprovalDecision:

@@ -147,6 +147,13 @@ agent = Agent(
 )
 # export OPENAI_API_KEY=...   # 主流程
 # export DEEPSEEK_API_KEY=... # auxiliary
+
+# 只想让 auto 档的 LLM 审查用某个特定模型（而不是副模型）：
+agent = DeepAgent(
+    model=main,
+    auxiliary_model=aux,
+    auxiliary_task_models={"auto_review": review_model},  # 优先级最高
+)
 ```
 
 **B. Fallback Models — 生产高可用**（content_filter / 5xx / 429 / timeout 自动跳到下一个）

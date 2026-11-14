@@ -46,7 +46,8 @@ Usage:
     print(response.cost_tracker.total_cost_usd)
 
     # Unified 3-tier tool permission (see agentica.agent.permissions):
-    # "ask" (park for confirmation), "auto" (park only unsafe actions),
+    # "read-only" (park writes and mutating commands), "auto" (workspace
+    # writes run; the model reviews what would otherwise park),
     # "allow-all" (never park — default, matches historical SDK behavior).
     agent = DeepAgent(permission_mode="auto")
     agent.set_permission_mode("allow-all")  # switch at runtime, no rebuild

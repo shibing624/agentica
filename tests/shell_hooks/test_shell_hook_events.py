@@ -63,7 +63,7 @@ def test_session_and_resolved_events_carry_identity(tmp_path):
         work_dir=str(tmp_path),
         run_context=None,
         model=SimpleNamespace(id="model-1"),
-        tool_config=SimpleNamespace(permission_mode="ask"),
+        tool_config=SimpleNamespace(permission_mode="read-only"),
         session_log=SimpleNamespace(path=transcript),
     )
 
@@ -83,7 +83,7 @@ def test_session_and_resolved_events_carry_identity(tmp_path):
     assert started["session_id"] == "session-1"
     assert started["model"] == "model-1"
     assert started["profile"] == "main"
-    assert started["permission_mode"] == "ask"
+    assert started["permission_mode"] == "read-only"
     assert started["transcript_path"] == str(transcript)
     assert by_name["needs.resolved"]["request_id"] == "request-1"
     assert by_name["needs.resolved"]["decided_by"] == "terminal"
