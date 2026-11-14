@@ -18,7 +18,7 @@
 
 - **不绑定单一模型厂商** — 支持 OpenAI、Claude、DeepSeek、智谱（含免费模型 `glm-4.7-flash`）、通义千问、Kimi、火山引擎豆包、Ollama 本地模型等，终端里敲 `/model` 随时切换，还能给子任务单配便宜的 `auxiliary_model`，给线上配 `fallback_models` 自动容灾。
 - **长对话不失忆、不爆窗口** — 超大命令输出自动存文件，窗口吃紧时自动清理早期工具结果，满窗时自动把目标和进度整理进 `<session>.notes.md` 并开启新窗口，原始对话随时可通过 `search_session` 查回。
-- **多会话像团队一样配合** — 进程内可并行派发只读子任务（`task`），大任务可交给独立后台进程（`delegate`），多个开着的终端可以互相看状态、发消息（`/list-agents`、`/send-message`），共用同一个仓库时还能用 `/worktree` 自动隔离分支。
+- **多会话像团队一样配合** — 进程内可并行派发只读子任务（`task`），大任务可交给后台独立进程（`execute(background=True)` 跑 `agentica --query ...`），`/list-agents` 能看到本机其它开着的终端，共用同一个仓库时还能用 `/worktree` 自动隔离分支。
 - **人离开电脑也能管** — 开启 Gateway 后，在微信、飞书、企微或 Telegram 里直接发指令就会落到本机绑定的项目会话：会话正开在终端里就注入那个终端跑，没开就由网关在后台跑并写进同一份会话日志；`/resume` 换会话、`/switch` 换项目、`/cancel` 中止，审批和追问会推一张免登录的 `/c/<token>` 卡片到手机。
 - **代码简洁、异步优先** — Python SDK 5 行代码即可跑起一个 Agent，所有接口同时提供 `async`（`await agent.run()`）与 `sync`（`agent.run_sync()`），只读工具自动并发执行。
 
@@ -49,7 +49,7 @@ print(result.content)
 | **模型选择** | 多厂商自由切换 + 本地 Ollama | 绑定单一厂商 | 多厂商 |
 | **开箱即用 CLI + Web + Desktop** | ✅ 三端共用本地状态 | 仅 CLI / 专属客户端 | ❌ 需自行开发前端 |
 | **微信 / 飞书 / 企微手机直连** | ✅ 内置 Gateway，无需公网 IP | ❌ | ❌ |
-| **跨终端多会话协作** | ✅ `task` + `delegate` + peer 消息 | 仅会话内子任务 | 仅代码内编排 |
+| **跨终端多会话协作** | ✅ `task` + 后台进程 + `/worktree` | 仅会话内子任务 | 仅代码内编排 |
 | **Python SDK 可嵌入** | ✅ 原生 async/sync，极简面向对象 API | 部分或无 | ✅（但抽象层较重） |
 | **开源协议** | Apache 2.0 | 部分开源 | MIT / Apache |
 

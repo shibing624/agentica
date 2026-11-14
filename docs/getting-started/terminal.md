@@ -83,8 +83,7 @@ agentica --profile deepseek_pro
 | `/steer <指令>` / `/queue <指令>` | 运行中途立刻纠偏当前轮次（`/steer`），或把新任务排进下一轮队列（`/queue`） |
 | `/worktree [new\|merge\|remove] <名>` | 为任务创建独立的 Git 分支与目录，改完一键合回（详见 [Worktree](../multi-agent/worktrees.md)） |
 | `/list-agents`（或 `/peers`） | 查看本机正在运行的其他 CLI 会话、所在分支与正在修改的文件 |
-| `/send-message <会话名> <内容>` | 向本机另一个正在运行的终端会话发送指令（别名 `/send`） |
-| `/ps` / `/stop <id\|all>` | 查看正在后台运行的命令或委托任务；用 `/stop <id>` 或 `/stop all` 停止它们 |
+| `/ps` / `/stop <id\|all>` | 查看正在后台运行的命令；用 `/stop <id>` 或 `/stop all` 停止它们 |
 
 ### 技能、子智能体与定时任务
 
@@ -99,14 +98,13 @@ agentica --profile deepseek_pro
 
 ## 四、多任务与多会话协作
 
-在 CLI 中，你可以根据任务大小选择四种协作方式：
+在 CLI 中，你可以根据任务大小选择以下协作方式：
 
 | 方式 | 适用场景 | 怎么触发 |
 |---|---|---|
 | **`task`（进程内子任务）** | 查代码、搜资料、读多个模块等**短平快的只读调查**（默认使用便宜的 `auxiliary_model`，支持一条消息并行跑多个） | Agent 自动调用，或你在话里说「用 subagent 帮我查一下…」 |
-| **`delegate`（后台独立进程）** | 需要独立上下文窗口、换到另一个仓库目录、或要动手改文件的**大型独立任务** | 对 Agent 说「把 service-a 的升级 delegate 到后台跑」；用 `/ps` 查看进度、`/stop <id>` 停止 |
-| **`acp_agent`（调用外部 Agent）** | 在会话里直接调用本机安装的 **Codex (`codex`)、Claude Code (`claude_code`) 或 OpenCode (`opencode`)** 帮你干活或做交叉审查 | 对 Agent 说「让 codex 审查一下这次提交」 |
-| **Peer 消息（跨终端通信）** | 你自己开了两个终端窗口，想让两边互通结论或指令 | 你敲 `/send-message <对方会话名> <话>`，或让 Agent 调 `list_agents` / `send_message` |
+| **后台独立进程** | 需要独立上下文窗口、换到另一个仓库目录、或要动手改文件的**大型独立任务** | 对 Agent 说「在后台起一个 `agentica --query` 进程做 service-a 的升级」，Agent 会用 `execute(background=True)` 启动；用 `/ps` 查看进度、`/stop <id>` 停止 |
+| **查看其它终端（`/list-agents`）** | 你自己开了多个终端窗口，想知道各自在哪个分支、改哪些文件 | 你敲 `/list-agents`（或 `/peers`） |
 
 ---
 

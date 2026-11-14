@@ -66,7 +66,7 @@ Deeply tuned for open and frontier models alike — DeepSeek, OpenAI, Claude, Zh
 
 ### 2. 🤝 Coordinate multiple agents like a team
 
-An agent can spin up fast read-only subagents to search code, hand off large jobs to background worker processes, or message other open terminal sessions directly — with nothing extra to deploy. See [Multi-Agent Collaboration](https://shibing624.github.io/agentica/multi-agent/choosing).
+An agent can spin up fast read-only subagents to search code or hand off large jobs to background worker processes, and `/worktree` isolates branches when several terminals edit the same repository — with nothing extra to deploy. See [Multi-Agent Collaboration](https://shibing624.github.io/agentica/multi-agent/subagent).
 
 ### 3. 🧬 Learns your habits and your codebase
 
@@ -88,7 +88,7 @@ Link WeChat (scan a QR code), Feishu, WeCom, Telegram, QQ, DingTalk, or Slack wi
 |---|---|---|---|
 | **Surfaces** | ✅ Desktop App + CLI + Local Web + Mobile IM | CLI / IDE | CLI |
 | **Models** | ✅ Any provider, switch anytime (cloud or local Ollama) | Claude only | OpenAI only |
-| **Multi-session teamwork** | ✅ Subagents + background workers + cross-terminal messaging | ❌ | ❌ |
+| **Multi-session teamwork** | ✅ Subagents + background workers + worktree branch isolation | ❌ | ❌ |
 | **Long-term memory & evolving skills** | ✅ Auto memory + experience compiled into Skills | ❌ | ❌ |
 | **SDKs for developers** | ✅ Python SDK (`agentica`) + npm (`@agentica-ai/sdk`) | Partial (Claude-only) | ❌ |
 | **Open source** | ✅ Apache 2.0 | ❌ | ✅ |
@@ -99,7 +99,7 @@ Link WeChat (scan a QR code), Feishu, WeCom, Telegram, QQ, DingTalk, or Slack wi
 
 - **Documentation site**: **https://shibing624.github.io/agentica**
 - **Popular guides**: [Installation & Configuration](https://shibing624.github.io/agentica/getting-started/installation) · [Desktop, Web & IM](https://shibing624.github.io/agentica/advanced/gateway) · [CLI Terminal](https://shibing624.github.io/agentica/getting-started/terminal) · [Python SDK Quickstart](https://shibing624.github.io/agentica/getting-started/quickstart)
-- **Runnable examples**: [examples/](https://github.com/shibing624/agentica/tree/main/examples) (basics, multi-agent patterns, RAG, MCP, workflows, and end-to-end applications)
+- **Runnable examples**: [examples/](https://github.com/shibing624/agentica/tree/main/examples) (basics, multi-agent patterns, MCP, and end-to-end applications)
 - **Developer internals**: [Architecture & Execution Engine](https://shibing624.github.io/agentica/introduction/architecture)
 
 ---

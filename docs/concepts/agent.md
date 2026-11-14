@@ -10,7 +10,6 @@ Agent
 ├── Tools          # 双手：与外部世界交互的能力
 ├── Memory         # 运行时记忆：当前会话消息历史
 ├── Workspace      # 持久化记忆：跨会话长期记忆
-├── Knowledge      # 知识库：外部文档检索 (RAG)
 ├── Instructions   # 指令：定义 Agent 的行为和风格
 └── Runner         # 执行引擎（自动创建，无需手动管理）
 ```
@@ -89,7 +88,6 @@ asyncio.run(main())
 | `description` | `str` | Agent 描述，作为 System Prompt 开头 |
 | `instructions` | `str \| List[str] \| Callable` | 行为指令，支持动态计算 |
 | `tools` | `List[Tool \| Callable]` | 工具列表 |
-| `knowledge` | `Knowledge` | RAG 知识库 |
 | `workspace` | `Workspace` | 持久化工作空间 |
 | `session_id` | `str` | 会话 ID（用于会话持久化和恢复） |
 | `response_model` | `Type[BaseModel]` | 结构化输出（Pydantic 模型） |
@@ -295,7 +293,6 @@ agent = Agent(
     tools=[...],
     tool_config=ToolConfig(
         tool_call_limit=30,            # 单次 run 最多调用工具 30 次（防止无限循环）
-        search_knowledge=True,         # 允许 Agent 主动搜索知识库
     ),
 )
 ```
@@ -568,7 +565,6 @@ agent = DeepAgent(
 
 ## 下一步
 
-- [Workflow](../multi-agent/workflow.md) -- 确定性工作流编排
 - [Subagent](../multi-agent/subagent.md) -- 受治理的子 Agent（spawn / task）
 - [工具系统](tools.md) -- 工具开发和配置
 - [Memory & Workspace](memory.md) -- 长期记忆机制

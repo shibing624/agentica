@@ -66,7 +66,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 ### 2. 🤝 多窗口组队，一个人指挥一支队伍
 
-一个窗口不够用时，Agent 可以自己派生只读子任务查代码查资料，也可以把独立的大功能交给后台新进程去跑，或者让多个打开的终端窗口直接互通消息、分工配合。详见 [多智能体协作](https://shibing624.github.io/agentica/multi-agent/choosing)。
+一个窗口不够用时，Agent 可以自己派生只读子任务查代码查资料，也可以把独立的大功能交给后台新进程去跑；多个终端同时改同一个仓库时，用 `/worktree` 自动隔离分支。详见 [多智能体协作](https://shibing624.github.io/agentica/multi-agent/subagent)。
 
 ### 3. 🧬 越用越懂你和你的项目
 
@@ -88,7 +88,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 |---|---|---|---|
 | **产品形态** | ✅ Desktop App + CLI + 本地 Web + 手机 IM | CLI / IDE | CLI |
 | **模型选择** | ✅ 多厂商自由切换（国产 / 海外 / 本地 Ollama） | 仅 Claude | 仅 OpenAI |
-| **多会话组队协作** | ✅ 子任务 + 后台进程 + 跨窗口通信 | ❌ | ❌ |
+| **多会话组队协作** | ✅ 子任务 + 后台进程 + Worktree 分支隔离 | ❌ | ❌ |
 | **长期记忆与自进化技能** | ✅ 自动记忆 + 经验沉淀为 Skill | ❌ | ❌ |
 | **SDK 二次开发** | ✅ Python SDK (`agentica`) + npm (`@agentica-ai/sdk`) | 部分（绑定 Claude） | ❌ |
 | **开源协议** | ✅ Apache 2.0 | ❌ | ✅ |
@@ -99,7 +99,7 @@ https://github.com/user-attachments/assets/39fb961e-3979-4629-a87d-81dce9196597
 
 - **完整文档站**：**https://shibing624.github.io/agentica**
 - **快速入口**：[安装与配置](https://shibing624.github.io/agentica/getting-started/installation) · [桌面端与 Web / 微信](https://shibing624.github.io/agentica/advanced/gateway) · [CLI 终端](https://shibing624.github.io/agentica/getting-started/terminal) · [Python SDK 快速上手](https://shibing624.github.io/agentica/getting-started/quickstart)
-- **代码示例库**：[examples/](https://github.com/shibing624/agentica/tree/main/examples)（基础用法、多智能体编排、RAG、MCP、工作流与完整行业应用）
+- **代码示例库**：[examples/](https://github.com/shibing624/agentica/tree/main/examples)（基础用法、多智能体编排、MCP 与完整行业应用）
 - **开发者选读**：[架构设计与内部实现](https://shibing624.github.io/agentica/introduction/architecture)
 
 ---

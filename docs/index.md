@@ -72,17 +72,12 @@ print(result.content)
 | [模型与提供商](concepts/model.md) | 切换模型、设置 `auxiliary_model` 副模型与 `fallback_models` 兜底链 |
 | [工具与自定义工具](concepts/tools.md) | 内置工具一览、用普通 Python 函数或 `@tool` 编写自定义工具、切换搜索引擎 |
 | [记忆与常驻规则](concepts/memory.md) | 会话历史、跨会话长期记忆（`MEMORY.md`）与常驻偏好规则（`AGENTS.md`） |
-| [知识库 (RAG)](concepts/rag.md) | 本地文档解析、向量检索与重排序 |
-| [存储与数据库](concepts/storage.md) | SQLite / Postgres 会话存储与媒体管理 |
 
 ### 多智能体与协作
 
 | 文档 | 内容 |
 |------|------|
-| [如何选择协作方式](multi-agent/choosing.md) | 一张图选对 `task`、`delegate`、peer、`as_tool`、Workflow、Swarm |
-| [Subagent (子任务)](multi-agent/subagent.md) | 内置只读子智能体与 `.agentica/agents/*.md` 自定义子智能体 |
-| [Workflow (确定性流水线)](multi-agent/workflow.md) | 固定步骤编排，混合 Python 函数与 Agent 调用 |
-| [Swarm (多智能体自治)](multi-agent/swarm.md) | 多智能体并行分工与自主协作 |
+| [Subagent (子任务)](multi-agent/subagent.md) | `as_tool` 与 `task` 怎么选，内置只读子智能体与 `.agentica/agents/*.md` 自定义子智能体 |
 | [多会话共用仓库 (Worktree)](multi-agent/worktrees.md) | 多个会话同时改同一个仓库时的分支隔离与状态可见 |
 
 ### 进阶功能

@@ -10,7 +10,6 @@
 - [工具使用](#工具使用)
 - [内存管理](#内存管理)
 - [历史消息定制](#历史消息定制)
-- [RAG 最佳实践](#rag-最佳实践)
 - [多轮对话](#多轮对话)
 - [团队协作](#团队协作)
 - [性能优化](#性能优化)
@@ -355,28 +354,23 @@ agent = Agent(
 ### 1. 会话持久化
 
 ```python
-from agentica import Agent, SqliteDb, AgentMemory
+from agentica import Agent
 
-# 使用数据库持久化会话
-db = SqliteDb(table_name="sessions", db_file="agent.db")
+# 传 session_id 即启用内置 JSONL 会话日志（SessionLog），无需配置数据库
+agent = Agent(session_id="user-123-session")
 
-agent = Agent(
-    session_id="user-123-session",
-    memory=AgentMemory.with_db(db=db),
-)
-
-# 会话会自动保存和恢复
+# 消息自动写入 ~/.agentica/projects/<cwd>/<session_id>.jsonl，
+# 用相同 session_id 再次创建 Agent 即可恢复
 ```
 
 ### 2. 长期记忆
 
 ```python
+from agentica import Agent, Workspace
+
 agent = Agent(
-    user_id="user-123",
-    memory=AgentMemory.with_db(
-        db=db,
-        create_user_memories=True,  # 启用长期记忆
-    ),
+    workspace=Workspace(path="./my_workspace", user_id="user-123"),
+    enable_long_term_memory=True,  # 启用 save_memory / search_memory
 )
 
 # Agent 会自动记住用户偏好
@@ -486,71 +480,24 @@ messages_for_model
 
 ---
 
-## RAG 最佳实践
+## 检索增强
 
-### 1. 知识库配置
-
-```python
-from agentica import Knowledge
-from agentica.vectordb import LanceDb
-from agentica.emb import OpenAIEmbedder
-
-knowledge = Knowledge(
-    data_path="./documents",
-    vector_db=LanceDb(
-        table_name="docs",
-        uri="./lancedb",
-        embedder=OpenAIEmbedder(),
-    ),
-    chunk_size=1000,      # 适当的分块大小
-    num_documents=5,      # 检索文档数
-)
-
-# 加载知识库
-knowledge.load(recreate=False, upsert=True)
-```
-
-### 2. 检索增强
+框架不再内置知识库与向量数据库。需要检索时，把检索逻辑写成一个普通函数（或 `@tool`）交给 Agent，由 Agent 自己决定何时调用：
 
 ```python
-from agentica.agent.config import ToolConfig
+from agentica import Agent
+
+def search_docs(query: str, top_k: int = 5) -> str:
+    """Search the internal documents and return the most relevant passages."""
+    ...  # 调用你自己的向量库 / 搜索服务
 
 agent = Agent(
-    knowledge=knowledge,
-    tool_config=ToolConfig(add_references=True),  # 添加引用到响应
+    tools=[search_docs],
     instructions=[
-        "基于知识库回答问题",
-        "如果知识库中没有相关信息，明确告知用户",
+        "遇到专业问题时，先调用 search_docs 检索",
+        "如果检索结果中没有相关信息，明确告知用户",
         "引用来源时注明文档名称",
     ],
-)
-```
-
-### 3. Agentic RAG
-
-让 Agent 主动搜索知识库。
-
-```python
-from agentica.agent.config import ToolConfig
-
-agent = Agent(
-    knowledge=knowledge,
-    tool_config=ToolConfig(search_knowledge=True),  # Agent 可以主动搜索
-    instructions=[
-        "遇到专业问题时，先搜索知识库",
-        "综合多个来源的信息回答",
-    ],
-)
-```
-
-### 4. 混合检索
-
-```python
-from agentica.vectordb import LanceDb
-
-db = LanceDb(
-    search_type="hybrid",  # 混合检索：向量 + 关键词
-    reranker=CohereReranker(),  # 重排序
 )
 ```
 
@@ -648,27 +595,22 @@ main_agent = Agent(
 )
 ```
 
-### 3. Workflow 编排
+### 3. 固定步骤流水线
+
+步骤顺序固定时，直接写一个普通的 `async def` 依次调用各 Agent：
 
 ```python
-from agentica import Workflow, RunResponse
+async def write_article(topic: str) -> str:
+    # 1. 研究
+    research = await researcher.run(f"研究: {topic}")
 
-class ArticleWorkflow(Workflow):
-    researcher: Agent
-    writer: Agent
-    reviewer: Agent
-    
-    def run(self, topic: str) -> RunResponse:
-        # 1. 研究
-        research = self.researcher.run(f"研究: {topic}")
-        
-        # 2. 写作
-        draft = self.writer.run(f"基于研究写文章:\n{research.content}")
-        
-        # 3. 审核
-        final = self.reviewer.run(f"审核并改进:\n{draft.content}")
-        
-        return RunResponse(content=final.content)
+    # 2. 写作
+    draft = await writer.run(f"基于研究写文章:\n{research.content}")
+
+    # 3. 审核
+    final = await reviewer.run(f"审核并改进:\n{draft.content}")
+
+    return final.content
 ```
 
 ---

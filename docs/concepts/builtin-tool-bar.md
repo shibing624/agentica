@@ -22,12 +22,10 @@
 | 工具 | 为什么进不了 `get_builtin_tools` |
 |---|---|
 | `worktree` | 仍只在 CLI 组装（`cli/runtime.py`）；工具本身不再改进程 cwd，隔离靠调用方传入 `work_dir` / `path` |
-| `delegate` | 要 session 的 `BackgroundProcessRegistry` 才能追踪/等待/回报 worker |
-| `list_agents` / `send_message` | 要 `PeerSession`，即「这台机器上用户开着的其它终端」 |
 | `self_manage` / `cronjob` | 改的是这套安装的 `config.yaml` / `.env` 与用户的 cron |
 
 判据：**这个能力的正确性依赖「只有一个 session」吗？** 依赖就是 CLI-only。
-CLI-only 工具在 `agentica/cli/runtime.py:1078` 一带组装，从不进工厂。
+CLI-only 工具在 `agentica/cli/runtime.py:1098` 一带组装，从不进工厂。
 
 ## 有没有一个装配期就能查的前提
 
@@ -35,21 +33,21 @@ CLI-only 工具在 `agentica/cli/runtime.py:1078` 一带组装，从不进工厂
 没有前提就不挂——不是挂上去再在调用时报错。
 
 ```python
-# agentica/agent/base.py:704 —— 记忆工具要有 workspace 才有意义
+# agentica/agent/base.py:737 —— 记忆工具要有 workspace 才有意义
 if self.enable_long_term_memory and self.workspace is not None:
     ...注册 BuiltinMemoryTool
 
-# agentica/cli/runtime.py:1154 —— 没有 registry，或已经到 MAX_DEPTH
-if background_process_registry is None or delegation_depth() >= MAX_DEPTH:
-    ...移除 BuiltinDelegateTool
+# agentica/tools/builtin/execute_tool.py:431 —— 没有 registry 就没有后台进程可等
+if self._background_process_registry is not None:
+    ...注册 wait
 ```
 
 `ask_user_question` 是这条的极端形式：`create_agent()` 把
 `include_ask_user_question` 做成 **keyword-only 且没有默认值**
-（`agentica/cli/runtime.py:914`）。
+（`agentica/cli/runtime.py:918`）。
 
 给它一个默认值就等于替调用方猜「现在有没有人在终端前等着回答」，而这件事只有
-调用方知道。`--query` 一次性运行显式传 `False`（`agentica/cli/main.py:262`）：
+调用方知道。`--query` 一次性运行显式传 `False`（`agentica/cli/main.py:280`）：
 没有 TUI，工具会掉到一个 `input()` 上去问一个不存在的终端。
 **必填让这个问题在读代码时就必须被回答，而不是在半夜的 cron 里挂住。**
 
@@ -59,7 +57,7 @@ if background_process_registry is None or delegation_depth() >= MAX_DEPTH:
 agentica 明确不走这条路：
 
 ```python
-# agentica/agent/permissions.py:57
+# agentica/agent/permissions.py:78
 def read_only_whitelist(mode: str) -> Optional[List[str]]:
     """Query-level tool whitelist for `mode`. Always None: every tier exposes all tools."""
 ```
@@ -84,7 +82,7 @@ OCR 没有单独暴露成 tool，因为「走哪条路」是这套安装的能�
 
 反过来，`execute` 的 `background=True` 也不是独立的 `run_in_background` 工具。
 但注意它连带的约束：没有 `BackgroundProcessRegistry` 时，
-**那个参数根本不在 schema 里**——`agentica/tools/builtin/execute_tool.py:342`
+**那个参数根本不在 schema 里**——`agentica/tools/builtin/execute_tool.py:445`
 把 `background` 从
 `parameters["properties"]` 里主动 `pop` 掉，同时 `wait` 不注册。
 实测两种模式的参数面确实不同：交互 CLI 是
@@ -136,33 +134,30 @@ OCR 没有单独暴露成 tool，因为「走哪条路」是这套安装的能�
 以下是实测结果（实际 `create_agent()` 两次后遍历 `agent.tools`，非数代码）。
 它是上面几条判据叠加后的产物，也是核对「我新加的工具挂在了该挂的地方」的基线。
 
-**交互式 CLI = 24 个**
+**交互式 CLI = 22 个**
 
 ```
-analyze_image, apply_patch, ask_user_question, cronjob, delegate, execute,
-fetch_url, get_skill_info, glob, grep, list_agents, list_skills, read_file,
-save_memory, search_memory, search_session, self_manage, send_message, task,
-wait, web_search, worktree, write_file, write_todos
+analyze_image, apply_patch, ask_user_question, cronjob, execute, fetch_url,
+forget_memory, get_skill_info, glob, grep, list_skills, read_file, save_memory,
+search_memory, search_session, self_manage, task, wait, web_search, worktree,
+write_file, write_todos
 ```
 
-**`--query` / `--print` 一次性运行 = 18 个**（反向差集为空）
+**`--query` / `--print` 一次性运行 = 19 个**（反向差集为空）
 
-少的 6 个，每一个都对应上面的一条判据：
+配置了 COS 时两边都会多出 `publish_file` / `publish_html` / `publish_markdown`
+（`agent/deep.py:294`，前提是 `cos_configured()`），不影响差集。
+
+少的 3 个，每一个都对应上面的一条判据：
 
 | 工具 | 不挂载的位置 | 缺的那个前提 |
 |---|---|---|
-| `ask_user_question` | `tools/builtin/__init__.py:157`，由 `cli/main.py:262` 传 `False` | 没有 TUI，没人能回答 |
-| `list_agents` / `send_message` | `cli/runtime.py:1083` | 没有 `PeerSession` |
-| `worktree` | `cli/runtime.py:1091` | 没有 `WorktreeBinder` |
-| `wait` | `tools/builtin/execute_tool.py:335` | 没有 process registry，也就没有后台进程可等 |
-| `delegate` | `agent/deep.py:275`，CLI 侧二次摘除 `cli/runtime.py:1154` | 没有 registry；或已达 `MAX_DEPTH` |
+| `ask_user_question` | `tools/builtin/__init__.py:157`，由 `cli/main.py:280` 传 `False` | 没有 TUI，没人能回答 |
+| `worktree` | `cli/runtime.py:1105` | 没有 `WorktreeBinder` |
+| `wait` | `tools/builtin/execute_tool.py:431` | 没有 process registry，也就没有后台进程可等 |
 
-复现时有一个坑：`delegate` 的可见性还取决于 `AGENTICA_DELEGATE_DEPTH`
-（`MAX_DEPTH = 1`，`tools/builtin/delegate_tool.py:44`）。
-在一个**被 delegate 出来的** session 里实测，交互式那边也不会有 `delegate`，
-差集看起来就只有 5 个。要的是用户真实终端的数，就得在 depth 0 下测。
 
 ## 下一步
 
 - [Tools](tools.md) —— 怎么写工具、JSON Schema 生成、并发与安全
-- [Choosing](../multi-agent/choosing.md) —— `task` / `delegate` / peer 怎么选
+- [Subagent](../multi-agent/subagent.md) —— `as_tool` / `task` 怎么选

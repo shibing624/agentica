@@ -19,10 +19,9 @@ from agentica import Agent
 | `model` | `Model` | `None` | LLM 模型实例。未指定时使用默认 OpenAI 模型 |
 | `name` | `str` | `None` | Agent 名称，用于日志和多智能体协作标识 |
 | `agent_id` | `str` | 自动 UUID | Agent 唯一标识 |
-| `description` | `str` | `None` | Agent 描述，在多智能体协作（Swarm/`as_tool()`）中帮助协调者理解成员能力 |
+| `description` | `str` | `None` | Agent 描述，在多智能体协作（`as_tool()`）中帮助协调者理解成员能力 |
 | `instructions` | `str \| List[str] \| Callable` | `None` | 行为指令，注入到 system prompt |
 | `tools` | `List[Tool \| Callable]` | `None` | 工具列表 |
-| `knowledge` | `Knowledge` | `None` | 知识库实例 (RAG) |
 | `workspace` | `Workspace \| str` | `None` | 工作空间（传 str 会自动创建 Workspace） |
 | `response_model` | `Type[BaseModel]` | `None` | Pydantic 模型，启用结构化输出 |
 
@@ -200,12 +199,6 @@ all_msgs = agent.working_memory.get_messages()
 
 ---
 
-#### `search_knowledge_base(query, num_documents=None) -> str`
-
-搜索知识库。
-
----
-
 ## PromptConfig
 
 ```python
@@ -240,8 +233,6 @@ from agentica.agent.config import ToolConfig
 | `support_tool_calls` | `bool` | `True` | 是否支持工具调用 |
 | `tool_call_limit` | `int` | `None` | 工具调用次数限制 |
 | `tool_choice` | `str \| Dict` | `None` | 工具选择策略 |
-| `search_knowledge` | `bool` | `True` | 允许 Agent 主动搜索知识库 |
-| `add_references` | `bool` | `False` | 添加知识库引用 |
 | `compression_manager` | `CompressionManager` | `None` | 自定义 Layer 2 压缩管理器；留空时自动创建 |
 
 ## WorkspaceMemoryConfig
@@ -355,8 +346,6 @@ from agentica import RunEvent
 | `reasoning_step` | `"ReasoningStep"` | 推理链步骤 token |
 | `reasoning_completed` | `"ReasoningCompleted"` | 推理链完成 |
 | `updating_memory` | `"UpdatingMemory"` | 正在更新记忆 |
-| `workflow_started` | `"WorkflowStarted"` | Workflow 开始 |
-| `workflow_completed` | `"WorkflowCompleted"` | Workflow 完成 |
 
 ```python
 from agentica import Agent, ZhipuAI, RunEvent
@@ -390,23 +379,6 @@ from agentica import ToolCallInfo
 | `tool_args` | `Dict` | 调用参数 |
 | `tool_result` | `str` | 返回结果 |
 | `call_id` | `str` | 调用 ID |
-
----
-
-## Workflow
-
-```python
-from agentica import Workflow
-```
-
-确定性工作流引擎。子类实现 `run()` 方法编排步骤。
-
-### 方法
-
-| 方法 | 类型 | 说明 |
-|------|------|------|
-| `run()` | async | 子类实现的运行逻辑 |
-| `run_sync()` | sync | 同步适配器 |
 
 ---
 
@@ -468,7 +440,8 @@ from agentica.memory import WorkingMemory
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `db` | `BaseDb` | `None` | 持久化数据库 |
+| `max_messages` | `int` | `200` | 保留的最大消息数 |
+| `create_session_summary` | `bool` | `False` | 是否生成会话摘要 |
 
 ---
 
@@ -493,25 +466,6 @@ func = Function.from_callable(my_function, strict=True)
 ```
 
 从 Python 函数自动生成工具定义。
-
----
-
-## 数据库
-
-```python
-from agentica import SqliteDb, PostgresDb, InMemoryDb, JsonDb
-```
-
-| 类 | 说明 |
-|----|------|
-| `SqliteDb` | SQLite 持久化 |
-| `PostgresDb` | PostgreSQL |
-| `InMemoryDb` | 内存（测试用） |
-| `JsonDb` | JSON 文件 |
-
-```python
-db = SqliteDb(table_name="sessions", db_file="agent.db")
-```
 
 ---
 
