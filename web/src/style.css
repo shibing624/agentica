@@ -1295,6 +1295,23 @@ a.side-nav-item{text-decoration:none;color:inherit}
 .dlg-overlay.open{display:flex}
 .dlg{background:var(--bg);border:var(--hair) solid var(--border);border-radius:var(--radius);box-shadow:var(--elev-pop);width:min(420px,92vw);max-height:85vh;display:flex;flex-direction:column;animation:modalIn .15s ease}
 .dlg.wide{width:min(520px,92vw)}
+.worktree-panel{width:min(640px,92vw);padding:0}
+.worktree-panel .wt-close{border:0;background:transparent;color:var(--fg2);font-size:18px;line-height:1;cursor:pointer}
+.worktree-current{padding:10px 16px;font:12px/1.45 var(--mono);color:var(--fg3);border-bottom:var(--hair) solid var(--border)}
+.worktree-list{padding:10px 16px;overflow-y:auto;min-height:72px;max-height:46vh}
+.worktree-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:var(--hair) solid var(--border)}
+.worktree-row:last-child{border-bottom:0}
+.worktree-name{display:flex;flex-direction:column;gap:3px;min-width:0}
+.worktree-name strong{font-size:13px;color:var(--fg)}
+.worktree-name span{font:11px/1.4 var(--mono);color:var(--fg3);word-break:break-all}
+.worktree-actions{display:flex;gap:6px;flex-shrink:0}
+.worktree-actions button,.worktree-form button{border:var(--hair) solid var(--border);background:var(--bg2);color:var(--fg);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer}
+.worktree-actions button:disabled,.worktree-form button:disabled{opacity:.5;cursor:default}
+.worktree-form{display:flex;gap:8px;padding:12px 16px;border-top:var(--hair) solid var(--border)}
+.worktree-form input{flex:1;min-width:0;border:var(--hair) solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);padding:6px 9px;font-size:12px}
+.worktree-output{margin:0;padding:0 16px 14px;font:11px/1.45 var(--mono);white-space:pre-wrap;color:var(--fg2)}
+.worktree-error{color:#dc2626}
+.worktree-empty{padding:14px 0;text-align:center;color:var(--fg3);font-size:12px}
 .dlg-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:var(--hair) solid var(--border)}
 .dlg-head h3{margin:0;font-size:15px;font-weight:600}
 .dlg-body{padding:14px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}

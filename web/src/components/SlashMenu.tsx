@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStrings } from "../i18n";
 import type { JSX, KeyboardEvent, Ref } from "react";
 import {
-  IconBook, IconCompact, IconDownload, IconModel, IconPaperclip, IconQueue, IconShield, IconTarget,
+  IconBook, IconCompact, IconDownload, IconFork, IconModel, IconPaperclip, IconQueue, IconShield, IconTarget,
 } from "../icons";
 import { filterPicker, type CommandId, type MenuGroup, type MenuItem, type PickerGroup } from "../lib/composerCommands";
 import { isImeKey } from "../lib/ime";
@@ -27,6 +27,7 @@ export function invocableSkills(skills: Array<Record<string, any>>): Array<{ cmd
 const ICONS: Record<CommandId, () => JSX.Element> = {
   file: IconPaperclip, skill: IconBook, goal: IconTarget, queue: IconQueue, compact: IconCompact,
   permission: IconShield, model: IconModel, export: IconDownload,
+  worktree: IconFork,
 };
 
 /**

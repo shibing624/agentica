@@ -51,6 +51,7 @@ import { BackgroundJobs } from "../components/BackgroundJobs";
 import { PreviewableImage } from "../components/ImageLightbox";
 import { FilesPanel } from "../workspace/FilesPanel";
 import { MessageFilesCard } from "../workspace/MessageFilesCard";
+import { WorktreePanel } from "../components/WorktreePanel";
 import type { FileEdits } from "../lib/fileDiff";
 import { useFilesPanel } from "../workspace/useFilesPanel";
 import { isImeKey } from "../lib/ime";
@@ -927,6 +928,7 @@ export function ChatPage() {
         </div>
       </div>
       <FilesPanel root={workspace} panel={files} />
+      <WorktreePanel />
     </>
   );
 }
@@ -2463,6 +2465,9 @@ function runCommand(it: MenuItem, taRef: { current: HTMLTextAreaElement | null }
       // handler runs after it and would close a dropdown opened right now.
       setState({ inputText: clearIfSlash() });
       setTimeout(() => setState({ composerPicker: it.id as "model" | "permission" | "skill", modelDDOpen: false, approvalMenuOpen: false }), 0);
+      return;
+    case "worktree":
+      setState({ inputText: clearIfSlash(), worktreePanel: { ...getState().worktreePanel, open: true } });
       return;
     case "export": {
       setState({ inputText: clearIfSlash() });

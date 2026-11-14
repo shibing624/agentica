@@ -1,38 +1,47 @@
 ---
 name: worktree
 description: >-
-  Isolate parallel work in a git worktree of the current repository
-  (worktree tool: status / new / merge / remove). Use when another live
-  session is dirty in the same directory (/list-agents), when two agents would
+  Isolate parallel work in a git worktree of the current repository on every
+  Agentica surface (worktree tool: status / new / merge / remove). Use when
+  another live session is dirty in the same directory, when two agents would
   fight over index.lock, or when starting a parallel task checkout.
 metadata:
-  version: "2.1"
+  version: "2.2"
 ---
 
 # Isolate work in a worktree
 
 Several sessions in one checkout overwrite each other and contend for git's
 index. A worktree is one directory + one branch per *task*, sharing the
-repository.
+repository. CLI, Web, Desktop, IM and headless runs all load this skill and
+all have the `worktree` tool; the surface is only the outlet, not a different
+capability set.
 
-This session does **not** move. `worktree(action="new")` returns a path.
+Use `worktree(action="new")` to create or reuse a checkout. It returns a path.
 Pass that path as `work_dir` on `read_file` / `write_file` / `apply_patch` /
-`execute`. On `glob` / `grep`, pass it as `path`. Omit those arguments and
-the call stays in this session's directory.
+`execute`; on `glob` / `grep`, pass it as `path`. Omit those arguments and the
+call stays in this session's directory. The agent's own cwd does not move.
 
-Do not `cd` and expect later calls to follow — each call is independent.
-Do not `execute` `git worktree add`: that only makes a directory, and later
-calls still use this session unless you pass `work_dir` / `path`. Use
-`worktree(action="new")`.
+In Web / Desktop / IM, `/worktree` opens the worktree picker. It calls the
+same backend operation as the model tool; selecting **Bind** also switches the
+session's working directory and rebuilds that session's agent. In the CLI,
+`/worktree status|new|merge|remove` is the human-facing command; a new CLI
+process that should start inside a tree is `agentica --worktree <task>`.
+
+Do not `cd` and expect later tool calls to follow — each call is independent.
+Do not call `git worktree add` through `execute`, and do not write Python to
+import `agentica.git.worktree.ensure`: that only makes a directory, bypasses
+session binding and leaves later calls in the wrong place. Use `worktree` or
+the matching `/worktree` outlet.
 
 ## When
 
-- Another live session is working in this directory (dirty files, same
-  branch) and you are about to edit.
+- Another live session is working in this directory (dirty files, same branch)
+  and you are about to edit.
 - A change should not land on the shared working tree.
+- Web / Desktop / IM development needs a branch-isolated session.
 
-Not this: a read-only `task` subagent (it does not write). A second CLI
-that should start already inside a tree is `agentica --worktree <task>`.
+Not this: a read-only `task` subagent (it does not write).
 
 ## How
 

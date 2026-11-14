@@ -433,3 +433,37 @@ export const gitStatusApi = (cwd: string, files: string[]) => postJson<GitStatus
 export const gitMessageApi = (cwd: string, files: string[]) => postJson<{ message: string }>("/api/git/message", { cwd, files });
 export const gitCommitApi = (cwd: string, files: string[], message: string, push: boolean) =>
   postJson<{ sha: string; files: string[]; pushed: boolean; pushError?: string }>("/api/git/commit", { cwd, files, message, push });
+
+export type WorktreeEntry = {
+  name: string;
+  path: string;
+  branch: string;
+  head: string;
+  is_main: boolean;
+  exists: boolean;
+  locked: boolean;
+  lock_reason: string;
+  describe: string;
+};
+
+export type WorktreeState = {
+  work_dir: string;
+  worktrees: WorktreeEntry[];
+  status: string;
+  output?: string;
+};
+
+export const getWorktrees = (sessionId: string) =>
+  request<WorktreeState>(`/api/worktrees?session_id=${encodeURIComponent(sessionId)}`);
+
+export const postWorktree = (
+  sessionId: string,
+  action: "status" | "new" | "bind" | "merge" | "remove",
+  name = "",
+  base = "",
+) => postJson<{ ok: boolean; output: string; work_dir: string }>("/api/worktrees", {
+  session_id: sessionId,
+  action,
+  name,
+  base,
+});

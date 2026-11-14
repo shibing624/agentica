@@ -59,6 +59,7 @@ nav:
       - 生命周期钩子 (Hooks): advanced/hooks.md
       - MCP 外部工具集成: advanced/mcp.md
       - ACP (IDE 集成): advanced/acp.md
+      - 多端能力对齐: advanced/surface-parity.md
   - 配置与参考:
       - 统一配置文件 (config.yaml): guides/config.md
       - 模型提供商速查: guides/models.md

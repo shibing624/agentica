@@ -116,20 +116,26 @@ class AgentBuilderMixin:
         max_api_retry = int(cfg.get("max_api_retry") or 2)
         work_dir = self.get_session_work_dir(session_id, owner)
 
-        extra = list(self.extra_tools)
-        cron_tools = pkg.get_cron_tools(owner=self._owner(owner))
-        extra.extend(cron_tools)
-        self_manage_tools = pkg.get_self_manage_tools()
-        extra.extend(self_manage_tools)
+        from agentica.tools.product import build_product_tools
+
+        extra = build_product_tools(
+            surface="gateway",
+            work_dir=work_dir,
+            owner=self._owner(owner),
+            session_id=session_id,
+            service=self,
+            cron_job_runner=pkg._gateway_cron_job_runner,
+            extra_tools=list(self.extra_tools),
+        )
 
         extra.append(AskUserQuestionTool(input_callback=self._make_ask_callback(session_id, owner)))
 
         instructions = list(self.extra_instructions) if self.extra_instructions else None
-        if cron_tools:
+        if any(tool.name == "cronjob" for tool in extra):
             if instructions is None:
                 instructions = []
             instructions.append(pkg.get_cron_instructions())
-        if self_manage_tools:
+        if any(tool.name == "self_manage" for tool in extra):
             if instructions is None:
                 instructions = []
             instructions.append(pkg.get_self_manage_instructions())

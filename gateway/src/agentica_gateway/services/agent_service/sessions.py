@@ -285,6 +285,17 @@ class AgentSessionsMixin:
             else:
                 self._cache.delete(key)
 
+    def invalidate_session_agent(
+        self, session_id: str, owner: Optional[str] = None,
+    ) -> None:
+        """Make one session rebuild its agent after its cwd/settings changed."""
+        key = self._sk(session_id, owner)
+        lock = self._session_locks.get(key)
+        if lock is not None and lock.locked():
+            self._stale_agents.add(key)
+            return
+        self._cache.delete(key)
+
     def delete_session(self, session_id: str, owner: Optional[str] = None) -> bool:
         """Delete a session: cached Agent + persistent SessionLog JSONL + meta."""
         base_dir, _work_dir = self._locate_session(session_id, owner)
