@@ -22,6 +22,7 @@ import { parseSkillTurn } from "../lib/skillInvocation";
 import { SkillTurn } from "./MessageExtras";
 import { invocableSkills } from "./SlashMenu";
 import { TaskCard, TodoList } from "./TaskCard";
+import { useStickyBody } from "../lib/stickyBody";
 
 const ChatMarkdown = lazy(() => import("./ChatMarkdown").then((m) => ({ default: m.ChatMarkdown })));
 
@@ -80,10 +81,10 @@ function toolSummary(part: Extract<MsgPart, { kind: "tool" }>, S: ReturnType<typ
 
 /**
  * A run of thinking and tool calls between two pieces of answer text
- * (deepseek-harness `detailed` style). While the turn is streaming (`live`),
- * step rows render flat without a group header so every command description
- * and file read is visible in real time; once settled, historical groups keep
- * their collapsible summary header ("Ran commands and read files").
+ * (deepseek-harness `detailed` style): one folded line naming what the run did
+ * — the current step while it runs, the top three categories once settled —
+ * that opens to the full rows. An open body scrolls on its own and follows its
+ * tail while the run is still producing rows.
  */
 export function WorkGroup({
   items,
@@ -112,6 +113,7 @@ export function WorkGroup({
   const userToggled = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
+  const body = useStickyBody(open, running);
 
   useEffect(() => {
     if (!userToggled.current && containsPending) setOpen(true);
@@ -184,8 +186,14 @@ export function WorkGroup({
         {!open && summary && <><span className="wr-dot" /><span className="wg-sum">{summary}</span></>}
       </button>
       {open && (
-        <div className="wg-body">
-          {rows}
+        <div
+          ref={body.bodyRef}
+          className={"wg-body"
+            + (body.edges.up ? " fade-top" : "")
+            + (body.edges.down ? " fade-bottom" : "")}
+          {...body.handlers}
+        >
+          <div ref={body.contentRef} className="wg-content">{rows}</div>
         </div>
       )}
     </div>

@@ -99,6 +99,23 @@ class TestStreamLiveWindow(unittest.TestCase):
         self.assertIn("--filter VPetMacTests", live)
         self.assertNotIn("build-...", live)
 
+    def test_compose_live_prefixes_web_activity_category(self):
+        mgr, _ = self._mgr_and_buf()
+        for name, category, call_id in (
+            ("execute", "commands", "e1"),
+            ("grep", "search", "g1"),
+            ("read_file", "read", "r1"),
+            ("task", "subagents", "t1"),
+            ("unknown_tool", "tools", "u1"),
+        ):
+            mgr.display_tool(name, {}, tool_call_id=call_id)
+        live = "\n".join(mgr.compose_live("⠋"))
+        self.assertIn("[commands] ⚡ execute", live)
+        self.assertIn("[search]", live)
+        self.assertIn("[read]", live)
+        self.assertIn("[subagents]", live)
+        self.assertIn("[tools]", live)
+
     def test_compose_live_caps_at_live_max_rows(self):
         mgr, _ = self._mgr_and_buf()
         for i in range(LIVE_MAX_ROWS + 5):

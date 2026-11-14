@@ -199,7 +199,7 @@ class ImTurnsMixin:
             return
         try:
             _pkg().send_peer_message(
-                peer, text=report, from_name="gateway", from_peer_id="gateway", from_kind="agent",
+                peer, text=report, from_name="gateway", from_peer_id="gateway",
             )
             notice = f"🔔 后台任务已结束，结果已交给终端 [{peer.name}] 继续处理。"
         except PeerMessageRefused as exc:

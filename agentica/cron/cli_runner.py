@@ -129,7 +129,7 @@ class CliAgentRunner:
                 return CronRunOutput(content=answer, session_id=session_id)
             from agentica.live import send_message
 
-            send_message(peer, text=prompt, from_name="cron", from_peer_id="cron", from_kind="agent")
+            send_message(peer, text=prompt, from_name="cron", from_peer_id="cron")
             return CronRunOutput(
                 content=f"Handed to the open terminal [{peer.name}] serving this conversation.",
                 session_id=session_id,

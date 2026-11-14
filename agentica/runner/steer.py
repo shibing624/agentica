@@ -168,7 +168,9 @@ class SteerMixin:
             # that already ran, and the round below it is still live for Layer 1.
             injected = Message(role="user", content=marker)
             injected._injected = True
-            injected.automated = not any(message.from_user for message in drained)
+            # A mailbox message is never the user speaking: no writer can claim
+            # user authority any more, so the turn is always automated.
+            injected.automated = True
             messages.append(injected)
         logger.debug(f"Injected {len(drained)} peer message(s) into the run")
 

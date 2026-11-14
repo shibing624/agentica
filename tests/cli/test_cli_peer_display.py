@@ -30,13 +30,12 @@ def _render(messages) -> str:
     return captured.get()
 
 
-def _message(text, *, from_kind="agent", from_name="nlp-f1") -> PeerMessage:
+def _message(text, *, from_name="nlp-f1") -> PeerMessage:
     return PeerMessage(
         text=text,
         from_name=from_name,
         from_peer_id="abcd1234",
         to_peer_id="beef5678",
-        from_kind=from_kind,
     )
 
 
@@ -66,12 +65,12 @@ class TestPeerMessageRendering:
         assert body.plain == "nlp-f1: I refactored the loader"
         assert all("dim" in str(span.style) for span in body.spans)
 
-    def test_a_relayed_user_message_is_shown_as_the_user_speaking(self):
-        out = _render([_message("ship it", from_kind="user")])
+    def test_no_peer_message_is_ever_shown_as_the_user_speaking(self):
+        """Mailbox mail is another process, so it never gets the ``❯`` panel."""
+        out = _render([_message("ship it")])
 
-        assert "❯" in out
-        assert "via nlp-f1" in out
-        assert "ship it" in out
+        assert "❯" not in out
+        assert "↳ nlp-f1: ship it" in out
 
     def test_the_model_facing_header_is_not_what_the_user_reads(self):
         """The bracketed authority header belongs in the model's context only."""
@@ -170,13 +169,15 @@ class TestRelayedTurnsAreNotEchoedTwice:
         queued = unpack_queue_payload(pending.peek_all()[0])
         assert queued.is_relayed and queued.is_automated
 
-    def test_the_user_speaking_from_elsewhere_is_relayed_but_not_automated(self):
+    def test_a_line_relayed_by_an_attach_client_can_be_human_input(self):
+        """The attach socket still carries lines the IM user typed; those are
+        human input, and ``automated=False`` is how the client says so."""
         state = SessionState()
         state.agent_running = False
         state.current_agent = MagicMock()
         pending = PendingQueue()
 
-        hand_to_agent(state, pending, "commit what you have")
+        hand_to_agent(state, pending, "commit what you have", automated=False)
 
         queued = unpack_queue_payload(pending.peek_all()[0])
         assert queued.is_relayed

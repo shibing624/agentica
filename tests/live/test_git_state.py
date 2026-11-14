@@ -137,7 +137,7 @@ class TestCaching:
 
 
 class TestPublishedThroughPresence:
-    """What another session actually reads in `list_agents`."""
+    """What another session actually reads in the `/list-agents` listing."""
 
     def test_a_peer_listing_shows_branch_distance_and_dirty_paths(self, repo, tmp_path, monkeypatch):
         from agentica import live as peers

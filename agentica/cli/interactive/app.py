@@ -1404,12 +1404,8 @@ def run_interactive(
                 continue
             if not messages:
                 continue
-            # A batch carrying the user's own words (sent from their other
-            # session) is a human turn; agent-to-agent traffic is automated.
-            _hand_to_agent(
-                format_for_model(messages),
-                automated=not any(message.from_user for message in messages),
-            )
+            # Mailbox mail is another process talking, never the user typing.
+            _hand_to_agent(format_for_model(messages), automated=True)
             if app.is_running:
                 app.invalidate()
 

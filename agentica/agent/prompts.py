@@ -288,6 +288,35 @@ class PromptsMixin:
             "</system-reminder>"
         )
 
+    def _take_removed_pinned_tools_reminder(self) -> Optional[str]:
+        """Name tools the restored prompt documents but this session no longer has.
+
+        A resumed log restores ``messages[0]`` verbatim to preserve the cache
+        prefix, so guidance for a tool that has since been deleted (1.5.x logs
+        after the 1.6.0 removals) or simply not mounted in this rebuild stays in
+        front of the model while the tool table does not contain it. The model
+        then calls an unknown tool. State the mismatch once; the pinned prompt
+        itself is left untouched so the rest of the cached prefix survives.
+        """
+        if self._pinned_system_prompt is None or not self._pinned_logged_tools:
+            return None
+        if self.model is None:
+            return None
+        current = set(self.model.functions or {})
+        removed = list(dict.fromkeys(
+            name for name in self._pinned_logged_tools if name and name not in current
+        ))
+        self._pinned_logged_tools = []
+        if not removed:
+            return None
+        listed = ", ".join(f"'{name}'" for name in removed)
+        return (
+            "<system-reminder>\n"
+            f"These tools are no longer available in this session: {listed}. "
+            "Ignore any guidance about them in your instructions and do not call them.\n"
+            "</system-reminder>"
+        )
+
     def _take_runtime_context_reminder(self) -> Optional[str]:
         """Emit an in-history ``<system-reminder>`` only when volatile facts changed.
 
@@ -1016,6 +1045,7 @@ class PromptsMixin:
             pieces = [
                 piece
                 for piece in (
+                    self._take_removed_pinned_tools_reminder(),
                     self._take_tool_policy_reminder(),
                     self._take_runtime_context_reminder(),
                 )

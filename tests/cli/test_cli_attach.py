@@ -958,8 +958,7 @@ class TestLifecycle:
         Without the row, a client can only go spelunking in ``live/*.json`` —
         which is what the first version of the e2e script had to do, and is not a
         supported path. Pinned through ``detail_rows`` because that is the single
-        source both ``describe()`` (the model's ``list_agents``) and
-        ``/list-agents`` render.
+        source ``describe()`` and ``/list-agents`` both render.
         """
         monkeypatch.setattr(peers, "AGENTICA_CACHE_DIR", str(tmp_path))
         session = peers.PeerSession(name="tmux-cli", cwd="/tmp/proj")

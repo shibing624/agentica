@@ -1123,9 +1123,9 @@ class TestPerCallWorkDir:
 
         session = Path(tmp_dir)
         other = tmp_path / "other"
-        third = tmp_path / "third"
+        # Not under the platform temp root: temp dirs are writable in this mode.
+        third = Path.home() / "agentica-sandbox-third"
         other.mkdir()
-        third.mkdir()
         tool = BuiltinFileTool(
             work_dir=str(session),
             sandbox_config=SandboxConfig(enabled=True, writable_dirs=[str(session)]),
@@ -1137,6 +1137,22 @@ class TestPerCallWorkDir:
         with pytest.raises(PermissionError, match="not allowed"):
             asyncio.run(tool.write_file(str(third / "nope.txt"), "blocked\n"))
         assert not (third / "nope.txt").exists()
+
+    def test_sandbox_keeps_the_platform_temp_dirs_writable(self, tmp_dir):
+        """dsh parity: a scratch file in the temp area needs no escalation."""
+        from agentica.agent.config import SandboxConfig
+        from agentica.tools.os_sandbox import writable_temp_roots
+
+        tool = BuiltinFileTool(
+            work_dir=tmp_dir,
+            sandbox_config=SandboxConfig(enabled=True, writable_dirs=[tmp_dir]),
+        )
+        target = Path(writable_temp_roots()[0]) / f"agentica-scratch-{os.getpid()}.txt"
+        try:
+            asyncio.run(tool.write_file(str(target), "scratch\n"))
+            assert target.read_text() == "scratch\n"
+        finally:
+            target.unlink(missing_ok=True)
 
     def test_missing_work_dir_names_the_directory(self, tmp_dir, tmp_path):
         gone = tmp_path / "gone"

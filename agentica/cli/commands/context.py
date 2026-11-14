@@ -41,8 +41,8 @@ class CommandContext:
     bg_task_counter: int = 0
     background_processes: Any = None
     # Cross-session peer channel (agentica.live.PeerSession). Shared with every
-    # rebuilt agent so /resume, /model and friends keep the messaging tools and
-    # this terminal's mailbox identity.
+    # rebuilt agent so /resume, /model and friends keep this terminal's mailbox
+    # identity (the model has no peer-send tool; delivery is infrastructure).
     peer_session: Any = None
     # Per-task worktree binding (agentica.cli.worktree_binding.WorktreeBinder).
     # Shared with every rebuilt agent so /model does not drop the `worktree` tool.

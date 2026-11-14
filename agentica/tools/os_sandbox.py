@@ -65,6 +65,29 @@ def _real(path: str) -> str:
     return os.path.realpath(os.path.expanduser(path))
 
 
+def writable_temp_roots() -> Tuple[str, ...]:
+    """Real paths of the platform temp areas a workspace-write sandbox keeps writable.
+
+    dsh keeps the temp areas writable in workspace-write mode: a scratch script,
+    a test artifact or an editor's backup file does not need an escalation for
+    it. The conventional ``/tmp`` is added alongside ``tempfile.gettempdir()``
+    because the two differ on macOS (per-user ``/var/folders/.../T``) and a
+    program may set ``TMPDIR`` while still writing to ``/tmp``. Only existing
+    directories: neither backend can grant a path that is not there.
+
+    Shared by both layers on purpose. ``execute`` already gets these roots via
+    :func:`resolve_policy_paths`; the file tools must agree with it, or writing
+    a scratch file is refused on a permission mode that lets the same command
+    write it through the shell.
+    """
+    roots: List[str] = []
+    for candidate in (tempfile.gettempdir(), "/tmp"):
+        path = _real(candidate)
+        if os.path.isdir(path) and path not in roots:
+            roots.append(path)
+    return tuple(roots)
+
+
 async def _git_lines(root: str, *args: str) -> List[str]:
     """stdout lines of ``git -C root <args>``; empty when ``root`` is no repository."""
     proc = await asyncio.create_subprocess_exec(
@@ -115,7 +138,7 @@ async def resolve_policy_paths(dirs: Iterable[str]) -> Tuple[Tuple[str, ...], Tu
     for writable, protected in repos:
         candidates.extend(_real(p) for p in writable)
         read_only.extend(_real(p) for p in protected if _real(p) not in read_only)
-    candidates.extend(_real(p) for p in (tempfile.gettempdir(), "/tmp"))
+    candidates.extend(writable_temp_roots())
     candidates.extend(_real(p) for p in _CACHE_DIRS)
     roots: List[str] = []
     for path in candidates:

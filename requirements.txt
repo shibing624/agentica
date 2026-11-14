@@ -4,7 +4,6 @@
 #     pip install -e .
 #
 # To install with optional extras (see pyproject.toml [project.optional-dependencies]):
-#     pip install -e ".[rag]"          # RAG
 #     pip install -e ".[gateway]"      # Gateway FastAPI + IM
 #     pip install -e ".[cli]"          # CLI (already included in core)
 #     pip install -e ".[full]"         # Everything

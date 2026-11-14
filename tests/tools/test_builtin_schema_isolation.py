@@ -115,7 +115,6 @@ def test_tools_md_does_not_name_execute():
     content = get_tools_prompt()
     assert not _mentions(content, "execute")
     assert not _mentions(content, "task")
-    assert not _mentions(content, "execute")
 
 
 def test_every_builtin_tool_property_has_description_and_clean_top_doc():

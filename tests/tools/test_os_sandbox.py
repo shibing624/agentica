@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -172,6 +173,8 @@ def test_writable_roots_for_a_plain_directory(tmp_path):
     assert roots[0] == os.path.realpath(str(tmp_path))
     assert read_only == ()
     assert os.path.realpath("/tmp") in roots
+    # Same helper the file tools use: TMPDIR on macOS, /tmp elsewhere.
+    assert os.path.realpath(tempfile.gettempdir()) in roots
 
 
 # --- approval routing -----------------------------------------------------

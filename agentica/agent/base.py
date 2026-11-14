@@ -681,6 +681,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_runtime_state: Optional[Dict[str, str]] = None
         self._pinned_tool_order: List[str] = []
         self._pinned_tool_policies: List[str] = []
+        # Tool names the restored system prompt documents. Compared against the
+        # live table on the next request so a tool deleted since the log was
+        # written is called out once instead of being silently called.
+        self._pinned_logged_tools: List[str] = []
         self._pinned_context_epoch: Optional[Tuple[str, int]] = None
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
@@ -1051,6 +1055,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self._pinned_runtime_state = None
         self._pinned_tool_order = []
         self._pinned_tool_policies = []
+        self._pinned_logged_tools = []
         self._pinned_context_epoch = None
 
     def _logged_agents_md_still_current(self, logged: Optional[str]) -> bool:
@@ -1091,6 +1096,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 else self._current_runtime_state()
             )
             self._pinned_tool_policies = self._logged_tool_policies(prelude.tool_policy_keys)
+            # The restored prompt is used verbatim, so a tool it documents may
+            # no longer exist (1.5.x log after the 1.6.0 deletions, or a tool
+            # this rebuild did not mount). The next request names those once.
+            self._pinned_logged_tools = list(prelude.tools)
             workspace = self.workspace
             self._pinned_context_epoch = workspace.context_epoch if workspace is not None else None
         if prelude.tools and not self._pinned_tool_order:

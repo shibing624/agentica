@@ -288,7 +288,7 @@ def test_a_session_the_terminal_took_over_gets_the_report_through_its_mailbox(tm
     _run(scenario())
     assert svc.calls == []
     assert mailed == [("cli-1", {"text": "report text", "from_name": "gateway",
-                                 "from_peer_id": "gateway", "from_kind": "agent"})]
+                                 "from_peer_id": "gateway"})]
     assert "终端 [cli-1]" in channels.sent[0][1]
 
 

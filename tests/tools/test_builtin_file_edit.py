@@ -19,14 +19,22 @@ class TestBuiltinFileToolGrantPathAccess:
         sandbox = SandboxConfig(enabled=True, writable_dirs=[tmp_dir])
         return BuiltinFileTool(work_dir=tmp_dir, sandbox_config=sandbox)
 
-    def test_write_outside_writable_dirs_is_blocked(self, tmp_dir):
+    def test_write_outside_writable_dirs_is_blocked(self, tmp_dir, monkeypatch):
+        # The platform temp dirs are writable by default (dsh parity); this
+        # test is about the whitelist, so take them out of the picture.
+        from agentica.tools.builtin import file_tool as file_tool_mod
+
+        monkeypatch.setattr(file_tool_mod, "writable_temp_roots", lambda: ())
         with tempfile.TemporaryDirectory() as other_dir:
             tool = self._sandboxed_tool(tmp_dir)
             fp = os.path.join(other_dir, "outside.txt")
             with pytest.raises(PermissionError, match="blocked"):
                 asyncio.run(tool.write_file(fp, "content"))
 
-    def test_grant_exact_unblocks_that_file_only(self, tmp_dir):
+    def test_grant_exact_unblocks_that_file_only(self, tmp_dir, monkeypatch):
+        from agentica.tools.builtin import file_tool as file_tool_mod
+
+        monkeypatch.setattr(file_tool_mod, "writable_temp_roots", lambda: ())
         with tempfile.TemporaryDirectory() as other_dir:
             tool = self._sandboxed_tool(tmp_dir)
             allowed = os.path.join(other_dir, "now_allowed.txt")
@@ -414,21 +422,22 @@ class TestBuiltinFileToolApplyPatch:
     def test_sandbox_blocks_any_target_before_writing(self, tmp_dir):
         from agentica.agent.config import SandboxConfig
 
-        with tempfile.TemporaryDirectory() as outside_dir:
-            tool = BuiltinFileTool(
-                work_dir=tmp_dir,
-                sandbox_config=SandboxConfig(enabled=True, writable_dirs=[tmp_dir]),
-            )
-            outside = Path(outside_dir, "outside.py")
-            patch_text = f"""*** Begin Patch
+        tool = BuiltinFileTool(
+            work_dir=tmp_dir,
+            sandbox_config=SandboxConfig(enabled=True, writable_dirs=[tmp_dir]),
+        )
+        # Deliberately outside the platform temp root: temp dirs stay writable
+        # in this mode (dsh parity), so a temp path would not test the whitelist.
+        outside = Path.home() / "agentica-sandbox-outside" / "outside.py"
+        patch_text = f"""*** Begin Patch
 *** Add File: {outside}
 +blocked = True
 *** End Patch"""
 
-            with pytest.raises(PermissionError, match="not allowed"):
-                asyncio.run(tool.apply_patch(patch_text))
+        with pytest.raises(PermissionError, match="not allowed"):
+            asyncio.run(tool.apply_patch(patch_text))
 
-            assert not outside.exists()
+        assert not outside.exists()
 
 
 

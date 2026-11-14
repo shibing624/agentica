@@ -273,6 +273,16 @@ class TestBundledSkillContent(unittest.TestCase):
             SkillLoader.BUNDLED_SKILL_DIR / name / "SKILL.md", location="bundled",
         ).content
 
+    def test_bundled_skills_do_not_point_at_removed_surfaces(self):
+        """A skill is a standing instruction; naming a deleted tool or skill is
+        the same bug as a system prompt doing it (1.6.0 removed the model-side
+        peer tools, ``delegate``, ``acp_agent`` and the ``multi-agent`` skill)."""
+        removed = ("multi-agent", "delegate", "list_agents", "send_message", "acp_agent")
+        for name in BUNDLED:
+            body = self._body(name)
+            for term in removed:
+                self.assertNotIn(term, body, f"{name}/SKILL.md still names removed '{term}'")
+
     def test_the_agentica_skill_points_at_live_sources(self):
         body = self._body("agentica")
         self.assertIn("agentica --help", body)

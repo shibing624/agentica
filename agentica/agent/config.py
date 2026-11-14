@@ -349,6 +349,11 @@ class SandboxConfig:
     Attributes:
         enabled: Whether sandbox restrictions are active
         writable_dirs: List of directory paths the agent is allowed to write to.
+            When non-empty under ``enabled``, file writes (``write_file`` /
+            ``apply_patch``) are limited to these dirs, the session / call
+            work_dir, and the platform temp directories — the same temp areas
+            ``os_sandbox`` grants, so a scratch file does not need an
+            escalation whichever layer writes it.
         blocked_paths: Path components that are always blocked for read/write.
             Access to any path containing these path components is denied.
             Uses path component matching (not substring) to avoid false positives.

@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from .activity import tool_category
 from .live_blocks import LIVE_MAX_ROWS, LiveToolBlock, LiveToolResult, LiveToolStore
 from .status_bar import format_turn_clock
 
@@ -443,7 +444,7 @@ class StreamDisplayManager:
             spin = spinner if not block.finished else "✓"
             icon = TOOL_ICONS.get(block.tool_name, TOOL_ICONS["default"])
             params = self._format_call(block.tool_name, block.tool_args)
-            head = f"  {spin} {icon} {block.tool_name}"
+            head = f"  {spin} [{tool_category(block.tool_name)}] {icon} {block.tool_name}"
             if block.tool_name == "execute" and params:
                 wrap_width = max(24, width - len(head) - 1)
                 wrapped = _wrap_command_lines(params, wrap_width)

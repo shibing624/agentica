@@ -147,29 +147,23 @@ def _echo_panel(
 def display_peer_messages(messages: List[PeerMessage]) -> None:
     """Show messages that just arrived from another session.
 
-    The user speaking from another session gets the input panel with ``❯``:
-    it is a request, same as typing here. Another session's agent is internal
-    traffic, so it is a dim, indented note (``↳ <name>:``) rather than a panel
-    that competes with the person's own requests. The model-facing header
-    separately enforces that an agent message does not carry user authority.
+    Mailbox mail is internal traffic between processes (cron, the gateway, IM
+    delivery, or another session), never the human typing here, so it gets a
+    dim, indented note (``↳ <name>:``) rather than the ``❯`` panel that means
+    "the user said this". The model-facing header says the same thing about
+    authority.
     """
     for message in messages:
-        if message.from_user:
-            body = Text()
-            body.append(f"via {message.from_name}  ", style="dim")
-            body.append(message.text, style=f"bold {COLORS['user']}")
-            _echo_panel(body)
-        else:
-            note = Table.grid(padding=(0, 1), expand=True)
-            note.add_column(no_wrap=True)
-            note.add_column(ratio=1, overflow="fold")
-            note.add_row(
-                Text("↳", style="dim"),
-                Text.assemble((f"{message.from_name}: ", "dim bold"), (message.text, "dim")),
-            )
-            console = get_console()
-            console.print()
-            console.print(Padding(note, (0, 0, 0, 2)))
+        note = Table.grid(padding=(0, 1), expand=True)
+        note.add_column(no_wrap=True)
+        note.add_column(ratio=1, overflow="fold")
+        note.add_row(
+            Text("↳", style="dim"),
+            Text.assemble((f"{message.from_name}: ", "dim bold"), (message.text, "dim")),
+        )
+        console = get_console()
+        console.print()
+        console.print(Padding(note, (0, 0, 0, 2)))
 
 
 def display_attached_user_message(text: str, *, from_name: str = "", automated: bool = False) -> None:

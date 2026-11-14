@@ -20,6 +20,7 @@ import aiofiles
 
 from agentica.tools.base import Tool
 from agentica.tools.helpers import ToolDisplayOutput, file_change_meta, file_display_meta
+from agentica.tools.os_sandbox import writable_temp_roots
 from agentica.tools.patch import PatchContextError, PatchNoChangeError, apply_diff, parse_patch_envelope
 from agentica.utils.async_utils import close_subprocess_transport, terminate_subprocess
 from agentica.utils.log import logger
@@ -828,12 +829,23 @@ class BuiltinFileTool(Tool):
 
     def _is_write_allowed(self, resolved: str, *, extra_root: Optional[Path] = None) -> bool:
         """Whether `resolved` (an absolute path string) is inside a writable_dir,
-        the session work_dir, this call's work_dir, or a previously-escalated path."""
+        the session work_dir, this call's work_dir, a platform temp area, or a
+        previously-escalated path.
+
+        The temp roots are the same ones ``execute``'s OS sandbox grants
+        (:func:`agentica.tools.os_sandbox.writable_temp_roots`). dsh keeps the
+        platform temp areas writable in workspace-write mode, and the two
+        layers must agree: a scratch file that a shell command may write must
+        not need an escalation just because it was written by ``write_file``.
+        """
         if self._is_escalated(resolved):
             return True
         for wd in self._sandbox_config.writable_dirs:
             wd_resolved = str(Path(wd).expanduser().resolve())
             if resolved.startswith(wd_resolved):
+                return True
+        for temp_root in writable_temp_roots():
+            if resolved == temp_root or resolved.startswith(temp_root + os.sep):
                 return True
         if extra_root is not None:
             extra = str(extra_root.resolve())
@@ -863,7 +875,9 @@ class BuiltinFileTool(Tool):
     def _validate_write_path(self, path: str, *, root: Optional[Path] = None) -> str:
         """Validate that a write operation is allowed under sandbox restrictions.
 
-        Checks blocked_paths and writable_dirs whitelist.
+        Checks blocked_paths and the writable whitelist: ``writable_dirs``, the
+        session / call work_dir, and the platform temp areas (dsh parity — see
+        ``_is_write_allowed``).
 
         Raises:
             PermissionError: If write is not allowed
@@ -877,7 +891,8 @@ class BuiltinFileTool(Tool):
         ):
             raise PermissionError(
                 f"Sandbox: write to '{path}' is not allowed in the current permission mode. "
-                f"Writable dirs: {self._sandbox_config.writable_dirs}."
+                f"Writable dirs: {self._sandbox_config.writable_dirs}; the platform temp "
+                f"directories are always writable."
                 + self._escalation_hint("<the directory>")
             )
         return path

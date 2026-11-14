@@ -667,6 +667,64 @@ def test_a_prelude_without_policy_keys_resends_every_guide(tmp_path):
     assert note is not None and "LEGACY-GUIDE follow this" in note
 
 
+def test_resume_warns_once_about_tools_that_no_longer_exist(tmp_path):
+    """A 1.5.x log documents tools 1.6.0 deleted (send_message / list_agents).
+
+    The pinned system prompt is restored verbatim for the cache prefix, so
+    without a reminder the model reads a guide for a tool the schema no longer
+    contains and calls it. The reminder is emitted once, then forgotten.
+    """
+    slog = SessionLog(session_id="pin-removed-tools", base_dir=str(tmp_path / "log"))
+    slog.append_trace_prelude(
+        model="gpt-4o-mini",
+        provider="openai",
+        context_window=128000,
+        tools=["read_file", "send_message", "list_agents"],
+        system_prompt="## Tool Usage Guide\n\nSEND-MESSAGE-GUIDE",
+        runtime_state={"date": "", "channel": "", "summary": ""},
+        tool_policies=[],
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent._session_log = slog
+    # The live table still has read_file; the other two are gone.
+    agent.model.functions = {"read_file": SimpleNamespace()}
+    agent.working_memory.runs.append(SimpleNamespace())
+
+    agent._restore_prelude_from_session_log()
+
+    note = agent._take_removed_pinned_tools_reminder()
+    assert note is not None and "send_message" in note and "list_agents" in note
+    assert "read_file" not in note
+    # One reminder per restore: the model has been told, repeating it is noise.
+    assert agent._take_removed_pinned_tools_reminder() is None
+
+
+def test_resume_does_not_warn_when_every_logged_tool_still_exists(tmp_path):
+    slog = SessionLog(session_id="pin-same-tools", base_dir=str(tmp_path / "log"))
+    slog.append_trace_prelude(
+        model="gpt-4o-mini",
+        provider="openai",
+        context_window=128000,
+        tools=["read_file"],
+        system_prompt="## Tool Usage Guide\n\nREAD-GUIDE",
+        runtime_state={"date": "", "channel": "", "summary": ""},
+        tool_policies=[],
+    )
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini", api_key="fake_key"),
+        tool_config=ToolConfig(auto_load_mcp=False),
+    )
+    agent._session_log = slog
+    agent.model.functions = {"read_file": SimpleNamespace()}
+    agent.working_memory.runs.append(SimpleNamespace())
+
+    agent._restore_prelude_from_session_log()
+
+    assert agent._take_removed_pinned_tools_reminder() is None
+
 def test_tool_policy_key_changes_with_the_guide_text():
     assert tool_policy_key("same") == tool_policy_key("same")
     assert tool_policy_key("v1") != tool_policy_key("v2")
