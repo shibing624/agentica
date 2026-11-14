@@ -40,7 +40,12 @@ def read_csv_file(path: Path, row_limit: Optional[int] = None) -> str:
                 csv_data = [row for row in reader]
             elif row_limit >= 0:
                 # Stop before parsing records outside the requested prefix.
-                csv_data = [row for _, row in zip(range(row_limit), reader)]
+                csv_data = []
+                for _ in range(row_limit):
+                    try:
+                        csv_data.append(next(reader))
+                    except StopIteration:
+                        break
             else:
                 csv_data = [row for row in reader][:row_limit]
         return json.dumps(csv_data, ensure_ascii=False)
